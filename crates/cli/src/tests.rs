@@ -354,7 +354,7 @@ fn status_json_matches_documented_stable_contract() {
          backend=input-method-v2\n\
          route_id=input-method-v2\n\
          backend_mode=unknown\n\
-         status_schema=11\n\
+         status_schema=12\n\
          daemon_commit=test-commit\n\
          state=connected\n\
          paused=false\n\
@@ -400,6 +400,10 @@ fn status_json_matches_documented_stable_contract() {
          usage_flush_max_duration_us=25\n\
          usage_flush_failures_total=1\n\
          usage_queue_rejected_total=2\n\
+         usage_worker_failures_total=0\n\
+         usage_events_recorded_total=20\n\
+         usage_events_persisted_total=18\n\
+         usage_events_dropped_total=2\n\
          clipboard_worker_threads=1\n\
          clipboard_reads_in_flight=0\n\
          clipboard_reads_total=4\n\
@@ -579,6 +583,10 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "usage_flush_max_duration_us",
             "usage_flush_failures_total",
             "usage_queue_rejected_total",
+            "usage_worker_failures_total",
+            "usage_events_recorded_total",
+            "usage_events_persisted_total",
+            "usage_events_dropped_total",
             "clipboard_worker_threads",
             "clipboard_reads_in_flight",
             "clipboard_reads_total",

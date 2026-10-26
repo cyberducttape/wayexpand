@@ -291,7 +291,10 @@ text, in `usage-stats.json` next to your configuration; nothing leaves your
 machine. `wayexpand stats --clear` deletes it, and
 `[settings] usage_stats = false` stops recording. If a daemon clear request
 times out, its result is unknown; check `wayexpand stats` before retrying
-because the queued clear may still complete.
+because the queued clear may still complete. Statistics are asynchronous and
+best-effort, so the file can lag recent expansions or omit events after a
+reported writer failure or shutdown deadline; it is not an exact audit ledger. Check
+`wayexpand status --json` for recorded, persisted, and dropped event counters.
 
 See [TEMPLATES.md](TEMPLATES.md) for every variable, including snippet
 includes, allowlisted environment variables, and the opt-in clipboard.

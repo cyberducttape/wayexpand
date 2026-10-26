@@ -59,7 +59,11 @@ names the reviewed commit with \fB--approved-revision\fR.
 .B stats [--json] [--days N] [--clear] [CONFIG]
 Show local usage statistics: recent expansions, keystrokes avoided, most-used
 and unused snippets, and risky triggers. Only snippet IDs, counts, and dates are
-stored, beside the configuration; \-\-clear deletes them.
+stored, beside the configuration; \-\-clear deletes them. Statistics are
+asynchronous best-effort aggregates, not an exact audit ledger, and may omit
+events after a writer failure or shutdown deadline. Inspect daemon status for
+recorded, persisted, and dropped event counters; the daemon logs any events
+still unconfirmed at its shutdown deadline.
 .TP
 .B explain TEXT [--json] [--offline] [--app ID] [CONFIG]
 Explain why TEXT would or would not expand. With a running daemon the answer

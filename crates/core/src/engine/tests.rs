@@ -4858,6 +4858,31 @@ fn applied_expansions_produce_usage_events_by_snippet_id() {
 }
 
 #[test]
+fn bounded_usage_event_buffer_reports_evictions() {
+    let config =
+        Config::parse("[[expansion]]\ntrigger = \":sig\"\nreplacement = \"Best regards\"\n")
+            .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    let result = ExpansionResult {
+        snippet_id: "usage-buffer-test".into(),
+        trigger: ":sig".into(),
+        matched_text: ":sig".into(),
+        insert: "Best regards".into(),
+        reinsert_after: None,
+        cursor_offset: None,
+        command_backed: false,
+        undoable: false,
+        folded_suffix_chars: 0,
+    };
+    for _ in 0..=1024 {
+        engine.commit_applied_expansion(&result);
+    }
+    assert_eq!(engine.drain_usage_events().len(), 1024);
+    assert_eq!(engine.take_dropped_usage_event_count(), 1);
+    assert_eq!(engine.take_dropped_usage_event_count(), 0);
+}
+
+#[test]
 fn usage_attribution_follows_the_matched_enabled_snippet() {
     let config = Config::parse(
         "[[expansion]]\nid = \"00000000-0000-4000-8000-00000000000a\"\ntrigger = \";test\"\nenabled = false\nreplacement = \"old\"\n\n[[expansion]]\nid = \"00000000-0000-4000-8000-00000000000b\"\ntrigger = \";test\"\nenabled = true\nreplacement = \"new\"\n",

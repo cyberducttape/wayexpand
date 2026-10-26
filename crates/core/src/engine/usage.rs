@@ -31,6 +31,11 @@ impl ExpansionEngine {
         self.usage_events.drain(..).collect()
     }
 
+    /// Return and reset usage events evicted from the bounded engine buffer.
+    pub fn take_dropped_usage_event_count(&mut self) -> u64 {
+        std::mem::take(&mut self.usage_events_dropped)
+    }
+
     fn record_usage(&mut self, result: &ExpansionResult) {
         const MAX_PENDING_USAGE_EVENTS: usize = 1024;
         if !self.config.settings.usage_stats {
@@ -41,6 +46,7 @@ impl ExpansionEngine {
         }
         if self.usage_events.len() >= MAX_PENDING_USAGE_EVENTS {
             self.usage_events.pop_front();
+            self.usage_events_dropped = self.usage_events_dropped.saturating_add(1);
         }
         self.usage_events.push_back(crate::UsageEvent {
             snippet_id: result.snippet_id.clone(),

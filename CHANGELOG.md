@@ -32,6 +32,10 @@ All notable changes to WayExpand are documented here.
 - Strict-path Action Broker commands are opened and validated once, then
   launched through the pinned executable descriptor. This closes the
   validation-to-spawn path replacement race, including for shebang scripts.
+- Daemon status now distinguishes usage events collected, persisted, and
+  known dropped across the bounded engine buffer, writer queue, and final
+  persistence retries, and reports writer-worker failures. Usage statistics
+  are documented as best-effort aggregates rather than an exact audit ledger.
 - IBus now retires an engine instance after an output signal fails, preventing
   further expansion while a delete/commit transaction may have left the
   client document partially changed. Only a new `FocusIn` clears retirement;

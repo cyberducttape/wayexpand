@@ -16,9 +16,9 @@ use std::{
 };
 
 use tracing::warn;
-#[cfg(test)]
-use wayexpand_core::UsageEvent;
 use wayexpand_core::{ExpansionEngine, UsageStats};
+#[cfg(test)]
+use wayexpand_core::{InputEvent, UsageEvent};
 
 const SAVE_INTERVAL: Duration = Duration::from_secs(60);
 const SHUTDOWN_WAIT: Duration = Duration::from_secs(2);
@@ -30,20 +30,32 @@ const CLEAR_REPLY_WAIT: Duration = Duration::from_millis(1500);
 
 static MAX_FLUSH_DURATION_US: AtomicU64 = AtomicU64::new(0);
 static FLUSH_FAILURES_TOTAL: AtomicU64 = AtomicU64::new(0);
+static WORKER_FAILURES_TOTAL: AtomicU64 = AtomicU64::new(0);
 static QUEUE_REJECTED_TOTAL: AtomicU64 = AtomicU64::new(0);
+static EVENTS_RECORDED_TOTAL: AtomicU64 = AtomicU64::new(0);
+static EVENTS_PERSISTED_TOTAL: AtomicU64 = AtomicU64::new(0);
+static EVENTS_DROPPED_TOTAL: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct UsageMetrics {
     pub max_flush_duration_us: u64,
     pub flush_failures_total: u64,
+    pub worker_failures_total: u64,
     pub queue_rejected_total: u64,
+    pub events_recorded_total: u64,
+    pub events_persisted_total: u64,
+    pub events_dropped_total: u64,
 }
 
 pub fn metrics_snapshot() -> UsageMetrics {
     UsageMetrics {
         max_flush_duration_us: MAX_FLUSH_DURATION_US.load(Ordering::Relaxed),
         flush_failures_total: FLUSH_FAILURES_TOTAL.load(Ordering::Relaxed),
+        worker_failures_total: WORKER_FAILURES_TOTAL.load(Ordering::Relaxed),
         queue_rejected_total: QUEUE_REJECTED_TOTAL.load(Ordering::Relaxed),
+        events_recorded_total: EVENTS_RECORDED_TOTAL.load(Ordering::Relaxed),
+        events_persisted_total: EVENTS_PERSISTED_TOTAL.load(Ordering::Relaxed),
+        events_dropped_total: EVENTS_DROPPED_TOTAL.load(Ordering::Relaxed),
     }
 }
 
@@ -55,6 +67,7 @@ pub struct UsageRecorder {
     generation: Arc<Mutex<UsageGeneration>>,
     worker: Option<JoinHandle<()>>,
     worker_done: Option<Receiver<()>>,
+    outstanding_events: Arc<AtomicU64>,
 }
 
 enum UsageMessage {
@@ -136,10 +149,23 @@ impl UsageRecorder {
         let generation = Arc::new(Mutex::new(UsageGeneration::default()));
         let (done_sender, done_receiver) = mpsc::channel();
         let worker_path = path.clone();
+        let outstanding_events = Arc::new(AtomicU64::new(0));
+        let worker_outstanding_events = Arc::clone(&outstanding_events);
         let worker = thread::Builder::new()
             .name("wayexpand-usage-writer".into())
             .spawn(move || {
-                usage_writer(worker_path, receiver);
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    usage_writer(worker_path, receiver, &worker_outstanding_events);
+                }));
+                if result.is_err() {
+                    WORKER_FAILURES_TOTAL.fetch_add(1, Ordering::Relaxed);
+                    let dropped = worker_outstanding_events.swap(0, Ordering::Relaxed);
+                    record_dropped(dropped);
+                    warn!(
+                        dropped_events = dropped,
+                        "usage statistics worker panicked; outstanding events were lost"
+                    );
+                }
                 let _ = done_sender.send(());
             });
         match worker {
@@ -151,8 +177,10 @@ impl UsageRecorder {
                 generation: Arc::clone(&generation),
                 worker: Some(worker),
                 worker_done: Some(done_receiver),
+                outstanding_events,
             },
             Err(error) => {
+                WORKER_FAILURES_TOTAL.fetch_add(1, Ordering::Relaxed);
                 warn!(%error, "could not start usage statistics worker; usage events will be dropped");
                 Self {
                     path,
@@ -162,6 +190,7 @@ impl UsageRecorder {
                     generation,
                     worker: None,
                     worker_done: None,
+                    outstanding_events,
                 }
             }
         }
@@ -186,7 +215,14 @@ impl UsageRecorder {
                 self.pending_generation = generation.value;
             }
         }
-        for event in engine.drain_usage_events() {
+        let events = engine.drain_usage_events();
+        let engine_dropped = engine.take_dropped_usage_event_count();
+        EVENTS_RECORDED_TOTAL.fetch_add(
+            (events.len() as u64).saturating_add(engine_dropped),
+            Ordering::Relaxed,
+        );
+        record_dropped(engine_dropped);
+        for event in events {
             self.pending.record(&event);
         }
         self.enqueue_pending();
@@ -216,11 +252,18 @@ impl UsageRecorder {
             return;
         }
         let batch = std::mem::take(&mut self.pending);
+        let batch_events = event_count(&batch);
+        self.outstanding_events
+            .fetch_add(batch_events, Ordering::Relaxed);
         match sender.try_send(UsageMessage::Batch(batch)) {
             Ok(()) => {}
-            Err(TrySendError::Full(UsageMessage::Batch(batch))) => self.pending = batch,
+            Err(TrySendError::Full(UsageMessage::Batch(batch))) => {
+                decrement_outstanding(&self.outstanding_events, batch_events);
+                self.pending = batch;
+            }
             Err(TrySendError::Disconnected(UsageMessage::Batch(batch))) => {
                 let dropped = event_count(&batch).saturating_add(event_count(&self.pending));
+                decrement_outstanding(&self.outstanding_events, batch_events);
                 self.pending = UsageStats::default();
                 self.sender = None;
                 record_rejections(dropped);
@@ -291,7 +334,10 @@ impl UsageRecorder {
             }
         } else {
             // Never let slow or stuck storage make daemon shutdown unbounded.
-            warn!("usage statistics worker exceeded its shutdown deadline; it will finish asynchronously");
+            warn!(
+                unconfirmed_events = self.outstanding_events.load(Ordering::Relaxed),
+                "usage statistics worker exceeded its shutdown deadline; pending events may be lost if the daemon exits"
+            );
             self.worker.take();
         }
         self.worker_done.take();
@@ -321,9 +367,20 @@ impl Drop for UsageRecorder {
 
 fn record_rejections(count: u64) {
     QUEUE_REJECTED_TOTAL.fetch_add(count, Ordering::Relaxed);
+    record_dropped(count);
 }
 
-fn usage_writer(path: PathBuf, receiver: Receiver<UsageMessage>) {
+fn record_dropped(count: u64) {
+    EVENTS_DROPPED_TOTAL.fetch_add(count, Ordering::Relaxed);
+}
+
+fn decrement_outstanding(counter: &AtomicU64, count: u64) {
+    let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+        Some(value.saturating_sub(count))
+    });
+}
+
+fn usage_writer(path: PathBuf, receiver: Receiver<UsageMessage>, outstanding: &AtomicU64) {
     let mut pending = UsageStats::default();
     let mut last_flush = Instant::now();
     loop {
@@ -333,9 +390,12 @@ fn usage_writer(path: PathBuf, receiver: Receiver<UsageMessage>) {
                 pending.merge(&batch);
             }
             Ok(UsageMessage::Clear(reply, generation)) => {
+                let cleared_pending_events = event_count(&pending);
                 let result = clear_pending(&path, &mut pending);
                 if result.is_err() {
                     FLUSH_FAILURES_TOTAL.fetch_add(1, Ordering::Relaxed);
+                } else {
+                    decrement_outstanding(outstanding, cleared_pending_events);
                 }
                 if let Ok(mut generation) = generation.lock() {
                     generation.clear_pending = false;
@@ -347,7 +407,7 @@ fn usage_writer(path: PathBuf, receiver: Receiver<UsageMessage>) {
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 if !pending.snippets.is_empty() {
-                    flush_pending(&path, &mut pending);
+                    flush_pending(&path, &mut pending, outstanding);
                 }
                 // Reset even on an idle timeout; otherwise a zero-duration
                 // receive would spin forever after the first minute.
@@ -355,14 +415,19 @@ fn usage_writer(path: PathBuf, receiver: Receiver<UsageMessage>) {
             }
             Ok(UsageMessage::Shutdown) | Err(mpsc::RecvTimeoutError::Disconnected) => {
                 for _ in 0..3 {
-                    if pending.snippets.is_empty() || flush_pending(&path, &mut pending) {
+                    if pending.snippets.is_empty()
+                        || flush_pending(&path, &mut pending, outstanding)
+                    {
                         break;
                     }
                     thread::sleep(Duration::from_millis(50));
                 }
                 if !pending.snippets.is_empty() {
+                    let dropped = event_count(&pending);
+                    record_dropped(dropped);
+                    decrement_outstanding(outstanding, dropped);
                     warn!(
-                        unpersisted_events = event_count(&pending),
+                        unpersisted_events = dropped,
                         "usage events could not be persisted after final retries"
                     );
                 }
@@ -385,10 +450,19 @@ fn clear_pending(path: &std::path::Path, pending: &mut UsageStats) -> std::io::R
     Ok(cleared)
 }
 
-fn flush_pending(path: &std::path::Path, pending: &mut UsageStats) -> bool {
+fn flush_pending(
+    path: &std::path::Path,
+    pending: &mut UsageStats,
+    outstanding: &AtomicU64,
+) -> bool {
     let started = Instant::now();
+    let persisted = event_count(pending);
     match UsageStats::merge_and_save(path, pending) {
-        Ok(()) => *pending = UsageStats::default(),
+        Ok(()) => {
+            *pending = UsageStats::default();
+            EVENTS_PERSISTED_TOTAL.fetch_add(persisted, Ordering::Relaxed);
+            decrement_outstanding(outstanding, persisted);
+        }
         Err(error) => {
             FLUSH_FAILURES_TOTAL.fetch_add(1, Ordering::Relaxed);
             warn!(%error, "could not save local usage statistics; retaining events for retry");
@@ -416,6 +490,44 @@ mod tests {
             inserted_chars: 20,
             unix_timestamp: 1_700_000_000,
         }
+    }
+
+    #[test]
+    fn collected_usage_reports_recorded_and_successfully_persisted_events() {
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-usage-counters-{}-{suffix}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("usage-stats.json");
+        let config = wayexpand_core::Config::parse(
+            "[[expansion]]\ntrigger = ':sig'\nreplacement = 'Best regards'\n",
+        )
+        .unwrap();
+        let snippet_id = config.expansion[0].id.clone();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let mut results = engine.process(InputEvent::Text(":sig".into()));
+        results.extend(engine.process(InputEvent::EndOfInput));
+        engine.commit_applied_expansion(&results[0]);
+
+        let recorded_before = metrics_snapshot().events_recorded_total;
+        let persisted_before = metrics_snapshot().events_persisted_total;
+        let mut recorder = UsageRecorder::new(path.clone());
+        recorder.collect(&mut engine);
+        recorder.request_shutdown();
+        recorder.wait_for_shutdown();
+
+        assert!(metrics_snapshot().events_recorded_total > recorded_before);
+        assert!(metrics_snapshot().events_persisted_total > persisted_before);
+        assert_eq!(
+            UsageStats::load(&path).unwrap().snippets[&snippet_id].count,
+            1
+        );
+        let _ = std::fs::remove_dir_all(directory);
     }
 
     #[test]
@@ -574,11 +686,13 @@ mod tests {
             std::process::id(),
         ));
         let before = metrics_snapshot().flush_failures_total;
+        let dropped_before = metrics_snapshot().events_dropped_total;
         let mut recorder = UsageRecorder::new(path);
         recorder.pending.record(&event("failure"));
         recorder.request_shutdown();
         recorder.wait_for_shutdown();
         assert!(metrics_snapshot().flush_failures_total > before);
+        assert!(metrics_snapshot().events_dropped_total > dropped_before);
     }
 
     #[test]
@@ -597,6 +711,7 @@ mod tests {
             generation: Arc::new(Mutex::new(UsageGeneration::default())),
             worker: None,
             worker_done: None,
+            outstanding_events: Arc::new(AtomicU64::new(0)),
         };
         let started = Instant::now();
         recorder.enqueue_pending();

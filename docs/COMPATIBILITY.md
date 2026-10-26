@@ -480,7 +480,7 @@ side never counts as a match (`commit_matches` is then `false`).
   "backend": "input-method-v2",
   "route_id": "input-method-v2",
   "backend_mode": "unknown",
-  "status_schema": 11,
+  "status_schema": 12,
   "daemon_commit": "example-commit",
   "state": "connected",
   "paused": false,
@@ -533,6 +533,10 @@ side never counts as a match (`commit_matches` is then `false`).
   "usage_flush_max_duration_us": 0,
   "usage_flush_failures_total": 0,
   "usage_queue_rejected_total": 0,
+  "usage_worker_failures_total": 0,
+  "usage_events_recorded_total": 0,
+  "usage_events_persisted_total": 0,
+  "usage_events_dropped_total": 0,
   "clipboard_worker_threads": 1,
   "clipboard_reads_in_flight": 0,
   "clipboard_reads_total": 0,
@@ -566,7 +570,7 @@ side never counts as a match (`commit_matches` is then `false`).
 - `backend` (string): Active output backend (`"input-method-v2"`, `"wlroots-virtual-keyboard"`, `"libei"`, ...)
 - `route_id` (string): Canonical capture/injection route ID from the shared route catalog; `"stdin-test"` identifies the stdin harness, and `"unknown"` means the active pair has no catalog entry. Consumers should use this field instead of reconstructing route identity from `source` and `backend`.
 - `backend_mode` (string): Negotiated backend capability detail. Libei reports either `"ei_text (UTF-8 insertion)"` or `"ei_keyboard keysym fallback (12ms key pacing)"`; it is `"unknown"` before a backend has negotiated a mode or for backends without submodes.
-- `status_schema` (integer): Version of the daemon status contract. Certification requires a matching schema before treating runtime capabilities as current; missing or different values mean the daemon should be restarted/updated. Schema 11 adds canonical `route_id`.
+- `status_schema` (integer): Version of the daemon status contract. Certification requires a matching schema before treating runtime capabilities as current; missing or different values mean the daemon should be restarted/updated. Schema 11 adds canonical `route_id`; schema 12 adds usage-event recorded, persisted, and dropped counters.
 - `state` (string): Backend connection state (e.g. `"connected"`, `"reconnecting"`)
 - `paused` (bool): Whether expansion matching is currently disabled
 - `config` (string): Path to the active configuration file
@@ -598,7 +602,11 @@ side never counts as a match (`commit_matches` is then `false`).
 - `matcher_latency_p50_us`, `matcher_latency_p95_us`, `matcher_latency_p99_us` (integers): Nearest-rank matcher/preparation latency percentiles, excluding output injection, in microseconds
 - `usage_flush_max_duration_us` (integer): Maximum usage-statistics write duration since daemon start, in microseconds
 - `usage_flush_failures_total` (integer): Usage-statistics flush attempts that failed; queued events are retained for retry while the worker remains active
+- `usage_worker_failures_total` (integer): Usage-statistics writer worker start failures or panics
 - `usage_queue_rejected_total` (integer): Usage events dropped because bounded in-memory queue limits were exceeded or the persistence worker became unavailable
+- `usage_events_recorded_total` (integer): Usage events collected by the daemon, including events already evicted from the engine's bounded buffer
+- `usage_events_persisted_total` (integer): Usage events included in successful statistics-file writes since daemon start; this is a process-lifetime counter and is not reset by clearing the statistics file
+- `usage_events_dropped_total` (integer): Usage events known to have been lost through engine-buffer eviction, queue rejection, worker failure, or exhausted final persistence retries. Events still in flight are not counted as persisted or dropped.
 - `clipboard_worker_threads` (integer): Clipboard reader worker threads currently alive; the design uses at most one
 - `clipboard_reads_in_flight` (integer): Clipboard commands currently running (zero or one)
 - `clipboard_reads_total` (integer): Clipboard read attempts since daemon start

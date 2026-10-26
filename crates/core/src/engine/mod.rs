@@ -136,6 +136,8 @@ pub struct ExpansionEngine {
     /// Applied expansions not yet collected by the host; see
     /// [`ExpansionEngine::drain_usage_events`].
     usage_events: VecDeque<crate::UsageEvent>,
+    /// Events evicted when the host does not collect usage events promptly.
+    usage_events_dropped: u64,
     /// A snippet form is open; capture is suspended until it completes.
     form_active: bool,
     /// What the host's current output route guarantees about erasing the
@@ -251,6 +253,7 @@ impl ExpansionEngine {
             clipboard_triggers,
             clipboard_prefetch_armed: false,
             usage_events: VecDeque::new(),
+            usage_events_dropped: 0,
             form_active: false,
             form_replacement_guarantee: crate::ReplacementGuarantee::Unsupported,
         })
