@@ -426,7 +426,7 @@ impl ExpansionEngine {
                     || (completion.additional_max_size > 0
                         && output.len() > completion.additional_max_size);
                 let failure_kind = if self.sensitive_focus || self.user_paused {
-                    Some(CommandErrorKind::Policy)
+                    Some(CommandErrorKind::UnsafeContext)
                 } else if !returned_to_origin || !target_verifiable {
                     Some(CommandErrorKind::WindowIdentity)
                 } else if exceeds_limit {
@@ -465,7 +465,7 @@ impl ExpansionEngine {
                 {
                     CommandErrorKind::OutputTooLarge
                 } else if self.sensitive_focus || self.user_paused {
-                    CommandErrorKind::Policy
+                    CommandErrorKind::UnsafeContext
                 } else {
                     CommandErrorKind::StaleInput
                 };

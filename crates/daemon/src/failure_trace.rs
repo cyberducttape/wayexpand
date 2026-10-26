@@ -118,6 +118,7 @@ pub(crate) fn record_command_failure(backend: &str, kind: wayexpand_core::Comman
         Kind::BrokerUnavailable => "action broker unavailable",
         Kind::OutputTooLarge => "command output exceeded policy limit",
         Kind::Policy => "command blocked by policy",
+        Kind::UnsafeContext => "command context was no longer safe",
         Kind::StaleInput => "command result became stale",
         Kind::WindowIdentity => "command focus could not be verified",
         Kind::QueueFull | Kind::WorkerUnavailable => "command worker queue unavailable",

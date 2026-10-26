@@ -736,6 +736,49 @@ fn command_metrics_count_timeouts_and_failures() {
 }
 
 #[test]
+fn command_result_discarded_after_sensitive_focus_is_classified_as_unsafe_context() {
+    let config = Config::parse(
+        r#"
+        [[expansion]]
+        trigger = ":sensitive"
+        replacement = ""
+        [expansion.command]
+        program = "/bin/sleep"
+        args = ["1"]
+        timeout_ms = 3000
+        "#,
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    assert!(engine.enable_async_commands());
+    assert!(engine
+        .process(InputEvent::Text(":sensitive".into()))
+        .is_empty());
+
+    let deadline = Instant::now() + Duration::from_secs(4);
+    while engine.command_metrics().command_in_flight == 0 {
+        assert!(Instant::now() < deadline, "command did not start");
+        thread::sleep(Duration::from_millis(1));
+    }
+    engine.set_sensitive_focus(true);
+
+    loop {
+        engine.drain_completed_commands();
+        if engine
+            .drain_command_failures()
+            .contains(&CommandErrorKind::UnsafeContext)
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "unsafe-context result was not reported"
+        );
+        thread::sleep(Duration::from_millis(2));
+    }
+}
+
+#[test]
 fn command_wait_failures_are_not_reported_as_timeouts() {
     let error = CommandError::WaitFailed {
         operation: super::ProcessWaitOperation::Observe,

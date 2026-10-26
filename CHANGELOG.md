@@ -14,7 +14,8 @@ All notable changes to WayExpand are documented here.
   including policy, command, and evdev safety-gate failures, acknowledged
   insertions, and the stage where blocked or uncertain output attempts stopped.
   The trace never records typed or inserted text, and distinguishes backend
-  acknowledgement from proof of client display.
+  acknowledgement from proof of client display. It separates administrator
+  policy blocks from command results discarded after sensitive focus or pause.
   Insertion readiness also stays unknown when the daemon omits its full-Unicode
   capability instead of treating missing evidence as support. The dashboard
   warns when the running daemon is stale or its build identity cannot be verified,

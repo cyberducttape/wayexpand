@@ -405,6 +405,17 @@ impl Strings {
                 Language::Indonesian => "Perintah diblokir oleh kebijakan".into(),
                 Language::German => "Befehl wurde durch Richtlinie blockiert".into(),
             },
+            (_, "command context was no longer safe") => match self.lang {
+                Language::English => {
+                    "Command result was discarded because the context became unsafe".into()
+                }
+                Language::Indonesian => {
+                    "Hasil perintah dibuang karena konteks tidak lagi aman".into()
+                }
+                Language::German => {
+                    "Befehlsergebnis verworfen, weil der Kontext nicht mehr sicher war".into()
+                }
+            },
             (_, "command result became stale") => match self.lang {
                 Language::English => "Command result was discarded after input changed".into(),
                 Language::Indonesian => "Hasil perintah dibuang setelah input berubah".into(),
@@ -617,6 +628,11 @@ mod tests {
                 "command result became stale",
                 "Hasil perintah dibuang setelah input berubah",
                 "Befehlsergebnis nach Eingabeänderung verworfen",
+            ),
+            (
+                "command context was no longer safe",
+                "Hasil perintah dibuang karena konteks tidak lagi aman",
+                "Befehlsergebnis verworfen, weil der Kontext nicht mehr sicher war",
             ),
             (
                 "input arrived before output",

@@ -193,6 +193,7 @@ pub enum CommandErrorKind {
     NonZeroExit,
     OutputTooLarge,
     Policy,
+    UnsafeContext,
     StaleInput,
     WindowIdentity,
     QueueFull,
