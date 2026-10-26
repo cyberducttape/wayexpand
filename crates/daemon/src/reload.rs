@@ -1233,12 +1233,18 @@ mod tests {
 
     #[test]
     fn reading_the_watched_config_does_not_mark_it_dirty() {
-        let path = temporary_config();
+        // The watcher covers the whole parent directory, so use a private one:
+        // other tests writing their configs into the shared temporary
+        // directory would otherwise mark this one dirty.
+        let directory = temporary_config().with_extension("d");
+        fs::create_dir(&directory).unwrap();
+        fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let path = directory.join("config.toml");
         write_config(&path, &config_text("old"));
         let config =
             ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
         if config._watcher.is_none() {
-            let _ = fs::remove_file(path);
+            let _ = fs::remove_dir_all(directory);
             return;
         }
         // Let events from the initial write and load drain.
@@ -1247,7 +1253,7 @@ mod tests {
         let _ = fs::read(&path).unwrap();
         thread::sleep(Duration::from_millis(200));
         assert!(!config.watch_dirty.load(Ordering::Acquire));
-        let _ = fs::remove_file(path);
+        let _ = fs::remove_dir_all(directory);
     }
 
     #[test]
