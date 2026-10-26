@@ -35,7 +35,9 @@ All notable changes to WayExpand are documented here.
   production-eligible route, so the release certification workflow now fails
   explicitly before runner discovery instead of treating the impossible KWin
   target as a valid gate. Compatibility and headless evidence remain unable to
-  satisfy production certification.
+  satisfy production certification. Corrected the GNOME setup guide and
+  certification regression fixture so neither advertises input-method-v2 on
+  Mutter.
 - Added current-source KWin 6.6.6 headless certification evidence. The
   supported output/focus scenarios passed, but keyboard capture, Unicode on
   the negotiated keysym route, suspend/resume, and production desktop

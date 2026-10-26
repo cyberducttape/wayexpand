@@ -91,34 +91,18 @@ Evdev cannot provide password-field awareness; automated certification remains
 pending. Users handling sensitive fields should prefer a backend with an
 authoritative sensitive-field signal where available.
 
-### ⚠️ GNOME 47.x - EXPERIMENTAL
+### GNOME / Mutter — input-method-v2 unavailable
 
-**Configuration:**
-- Desktop: GNOME 47.x
-- Capture: input-method-v2 (no permissions needed)
-- Injection: input-method-v2
-- Window Tracking: N/A (text composition only)
+Older WayExpand notes described GNOME as an input-method-v2 target. That
+description was incorrect: the compositor does not currently advertise
+`zwp_input_method_manager_v2` in the [protocol support matrix](https://wayland.app/protocols/input-method-unstable-v2), and WayExpand's live probe therefore cannot select this route. Do not use the historical GNOME 47.x setup or claims of permission-free capture as current instructions.
 
-**Known Limitations:**
-- **No keyboard capture:** Function keys, arrow keys, Escape cannot be expanded. Use text-based alternatives.
-- **No window tracking:** `app_filter`-scoped expansions fail closed; they are not applied globally.
-- **Sensitive fields:** WayExpand implements input-method-v2 content-purpose
-  handling, but GNOME/Mutter observation is compositor-dependent and has not
-  been certified here. Do not treat the protocol signal as a production
-  password-field protection guarantee until the GNOME password-field scenario
-  has reviewed evidence.
-
-**When to Use:**
-- You primarily type text and don't need special keys
-- You want zero permission configuration
-- You do not need a certified password-field protection guarantee
-
-**When NOT to Use:**
-- You need arrow key expansion (`;up` → Up, etc.)
-- You need function key expansion
-- You need app-specific filtering
-
-**Recommendation:** ⚠️ Experimental for v1.2. Suitable for text-focused workflows. Contributions welcome to improve window tracking.
+WayExpand's IBus engine is a separate route. It can use IBus content-purpose
+signals when available and verifies surrounding text before replacement, but
+replacement is non-atomic, client behavior varies, and no GNOME route is
+production-certified. Without a window tracker, `app_filter`-scoped
+expansions fail closed. See the generated route table and
+[SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) for current status.
 
 ### ⚠️ Sway 0.20.x - EXPERIMENTAL
 

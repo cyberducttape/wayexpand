@@ -195,67 +195,20 @@ jq -e '.certified == false and .doctor.healthy == false and .doctor_probe_valid 
     .backend_probe_valid == true and .backend_certification_eligible == false' \
     "$explicit_route_json" >/dev/null
 
-input_method_cli="$test_root/input-method-cli"
-cat >"$input_method_cli" <<'EOF'
-#!/bin/sh
-case "${1-} ${2-}" in
-    "doctor --json") printf '%s\n' '{"healthy":true,"desktop":"KDE Plasma","wayexpand_commit":"test-commit"}' ;;
-    "status --json") printf '%s\n' '{"response":"running","status_schema":$status_schema,"daemon_commit":"test-commit","source":"input-method","backend":"input-method-v2","capture_sensitive_focus":true,"capture_key_passthrough":true,"capture_composition_aware":false,"capture_local_compose_aware":true,"capture_layout_aware":true,"inject_atomic_replace":true,"inject_full_unicode":true,"inject_key_passthrough":true}' ;;
-esac
-EOF
-chmod 0755 "$input_method_cli"
-set_status_schema "$input_method_cli"
-input_method_json="$test_root/input-method-certification.json"
-"$project_dir/scripts/certify-compositor.sh" --format json \
-    --compositor kde --version 6.6.2 --backend input-method-v2 --layout us,de,fr,altgr,multi-layout-switching \
-    --target-apps "$target_apps" --results "$results" \
-    --cli "$input_method_cli" --output "$input_method_json" >/dev/null
-jq -e '.certified == true and .backend_probe_valid == true and
-    .daemon_status.capture_composition_aware == false and
-    .daemon_status.capture_local_compose_aware == true' "$input_method_json" >/dev/null
-
-unhealthy_input_method_cli="$test_root/unhealthy-input-method-cli"
-cat >"$unhealthy_input_method_cli" <<'EOF'
-#!/bin/sh
-case "${1-} ${2-}" in
-    "doctor --json") printf '%s\n' '{"healthy":false,"desktop":"KDE Plasma","wayexpand_commit":"test-commit"}' ;;
-    "status --json") printf '%s\n' '{"response":"running","status_schema":$status_schema,"daemon_commit":"test-commit","source":"input-method","backend":"input-method-v2","capture_sensitive_focus":true,"capture_key_passthrough":true,"capture_composition_aware":false,"capture_local_compose_aware":true,"capture_layout_aware":true,"inject_atomic_replace":true,"inject_full_unicode":true,"inject_key_passthrough":true}' ;;
-esac
-EOF
-chmod 0755 "$unhealthy_input_method_cli"
-set_status_schema "$unhealthy_input_method_cli"
-unhealthy_input_method_json="$test_root/unhealthy-input-method-certification.json"
-if "$project_dir/scripts/certify-compositor.sh" --format json \
-    --compositor kde --version 6.6.2 --backend input-method-v2 \
-    --layout us,de,fr,altgr,multi-layout-switching --target-apps "$target_apps" \
-    --results "$results" --cli "$unhealthy_input_method_cli" \
-    --output "$unhealthy_input_method_json" >/dev/null; then
-    printf '%s\n' 'certification accepted an unhealthy input-method route' >&2
-    exit 1
-fi
-jq -e '.certified == false and .doctor_probe_valid == false and .status_probe_valid == true' \
-    "$unhealthy_input_method_json" >/dev/null
-
-unsafe_input_method_cli="$test_root/unsafe-input-method-cli"
-cat >"$unsafe_input_method_cli" <<'EOF'
-#!/bin/sh
-case "\${1-} \${2-}" in
-    "doctor --json") printf '%s\n' '{"healthy":true,"desktop":"KDE Plasma","wayexpand_commit":"test-commit"}' ;;
-    "status --json") printf '%s\n' '{"response":"running","status_schema":$status_schema,"daemon_commit":"test-commit","source":"input-method","backend":"input-method-v2","capture_sensitive_focus":true,"capture_key_passthrough":true,"capture_composition_aware":false,"capture_local_compose_aware":true,"capture_layout_aware":true,"inject_atomic_replace":true,"inject_full_unicode":false,"inject_key_passthrough":true}' ;;
-esac
-EOF
-chmod 0755 "$unsafe_input_method_cli"
-set_status_schema "$unsafe_input_method_cli"
-unsafe_input_method_json="$test_root/unsafe-input-method-certification.json"
-if "$project_dir/scripts/certify-compositor.sh" --format json \
-    --compositor kde --version 6.6.2 --backend input-method-v2 \
-    --layout us,de,fr,altgr,multi-layout-switching --target-apps "$target_apps" \
-    --results "$results" --cli "$unsafe_input_method_cli" --output "$unsafe_input_method_json" >/dev/null
-then
-    printf '%s\n' 'certification accepted an input-method route without full Unicode support' >&2
-    exit 1
-fi
-jq -e '.certified == false and .backend_probe_valid == false' "$unsafe_input_method_json" >/dev/null
+for unsupported_compositor in kde gnome; do
+    unsupported_log="$test_root/$unsupported_compositor-input-method.log"
+    unsupported_report="$test_root/$unsupported_compositor-input-method.json"
+    if "$project_dir/scripts/certify-compositor.sh" --format json \
+        --compositor "$unsupported_compositor" --version test --backend input-method-v2 \
+        --output "$unsupported_report" 2>"$unsupported_log"; then
+        printf 'certification accepted undeclared input-method-v2 on %s\n' \
+            "$unsupported_compositor" >&2
+        exit 1
+    fi
+    grep -F -- "backend 'input-method-v2' is not a declared certification path for $unsupported_compositor" \
+        "$unsupported_log" >/dev/null
+    [ ! -e "$unsupported_report" ]
+done
 
 stale_daemon_cli="$test_root/stale-daemon-cli"
 cat >"$stale_daemon_cli" <<'EOF'
@@ -443,8 +396,8 @@ if "$project_dir/scripts/certify-compositor.sh" \
     exit 1
 fi
 
-# GNOME has no input-method-v2 route; IBus evidence certifies it, and the
-# evidence states the guarantees IBus still lacks.
+# GNOME has no input-method-v2 route. Its IBus compatibility evidence states
+# the guarantees IBus still lacks; it is not a production release target.
 gnome_cli="$test_root/gnome-certification-cli"
 cat >"$gnome_cli" <<EOF
 #!/bin/sh

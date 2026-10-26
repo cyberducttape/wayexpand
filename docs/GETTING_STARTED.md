@@ -206,20 +206,22 @@ wayexpand doctor  # Shows what your session can use
 
 Limited support due to GNOME's design (no window tracking protocol).
 
-**What works:**
-- Text capture via input-method-v2 when explicitly enabled (but no window
-  tracking); this path remains uncertified
-- Sensitive-field suppression is implemented when GNOME supplies reliable
-  input-method-v2 content-purpose information; GNOME's behavior is not yet
-  certified, so verify it in the certification matrix before relying on it
+**Current input routes:**
+- Mutter does not currently advertise `zwp_input_method_manager_v2`, so
+  WayExpand cannot use its input-method-v2 source on GNOME.
+- The separate WayExpand IBus engine can be used when installed and selected.
+  IBus content-purpose signals can suppress matching in sensitive fields,
+  while trigger deletion is verified against surrounding text but is not
+  atomic. This route is experimental and not production-certified.
 
 **What doesn't work:**
 - ❌ Window-specific snippets (app_filter)
-- ❌ Certified password-field protection (compositor/content-purpose behavior
-  is not yet validated)
+- ❌ Atomic replacement, exact window tracking, and production-certified
+  password-field protection
 
 **Recommendation:**
-- Use **global hotkeys** instead of trigger-based expansion, or explicitly opt into input-method-v2 after testing key pass-through
+- Use **global hotkeys** instead of trigger-based expansion, or test the
+  separate IBus route and its limitations before relying on it
 - See [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) for compatibility status
 
 ---

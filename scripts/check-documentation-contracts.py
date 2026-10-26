@@ -94,16 +94,14 @@ def main() -> int:
     }
     if any(not isinstance(support, dict) for support in route_sensitive_support.values()):
         errors.append("route catalog must define structured sensitive-field support metadata")
-    gnome_section = certification_doc.split("### ⚠️ GNOME", 1)
+    gnome_section = certification_doc.split("### GNOME / Mutter", 1)
     gnome_text = gnome_section[1].split("\n### ", 1)[0] if len(gnome_section) == 2 else ""
-    if "No sensitive field detection" in gnome_text:
-        errors.append("GNOME certification prose must not erase input-method implementation")
     if (
-        "implements input-method-v2" not in gnome_text.lower()
-        or "compositor-dependent" not in gnome_text.lower()
-        or "certified here" not in gnome_text.lower()
+        "does not currently advertise" not in gnome_text
+        or "WayExpand's IBus engine" not in gnome_text
+        or "non-atomic" not in gnome_text
     ):
-        errors.append("GNOME certification prose must distinguish implementation from certification")
+        errors.append("GNOME certification prose must distinguish the unavailable input-method-v2 route from IBus")
     recommended_description = route_catalog.get("recommended_description")
     if not isinstance(recommended_description, str) or not recommended_description:
         errors.append("backend route catalog is missing recommended_description")
@@ -175,7 +173,8 @@ def main() -> int:
                 errors.append(
                     f"certification quick reference claims an unshipped tracker for {desktop}"
                 )
-            section = certification_doc.split(f"### ⚠️ {desktop}", 1)
+            heading = "### GNOME / Mutter" if desktop == "GNOME" else f"### ⚠️ {desktop}"
+            section = certification_doc.split(heading, 1)
             section_text = section[1].split("\n### ", 1)[0] if len(section) == 2 else ""
             if "app_filter" not in section_text or "fail closed" not in section_text.lower():
                 errors.append(
