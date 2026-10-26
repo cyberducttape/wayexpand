@@ -75,7 +75,7 @@ fn bench_gui_typing_preview(c: &mut Criterion) {
                     Some(Arc::clone(&snippets)),
                 );
                 draft.replacement.pop();
-                black_box(result);
+                black_box(result.expect("benchmark preview should render"));
             });
         });
     }

@@ -62,6 +62,7 @@ pub(crate) fn render(
     app: &str,
 ) -> String {
     render_with_library_snippets(source, settings, organization, draft, input, app, None)
+        .unwrap_or_else(|error| format!("Template error: {error}"))
 }
 
 pub(crate) fn render_with_library_snippets(
@@ -72,7 +73,7 @@ pub(crate) fn render_with_library_snippets(
     input: &str,
     app: &str,
     library_snippets: Option<Arc<wayexpand_core::SnippetLibrary>>,
-) -> String {
+) -> Result<String, String> {
     let expansion = match draft {
         Some(draft) => match draft.to_expansion(
             source
@@ -80,12 +81,12 @@ pub(crate) fn render_with_library_snippets(
                 .unwrap_or_else(ExpansionConfig::new_id),
         ) {
             Ok(expansion) => Some(expansion),
-            Err(_) => return "Configuration is invalid".into(),
+            Err(_) => return Err("The current draft has invalid fields".into()),
         },
         None => source.cloned(),
     };
     let Some(expansion) = expansion else {
-        return "Configuration is invalid".into();
+        return Err("No snippet is selected".into());
     };
     // A preview is scoped to one expansion. Cloning the production Config and
     // rebuilding its matcher on every preview-input edit made this path O(N)
@@ -96,9 +97,8 @@ pub(crate) fn render_with_library_snippets(
         settings: settings.clone(),
         organization: organization.clone(),
     };
-    let Ok(mut engine) = ExpansionEngine::new_with_snippets(config, library_snippets) else {
-        return "Configuration is invalid".into();
-    };
+    let mut engine = ExpansionEngine::new_with_snippets(config, library_snippets)
+        .map_err(|error| error.safe_summary())?;
     if !app.trim().is_empty() {
         engine.set_current_window(Some(WindowContext {
             app_id: Some(app.trim().to_owned()),
@@ -108,10 +108,10 @@ pub(crate) fn render_with_library_snippets(
     }
     let mut results = engine.process(InputEvent::Text(input.to_owned()));
     results.extend(engine.process(InputEvent::EndOfInput));
-    results
+    Ok(results
         .last()
         .map(|result| result.insert.clone())
-        .unwrap_or_else(|| "No expansion matched".into())
+        .unwrap_or_else(|| "No expansion matched".into()))
 }
 
 #[cfg(test)]
@@ -277,7 +277,7 @@ mod tests {
                 ":hi",
                 ""
             ),
-            "Configuration is invalid"
+            "Template error: The current draft has invalid fields"
         );
     }
 
@@ -351,7 +351,9 @@ mod tests {
     fn invalid_alias_is_reported_invalid() {
         let mut draft = Draft::from_expansion(&aliased());
         draft.pending_alias = ";".repeat(1_000);
-        assert_eq!(preview(&draft, ";sig"), "Configuration is invalid");
+        assert!(
+            preview(&draft, ";sig").starts_with("Template error: expansion 0 trigger is too long")
+        );
     }
 
     #[test]

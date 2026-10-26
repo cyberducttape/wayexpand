@@ -110,7 +110,9 @@ unsafe limits are rejected before the file is changed.
 The `Template variables` palette inserts supported built-ins such as date,
 time, hostname, username, newline, and tab at the replacement editor's caret
 (replacing any selection); unknown template syntax is still rejected by core
-validation.
+validation. Its **Reusable snippets** section inserts a reference to any
+enabled static snippet, so common text can be maintained once and included in
+other replacements.
 Tags and "Only in these apps" filters are edited as chips: type a value and
 press Enter to add it, or click a chip's `×` to remove it. A value that has
 been typed but not yet confirmed is still saved with the snippet.
@@ -121,9 +123,12 @@ text and making word-boundary behavior visible before saving.
 
 ### Matcher preview
 
-A panel pinned under the editor provides an in-process preview of the saved
-library. It tests snippet matching and template rendering, with command-backed
-snippets disabled. It does not test desktop capture, focus changes, portals,
+A panel pinned under the editor provides an in-process preview of the library
+and current unsaved draft. It tests snippet matching and template rendering,
+including match rules, aliases, app filters, and reusable snippet references,
+with command-backed snippets disabled. Invalid previews show a safe validation
+reason. The match explanation identifies checks that passed or blocked the
+current test input. It does not test desktop capture, focus changes, portals,
 keyboard layouts, pass-through, sensitive-field detection, or insertion into a
 real client. Use a separate harmless desktop integration check in a disposable
 text field before relying on an input backend. The panel counts expansions and

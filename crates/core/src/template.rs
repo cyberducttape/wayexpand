@@ -221,6 +221,33 @@ pub enum TemplateError {
     RandomUnavailable,
 }
 
+impl TemplateError {
+    /// Describe template failures without echoing user-provided variable
+    /// names, formats, or random-choice values into diagnostics.
+    pub fn safe_summary(&self) -> &'static str {
+        match self {
+            Self::UnknownVariable { .. } => "unknown template variable",
+            Self::DateArithmeticOverflow { .. } => "date arithmetic overflow",
+            Self::EnvNotAllowed { .. } => "environment variable is not allowlisted",
+            Self::InvalidDateFormat { .. } => "unsupported date format",
+            Self::InvalidRandom { .. } => "malformed random variable",
+            Self::Unclosed { .. } => "unclosed template variable",
+            Self::EmptyVariable { .. } => "empty template variable",
+            Self::RenderedTooLarge { .. } => "rendered template exceeds the size limit",
+            Self::MultipleCursors { .. } => "template has more than one cursor marker",
+            Self::UnknownSnippet => "included snippet does not exist",
+            Self::IncludeTooDeep => "snippet includes are cyclic or too deeply nested",
+            Self::CursorInInclude => "included snippets cannot contain a cursor marker",
+            Self::ClipboardDisabled => "clipboard variable is disabled",
+            Self::ClipboardUnavailable => "clipboard is unavailable",
+            Self::InvalidField => "form field is malformed",
+            Self::FieldValueMissing => "form field value is missing",
+            Self::InvalidUuidName => "named UUID variable is malformed",
+            Self::RandomUnavailable => "system random number generator is unavailable",
+        }
+    }
+}
+
 /// Render built-in variables without invoking a shell or external process.
 /// Unknown variables are errors so a typo can never silently reach an editor.
 pub fn render_template(template: &str, context: &TemplateContext) -> Result<String, TemplateError> {

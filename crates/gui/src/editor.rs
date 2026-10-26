@@ -6,7 +6,7 @@ use wayexpand_core::{
 /// Editable form state for one expansion. Keeping this separate from the
 /// application shell makes editor validation and future editor widgets
 /// independently testable.
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub(crate) struct Draft {
     pub(crate) trigger: String,
     pub(crate) aliases: Vec<String>,

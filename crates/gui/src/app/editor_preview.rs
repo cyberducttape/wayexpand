@@ -92,26 +92,32 @@ impl GuiApp {
                     });
                 });
         } else {
-            let preview_text = self.preview();
+            let preview_result = self.preview();
             egui::Frame::new()
                 .fill(palette.extreme_bg)
                 .stroke(egui::Stroke::new(1.0, palette.accent))
                 .corner_radius(egui::CornerRadius::same(8))
                 .inner_margin(egui::Margin::symmetric(12, 10))
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(&preview_text).monospace());
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-                            if ui
-                                .small_button(self.strings.copy())
-                                .on_hover_text(self.strings.copy_tooltip())
-                                .clicked()
-                            {
-                                ui.ctx().copy_text(preview_text.clone());
-                                self.status = Status::success(self.strings.status_preview_copied());
-                            }
+                .show(ui, |ui| match preview_result {
+                    Ok(preview_text) => {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(&preview_text).monospace());
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                                if ui
+                                    .small_button(self.strings.copy())
+                                    .on_hover_text(self.strings.copy_tooltip())
+                                    .clicked()
+                                {
+                                    ui.ctx().copy_text(preview_text.clone());
+                                    self.status =
+                                        Status::success(self.strings.status_preview_copied());
+                                }
+                            });
                         });
-                    });
+                    }
+                    Err(error) => {
+                        ui.colored_label(palette.danger, self.strings.template_error(&error));
+                    }
                 });
         }
         self.render_form_test(ui, palette);

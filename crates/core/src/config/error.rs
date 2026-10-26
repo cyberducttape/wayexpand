@@ -257,7 +257,10 @@ impl ConfigError {
             }
             Self::Serialize(_) => "configuration could not be serialized".into(),
             Self::InvalidTemplate { index, source } => {
-                format!("expansion {index} has an invalid replacement template ({source})")
+                format!(
+                    "expansion {index} has an invalid replacement template ({})",
+                    source.safe_summary()
+                )
             }
             Self::InvalidPolicyConfig(msg) => {
                 format!("organization policy configuration error: {msg}")

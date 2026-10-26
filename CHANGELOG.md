@@ -4,6 +4,14 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The pinned matcher playground now tests the current unsaved draft against the
+  rest of the library, including aliases, match rules, app filters, and reusable
+  snippet includes. Command-backed snippets remain disabled there. Successful
+  tests explain the trigger that fired; invalid previews show safe template
+  validation errors instead of looking like replacement text.
+- The template palette can insert references to reusable static snippets.
+  Template validation summaries no longer echo user-provided variable names,
+  formats, or random-choice values into GUI diagnostics.
 - ConfigStore reload now retains full validation on the candidate snapshot and
   verifies its exact source revision with a second secure file read, without
   parsing and validating the same TOML a second time. A benchmark and regression

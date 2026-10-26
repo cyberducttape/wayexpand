@@ -299,6 +299,46 @@ impl Strings {
         }
     }
 
+    pub fn reusable_snippets(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Reusable snippets",
+            Language::Indonesian => "Cuplikan yang dapat digunakan ulang",
+            Language::German => "Wiederverwendbare Snippets",
+        }
+    }
+
+    pub fn reusable_snippet_search_hint(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Search static snippets by trigger or description",
+            Language::Indonesian => "Cari cuplikan statis berdasarkan pemicu atau deskripsi",
+            Language::German => "Statische Snippets nach Auslöser oder Beschreibung suchen",
+        }
+    }
+
+    pub fn no_reusable_snippet_matches(&self) -> &'static str {
+        match self.lang {
+            Language::English => "No reusable snippets match this search",
+            Language::Indonesian => "Tidak ada cuplikan yang cocok dengan pencarian ini",
+            Language::German => "Keine wiederverwendbaren Snippets für diese Suche",
+        }
+    }
+
+    pub fn reusable_snippet_tooltip(&self, trigger: &str) -> String {
+        match self.lang {
+            Language::English => format!("Insert the static text from {trigger}"),
+            Language::Indonesian => format!("Sisipkan teks statis dari {trigger}"),
+            Language::German => format!("Statischen Text aus {trigger} einfügen"),
+        }
+    }
+
+    pub fn reusable_snippet_description(&self, trigger: &str, description: &str) -> String {
+        match self.lang {
+            Language::English => format!("{trigger}: {description}"),
+            Language::Indonesian => format!("{trigger}: {description}"),
+            Language::German => format!("{trigger}: {description}"),
+        }
+    }
+
     pub fn dynamic_command(&self) -> &'static str {
         match self.lang {
             Language::English => "Dynamic command (optional)",

@@ -150,6 +150,8 @@ const TEMPLATE_VARIABLE_GROUPS: &[(TemplateVariableGroup, &[&str])] = &[
     ),
 ];
 
+type ReusableSnippetChoices = (u64, String, Vec<(String, String)>);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TemplateVariableGroup {
     DateTime,
@@ -237,7 +239,9 @@ struct GuiApp {
     /// Cache of the last plain preview result. Stores (editor_revision, input,
     /// result) to avoid rebuilding the ExpansionEngine on every repaint. The
     /// revision is O(1), unlike hashing a potentially large draft.
-    preview_cache: Option<(u64, String, String)>,
+    preview_cache: Option<(u64, String, Result<String, String>)>,
+    reusable_snippet_filter: String,
+    reusable_snippet_choices: Option<ReusableSnippetChoices>,
     /// Incremented on editor input that may change the draft or preview app.
     /// Preview cache validation therefore stays O(1) even for large snippets.
     preview_revision: u64,
@@ -454,6 +458,8 @@ impl GuiApp {
             command_preview_cancel: None,
             theme_refresh_pending: false,
             preview_cache: None,
+            reusable_snippet_filter: String::new(),
+            reusable_snippet_choices: None,
             preview_revision: 0,
             app_detection: None,
             screenshot: screenshot::ScreenshotCapture::from_env(),

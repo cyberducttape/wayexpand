@@ -417,9 +417,9 @@ impl Strings {
 
     pub fn try_live_help(&self) -> &'static str {
         match self.lang {
-            Language::English => "Tests matching only — not desktop integration. It does not test capture, focus, portals, sensitive fields, or insertion; command snippets are not run.",
-            Language::Indonesian => "Hanya menguji pencocokan — bukan integrasi desktop. Tidak menguji tangkapan, fokus, portal, kolom sensitif, atau penyisipan; cuplikan perintah tidak dijalankan.",
-            Language::German => "Testet nur Matching — keine Desktop-Integration. Erfassung, Fokus, Portale, sensible Felder und Einfügen werden nicht getestet; Befehls-Snippets laufen nicht.",
+            Language::English => "Tests the current draft and library matching only — not desktop integration. It does not test capture, focus, portals, sensitive fields, or insertion; command snippets are not run.",
+            Language::Indonesian => "Hanya menguji pencocokan draf saat ini dan pustaka — bukan integrasi desktop. Tidak menguji tangkapan, fokus, portal, kolom sensitif, atau penyisipan; cuplikan perintah tidak dijalankan.",
+            Language::German => "Testet nur das Matching des aktuellen Entwurfs und der Bibliothek — keine Desktop-Integration. Erfassung, Fokus, Portale, sensible Felder und Einfügen werden nicht getestet; Befehls-Snippets laufen nicht.",
         }
     }
 
@@ -467,6 +467,14 @@ impl Strings {
                 "{expansions} Erweiterung{} · {saved} Tastenanschläge gespart",
                 if expansions == 1 { "" } else { "en" }
             ),
+        }
+    }
+
+    pub fn try_live_draft(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Testing the current unsaved draft",
+            Language::Indonesian => "Menguji draf saat ini yang belum disimpan",
+            Language::German => "Der aktuelle ungespeicherte Entwurf wird getestet",
         }
     }
 

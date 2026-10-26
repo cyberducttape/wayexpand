@@ -288,7 +288,7 @@ fn new_snippet_stays_out_of_config_until_a_nonempty_replacement_is_saved() {
     assert_eq!(fs::read(&path).unwrap(), original_file);
 
     app.draft.as_mut().unwrap().replacement = "Finished snippet".into();
-    assert_eq!(app.preview(), "Finished snippet");
+    assert_eq!(app.preview().unwrap(), "Finished snippet");
     app.save_selected();
 
     let saved = Config::load(&path).unwrap();
@@ -319,13 +319,71 @@ fn editor_preview_keeps_cross_snippet_include_semantics() {
     config.save_atomic(&path).unwrap();
 
     let mut app = GuiApp::load(path.clone()).unwrap();
-    assert_eq!(app.preview(), "Included value");
+    assert_eq!(app.preview().unwrap(), "Included value");
     let cached_snippets = Arc::clone(&app.preview_library_snippets);
     app.preview_input = ":outer ".into();
     app.invalidate_preview();
-    assert_eq!(app.preview(), "Included value");
+    assert_eq!(app.preview().unwrap(), "Included value");
     assert!(Arc::ptr_eq(&cached_snippets, &app.preview_library_snippets));
 
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn matcher_playground_uses_the_unsaved_draft_and_explains_it() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-draft-playground-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    let config = Config {
+        expansion: vec![import_expansion(":saved", "Saved text")],
+        hotkey: Vec::new(),
+        settings: wayexpand_core::Settings::default(),
+        organization: wayexpand_core::OrganizationPolicy::default(),
+    };
+    config.save_atomic(&path).unwrap();
+
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    app.select(0);
+    let draft = app.draft.as_mut().unwrap();
+    draft.trigger = ":draft".into();
+    draft.replacement = "Unsaved preview".into();
+    let candidate = app.playground_config().unwrap();
+    let rewrite = app
+        .playground
+        .edit(&candidate, "", "libei", ":draft", true)
+        .unwrap();
+    assert_eq!(rewrite.text, "Unsaved preview");
+    assert!(app
+        .playground
+        .explanation
+        .as_ref()
+        .is_some_and(wayexpand_core::Explanation::would_expand));
+
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn editor_preview_returns_safe_template_validation_errors() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-preview-invalid-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    let config = Config {
+        expansion: vec![import_expansion(":invalid", "valid")],
+        hotkey: Vec::new(),
+        settings: wayexpand_core::Settings::default(),
+        organization: wayexpand_core::OrganizationPolicy::default(),
+    };
+    config.save_atomic(&path).unwrap();
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    app.select(0);
+    app.draft.as_mut().unwrap().replacement = "{{unknown-secret-value}}".into();
+    let error = app.preview().unwrap_err();
+    assert!(error.contains("template"));
+    assert!(!error.contains("unknown-secret-value"));
     fs::remove_file(path).unwrap();
 }
 
@@ -2116,6 +2174,12 @@ fn indonesian_strings_are_translated_not_english_fallbacks() {
     assert_ne!(indonesian.output_latency(), english.output_latency());
     assert_ne!(german.matcher_latency(), english.matcher_latency());
     assert_ne!(german.output_latency(), english.output_latency());
+    assert_ne!(indonesian.reusable_snippets(), english.reusable_snippets());
+    assert_ne!(
+        german.reusable_snippet_search_hint(),
+        english.reusable_snippet_search_hint()
+    );
+    assert_ne!(indonesian.try_live_draft(), english.try_live_draft());
 }
 
 fn failed_save_test_app(name: &str) -> (std::path::PathBuf, GuiApp) {

@@ -33,12 +33,22 @@ pub(crate) struct Playground {
     pub form_detected: bool,
     /// Side-effect-free explanation of the current text and preview app.
     pub explanation: Option<Explanation>,
+    /// A safe validation message for a draft that cannot be tested yet.
+    pub config_error: Option<String>,
 }
 
 impl Playground {
     /// Forget the compiled library; it is rebuilt from the next saved config.
     pub fn invalidate(&mut self) {
         self.engine = None;
+        self.seen.clear();
+        self.form_detected = false;
+        self.explanation = None;
+        self.config_error = None;
+    }
+
+    pub fn needs_engine(&self) -> bool {
+        self.engine.is_none()
     }
 
     pub fn clear(&mut self) {
@@ -46,6 +56,7 @@ impl Playground {
         self.seen.clear();
         self.form_detected = false;
         self.explanation = None;
+        self.config_error = None;
         if let Some(engine) = self.engine.as_mut() {
             engine.process(InputEvent::Reset);
         }
@@ -128,7 +139,12 @@ impl Playground {
             }
         }
         self.seen = text.clone();
-        self.explanation = Some(engine.explain(&text, backend));
+        let explained_text = if rewritten {
+            self.last_trigger.as_deref().unwrap_or(&text)
+        } else {
+            &text
+        };
+        self.explanation = Some(engine.explain(explained_text, backend));
         rewritten.then_some(Rewrite { text, caret })
     }
 }

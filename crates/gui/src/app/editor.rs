@@ -3,6 +3,44 @@
 use crate::*;
 
 impl GuiApp {
+    fn reusable_snippet_choices(&mut self) -> Vec<(String, String)> {
+        let query = self.reusable_snippet_filter.trim().to_lowercase();
+        let cache_valid =
+            self.reusable_snippet_choices
+                .as_ref()
+                .is_some_and(|(revision, cached_query, _)| {
+                    *revision == self.library_revision && cached_query == &query
+                });
+        if !cache_valid {
+            const MAX_CHOICES: usize = 24;
+            let choices = self
+                .config
+                .expansion
+                .iter()
+                .filter(|expansion| {
+                    expansion.enabled
+                        && expansion.command.is_none()
+                        && wayexpand_core::form_fields(&expansion.replacement)
+                            .is_ok_and(|fields| fields.is_empty())
+                })
+                .filter(|expansion| {
+                    query.is_empty()
+                        || library::trigger_search_text(expansion)
+                            .to_lowercase()
+                            .contains(&query)
+                        || expansion.description.to_lowercase().contains(&query)
+                })
+                .take(MAX_CHOICES)
+                .map(|expansion| (expansion.trigger.clone(), expansion.description.clone()))
+                .collect();
+            self.reusable_snippet_choices = Some((self.library_revision, query.clone(), choices));
+        }
+        self.reusable_snippet_choices
+            .as_ref()
+            .map(|(_, _, choices)| choices.clone())
+            .unwrap_or_default()
+    }
+
     pub(crate) fn cancel_app_detection(&mut self) {
         if let Some(task) = self.app_detection.as_mut() {
             task.cancelled.store(true, Ordering::Release);
@@ -62,19 +100,19 @@ impl GuiApp {
     /// including any side-effecting script the user has not even saved yet.
     /// Command previews are explicit and user-triggered instead; see
     /// `run_command_preview`.
-    pub(crate) fn preview(&mut self) -> String {
+    pub(crate) fn preview(&mut self) -> Result<String, String> {
         if self.preview_library_revision != self.config_revision {
             self.preview_library_snippets = self.config.includable_snippets();
             self.preview_library_revision = self.config_revision.clone();
         }
         let source = if self.new_draft {
             if self.draft.is_none() {
-                return self.strings.no_selection().into();
+                return Ok(self.strings.no_selection().into());
             }
             None
         } else {
             let Some(index) = self.selected_index() else {
-                return self.strings.no_selection().into();
+                return Ok(self.strings.no_selection().into());
             };
             Some(&self.config.expansion[index])
         };
@@ -98,6 +136,29 @@ impl GuiApp {
             result.clone(),
         ));
         result
+    }
+
+    /// Build the matcher-test library with the current unsaved draft in place.
+    /// This runs only when the playground engine is created or invalidated, so
+    /// typing into the test field does not clone a large library per key.
+    pub(crate) fn playground_config(&self) -> Result<Config, String> {
+        let mut config = self.config.clone();
+        if let Some(draft) = self.draft.as_ref() {
+            let (index, id) = match self.selected_index() {
+                Some(index) => (Some(index), config.expansion[index].id.clone()),
+                None => (None, wayexpand_core::ExpansionConfig::new_id()),
+            };
+            let expansion = draft
+                .to_expansion(id)
+                .map_err(|_| "The current draft has invalid fields".to_owned())?;
+            if let Some(index) = index {
+                config.expansion[index] = expansion;
+            } else {
+                config.expansion.push(expansion);
+            }
+        }
+        config.validate().map_err(|error| error.safe_summary())?;
+        Ok(config)
     }
 
     pub(crate) fn invalidate_preview(&mut self) {
@@ -204,20 +265,25 @@ impl GuiApp {
         // avoids hashing the full draft (which may contain megabytes of text)
         // on every otherwise-idle repaint. Pointer movement is intentionally
         // excluded so moving the mouse does not invalidate the preview.
+        let playground_has_text_focus = root
+            .ctx()
+            .memory(|memory| memory.has_focus(egui::Id::new("try_live_field")));
         let editor_input = root.ctx().input(|input| {
             input.events.iter().any(|event| {
-                matches!(
-                    event,
-                    egui::Event::Text(_)
-                        | egui::Event::Paste(_)
-                        | egui::Event::Cut
-                        | egui::Event::Key { pressed: true, .. }
-                        | egui::Event::PointerButton { pressed: true, .. }
-                )
+                matches!(event, egui::Event::PointerButton { pressed: true, .. })
+                    || (!playground_has_text_focus
+                        && matches!(
+                            event,
+                            egui::Event::Text(_)
+                                | egui::Event::Paste(_)
+                                | egui::Event::Cut
+                                | egui::Event::Key { pressed: true, .. }
+                        ))
             })
         });
         if editor_input {
             self.invalidate_preview();
+            self.playground.invalidate();
         }
         egui::CentralPanel::default()
             .frame(
@@ -300,6 +366,7 @@ impl GuiApp {
                             .trigger_suggestions(&draft.trigger, Some(index))
                     })
                     .unwrap_or_default();
+                let reusable_snippets = self.reusable_snippet_choices();
                 let strings = &self.strings;
                 let app_detecting = self
                     .app_detection
@@ -455,6 +522,48 @@ impl GuiApp {
                                     }
                                 }
                             });
+                        }
+                        if !reusable_snippets.is_empty()
+                            || !self.reusable_snippet_filter.trim().is_empty()
+                        {
+                            ui.add_space(4.0);
+                            ui.label(RichText::new(strings.reusable_snippets()).small().strong());
+                            ui.add(
+                                TextEdit::singleline(&mut self.reusable_snippet_filter)
+                                    .hint_text(strings.reusable_snippet_search_hint())
+                                    .desired_width(field_width),
+                            );
+                            if reusable_snippets.is_empty() {
+                                ui.label(
+                                    RichText::new(strings.no_reusable_snippet_matches())
+                                        .small()
+                                        .color(palette.muted),
+                                );
+                            } else {
+                                ui.horizontal_wrapped(|ui| {
+                                    for (trigger, description) in &reusable_snippets {
+                                        let variable = format!("{{{{snippet:{trigger}}}}}");
+                                        if theme::secondary_button(ui, palette, &variable)
+                                            .on_hover_text(if description.is_empty() {
+                                                strings.reusable_snippet_tooltip(trigger)
+                                            } else {
+                                                strings.reusable_snippet_description(
+                                                    trigger,
+                                                    description,
+                                                )
+                                            })
+                                            .clicked()
+                                        {
+                                            insert_into_replacement_editor(
+                                                ui.ctx(),
+                                                &mut draft.replacement,
+                                                &variable,
+                                            );
+                                            variable_inserted = true;
+                                        }
+                                    }
+                                });
+                            }
                         }
                     });
                 });
@@ -724,6 +833,7 @@ impl GuiApp {
                                 if !draft.app_filter.contains(&value) {
                                     draft.app_filter.push(value.clone());
                                     self.invalidate_preview();
+                                    self.playground.invalidate();
                                 }
                             }
                             self.status =
@@ -766,7 +876,7 @@ impl GuiApp {
     /// Pinned under the editor (above Save) so the one thing that proves the
     /// library works is always in view, not below the snippet form.
     pub(crate) fn render_try_live_panel(&mut self, root: &mut egui::Ui, palette: &Palette) {
-        if self.config.expansion.is_empty() {
+        if self.config.expansion.is_empty() && self.draft.is_none() {
             return;
         }
         egui::Panel::bottom("try_live")
@@ -820,6 +930,13 @@ impl GuiApp {
                             theme::tint(palette.success, 34),
                         );
                     }
+                    if self.try_live_open && self.draft_is_dirty() {
+                        ui.label(
+                            RichText::new(self.strings.try_live_draft())
+                                .small()
+                                .color(palette.warning),
+                        );
+                    }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if self.try_live_open
                             && !self.playground.text.is_empty()
@@ -865,13 +982,34 @@ impl GuiApp {
                     let caret_at_end = output
                         .cursor_range
                         .is_none_or(|range| range.primary.index == text.chars().count());
-                    if let Some(rewrite) = self.playground.edit(
-                        &self.config,
-                        &self.preview_app,
-                        &backend,
-                        &text,
-                        caret_at_end,
-                    ) {
+                    let candidate = self
+                        .playground
+                        .needs_engine()
+                        .then(|| self.playground_config());
+                    let edit_result = match candidate {
+                        Some(Err(error)) => {
+                            self.playground.config_error = Some(error);
+                            None
+                        }
+                        Some(Ok(config)) => {
+                            self.playground.config_error = None;
+                            self.playground.edit(
+                                &config,
+                                &self.preview_app,
+                                &backend,
+                                &text,
+                                caret_at_end,
+                            )
+                        }
+                        None => self.playground.edit(
+                            &self.config,
+                            &self.preview_app,
+                            &backend,
+                            &text,
+                            caret_at_end,
+                        ),
+                    };
+                    if let Some(rewrite) = edit_result {
                         let caret = rewrite
                             .caret
                             .unwrap_or_else(|| rewrite.text.chars().count());
@@ -884,6 +1022,9 @@ impl GuiApp {
                             )));
                         state.store(ui.ctx(), id);
                     }
+                }
+                if let Some(error) = self.playground.config_error.as_ref() {
+                    ui.colored_label(palette.danger, self.strings.template_error(error));
                 }
                 if let Some(explanation) = self.playground.explanation.as_ref() {
                     ui.collapsing(
