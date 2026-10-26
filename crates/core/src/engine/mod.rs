@@ -121,9 +121,11 @@ pub struct ExpansionEngine {
     completion_notifier: Arc<RwLock<Option<CompletionNotifier>>>,
     expansion_metrics: Arc<CommandMetricsState>,
     hotkey_metrics: Arc<CommandMetricsState>,
-    /// Whether a terminating character should be included in the replacement
-    /// operation. Exclusive input sources have not delivered the delimiter to
-    /// the application yet; non-exclusive sources such as evdev have.
+    /// Whether a terminating character is carried through the replacement:
+    /// erased together with the trigger and typed again after the insert.
+    /// Every live source has already delivered the delimiter to the
+    /// application by the time it matches (the input method commits each
+    /// typed character; evdev is non-exclusive), so hosts keep this enabled.
     reinsert_terminators: bool,
     /// Environment and include values for templates, built once per config.
     template_base: crate::TemplateContext,
@@ -281,9 +283,10 @@ impl ExpansionEngine {
         self.config.apply_administrator_policy(policy)
     }
 
-    /// Configure whether delimiters reported with a match must be reinserted.
-    /// Exclusive sources need this enabled; non-exclusive sources (evdev)
-    /// should leave the physical delimiter to the focused application.
+    /// Configure whether a match's terminating delimiter is erased with the
+    /// trigger and reinserted after the replacement. Enabled by default; only
+    /// a host whose source withholds the delimiter from the application
+    /// should disable it.
     pub fn set_reinsert_terminators(&mut self, enabled: bool) {
         self.reinsert_terminators = enabled;
     }
