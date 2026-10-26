@@ -10,7 +10,7 @@ This matrix records compatibility observations and certification evidence. A
 manual test is not certification; the machine-readable artifact from
 `wayexpand certify` is the single source of truth for production certification.
 
-> **Important:** A route is certified only when a reviewed machine-readable artifact records real-session evidence and the live daemon satisfies the required capability contract. Manual observations and protocol availability do not certify a route.
+> **Important:** A route is production-certified only when a reviewed machine-readable artifact has `certification_scope: production`, records real-session evidence, and the live daemon satisfies the required capability contract. Compatibility verification, manual observations, and protocol availability do not certify a production route.
 
 Security-sensitive route claims have four separate meanings: **implemented by
 WayExpand**, **advertised by the protocol**, **observed in the compositor
@@ -26,7 +26,7 @@ by the certification tools. Declared test paths are not per-session
 availability claims, and no target is certified without reviewed evidence.
 
 <!-- generated:desktop-certification-matrix:start -->
-| Target | Desktop/session | Declared test paths | Window tracking | App filters | Sensitive fields observed | E2E certification |
+| Target | Desktop/session | Declared test paths | Window tracking | App filters | Sensitive fields observed | Production certification |
 | --- | --- | --- | --- | --- | --- | --- |
 | `kde` | KDE Plasma / KWin | ibus, evdev+libei | KWin application tracker | Available in declared path | Not observed | **Not certified** |
 | `gnome` | GNOME Shell / Mutter | ibus, evdev+libei | none | Unavailable | Not observed | **Not certified** |

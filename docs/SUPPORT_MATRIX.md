@@ -48,11 +48,11 @@ deploying desktop capture, test and record the exact compositor and version:
 
 The table below is generated from the certification target contract. Its
 paths are test targets, not a guarantee that the path is available or works on
-your session. E2E certification changes only after reviewed real-session
-evidence exists.
+your session. Production certification changes only after reviewed
+real-session evidence with `certification_scope: production` exists.
 
 <!-- generated:desktop-certification-matrix:start -->
-| Target | Desktop/session | Declared test paths | Window tracking | App filters | Sensitive fields observed | E2E certification |
+| Target | Desktop/session | Declared test paths | Window tracking | App filters | Sensitive fields observed | Production certification |
 | --- | --- | --- | --- | --- | --- | --- |
 | `kde` | KDE Plasma / KWin | ibus, evdev+libei | KWin application tracker | Available in declared path | Not observed | **Not certified** |
 | `gnome` | GNOME Shell / Mutter | ibus, evdev+libei | none | Unavailable | Not observed | **Not certified** |

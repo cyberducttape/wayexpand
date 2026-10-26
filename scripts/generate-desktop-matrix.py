@@ -20,6 +20,23 @@ VALID_CERTIFICATION = {"not-certified", "certified"}
 VALID_SENSITIVE_OBSERVATION = {"not-observed", "observed", "unavailable"}
 
 
+def is_production_evidence(
+    evidence: object, target_id: str, declared_paths: list[str]
+) -> bool:
+    if not isinstance(evidence, dict):
+        return False
+    return (
+        evidence.get("schema") == 3
+        and evidence.get("certified") is True
+        and evidence.get("status") == "certified"
+        and evidence.get("certification_scope") == "production"
+        and evidence.get("production_eligible") is True
+        and evidence.get("production_certification_required") is True
+        and evidence.get("compositor") == target_id
+        and evidence.get("backend") in declared_paths
+    )
+
+
 def render(matrix: dict[str, object], route_catalog: dict[str, object]) -> str:
     targets = matrix.get("targets")
     routes = route_catalog.get("routes")
@@ -40,7 +57,7 @@ def render(matrix: dict[str, object], route_catalog: dict[str, object]) -> str:
         for target_id in targets_for_route:
             route_paths.setdefault(target_id, []).append(path)
     rows = [
-        "| Target | Desktop/session | Declared test paths | Window tracking | App filters | Sensitive fields observed | E2E certification |",
+        "| Target | Desktop/session | Declared test paths | Window tracking | App filters | Sensitive fields observed | Production certification |",
         "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     seen: set[str] = set()
@@ -86,13 +103,7 @@ def render(matrix: dict[str, object], route_catalog: dict[str, object]) -> str:
             if not evidence_file.is_relative_to(ROOT.resolve()) or not evidence_file.is_file():
                 raise ValueError(f"{target_id}: certification evidence must be a checked-in file")
             evidence = json.loads(evidence_file.read_text(encoding="utf-8"))
-            if (
-                evidence.get("schema") != 2
-                or evidence.get("certified") is not True
-                or evidence.get("status") != "certified"
-                or evidence.get("compositor") != target_id
-                or evidence.get("backend") not in paths
-            ):
+            if not is_production_evidence(evidence, target_id, paths):
                 raise ValueError(f"{target_id}: evidence does not certify a declared backend")
         elif evidence_path is not None:
             raise ValueError(f"{target_id}: not-certified targets must not claim an evidence artifact")

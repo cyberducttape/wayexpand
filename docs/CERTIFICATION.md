@@ -75,15 +75,21 @@ scripts/certify-compositor.sh --format json --compositor kde \
 ```
 
 That record is distinct from the CLI preflight: it includes the exact session
-metadata and one result for every scenario × layout × client cell, but remains
-`certified: false` unless every cell is explicitly passed, the doctor
-snapshot reports `healthy: true`, and the selected backend probe is consistent
-with the evidence metadata, including an exact match between the requested
-compositor and the desktop identity returned by `doctor --json`. Daemon-backed
-paths additionally require a status snapshot with `response: "running"`, the
-current status schema, and the matching source/backend pair; IBus uses the
-doctor IBus-installation probe because it is not the daemon control socket
-path. Its stable `status` field is `certified`, `incomplete`, or `failed`.
+metadata and one result for every scenario × layout × client cell. Schema 3
+separates `certified` from `certification_scope`: a compatibility run can pass
+every scenario and report `certified: true` with scope `compatibility`, but
+only scope `production` can satisfy the release gate. Production scope also
+requires a production-eligible route and a matrix target explicitly marked
+production-required. The report remains `certified: false` unless every cell
+is explicitly passed, the doctor snapshot reports `healthy: true`, and the
+selected backend probe is consistent with the evidence metadata, including an
+exact match between the requested compositor and the desktop identity
+returned by `doctor --json`. Daemon-backed paths additionally require a status
+snapshot with `response: "running"`, the current status schema, and the
+matching source/backend pair; IBus uses the doctor IBus-installation probe
+because it is not the daemon control socket path. `status` reports scenario
+completeness (`certified`, `incomplete`, or `failed`); `certification_scope`
+reports compatibility or production evidence.
 
 Raw evdev capture is a compatibility fallback and is never eligible for a
 production certification: it has no sensitive-field signal and cannot provide
@@ -111,14 +117,16 @@ means the scenario passed, `fail` means it was exercised and failed,
 `unsupported-by-design` records a documented capability that the selected
 backend cannot provide (for example password-field awareness through evdev),
 and `UNVERIFIED` means no trustworthy result was collected. Only an artifact
-whose required cells are all `pass` can set `certified: true`; human
-support tables are compatibility observations, not certification evidence.
+whose required cells are all `pass` can set `certified: true`; the separate
+`certification_scope` field determines whether this is compatibility or
+production evidence. Human support tables are compatibility observations,
+not certification evidence.
 
 The collector writes its report in either format, then exits nonzero whenever
-certification is incomplete or failed. Automation should still inspect
-`.certified` and `.status` so it can distinguish an ineligible route from
-missing scenario evidence; the JSON artifact remains available for upload and
-review after a nonzero exit.
+certification is incomplete or failed. Automation must inspect
+`.certified`, `.status`, and `.certification_scope`; a compatibility-scoped
+pass is not a production pass. The JSON artifact remains available for upload
+and review after a nonzero exit.
 
 The compositor evidence collector emits schema version 2, where each entry in
 `scenarios` is an individual scenario × layout × client result. Scenario-only

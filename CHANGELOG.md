@@ -38,6 +38,11 @@ All notable changes to WayExpand are documented here.
   satisfy production certification. Corrected the GNOME setup guide and
   certification regression fixture so neither advertises input-method-v2 on
   Mutter.
+- Certification evidence schema 3 now labels compatibility and production
+  scope separately. Release checks and support-table generation require a
+  production-scoped report, a production-eligible route, and an explicitly
+  required matrix target; a complete compatibility run cannot promote a
+  desktop.
 - Added current-source KWin 6.6.6 headless certification evidence. The
   supported output/focus scenarios passed, but keyboard capture, Unicode on
   the negotiated keysym route, suspend/resume, and production desktop

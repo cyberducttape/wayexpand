@@ -61,6 +61,12 @@ if ! jq -e --arg compositor "$compositor" --arg backend "$backend" \
     printf '%s\n' "error: backend '$backend' is not a declared certification path for $compositor" >&2
     exit 2
 fi
+production_certification_required=$(jq -er --arg compositor "$compositor" \
+    '.targets[] | select(.id == $compositor) | .production_certification_required | if type == "boolean" then tostring else empty end' \
+    "$matrix") || {
+    printf '%s\n' "error: certification target '$compositor' has no valid production gate declaration" >&2
+    exit 2
+}
 
 [ -n "$compositor_version" ] || {
     printf '%s\n' "error: --version is required for reproducible evidence" >&2
@@ -212,6 +218,7 @@ fi
 status_required=true
 backend_probe_valid=1
 backend_certification_eligible=true
+production_eligible=false
 backend_certification_block_reason=''
 # Guarantees a certified route still does not provide. Recorded in the
 # evidence so a certification never implies more than the route delivers.
@@ -220,8 +227,9 @@ case "$backend" in
     ibus)
         status_required=false
         if [ "$compositor" = gnome ]; then
-            # GNOME offers no input-method-v2 route; IBus is its certified
-            # path, with these limits stated rather than assumed away.
+            # GNOME offers no input-method-v2 route. IBus can be verified as
+            # a compatibility path, but its guarantees do not make it
+            # production-eligible.
             certification_limitations='IBus replaces triggers after verifying the surrounding text but not atomically; GNOME has no window tracker, so application filters are unavailable; external IME composition is not supported'
         else
             backend_certification_eligible=false
@@ -234,6 +242,7 @@ case "$backend" in
         ;;
     evdev+libei)
         backend_certification_eligible=false
+        production_eligible=false
         backend_certification_block_reason='evdev capture has no sensitive-field signal and cannot provide atomic replacement'
         if ! printf '%s' "$doctor_json" | jq -e '
             .healthy == true or
@@ -247,6 +256,7 @@ case "$backend" in
         ;;
     evdev+wlroots)
         backend_certification_eligible=false
+        production_eligible=false
         backend_certification_block_reason='evdev capture has no sensitive-field signal and cannot provide atomic replacement'
         if ! printf '%s' "$doctor_json" | jq -e '
             .healthy == true or
@@ -281,6 +291,8 @@ case "$backend" in
             backend_probe_valid=0
             backend_certification_eligible=false
             backend_certification_block_reason='input-method route does not provide the complete sensitive-field, local dead-key/Compose, key-pass-through, atomic-replacement, and Unicode capability contract'
+        else
+            production_eligible=true
         fi
         ;;
     *)
@@ -327,6 +339,10 @@ certified=false
     && [ "$desktop_probe_valid" -eq 1 ] && [ "$backend_probe_valid" -eq 1 ] \
     && [ "$backend_certification_eligible" = true ] \
     && { [ "$status_required" = false ] || [ "$status_probe_valid" -eq 1 ]; } && certified=true
+certification_scope=compatibility
+if [ "$production_certification_required" = true ] && [ "$production_eligible" = true ]; then
+    certification_scope=production
+fi
 [ "$doctor_probe_valid" -eq 1 ] || complete=0
 if [ "$status_required" = true ] && [ "$status_probe_valid" -ne 1 ]; then
     complete=0
@@ -375,12 +391,18 @@ if [ "$format" = json ]; then
         --arg backend_certification_block_reason "$backend_certification_block_reason" \
         --arg certification_limitations "$certification_limitations" \
         --arg certification_status "$certification_status" \
-        '{schema: 2, certified: $certified,
+        --arg production_eligible "$production_eligible" \
+        --arg production_certification_required "$production_certification_required" \
+        --arg certification_scope "$certification_scope" \
+        '{schema: 3, certified: $certified,
           wayexpand_version: $wayexpand_version, wayexpand_commit: $wayexpand_commit,
           compositor: $compositor,
           expected_desktop: $expected_desktop,
           detected_desktop: $detected_desktop,
           status: $certification_status,
+          certification_scope: $certification_scope,
+          production_eligible: ($production_eligible == "true"),
+          production_certification_required: ($production_certification_required == "true"),
           compositor_version: $compositor_version, backend: $backend,
           keyboard_layout: $keyboard_layout, target_apps: $target_apps,
           required_client_markers: $required_client_markers,
@@ -408,6 +430,9 @@ else
     printf '%s\n' "- expected_desktop: $expected_desktop"
     printf '%s\n' "- detected_desktop: $detected_desktop"
     printf '%s\n' "- backend: $backend"
+    printf '%s\n' "- certification_scope: $certification_scope"
+    printf '%s\n' "- production_eligible: $production_eligible"
+    printf '%s\n' "- production_certification_required: $production_certification_required"
     if [ -n "$certification_limitations" ]; then
         printf '%s\n' "- certification_limitations: $certification_limitations"
     fi

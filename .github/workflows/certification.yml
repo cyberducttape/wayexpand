@@ -199,7 +199,10 @@ jobs:
             echo "certification evidence was not produced" >&2
             exit 1
           }
-          jq -e '.certified == true and .status == "certified"' "$EVIDENCE_FILE" >/dev/null || {
+          jq -e '.certified == true and .status == "certified" and
+            .certification_scope == "production" and
+            .production_eligible == true and
+            .production_certification_required == true' "$EVIDENCE_FILE" >/dev/null || {
             echo "desktop certification is incomplete or failed; inspect the uploaded evidence artifact" >&2
             exit 1
           }

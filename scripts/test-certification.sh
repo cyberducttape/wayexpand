@@ -72,7 +72,9 @@ if run_certification --format json --results "$results" --output "$json_output";
     exit 1
 fi
 jq -e --argjson expected_cases "$expected_cases" '
-    .schema == 2 and .certified == false and .status == "incomplete" and
+    .schema == 3 and .certified == false and .status == "incomplete" and
+    .certification_scope == "compatibility" and .production_eligible == false and
+    .production_certification_required == false and
     .backend_certification_eligible == false and
     .backend_certification_block_reason == "IBus lacks atomic replacement, exact window identity, and composition awareness" and
     ([.out_of_scope_capabilities[] | select(.id == "active-ime-preedit" and .status == "unsupported-by-design")] | length == 1) and
@@ -323,7 +325,7 @@ if run_certification --format json --results "$missing" --output "$missing_json"
     printf '%s\n' 'JSON certification accepted an incomplete results file' >&2
     exit 1
 fi
-jq -e --argjson cases "$expected_cases" '.schema == 2 and .certified == false and .status == "incomplete" and ([.out_of_scope_capabilities[] | select(.id == "active-ime-preedit" and .status == "unsupported-by-design")] | length == 1) and ([.scenarios[] | select(.result == "UNVERIFIED")] | length == 1) and (.scenarios | length == $cases)' "$missing_json" >/dev/null
+jq -e --argjson cases "$expected_cases" '.schema == 3 and .certified == false and .status == "incomplete" and .certification_scope == "compatibility" and ([.out_of_scope_capabilities[] | select(.id == "active-ime-preedit" and .status == "unsupported-by-design")] | length == 1) and ([.scenarios[] | select(.result == "UNVERIFIED")] | length == 1) and (.scenarios | length == $cases)' "$missing_json" >/dev/null
 
 failed="$test_root/failed.txt"
 sed '1s/=pass$/=fail/' "$results" >"$failed"
@@ -416,7 +418,10 @@ XDG_CURRENT_DESKTOP=GNOME PATH="$project_dir/target/debug:$PATH" \
     --target-apps "$target_apps" --cli "$gnome_cli" --format json \
     --results "$results" --output "$gnome_json"
 jq -e '
-    .certified == true and .status == "certified" and
+    .schema == 3 and .certified == true and .status == "certified" and
+    .certification_scope == "compatibility" and
+    .production_eligible == false and
+    .production_certification_required == false and
     .compositor == "gnome" and .backend == "ibus" and
     .backend_certification_eligible == true and
     .backend_certification_block_reason == "" and

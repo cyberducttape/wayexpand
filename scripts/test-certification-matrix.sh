@@ -39,6 +39,7 @@ grep -F -- 'actions: read' "$workflow" >/dev/null
 grep -F -- 'fromJSON(needs.runner-preflight.outputs.matrix)' "$workflow" >/dev/null
 grep -F -- 'scripts/run-certification-driver.sh' "$workflow" >/dev/null
 grep -F -- 'scripts/certify-compositor.sh' "$workflow" >/dev/null
+grep -F -- '.certification_scope == "production"' "$workflow" >/dev/null
 grep -F -- 'continue-on-error: true' "$workflow" >/dev/null
 grep -F -- 'if: always()' "$workflow" >/dev/null
 grep -F -- 'schedule:' "$workflow" >/dev/null
@@ -51,8 +52,10 @@ grep -F -- 'No declared compositor route currently meets WayExpand production ce
 
 python3 - "$matrix" "$workflow" <<'PY'
 import json
+import importlib.util
 import re
 import sys
+from pathlib import Path
 
 matrix_path, workflow_path = sys.argv[1:]
 matrix = json.load(open(matrix_path, encoding="utf-8"))
@@ -74,7 +77,7 @@ if "evdev+libei" in workflow_backends.values():
 if workflow_backends.get("kde") != "ibus":
     raise SystemExit("KDE compatibility job must use a declared route")
 if workflow_backends.get("gnome") != "ibus":
-    raise SystemExit("GNOME must be certified on the IBus route")
+    raise SystemExit("GNOME compatibility job must use the IBus route")
 
 for target in matrix["targets"]:
     expected = target["production_certification_required"]
@@ -83,6 +86,45 @@ for target in matrix["targets"]:
         raise SystemExit(
             f"workflow production_required for {target['id']} is {actual!r}; expected {expected!r}"
         )
+    if expected and (
+        workflow_backends.get(target["id"]) != "input-method-v2"
+        or "input-method-v2" not in target["input_paths"]
+    ):
+        raise SystemExit(
+            f"production target {target['id']} must use its declared input-method-v2 route"
+        )
+
+generator_path = Path(matrix_path).resolve().parents[2] / "scripts/generate-desktop-matrix.py"
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("desktop_matrix", generator_path)
+if spec is None or spec.loader is None:
+    raise SystemExit("could not load desktop evidence validator")
+generator = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(generator)
+production_evidence = {
+    "schema": 3,
+    "certified": True,
+    "status": "certified",
+    "certification_scope": "production",
+    "production_eligible": True,
+    "production_certification_required": True,
+    "compositor": "sway",
+    "backend": "input-method-v2",
+}
+if not generator.is_production_evidence(
+    production_evidence, "sway", ["evdev+wlroots", "input-method-v2"]
+):
+    raise SystemExit("valid production evidence was rejected")
+for field, value in (
+    ("certification_scope", "compatibility"),
+    ("production_eligible", False),
+    ("production_certification_required", False),
+):
+    compatibility_report = {**production_evidence, field: value}
+    if generator.is_production_evidence(
+        compatibility_report, "sway", ["evdev+wlroots", "input-method-v2"]
+    ):
+        raise SystemExit(f"compatibility evidence was accepted as production: {field}")
 PY
 if grep -F -- 'backend: evdev+libei' "$workflow" >/dev/null; then
     printf '%s\n' 'certification workflow must not certify raw evdev' >&2
