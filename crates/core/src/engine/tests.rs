@@ -3242,6 +3242,46 @@ fn continuously_readable_stdout_still_observes_the_command_deadline() {
 }
 
 #[test]
+#[cfg(target_os = "linux")]
+fn waiting_on_a_command_that_closed_its_output_does_not_spin() {
+    fn thread_cpu_time() -> Duration {
+        let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
+        assert_eq!(
+            unsafe { libc::getrusage(libc::RUSAGE_THREAD, usage.as_mut_ptr()) },
+            0
+        );
+        let usage = unsafe { usage.assume_init() };
+        let micros = |time: libc::timeval| {
+            Duration::from_secs(time.tv_sec as u64) + Duration::from_micros(time.tv_usec as u64)
+        };
+        micros(usage.ru_utime) + micros(usage.ru_stime)
+    }
+    // Both pipes hang up while the command keeps running. A hung-up pipe is
+    // always readable, so polling it again would busy-wait for the whole run.
+    let command = CommandConfig {
+        action: None,
+        program: "/bin/sh".to_string(),
+        args: vec![
+            "-c".to_string(),
+            "exec >&- 2>&-; /bin/sleep 0.5".to_string(),
+        ],
+        timeout_ms: 5_000,
+        cache_ms: 0,
+        environment: CommandEnvironment::Minimal,
+        pass_env: vec![],
+    };
+    let before = thread_cpu_time();
+    let result = run_command(&command);
+    let spent = thread_cpu_time() - before;
+
+    assert_eq!(result, Ok(String::new()));
+    assert!(
+        spent < Duration::from_millis(150),
+        "waiting for the command used {spent:?} of CPU"
+    );
+}
+
+#[test]
 #[cfg(unix)]
 fn command_rejects_output_when_descendant_keeps_stdout_open() {
     let pid_file = format!(

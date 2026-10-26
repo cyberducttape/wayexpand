@@ -947,7 +947,11 @@ impl ExpansionEngine {
                         folded_suffix_chars: 0,
                     },
                 };
-                if runtime.try_send_command(job).is_err() {
+                if let Err(error) = runtime.try_send_command(job) {
+                    self.remember_command_failure(match error {
+                        QueueSendError::Full => CommandErrorKind::QueueFull,
+                        QueueSendError::Disconnected => CommandErrorKind::WorkerUnavailable,
+                    });
                     return None;
                 }
                 // Do not consume the trigger until the worker has accepted

@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Waiting for a command that closed its stdout or stderr while still running
+  no longer busy-polls the hung-up pipe; the worker previously used a full CPU
+  core until the command exited or timed out. A command-backed match dropped
+  because the expansion queue was full is now reported in command failure
+  diagnostics like the deferred path.
 - Configuration watcher events from read-only access (opening or reading the
   file) no longer request a reload. Since watcher events started forcing a
   reload, the reload worker's own read of the configuration re-triggered the

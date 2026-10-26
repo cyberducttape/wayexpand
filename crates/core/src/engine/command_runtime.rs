@@ -276,8 +276,8 @@ pub(super) fn run_command_unix(
         }
         if Instant::now() < deadline {
             wait_for_command_event(
-                &stdout,
-                &stderr,
+                (!stdout_eof).then_some(&stdout),
+                (!stderr_eof).then_some(&stderr),
                 guard.pidfd(),
                 deadline,
                 shutdown.is_some(),
@@ -291,7 +291,13 @@ pub(super) fn run_command_unix(
         stdout_eof = read_available_stdout(&mut stdout, &mut bytes, None, None)?;
         stderr_eof = read_available_stderr(&mut stderr, &mut stderr_bytes)?;
         if !stdout_eof || !stderr_eof {
-            wait_for_command_event(&stdout, &stderr, None, drain_deadline, false)?;
+            wait_for_command_event(
+                (!stdout_eof).then_some(&stdout),
+                (!stderr_eof).then_some(&stderr),
+                None,
+                drain_deadline,
+                false,
+            )?;
         }
     }
     if !status.success() {
@@ -343,22 +349,27 @@ fn set_nonblocking_stderr(stderr: &ChildStderr) -> Result<(), CommandError> {
     Ok(())
 }
 
+/// Wait until an open output pipe or the child's pidfd is ready, or the
+/// deadline passes. Pass `None` for a pipe that already reached EOF: a hung-up
+/// pipe stays readable forever, so polling it again would spin until the child
+/// exits (a command may close stdout and keep running). Negative descriptors
+/// are ignored by poll(2).
 #[cfg(unix)]
 fn wait_for_command_event(
-    stdout: &ChildStdout,
-    stderr: &ChildStderr,
+    stdout: Option<&ChildStdout>,
+    stderr: Option<&ChildStderr>,
     pidfd: Option<&OwnedFd>,
     deadline: Instant,
     cancellation_watch: bool,
 ) -> Result<(), CommandError> {
     let mut fds = [
         libc::pollfd {
-            fd: stdout.as_raw_fd(),
+            fd: stdout.map_or(-1, AsRawFd::as_raw_fd),
             events: libc::POLLIN | libc::POLLHUP | libc::POLLERR,
             revents: 0,
         },
         libc::pollfd {
-            fd: stderr.as_raw_fd(),
+            fd: stderr.map_or(-1, AsRawFd::as_raw_fd),
             events: libc::POLLIN | libc::POLLHUP | libc::POLLERR,
             revents: 0,
         },
@@ -366,7 +377,6 @@ fn wait_for_command_event(
     if let Some(pidfd) = pidfd {
         // The extra entry is only used on Linux, where pidfd readiness means
         // the child exited and avoids periodic waitpid polling entirely.
-        fds[0].revents = 0;
         let mut all_fds = [
             fds[0],
             fds[1],
