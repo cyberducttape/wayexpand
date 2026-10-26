@@ -729,7 +729,13 @@ mod tests {
         assert_eq!(fs::metadata(&nested).unwrap().len(), 6);
 
         let before = fleet_signature_for([nested.clone()]);
-        fs::write(&nested, "after!").unwrap();
+        // Config editors save by writing a sibling and atomically renaming it
+        // into place. Reproduce that replacement rather than relying on the
+        // filesystem to expose sub-second ctime changes for an in-place write
+        // (some Launchpad builders use filesystems with coarser metadata).
+        let replacement = nested.with_extension("toml.new");
+        fs::write(&replacement, "after!").unwrap();
+        fs::rename(&replacement, &nested).unwrap();
         assert_eq!(fs::metadata(&nested).unwrap().len(), 6);
         let after = fleet_signature_for([nested.clone()]);
 
