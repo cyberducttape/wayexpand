@@ -13,6 +13,12 @@ All notable changes to WayExpand are documented here.
   fixture fix. The isolated insertion, focus, reload, restart, and refusal
   checks passed; keyboard capture, Unicode on the keysym fallback, and
   suspend/resume remain untested, so this is not compositor certification.
+- Preserved a fresh `doctor --certify --json` report for commit
+  `1a274fbd6fa7`. The isolated KWin clients passed 12 output/focus scenarios;
+  20 small keysym-fallback insertions measured 12,375 µs p50 and 12,531 µs
+  p95/p99 inside the injector. Keyboard capture, Unicode insertion, and
+  suspend/resume remain untested. The report is partial compatibility evidence,
+  not production certification.
 - Verified the KWin window tracker in a live Plasma Wayland session on KWin
   6.6.6: it received the focused window identity, rejected an untrusted D-Bus
   focus event, and detected removal of its temporary script. This component

@@ -268,6 +268,15 @@ capture and client paint. Unicode insertion, physical keyboard capture, and
 suspend/resume remain explicitly untested. This partial report does not
 describe or certify the active desktop.
 
+[`evidence/doctor-certify-1a274fbd6fa7.json`](evidence/doctor-certify-1a274fbd6fa7.json)
+preserves the current-source report from commit `1a274fbd6fa7` on KWin 6.6.6.
+The isolated clients passed 12 insertion, focus, reload, restart, refusal, and
+build-identity checks. The session used libei keysym fallback with 12 ms
+pacing; 20 small replacements measured 12,375 µs p50 and 12,531 µs p95/p99
+inside the injector. Unicode insertion, physical keyboard capture, and
+suspend/resume were not tested. This partial headless report does not certify
+the active desktop or production capture route.
+
 [`evidence/kwin-headless-2026-10-24.json`](evidence/kwin-headless-2026-10-24.json)
 records an 11-scenario run against the production daemon, libei injector, and
 KWin window tracker on KWin 6.6.6. All 11 scenarios passed. The private KWin
