@@ -349,6 +349,42 @@ impl Strings {
                 Language::Indonesian => "Diblokir kebijakan perintah sebelum keluaran".into(),
                 Language::German => "Vor der Ausgabe durch Befehlsrichtlinie blockiert".into(),
             },
+            (_, "key release was not confirmed before output") => match self.lang {
+                Language::English => "Blocked because key release could not be confirmed".into(),
+                Language::Indonesian => {
+                    "Diblokir karena pelepasan tombol tidak dapat dikonfirmasi".into()
+                }
+                Language::German => {
+                    "Blockiert, weil das Loslassen der Taste nicht bestätigt wurde".into()
+                }
+            },
+            (_, "input quiet check failed") => match self.lang {
+                Language::English => "Blocked because input safety could not be checked".into(),
+                Language::Indonesian => {
+                    "Diblokir karena keamanan input tidak dapat diperiksa".into()
+                }
+                Language::German => {
+                    "Blockiert, weil die Eingabesicherheit nicht geprüft werden konnte".into()
+                }
+            },
+            (_, "input arrived before output") => match self.lang {
+                Language::English => "Blocked because more input arrived before replacement".into(),
+                Language::Indonesian => "Diblokir karena ada input baru sebelum penggantian".into(),
+                Language::German => {
+                    "Blockiert, weil vor dem Ersetzen weitere Eingabe eintraf".into()
+                }
+            },
+            (_, "multiple inputs arrived before output") => match self.lang {
+                Language::English => {
+                    "Blocked because multiple inputs arrived before replacement".into()
+                }
+                Language::Indonesian => {
+                    "Diblokir karena beberapa input tiba sebelum penggantian".into()
+                }
+                Language::German => {
+                    "Blockiert, weil vor dem Ersetzen mehrere Eingaben eintrafen".into()
+                }
+            },
             _ => completion.to_owned(),
         }
     }

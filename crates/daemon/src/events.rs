@@ -149,7 +149,7 @@ pub(crate) fn dispatch_pending_results(
                 if let Some(violation) = policy.command_path_violation(&command.program) {
                     policy::log_violation(policy, &violation);
                     if policy.command_path_is_blocked(&command.program) {
-                        failure_trace::record_policy_refusal(
+                        failure_trace::record_blocked_expansion(
                             active_backend,
                             "blocked by command policy",
                         );
@@ -168,7 +168,10 @@ pub(crate) fn dispatch_pending_results(
             active_backend,
         ) {
             // In safe_mode, block the expansion
-            failure_trace::record_policy_refusal(active_backend, "blocked by organization policy");
+            failure_trace::record_blocked_expansion(
+                active_backend,
+                "blocked by organization policy",
+            );
             engine.restore_deferred_match(&pending_result.matched_text);
             continue;
         }
@@ -203,6 +206,7 @@ pub(crate) struct EvdevGatingOutcome {
 pub(crate) fn apply_evdev_gating(
     mut results: Vec<ExpansionResult>,
     evdev: &mut Option<EvdevSource>,
+    active_backend: &str,
 ) -> EvdevGatingOutcome {
     let mut follow_up = Vec::new();
     if let Some(source) = evdev.as_mut() {
@@ -210,6 +214,11 @@ pub(crate) fn apply_evdev_gating(
         // Injecting while trigger key is held can make synthetic input appear
         // as auto-repeat or cancel the physical release.
         if !evdev_release_is_safe(source.wait_for_key_release(KEY_RELEASE_TIMEOUT)) {
+            record_abandoned_expansions(
+                active_backend,
+                results.len(),
+                "key release was not confirmed before output",
+            );
             follow_up = source.take_pending_events();
             return EvdevGatingOutcome {
                 results: Vec::new(),
@@ -223,6 +232,11 @@ pub(crate) fn apply_evdev_gating(
             Ok(quiet) => quiet,
             Err(error) => {
                 warn!(%error, "evdev quiet-period check failed; abandoning expansion");
+                record_abandoned_expansions(
+                    active_backend,
+                    results.len(),
+                    "input quiet check failed",
+                );
                 // Preserve anything captured before the polling error so the
                 // matcher sees the same stream as the focused application.
                 follow_up = source.take_pending_events();
@@ -252,6 +266,11 @@ pub(crate) fn apply_evdev_gating(
                     warn!(
                         "input arrived while waiting for key release; dropping expansion to avoid cursor misplacement"
                     );
+                    record_abandoned_expansions(
+                        active_backend,
+                        results.len(),
+                        "input arrived before output",
+                    );
                     let abandoned = results.clone();
                     results.clear();
                     return EvdevGatingOutcome {
@@ -264,6 +283,11 @@ pub(crate) fn apply_evdev_gating(
                 // Multiple inputs arrived: don't inject
                 warn!(
                     "multiple inputs arrived while waiting for key release; dropping expansion to avoid cursor misplacement"
+                );
+                record_abandoned_expansions(
+                    active_backend,
+                    results.len(),
+                    "multiple inputs arrived before output",
                 );
                 let abandoned = results.clone();
                 results.clear();
@@ -279,6 +303,12 @@ pub(crate) fn apply_evdev_gating(
         results,
         follow_up,
         abandoned: Vec::new(),
+    }
+}
+
+fn record_abandoned_expansions(backend: &str, count: usize, reason: &'static str) {
+    for _ in 0..count {
+        failure_trace::record_blocked_expansion(backend, reason);
     }
 }
 
@@ -312,7 +342,7 @@ pub(crate) fn apply_deferred_evdev_event(
     if results.is_empty() {
         return Ok(());
     }
-    let gating = apply_evdev_gating(results, evdev);
+    let gating = apply_evdev_gating(results, evdev, active_backend);
     restore_abandoned_results(engine, gating.abandoned);
     apply_results(
         engine,
@@ -365,7 +395,7 @@ pub(crate) fn expansion_allowed(
         active_backend,
     ) {
         // In safe_mode, block the expansion
-        failure_trace::record_policy_refusal(active_backend, "blocked by organization policy");
+        failure_trace::record_blocked_expansion(active_backend, "blocked by organization policy");
         engine.restore_deferred_result(result);
         return false;
     }

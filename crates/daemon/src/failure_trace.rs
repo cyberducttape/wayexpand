@@ -89,11 +89,11 @@ impl<'a> TracedInjector<'a> {
     }
 }
 
-/// Record a matched expansion rejected before output. Only callers supply
+/// Record a matched expansion stopped before output. Only callers supply
 /// fixed reason labels; no trigger, replacement, policy text, or user input is
 /// retained. Backend names are bounded and stripped to a small identifier set
 /// because they are serialized into the daemon status response.
-pub(crate) fn record_policy_refusal(backend: &str, reason: &'static str) {
+pub(crate) fn record_blocked_expansion(backend: &str, reason: &'static str) {
     let backend = backend
         .chars()
         .filter(|character| character.is_ascii_alphanumeric() || "-_.+".contains(*character))
@@ -325,27 +325,27 @@ mod tests {
     }
 
     #[test]
-    fn policy_refusals_are_content_free_outcomes() {
-        record_policy_refusal("input-method-v2", "blocked by organization policy");
+    fn pre_output_blocks_are_content_free_outcomes() {
+        record_blocked_expansion("evdev+libei", "input arrived before output");
 
         let outcomes: serde_json::Value =
             serde_json::from_str(&recent_outcomes_json()).expect("outcomes should be JSON");
         assert!(outcomes.as_array().unwrap().iter().any(|trace| {
-            trace["completion"] == "blocked by organization policy"
-                && trace["backend"] == "input-method-v2"
+            trace["completion"] == "input arrived before output"
+                && trace["backend"] == "evdev+libei"
                 && trace["trigger_recognized"] == "yes"
                 && trace["focus_admission"] == "not reached"
                 && trace["backend_selected"] == "not reached"
                 && trace["erase_acknowledged"] == "not attempted"
                 && trace["insertion_attempted"] == false
         }));
-        let refusal = outcomes
+        let block = outcomes
             .as_array()
             .unwrap()
             .iter()
-            .find(|trace| trace["completion"] == "blocked by organization policy")
+            .find(|trace| trace["completion"] == "input arrived before output")
             .unwrap();
-        assert!(refusal.get("trigger").is_none());
-        assert!(refusal.get("replacement").is_none());
+        assert!(block.get("trigger").is_none());
+        assert!(block.get("replacement").is_none());
     }
 }

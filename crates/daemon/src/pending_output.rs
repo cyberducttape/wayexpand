@@ -298,7 +298,7 @@ impl Daemon {
         if results.is_empty() {
             return Ok(());
         }
-        let gating = apply_evdev_gating(results, &mut self.evdev);
+        let gating = apply_evdev_gating(results, &mut self.evdev, self.active_backend);
         restore_abandoned_results(&mut self.config.engine, gating.abandoned);
         self.start_output(
             OutputOrigin::Typed,

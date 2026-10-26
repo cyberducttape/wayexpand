@@ -126,7 +126,7 @@ impl Daemon {
             // This prevents the race condition where fast commands finish
             // before the trigger key's physical release event is processed.
             let gating = if self.evdev_mode {
-                apply_evdev_gating(completed_commands, &mut self.evdev)
+                apply_evdev_gating(completed_commands, &mut self.evdev, self.active_backend)
             } else {
                 EvdevGatingOutcome {
                     results: completed_commands,
@@ -235,7 +235,7 @@ impl Daemon {
             match self.config.engine.prepare_insert(&request.trigger) {
                 Ok(result) => {
                     let gating = if self.evdev_mode {
-                        apply_evdev_gating(vec![result], &mut self.evdev)
+                        apply_evdev_gating(vec![result], &mut self.evdev, self.active_backend)
                     } else {
                         EvdevGatingOutcome {
                             results: vec![result],
