@@ -76,6 +76,14 @@ impl Strings {
         }
     }
 
+    pub fn sensitive_verification_note(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Sensitivity capability is a runtime report; certification requires compositor and real-client evidence.",
+            Language::Indonesian => "Kemampuan deteksi bidang sensitif berasal dari laporan runtime; sertifikasi memerlukan bukti kompositor dan aplikasi nyata.",
+            Language::German => "Die Erkennung sensibler Felder ist eine Laufzeitmeldung; eine Zertifizierung erfordert Nachweise mit Compositor und echten Anwendungen.",
+        }
+    }
+
     pub fn assessment_state(&self, state: crate::diagnostics::AssessmentState) -> &'static str {
         use crate::diagnostics::AssessmentState::*;
         match (self.lang, state) {

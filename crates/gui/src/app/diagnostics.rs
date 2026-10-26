@@ -146,7 +146,7 @@ impl GuiApp {
                 );
             });
             ui.label(
-                RichText::new("Sensitivity capability is a runtime report; certification requires compositor and real-client evidence.")
+                RichText::new(self.strings.sensitive_verification_note())
                     .small()
                     .color(palette.muted),
             );

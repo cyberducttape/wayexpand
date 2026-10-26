@@ -2172,6 +2172,14 @@ fn indonesian_strings_are_translated_not_english_fallbacks() {
     assert_ne!(indonesian.save_settings(), english.save_settings());
     assert_ne!(indonesian.matcher_latency(), english.matcher_latency());
     assert_ne!(indonesian.output_latency(), english.output_latency());
+    assert_ne!(
+        indonesian.sensitive_verification_note(),
+        english.sensitive_verification_note()
+    );
+    assert_ne!(
+        german.sensitive_verification_note(),
+        english.sensitive_verification_note()
+    );
     assert_ne!(german.matcher_latency(), english.matcher_latency());
     assert_ne!(german.output_latency(), english.output_latency());
     assert_ne!(indonesian.reusable_snippets(), english.reusable_snippets());
