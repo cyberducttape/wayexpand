@@ -33,7 +33,7 @@ impl GuiApp {
                 .take(MAX_CHOICES)
                 .map(|expansion| (expansion.trigger.clone(), expansion.description.clone()))
                 .collect();
-            self.reusable_snippet_choices = Some((self.library_revision, query.clone(), choices));
+            self.reusable_snippet_choices = Some((self.library_revision, query, choices));
         }
         self.reusable_snippet_choices
             .as_ref()

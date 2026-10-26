@@ -25,7 +25,11 @@ use wayexpand_core::{
     Modifiers, TextInjector, TransactionOutcome,
 };
 
-use crate::{control, input_loop::wait_for_retry, status};
+use crate::{
+    control,
+    input_loop::{next_retry_delay, wait_for_retry},
+    status,
+};
 
 /// Error connecting to an output backend.
 #[derive(Debug)]
@@ -667,11 +671,6 @@ pub fn connect_output_with_retry(
             Err(error) => return Err(anyhow::Error::new(error)),
         }
     }
-}
-
-/// Calculate next retry delay with exponential backoff (max 30s).
-fn next_retry_delay(delay: Duration) -> Duration {
-    delay.saturating_mul(2).min(Duration::from_secs(30))
 }
 
 #[cfg(test)]

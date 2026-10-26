@@ -74,12 +74,11 @@ impl ActionExecutor {
                 reason: "broker is shutting down; action was not started".to_string(),
             });
         }
-        let action_config =
-            self.config
-                .get_action(&request.action_id)
-                .ok_or(ActionError::ActionNotFound {
-                    action_id: request.action_id.clone(),
-                })?;
+        let action_config = self.config.get_action(&request.action_id).ok_or_else(|| {
+            ActionError::ActionNotFound {
+                action_id: request.action_id.clone(),
+            }
+        })?;
 
         if !action_config.is_enabled() {
             return Err(ActionError::ActionBlocked {
