@@ -180,6 +180,25 @@ fn stable_content_fingerprint(contents: &[u8]) -> u64 {
     })
 }
 
+/// Whether a watcher notification may mean configuration contents changed.
+///
+/// Every change-carrying event triggers a reload, so read-only access must not:
+/// the reload worker opens the file itself, and an `IN_OPEN` that requested
+/// another reload would rebuild the engine (and drop the typing buffer)
+/// forever. Errors can mean an event was lost (for example, the kernel watch
+/// queue overflowed), so they still request a rescan.
+fn event_requests_rescan(event: &notify::Result<notify::Event>) -> bool {
+    use notify::event::{AccessKind, AccessMode, EventKind};
+    match event {
+        Err(_) => true,
+        Ok(event) => match event.kind {
+            EventKind::Access(AccessKind::Close(AccessMode::Write)) => true,
+            EventKind::Access(_) => false,
+            _ => true,
+        },
+    }
+}
+
 fn start_config_watcher(
     path: &Path,
     fleet: bool,
@@ -188,10 +207,9 @@ fn start_config_watcher(
     let callback_dirty = Arc::clone(&dirty);
     let mut watcher = match notify::recommended_watcher(
         move |event: notify::Result<notify::Event>| {
-            // Errors can mean an event was lost (for example, the kernel watch
-            // queue overflowed), so they also request a secure rescan.
-            let _ = event;
-            callback_dirty.store(true, Ordering::Release);
+            if event_requests_rescan(&event) {
+                callback_dirty.store(true, Ordering::Release);
+            }
         },
     ) {
         Ok(watcher) => watcher,
@@ -1188,6 +1206,47 @@ mod tests {
             );
             thread::sleep(Duration::from_millis(10));
         }
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn read_only_access_does_not_request_a_rescan() {
+        use notify::event::{AccessKind, AccessMode, CreateKind, EventKind, ModifyKind};
+        let event = |kind| Ok(notify::Event::new(kind));
+        assert!(!event_requests_rescan(&event(EventKind::Access(
+            AccessKind::Open(AccessMode::Any)
+        ))));
+        assert!(!event_requests_rescan(&event(EventKind::Access(
+            AccessKind::Close(AccessMode::Read)
+        ))));
+        assert!(event_requests_rescan(&event(EventKind::Access(
+            AccessKind::Close(AccessMode::Write)
+        ))));
+        assert!(event_requests_rescan(&event(EventKind::Modify(
+            ModifyKind::Any
+        ))));
+        assert!(event_requests_rescan(&event(EventKind::Create(
+            CreateKind::File
+        ))));
+        assert!(event_requests_rescan(&Err(notify::Error::generic("lost"))));
+    }
+
+    #[test]
+    fn reading_the_watched_config_does_not_mark_it_dirty() {
+        let path = temporary_config();
+        write_config(&path, &config_text("old"));
+        let config =
+            ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
+        if config._watcher.is_none() {
+            let _ = fs::remove_file(path);
+            return;
+        }
+        // Let events from the initial write and load drain.
+        thread::sleep(Duration::from_millis(200));
+        config.watch_dirty.store(false, Ordering::Release);
+        let _ = fs::read(&path).unwrap();
+        thread::sleep(Duration::from_millis(200));
+        assert!(!config.watch_dirty.load(Ordering::Acquire));
         let _ = fs::remove_file(path);
     }
 

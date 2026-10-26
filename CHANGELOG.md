@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Configuration watcher events from read-only access (opening or reading the
+  file) no longer request a reload. Since watcher events started forcing a
+  reload, the reload worker's own read of the configuration re-triggered the
+  watcher, rebuilding the engine every debounce interval and discarding
+  partially typed triggers.
 - The action broker now accepts root-owned or user-owned sticky directories
   such as `/tmp` as protected ancestors of private configuration and audit
   paths. Its SIGTERM integration test places private fixtures under `/tmp`, so
