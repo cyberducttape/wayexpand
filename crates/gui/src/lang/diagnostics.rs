@@ -294,9 +294,9 @@ impl Strings {
 
     pub fn recent_expansion_outcomes(&self) -> &'static str {
         match self.lang {
-            Language::English => "Recent output outcomes · content-free trace",
-            Language::Indonesian => "Hasil keluaran terbaru · jejak tanpa konten",
-            Language::German => "Letzte Ausgabeergebnisse · inhaltsfreie Spur",
+            Language::English => "Recent expansion outcomes · content-free trace",
+            Language::Indonesian => "Hasil ekspansi terbaru · jejak tanpa konten",
+            Language::German => "Letzte Expansionsergebnisse · inhaltsfreie Spur",
         }
     }
 
@@ -336,6 +336,18 @@ impl Strings {
                 Language::English => "Partial output; final result is unknown".into(),
                 Language::Indonesian => "Keluaran sebagian; hasil akhir tidak diketahui".into(),
                 Language::German => "Teilausgabe; Endergebnis unbekannt".into(),
+            },
+            (_, "blocked by organization policy") => match self.lang {
+                Language::English => "Blocked by organization policy before output".into(),
+                Language::Indonesian => "Diblokir kebijakan organisasi sebelum keluaran".into(),
+                Language::German => {
+                    "Vor der Ausgabe durch Organisationsrichtlinie blockiert".into()
+                }
+            },
+            (_, "blocked by command policy") => match self.lang {
+                Language::English => "Blocked by command policy before output".into(),
+                Language::Indonesian => "Diblokir kebijakan perintah sebelum keluaran".into(),
+                Language::German => "Vor der Ausgabe durch Befehlsrichtlinie blockiert".into(),
             },
             _ => completion.to_owned(),
         }
@@ -383,9 +395,9 @@ impl Strings {
 
     pub fn trace_privacy_and_limits(&self) -> &'static str {
         match self.lang {
-            Language::English => "Only output transactions are recorded. Acknowledgement does not prove the target application displayed the text; unmatched typing is never recorded. Use Matcher preview to explain a test input.",
-            Language::Indonesian => "Hanya transaksi keluaran yang dicatat. Konfirmasi tidak membuktikan aplikasi tujuan menampilkan teks; ketikan yang tidak cocok tidak pernah dicatat. Gunakan Pratinjau pencocok untuk menjelaskan teks uji.",
-            Language::German => "Nur Ausgabetransaktionen werden erfasst. Eine Bestätigung beweist nicht, dass die Zielanwendung den Text angezeigt hat; nicht erkannte Eingaben werden nie protokolliert. Die Matcher-Vorschau erklärt Testeingaben.",
+            Language::English => "Matched policy decisions and output transactions are recorded without typed or inserted text. Output acknowledgement does not prove the target application displayed the text; unmatched typing is never recorded. Use Matcher preview to explain a test input.",
+            Language::Indonesian => "Keputusan kebijakan atas pemicu yang cocok dan transaksi keluaran dicatat tanpa teks yang diketik atau disisipkan. Konfirmasi keluaran tidak membuktikan aplikasi tujuan menampilkan teks; ketikan yang tidak cocok tidak pernah dicatat. Gunakan Pratinjau pencocok untuk menjelaskan teks uji.",
+            Language::German => "Erkannte Richtlinienentscheidungen und Ausgabetransaktionen werden ohne getippten oder eingefügten Text erfasst. Eine Ausgabebestätigung beweist nicht, dass die Zielanwendung den Text angezeigt hat; nicht erkannte Eingaben werden nie protokolliert. Die Matcher-Vorschau erklärt Testeingaben.",
         }
     }
 

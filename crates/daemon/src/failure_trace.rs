@@ -77,9 +77,7 @@ impl<'a> TracedInjector<'a> {
             self.stages.erase
         };
         push(FailureTrace {
-            at_unix: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map_or(0, |duration| duration.as_secs()),
+            at_unix: now_unix(),
             backend: self.stages.backend,
             trigger_recognized: "yes",
             focus_admission: self.stages.admission.get(),
@@ -89,6 +87,34 @@ impl<'a> TracedInjector<'a> {
             completion,
         });
     }
+}
+
+/// Record a matched expansion rejected before output. Only callers supply
+/// fixed reason labels; no trigger, replacement, policy text, or user input is
+/// retained. Backend names are bounded and stripped to a small identifier set
+/// because they are serialized into the daemon status response.
+pub(crate) fn record_policy_refusal(backend: &str, reason: &'static str) {
+    let backend = backend
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric() || "-_.+".contains(*character))
+        .take(64)
+        .collect::<String>();
+    push(FailureTrace {
+        at_unix: now_unix(),
+        backend,
+        trigger_recognized: "yes",
+        focus_admission: "not reached",
+        backend_selected: "not reached",
+        erase_acknowledged: "not attempted",
+        insertion_attempted: false,
+        completion: reason,
+    });
+}
+
+fn now_unix() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs())
 }
 
 impl TextInjector for TracedInjector<'_> {
@@ -296,5 +322,30 @@ mod tests {
             .unwrap()
             .iter()
             .all(|trace| trace["completion"] != "applied"));
+    }
+
+    #[test]
+    fn policy_refusals_are_content_free_outcomes() {
+        record_policy_refusal("input-method-v2", "blocked by organization policy");
+
+        let outcomes: serde_json::Value =
+            serde_json::from_str(&recent_outcomes_json()).expect("outcomes should be JSON");
+        assert!(outcomes.as_array().unwrap().iter().any(|trace| {
+            trace["completion"] == "blocked by organization policy"
+                && trace["backend"] == "input-method-v2"
+                && trace["trigger_recognized"] == "yes"
+                && trace["focus_admission"] == "not reached"
+                && trace["backend_selected"] == "not reached"
+                && trace["erase_acknowledged"] == "not attempted"
+                && trace["insertion_attempted"] == false
+        }));
+        let refusal = outcomes
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|trace| trace["completion"] == "blocked by organization policy")
+            .unwrap();
+        assert!(refusal.get("trigger").is_none());
+        assert!(refusal.get("replacement").is_none());
     }
 }

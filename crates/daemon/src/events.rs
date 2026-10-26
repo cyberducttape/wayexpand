@@ -149,6 +149,10 @@ pub(crate) fn dispatch_pending_results(
                 if let Some(violation) = policy.command_path_violation(&command.program) {
                     policy::log_violation(policy, &violation);
                     if policy.command_path_is_blocked(&command.program) {
+                        failure_trace::record_policy_refusal(
+                            active_backend,
+                            "blocked by command policy",
+                        );
                         engine.restore_deferred_match(&pending_result.matched_text);
                         continue;
                     }
@@ -164,6 +168,7 @@ pub(crate) fn dispatch_pending_results(
             active_backend,
         ) {
             // In safe_mode, block the expansion
+            failure_trace::record_policy_refusal(active_backend, "blocked by organization policy");
             engine.restore_deferred_match(&pending_result.matched_text);
             continue;
         }
@@ -360,6 +365,7 @@ pub(crate) fn expansion_allowed(
         active_backend,
     ) {
         // In safe_mode, block the expansion
+        failure_trace::record_policy_refusal(active_backend, "blocked by organization policy");
         engine.restore_deferred_result(result);
         return false;
     }
@@ -506,5 +512,46 @@ mod tests {
                 .process_deferred(InputEvent::Text(" ".into()))
                 .is_empty());
         }
+    }
+
+    #[test]
+    fn organization_policy_blocks_are_recorded_without_expansion_content() {
+        let config = wayexpand_core::Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ":x"
+            replacement = "private replacement text"
+            "#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let pending = engine.process_deferred(InputEvent::Text(":x".into()));
+        let policy = wayexpand_core::OrganizationPolicy {
+            safe_mode: true,
+            allowed_backends: vec!["allowed-route".into()],
+            ..Default::default()
+        };
+
+        let results = dispatch_pending_results(&mut engine, pending, &policy, "trace-test-route");
+
+        assert!(results.is_empty());
+        let outcomes: serde_json::Value =
+            serde_json::from_str(&crate::failure_trace::recent_outcomes_json()).unwrap();
+        let refusal = outcomes
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|trace| {
+                trace["backend"] == "trace-test-route"
+                    && trace["completion"] == "blocked by organization policy"
+            })
+            .expect("the blocked matched expansion should be visible in diagnostics");
+        assert_eq!(refusal["trigger_recognized"], "yes");
+        assert_eq!(refusal["focus_admission"], "not reached");
+        assert_eq!(refusal["erase_acknowledged"], "not attempted");
+        assert_eq!(refusal["insertion_attempted"], false);
+        let refusal_json = serde_json::to_string(refusal).unwrap();
+        assert!(!refusal_json.contains(":x"));
+        assert!(!refusal_json.contains("private replacement text"));
     }
 }
