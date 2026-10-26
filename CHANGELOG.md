@@ -13,6 +13,10 @@ All notable changes to WayExpand are documented here.
   fixture fix. The isolated insertion, focus, reload, restart, and refusal
   checks passed; keyboard capture, Unicode on the keysym fallback, and
   suspend/resume remain untested, so this is not compositor certification.
+- Verified the KWin window tracker in a live Plasma Wayland session on KWin
+  6.6.6: it received the focused window identity, rejected an untrusted D-Bus
+  focus event, and detected removal of its temporary script. This component
+  check does not certify keyboard capture or text insertion.
 - The Diagnostics dashboard now gives explicit active-route assessments for
   capture availability, insertion safety, compositor/device permissions, and
   focus visibility. It also shows recent content-free expansion outcomes,

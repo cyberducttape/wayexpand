@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "evidence_type": "component-live-session-check",
+  "tested_commit": "d01033979da664426fcad0cccdd4a9e089dc11c2",
+  "captured_at_utc": "2026-10-26T02:56:52Z",
+  "desktop": "KDE Plasma Wayland",
+  "compositor": "KWin 6.6.6",
+  "test": "live_kwin_tracker_health_probe_detects_script_unload",
+  "status": "passed",
+  "verified": [
+    "KWin reported an exact focused-window identity.",
+    "An untrusted D-Bus caller could not publish a focus event.",
+    "The tracker detected unloading its uniquely named temporary KWin script."
+  ],
+  "limitations": [
+    "This test covers the KWin window-tracker component only.",
+    "It does not test keyboard capture, text insertion, client behavior, suspend/resume, or the compositor certification matrix.",
+    "This is not production compositor certification."
+  ]
+}

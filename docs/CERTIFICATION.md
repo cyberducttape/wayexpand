@@ -152,6 +152,16 @@ outside its declared certification paths, and requires the layout profiles
 drivers. A layout profile is evidence metadata only until the driver records
 the actual keymap and observed behavior.
 
+## Supporting component evidence (not certification)
+
+[`evidence/kwin-tracker-live-2026-10-26.json`](evidence/kwin-tracker-live-2026-10-26.json)
+records a focused test against the active KDE Plasma Wayland session on KWin
+6.6.6, using commit `d01033979da6`. The tracker received an exact focused
+window identity, rejected an untrusted D-Bus focus event, and detected
+unloading its temporary KWin script. This covers the window-tracker component
+only; it does not exercise keyboard capture, text insertion, client behavior,
+or the compositor certification matrix.
+
 ## Supporting headless evidence
 
 [`evidence/doctor-certify-061c3d366a9d.json`](evidence/doctor-certify-061c3d366a9d.json)
