@@ -4,6 +4,16 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- ConfigStore reload now retains full validation on the candidate snapshot and
+  verifies its exact source revision with a second secure file read, without
+  parsing and validating the same TOML a second time. A benchmark and regression
+  test cover the revision check; exploratory 10,000-snippet measurements show
+  a substantial reduction in reload validation time.
+- Added a Criterion configuration reload group that measures the ConfigStore's
+  stable two-read validation separately from file-load/validation plus matcher
+  construction. Added a seeded concurrent snapshot-reader stress test, varied
+  its seeds in the existing parallel CI lane, and added a dedicated CI suite
+  for concurrency and injected storage, worker, output, and audit failures.
 - Replacement assurance is now explicit in backend route recommendations,
   generated support tables, daemon status schema 13, `doctor`, and GUI/TUI
   status. Live status distinguishes verified target-text checks,

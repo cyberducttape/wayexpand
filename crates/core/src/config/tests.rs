@@ -191,6 +191,32 @@ fn versioned_load_uses_one_source_snapshot_and_rejects_stale_save() {
 }
 
 #[test]
+fn source_revision_check_detects_edits_without_reparsing_them() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-config-source-revision-{}-{}.toml",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &path,
+        "[[expansion]]\nid = '00000000-0000-4000-8000-000000000001'\ntrigger = ':x'\nreplacement = 'old'\n",
+    )
+    .unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+
+    let loaded = Config::load_versioned(&path).unwrap();
+    assert!(Config::source_matches_revision(&path, &loaded.revision).unwrap());
+
+    fs::write(&path, "this is malformed TOML = [\n").unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(!Config::source_matches_revision(&path, &loaded.revision).unwrap());
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn conditional_save_reports_reintroduced_legacy_content_as_conflict() {
     let path = std::env::temp_dir().join(format!(
         "wayexpand-config-legacy-conflict-{}.toml",

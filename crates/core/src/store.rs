@@ -142,12 +142,11 @@ impl ConfigStore {
                 }
             };
 
-            // Read and validate a second descriptor snapshot. Comparing the
-            // exact source revision ensures the config being installed is the
-            // same content represented by the revision we just observed, even
-            // when an editor atomically renames the file during the first
-            // read.
-            let verified = match Config::load_versioned(&self.path) {
+            // Re-read through a securely validated descriptor, but compare
+            // the exact source instead of parsing and validating the same TOML
+            // a second time. This still rejects a concurrent in-place edit or
+            // atomic rename before publishing the first parsed snapshot.
+            let verified = match Config::source_matches_revision(&self.path, &loaded.revision) {
                 Ok(verified) => verified,
                 Err(error) => {
                     let after = metadata_stamp(&self.path);
@@ -161,8 +160,8 @@ impl ConfigStore {
             };
             let after = metadata_stamp(&self.path);
             *observed_stamp = after;
-            if before == after && loaded.revision == verified.revision {
-                self.atomically_replace(verified.config);
+            if before == after && verified {
+                self.atomically_replace(loaded.config);
                 *self
                     .reload_error
                     .lock()
@@ -224,6 +223,10 @@ mod tests {
     use std::{
         fs,
         os::unix::fs::PermissionsExt,
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Barrier,
+        },
         thread,
         time::{SystemTime, UNIX_EPOCH},
     };
@@ -357,6 +360,93 @@ mod tests {
         let snapshot = store.snapshot();
         assert_eq!(snapshot.generation, 500);
         assert_eq!(snapshot.config.expansion[0].replacement, "generation-500");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn seeded_snapshot_stress_keeps_configuration_and_generation_coherent() {
+        const WRITES: u64 = 2_000;
+        const READERS: usize = 4;
+        let path = path();
+        write_private(
+            &path,
+            "[[expansion]]\ntrigger = ':x'\nreplacement = 'generation-0'\n",
+        );
+        let store = ConfigStore::load(&path).unwrap();
+        let finished = Arc::new(AtomicBool::new(false));
+        let start = Arc::new(Barrier::new(READERS + 1));
+        let mut readers = Vec::with_capacity(READERS);
+
+        for reader_id in 0..READERS {
+            let store = Arc::clone(&store);
+            let finished = Arc::clone(&finished);
+            let start = Arc::clone(&start);
+            readers.push(thread::spawn(move || {
+                let seed = std::env::var("WAYEXPAND_STRESS_SEED")
+                    .ok()
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .unwrap_or(0x5741_5945_5850_414e)
+                    ^ (reader_id as u64 + 1);
+                let mut state = seed;
+                start.wait();
+                loop {
+                    let snapshot = store.snapshot();
+                    assert_eq!(
+                        snapshot.config.expansion[0].replacement,
+                        format!("generation-{}", snapshot.generation),
+                        "reader {reader_id} observed a torn snapshot at generation {}",
+                        snapshot.generation
+                    );
+                    if finished.load(Ordering::Acquire) {
+                        break;
+                    }
+                    state = state
+                        .wrapping_mul(6_364_136_223_846_793_005)
+                        .wrapping_add(1_442_695_040_888_963_407);
+                    if state & 3 == 0 {
+                        thread::yield_now();
+                    } else {
+                        for _ in 0..(state as u8) {
+                            std::hint::spin_loop();
+                        }
+                    }
+                }
+            }));
+        }
+
+        let writer_store = Arc::clone(&store);
+        let writer_start = Arc::clone(&start);
+        let writer_finished = Arc::clone(&finished);
+        let writer = thread::spawn(move || {
+            let mut state = std::env::var("WAYEXPAND_STRESS_SEED")
+                .ok()
+                .and_then(|value| value.parse::<u64>().ok())
+                .unwrap_or(0x5741_5945_5850_414e);
+            writer_start.wait();
+            for generation in 1..=WRITES {
+                let mut config = (*writer_store.snapshot().config).clone();
+                config.expansion[0].replacement = format!("generation-{generation}");
+                writer_store.atomically_replace(config);
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                if state & 7 == 0 {
+                    thread::yield_now();
+                }
+            }
+            writer_finished.store(true, Ordering::Release);
+        });
+
+        writer.join().unwrap();
+        for reader in readers {
+            reader.join().unwrap();
+        }
+        let snapshot = store.snapshot();
+        assert_eq!(snapshot.generation, WRITES);
+        assert_eq!(
+            snapshot.config.expansion[0].replacement,
+            format!("generation-{WRITES}")
+        );
         let _ = fs::remove_file(path);
     }
 

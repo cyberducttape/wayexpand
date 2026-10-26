@@ -158,6 +158,39 @@ revision-checked atomic write):
 cargo bench --locked -p wayexpand-gui --bench gui_edit
 ```
 
+## Configuration reload and engine build
+
+The `config_reload` group in `config_edit` measures one secure validated file
+read, a validated read followed by a secure exact-source revision check, and
+file load plus `ExpansionEngine` construction. It covers 100, 1,000, 5,000,
+and 10,000 snippets. The revision-check case models concurrent-edit
+protection without parsing the same TOML twice. These core workloads exclude
+snapshot publication, daemon filesystem watcher delivery, administrator
+policy loading, and standard organization and pack layer discovery; those
+need a private desktop/fleet fixture to measure without changing host
+configuration.
+
+Run it with:
+
+```sh
+cargo bench --locked -p wayexpand-core --bench config_edit \
+  -- config_reload
+```
+
+Criterion stores reload results alongside the existing clone/validation and
+matcher measurements in `target/criterion`. Compare them on the same host and
+toolchain; these are local file-system and core construction benchmarks, not
+an end-to-end daemon reload latency guarantee.
+
+An exploratory before/after run on the AMD Ryzen 7 7735U / Rust 1.96.0 host
+measured the 10,000-snippet stable check at 348.30 ms (95% interval
+271.37–436.14 ms) when both reads parsed and validated TOML, and 93.89 ms
+(88.07–100.65 ms) when the second secure read compared source bytes without
+parsing again. The central estimate is 73% lower. This was measured while the
+shared 16-thread host was heavily loaded, so the figures are evidence that the
+second parse was costly, not a release performance baseline. Re-run on an idle
+host before making a latency claim.
+
 ### GUI measurements: 2026-10-24
 
 Captured on the same AMD Ryzen 7 7735U / Rust 1.96.0 host. The trigger lookup

@@ -832,6 +832,18 @@ impl Config {
         }
     }
 
+    /// Securely read a configuration source and compare it with a previously
+    /// validated revision without parsing or validating the TOML a second
+    /// time. Callers still get the same path, ownership, permission, size, and
+    /// descriptor checks as [`Self::load_versioned`].
+    pub fn source_matches_revision(
+        path: impl AsRef<Path>,
+        expected: &ConfigRevision,
+    ) -> Result<bool, ConfigError> {
+        let source = Self::read_secure_source(path.as_ref())?;
+        Ok(source == expected.0.as_ref())
+    }
+
     fn persist_legacy_id_migration(path: &Path) -> Result<LoadedConfig, ConfigError> {
         let resolved = resolve_config_target(path)?;
         validate_parent_directories(&resolved)?;
@@ -849,6 +861,17 @@ impl Config {
 
     fn load_versioned_once(path: impl AsRef<Path>) -> Result<LoadedConfig, ConfigError> {
         let path = path.as_ref();
+        let text = Self::read_secure_source(path)?;
+        let config = Self::parse(&text)?;
+        let source: Arc<str> = Arc::from(text);
+        Ok(LoadedConfig {
+            config,
+            revision: ConfigRevision(source.clone()),
+            source,
+        })
+    }
+
+    fn read_secure_source(path: &Path) -> Result<String, ConfigError> {
         // Resolve symlinks before validating ancestors and opening the file.
         // Validating the link's parent alone would allow a link swap to point
         // at a file below an untrusted directory. Opening the resolved path
@@ -931,13 +954,7 @@ impl Config {
             path: path.display().to_string(),
             source,
         })?;
-        let config = Self::parse(&text)?;
-        let source: Arc<str> = Arc::from(text);
-        Ok(LoadedConfig {
-            config,
-            revision: ConfigRevision(source.clone()),
-            source,
-        })
+        Ok(text)
     }
 
     pub fn parse(text: &str) -> Result<Self, ConfigError> {

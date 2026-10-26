@@ -209,8 +209,26 @@ jobs:
           set -euo pipefail
           for iteration in 1 2 3; do
             echo "Concurrent stress iteration ${iteration}"
+            export WAYEXPAND_STRESS_SEED=$((iteration * 104729))
             cargo test --locked -p "${{ matrix.package }}" -- --test-threads=8
           done
+
+  concurrency-fault-regressions:
+    name: Seeded concurrency and fault regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
+        with:
+          toolchain: 1.96.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config
+      - name: Run seeded snapshot races and injected failure cases
+        run: bash scripts/test-concurrency-faults.sh
 
   daemon-soak:
     name: Daemon soak (3 min)
