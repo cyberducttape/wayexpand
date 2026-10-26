@@ -26,6 +26,9 @@ All notable changes to WayExpand are documented here.
 - Configuration stores now publish the validated configuration and generation
   as one coherent snapshot, with replacement notifications ordered alongside
   updates. The IBus service reads a single snapshot when applying reloads.
+- Strict-path Action Broker commands are opened and validated once, then
+  launched through the pinned executable descriptor. This closes the
+  validation-to-spawn path replacement race, including for shebang scripts.
 - IBus now retires an engine instance after an output signal fails, preventing
   further expansion while a delete/commit transaction may have left the
   client document partially changed. Only a new `FocusIn` clears retirement;

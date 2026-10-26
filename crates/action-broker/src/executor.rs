@@ -14,6 +14,8 @@ use crate::{
     protocol::{ActionError, ActionOutput, ActionRequest, ActionResponse},
 };
 use std::collections::HashMap;
+#[cfg(unix)]
+use std::os::unix::io::AsRawFd;
 use std::process::{Command, Stdio};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -93,33 +95,44 @@ impl ActionExecutor {
             });
         }
 
-        if self.config.require_absolute_paths {
-            // The program was validated when the policy loaded; its owner,
-            // permissions, or a parent directory may have changed since.
-            // Re-check immediately before launch and require that the path
-            // still resolves to the program that was validated.
-            let still_valid = crate::path_security::validate_absolute_program(
+        let pinned_program = if self.config.require_absolute_paths {
+            match crate::path_security::open_validated_program(
                 &request.action_id,
                 &action_config.program,
-            )
-            .and_then(|()| {
-                let resolved = std::fs::canonicalize(&action_config.program)
-                    .map_err(|error| format!("program cannot be resolved: {error}"))?;
-                if resolved.as_os_str() == std::ffi::OsStr::new(&action_config.program) {
-                    Ok(())
-                } else {
-                    Err("program path now resolves to a different file".to_owned())
+            ) {
+                Ok((file, resolved))
+                    if resolved.as_os_str() == std::ffi::OsStr::new(&action_config.program) =>
+                {
+                    Some(file)
                 }
-            });
-            if let Err(reason) = still_valid {
-                return Err(ActionError::ActionBlocked {
-                    action_id: request.action_id.clone(),
-                    reason: format!("program failed revalidation before launch: {reason}"),
-                });
+                Ok(_) => {
+                    return Err(ActionError::ActionBlocked {
+                        action_id: request.action_id.clone(),
+                        reason: "program failed revalidation before launch: path no longer resolves to the validated file".to_string(),
+                    });
+                }
+                Err(reason) => {
+                    return Err(ActionError::ActionBlocked {
+                        action_id: request.action_id.clone(),
+                        reason: format!("program failed revalidation before launch: {reason}"),
+                    });
+                }
             }
+        } else {
+            None
+        };
+        let pinned_path = pinned_program
+            .as_ref()
+            .map(|file| format!("/proc/self/fd/{}", file.as_raw_fd()));
+        let mut cmd = Command::new(
+            pinned_path
+                .as_deref()
+                .unwrap_or(action_config.program.as_str()),
+        );
+        #[cfg(target_os = "linux")]
+        if let Some(file) = pinned_program.as_ref() {
+            configure_pinned_executable(&mut cmd, file, &action_config.program);
         }
-
-        let mut cmd = Command::new(&action_config.program);
 
         for arg in &action_config.args {
             cmd.arg(arg);
@@ -298,10 +311,70 @@ impl ActionExecutor {
     }
 }
 
+#[cfg(target_os = "linux")]
+fn configure_pinned_executable(cmd: &mut Command, file: &std::fs::File, original: &str) {
+    use std::os::unix::process::CommandExt;
+
+    cmd.arg0(original);
+    let fd = file.as_raw_fd();
+    // The descriptor must survive execve's path lookup through /proc/self/fd.
+    // It remains open for shebang interpreters too.
+    unsafe {
+        cmd.pre_exec(move || {
+            let flags = libc::fcntl(fd, libc::F_GETFD);
+            if flags < 0 || libc::fcntl(fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::ActionConfig;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn pinned_shebang_launch_uses_the_validated_inode_after_path_replacement() {
+        use std::os::unix::{fs::PermissionsExt, io::AsRawFd};
+
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-broker-pinned-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let program = directory.join("action.sh");
+        std::fs::write(&program, "#!/bin/sh\nprintf 'validated-inode\\n'\n").unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let (file, resolved) =
+            crate::path_security::open_validated_program("test", program.to_str().unwrap())
+                .unwrap();
+        assert_eq!(resolved, program);
+
+        let replacement = directory.join("replacement.sh");
+        std::fs::write(&replacement, "#!/bin/sh\nprintf 'replacement-inode\\n'\n").unwrap();
+        std::fs::set_permissions(&replacement, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::rename(&replacement, &program).unwrap();
+
+        let mut command = Command::new(format!("/proc/self/fd/{}", file.as_raw_fd()));
+        configure_pinned_executable(&mut command, &file, program.to_str().unwrap());
+        let output = command.output().unwrap();
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            "validated-inode\n"
+        );
+        drop(file);
+        let _ = std::fs::remove_dir_all(directory);
+    }
 
     #[tokio::test]
     async fn executor_action_not_found() {

@@ -1,7 +1,7 @@
 //! Filesystem ownership and path validation for broker policy values.
 
-use std::fs;
-use std::os::unix::fs::MetadataExt;
+use std::fs::{self, File, OpenOptions};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
 /// systemd user services that use `ReadWritePaths=` may run in a mount/user
@@ -127,6 +127,15 @@ pub(crate) fn resolve_audit_path(path: &str) -> Result<PathBuf, String> {
 }
 
 pub(crate) fn validate_absolute_program(action_id: &str, program: &str) -> Result<(), String> {
+    open_validated_program(action_id, program).map(|_| ())
+}
+
+/// Open and validate an executable once so the caller can launch the exact
+/// inode that was checked, even if the configured path changes before spawn.
+pub(crate) fn open_validated_program(
+    action_id: &str,
+    program: &str,
+) -> Result<(File, PathBuf), String> {
     let path = Path::new(program);
     if !path.is_absolute() {
         return Err(format!(
@@ -141,7 +150,20 @@ pub(crate) fn validate_absolute_program(action_id: &str, program: &str) -> Resul
         )
     })?;
     validate_path_ancestors(&resolved, &format!("action '{}' program", action_id), true)?;
-    let metadata = fs::metadata(&resolved).map_err(|error| {
+    // O_PATH pins the inode without requiring read permission. O_NOFOLLOW is
+    // applied after canonicalization so a last-component swap to a symlink
+    // fails closed instead of changing the executable between checks.
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_PATH | libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .open(&resolved)
+        .map_err(|error| {
+            format!(
+                "action '{}' program '{}' cannot be opened safely: {}",
+                action_id, program, error
+            )
+        })?;
+    let metadata = file.metadata().map_err(|error| {
         format!(
             "action '{}': program '{}' cannot be inspected: {}",
             action_id, program, error
@@ -172,7 +194,7 @@ pub(crate) fn validate_absolute_program(action_id: &str, program: &str) -> Resul
             action_id, program
         ));
     }
-    Ok(())
+    Ok((file, resolved))
 }
 
 fn validate_path_ancestors(
