@@ -6,6 +6,8 @@ All notable changes to WayExpand are documented here.
 
 - Correct the README's Rust source-build minimum to match the declared Rust
   1.92 MSRV and its CI lane.
+- Preserve the latest private-KWin smoke report, including size-segmented
+  injector latency and explicit untested capture/Unicode/lifecycle scenarios.
 - Update packaging and administrator guides to record the successful Ubuntu
   26.04 Resolute amd64 Launchpad daily build while keeping its experimental
   status distinct from desktop certification; link the PPA install path from

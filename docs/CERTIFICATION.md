@@ -74,6 +74,19 @@ stdin; Unicode insertion, physical keyboard capture, sensitive-field behavior,
 suspend/resume, and long-running stability remain untested. This is partial
 compatibility evidence, not production compositor certification.
 
+The latest preserved smoke report at
+[`docs/evidence/doctor-certify-b9fdc52f3d7d.json`](evidence/doctor-certify-b9fdc52f3d7d.json)
+tested commit `b9fdc52f3d7d` on KWin 6.6.6 in a private headless session. It
+passed 12 output, focus, reload, restart, and refusal checks; Unicode insertion,
+keyboard capture, and suspend/resume were not tested. The negotiated route was
+libei keysym fallback with stdin-simulated capture and no sensitive-field
+signal. Twenty samples per size measured injector p50/p95/p99 of 12.519/12.555/
+12.565 ms (small), 779.543/781.033/781.814 ms (medium), and
+3,127.174/3,132.945/3,134.460 ms (large). These transactions exclude physical
+capture and client paint latency and are measurements, not SLO results. The
+report confirms the tested build identity and clean certification inputs; it
+does not certify a production desktop route.
+
 The current-source private KWin E2E report at
 [`docs/evidence/kwin-e2e-71d6f1e43.txt`](evidence/kwin-e2e-71d6f1e43.txt)
 tested commit `71d6f1e4397c` on KWin 6.6.6. Twelve real-client output and
