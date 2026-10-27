@@ -24,6 +24,11 @@ done
 cat >"$fake_bin/timeout" <<'EOF'
 #!/bin/sh
 [ "${1-}" = 900 ] || exit 90
+[ "${E2E_CONFIG%/*}" = "$XDG_RUNTIME_DIR" ] || {
+    printf 'certification config is outside the private runtime directory: %s\n' \
+        "${E2E_CONFIG-}" >&2
+    exit 91
+}
 printf '%s\n' 'synthetic KWin timeout after scenario output' >&2
 for scenario in ${E2E_SCENARIOS-}; do
     printf 'pass %s synthetic result\n' "$scenario" >>"$E2E_RESULTS"
@@ -37,10 +42,13 @@ EOF
 chmod 0755 "$fake_bin/timeout" "$fake_bin/kwin_wayland"
 
 output="$test_root/output.log"
+mkdir -m 700 "$test_root/runtime" "$test_root/cache"
+chmod 0775 "$test_root/cache"
 if PATH="$fake_bin:$PATH" \
     WAYEXPAND_E2E_PREBUILT_BIN="$helpers" \
     WAYEXPAND_E2E_APP_BIN="$apps" \
     XDG_CACHE_HOME="$test_root/cache" \
+    XDG_RUNTIME_DIR="$test_root/runtime" \
     "$project_dir/scripts/test-kwin-e2e.sh" --keep expansion-replaces-trigger \
     >"$output" 2>&1
 then

@@ -104,6 +104,7 @@ fi
 chmod 700 "$work"
 # Wayland and libei socket paths must fit in 108 bytes.
 runtime=$(mktemp -d /tmp/wxe2e.XXXXXX)
+chmod 700 "$runtime"
 # KWin's own start-up D-Bus-activates the desktop portal, which brings up
 # xdg-desktop-portal-kde and ksecretd; they outlive the private bus. Stop
 # every process of this user whose HOME is this run's private home -- no
@@ -174,6 +175,7 @@ env -i \
     E2E_BIN="$bin" \
     E2E_APP_BIN="$app_bin" \
     E2E_WORK="$work" \
+    E2E_CONFIG="$runtime/expansions.toml" \
     E2E_RESULTS="$results" \
     E2E_INPUT_SOURCE="$input_source" \
     E2E_SCENARIOS="$*" \

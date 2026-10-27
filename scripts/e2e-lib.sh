@@ -28,7 +28,10 @@ e2e_input_source=${E2E_INPUT_SOURCE:-stdin}
 stdin_open=0
 
 export WAYEXPAND_SOCKET="$XDG_RUNTIME_DIR/wayexpand.sock"
-export WAYEXPAND_CONFIG="$work/expansions.toml"
+# Keep the active configuration under the private runtime directory when the
+# installed harness provides one. Retained logs may live in XDG_CACHE_HOME,
+# whose ancestors are not necessarily trusted for the daemon's config policy.
+export WAYEXPAND_CONFIG="${E2E_CONFIG:-$work/expansions.toml}"
 
 sink_pids=
 daemon_pid=
