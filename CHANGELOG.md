@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Fixed a flaky parallel process-supervisor test by serializing assertions
+  against its process-global cleanup-failure counter. This keeps the CI stress
+  lane checking process cleanup rather than concurrent test bookkeeping.
 - Fixed evdev consent checks for custom XDG configuration roots. The generated
   systemd drop-in now overrides the unit condition using the resolved config
   path, and the release installer checks and documents that same marker path.

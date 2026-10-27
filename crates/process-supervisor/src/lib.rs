@@ -225,12 +225,19 @@ mod tests {
     use std::{
         io::BufRead,
         process::{Command, Stdio},
+        sync::Mutex,
         thread,
         time::Duration,
     };
 
+    // These tests compare a process-global counter. Serialize them so the
+    // deliberate invalid-PID increments in one test cannot make another
+    // test's before/after assertion scheduler-dependent.
+    static KILL_FAILURE_COUNTER_TEST_LOCK: Mutex<()> = Mutex::new(());
+
     #[test]
     fn already_exited_group_is_not_a_cleanup_failure() {
+        let _guard = KILL_FAILURE_COUNTER_TEST_LOCK.lock().unwrap();
         let mut command = Command::new("/bin/true");
         configure_process_group(&mut command);
         let mut child = command.spawn().unwrap();
@@ -243,6 +250,7 @@ mod tests {
 
     #[test]
     fn leader_ids_that_would_signal_everything_are_refused_and_counted() {
+        let _guard = KILL_FAILURE_COUNTER_TEST_LOCK.lock().unwrap();
         let before = kill_failures_total();
         kill_group_by_leader(0);
         kill_group_by_leader(1);
@@ -313,6 +321,7 @@ mod tests {
     #[test]
     #[cfg(target_os = "linux")]
     fn reap_terminates_group_descendants_and_invalidates_identifier() {
+        let _guard = KILL_FAILURE_COUNTER_TEST_LOCK.lock().unwrap();
         let mut command = Command::new("sh");
         command
             .args(["-c", "sleep 30 & echo $!"])
