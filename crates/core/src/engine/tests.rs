@@ -5777,3 +5777,41 @@ fn unreleased_deferred_result_is_not_matched_again_by_following_input() {
         1
     );
 }
+
+#[test]
+fn failed_command_trigger_is_not_matched_again_by_following_input() {
+    // A timed-out command restores its trigger; the next trigger's first
+    // character must not complete it again and rerun the command.
+    let config = r#"
+        [[expansion]]
+        trigger = ";hang"
+        replacement = ""
+        [expansion.command]
+        program = "/bin/sh"
+        args = ["-c", "sleep 2; printf late"]
+        timeout_ms = 50
+
+        [[expansion]]
+        trigger = ";zq"
+        replacement = "zany quiz"
+    "#;
+    let mut engine = ExpansionEngine::new(Config::parse(config).unwrap()).unwrap();
+    engine.enable_async_commands();
+    for result in engine.process_deferred(InputEvent::Text(";hang".into())) {
+        assert!(engine.dispatch_pending_with_policy(result, 0).is_ok());
+    }
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while engine.has_deferred_reservations() {
+        assert!(engine.drain_completed_commands().is_empty());
+        assert!(Instant::now() < deadline, "timeout was not reported");
+        thread::sleep(Duration::from_millis(10));
+    }
+    let after = engine.process_deferred(InputEvent::Text(";zq".into()));
+    assert_eq!(
+        after
+            .iter()
+            .map(|result| result.trigger.as_str())
+            .collect::<Vec<_>>(),
+        [";zq"]
+    );
+}

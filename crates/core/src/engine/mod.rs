@@ -109,9 +109,9 @@ pub struct ExpansionEngine {
     /// reservation is released only after successful injection; otherwise it
     /// is restored before subsequent input is matched.
     deferred_matches: Vec<String>,
-    /// How many trailing buffer characters `restore_deferred_matches` put
-    /// back. They already matched once, so they are context for later input
-    /// but must not complete a trigger again on their own.
+    /// How many trailing buffer characters were restored from deferred
+    /// reservations. They already matched once, so they are context for
+    /// later input but must not complete a trigger again on their own.
     restored_reservation_chars: usize,
     /// Bounded content-free categories for command completions that never
     /// reached output. Hosts drain these into their diagnostics surfaces.
@@ -416,7 +416,7 @@ impl ExpansionEngine {
                     Ok(output) => output,
                     Err(error) => {
                         self.remember_command_failure(error.kind());
-                        self.restore_deferred_match(&completion.result.matched_text);
+                        self.restore_failed_command_match(&completion.result.matched_text);
                         continue;
                     }
                 };
@@ -444,7 +444,7 @@ impl ExpansionEngine {
                 };
                 if let Some(kind) = failure_kind {
                     self.remember_command_failure(kind);
-                    self.restore_deferred_match(&completion.result.matched_text);
+                    self.restore_failed_command_match(&completion.result.matched_text);
                     continue;
                 }
                 let mut result = completion.result;
@@ -456,7 +456,7 @@ impl ExpansionEngine {
                 Ok(output) => output,
                 Err(error) => {
                     self.remember_command_failure(error.kind());
-                    self.restore_deferred_match(&completion.result.matched_text);
+                    self.restore_failed_command_match(&completion.result.matched_text);
                     continue;
                 }
             };
@@ -478,7 +478,7 @@ impl ExpansionEngine {
                     CommandErrorKind::StaleInput
                 };
                 self.remember_command_failure(kind);
-                self.restore_deferred_match(&completion.result.matched_text);
+                self.restore_failed_command_match(&completion.result.matched_text);
                 continue;
             }
             let validated_output = output;
@@ -486,7 +486,7 @@ impl ExpansionEngine {
                 && validated_output.len() > completion.additional_max_size
             {
                 self.remember_command_failure(CommandErrorKind::OutputTooLarge);
-                self.restore_deferred_match(&completion.result.matched_text);
+                self.restore_failed_command_match(&completion.result.matched_text);
                 continue;
             }
 
@@ -815,20 +815,14 @@ impl ExpansionEngine {
 
     fn restore_deferred_matches(&mut self) {
         let reservations = std::mem::take(&mut self.deferred_matches);
-        let mut restored = 0usize;
         for matched_text in reservations {
-            self.restore_buffered(&matched_text);
-            restored = restored.saturating_add(matched_text.chars().count());
+            self.restore_buffered_as_context(&matched_text);
         }
-        // A command result is still on the worker when the next event
-        // arrives. That event makes it stale, but its trigger is back in the
-        // buffer and must not match a second time at the new generation.
-        self.restored_reservation_chars = restored.min(self.buffer.len());
         debug_assert!(self.buffer.len() <= self.max_buffer_chars);
     }
 
     /// Whether a suffix of `length` characters lies entirely inside text that
-    /// `restore_deferred_matches` put back.
+    /// was restored from deferred reservations.
     fn suffix_is_restored_reservation(&self, length: usize) -> bool {
         length <= self.restored_reservation_chars.min(self.buffer.len())
     }
@@ -839,6 +833,27 @@ impl ExpansionEngine {
     fn restore_buffered(&mut self, text: &str) {
         for character in text.chars() {
             self.push_buffered(character);
+        }
+    }
+
+    /// Restore a trigger that already matched as context only: the next
+    /// character cannot complete it again. Used where a retry would be wrong
+    /// -- the result went stale because later input arrived, or its command
+    /// failed -- because matching again would rerun the command or erase the
+    /// user's newer text. Known not-applied injections use the plain restore,
+    /// so the next keystroke retries them.
+    fn restore_buffered_as_context(&mut self, text: &str) {
+        let restored = self.restored_reservation_chars;
+        self.restore_buffered(text);
+        self.restored_reservation_chars = restored
+            .saturating_add(text.chars().count())
+            .min(self.buffer.len());
+    }
+
+    /// Restore a discarded command completion's trigger as context only.
+    fn restore_failed_command_match(&mut self, matched_text: &str) {
+        if self.take_deferred_reservation(matched_text).is_some() {
+            self.restore_buffered_as_context(matched_text);
         }
     }
 

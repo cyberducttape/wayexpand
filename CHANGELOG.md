@@ -16,8 +16,11 @@ All notable changes to WayExpand are documented here.
   character (or the end of input) matched it a second time. That duplicate
   started a fresh command whose output was not stale, so it was typed after
   erasing the trigger's length of the user's newer text (`;slowx` became
-  `;slow-output`). A restored reservation is now context only and cannot
-  complete a trigger again. The stdin test source defers its per-line
+  `;slow-output`). A timed-out or failed command had the same problem: the
+  next trigger's first character reran it, and that trigger never expanded.
+  A stale or failed reservation is now restored as context only and cannot
+  complete a trigger again; known not-applied injections are still retried
+  on the next keystroke. The stdin test source defers its per-line
   end-of-input flush while a command from that line is still running, which
   the duplicate match had been masking.
 - Added a headless real-client KWin certification driver for the
