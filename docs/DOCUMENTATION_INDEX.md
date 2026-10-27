@@ -118,6 +118,7 @@ Then see [SECURITY.md](../SECURITY.md)
 | [SECRET_MANAGEMENT.md](SECRET_MANAGEMENT.md) | Enterprise teams | Handling sensitive data |
 | [ACTION_BROKER_ARCHITECTURE.md](ACTION_BROKER_ARCHITECTURE.md) | Developers/security architects | Integrated named-action routing; operator-configured service and audit model |
 | [ANSIBLE_INTEGRATION.md](ANSIBLE_INTEGRATION.md) | DevOps/SRE | Ansible playbooks |
+| [SNIPPET_REPOSITORIES.md](SNIPPET_REPOSITORIES.md) | DevOps/SRE | Checking snippet repositories in CI and pre-commit |
 | [PUPPET_INTEGRATION.md](PUPPET_INTEGRATION.md) | DevOps/SRE | Puppet modules |
 
 ### Backends & Compatibility

@@ -1,0 +1,14 @@
+# Hooks for snippet repositories; see docs/SNIPPET_REPOSITORIES.md. They need
+# the wayexpand CLI on PATH (or WAYEXPAND_CLI) and jq.
+- id: wayexpand-snippets
+  name: Check WayExpand snippets
+  description: Validate snippet TOML files and packs; report risky triggers as warnings.
+  entry: scripts/check-snippet-repo.sh
+  language: script
+  files: \.toml$
+- id: wayexpand-snippets-strict
+  name: Check WayExpand snippets (risks fail)
+  description: Validate snippet TOML files and packs; fail on risky triggers.
+  entry: scripts/check-snippet-repo.sh --deny-risks
+  language: script
+  files: \.toml$

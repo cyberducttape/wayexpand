@@ -129,9 +129,11 @@ Search configured triggers, descriptions, and tags.
 .B schema
 Print the stable machine-readable TOML configuration shape for authoring tools.
 .TP
-.B validate [--fleet] [--json] [CONFIG]
+.B validate [--fleet] [--json] [--deny-risks] [CONFIG]
 Parse and validate a configuration file without starting the daemon. With
 --fleet, validate the merged fleet configuration; --json selects machine-readable output.
+Triggers likely to fire by accident or to shadow each other are reported;
+--deny-risks makes them a configuration error.
 .TP
 .B backup [CONFIG] [DESTINATION]
 Create a private, non-overwriting configuration backup.

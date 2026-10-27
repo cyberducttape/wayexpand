@@ -4,6 +4,15 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Added CI checks for snippet repositories: `scripts/check-snippet-repo.sh`,
+  a composite GitHub Action (`action.yml`), and pre-commit hooks
+  (`.pre-commit-hooks.yaml`). They validate snippet files and packs, verify
+  pack signatures with `--signers`, and report risky triggers as warnings or,
+  with `--deny-risks`, failures, all without printing replacement text. See
+  `docs/SNIPPET_REPOSITORIES.md`.
+- `wayexpand validate` reports trigger risks, and `--deny-risks` makes them a
+  configuration error. `validate --json` adds `trigger_risks` and
+  `command_count`.
 - Added `wayexpand metrics [--output FILE]`, which writes content-free
   Prometheus metrics for node_exporter's textfile collector: daemon liveness,
   build match, route, configuration and output health, queue and latency

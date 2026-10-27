@@ -121,6 +121,10 @@ install -m 600 team-wayexpand-snippets/expansions.toml \
   ~/.config/wayexpand/expansions.toml
 ```
 
+Check every change to such a repository before it is deployed with the
+GitHub Action or pre-commit hooks in
+[SNIPPET_REPOSITORIES.md](SNIPPET_REPOSITORIES.md).
+
 **Option 2: Config management tool** (Ansible, Puppet)
 ```
 roles/wayexpand/files/expansions.toml

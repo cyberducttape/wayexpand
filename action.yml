@@ -1,0 +1,50 @@
+name: WayExpand snippet check
+description: >-
+  Validate WayExpand snippet files and packs in a repository, verify pack
+  signatures, and flag triggers likely to fire by accident.
+branding:
+  icon: check-square
+  color: blue
+inputs:
+  paths:
+    description: Whitespace-separated files or directories to check, relative to the repository root.
+    required: false
+    default: "."
+  deny-risks:
+    description: Fail on trigger risks instead of reporting them as warnings.
+    required: false
+    default: "false"
+  signers:
+    description: Allowed-signers file; when set, every pack's signature must verify against it.
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
+      with:
+        toolchain: 1.96.0
+    - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      with:
+        workspaces: ${{ github.action_path }} -> target
+    - name: Install native dependencies
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config jq
+    - name: Build the WayExpand CLI from this action's revision
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: cargo build --locked --release -p wayexpand
+    - name: Check snippets
+      shell: bash
+      env:
+        WAYEXPAND_CLI: ${{ github.action_path }}/target/release/wayexpand
+        CHECK_PATHS: ${{ inputs.paths }}
+        CHECK_DENY_RISKS: ${{ inputs.deny-risks }}
+        CHECK_SIGNERS: ${{ inputs.signers }}
+      run: |
+        set -euo pipefail
+        args=()
+        [ "$CHECK_DENY_RISKS" != true ] || args+=(--deny-risks)
+        [ -z "$CHECK_SIGNERS" ] || args+=(--signers "$CHECK_SIGNERS")
+        read -r -a paths <<<"$CHECK_PATHS"
+        sh "$GITHUB_ACTION_PATH/scripts/check-snippet-repo.sh" "${args[@]}" -- "${paths[@]}"

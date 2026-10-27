@@ -253,9 +253,15 @@ pub(crate) fn validate_command(args: Args) -> Result<()> {
     } else {
         false
     };
+    let deny_risks = if let Some(index) = rest.iter().position(|arg| arg == "--deny-risks") {
+        rest.remove(index);
+        true
+    } else {
+        false
+    };
     let requested_json = take_json_flag(&mut rest);
     if rest.len() > 1 {
-        usage_bail!("usage: wayexpand validate [--fleet] [--json] [config]");
+        usage_bail!("usage: wayexpand validate [--fleet] [--json] [--deny-risks] [config]");
     }
     let path = rest
         .into_iter()
@@ -313,6 +319,13 @@ pub(crate) fn validate_command(args: Args) -> Result<()> {
                 );
         }
     }
+    let risks = wayexpand_core::trigger_risks(&config);
+    let command_count = config
+        .expansion
+        .iter()
+        .filter(|expansion| expansion.command.is_some())
+        .count()
+        + config.hotkey.len();
     if requested_json {
         println!(
             "{}",
@@ -323,6 +336,8 @@ pub(crate) fn validate_command(args: Args) -> Result<()> {
                 "hotkey_count": config.hotkey.len(),
                 "max_buffer_chars": config.settings.max_buffer_chars,
                 "policy_violations": policy_violations,
+                "trigger_risks": risks,
+                "command_count": command_count,
             })
         );
     } else {
@@ -332,6 +347,15 @@ pub(crate) fn validate_command(args: Args) -> Result<()> {
             config.expansion.len(),
             config.settings.max_buffer_chars
         );
+        for risk in &risks {
+            println!("trigger risk: {} {}", risk.trigger, risk.reason);
+        }
+    }
+    if deny_risks && !risks.is_empty() {
+        return Err(config_error(format!(
+            "{} trigger risk(s) found; rename the triggers or drop --deny-risks",
+            risks.len()
+        )));
     }
     Ok(())
 }

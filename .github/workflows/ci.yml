@@ -431,6 +431,7 @@ jobs:
           bash scripts/test-certification.sh
           bash scripts/test-certification-driver.sh
           sh scripts/test-kwin-certification-driver.sh
+          sh scripts/test-check-snippet-repo.sh target/debug/wayexpand
           bash scripts/test-kwin-e2e-timeout.sh
       - name: TUI smoke test
         run: bash scripts/test-ui.sh

@@ -223,7 +223,7 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "Set the matching mode",
             ),
             (
-                "validate [--fleet] [--json] [config]",
+                "validate [--fleet] [--json] [--deny-risks] [config]",
                 "Validate configuration",
             ),
             (
