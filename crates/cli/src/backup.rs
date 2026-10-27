@@ -116,7 +116,8 @@ fn source_changed_during_backup(before: &fs::Metadata, after: &fs::Metadata) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::fs::FileTimes;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     #[test]
     fn directory_sync_failure_reports_that_backup_was_created() {
@@ -163,7 +164,21 @@ mod tests {
         let error = create_backup_with_hooks(
             &source,
             &destination,
-            || fs::write(&source, b"other-config").unwrap(),
+            || {
+                fs::write(&source, b"other-config").unwrap();
+                // Some build filesystems expose coarse timestamp resolution.
+                // Force a distinct mtime so this test checks same-size content
+                // changes reliably instead of depending on scheduler timing.
+                fs::File::options()
+                    .write(true)
+                    .open(&source)
+                    .unwrap()
+                    .set_times(
+                        FileTimes::new()
+                            .set_modified(UNIX_EPOCH + Duration::from_secs(1)),
+                    )
+                    .unwrap();
+            },
             |directory| directory.sync_all(),
         )
         .unwrap_err();

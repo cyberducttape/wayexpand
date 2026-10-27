@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Made the backup race regression test deterministic on filesystems with coarse
+  timestamp resolution. Launchpad's build filesystem could perform both
+  same-size writes within one timestamp tick, causing the test to miss the
+  modification and fail despite the intended metadata check.
 - Configuration watcher events now reload only when they concern the
   configuration file, its `snippets.d` layers, or the fleet directories.
   Since watcher events started forcing a reload, any write in the
