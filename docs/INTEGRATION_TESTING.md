@@ -87,7 +87,7 @@ not physical keyboard certification.
 | `target-closes-during-expansion` | The target window closing mid-expansion: nothing is typed into the window that gains focus, and the daemon survives |
 | `config-reload` | An edited configuration takes effect without a restart |
 | `daemon-restart` | A killed daemon reconnects to libei and the tracker and expands again |
-| `output-latency` | Times at least 20 verified small replacements and reports injector p50/p95/p99; excludes capture and client paint and has no pass threshold |
+| `output-latency` | Times 20 verified small, medium, and large replacements and reports p50/p95/p99 by negotiated output mode and size; excludes capture and client paint and has no pass threshold |
 
 Each line of the summary is `pass`, `fail`, or `unverified` (the scenario
 could not set itself up). The script exits non-zero unless every selected

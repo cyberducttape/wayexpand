@@ -48,6 +48,7 @@ struct HarnessResult {
     tested_commit: Option<String>,
     source_tree_state: Option<String>,
     latency_profile: Option<serde_json::Value>,
+    latency_profiles: Vec<serde_json::Value>,
     capture_source: Option<String>,
     injection_backend: Option<String>,
     insertion_mode: Option<String>,
@@ -96,6 +97,8 @@ fn run_harness() -> HarnessResult {
     let mut tested_commit = None;
     let mut source_tree_state = None;
     let mut latency_profile = None;
+    let mut latency_profiles = Vec::new();
+    let mut saw_latency_profiles = false;
     let mut capture_source = None;
     let mut injection_backend = None;
     let mut insertion_mode = None;
@@ -103,6 +106,16 @@ fn run_harness() -> HarnessResult {
     let mut sensitive_field_detection = None;
     let mut malformed_harness_output = false;
     for line in stdout.lines() {
+        if let Some((_, value)) = line.split_once("latency-profiles=") {
+            let encoded = value.split_whitespace().next().unwrap_or_default();
+            match serde_json::from_str::<Vec<serde_json::Value>>(encoded) {
+                Ok(profiles) if valid_latency_profiles(&profiles) && !saw_latency_profiles => {
+                    latency_profiles = profiles;
+                    saw_latency_profiles = true;
+                }
+                _ => malformed_harness_output = true,
+            }
+        }
         if let Some((_, value)) = line.split_once("latency-profile=") {
             let encoded = value.split_whitespace().next().unwrap_or_default();
             match serde_json::from_str(encoded) {
@@ -178,6 +191,7 @@ fn run_harness() -> HarnessResult {
             tested_commit,
             source_tree_state,
             latency_profile,
+            latency_profiles,
             capture_source,
             injection_backend,
             insertion_mode,
@@ -203,6 +217,7 @@ fn run_harness() -> HarnessResult {
             tested_commit,
             source_tree_state,
             latency_profile,
+            latency_profiles,
             capture_source,
             injection_backend,
             insertion_mode,
@@ -219,6 +234,7 @@ fn run_harness() -> HarnessResult {
             tested_commit,
             source_tree_state,
             latency_profile,
+            latency_profiles,
             capture_source,
             injection_backend,
             insertion_mode,
@@ -238,6 +254,7 @@ fn run_harness() -> HarnessResult {
             tested_commit,
             source_tree_state,
             latency_profile,
+            latency_profiles,
             capture_source,
             injection_backend,
             insertion_mode,
@@ -259,6 +276,7 @@ fn run_harness() -> HarnessResult {
             tested_commit,
             source_tree_state,
             latency_profile,
+            latency_profiles,
             capture_source,
             injection_backend,
             insertion_mode,
@@ -276,6 +294,7 @@ fn run_harness() -> HarnessResult {
         tested_commit,
         source_tree_state,
         latency_profile,
+        latency_profiles,
         capture_source,
         injection_backend,
         insertion_mode,
@@ -331,6 +350,7 @@ fn unavailable(reason: &'static str) -> HarnessResult {
         tested_commit: None,
         source_tree_state: None,
         latency_profile: None,
+        latency_profiles: Vec::new(),
         capture_source: None,
         injection_backend: None,
         insertion_mode: None,
@@ -399,11 +419,29 @@ fn valid_latency_profile(profile: &serde_json::Value) -> bool {
         return false;
     };
     !mode.is_empty()
-        && profile["size"] == "small"
+        && matches!(profile["size"].as_str(), Some("small" | "medium" | "large"))
         && sample_count >= 20
         && window_count >= 20
         && p50 <= p95
         && p95 <= p99
+}
+
+fn valid_latency_profiles(profiles: &[serde_json::Value]) -> bool {
+    if profiles.len() != 3 || !profiles.iter().all(valid_latency_profile) {
+        return false;
+    }
+    let Some(mode) = profiles[0]["backend_mode"].as_str() else {
+        return false;
+    };
+    let mut sizes = profiles
+        .iter()
+        .map(|profile| profile["size"].as_str().unwrap_or_default())
+        .collect::<Vec<_>>();
+    sizes.sort_unstable();
+    sizes == ["large", "medium", "small"]
+        && profiles
+            .iter()
+            .all(|profile| profile["backend_mode"] == mode)
 }
 
 fn command_exists(name: &str) -> bool {
@@ -538,12 +576,19 @@ fn make_report_for_build(
         .is_some_and(|status| *status == "passed");
     checks.push(check(
         "backend-latency-measurement",
-        if latency_was_run && result.latency_profile.is_some() {
+        if latency_was_run
+            && result.latency_profile.is_some()
+            && (result.latency_profiles.is_empty() || valid_latency_profiles(&result.latency_profiles))
+        {
             "measured"
         } else {
             "not-tested"
         },
-        "At least 20 verified replacements were timed inside the injector. This excludes physical keyboard capture and client paint latency; it is a measurement, not an SLO pass.",
+        if result.latency_profiles.is_empty() {
+            "At least 20 small verified replacements were timed inside the injector. This excludes physical keyboard capture and client paint latency; it is a measurement, not an SLO pass."
+        } else {
+            "At least 20 verified replacements in each of the small, medium, and large buckets were timed inside the injector. This excludes physical keyboard capture and client paint latency; it is a measurement, not an SLO pass."
+        },
     ));
     checks.push(check(
         "suspend-resume",
@@ -645,6 +690,7 @@ fn make_report_for_build(
             "backend_injection_latency": {
                 "scope": "headless KWin injector transaction; excludes input capture and client paint latency",
                 "profile": result.latency_profile,
+                "profiles": result.latency_profiles,
             }
         },
         "checks": checks,
@@ -732,32 +778,46 @@ fn print_human_report(report: &serde_json::Value) {
             );
         }
     }
-    if let Some(profile) =
-        report["measurements"]["backend_injection_latency"]["profile"].as_object()
-    {
-        println!(
-            "Backend latency ({}; {} samples): p50 {} µs, p95 {} µs, p99 {} µs",
-            profile
-                .get("backend_mode")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("unknown"),
-            profile
-                .get("sample_count")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0),
-            profile
-                .get("p50_us")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0),
-            profile
-                .get("p95_us")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0),
-            profile
-                .get("p99_us")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0),
-        );
+    let profiles = report["measurements"]["backend_injection_latency"]["profiles"]
+        .as_array()
+        .filter(|profiles| !profiles.is_empty())
+        .cloned()
+        .or_else(|| {
+            report["measurements"]["backend_injection_latency"]["profile"]
+                .as_object()
+                .cloned()
+                .map(|profile| vec![serde_json::Value::Object(profile)])
+        });
+    if let Some(profiles) = profiles {
+        for profile in profiles {
+            println!(
+                "Backend latency ({}; {}; {} samples): p50 {} µs, p95 {} µs, p99 {} µs",
+                profile
+                    .get("backend_mode")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("unknown"),
+                profile
+                    .get("size")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("unknown size"),
+                profile
+                    .get("sample_count")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0),
+                profile
+                    .get("p50_us")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0),
+                profile
+                    .get("p95_us")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0),
+                profile
+                    .get("p99_us")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0),
+            );
+        }
     }
     let overall = match report["overall"].as_str().unwrap_or("unavailable") {
         "partial" => "Partial certification",
@@ -839,6 +899,37 @@ mod tests {
     }
 
     #[test]
+    fn latency_profiles_require_each_size_from_one_negotiated_mode() {
+        let profile = |size| {
+            serde_json::json!({
+                "backend_mode": "libei_keysym_fallback",
+                "size": size,
+                "sample_count": 20,
+                "window_count": 20,
+                "p50_us": 12000,
+                "p95_us": 18000,
+                "p99_us": 19000,
+            })
+        };
+        let profiles = vec![profile("small"), profile("medium"), profile("large")];
+        assert!(valid_latency_profiles(&profiles));
+        assert!(!valid_latency_profiles(&profiles[..2]));
+        assert!(!valid_latency_profiles(&[
+            profile("small"),
+            profile("small"),
+            profile("large")
+        ]));
+
+        let mut different_mode = profile("medium");
+        different_mode["backend_mode"] = serde_json::json!("ei_text");
+        assert!(!valid_latency_profiles(&[
+            profile("small"),
+            different_mode,
+            profile("large")
+        ]));
+    }
+
+    #[test]
     fn duplicate_metadata_records_are_rejected_without_overwriting() {
         let mut commit = None;
         assert!(!record_once(&mut commit, Some("first")));
@@ -882,6 +973,7 @@ mod tests {
             tested_commit: None,
             source_tree_state: None,
             latency_profile: None,
+            latency_profiles: Vec::new(),
             capture_source: None,
             injection_backend: None,
             insertion_mode: None,
@@ -903,6 +995,7 @@ mod tests {
             tested_commit: None,
             source_tree_state: None,
             latency_profile: None,
+            latency_profiles: Vec::new(),
             capture_source: None,
             injection_backend: None,
             insertion_mode: None,
@@ -925,6 +1018,7 @@ mod tests {
                 tested_commit: Some("test-commit".into()),
                 source_tree_state: Some("clean".into()),
                 latency_profile: None,
+                latency_profiles: Vec::new(),
                 capture_source: Some("stdin".into()),
                 injection_backend: Some("libei".into()),
                 insertion_mode: Some("libei keysym fallback".into()),
@@ -986,6 +1080,20 @@ mod tests {
             "p95_us": 18000,
             "p99_us": 19000,
         });
+        let profiles = ["small", "medium", "large"]
+            .into_iter()
+            .map(|size| {
+                serde_json::json!({
+                    "backend_mode": "libei_keysym_fallback",
+                    "size": size,
+                    "sample_count": 20,
+                    "window_count": 20,
+                    "p50_us": 12000,
+                    "p95_us": 18000,
+                    "p99_us": 19000,
+                })
+            })
+            .collect::<Vec<_>>();
         let report = make_report_for_build(
             HarnessResult {
                 status: "completed",
@@ -993,6 +1101,7 @@ mod tests {
                 tested_commit: Some("test-commit".into()),
                 source_tree_state: Some("clean".into()),
                 latency_profile: Some(profile.clone()),
+                latency_profiles: profiles.clone(),
                 capture_source: Some("stdin".into()),
                 injection_backend: Some("libei".into()),
                 insertion_mode: Some("libei keysym fallback".into()),
@@ -1020,6 +1129,10 @@ mod tests {
             report["measurements"]["backend_injection_latency"]["profile"],
             profile
         );
+        assert_eq!(
+            report["measurements"]["backend_injection_latency"]["profiles"],
+            serde_json::json!(profiles)
+        );
     }
 
     #[test]
@@ -1030,6 +1143,7 @@ mod tests {
             tested_commit: None,
             source_tree_state: None,
             latency_profile: None,
+            latency_profiles: Vec::new(),
             capture_source: None,
             injection_backend: None,
             insertion_mode: None,
@@ -1054,6 +1168,7 @@ mod tests {
                 tested_commit: Some("test-commit".into()),
                 source_tree_state: Some("clean".into()),
                 latency_profile: None,
+                latency_profiles: Vec::new(),
                 capture_source: Some("stdin".into()),
                 injection_backend: Some("libei".into()),
                 insertion_mode: Some("libei ei_text".into()),
@@ -1090,6 +1205,7 @@ mod tests {
                 tested_commit: Some("test-commit".into()),
                 source_tree_state: Some("clean".into()),
                 latency_profile: None,
+                latency_profiles: Vec::new(),
                 capture_source: Some("stdin".into()),
                 injection_backend: Some("libei".into()),
                 insertion_mode: Some("libei ei_text".into()),
@@ -1124,6 +1240,7 @@ mod tests {
                 tested_commit: Some("different-build".into()),
                 source_tree_state: Some("clean".into()),
                 latency_profile: None,
+                latency_profiles: Vec::new(),
                 capture_source: Some("stdin".into()),
                 injection_backend: Some("libei".into()),
                 insertion_mode: Some("libei ei_text".into()),
@@ -1159,6 +1276,7 @@ mod tests {
                 tested_commit: Some("unknown".into()),
                 source_tree_state: Some("clean".into()),
                 latency_profile: None,
+                latency_profiles: Vec::new(),
                 capture_source: Some("stdin".into()),
                 injection_backend: Some("libei".into()),
                 insertion_mode: Some("libei ei_text".into()),
@@ -1185,6 +1303,7 @@ mod tests {
                 tested_commit: Some("test-commit".into()),
                 source_tree_state: Some("dirty".into()),
                 latency_profile: None,
+                latency_profiles: Vec::new(),
                 capture_source: Some("stdin".into()),
                 injection_backend: Some("libei".into()),
                 insertion_mode: Some("libei ei_text".into()),
@@ -1217,6 +1336,7 @@ mod tests {
                 tested_commit: Some("test-commit".into()),
                 source_tree_state: None,
                 latency_profile: None,
+                latency_profiles: Vec::new(),
                 capture_source: Some("stdin".into()),
                 injection_backend: Some("libei".into()),
                 insertion_mode: Some("libei ei_text".into()),

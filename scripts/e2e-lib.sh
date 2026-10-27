@@ -126,6 +126,9 @@ write_config() {
     umask 077
     {
         printf '%s\n' '[settings]' "compatibility_mode = \"${e2e_compatibility_mode:?}\"" ''
+        if [ -n "${e2e_keystroke_max_chars:-}" ]; then
+            printf 'keystroke_max_chars = %s\n' "$e2e_keystroke_max_chars"
+        fi
         cat
     } >"$WAYEXPAND_CONFIG.tmp"
     mv "$WAYEXPAND_CONFIG.tmp" "$WAYEXPAND_CONFIG"
@@ -231,42 +234,66 @@ EOF
 }
 
 scenario_output_latency() {
-    latency_expected=''
-    sample=0
     status=''
     profiles=''
-    profile=''
-    write_config <<'EOF'
+    latency_profiles=''
+    small_profile=''
+    small_replacement=x
+    medium_replacement=$(head -c 64 /dev/zero | tr '\000' x)
+    large_replacement=$(head -c 257 /dev/zero | tr '\000' x)
+    e2e_keystroke_max_chars=260
+    write_config <<EOF
 [[expansion]]
 trigger = ";lat"
-replacement = "x"
+replacement = "$small_replacement"
+[[expansion]]
+trigger = ";medium"
+replacement = "$medium_replacement"
+[[expansion]]
+trigger = ";large"
+replacement = "$large_replacement"
 EOF
+    e2e_keystroke_max_chars=
     start_sink e2e-a && start_daemon || return 2
-    while [ "$sample" -lt 20 ]; do
-        user_types e2e-a "${latency_expected};lat" ";lat" || return 1
-        daemon_sees ";lat"
-        latency_expected="${latency_expected}x"
-        wait_until 50 sink_text_is e2e-a "$latency_expected" || return 1
-        sample=$((sample + 1))
+    latency_expected=''
+    for bucket in small medium large; do
+        case "$bucket" in
+            small) trigger=';lat'; replacement=$small_replacement ;;
+            medium) trigger=';medium'; replacement=$medium_replacement ;;
+            large) trigger=';large'; replacement=$large_replacement ;;
+        esac
+        sample=0
+        while [ "$sample" -lt 20 ]; do
+            user_types e2e-a "${latency_expected}${trigger}" "$trigger" || return 1
+            daemon_sees "$trigger"
+            latency_expected="${latency_expected}${replacement}"
+            wait_until 150 sink_text_is e2e-a "$latency_expected" || return 1
+            sample=$((sample + 1))
+        done
     done
     status=$(daemon_status) || return 2
     profiles=$(printf '%s\n' "$status" | sed -n 's/^injection_latency_profiles=//p')
-    profile=$(printf '%s' "$profiles" | jq -ce '
-        to_entries[]
-        | select(.value.small.sample_count >= 20)
-        | {
-            backend_mode: .key,
-            size: "small",
-            sample_count: .value.small.sample_count,
-            window_count: .value.small.window_count,
-            p50_us: .value.small.p50_us,
-            p95_us: .value.small.p95_us,
-            p99_us: .value.small.p99_us
-          }
-    ' | head -n 1) || return 2
-    [ -n "$profile" ] || return 2
-    printf 'latency-profile=%s ' "$profile"
-    describe e2e-a
+    latency_profiles=$(printf '%s' "$profiles" | jq -ce '
+        [to_entries[] as $mode
+         | ["small", "medium", "large"][] as $size
+         | select($mode.value[$size].sample_count >= 20)
+         | {
+             backend_mode: $mode.key,
+             size: $size,
+             sample_count: $mode.value[$size].sample_count,
+             window_count: $mode.value[$size].window_count,
+             p50_us: $mode.value[$size].p50_us,
+             p95_us: $mode.value[$size].p95_us,
+             p99_us: $mode.value[$size].p99_us
+           }]
+        | sort_by(.size)
+    ') || return 2
+    [ "$(printf '%s' "$latency_profiles" | jq 'length')" -eq 3 ] || return 2
+    small_profile=$(printf '%s' "$latency_profiles" | jq -ce '.[] | select(.size == "small")') || return 2
+    printf 'latency-profile=%s latency-profiles=%s ' "$small_profile" "$latency_profiles"
+    printf 'text_chars=%s cursor=%s' \
+        "$(sink_field e2e-a text | wc -m | tr -d ' ')" \
+        "$(sink_field e2e-a cursor)"
 }
 
 scenario_input_method_expansion() {
