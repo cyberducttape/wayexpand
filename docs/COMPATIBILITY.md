@@ -653,6 +653,31 @@ the configuration exit code; `--approved-revision` without
 
 ---
 
+### `wayexpand metrics [--output FILE] [config]`
+
+Prometheus text exposition format. Always present: `wayexpand_build_info`
+(labels `version`, `commit`), `wayexpand_daemon_up`,
+`wayexpand_daemon_build_matches`, and `wayexpand_config_valid`. When the
+daemon is running: `wayexpand_daemon_route_info` (labels `route_id`,
+`source`, `backend`, `state`), `wayexpand_daemon_config_ok`,
+`wayexpand_daemon_output_healthy`, the flags `wayexpand_daemon_paused`,
+`wayexpand_daemon_window_tracker_connected` and
+`wayexpand_daemon_sensitive_field_detection`, the gauges
+`wayexpand_daemon_command_queue_depth`, `wayexpand_daemon_command_in_flight`,
+`wayexpand_daemon_output_stalled_milliseconds`,
+`wayexpand_daemon_output_retiring_workers`,
+`wayexpand_daemon_memory_rss_kibibytes`,
+`wayexpand_daemon_matcher_latency_p95_microseconds` and
+`wayexpand_daemon_injection_latency_p95_microseconds`, and one counter
+`wayexpand_daemon_<field>` for every `*_total` field of `status --json`. When
+the configuration is valid: `wayexpand_config_files_loaded`,
+`wayexpand_config_expansions`, `wayexpand_config_hotkeys`, and
+`wayexpand_config_policy_violations`. Exit 0 whenever the metrics were
+written, including while the daemon is stopped; usage errors exit 2.
+**Stability:** 🟡 **Experimental**. Counters reset when the daemon restarts.
+
+---
+
 ### `wayexpand stats`
 
 `wayexpand stats [--json] [--days N] [--clear] [config]` reports local usage

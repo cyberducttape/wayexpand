@@ -15,6 +15,7 @@ use commands::config::{
     stats_command, sync_command, test_command, test_hotkey_command, validate_command,
 };
 use commands::daemon::{control_command, insert_command};
+use commands::metrics::metrics_command;
 use commands::new::new_command;
 use commands::system::{
     backend_command, certify_command, doctor_command, explain_backend_command, explain_command,
@@ -123,6 +124,7 @@ fn run() -> Result<()> {
         Some("backend") => backend_command(args)?,
         Some("explain-backend") => explain_backend_command(args)?,
         Some("fleet") => fleet_command(args)?,
+        Some("metrics") => metrics_command(args)?,
         Some("portal") => portal_command(args)?,
         Some(requested @ ("status" | "reload" | "pause" | "resume" | "stop")) => {
             control_command(requested, args)?
@@ -251,6 +253,10 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
             (
                 "fleet status [--json]",
                 "Show merged fleet configuration status",
+            ),
+            (
+                "metrics [--output FILE] [config]",
+                "Write content-free Prometheus metrics (textfile collector)",
             ),
             (
                 "portal status|reset",

@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Added `wayexpand metrics [--output FILE]`, which writes content-free
+  Prometheus metrics for node_exporter's textfile collector: daemon liveness,
+  build match, route, configuration and output health, queue and latency
+  gauges, and every `*_total` status counter. The file is replaced
+  atomically, and a stopped daemon is reported as `wayexpand_daemon_up 0`.
+  See the monitoring section of `docs/OPERATIONS.md`.
 - Fixed lost user text when typing continued while a command expansion was
   running. On the deferred matching path used by the daemon, the next event
   restored the running command's trigger into the matcher, and the next

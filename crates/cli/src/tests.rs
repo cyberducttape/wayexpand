@@ -1007,3 +1007,95 @@ fn unclassified_errors_keep_their_cause() {
     );
     assert_eq!(exit_code_for(&error), 1);
 }
+
+fn metric_lines_are_well_formed(text: &str) {
+    for line in text.lines() {
+        if line.starts_with("# HELP ") || line.starts_with("# TYPE ") {
+            continue;
+        }
+        let (name_and_labels, value) = line.rsplit_once(' ').expect("sample has a value");
+        assert!(value.parse::<f64>().is_ok(), "bad value in {line:?}");
+        let name = name_and_labels.split('{').next().unwrap();
+        assert!(
+            name.starts_with("wayexpand_")
+                && name
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
+            "bad metric name in {line:?}"
+        );
+    }
+}
+
+#[test]
+fn metrics_export_status_counters_without_content() {
+    let snapshot = serde_json::json!({
+        "response": "running",
+        "route_id": "kde-evdev-libei",
+        "source": "evdev",
+        "backend": "libei",
+        "state": "connected",
+        "config_state": "ok",
+        "output_health": "ok",
+        "paused": false,
+        "window_tracker_connected": true,
+        "command_queue_depth": 2,
+        "output_reconnect_total": 3,
+        "future_counter_total": "7",
+        "config": "/home/user/secret-project/expansions.toml",
+        "recent_expansion_outcomes": "[{\"trigger\":\";pw\"}]",
+    });
+    let upgrade = serde_json::json!({"commit_matches": true});
+    let text = commands::metrics::render_metrics(
+        Some(&snapshot),
+        &upgrade,
+        &commands::metrics::ConfigMetrics::Valid {
+            files_loaded: 2,
+            expansions: 10,
+            hotkeys: 1,
+            policy_violations: 0,
+        },
+    );
+    metric_lines_are_well_formed(&text);
+    for expected in [
+        "wayexpand_daemon_up 1",
+        "wayexpand_daemon_build_matches 1",
+        "wayexpand_daemon_route_info{route_id=\"kde-evdev-libei\",source=\"evdev\",backend=\"libei\",state=\"connected\"} 1",
+        "wayexpand_daemon_command_queue_depth 2",
+        "# TYPE wayexpand_daemon_output_reconnect_total counter",
+        "wayexpand_daemon_output_reconnect_total 3",
+        "wayexpand_daemon_future_counter_total 7",
+        "wayexpand_config_valid 1",
+        "wayexpand_config_expansions 10",
+    ] {
+        assert!(text.contains(expected), "missing {expected:?} in:\n{text}");
+    }
+    assert!(!text.contains("secret-project"));
+    assert!(!text.contains(";pw"));
+}
+
+#[test]
+fn metrics_escape_labels_and_report_a_stopped_daemon() {
+    let snapshot = serde_json::json!({
+        "response": "running",
+        "route_id": "odd\"route\\\nid",
+    });
+    let text = commands::metrics::render_metrics(
+        Some(&snapshot),
+        &serde_json::json!({}),
+        &commands::metrics::ConfigMetrics::Invalid,
+    );
+    metric_lines_are_well_formed(&text);
+    assert!(text.contains("route_id=\"odd\\\"route\\\\\\nid\""));
+    assert!(text.contains("wayexpand_config_valid 0"));
+    assert!(!text.contains("wayexpand_config_expansions"));
+
+    let stopped = commands::metrics::render_metrics(
+        None,
+        &crate::doctor::status::upgrade_status_unavailable(),
+        &commands::metrics::ConfigMetrics::Invalid,
+    );
+    metric_lines_are_well_formed(&stopped);
+    assert!(stopped.contains("wayexpand_daemon_up 0"));
+    assert!(stopped.contains("wayexpand_daemon_build_matches 0"));
+    assert!(!stopped.contains("wayexpand_daemon_route_info"));
+}

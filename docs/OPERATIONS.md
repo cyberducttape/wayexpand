@@ -479,6 +479,47 @@ wayexpand status --json
 The control socket is user-owned and mode `0600`; do not expose it through a
 shared filesystem or proxy it over a network.
 
+### Prometheus metrics
+
+`wayexpand metrics` prints the daemon's health and counters in the Prometheus
+text format for node_exporter's
+[textfile collector](https://github.com/prometheus/node_exporter#textfile-collector).
+It contains no snippet content: no triggers, replacements, commands, window
+titles or paths. With `--output FILE` it replaces the file atomically, so the
+collector never reads a half-written file. A stopped daemon or an invalid
+configuration is reported as a value (`wayexpand_daemon_up 0`,
+`wayexpand_config_valid 0`) and the command still exits 0.
+
+The daemon and control socket belong to the logged-in user, so collect from a
+user timer and point node_exporter's `--collector.textfile.directory` at a
+directory that user can write:
+
+```ini
+# ~/.config/systemd/user/wayexpand-metrics.service
+[Service]
+Type=oneshot
+ExecStart=wayexpand metrics --output %h/.local/state/wayexpand/metrics/wayexpand.prom
+
+# ~/.config/systemd/user/wayexpand-metrics.timer
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+
+[Install]
+WantedBy=timers.target
+```
+
+Useful alerts:
+
+| Expression | Meaning |
+|---|---|
+| `wayexpand_daemon_up == 0` | The daemon is not running for this user |
+| `wayexpand_daemon_build_matches == 0` | The daemon is older than the installed CLI; restart it after an upgrade |
+| `wayexpand_config_valid == 0` or `wayexpand_daemon_config_ok == 0` | The configuration on disk, or the daemon's last reload, failed |
+| `increase(wayexpand_daemon_output_reconnect_total[1h]) > 5` | The output backend keeps reconnecting |
+| `wayexpand_daemon_output_healthy == 0` | Output is stalled or refusing replacements |
+| `count by (route_id) (wayexpand_daemon_route_info)` | Which capture/output routes the fleet actually runs |
+
 To share a diagnostic artifact with support or attach it to a fleet ticket,
 generate the allowlisted report:
 
