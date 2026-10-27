@@ -426,6 +426,46 @@ fn matcher_playground_gui_applies_one_rewrite_per_typed_trigger() {
 }
 
 #[test]
+fn matcher_playground_paste_expands_once_when_output_contains_another_trigger() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-playground-paste-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    let config = Config {
+        expansion: vec![
+            import_expansion(":go", "Expanded :inner"),
+            import_expansion(":inner", "Expanded twice"),
+        ],
+        hotkey: Vec::new(),
+        settings: Settings::default(),
+        organization: wayexpand_core::OrganizationPolicy::default(),
+    };
+    config.save_atomic(&path).unwrap();
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    app.try_live_open = true;
+
+    let ctx = egui::Context::default();
+    let screen_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 760.0));
+    ctx.memory_mut(|memory| memory.request_focus(egui::Id::new("try_live_field")));
+    let input = egui::RawInput {
+        screen_rect: Some(screen_rect),
+        events: vec![egui::Event::Paste(":go".into())],
+        ..Default::default()
+    };
+    run_gui_test_frame(&ctx, input, |ui| {
+        let palette = Palette::for_pack(app.colorpack, app.dark_mode);
+        app.render_try_live_panel(ui, &palette);
+        app.render_editor(ui, &palette);
+    });
+
+    assert_eq!(app.playground.text, "Expanded :inner");
+    assert_eq!(app.playground.expansions, 1);
+    assert_eq!(app.playground.last_trigger.as_deref(), Some(":go"));
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn matcher_preview_explains_that_existing_text_is_preserved() {
     for (language, clear_label, behavior_copy, cumulative_copy) in [
         (
