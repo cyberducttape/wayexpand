@@ -21,6 +21,12 @@ All notable changes to WayExpand are documented here.
   sensitive-field verification, and zero-corruption acceptance criteria.
 - Measure headless KWin injector latency across small, medium, and large
   replacements, with separate percentiles for each negotiated output mode.
+- Preserve current-source KWin 6.6.6 report evidence for `ff6eeeac8d83`:
+  12 checks passed and three areas were not tested. Keysym-fallback p95 was
+  12.630 ms for small, 780.887 ms for medium, and 3.144 s for large
+  replacements. Capture was simulated; the report remains partial evidence.
+- Fix three literal-shell-pattern warnings in the Launchpad workflow contract
+  test that failed CI ShellCheck validation.
 - Report the requested capture route accurately in private KWin E2E summaries;
   input-method-v2 probes are no longer mislabeled as simulated capture.
 - Made `wayexpand stats --clear` discard usage events that were still buffered

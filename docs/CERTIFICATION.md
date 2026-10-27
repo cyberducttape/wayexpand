@@ -455,6 +455,17 @@ p95/p99 inside the injector. Capture was simulated through stdin, and the
 session was private and headless. This is partial output/focus compatibility
 evidence, not active-desktop or production certification.
 
+[`evidence/doctor-certify-ff6eeeac8.json`](evidence/doctor-certify-ff6eeeac8.json)
+preserves the current-source KWin 6.6.6 report for commit `ff6eeeac8d83`.
+Twelve checks passed; Unicode insertion, suspend/resume, and physical keyboard
+capture were not tested. It records 20 injector samples in each size bucket:
+small p95 12,630 µs, medium p95 780,887 µs, and large p95 3,143,614 µs.
+The benchmark raises the isolated test config's `keystroke_max_chars` to 260
+to exercise a 257-character large sample; this does not change the product
+default. Capture was simulated through stdin in private headless KWin. These
+measurements exclude input capture and client paint and are not a production
+SLO or certification.
+
 [`evidence/kwin-headless-2026-10-24.json`](evidence/kwin-headless-2026-10-24.json)
 records an 11-scenario run against the production daemon, libei injector, and
 KWin window tracker on KWin 6.6.6. All 11 scenarios passed. The private KWin

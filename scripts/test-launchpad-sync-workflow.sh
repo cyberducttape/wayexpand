@@ -43,12 +43,12 @@ query_line=$(grep -nF -- 'retry_ls_remote() {' "$workflow" | cut -d: -f1)
 push_retry_line=$(grep -nF -- 'retry_push() {' "$workflow" | cut -d: -f1)
 test -n "$query_line" -a -n "$push_retry_line"
 sed -n "$query_line,$((push_retry_line - 1))p" "$workflow" | grep -F -- 'for attempt in 1 2 3 4 5 6 7; do' >/dev/null
-sed -n "$query_line,$((push_retry_line - 1))p" "$workflow" | grep -F -- 'if [ "$attempt" -lt 7 ]; then' >/dev/null
+sed -n "$query_line,$((push_retry_line - 1))p" "$workflow" | grep -F -- "if [ \"\$attempt\" -lt 7 ]; then" >/dev/null
 push_step=$(grep -nF -- '- name: Push GitHub main to Launchpad' "$workflow" | cut -d: -f1)
 vendored_step=$(grep -nF -- '- name: Publish the vendored Launchpad build branch' "$workflow" | cut -d: -f1)
 test -n "$push_step" -a -n "$vendored_step"
 sed -n "$push_step,$((vendored_step - 1))p" "$workflow" | grep -F -- 'for attempt in 1 2 3 4 5; do' >/dev/null
-sed -n "$push_step,$((vendored_step - 1))p" "$workflow" | grep -F -- 'if [ "$attempt" -lt 5 ]; then' >/dev/null
+sed -n "$push_step,$((vendored_step - 1))p" "$workflow" | grep -F -- "if [ \"\$attempt\" -lt 5 ]; then" >/dev/null
 
 # Both main push forms must remain inside the branch guard. The two push lines
 # must occur after the guard and before the tag-only branch, so nested `if`
@@ -72,6 +72,6 @@ sed -n "$((publish_line + 1))p" "$workflow" | grep -F -- "if: github.ref == 'ref
 sed -n "$publish_line,\$p" "$workflow" | grep -F -- 'timeout --signal=TERM --kill-after=30s 10m' >/dev/null
 sed -n "$publish_line,\$p" "$workflow" | grep -F -- 'bash scripts/publish-launchpad-branch.sh' >/dev/null
 sed -n "$publish_line,\$p" "$workflow" | grep -F -- 'for attempt in 1 2 3 4 5; do' >/dev/null
-sed -n "$publish_line,\$p" "$workflow" | grep -F -- 'if [ "$attempt" -lt 5 ]; then' >/dev/null
+sed -n "$publish_line,\$p" "$workflow" | grep -F -- "if [ \"\$attempt\" -lt 5 ]; then" >/dev/null
 
 printf '%s\n' 'Launchpad workflow safety contract passed'
