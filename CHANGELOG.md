@@ -6,6 +6,10 @@ All notable changes to WayExpand are documented here.
 
 - Ship the KWin E2E report helper beside the installed harness so
   `wayexpand doctor --certify` works from user, package, and release installs.
+- Preserve a successful installed-build KWin 6.6.6 certification smoke report
+  for `0d1b2138a8fd`: 12 checks passed, Unicode insertion, physical capture,
+  and suspend/resume were not tested, and keysym fallback measured p50
+  12.198 ms and p95/p99 12.220 ms. This remains partial compatibility evidence.
 - Exercise back-to-back `.ssl` and `.clarity` expansions through the daemon's
   serialized output worker, with the second trigger queued during the first
   replacement, to guard against duplicate insertion.

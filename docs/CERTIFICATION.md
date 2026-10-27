@@ -437,6 +437,15 @@ inside the injector. Unicode insertion, physical keyboard capture, and
 suspend/resume were not tested. This partial headless report does not certify
 the active desktop or production capture route.
 
+[`evidence/doctor-certify-0d1b2138a8fd.json`](evidence/doctor-certify-0d1b2138a8fd.json)
+preserves the installed build's KWin 6.6.6 `doctor --certify --json` run for
+commit `0d1b2138a8fd`. Twelve output, focus, reload, restart, refusal, and
+build-identity checks passed. The route used libei keysym fallback; 20 small
+injector transactions measured 12,198 µs p50 and 12,220 µs p95/p99. Unicode
+insertion, physical keyboard capture, and suspend/resume were not tested. The
+source-tree state is unknown for this installed-binary run. It is partial
+headless compatibility evidence, not active-desktop or production certification.
+
 [`evidence/kwin-headless-2026-10-24.json`](evidence/kwin-headless-2026-10-24.json)
 records an 11-scenario run against the production daemon, libei injector, and
 KWin window tracker on KWin 6.6.6. All 11 scenarios passed. The private KWin
