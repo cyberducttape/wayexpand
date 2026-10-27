@@ -78,7 +78,7 @@ fn create_backup_with_hooks(
         after_copy
             .take()
             .expect("backup copy hook is called once")();
-        if !file_contents_match(&mut source_file, &mut destination_file)? {
+        if !file_contents_match(&mut source_file, &mut destination_file, metadata.len())? {
             return Err(io::Error::other(
                 "configuration changed during backup (copied content differs); refusing to keep a possibly inconsistent copy",
             ));
@@ -112,24 +112,31 @@ fn create_backup_with_hooks(
 
 /// Compare the copied backup with the still-open source without relying on
 /// filesystem timestamp resolution to detect same-size in-place edits.
-fn file_contents_match(source: &mut fs::File, backup: &mut fs::File) -> io::Result<bool> {
+fn file_contents_match(
+    source: &mut fs::File,
+    backup: &mut fs::File,
+    expected_len: u64,
+) -> io::Result<bool> {
     source.seek(SeekFrom::Start(0))?;
     backup.seek(SeekFrom::Start(0))?;
 
     let mut source_buffer = [0_u8; 16 * 1024];
     let mut backup_buffer = [0_u8; 16 * 1024];
-    loop {
-        let source_read = source.read(&mut source_buffer)?;
-        let backup_read = backup.read(&mut backup_buffer)?;
-        if source_read != backup_read
-            || source_buffer[..source_read] != backup_buffer[..backup_read]
-        {
+    let mut remaining = expected_len;
+    while remaining > 0 {
+        let chunk_len = remaining.min(source_buffer.len() as u64) as usize;
+        source.read_exact(&mut source_buffer[..chunk_len])?;
+        backup.read_exact(&mut backup_buffer[..chunk_len])?;
+        if source_buffer[..chunk_len] != backup_buffer[..chunk_len] {
             return Ok(false);
         }
-        if source_read == 0 {
-            return Ok(true);
-        }
+        remaining -= chunk_len as u64;
     }
+
+    let source_extra = source.read(&mut source_buffer[..1])?;
+    let backup_extra = backup.read(&mut backup_buffer[..1])?;
+    Ok(source_extra == backup_extra
+        && source_buffer[..source_extra] == backup_buffer[..backup_extra])
 }
 
 fn source_changed_during_backup(before: &fs::Metadata, after: &fs::Metadata) -> bool {
