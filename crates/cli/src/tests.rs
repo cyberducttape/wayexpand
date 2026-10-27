@@ -5,7 +5,10 @@ use crate::doctor::backends::{
 use crate::doctor::certification::certification_selection_status;
 use crate::doctor::files::existing_control_socket_is_healthy;
 use crate::doctor::json::{production_readiness, protocol_probe_report};
-use crate::doctor::policy::{absolute_command_policy_diagnostic, print_policy_diagnostics_json};
+use crate::doctor::policy::{
+    absolute_command_policy_diagnostic, exclusive_capture_policy_diagnostic,
+    print_policy_diagnostics_json,
+};
 use crate::doctor::status::{runtime_capabilities_from_status, status_schema_compatible};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -50,12 +53,41 @@ fn doctor_policy_json_reports_absolute_command_requirement() {
         serde_json::Value::Bool(true)
     );
     assert_eq!(
+        diagnostics["policy"]["require_exclusive_capture"],
+        serde_json::Value::Bool(false)
+    );
+    assert_eq!(
         absolute_command_policy_diagnostic(&OrganizationPolicy {
             safe_mode: false,
             require_absolute_commands: true,
             ..OrganizationPolicy::default()
         }),
         Some("Require absolute command paths: audit only")
+    );
+}
+
+#[test]
+fn doctor_policy_json_reports_exclusive_capture_requirement() {
+    let policy = OrganizationPolicy {
+        safe_mode: true,
+        require_exclusive_capture: true,
+        ..OrganizationPolicy::default()
+    };
+    let diagnostics = print_policy_diagnostics_json(&Ok(policy.clone()));
+    assert_eq!(
+        diagnostics["policy"]["require_exclusive_capture"],
+        serde_json::Value::Bool(true)
+    );
+    assert_eq!(
+        exclusive_capture_policy_diagnostic(&policy),
+        Some("Require exclusive keyboard capture: enforced")
+    );
+    assert_eq!(
+        exclusive_capture_policy_diagnostic(&OrganizationPolicy {
+            safe_mode: false,
+            ..policy
+        }),
+        Some("Require exclusive keyboard capture: audit only")
     );
 }
 
@@ -728,6 +760,16 @@ fn setup_modes_respect_runtime_backend_policy_names() {
         "input-method"
     );
     assert!(setup_backend_for_mode("maximum", &capabilities, &input_method_only).is_err());
+    let exclusive_only = OrganizationPolicy {
+        safe_mode: true,
+        require_exclusive_capture: true,
+        ..Default::default()
+    };
+    assert!(setup_backend_for_mode("maximum", &capabilities, &exclusive_only).is_err());
+    assert_eq!(
+        setup_backend_for_mode("experimental", &capabilities, &exclusive_only).unwrap(),
+        "input-method"
+    );
 
     // Allowing input-method-v2 does not allow IBus; it must be named.
     assert!(!setup_backend_allowed(&input_method_only, "ibus"));

@@ -345,6 +345,7 @@ Diagnostic output suitable for health checks and monitoring systems.
       "valid": true,
       "require_absolute_commands": false,
       "require_atomic_replace": false,
+      "require_exclusive_capture": false,
       "minimum_replacement_guarantee": null,
       "require_sensitive_focus": false,
       "is_active": false
@@ -419,6 +420,7 @@ Diagnostic output suitable for health checks and monitoring systems.
 - `policy` (object): Organization-policy validation result from the same secure loader used by the daemon
 - `policy.policy.require_absolute_commands` (bool): Whether command programs must use absolute paths; in audit mode this is reported but not enforced
 - `policy.policy.require_atomic_replace` (bool): Whether startup requires a protocol-level atomic replacement capability; enforced only when `safe_mode` is true
+- `policy.policy.require_exclusive_capture` (bool): Whether startup requires the input source to intercept physical keys before they reach the application; independent of atomic replacement and enforced only when `safe_mode` is true
 - `policy.policy.minimum_replacement_guarantee` (string|null): Minimum replacement guarantee the selected injector must provide: `"best-effort"`, `"verified"`, or `"atomic"`; null when unset; enforced only when `safe_mode` is true
 - `policy.policy.require_sensitive_focus` (bool): Whether startup requires an input source that reports password/sensitive-field focus; enforced only when `safe_mode` is true
 - `policy.policy.require_verified_insert_target` (bool): Whether explicit inserts must name the exact focused window (`insert --verified` or the picker); enforced only when `safe_mode` is true

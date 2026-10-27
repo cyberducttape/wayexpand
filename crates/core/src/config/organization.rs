@@ -41,6 +41,13 @@ pub struct OrganizationPolicy {
     /// other administrator-owned requirements.
     pub require_atomic_replace: bool,
 
+    /// Refuse startup unless the selected input source can prevent original
+    /// physical keys from reaching the application before WayExpand reacts.
+    /// This is independent of atomic replacement and is enforced only in
+    /// safe mode.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub require_exclusive_capture: bool,
+
     /// Refuse startup unless the selected injector provides at least this
     /// replacement guarantee: `"best-effort"`, `"verified"` (trigger
     /// confirmed in the target's surrounding text before erasing), or
@@ -100,6 +107,7 @@ impl Default for OrganizationPolicy {
             disable_title_matching: false,
             allow_weak_app_filters: false,
             require_atomic_replace: false,
+            require_exclusive_capture: false,
             minimum_replacement_guarantee: None,
             require_sensitive_focus: false,
             require_verified_insert_target: false,
@@ -133,6 +141,7 @@ impl OrganizationPolicy {
         effective.require_absolute_commands = false;
         effective.disable_title_matching = false;
         effective.require_atomic_replace = false;
+        effective.require_exclusive_capture = false;
         effective.minimum_replacement_guarantee = None;
         effective.require_sensitive_focus = false;
         effective.require_verified_insert_target = false;
@@ -154,6 +163,7 @@ impl OrganizationPolicy {
             || self.disable_title_matching
             || self.allow_weak_app_filters
             || self.require_atomic_replace
+            || self.require_exclusive_capture
             || self.minimum_replacement_guarantee.is_some()
             || self.require_sensitive_focus
             || self.require_verified_insert_target
@@ -195,6 +205,9 @@ impl OrganizationPolicy {
         injector: crate::InjectorCapabilities,
         source: crate::InputSourceCapabilities,
     ) -> Option<String> {
+        if self.require_exclusive_capture && !source.exclusive_capture {
+            return Some("selected input source cannot capture keyboard input exclusively".into());
+        }
         if self.require_atomic_replace && !injector.atomic_replace {
             return Some(
                 "selected injector cannot guarantee atomic replacement transactions".into(),

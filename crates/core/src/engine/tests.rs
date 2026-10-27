@@ -4734,6 +4734,26 @@ fn verified_insert_policy_is_omitted_from_saved_toml_unless_set() {
 }
 
 #[test]
+fn exclusive_capture_policy_is_omitted_from_saved_toml_unless_set() {
+    let config = Config::parse("[[expansion]]\ntrigger = \":a\"\nreplacement = \"x\"\n").unwrap();
+    let text = toml::to_string(&config).unwrap();
+    assert!(!text.contains("require_exclusive_capture"), "{text}");
+
+    let required = Config::parse("[organization]\nrequire_exclusive_capture = true\n").unwrap();
+    let text = toml::to_string(&required).unwrap();
+    let round_trip = Config::parse(&text).unwrap();
+    assert!(round_trip.organization.require_exclusive_capture);
+    assert!(required.organization.is_active());
+    assert!(
+        !required
+            .organization
+            .effective_enforcement_policy()
+            .require_exclusive_capture,
+        "audit mode must not enforce"
+    );
+}
+
+#[test]
 fn default_clipboard_mode_is_omitted_from_saved_toml() {
     let config = Config::parse("[[expansion]]\ntrigger = \":a\"\nreplacement = \"x\"\n").unwrap();
     let text = toml::to_string(&config).unwrap();

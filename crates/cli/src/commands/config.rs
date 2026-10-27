@@ -394,7 +394,7 @@ pub(crate) fn schema_command(mut args: Args) -> Result<()> {
                     "fields": ["action", "program", "args", "timeout_ms", "cache_ms", "environment", "pass_env"]
                 },
                 "OrganizationPolicy": {
-                    "fields": ["safe_mode", "disable_commands", "disable_hotkeys", "require_absolute_commands", "disable_title_matching", "allow_weak_app_filters", "require_atomic_replace", "minimum_replacement_guarantee", "require_sensitive_focus", "require_verified_insert_target", "max_replacement_size", "allowed_backends", "allowed_packs", "require_signed_packs", "pack_signers_file", "disable_clipboard", "disable_template_env", "audit_prefix"]
+                    "fields": ["safe_mode", "disable_commands", "disable_hotkeys", "require_absolute_commands", "disable_title_matching", "allow_weak_app_filters", "require_atomic_replace", "require_exclusive_capture", "minimum_replacement_guarantee", "require_sensitive_focus", "require_verified_insert_target", "max_replacement_size", "allowed_backends", "allowed_packs", "require_signed_packs", "pack_signers_file", "disable_clipboard", "disable_template_env", "audit_prefix"]
                 }
             }
         }))?

@@ -18,6 +18,18 @@ pub(crate) fn absolute_command_policy_diagnostic(
         })
 }
 
+pub(crate) fn exclusive_capture_policy_diagnostic(
+    policy: &OrganizationPolicy,
+) -> Option<&'static str> {
+    policy
+        .require_exclusive_capture
+        .then_some(if policy.safe_mode {
+            "Require exclusive keyboard capture: enforced"
+        } else {
+            "Require exclusive keyboard capture: audit only"
+        })
+}
+
 pub(crate) fn print_policy_diagnostics_json(
     policy_result: &Result<OrganizationPolicy>,
 ) -> serde_json::Value {
@@ -29,6 +41,7 @@ pub(crate) fn print_policy_diagnostics_json(
                 "disable_commands": policy.disable_commands,
                 "require_absolute_commands": policy.require_absolute_commands,
                 "require_atomic_replace": policy.require_atomic_replace,
+                "require_exclusive_capture": policy.require_exclusive_capture,
                 "minimum_replacement_guarantee": policy
                     .minimum_replacement_guarantee
                     .map(wayexpand_core::ReplacementGuarantee::as_str),
@@ -135,6 +148,9 @@ pub(crate) fn print_policy_diagnostics() -> bool {
                     println!("  Disable commands: enabled");
                 }
                 if let Some(diagnostic) = absolute_command_policy_diagnostic(&policy) {
+                    println!("  {diagnostic}");
+                }
+                if let Some(diagnostic) = exclusive_capture_policy_diagnostic(&policy) {
                     println!("  {diagnostic}");
                 }
                 if policy.disable_hotkeys {

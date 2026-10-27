@@ -1228,6 +1228,16 @@ timeout_ms = 1000
     }
 
     #[test]
+    fn exclusive_capture_requirement_accepts_ibus_capture() {
+        let adapter = policy_adapter(OrganizationPolicy {
+            safe_mode: true,
+            require_exclusive_capture: true,
+            ..Default::default()
+        });
+        assert!(adapter.capability_block().is_none());
+    }
+
+    #[test]
     fn ibus_route_does_not_claim_atomic_replacement() {
         assert!(!injector_capabilities().atomic_replace);
         assert_eq!(

@@ -64,6 +64,10 @@ disable_template_env = false
 # Require a backend with a protocol-level atomic replacement transaction
 require_atomic_replace = false
 
+# Require capture to intercept physical keys before they reach the application.
+# This is separate from atomic replacement and rules out non-exclusive evdev.
+require_exclusive_capture = false
+
 # Minimum replacement guarantee (unset = no requirement):
 #   "best-effort"  erase by key events without seeing the target's text
 #   "verified"     erase only after the target's surrounding text confirms
@@ -104,10 +108,12 @@ When `safe_mode = true`:
 - Policy violations **prevent** expansions from executing
 - Violations logged as **errors** to journald
 - Suitable for locked-down production environments
-- `require_atomic_replace`, `minimum_replacement_guarantee`, and
-  `require_sensitive_focus` reject startup before capture begins when the
-  selected source/backend cannot provide the guarantee. libei and wlroots
-  output are `best-effort`, IBus is `verified`, input-method-v2 is `atomic`
+- `require_atomic_replace`, `minimum_replacement_guarantee`,
+  `require_exclusive_capture`, and `require_sensitive_focus` reject startup
+  before capture begins when the selected source/backend cannot provide the
+  guarantee. `require_exclusive_capture` independently rejects evdev; libei
+  and wlroots output are `best-effort`, IBus is `verified`, and input-method-v2
+  is `atomic`.
 - Blocks: commands, hotkeys, title matching, oversized replacements, disallowed backends, unverified inserts (with `require_verified_insert_target`)
 - Can require absolute command paths so `program = "git"` is rejected
 
@@ -166,6 +172,7 @@ disable_hotkeys = true
 require_absolute_commands = true
 disable_title_matching = false
 require_atomic_replace = true
+require_exclusive_capture = true
 require_sensitive_focus = true
 require_verified_insert_target = true
 max_replacement_size = 1024
@@ -191,6 +198,7 @@ disable_hotkeys = false
 require_absolute_commands = true
 disable_title_matching = false
 require_atomic_replace = true
+require_exclusive_capture = true
 require_sensitive_focus = true
 max_replacement_size = 65536
 allowed_backends = ["input-method-v2"]

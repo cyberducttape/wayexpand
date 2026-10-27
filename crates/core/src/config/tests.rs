@@ -718,6 +718,40 @@ fn capability_requirements_distinguish_atomic_and_sensitive_guarantees() {
 }
 
 #[test]
+fn exclusive_capture_requirement_is_independent_and_enforced_only_in_safe_mode() {
+    let policy = OrganizationPolicy {
+        safe_mode: true,
+        require_exclusive_capture: true,
+        ..OrganizationPolicy::default()
+    };
+    let injector = crate::InjectorCapabilities {
+        atomic_replace: true,
+        replacement_guarantee: crate::ReplacementGuarantee::Atomic,
+        ..crate::InjectorCapabilities::default()
+    };
+    assert_eq!(
+        policy
+            .capability_violation_for_source(injector, crate::InputSourceCapabilities::EVDEV)
+            .as_deref(),
+        Some("selected input source cannot capture keyboard input exclusively")
+    );
+    assert!(policy
+        .capability_violation_for_source(injector, crate::InputSourceCapabilities::INPUT_METHOD_V2,)
+        .is_none());
+
+    let audit = OrganizationPolicy {
+        safe_mode: false,
+        ..policy.clone()
+    };
+    assert!(
+        !audit
+            .effective_enforcement_policy()
+            .require_exclusive_capture
+    );
+    assert!(audit.is_active());
+}
+
+#[test]
 fn minimum_replacement_guarantee_is_ordered_and_enforced_in_safe_mode() {
     use crate::ReplacementGuarantee::*;
     assert!(Unsupported < BestEffort && BestEffort < VerifiedSurroundingText);

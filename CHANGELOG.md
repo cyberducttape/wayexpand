@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add a safe-mode policy requiring exclusive keyboard capture independently
+  of atomic replacement, and apply it consistently to daemon startup,
+  IBus, setup recommendations, and CLI diagnostics.
 - Explain in the route dashboard that physical typing during best-effort
   keystroke replacement can corrupt surrounding text or leave a partial trigger.
 - Mark connected non-exclusive capture as limited, and unknown exclusivity as

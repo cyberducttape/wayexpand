@@ -714,6 +714,44 @@ mod tests {
     }
 
     #[test]
+    fn managed_capture_requirements_filter_setup_routes_independently() {
+        let policy = wayexpand_core::OrganizationPolicy {
+            safe_mode: true,
+            require_exclusive_capture: true,
+            ..wayexpand_core::OrganizationPolicy::default()
+        };
+        assert!(setup_backend_allowed(&policy, "input-method"));
+        assert!(setup_backend_allowed(&policy, "ibus"));
+        assert!(!setup_backend_allowed(&policy, "evdev"));
+
+        let evdev = catalog_for_tests()
+            .iter()
+            .find(|route| route.id == "kde-evdev-libei")
+            .unwrap();
+        assert!(!route_allowed_by_policy(&policy, evdev));
+
+        // Audit mode reports but does not enforce the requirement.
+        let audit = wayexpand_core::OrganizationPolicy {
+            safe_mode: false,
+            allowed_backends: vec!["input-method-v2".into()],
+            ..policy
+        };
+        assert!(setup_backend_allowed(&audit, "evdev"));
+    }
+
+    #[test]
+    fn atomic_capture_policy_also_filters_best_effort_setup_routes() {
+        let policy = wayexpand_core::OrganizationPolicy {
+            safe_mode: true,
+            require_atomic_replace: true,
+            ..wayexpand_core::OrganizationPolicy::default()
+        };
+        assert!(!setup_backend_allowed(&policy, "evdev"));
+        assert!(!setup_backend_allowed(&policy, "ibus"));
+        assert!(setup_backend_allowed(&policy, "input-method"));
+    }
+
+    #[test]
     fn recommended_routes_have_complete_operator_contracts() {
         let route = recommended_route(&capabilities(false, false, false), true, allow_all)
             .expect("IBus is recommended when it is the only route");

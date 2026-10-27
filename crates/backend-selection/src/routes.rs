@@ -292,10 +292,11 @@ pub fn plan_routes(
 }
 
 pub fn setup_backend_allowed(policy: &wayexpand_core::OrganizationPolicy, backend: &str) -> bool {
+    use wayexpand_core::{InjectorCapabilities, InputSourceCapabilities, ReplacementGuarantee};
+    let enforcement = policy.effective_enforcement_policy();
     match backend {
         "ibus" => {
-            let enforcement = policy.effective_enforcement_policy();
-            policy.backend_allowed(wayexpand_backend_ibus::IBUS_BACKEND_NAME)
+            enforcement.backend_allowed(wayexpand_backend_ibus::IBUS_BACKEND_NAME)
                 && enforcement
                     .capability_violation_for_source(
                         wayexpand_backend_ibus::injector_capabilities(),
@@ -303,8 +304,31 @@ pub fn setup_backend_allowed(policy: &wayexpand_core::OrganizationPolicy, backen
                     )
                     .is_none()
         }
-        "input-method" => policy.backend_allowed("input-method-v2"),
-        "evdev" => policy.backend_allowed("libei"),
+        "input-method" => {
+            let injector = InjectorCapabilities {
+                atomic_replace: true,
+                replacement_guarantee: ReplacementGuarantee::Atomic,
+                full_unicode: true,
+                ..InjectorCapabilities::default()
+            };
+            enforcement.backend_allowed("input-method-v2")
+                && enforcement
+                    .capability_violation_for_source(
+                        injector,
+                        InputSourceCapabilities::INPUT_METHOD_V2,
+                    )
+                    .is_none()
+        }
+        "evdev" => {
+            let injector = InjectorCapabilities {
+                replacement_guarantee: ReplacementGuarantee::BestEffort,
+                ..InjectorCapabilities::default()
+            };
+            enforcement.backend_allowed("libei")
+                && enforcement
+                    .capability_violation_for_source(injector, InputSourceCapabilities::EVDEV)
+                    .is_none()
+        }
         _ => false,
     }
 }
