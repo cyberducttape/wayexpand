@@ -426,6 +426,31 @@ fn matcher_playground_gui_applies_one_rewrite_per_typed_trigger() {
 }
 
 #[test]
+fn matcher_preview_explains_that_existing_text_is_preserved() {
+    for (language, clear_label, behavior_copy) in [
+        (
+            Language::English,
+            "Clear preview",
+            "surrounding preview text",
+        ),
+        (
+            Language::German,
+            "Vorschau leeren",
+            "umgebenden Vorschautext",
+        ),
+        (
+            Language::Indonesian,
+            "Hapus pratinjau",
+            "teks pratinjau di sekitarnya",
+        ),
+    ] {
+        let strings = Strings::new(language);
+        assert_eq!(strings.clear(), clear_label);
+        assert!(strings.try_live_help().contains(behavior_copy));
+    }
+}
+
+#[test]
 fn editor_preview_returns_safe_template_validation_errors() {
     let path = std::env::temp_dir().join(format!(
         "wayexpand-gui-preview-invalid-{}.toml",

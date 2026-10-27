@@ -417,9 +417,9 @@ impl Strings {
 
     pub fn try_live_help(&self) -> &'static str {
         match self.lang {
-            Language::English => "Tests the current draft and library matching only — not desktop integration. It does not test capture, focus, portals, sensitive fields, or insertion; command snippets are not run.",
-            Language::Indonesian => "Hanya menguji pencocokan draf saat ini dan pustaka — bukan integrasi desktop. Tidak menguji tangkapan, fokus, portal, kolom sensitif, atau penyisipan; cuplikan perintah tidak dijalankan.",
-            Language::German => "Testet nur das Matching des aktuellen Entwurfs und der Bibliothek — keine Desktop-Integration. Erfassung, Fokus, Portale, sensible Felder und Einfügen werden nicht getestet; Befehls-Snippets laufen nicht.",
+            Language::English => "Tests the current draft and library matching only — not desktop integration. It does not test capture, focus, portals, sensitive fields, or insertion; command snippets are not run. Expansions replace only their trigger and keep surrounding preview text. Clear the preview to start over.",
+            Language::Indonesian => "Hanya menguji pencocokan draf saat ini dan pustaka — bukan integrasi desktop. Tidak menguji tangkapan, fokus, portal, kolom sensitif, atau penyisipan; cuplikan perintah tidak dijalankan. Ekspansi hanya mengganti pemicunya dan mempertahankan teks pratinjau di sekitarnya. Hapus pratinjau untuk memulai lagi.",
+            Language::German => "Testet nur das Matching des aktuellen Entwurfs und der Bibliothek — keine Desktop-Integration. Erfassung, Fokus, Portale, sensible Felder und Einfügen werden nicht getestet; Befehls-Snippets laufen nicht. Erweiterungen ersetzen nur ihren Auslöser und behalten den umgebenden Vorschautext bei. Vorschau leeren, um neu zu beginnen.",
         }
     }
 
@@ -447,9 +447,9 @@ impl Strings {
 
     pub fn try_live_hint(&self) -> &'static str {
         match self.lang {
-            Language::English => "Type a trigger and watch it expand…",
-            Language::Indonesian => "Ketik pemicu dan lihat hasil ekspansinya…",
-            Language::German => "Tippen Sie einen Auslöser und sehen Sie zu…",
+            Language::English => "Type a trigger; surrounding text stays…",
+            Language::Indonesian => "Ketik pemicu; teks di sekitarnya tetap ada…",
+            Language::German => "Auslöser tippen; umgebender Text bleibt…",
         }
     }
 
@@ -480,9 +480,9 @@ impl Strings {
 
     pub fn clear(&self) -> &'static str {
         match self.lang {
-            Language::English => "Clear",
-            Language::Indonesian => "Bersihkan",
-            Language::German => "Leeren",
+            Language::English => "Clear preview",
+            Language::Indonesian => "Hapus pratinjau",
+            Language::German => "Vorschau leeren",
         }
     }
 
