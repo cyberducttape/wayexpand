@@ -210,7 +210,10 @@ activate_client() {
 # The "user" types TEXT into the focused client; wait for EXPECTED.
 client_types() {
     "$bin/wx-e2e-type" text "$3" >>"$case_dir/type.log" 2>&1 &&
-        wait_until 50 client_text_is "$1" "$2"
+        # Each AT-SPI refresh starts a helper process and may wait on a
+        # desktop-bus round trip. Limit retries so expected refusals do not
+        # turn into dozens of unnecessary refreshes.
+        wait_until 10 client_text_is "$1" "$2"
 }
 
 expand_in_client() {
@@ -331,7 +334,16 @@ cert_target_closes_during_expansion() {
     activate_client "$1" || return 2
     sleep 0.5
     expand_in_client "$1" "" ";slow" || return 2
-    kill "$client_pid" 2>/dev/null
+    # Some desktop clients (notably Kate) hand the document to a detached
+    # process, so killing the launcher PID does not close the target window.
+    # Reap every process carrying this case's private XDG_CONFIG_HOME and
+    # require it to disappear before checking that the pending result did not
+    # leak into the other window.
+    reap_case_clients
+    if ! wait_until 30 no_case_clients; then
+        printf 'target client remained alive after termination'
+        return 1
+    fi
     wait_until 30 sink_focused e2e-b || activate e2e-b || true
     sleep 3
     if ! daemon_alive; then
@@ -425,7 +437,10 @@ cert_daemon_restart_during_typing() {
 # Returns 0 for exact text, 4 for a clean refusal, 1 otherwise.
 insert_or_refuse() {
     expand_in_client "$1" "" "$2" || return 2
-    if wait_until 50 client_text_is "$1" "$3"; then
+    # AT-SPI requests start a Python process and can take close to a second
+    # for desktop applications. Ten checks is ample for an insertion result
+    # and avoids keeping each expected refusal in a 50-check polling loop.
+    if wait_until 10 client_text_is "$1" "$3"; then
         return 0
     fi
     client_text_is "$1" "$2" && return 4

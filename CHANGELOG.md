@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Corrected KWin certification client-close coverage: detached client processes
+  are terminated and verified stopped before the focus-change safety assertion.
+  Reduced AT-SPI polling retries in text-entry and expected-refusal checks.
 - Exposed the shared ranked input-route plan in `wayexpand setup`, GUI
   diagnostics, and `wayexpand doctor --json`, including policy standing,
   availability rationale, capture/injection modes, and catalog certification.
