@@ -176,6 +176,18 @@ fn status_json_preserves_types_and_ignores_banner() {
 }
 
 #[test]
+fn status_json_omits_ambiguous_duplicate_fields() {
+    let value = status_as_json(
+        "running\nstatus_schema=13\ndaemon_commit=real-build\ndaemon_commit=spoofed-build\npaused=false\npaused=true\n",
+    )
+    .unwrap();
+
+    assert_eq!(value["status_schema"], 13);
+    assert!(value.get("daemon_commit").is_none());
+    assert!(value.get("paused").is_none());
+}
+
+#[test]
 fn doctor_explains_verified_compatibility_and_blocked_insertion() {
     let insertion =
         |status: serde_json::Value| crate::doctor::status::insertion_from_status(&status);
