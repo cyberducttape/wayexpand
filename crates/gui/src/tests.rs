@@ -2550,3 +2550,34 @@ fn the_snippet_list_keeps_its_width_while_searching() {
     );
     let _ = fs::remove_dir_all(directory);
 }
+
+#[test]
+fn best_effort_route_explains_concurrent_typing_risk_in_all_languages() {
+    for language in [Language::English, Language::German, Language::Indonesian] {
+        let strings = crate::lang::Strings::new(language);
+        for assurance in [
+            runtime::ReplacementAssurance::FocusTrackedBestEffort,
+            runtime::ReplacementAssurance::Unverified,
+        ] {
+            let explanation = strings.replacement_explanation(assurance);
+            assert!(
+                explanation.contains("trigger")
+                    || explanation.contains("Auslösers")
+                    || explanation.contains("pemicu"),
+                "explanation should describe the trigger: {language:?} {assurance:?}: {explanation}"
+            );
+            assert!(
+                explanation.contains("physical")
+                    || explanation.contains("physische")
+                    || explanation.contains("fisik"),
+                "explanation should describe concurrent physical input: {language:?} {assurance:?}: {explanation}"
+            );
+            assert!(
+                explanation.contains("delete")
+                    || explanation.contains("löschen")
+                    || explanation.contains("menghapus"),
+                "explanation should describe possible text corruption: {language:?} {assurance:?}: {explanation}"
+            );
+        }
+    }
+}
