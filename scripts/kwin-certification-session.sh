@@ -87,7 +87,7 @@ app_info() {
         password-field) app_kind=json app_class=wx-cert-password app_single_line=true ;;
         qt6-plaintextedit) app_kind=json app_class=wx-cert-qt ;;
         terminal-konsole) app_kind=tty app_class=org.kde.konsole ;;
-        text-editor-gedit) app_kind=atspi app_class=org.gnome.gedit app_atspi=gedit ;;
+        text-editor-gedit) app_kind=atspi app_class=gedit app_atspi=gedit ;;
         qt6-editor-kate) app_kind=atspi app_class=org.kde.kate app_atspi=kate ;;
         *) return 1 ;;
     esac
@@ -128,6 +128,34 @@ client_describe() {
 }
 
 client_pid=
+
+# Kate detaches from the shell that starts it, so $client_pid can miss the
+# real client. Every client of a case runs with that case's XDG_CONFIG_HOME;
+# stop whatever still carries it.
+# Editors with an unsaved document can outlive SIGTERM, so survivors get
+# SIGKILL.
+case_client_pids() {
+    for pid in $(ps -u "$(id -u)" -o pid=); do
+        if { tr '\0' '\n' <"/proc/$pid/environ"; } 2>/dev/null |
+            grep -Fqx "XDG_CONFIG_HOME=$case_dir/xdg/config"; then
+            printf '%s\n' "$pid"
+        fi
+    done
+}
+
+no_case_clients() {
+    [ -z "$(case_client_pids)" ]
+}
+
+reap_case_clients() {
+    for pid in $(case_client_pids); do
+        kill "$pid" 2>/dev/null || true
+    done
+    wait_until 10 no_case_clients && return 0
+    for pid in $(case_client_pids); do
+        kill -KILL "$pid" 2>/dev/null || true
+    done
+}
 
 start_client() {
     app_info "$1" || return 1
@@ -565,6 +593,7 @@ for app do
         "$function_name" "$app" >"$case_dir/detail" 2>>"$case_dir/scenario.log"
         code=$?
         end_case
+        reap_case_clients
         detail=$(tr '\n' ' ' <"$case_dir/detail" | cut -c 1-400)
         case "$code" in
             0) outcome=pass ;;
