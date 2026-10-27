@@ -5854,6 +5854,41 @@ fn unreleased_deferred_result_is_not_matched_again_by_following_input() {
 }
 
 #[test]
+fn adjacent_static_triggers_do_not_repeat_while_output_is_pending() {
+    // Reproduce the reported sequence: two static snippets are typed back to
+    // back, then the delimiter arrives while the second replacement is still
+    // being injected. The first trigger must not be replayed as context, and
+    // the second one must not fire a second time on the delimiter.
+    let config = Config::parse(
+        r#"
+        [[expansion]]
+        trigger = ".ssl"
+        replacement = "Apache rewrite configuration"
+
+        [[expansion]]
+        trigger = ".clarity"
+        replacement = "ran updates, sent welcome email, setup"
+        "#,
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+
+    let first = engine.process_deferred(InputEvent::Text(".ssl".into()));
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].trigger, ".ssl");
+
+    let second = engine.process_deferred(InputEvent::Text(".clarity".into()));
+    assert_eq!(second.len(), 1);
+    assert_eq!(second[0].trigger, ".clarity");
+
+    // The output worker has not released the pending reservation yet.
+    // Typing the space must not schedule `.clarity` again.
+    assert!(engine
+        .process_deferred(InputEvent::Text(" ".into()))
+        .is_empty());
+}
+
+#[test]
 fn failed_command_trigger_is_not_matched_again_by_following_input() {
     // A timed-out command restores its trigger; the next trigger's first
     // character must not complete it again and rerun the command.

@@ -18,12 +18,13 @@ All notable changes to WayExpand are documented here.
 - Stabilized the asynchronous command metrics regression test: it now waits
   for both worker counters and delivered failure events, avoiding a timing
   race where counters advanced before completions reached the engine.
-- Fixed deferred command matching when a single text event contains both a
-  command trigger and following characters. Stale command triggers now return
-  to matcher context in the original input order and cannot be run again by
-  the next keystroke. Prometheus output now uses an exclusive, random sibling
-  file, syncs the replacement, and safely replaces an existing symlink rather
-  than following it.
+- Fixed deferred matching so an expansion whose output is still pending is
+  restored as context, not matched a second time by the next keystroke. This
+  prevents duplicate output for adjacent static snippets as well as rerunning
+  stale or failed command triggers. A regression now covers two adjacent
+  static snippets followed by a delimiter. Prometheus output also uses an
+  exclusive, random sibling file, syncs the replacement, and safely replaces
+  an existing symlink rather than following it.
 - Added the `ops-triage` example pack: twelve insert-only snippets for
   read-only first response (TLS expiry, certificate files, disk, memory,
   listening sockets, DNS, HTTP timing, nginx and firewall checks, failed
