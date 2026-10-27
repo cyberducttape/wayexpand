@@ -16,7 +16,7 @@ grep -F -- 'push_status=$?' "$workflow" >/dev/null
 grep -F -- "$expected_group" "$workflow" >/dev/null
 grep -F -- 'cancel-in-progress: false' "$workflow" >/dev/null
 # The job also vendors and publishes the launchpad-vendored build branch.
-grep -F -- 'timeout-minutes: 45' "$workflow" >/dev/null
+grep -F -- 'timeout-minutes: 60' "$workflow" >/dev/null
 grep -F -- "$main_guard" "$workflow" >/dev/null
 grep -F -- "$tag_message" "$workflow" >/dev/null
 grep -F -- "$main_lease" "$workflow" >/dev/null
@@ -69,7 +69,9 @@ publish_step="- name: Publish the vendored Launchpad build branch"
 publish_line=$(grep -nF -- "$publish_step" "$workflow" | cut -d: -f1)
 test -n "$publish_line"
 sed -n "$((publish_line + 1))p" "$workflow" | grep -F -- "if: github.ref == 'refs/heads/main'" >/dev/null
-sed -n "$publish_line,\$p" "$workflow" | grep -F -- 'timeout --signal=TERM --kill-after=30s 15m' >/dev/null
+sed -n "$publish_line,\$p" "$workflow" | grep -F -- 'timeout --signal=TERM --kill-after=30s 10m' >/dev/null
 sed -n "$publish_line,\$p" "$workflow" | grep -F -- 'bash scripts/publish-launchpad-branch.sh' >/dev/null
+sed -n "$publish_line,\$p" "$workflow" | grep -F -- 'for attempt in 1 2 3 4 5; do' >/dev/null
+sed -n "$publish_line,\$p" "$workflow" | grep -F -- 'if [ "$attempt" -lt 5 ]; then' >/dev/null
 
 printf '%s\n' 'Launchpad workflow safety contract passed'
