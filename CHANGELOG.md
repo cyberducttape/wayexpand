@@ -9,7 +9,8 @@ All notable changes to WayExpand are documented here.
   malformed status can no longer spoof pause, health, or capability values in
   the line-oriented diagnostics protocol.
 - Launchpad synchronization now retries its SSH authorization probe on
-  transient failures before giving up; pushes already had bounded retries.
+  transient failures before giving up, and retries remote branch and tag
+  lookups so a temporary path-translation failure cannot bypass push retries.
 - Shell validation now checks the workflow retry assertion without triggering
   ShellCheck's warning about intentional literal shell syntax.
 - Backup creation now compares the copied bytes against the opened source, so

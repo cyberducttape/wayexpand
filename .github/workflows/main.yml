@@ -80,6 +80,25 @@ jobs:
           set -euo pipefail
           git remote add launchpad \
             ssh://cyberducttape@git.launchpad.net/~cyberducttape/+git/wayexpand
+          retry_ls_remote() {
+            local attempt output query_status
+            for attempt in 1 2 3; do
+              set +e
+              output="$(timeout --signal=TERM --kill-after=15s 90s \
+                git ls-remote "$@")"
+              query_status=$?
+              set -e
+              if [ "$query_status" -eq 0 ]; then
+                printf '%s\n' "$output"
+                return 0
+              fi
+              if [ "$attempt" -lt 3 ]; then
+                echo "Launchpad ref query attempt $attempt failed with status $query_status; retrying." >&2
+                sleep $((attempt * 10))
+              fi
+            done
+            return 1
+          }
           retry_push() {
             local attempt
             for attempt in 1 2 3; do
@@ -106,7 +125,7 @@ jobs:
             # repairs a deliberate GitHub history rewrite (for example, when
             # commit identities are normalized) while refusing to overwrite a
             # Launchpad update that races the read below.
-            launchpad_main="$(git ls-remote launchpad refs/heads/main \
+            launchpad_main="$(retry_ls_remote launchpad refs/heads/main \
               | awk 'NR == 1 { print $1 }')"
             if [ -n "$launchpad_main" ]; then
               retry_push launchpad \
@@ -123,7 +142,7 @@ jobs:
           # per historical tag made this job unnecessarily slow and could
           # leave a successful mirror looking hung on Launchpad.
           remote_tags="$RUNNER_TEMP/wayexpand-launchpad-tags.txt"
-          git ls-remote --tags launchpad >"$remote_tags"
+          retry_ls_remote --tags launchpad >"$remote_tags"
           tag_pushes=()
           while IFS= read -r tag; do
             [ -n "$tag" ] || continue

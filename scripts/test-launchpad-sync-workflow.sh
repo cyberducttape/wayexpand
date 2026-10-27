@@ -32,6 +32,14 @@ sed -n "$probe_line,$((push_line - 1))p" "$workflow" | grep -F -- 'for attempt i
 sed -n "$probe_line,$((push_line - 1))p" "$workflow" | grep -F -- "sleep \$((attempt * 10))" >/dev/null
 sed -n "$probe_line,$((push_line - 1))p" "$workflow" | grep -F -- 'after three attempts' >/dev/null
 
+# A failed Launchpad ref lookup must be retried too; otherwise a transient
+# path-translation timeout exits before the branch and push retry loops.
+grep -F -- 'retry_ls_remote() {' "$workflow" >/dev/null
+grep -F -- 'retry_ls_remote launchpad refs/heads/main' "$workflow" >/dev/null
+grep -F -- 'retry_ls_remote --tags launchpad' "$workflow" >/dev/null
+grep -F -- "Launchpad ref query attempt \$attempt failed" "$workflow" >/dev/null
+grep -F -- 'timeout --signal=TERM --kill-after=15s 90s' "$workflow" >/dev/null
+
 # Both main push forms must remain inside the branch guard. The two push lines
 # must occur after the guard and before the tag-only branch, so nested `if`
 # blocks cannot accidentally move one of them outside the protection.
