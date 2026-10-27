@@ -16,6 +16,11 @@ All notable changes to WayExpand are documented here.
 - The installed KWin certification harness keeps its temporary configuration
   under a private runtime directory. Group-writable cache ancestors no longer
   make isolated daemon scenarios fail their secure configuration-path check.
+- Preserved the clean-source `doctor --certify --json` report for commit
+  `27b0a6c7db6b`. All 12 exercised checks passed on private headless KWin 6.6.6;
+  keysym-fallback p95 latency was 12,581 µs. Keyboard capture, Unicode
+  insertion, and suspend/resume remain untested, so this is partial
+  compatibility evidence rather than production certification.
 - Escaped control characters in the daemon's reported configuration path and
   made duplicate status fields unavailable to consumers. Custom filenames or
   malformed status can no longer spoof pause, health, or capability values in

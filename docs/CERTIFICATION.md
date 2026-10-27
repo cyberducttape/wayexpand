@@ -268,6 +268,16 @@ capture and client paint. Unicode insertion, physical keyboard capture, and
 suspend/resume remain explicitly untested. This partial report does not
 describe or certify the active desktop.
 
+[`evidence/doctor-certify-2026-10-26.json`](evidence/doctor-certify-2026-10-26.json)
+records a clean-source run from commit `27b0a6c7db6b` on KWin 6.6.6. The
+isolated clients passed all 12 exercised insertion, focus, reload, restart,
+refusal, and build-identity checks. The route used libei keysym fallback with
+12 ms pacing; 20 small replacements measured 12,504 µs p50, 12,581 µs p95,
+and 12,581 µs p99 inside the injector. Unicode insertion, physical keyboard
+capture, and suspend/resume remain untested. This is partial headless
+compatibility evidence, not production certification or evidence about the
+active desktop.
+
 [`evidence/doctor-certify-1a274fbd6fa7.json`](evidence/doctor-certify-1a274fbd6fa7.json)
 preserves the current-source report from commit `1a274fbd6fa7` on KWin 6.6.6.
 The isolated clients passed 12 insertion, focus, reload, restart, refusal, and
