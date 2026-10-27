@@ -3,7 +3,7 @@
 [![CI](https://github.com/cyberducttape/wayexpand/actions/workflows/ci.yml/badge.svg)](https://github.com/cyberducttape/wayexpand/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/cyberducttape/wayexpand?label=release)](https://github.com/cyberducttape/wayexpand/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.95%2B-orange.svg)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/rust-1.92%2B-orange.svg)](https://www.rust-lang.org/)
 
 ## Type less. Keep your words local.
 
@@ -85,7 +85,7 @@ it is not compositor-certified. Check the PPA page for current package status.
 
 ### From source
 
-Rust 1.95 or newer:
+Rust 1.92 or newer:
 
 ```sh
 git clone https://github.com/cyberducttape/wayexpand
