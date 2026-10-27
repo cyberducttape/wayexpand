@@ -234,9 +234,11 @@ impl GuiApp {
                 palette,
                 self.strings.capture_availability_label(),
                 assessment.capture,
-                &self
-                    .strings
-                    .capture_assessment_detail(self.route_state, source),
+                &self.strings.capture_assessment_detail(
+                    self.route_state,
+                    source,
+                    capabilities.and_then(|caps| caps.capture_exclusive),
+                ),
                 &self.strings,
             );
             render_assessment_row(

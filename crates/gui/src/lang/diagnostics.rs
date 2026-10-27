@@ -106,21 +106,50 @@ impl Strings {
         &self,
         state: Option<crate::runtime::RouteState>,
         source: &str,
+        exclusive: Option<bool>,
     ) -> String {
-        match (self.lang, state) {
-            (Language::English, Some(wayexpand_core::DaemonRouteState::Connected)) => {
-                format!("Active capture route {source} is connected.")
+        match (self.lang, state, exclusive) {
+            (Language::English, Some(wayexpand_core::DaemonRouteState::Connected), Some(true)) => {
+                format!("Active capture route {source} is connected and captures keys exclusively.")
             }
-            (Language::Indonesian, Some(wayexpand_core::DaemonRouteState::Connected)) => {
-                format!("Rute tangkap aktif {source} terhubung.")
+            (Language::English, Some(wayexpand_core::DaemonRouteState::Connected), Some(false)) => {
+                format!("Active capture route {source} is connected but non-exclusive; keys reach the app before WayExpand can react.")
             }
-            (Language::German, Some(wayexpand_core::DaemonRouteState::Connected)) => {
-                format!("Aktive Eingaberoute {source} ist verbunden.")
+            (Language::English, Some(wayexpand_core::DaemonRouteState::Connected), None) => {
+                format!("Active capture route {source} is connected; capture exclusivity is unreported.")
             }
-            (_, Some(wayexpand_core::DaemonRouteState::PermissionRequired)) => {
+            (
+                Language::Indonesian,
+                Some(wayexpand_core::DaemonRouteState::Connected),
+                Some(true),
+            ) => {
+                format!(
+                    "Rute tangkap aktif {source} terhubung dan menangkap tombol secara eksklusif."
+                )
+            }
+            (
+                Language::Indonesian,
+                Some(wayexpand_core::DaemonRouteState::Connected),
+                Some(false),
+            ) => {
+                format!("Rute tangkap aktif {source} terhubung tetapi tidak eksklusif; tombol mencapai aplikasi sebelum WayExpand dapat merespons.")
+            }
+            (Language::Indonesian, Some(wayexpand_core::DaemonRouteState::Connected), None) => {
+                format!("Rute tangkap aktif {source} terhubung; status eksklusivitas tangkapan tidak dilaporkan.")
+            }
+            (Language::German, Some(wayexpand_core::DaemonRouteState::Connected), Some(true)) => {
+                format!("Aktive Eingaberoute {source} ist verbunden und erfasst Tasten exklusiv.")
+            }
+            (Language::German, Some(wayexpand_core::DaemonRouteState::Connected), Some(false)) => {
+                format!("Aktive Eingaberoute {source} ist verbunden, erfasst aber nicht exklusiv; Tasten erreichen die Anwendung, bevor WayExpand reagieren kann.")
+            }
+            (Language::German, Some(wayexpand_core::DaemonRouteState::Connected), None) => {
+                format!("Aktive Eingaberoute {source} ist verbunden; die Exklusivität der Erfassung ist nicht bekannt.")
+            }
+            (_, Some(wayexpand_core::DaemonRouteState::PermissionRequired), _) => {
                 self.permission_required_route_detail(source)
             }
-            (_, Some(wayexpand_core::DaemonRouteState::PortalRevoked)) => {
+            (_, Some(wayexpand_core::DaemonRouteState::PortalRevoked), _) => {
                 self.portal_revoked_route_detail(source)
             }
             (
@@ -130,6 +159,7 @@ impl Strings {
                     | wayexpand_core::DaemonRouteState::Starting
                     | wayexpand_core::DaemonRouteState::Degraded,
                 ),
+                _,
             ) => {
                 format!("Capture route {source} is not fully available yet.")
             }
@@ -140,6 +170,7 @@ impl Strings {
                     | wayexpand_core::DaemonRouteState::Starting
                     | wayexpand_core::DaemonRouteState::Degraded,
                 ),
+                _,
             ) => {
                 format!("Rute tangkap {source} belum sepenuhnya tersedia.")
             }
@@ -150,6 +181,7 @@ impl Strings {
                     | wayexpand_core::DaemonRouteState::Starting
                     | wayexpand_core::DaemonRouteState::Degraded,
                 ),
+                _,
             ) => {
                 format!("Eingaberoute {source} ist noch nicht vollständig verfügbar.")
             }
@@ -160,6 +192,7 @@ impl Strings {
                     | wayexpand_core::DaemonRouteState::Failed
                     | wayexpand_core::DaemonRouteState::Stopped,
                 ),
+                _,
             ) => {
                 format!("Capture route {source} cannot currently run.")
             }
@@ -170,6 +203,7 @@ impl Strings {
                     | wayexpand_core::DaemonRouteState::Failed
                     | wayexpand_core::DaemonRouteState::Stopped,
                 ),
+                _,
             ) => {
                 format!("Rute tangkap {source} tidak dapat berjalan saat ini.")
             }
@@ -180,14 +214,17 @@ impl Strings {
                     | wayexpand_core::DaemonRouteState::Failed
                     | wayexpand_core::DaemonRouteState::Stopped,
                 ),
+                _,
             ) => {
                 format!("Eingaberoute {source} kann derzeit nicht ausgeführt werden.")
             }
-            (Language::English, None) => {
+            (Language::English, None, _) => {
                 "The daemon has not reported an active capture route.".into()
             }
-            (Language::Indonesian, None) => "Daemon belum melaporkan rute tangkap aktif.".into(),
-            (Language::German, None) => "Der Daemon hat keine aktive Eingaberoute gemeldet.".into(),
+            (Language::Indonesian, None, _) => "Daemon belum melaporkan rute tangkap aktif.".into(),
+            (Language::German, None, _) => {
+                "Der Daemon hat keine aktive Eingaberoute gemeldet.".into()
+            }
         }
     }
 

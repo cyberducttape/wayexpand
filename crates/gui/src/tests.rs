@@ -2581,3 +2581,27 @@ fn best_effort_route_explains_concurrent_typing_risk_in_all_languages() {
         }
     }
 }
+
+#[test]
+fn connected_nonexclusive_capture_is_explained_in_all_languages() {
+    for language in [Language::English, Language::German, Language::Indonesian] {
+        let strings = crate::lang::Strings::new(language);
+        let detail = strings.capture_assessment_detail(
+            Some(runtime::RouteState::Connected),
+            "evdev",
+            Some(false),
+        );
+        assert!(
+            detail.contains("non-exclusive")
+                || detail.contains("nicht exklusiv")
+                || detail.contains("tidak eksklusif"),
+            "detail should identify non-exclusive capture: {language:?}: {detail}"
+        );
+        assert!(
+            detail.contains("reach the app")
+                || detail.contains("erreichen die Anwendung")
+                || detail.contains("mencapai aplikasi"),
+            "detail should explain delivery to the app: {language:?}: {detail}"
+        );
+    }
+}

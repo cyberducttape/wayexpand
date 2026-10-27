@@ -40,9 +40,15 @@ pub(crate) fn assess_route(
     use crate::runtime::ReplacementAssurance;
     use AssessmentState::{Blocked, Ready, Unknown, Warning};
 
-    let capture = match (daemon_reachable, route_state) {
-        (Some(false), _) => Blocked,
-        (_, Some(crate::runtime::RouteState::Connected)) => Ready,
+    let capture = match (
+        daemon_reachable,
+        route_state,
+        capabilities.and_then(|caps| caps.capture_exclusive),
+    ) {
+        (Some(false), _, _) => Blocked,
+        (_, Some(crate::runtime::RouteState::Connected), Some(true)) => Ready,
+        (_, Some(crate::runtime::RouteState::Connected), Some(false)) => Warning,
+        (_, Some(crate::runtime::RouteState::Connected), None) => Unknown,
         (
             _,
             Some(
@@ -52,6 +58,7 @@ pub(crate) fn assess_route(
                 | crate::runtime::RouteState::Failed
                 | crate::runtime::RouteState::Stopped,
             ),
+            _,
         ) => Blocked,
         (
             _,
@@ -60,6 +67,7 @@ pub(crate) fn assess_route(
                 | crate::runtime::RouteState::Starting
                 | crate::runtime::RouteState::Degraded,
             ),
+            _,
         ) => Warning,
         _ => Unknown,
     };
@@ -450,6 +458,7 @@ mod tests {
 
         let mut capabilities = DaemonCapabilities {
             replacement_assurance: Some(ReplacementAssurance::Verified),
+            capture_exclusive: Some(true),
             window_tracker_connected: Some(true),
             window_identity_exact: Some(true),
             inject_full_unicode: Some(true),
@@ -465,6 +474,26 @@ mod tests {
         assert_eq!(ready.insertion, Ready);
         assert_eq!(ready.permissions, Ready);
         assert_eq!(ready.focus, Ready);
+
+        capabilities.capture_exclusive = Some(false);
+        let nonexclusive_capture = super::assess_route(
+            Some(true),
+            Some(RouteState::Connected),
+            Some(&capabilities),
+            "active route connected · evdev + libei",
+        );
+        assert_eq!(nonexclusive_capture.capture, Warning);
+
+        capabilities.capture_exclusive = None;
+        let unreported_capture = super::assess_route(
+            Some(true),
+            Some(RouteState::Connected),
+            Some(&capabilities),
+            "active route connected · unknown route",
+        );
+        assert_eq!(unreported_capture.capture, Unknown);
+
+        capabilities.capture_exclusive = Some(true);
 
         capabilities.inject_full_unicode = None;
         let unicode_unreported = super::assess_route(

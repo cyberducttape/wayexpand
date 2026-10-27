@@ -6,6 +6,8 @@ All notable changes to WayExpand are documented here.
 
 - Explain in the route dashboard that physical typing during best-effort
   keystroke replacement can corrupt surrounding text or leave a partial trigger.
+- Mark connected non-exclusive capture as limited, and unknown exclusivity as
+  unknown, in the route dashboard instead of presenting either as ready.
 - Include exclusive keyboard capture as a separate production-readiness
   capability and blocker; it is not implied by atomic replacement.
 - Ship the KWin E2E report helper beside the installed harness so
