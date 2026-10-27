@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Stabilized the asynchronous command metrics regression test: it now waits
+  for both worker counters and delivered failure events, avoiding a timing
+  race where counters advanced before completions reached the engine.
 - Fixed deferred command matching when a single text event contains both a
   command trigger and following characters. Stale command triggers now return
   to matcher context in the original input order and cannot be run again by

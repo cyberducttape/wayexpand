@@ -721,16 +721,21 @@ fn command_metrics_count_timeouts_and_failures() {
         .is_empty());
 
     let deadline = Instant::now() + Duration::from_secs(1);
+    let mut failures = Vec::new();
     loop {
         engine.drain_completed_commands();
+        failures.extend(engine.drain_command_failures());
         let metrics = engine.command_metrics();
-        if metrics.command_timeout_total == 1 && metrics.command_failure_total == 1 {
+        if metrics.command_timeout_total == 1
+            && metrics.command_failure_total == 1
+            && failures.contains(&CommandErrorKind::Timeout)
+            && failures.contains(&CommandErrorKind::NonZeroExit)
+        {
             break;
         }
         assert!(Instant::now() < deadline, "command metrics did not update");
         thread::sleep(Duration::from_millis(5));
     }
-    let failures = engine.drain_command_failures();
     assert!(failures.contains(&CommandErrorKind::Timeout));
     assert!(failures.contains(&CommandErrorKind::NonZeroExit));
 }
