@@ -640,6 +640,43 @@ mod tests {
     }
 
     #[test]
+    fn failed_clear_keeps_engine_buffered_events_for_persistence() {
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-usage-clear-engine-failure-{}-{suffix}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("usage-stats.json");
+        std::fs::create_dir(&path).unwrap();
+        let config = wayexpand_core::Config::parse(
+            "[[expansion]]\ntrigger = ':sig'\nreplacement = 'Best regards'\n",
+        )
+        .unwrap();
+        let snippet_id = config.expansion[0].id.clone();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let mut recorder = UsageRecorder::new(path.clone());
+        let mut results = engine.process(InputEvent::Text(":sig".into()));
+        results.extend(engine.process(InputEvent::EndOfInput));
+        engine.commit_applied_expansion(&results[0]);
+
+        assert!(recorder.clear_handle().unwrap().clear(&path).is_err());
+        std::fs::remove_dir(&path).unwrap();
+        recorder.collect(&mut engine);
+        recorder.request_shutdown();
+        recorder.wait_for_shutdown();
+
+        assert_eq!(
+            UsageStats::load(&path).unwrap().snippets[&snippet_id].count,
+            1
+        );
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
     fn shutdown_persists_promptly_while_a_clear_handle_is_alive() {
         let suffix = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
