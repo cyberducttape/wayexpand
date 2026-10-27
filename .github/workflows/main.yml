@@ -82,7 +82,7 @@ jobs:
             ssh://cyberducttape@git.launchpad.net/~cyberducttape/+git/wayexpand
           retry_ls_remote() {
             local attempt output query_status
-            for attempt in 1 2 3; do
+            for attempt in 1 2 3 4 5; do
               set +e
               output="$(timeout --signal=TERM --kill-after=15s 90s \
                 git ls-remote "$@")"
@@ -92,7 +92,7 @@ jobs:
                 printf '%s\n' "$output"
                 return 0
               fi
-              if [ "$attempt" -lt 3 ]; then
+              if [ "$attempt" -lt 5 ]; then
                 echo "Launchpad ref query attempt $attempt failed with status $query_status; retrying." >&2
                 sleep $((attempt * 10))
               fi
@@ -101,7 +101,7 @@ jobs:
           }
           retry_push() {
             local attempt
-            for attempt in 1 2 3; do
+            for attempt in 1 2 3 4 5; do
               set +e
               timeout --signal=TERM --kill-after=30s 5m git push "$@"
               push_status=$?
@@ -109,7 +109,7 @@ jobs:
               if [ "$push_status" -eq 0 ]; then
                 return 0
               fi
-              if [ "$attempt" -lt 3 ]; then
+              if [ "$attempt" -lt 5 ]; then
                 echo "Launchpad push attempt $attempt failed with status $push_status; retrying." >&2
                 sleep $((attempt * 10))
               fi

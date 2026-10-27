@@ -8,6 +8,8 @@ All notable changes to WayExpand are documented here.
   a descriptor-pinned action. This handles transient filesystem contention
   before a child starts without retrying other spawn failures or duplicating
   an action.
+- Increased Launchpad main-ref lookup and push retries to five bounded attempts
+  with backoff after repeated Launchpad ref-permission timeouts.
 - Preserved a 1,800-cell KWin 6.6.6 private real-client compatibility run for
   build `e075ddda6ada`: 187 cells passed, 40 password-field cells were
   unsupported by design, 1,573 remained unverified, and none failed. The
