@@ -90,6 +90,13 @@ run team/linked.toml
 expect_status 1
 expect_output 'symbolic-link inputs are not checked'
 rm team/linked.toml
+mkdir external
+cp team/support.toml external/hidden.toml
+ln -s ../external team/linked-dir
+run team
+expect_status 1
+expect_output 'contains symbolic links that may hide snippet files'
+rm team/linked-dir
 
 # An unsigned pack fails signature verification.
 : >"$repo/signers"

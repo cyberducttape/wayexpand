@@ -178,9 +178,9 @@ for path do
     fi
     if [ -d "$path" ]; then
         symlinks=$(find "$path" \( -name .git -o -name 'target*' -o -name node_modules \) -prune -o \
-            -type l -name '*.toml' -print)
+            -type l -print)
         if [ -n "$symlinks" ]; then
-            fail "$path" 'contains symlinked TOML files; replace them with regular files'
+            fail "$path" 'contains symbolic links that may hide snippet files; check a regular copy'
             continue
         fi
         spaced=$(find "$path" \( -name .git -o -name 'target*' -o -name node_modules \) -prune -o \

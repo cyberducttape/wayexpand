@@ -22,7 +22,8 @@ All notable changes to WayExpand are documented here.
   a composite GitHub Action (`action.yml`), and pre-commit hooks
   (`.pre-commit-hooks.yaml`). They validate snippet files and packs, verify
   pack signatures with `--signers`, and report risky triggers as warnings or,
-  with `--deny-risks`, failures, all without printing replacement text. See
+  with `--deny-risks`, failures, reject symlinked inputs or trees that could
+  hide snippets, all without printing replacement text. See
   `docs/SNIPPET_REPOSITORIES.md`.
 - `wayexpand validate` reports trigger risks, and `--deny-risks` makes them a
   configuration error. `validate --json` adds `trigger_risks` and
