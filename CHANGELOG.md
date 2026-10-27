@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Exercise back-to-back `.ssl` and `.clarity` expansions through the daemon's
+  serialized output worker, with the second trigger queued during the first
+  replacement, to guard against duplicate insertion.
 - Report the requested capture route accurately in private KWin E2E summaries;
   input-method-v2 probes are no longer mislabeled as simulated capture.
 - Made `wayexpand stats --clear` discard usage events that were still buffered

@@ -396,7 +396,9 @@ mod tests {
             let path = directory.join("expansions.toml");
             std::fs::write(
                 &path,
-                "[[expansion]]\ntrigger = \":x\"\nreplacement = \"value\"\n",
+                "[[expansion]]\ntrigger = \":x\"\nreplacement = \"value\"\n\
+                 [[expansion]]\ntrigger = \".ssl\"\nreplacement = \"Apache rewrite configuration\"\n\
+                 [[expansion]]\ntrigger = \".clarity\"\nreplacement = \"ran updates, sent welcome email, setup\"\n",
             )
             .unwrap();
             std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600))
@@ -597,6 +599,47 @@ mod tests {
             ["erase::a", "insert:first", "erase::b", "insert:second"]
         );
         assert!(harness.daemon.serialized_output(), "route stays connected");
+    }
+
+    #[test]
+    fn adjacent_triggers_queued_during_output_are_each_inserted_once() {
+        let mut harness = Harness::new(false);
+
+        // The first trigger starts a serialized replacement and blocks in the
+        // output worker. The second trigger is captured while that transaction
+        // is pending, so the reactor must process it only after the first
+        // result has been committed.
+        harness
+            .daemon
+            .start_evdev_output(InputEvent::Text(".ssl".into()))
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !harness.waiting.load(Ordering::Acquire) {
+            assert!(Instant::now() < deadline, "first replacement never started");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let queued_input = InputEvent::Text(".clarity".into());
+
+        harness.open_gate();
+        harness.run_until_resolved();
+        harness.daemon.start_evdev_output(queued_input).unwrap();
+        harness.run_until_resolved();
+        harness
+            .daemon
+            .start_evdev_output(InputEvent::Delimiter(' '))
+            .unwrap();
+
+        assert_eq!(
+            *harness.calls.lock().unwrap(),
+            [
+                "erase:.ssl",
+                "insert:Apache rewrite configuration",
+                "erase:.clarity",
+                "insert:ran updates, sent welcome email, setup",
+            ],
+            "each queued trigger must produce exactly one output transaction"
+        );
+        assert!(harness.daemon.pending_output.is_none());
     }
 
     #[test]
