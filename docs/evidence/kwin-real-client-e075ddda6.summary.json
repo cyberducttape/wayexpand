@@ -1,0 +1,68 @@
+{
+  "schema": 3,
+  "recorded_at_utc": "2026-10-27T08:33:18Z",
+  "compositor": "kde",
+  "compositor_version": "6.6.6",
+  "backend": "evdev+libei",
+  "keyboard_layout": "us,de,fr,altgr,multi-layout-switching",
+  "target_apps": [
+    "gtk3-textview",
+    "qt6-plaintextedit",
+    "terminal-konsole",
+    "password-field",
+    "text-editor-gedit",
+    "qt6-editor-kate",
+    "browser-firefox",
+    "electron-vscode"
+  ],
+  "wayexpand_commit": "e075ddda6ada",
+  "certified": false,
+  "status": "incomplete",
+  "certification_scope": "compatibility",
+  "backend_certification_eligible": false,
+  "backend_certification_block_reason": "evdev capture has no sensitive-field signal and cannot provide atomic replacement",
+  "driver": "scripts/kwin-certification-driver.sh",
+  "store": "kwin-real-client-e075ddda6.txt",
+  "note": "Private headless KWin sessions exercised real GTK, Qt, Konsole, gedit and Kate clients. Keyboard capture was simulated through stdin; this is compatibility evidence, not production certification. Live doctor and daemon snapshots are omitted because they describe the reporting workstation.",
+  "result_counts": {
+    "UNVERIFIED": 1573,
+    "pass": 187,
+    "unsupported-by-design": 40
+  },
+  "pass_by_scenario": {
+    "command-timeout": 24,
+    "config-reload": 24,
+    "daemon-restart": 24,
+    "daemon-restart-during-typing": 24,
+    "failed-insertion": 24,
+    "focus-cross-window": 23,
+    "multiline-rapid": 20,
+    "text-editor-client": 24
+  },
+  "layout_result_counts": {
+    "us": {
+      "UNVERIFIED": 305,
+      "pass": 47,
+      "unsupported-by-design": 8
+    },
+    "de": {
+      "UNVERIFIED": 305,
+      "pass": 47,
+      "unsupported-by-design": 8
+    },
+    "fr": {
+      "UNVERIFIED": 306,
+      "pass": 46,
+      "unsupported-by-design": 8
+    },
+    "altgr": {
+      "UNVERIFIED": 305,
+      "pass": 47,
+      "unsupported-by-design": 8
+    },
+    "multi-layout-switching": {
+      "UNVERIFIED": 352,
+      "unsupported-by-design": 8
+    }
+  }
+}

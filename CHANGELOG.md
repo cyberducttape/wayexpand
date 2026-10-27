@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Preserved a 1,800-cell KWin 6.6.6 private real-client compatibility run for
+  build `e075ddda6ada`: 187 cells passed, 40 password-field cells were
+  unsupported by design, 1,573 remained unverified, and none failed. The
+  report remains incomplete and does not certify production capture. Updated
+  the certification matrix to distinguish reviewed compatibility evidence
+  from production certification.
 - Kept snippet-checker errors and GitHub annotations actionable when Rust
   backtraces are enabled by extracting the primary validation error instead of
   the final stack frame.

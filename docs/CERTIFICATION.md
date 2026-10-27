@@ -241,10 +241,23 @@ driver records the actual keymap and observed behavior.
 
 ## Headless real-client evidence (not certification)
 
+[`evidence/kwin-real-client-e075ddda6.txt`](evidence/kwin-real-client-e075ddda6.txt)
+records the 1,800-cell compatibility matrix produced on 2026-10-27 by the
+KWin 6.6.6 private real-client driver, using build `e075ddda6ada`. Its
+[summary](evidence/kwin-real-client-e075ddda6.summary.json) records 187
+passing cells, 40 password-field cells marked `unsupported-by-design`, 1,573
+unverified cells, and no failed cells. The collector reported
+`certified: false`, `status: incomplete`, and compatibility scope. Capture was
+simulated through stdin, the active daemon status probe was unavailable, and
+the evdev route has no sensitive-field signal or atomic replacement. These
+results are compatibility evidence only and do not certify KDE or a production
+keyboard-capture route.
+
 [`evidence/kwin-real-client-c8c27d86d632.txt`](evidence/kwin-real-client-c8c27d86d632.txt)
 is the store from a clean-tree run of
 `scripts/kwin-certification-prepare.sh` at commit `c8c27d86d632` on KWin
-6.6.6, recorded 2026-10-27, and
+6.6.6, recorded 2026-10-27. This is an earlier archived run; the later
+`e075ddda6ada` matrix above supersedes its driver results. The archived run has
 [`evidence/kwin-real-client-c8c27d86d632.summary.json`](evidence/kwin-real-client-c8c27d86d632.summary.json)
 summarizes the collector report built from it. The live doctor and daemon
 snapshots are left out because they describe the reporting workstation.
@@ -260,13 +273,12 @@ harness ordering race, which has since been fixed. In the
 the test typist, because KWin never reported the active layout (see
 [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md)). All 72 of its cells are unverified.
 
-Through `run-certification-driver.sh` the full 1,800-cell matrix (45
-scenarios × 5 layouts × 8 apps) is 188 pass, 40 `unsupported-by-design`
-(password-field scenario: evdev has no sensitive-field signal) and 1,572
-`UNVERIFIED`. The collector reports `certified: false`, `status: incomplete`,
-scope `compatibility`. Capture is simulated, browsers and Electron are not
-driven, and the pending-output scenarios do not count for the evdev route.
-KDE remains uncertified.
+That earlier run's `run-certification-driver.sh` matrix had 188 pass, 40
+`unsupported-by-design` (password-field scenario: evdev has no sensitive-field
+signal) and 1,572 `UNVERIFIED`. The updated run above has the current counts.
+Both reports are incomplete compatibility evidence. Capture is simulated,
+browsers and Electron are not driven, and the pending-output scenarios do not
+count for the evdev route. KDE remains uncertified.
 
 ## Supporting component evidence (not certification)
 

@@ -45,13 +45,12 @@ availability claims, and no target is certified without reviewed evidence.
 
 ## Current evidence
 
-There are no reviewed compositor certification artifacts in this repository.
-The generated tables above are authoritative: every listed desktop and route
-remains uncertified. Historical manual observations below do not establish
-current compatibility because their session details and logs are not reviewed
-certification artifacts. See [CERTIFICATION.md](CERTIFICATION.md) for the
-evidence format and [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) for current route
-limitations.
+The repository contains reviewed KWin compatibility evidence, but no reviewed
+production certification artifact. The generated tables above are authoritative:
+every listed desktop and route remains uncertified. Historical manual
+observations below do not establish current compatibility. See
+[CERTIFICATION.md](CERTIFICATION.md) for the evidence format and
+[SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) for current route limitations.
 
 ## Historical manual observations (not certification evidence)
 
