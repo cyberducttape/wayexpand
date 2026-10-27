@@ -372,7 +372,10 @@ fn matcher_playground_gui_applies_one_rewrite_per_typed_trigger() {
     ));
     let _ = fs::remove_file(&path);
     let config = Config {
-        expansion: vec![import_expansion(":go", "Expanded once")],
+        expansion: vec![
+            import_expansion(":go", "Expanded :inner"),
+            import_expansion(":inner", "Expanded twice"),
+        ],
         hotkey: Vec::new(),
         settings: Settings::default(),
         organization: wayexpand_core::OrganizationPolicy::default(),
@@ -401,7 +404,23 @@ fn matcher_playground_gui_applies_one_rewrite_per_typed_trigger() {
         render(&mut app, vec![egui::Event::Text(character.to_string())]);
     }
 
-    assert_eq!(app.playground.text, "Expanded once");
+    assert_eq!(app.playground.text, "Expanded :inner");
+    assert_eq!(app.playground.expansions, 1);
+
+    render(
+        &mut app,
+        vec![egui::Event::PointerButton {
+            pos: egui::Pos2::ZERO,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::default(),
+        }],
+    );
+    assert!(app.playground.needs_engine());
+    ctx.memory_mut(|memory| memory.request_focus(egui::Id::new("try_live_field")));
+    render(&mut app, vec![egui::Event::Text("!".into())]);
+
+    assert_eq!(app.playground.text, "Expanded :inner!");
     assert_eq!(app.playground.expansions, 1);
     fs::remove_file(path).unwrap();
 }
