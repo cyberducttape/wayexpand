@@ -9,6 +9,9 @@ All notable changes to WayExpand are documented here.
   availability rationale, capture/injection modes, and catalog certification.
   The report keeps route availability separate from certification and reuses
   one IBus availability probe per command.
+- Made the certification matrix authoritative for workflow backend selection
+  and production-required runner checks, so a route promoted after reviewed
+  evidence cannot silently run as an optional compatibility job.
 - Fixed the snippet-repository checker test when given a relative CLI path:
   it now resolves that path before switching into its temporary repository.
 - Preserved a current-build KWin 6.6.6 smoke report for commit

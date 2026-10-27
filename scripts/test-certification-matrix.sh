@@ -13,10 +13,8 @@ jq -e '
   ([.targets[].id] | sort == ["gnome", "hyprland", "kde", "sway"]) and
   ([.targets[] | select((.input_paths | length) > 0 and (.toolkits | sort == ["GTK", "Qt"]) and (.required_client_markers | sort == ["browser", "editor", "electron", "gtk", "password", "qt", "terminal"]) and (.requires_password_field_check == true))] | length == 4) and
   ([.targets[] | select((.id == "kde" or .id == "gnome") and (.input_paths | index("ibus")) and (.input_paths | index("evdev+libei")))] | length == 2) and
-  ([.targets[] | select((.id == "kde" or .id == "gnome") and (.input_paths | index("input-method-v2")))] | length == 0) and
   ([.targets[] | select((.certification_status == "certified" and (.certification_evidence | type == "string")) or (.certification_status == "not-certified" and .certification_evidence == null))] | length == 4) and
-  ([.targets[] | select(.production_certification_required == true)] | length == 0) and
-  ([.targets[] | select(.production_certification_required == false)] | length == 4) and
+  ([.targets[] | select((.certification_backend as $backend | (.input_paths | index($backend)) != null) and (.production_certification_required != true or .certification_backend == "input-method-v2"))] | length == 4) and
   ([.targets[] | select((.id == "sway" or .id == "hyprland") and (.input_paths | index("evdev+wlroots")))] | length == 2) and
   ([.targets[] | select(.id == "kde" and .application_filter == "supported" and .window_tracker == "KWin application tracker")] | length == 1) and
   ([.targets[] | select((.id == "gnome" or .id == "sway" or .id == "hyprland") and .application_filter == "unavailable" and .window_tracker == "none")] | length == 3) and
@@ -37,6 +35,8 @@ grep -F -- 'Could not list repository Actions runners.' "$workflow" >/dev/null
 grep -F -- 'GITHUB_STEP_SUMMARY' "$workflow" >/dev/null
 grep -F -- 'actions: read' "$workflow" >/dev/null
 grep -F -- 'fromJSON(needs.runner-preflight.outputs.matrix)' "$workflow" >/dev/null
+grep -F -- "targets=\$(jq -r '.targets[]" "$workflow" >/dev/null
+grep -F -- 'Invalid certification backend declaration' "$workflow" >/dev/null
 grep -F -- 'scripts/run-certification-driver.sh' "$workflow" >/dev/null
 grep -F -- 'scripts/certify-compositor.sh' "$workflow" >/dev/null
 grep -F -- '.certification_scope == "production"' "$workflow" >/dev/null
@@ -53,46 +53,32 @@ grep -F -- 'No declared compositor route currently meets WayExpand production ce
 python3 - "$matrix" "$workflow" <<'PY'
 import json
 import importlib.util
-import re
 import sys
 from pathlib import Path
 
 matrix_path, workflow_path = sys.argv[1:]
 matrix = json.load(open(matrix_path, encoding="utf-8"))
 workflow = open(workflow_path, encoding="utf-8").read()
-# The preflight's target table: "compositor backend required" per line.
-table = re.search(r"targets='(.*?)'", workflow, re.S)
-if not table:
-    raise SystemExit("certification preflight target table is missing")
-workflow_flags = {}
-workflow_backends = {}
-for line in table.group(1).splitlines():
-    fields = line.split()
-    if len(fields) != 3 or fields[2] not in ("true", "false"):
-        raise SystemExit(f"malformed certification target: {line!r}")
-    workflow_flags[fields[0]] = fields[2] == "true"
-    workflow_backends[fields[0]] = fields[1]
+if "targets=$(jq -r '.targets[]" not in workflow:
+    raise SystemExit("certification workflow must derive candidates from the matrix")
+workflow_backends = {
+    target["id"]: target["certification_backend"] for target in matrix["targets"]
+}
 if "evdev+libei" in workflow_backends.values():
     raise SystemExit("certification workflow must not use raw evdev as a certification candidate")
-if workflow_backends.get("kde") != "ibus":
-    raise SystemExit("KDE compatibility job must use a declared route")
-if workflow_backends.get("gnome") != "ibus":
-    raise SystemExit("GNOME compatibility job must use the IBus route")
-
 for target in matrix["targets"]:
     expected = target["production_certification_required"]
-    actual = workflow_flags.get(target["id"])
-    if actual != expected:
-        raise SystemExit(
-            f"workflow production_required for {target['id']} is {actual!r}; expected {expected!r}"
-        )
+    backend = target.get("certification_backend")
+    if backend not in target["input_paths"]:
+        raise SystemExit(f"certification backend for {target['id']} is not a declared input path")
     if expected and (
-        workflow_backends.get(target["id"]) != "input-method-v2"
-        or "input-method-v2" not in target["input_paths"]
+        backend != "input-method-v2" or "input-method-v2" not in target["input_paths"]
     ):
         raise SystemExit(
             f"production target {target['id']} must use its declared input-method-v2 route"
         )
+    if not expected and target["id"] in ("kde", "gnome") and backend != "ibus":
+        raise SystemExit(f"{target['id']} compatibility job must use the IBus route")
 
 generator_path = Path(matrix_path).resolve().parents[2] / "scripts/generate-desktop-matrix.py"
 sys.dont_write_bytecode = True

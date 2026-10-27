@@ -224,8 +224,11 @@ CI validates that all four required desktop targets and all forty-five scenarios
 remain present, rejects evidence that pairs a compositor with a backend
 outside its declared certification paths, and requires the layout profiles
 `us`, `de`, `fr`, `altgr`, and `multi-layout-switching` from certification
-drivers. A layout profile is evidence metadata only until the driver records
-the actual keymap and observed behavior.
+drivers. Each target's `certification_backend` and
+`production_certification_required` fields also drive workflow backend
+selection and required runner checks; production targets must select the
+input-method-v2 route. A layout profile is evidence metadata only until the
+driver records the actual keymap and observed behavior.
 
 ## Headless real-client evidence (not certification)
 

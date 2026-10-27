@@ -68,15 +68,24 @@ jobs:
             } >>"$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          # compositor, certification backend, production required. These
-          # compatibility jobs never satisfy the production release gate.
-          targets='kde ibus false
-          gnome ibus false
-          sway evdev+wlroots false
-          hyprland evdev+wlroots false'
+          # The matrix is authoritative for candidates and release-gate
+          # status. Keep this list derived so newly eligible routes cannot
+          # silently fall through as optional or use a stale backend.
+          targets=$(jq -r '.targets[] | [.id, .certification_backend, (.production_certification_required | tostring)] | @tsv' \
+            tests/certification/compositor-matrix.json)
           missing=()
           include='[]'
           while read -r compositor backend required; do
+            if ! jq -e --arg compositor "$compositor" --arg backend "$backend" '
+              any(.targets[];
+                .id == $compositor
+                and .certification_backend == $backend
+                and (.input_paths | index($backend)) != null
+                and ((.production_certification_required != true) or $backend == "input-method-v2"))
+            ' tests/certification/compositor-matrix.json >/dev/null; then
+              echo "Invalid certification backend declaration for $compositor: $backend" >&2
+              exit 1
+            fi
             if jq -e --arg compositor "$compositor" '
               any(.[].runners[];
                 .status == "online"
