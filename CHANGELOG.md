@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Include exclusive keyboard capture as a separate production-readiness
+  capability and blocker; it is not implied by atomic replacement.
 - Ship the KWin E2E report helper beside the installed harness so
   `wayexpand doctor --certify` works from user, package, and release installs.
 - Preserve current-source KWin 6.6.6 evidence for `5ec3122de9de`: 12 checks

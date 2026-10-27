@@ -147,6 +147,7 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
                     "output": output_health_from_status(&snapshot),
                     "insertion": insertion_from_status(&snapshot),
                     "capabilities": {
+                        "exclusive_capture": snapshot.get("capture_exclusive"),
                         "sensitive_field_detection": snapshot.get("capture_sensitive_focus"),
                         "composition_awareness": snapshot.get("capture_composition_aware"),
                         "local_compose_tracking": snapshot.get("capture_local_compose_aware"),
@@ -321,6 +322,7 @@ pub(crate) fn production_readiness(daemon: &serde_json::Value) -> serde_json::Va
             .push("typed expansions are refused: keystroke route without compatibility consent");
     }
     for (name, label) in [
+        ("exclusive_capture", "exclusive keyboard capture"),
         ("sensitive_field_detection", "sensitive-field detection"),
         ("composition_awareness", "external IME/preedit awareness"),
         ("layout_awareness", "runtime layout awareness"),

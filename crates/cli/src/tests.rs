@@ -67,6 +67,7 @@ fn production_readiness_never_promotes_capabilities_to_certification() {
         "commit_matches": true,
         "state": "connected",
         "capabilities": {
+            "exclusive_capture": true,
             "sensitive_field_detection": true,
             "composition_awareness": true,
             "layout_awareness": true,
@@ -93,6 +94,7 @@ fn production_readiness_reports_limited_live_capabilities() {
         "commit_matches": true,
         "state": "connected",
         "capabilities": {
+            "exclusive_capture": false,
             "sensitive_field_detection": false,
             "composition_awareness": false,
             "layout_awareness": false,
@@ -104,9 +106,11 @@ fn production_readiness_reports_limited_live_capabilities() {
     }));
     assert_eq!(report["status"], "limited");
     assert_eq!(report["certified"], false);
+    assert_eq!(report["capabilities"]["exclusive_capture"], false);
     let blockers = report["blockers"].as_array().unwrap();
     assert!(blockers.len() >= 5);
     assert!(blockers.contains(&serde_json::json!("external IME/preedit awareness")));
+    assert!(blockers.contains(&serde_json::json!("exclusive keyboard capture")));
 }
 
 #[test]
