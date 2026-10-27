@@ -1281,7 +1281,7 @@ impl crate::TextInjector for CapabilityInjector {
     }
 
     fn preflight_text(&mut self, text: &str) -> Result<(), crate::InjectorError> {
-        if text == "refuse" {
+        if text == "refuse!" {
             return Err(crate::InjectorError {
                 backend: self.name(),
                 message: "test preflight refusal".into(),
@@ -1346,7 +1346,7 @@ fn apply_reports_backend_text_preflight_refusal_as_not_applied() {
         matched_text: ":x".into(),
         insert: "refuse".into(),
         cursor_offset: None,
-        reinsert_after: None,
+        reinsert_after: Some('!'),
         command_backed: false,
         undoable: true,
         folded_suffix_chars: 0,
