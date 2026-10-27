@@ -27,6 +27,35 @@ These are machine-specific reference values, not a release performance
 guarantee. Compare like-for-like hardware and toolchain when investigating a
 regression; Criterion's full reports are written to `target/criterion`.
 
+## libei keysym fallback pacing: exploratory KWin 6.6.6 run (2026-10-27)
+
+The private headless KWin 6.6.6 output harness measured the production
+`ei_keyboard` fallback at its 12 ms default and experimental compile-time
+intervals of 8, 6, 4, and 2 ms. Each interval ran the same output/focus/reload/
+restart scenarios and timed 20 injector transactions in each of the small,
+medium, and large size buckets. All 11 executable correctness checks passed
+with no observed text loss at each interval. Keyboard capture, Unicode insertion,
+and suspend/resume were not tested.
+
+Measured injector p95 latency:
+
+| Inter-key interval | Small | Medium | Large |
+| ---: | ---: | ---: | ---: |
+| 12 ms (default) | 12.555 ms | 781.033 ms | 3,132.945 ms |
+| 8 ms | 8.586 ms | 522.425 ms | 2,098.751 ms |
+| 6 ms | 6.581 ms | 395.760 ms | 1,583.192 ms |
+| 4 ms | 4.545 ms | 264.345 ms | 1,064.951 ms |
+| 2 ms | 2.498 ms | 136.870 ms | 546.543 ms |
+
+The 12 ms row comes from the clean source smoke report. Experimental intervals
+were tested in a separate worktree with only the pacing constant changed; the
+harness therefore marked their build identity unverified. The measurements
+exclude physical capture and client paint latency, and each interval was run
+once. This is exploratory evidence for one private KWin version, not a safe
+timing recommendation, compositor certification, or reliability guarantee.
+The production default remains 12 ms until repeated real-session testing
+establishes a supported compositor-specific value.
+
 ### Previous amplified construction baseline: 2026-10-04 (one alias)
 
 Same machine and toolchain. The workload builds an `ExpansionEngine` from a

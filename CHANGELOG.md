@@ -8,6 +8,8 @@ All notable changes to WayExpand are documented here.
   1.92 MSRV and its CI lane.
 - Preserve the latest private-KWin smoke report, including size-segmented
   injector latency and explicit untested capture/Unicode/lifecycle scenarios.
+- Record exploratory libei keysym pacing measurements for KWin 6.6.6; retain
+  the production 12 ms interval pending repeated real-session reliability tests.
 - Update packaging and administrator guides to record the successful Ubuntu
   26.04 Resolute amd64 Launchpad daily build while keeping its experimental
   status distinct from desktop certification; link the PPA install path from
