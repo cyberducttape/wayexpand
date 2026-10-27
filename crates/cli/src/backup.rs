@@ -173,10 +173,7 @@ mod tests {
                     .write(true)
                     .open(&source)
                     .unwrap()
-                    .set_times(
-                        FileTimes::new()
-                            .set_modified(UNIX_EPOCH + Duration::from_secs(1)),
-                    )
+                    .set_times(FileTimes::new().set_modified(UNIX_EPOCH + Duration::from_secs(1)))
                     .unwrap();
             },
             |directory| directory.sync_all(),
