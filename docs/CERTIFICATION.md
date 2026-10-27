@@ -71,6 +71,15 @@ fallback, 20 small replacements measured p50 12.529 ms and p95/p99 12.619 ms.
 This remains partial evidence: it does not test physical keyboard capture,
 sensitive-field behavior, suspend/resume, or long-running stability.
 
+The current-source report at
+[`docs/evidence/doctor-certify-2bac9c84aeb5.json`](evidence/doctor-certify-2bac9c84aeb5.json)
+tested commit `2bac9c84aeb5` on KWin 6.6.6 in a private headless session.
+Twelve checks passed, one latency sample was measured, and three checks were
+not tested. Twenty small libei keysym-fallback transactions measured p50
+12.456 ms and p95/p99 12.592 ms. Capture was simulated over stdin; this does
+not establish physical keyboard capture, sensitive-field behavior, or
+production compositor certification.
+
 For an operator evidence record after running the real-client scenarios, use
 the collector with `--format json` and a validated results file:
 

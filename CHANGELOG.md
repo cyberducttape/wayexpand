@@ -12,6 +12,10 @@ All notable changes to WayExpand are documented here.
 - Made the certification matrix authoritative for workflow backend selection
   and production-required runner checks, so a route promoted after reviewed
   evidence cannot silently run as an optional compatibility job.
+- Preserved current-source private KWin 6.6.6 smoke evidence for commit
+  `2bac9c84aeb5`: 12 checks passed, three were not tested, and 20 small
+  keysym-fallback transactions measured p95/p99 latency of 12.592 ms. The
+  report is partial and records simulated capture and remaining limitations.
 - Fixed the snippet-repository checker test when given a relative CLI path:
   it now resolves that path before switching into its temporary repository.
 - Preserved a current-build KWin 6.6.6 smoke report for commit
