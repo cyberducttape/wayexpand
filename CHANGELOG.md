@@ -10,6 +10,8 @@ All notable changes to WayExpand are documented here.
   the line-oriented diagnostics protocol.
 - Launchpad synchronization now retries its SSH authorization probe on
   transient failures before giving up; pushes already had bounded retries.
+- Shell validation now checks the workflow retry assertion without triggering
+  ShellCheck's warning about intentional literal shell syntax.
 - Backup creation now compares the copied bytes against the opened source, so
   same-size concurrent edits are detected even when filesystem timestamps
   have coarse resolution. This also removes a Launchpad test failure caused by
