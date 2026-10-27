@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Retry Linux `ETXTBSY` spawn failures for a short bounded window when launching
+  a descriptor-pinned action. This handles transient filesystem contention
+  before a child starts without retrying other spawn failures or duplicating
+  an action.
 - Preserved a 1,800-cell KWin 6.6.6 private real-client compatibility run for
   build `e075ddda6ada`: 187 cells passed, 40 password-field cells were
   unsupported by design, 1,573 remained unverified, and none failed. The

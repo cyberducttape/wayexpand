@@ -16,7 +16,7 @@ use crate::{
 use std::collections::HashMap;
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -197,7 +197,7 @@ impl ActionExecutor {
 
         let start = Instant::now();
 
-        let mut child = cmd.spawn().map_err(|e| ActionError::SpawnFailed {
+        let mut child = spawn_action(&mut cmd).map_err(|e| ActionError::SpawnFailed {
             action_id: request.action_id.clone(),
             program: action_config.program.clone(),
             reason: e.to_string(),
@@ -310,6 +310,34 @@ impl ActionExecutor {
     }
 }
 
+/// Some filesystems briefly return ETXTBSY when an executable is atomically
+/// replaced while a pinned descriptor is being launched. `Command::spawn`
+/// reports this before a child starts, so a short bounded retry cannot
+/// duplicate an action. Other spawn errors are returned immediately.
+#[cfg(unix)]
+fn spawn_action(command: &mut Command) -> std::io::Result<Child> {
+    retry_text_busy(|| command.spawn())
+}
+
+#[cfg(not(unix))]
+fn spawn_action(command: &mut Command) -> std::io::Result<Child> {
+    command.spawn()
+}
+
+#[cfg(unix)]
+fn retry_text_busy<T>(mut spawn: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
+    const RETRIES: usize = 3;
+    for attempt in 0..=RETRIES {
+        match spawn() {
+            Err(error) if error.raw_os_error() == Some(libc::ETXTBSY) && attempt < RETRIES => {
+                std::thread::sleep(Duration::from_millis(10 << attempt));
+            }
+            result => return result,
+        }
+    }
+    unreachable!("the final spawn attempt returns")
+}
+
 #[cfg(target_os = "linux")]
 fn configure_pinned_executable(cmd: &mut Command, file: &std::fs::File, original: &str) {
     use std::os::unix::process::CommandExt;
@@ -333,6 +361,32 @@ fn configure_pinned_executable(cmd: &mut Command, file: &std::fs::File, original
 mod tests {
     use super::*;
     use crate::config::ActionConfig;
+
+    #[cfg(unix)]
+    #[test]
+    fn transient_text_busy_spawn_is_retried_but_other_errors_are_not() {
+        use std::io;
+
+        let mut attempts = 0;
+        let result = retry_text_busy(|| {
+            attempts += 1;
+            if attempts < 3 {
+                Err(io::Error::from_raw_os_error(libc::ETXTBSY))
+            } else {
+                Ok(42)
+            }
+        });
+        assert_eq!(result.unwrap(), 42);
+        assert_eq!(attempts, 3);
+
+        let mut attempts = 0;
+        let result: io::Result<()> = retry_text_busy(|| {
+            attempts += 1;
+            Err(io::Error::from_raw_os_error(libc::ENOENT))
+        });
+        assert_eq!(result.unwrap_err().raw_os_error(), Some(libc::ENOENT));
+        assert_eq!(attempts, 1);
+    }
 
     #[cfg(target_os = "linux")]
     #[test]
@@ -365,7 +419,14 @@ mod tests {
 
         let mut command = Command::new(format!("/proc/self/fd/{}", file.as_raw_fd()));
         configure_pinned_executable(&mut command, &file, program.to_str().unwrap());
-        let output = command.output().unwrap();
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let output = spawn_action(&mut command)
+            .unwrap()
+            .wait_with_output()
+            .unwrap();
         assert!(output.status.success());
         assert_eq!(
             String::from_utf8(output.stdout).unwrap(),
