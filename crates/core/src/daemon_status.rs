@@ -60,6 +60,9 @@ impl DaemonStatus {
     }
 
     pub fn field(&self, key: &str) -> Option<&str> {
+        if !self.field_is_unique(key) {
+            return None;
+        }
         self.fields.get(key).map(String::as_str)
     }
 
@@ -109,6 +112,7 @@ impl DaemonStatus {
     pub fn fields(&self) -> impl Iterator<Item = (&str, &str)> {
         self.fields
             .iter()
+            .filter(|(key, _)| !self.duplicate_fields.contains(*key))
             .map(|(key, value)| (key.as_str(), value.as_str()))
     }
 }
@@ -152,5 +156,19 @@ mod tests {
             DaemonStatus::parse("state=connected\nstate=failed\n").route_state(),
             None
         );
+    }
+
+    #[test]
+    fn duplicate_fields_are_unavailable_to_raw_and_typed_readers() {
+        let status = DaemonStatus::parse(
+            "status_schema=13\npaused=false\npaused=true\ncommand_queue_depth=4\ncommand_queue_depth=99\n",
+        );
+
+        assert_eq!(status.field("paused"), None);
+        assert_eq!(status.bool_field("paused"), None);
+        assert_eq!(status.u64_field("command_queue_depth"), None);
+        assert_eq!(status.status_schema(), Some(13));
+        assert_eq!(status.fields().count(), 1);
+        assert_eq!(status.fields().next(), Some(("status_schema", "13")));
     }
 }

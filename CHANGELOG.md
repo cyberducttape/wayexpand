@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Escaped control characters in the daemon's reported configuration path and
+  made duplicate status fields unavailable to consumers. Custom filenames or
+  malformed status can no longer spoof pause, health, or capability values in
+  the line-oriented diagnostics protocol.
 - Backup creation now compares the copied bytes against the opened source, so
   same-size concurrent edits are detected even when filesystem timestamps
   have coarse resolution. This also removes a Launchpad test failure caused by

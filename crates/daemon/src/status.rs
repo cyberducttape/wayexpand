@@ -7,6 +7,13 @@ use wayexpand_core::{
     CommandMetrics, InjectorCapabilities, InputSourceCapabilities, CONTROL_STATUS_SCHEMA,
 };
 
+/// Keep values safe for the line-oriented status protocol. Paths are user
+/// supplied and may contain newlines or other control characters, which must
+/// not be allowed to create or overwrite status fields.
+fn escape_status_value(value: &str) -> String {
+    value.chars().flat_map(char::escape_default).collect()
+}
+
 /// A complete control-socket status body.
 ///
 /// `daemon_status_body_with_mode` is the only way to build one, and
@@ -97,6 +104,7 @@ pub fn daemon_status_body_with_runtime_capabilities(
     window_tracker_connected: bool,
     window_identity_exact: bool,
 ) -> StatusBody {
+    let config_path = escape_status_value(&config_path.display().to_string());
     let matcher_latency = crate::latency::matcher_snapshot();
     let injection_latency_profiles = crate::latency::profiles_json();
     let usage_metrics = crate::usage::metrics_snapshot();
@@ -125,7 +133,7 @@ pub fn daemon_status_body_with_runtime_capabilities(
         "source={source}\nbackend={backend}\nroute_id={route_id}\nbackend_mode={backend_mode}\nstatus_schema={CONTROL_STATUS_SCHEMA}\ndaemon_commit={}\nstate={state}\npaused={}\nconfig={}\nconfig_state={}\ncapture_sensitive_focus={}\ncapture_exclusive={}\ncapture_reliable_key_state={}\ncapture_key_passthrough={}\ncapture_composition_aware={}\ncapture_local_compose_aware={}\ncapture_layout_aware={}\nwindow_tracker_connected={}\nwindow_identity_exact={}\ninject_atomic_replace={}\ninject_full_unicode={}\ninject_cursor_reposition={}\ninject_key_passthrough={}\ninject_insertion_mode={}\ninject_max_text_chars={}\ninject_expected_throughput_chars_per_sec={}\ncommand_queue_depth={}\ncommand_in_flight={}\nexpansion_command_queue_depth={}\nexpansion_command_in_flight={}\nhotkey_queue_depth={}\nhotkey_in_flight={}\ncommand_queue_rejected_total={}\ncommand_timeout_total={}\ncommand_failure_total={}\ninjection_latency_sample_count={}\ninjection_latency_window_count={}\ninjection_latency_mean_us={}\ninjection_latency_p50_us={}\ninjection_latency_p95_us={}\ninjection_latency_p99_us={}\ninjection_latency_profiles={}\nmatcher_latency_sample_count={}\nmatcher_latency_window_count={}\nmatcher_latency_p50_us={}\nmatcher_latency_p95_us={}\nmatcher_latency_p99_us={}\nusage_flush_max_duration_us={}\nusage_flush_failures_total={}\nusage_worker_failures_total={}\nusage_queue_rejected_total={}\nusage_events_recorded_total={}\nusage_events_persisted_total={}\nusage_events_dropped_total={}\nclipboard_worker_threads={}\nclipboard_reads_in_flight={}\nclipboard_reads_total={}\nclipboard_read_failures_total={}\nclipboard_deadline_misses_total={}\nclipboard_read_max_duration_us={}\noutput_health={}\noutput_uncertain_total={}\noutput_retiring_workers={}\noutput_stalled_ms={}\ninsertion_assurance={}\nreplacement_assurance={}\ncompatibility_mode={}\nfocus_assurance={}\noutput_refused_total={}\noutput_last_refusal={}\noutput_unsupported_total={}\noutput_last_unsupported={}\nrecent_expansion_failures={}\nrecent_expansion_outcomes={}\noutput_reconnect_total={}\ninput_reconnect_total={}\ninput_overflow_total={}\ncontrol_rejected_total={}\nmemory_rss_kib={}\nmemory_high_water_kib={}",
         build_info::COMMIT,
         paused,
-        config_path.display(),
+        config_path,
         if config_healthy { "ok" } else { "reload-rejected" },
         capture.sensitive_focus,
         capture.exclusive_capture,

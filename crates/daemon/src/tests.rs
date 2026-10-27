@@ -200,6 +200,38 @@ fn daemon_status_body_matches_documented_stable_contract() {
 }
 
 #[test]
+fn status_escapes_control_characters_in_custom_config_paths() {
+    let body = status::daemon_status_body_with_runtime_capabilities(
+        "evdev",
+        "libei",
+        "connected",
+        false,
+        Path::new("/tmp/expansions.toml\npaused=true\ndaemon_commit=spoofed"),
+        true,
+        "ei_text",
+        CommandMetrics::default(),
+        latency::Snapshot::default(),
+        InputSourceCapabilities::default(),
+        InjectorCapabilities::default(),
+        false,
+        false,
+    );
+    let parsed = wayexpand_core::DaemonStatus::parse(body.as_str());
+
+    assert_eq!(
+        parsed.field("config"),
+        Some("/tmp/expansions.toml\\npaused=true\\ndaemon_commit=spoofed")
+    );
+    assert!(parsed.field_is_unique("paused"));
+    assert_eq!(parsed.bool_field("paused"), Some(false));
+    assert!(parsed.field_is_unique("daemon_commit"));
+    assert_eq!(
+        parsed.field("daemon_commit"),
+        Some(crate::build_info::COMMIT)
+    );
+}
+
+#[test]
 fn connected_window_tracker_does_not_claim_exact_identity_without_a_focus_token() {
     let body = status::daemon_status_body_with_runtime_capabilities(
         "evdev",
