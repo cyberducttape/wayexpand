@@ -189,6 +189,19 @@ git push
 
 ### Ubuntu PPA
 
+The experimental daily package is currently published for Ubuntu 26.04
+(Resolute) on amd64. To install it:
+
+```bash
+sudo add-apt-repository ppa:cyberducttape/ppa
+sudo apt update
+sudo apt install wayexpand
+```
+
+This is a daily development build, not a compositor-certified release. Check
+the [PPA page](https://launchpad.net/~cyberducttape/+archive/ubuntu/ppa) for
+the latest published version and supported series before installing.
+
 To create an unsigned Debian source package for Launchpad, manually dispatch
 the GitHub Release workflow with `launchpad_series` set to the Ubuntu series
 codename. The workflow targets that suite in `debian/changelog`; it intentionally
