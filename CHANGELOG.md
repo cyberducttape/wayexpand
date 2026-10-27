@@ -10,7 +10,9 @@ All notable changes to WayExpand are documented here.
   expansion for a second time.
 - Clarified that matcher preview replaces only the trigger and preserves
   surrounding text; its reset action is now explicitly labeled "Clear preview"
-  in English, German, and Indonesian.
+  in English, German, and Indonesian. After a match, an inline note explains
+  that the preview accumulates text and recommends clearing it before a
+  separate test.
 - Escaped control characters in the daemon's reported configuration path and
   made duplicate status fields unavailable to consumers. Custom filenames or
   malformed status can no longer spoof pause, health, or capability values in

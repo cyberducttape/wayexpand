@@ -977,6 +977,13 @@ impl GuiApp {
                     .desired_rows(2)
                     .desired_width(f32::INFINITY)
                     .show(ui);
+                if self.playground.expansions > 0 {
+                    ui.label(
+                        RichText::new(self.strings.try_live_cumulative_notice())
+                            .small()
+                            .color(palette.muted),
+                    );
+                }
                 if output.response.response.changed() {
                     let text = self.playground.text.clone();
                     let caret_at_end = output

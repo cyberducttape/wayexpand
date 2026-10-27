@@ -431,6 +431,20 @@ impl Strings {
         }
     }
 
+    pub fn try_live_cumulative_notice(&self) -> &'static str {
+        match self.lang {
+            Language::English => {
+                "Each trigger replaces only itself. Earlier preview text stays; clear the preview before a separate test."
+            }
+            Language::Indonesian => {
+                "Setiap pemicu hanya menggantikan dirinya. Teks pratinjau sebelumnya tetap ada; hapus pratinjau sebelum pengujian terpisah."
+            }
+            Language::German => {
+                "Jeder Trigger ersetzt nur sich selbst. Vorheriger Vorschautext bleibt erhalten; für einen neuen Test die Vorschau leeren."
+            }
+        }
+    }
+
     pub fn try_live_form_detected(&self) -> &'static str {
         match self.lang {
             Language::English => {
