@@ -3697,6 +3697,36 @@ fn deferred_restoration_never_exceeds_the_configured_buffer_bound() {
 }
 
 #[test]
+fn stale_command_in_multichar_text_is_restored_in_order_and_not_retried() {
+    let config = Config::parse(
+        r#"
+        [[expansion]]
+        trigger = ":slow"
+        replacement = ""
+        [expansion.command]
+        program = "/bin/true"
+        timeout_ms = 100
+        "#,
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+
+    let pending = engine.process_deferred(InputEvent::Text(":slowx".into()));
+    assert_eq!(pending.len(), 1);
+    assert_eq!(engine.buffer.iter().collect::<String>(), ":slowx");
+
+    assert!(matches!(
+        engine.dispatch_pending_with_policy(pending.into_iter().next().unwrap(), 0),
+        Err(CommandError::StaleInput)
+    ));
+    assert_eq!(engine.buffer.iter().collect::<String>(), ":slowx");
+    assert!(engine
+        .process_deferred(InputEvent::Text("y".into()))
+        .is_empty());
+    assert_eq!(engine.buffer.iter().collect::<String>(), ":slowxy");
+}
+
+#[test]
 fn non_ascii_buffer_count_tracks_edits_eviction_restoration_and_clear() {
     let config = Config::parse(
         r#"

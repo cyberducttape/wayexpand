@@ -7,7 +7,7 @@
 
 use super::Args;
 use crate::*;
-use std::fmt::Write as _;
+use std::{fmt::Write as _, os::unix::fs::OpenOptionsExt};
 
 const USAGE: &str = "usage: wayexpand metrics [--output FILE] [config]";
 
@@ -134,16 +134,43 @@ fn write_atomically(path: &Path, text: &str) -> Result<()> {
     let file_name = path
         .file_name()
         .ok_or_else(|| usage_error("--output requires a file path"))?;
+    // The output directory may be shared with a collector or other local
+    // processes. Never follow a planted symlink at the temporary path.
+    let mut random = [0_u8; 16];
+    getrandom::fill(&mut random).context("could not obtain randomness for metrics output")?;
+    let suffix = random
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
     let mut temporary_name = std::ffi::OsString::from(".");
     temporary_name.push(file_name);
-    temporary_name.push(format!(".{}.tmp", std::process::id()));
+    temporary_name.push(format!(".{suffix}.tmp"));
     let temporary = path.with_file_name(temporary_name);
-    fs::write(&temporary, text)
-        .with_context(|| format!("could not write {}", temporary.display()))?;
-    fs::rename(&temporary, path).map_err(|error| {
-        let _ = fs::remove_file(&temporary);
-        anyhow::anyhow!("could not replace {}: {error}", path.display())
-    })
+    let mut created_temporary = false;
+    let result = (|| -> io::Result<()> {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o644)
+            .open(&temporary)?;
+        created_temporary = true;
+        file.write_all(text.as_bytes())?;
+        file.sync_all()?;
+        fs::rename(&temporary, path)?;
+        let parent = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        fs::File::open(parent)?.sync_all()
+    })();
+    if let Err(error) = result {
+        if created_temporary {
+            let _ = fs::remove_file(&temporary);
+        }
+        return Err(error)
+            .with_context(|| format!("could not atomically write {}", path.display()));
+    }
+    Ok(())
 }
 
 /// Escape a label value as the Prometheus text format requires.
@@ -152,6 +179,7 @@ fn label(value: &str) -> String {
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
         .replace('\n', "\\n")
+        .replace('\r', "\\r")
 }
 
 fn metric(out: &mut String, name: &str, kind: &str, help: &str, samples: &[(String, f64)]) {
@@ -340,4 +368,43 @@ fn is_metric_name(name: &str) -> bool {
     name.chars().all(|character| {
         character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_'
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn atomic_output_replaces_symlink_without_writing_through_it() {
+        let mut random = [0_u8; 8];
+        getrandom::fill(&mut random).unwrap();
+        let suffix = random
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let directory = std::env::temp_dir().join(format!("wayexpand-metrics-{suffix}"));
+        fs::create_dir(&directory).unwrap();
+        let target = directory.join("target");
+        let output = directory.join("metrics.prom");
+        fs::write(&target, "keep me").unwrap();
+        std::os::unix::fs::symlink(&target, &output).unwrap();
+
+        write_atomically(&output, "wayexpand_daemon_up 1\n").unwrap();
+
+        assert_eq!(fs::read_to_string(&target).unwrap(), "keep me");
+        assert_eq!(
+            fs::read_to_string(&output).unwrap(),
+            "wayexpand_daemon_up 1\n"
+        );
+        assert_eq!(
+            fs::symlink_metadata(&output).unwrap().permissions().mode() & 0o600,
+            0o600
+        );
+        assert_eq!(
+            fs::symlink_metadata(&output).unwrap().permissions().mode() & 0o022,
+            0
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
 }

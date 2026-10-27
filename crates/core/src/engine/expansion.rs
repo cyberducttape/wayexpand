@@ -45,6 +45,7 @@ trait MatchProcessor {
     type Output;
 
     fn before_event(engine: &mut ExpansionEngine);
+    fn before_character(engine: &mut ExpansionEngine);
     fn take(
         engine: &mut ExpansionEngine,
         config_index: usize,
@@ -63,6 +64,8 @@ impl MatchProcessor for ImmediateProcessor {
     type Output = ExpansionResult;
 
     fn before_event(_: &mut ExpansionEngine) {}
+
+    fn before_character(_: &mut ExpansionEngine) {}
 
     fn take(
         engine: &mut ExpansionEngine,
@@ -91,6 +94,10 @@ impl MatchProcessor for DeferredProcessor {
 
     fn before_event(engine: &mut ExpansionEngine) {
         engine.restore_deferred_matches();
+    }
+
+    fn before_character(engine: &mut ExpansionEngine) {
+        engine.restore_stale_command_reservations();
     }
 
     fn take(
@@ -476,7 +483,10 @@ impl ExpansionEngine {
         if !self.is_capture_enabled() {
             return results;
         }
-        for character in text.chars() {
+        for (index, character) in text.chars().enumerate() {
+            if index > 0 {
+                P::before_character(self);
+            }
             // A later scalar in the same text event invalidates undo for
             // earlier matches, with policy-specific metadata handled here.
             if !results.is_empty() {

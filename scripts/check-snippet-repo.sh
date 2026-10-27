@@ -172,7 +172,17 @@ for path do
     case "$path" in
         *[[:space:]]*) fail "$path" 'file names with whitespace are not supported'; continue ;;
     esac
+    if [ -L "$path" ]; then
+        fail "$path" 'symbolic-link inputs are not checked; use regular files inside the repository'
+        continue
+    fi
     if [ -d "$path" ]; then
+        symlinks=$(find "$path" \( -name .git -o -name 'target*' -o -name node_modules \) -prune -o \
+            -type l -name '*.toml' -print)
+        if [ -n "$symlinks" ]; then
+            fail "$path" 'contains symlinked TOML files; replace them with regular files'
+            continue
+        fi
         spaced=$(find "$path" \( -name .git -o -name 'target*' -o -name node_modules \) -prune -o \
             -name '*[[:space:]]*' -name '*.toml' -print)
         if [ -n "$spaced" ]; then

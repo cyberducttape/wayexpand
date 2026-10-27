@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Fixed deferred command matching when a single text event contains both a
+  command trigger and following characters. Stale command triggers now return
+  to matcher context in the original input order and cannot be run again by
+  the next keystroke. Prometheus output now uses an exclusive, random sibling
+  file, syncs the replacement, and safely replaces an existing symlink rather
+  than following it.
 - Added the `ops-triage` example pack: twelve insert-only snippets for
   read-only first response (TLS expiry, certificate files, disk, memory,
   listening sockets, DNS, HTTP timing, nginx and firewall checks, failed

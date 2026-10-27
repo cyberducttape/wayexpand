@@ -59,6 +59,11 @@ const ASYNC_COMMAND_QUEUE_CAPACITY: usize = 16;
 const ASYNC_COMMAND_WORKER_COUNT: usize = 4;
 const COMMAND_FAILURE_HISTORY_LIMIT: usize = 16;
 
+struct DeferredMatchReservation {
+    matched_text: String,
+    command_backed: bool,
+}
+
 /// Maximum accepted size for opaque backend-provided toplevel identities.
 pub const MAX_WINDOW_INSTANCE_ID_BYTES: usize = 192;
 
@@ -108,7 +113,7 @@ pub struct ExpansionEngine {
     /// Trigger text removed while a deferred result is being prepared. The
     /// reservation is released only after successful injection; otherwise it
     /// is restored before subsequent input is matched.
-    deferred_matches: Vec<String>,
+    deferred_matches: Vec<DeferredMatchReservation>,
     /// How many trailing buffer characters were restored from deferred
     /// reservations. They already matched once, so they are context for
     /// later input but must not complete a trigger again on their own.
@@ -612,7 +617,11 @@ impl ExpansionEngine {
             || self.sensitive_focus
             || (pending.command.is_some() && pending.captured_window != self.current_window)
         {
-            self.restore_deferred_match(&matched_text);
+            if pending.command.is_some() {
+                self.restore_failed_command_match(&matched_text);
+            } else {
+                self.restore_deferred_match(&matched_text);
+            }
             return Err(CommandError::StaleInput);
         }
         if let Some(fields) = pending.form.clone() {
@@ -776,13 +785,13 @@ impl ExpansionEngine {
     /// delimiter into `matched_text` after the reservation was created, so a
     /// result can be the reserved trigger plus exactly one scalar.
     fn take_deferred_reservation(&mut self, matched_text: &str) -> Option<String> {
-        let index = self.deferred_matches.iter().position(|reserved| {
-            reserved == matched_text
+        let index = self.deferred_matches.iter().position(|reservation| {
+            reservation.matched_text == matched_text
                 || matched_text
-                    .strip_prefix(reserved)
+                    .strip_prefix(&reservation.matched_text)
                     .is_some_and(|suffix| suffix.chars().count() == 1)
         })?;
-        Some(self.deferred_matches.remove(index))
+        Some(self.deferred_matches.remove(index).matched_text)
     }
 
     /// The text this result reserved when it was matched, before a host folded
@@ -815,9 +824,27 @@ impl ExpansionEngine {
 
     fn restore_deferred_matches(&mut self) {
         let reservations = std::mem::take(&mut self.deferred_matches);
-        for matched_text in reservations {
-            self.restore_buffered_as_context(&matched_text);
+        for reservation in reservations {
+            self.restore_buffered_as_context(&reservation.matched_text);
         }
+        debug_assert!(self.buffer.len() <= self.max_buffer_chars);
+    }
+
+    /// A command reservation becomes stale as soon as later text arrives.
+    /// Restore it before scanning that text so the buffer follows document
+    /// order, and keep it context-only so the completed command cannot run a
+    /// second time. Static deferred results remain reserved until their
+    /// caller applies them.
+    fn restore_stale_command_reservations(&mut self) {
+        let mut retained = Vec::with_capacity(self.deferred_matches.len());
+        for reservation in std::mem::take(&mut self.deferred_matches) {
+            if reservation.command_backed {
+                self.restore_buffered_as_context(&reservation.matched_text);
+            } else {
+                retained.push(reservation);
+            }
+        }
+        self.deferred_matches = retained;
         debug_assert!(self.buffer.len() <= self.max_buffer_chars);
     }
 
@@ -1039,7 +1066,10 @@ impl ExpansionEngine {
 
         // Consume buffer
         self.consume_matched_text();
-        self.deferred_matches.push(plan.matched_text.clone());
+        self.deferred_matches.push(DeferredMatchReservation {
+            matched_text: plan.matched_text.clone(),
+            command_backed: plan.command.is_some(),
+        });
 
         Some(PendingExpansionResult {
             snippet_id: plan.snippet_id,

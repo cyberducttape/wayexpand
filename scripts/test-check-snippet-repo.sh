@@ -84,6 +84,13 @@ if grep -F secret-replacement-text "$repo/.out" >/dev/null; then
 fi
 rm team/broken.toml team/risky.toml
 
+# Symlinked configuration files are not silently skipped by the private copy.
+ln -s support.toml team/linked.toml
+run team/linked.toml
+expect_status 1
+expect_output 'symbolic-link inputs are not checked'
+rm team/linked.toml
+
 # An unsigned pack fails signature verification.
 : >"$repo/signers"
 run --signers "$repo/signers" packs/kubernetes
