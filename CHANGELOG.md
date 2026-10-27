@@ -8,6 +8,11 @@ All notable changes to WayExpand are documented here.
   same-size concurrent edits are detected even when filesystem timestamps
   have coarse resolution. This also removes a Launchpad test failure caused by
   both writes landing within one timestamp tick.
+- Preserved a fresh isolated KWin report for commit `6e8d3b6ae321`: output,
+  focus safety, reload, restart, and command completion passed; keysym-fallback
+  latency measured 12,463 µs p50 and 12,562 µs p95/p99. Unicode, physical
+  keyboard capture, and suspend/resume were not tested, so the report is
+  partial compatibility evidence, not production certification.
 - Configuration watcher events now reload only when they concern the
   configuration file, its `snippets.d` layers, or the fleet directories.
   Since watcher events started forcing a reload, any write in the
