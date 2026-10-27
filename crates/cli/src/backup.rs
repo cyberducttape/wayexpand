@@ -1,6 +1,7 @@
 //! Configuration backup: default destination and archive creation.
 
 use crate::*;
+use std::io::{Read, Seek, SeekFrom};
 
 /// `<config>.bak`, or the first free `<config>.bak.N`, so running `backup`
 /// again keeps every earlier backup instead of failing on the first one.
@@ -56,6 +57,7 @@ fn create_backup_with_hooks(
     }
 
     let mut destination_file = fs::OpenOptions::new()
+        .read(true)
         .write(true)
         .create_new(true)
         .mode(0o600)
@@ -76,6 +78,11 @@ fn create_backup_with_hooks(
         after_copy
             .take()
             .expect("backup copy hook is called once")();
+        if !file_contents_match(&mut source_file, &mut destination_file)? {
+            return Err(io::Error::other(
+                "configuration changed during backup (copied content differs); refusing to keep a possibly inconsistent copy",
+            ));
+        }
         let final_metadata = source_file.metadata()?;
         if source_changed_during_backup(&metadata, &final_metadata) {
             return Err(io::Error::other(
@@ -103,6 +110,28 @@ fn create_backup_with_hooks(
     Ok(())
 }
 
+/// Compare the copied backup with the still-open source without relying on
+/// filesystem timestamp resolution to detect same-size in-place edits.
+fn file_contents_match(source: &mut fs::File, backup: &mut fs::File) -> io::Result<bool> {
+    source.seek(SeekFrom::Start(0))?;
+    backup.seek(SeekFrom::Start(0))?;
+
+    let mut source_buffer = [0_u8; 16 * 1024];
+    let mut backup_buffer = [0_u8; 16 * 1024];
+    loop {
+        let source_read = source.read(&mut source_buffer)?;
+        let backup_read = backup.read(&mut backup_buffer)?;
+        if source_read != backup_read
+            || source_buffer[..source_read] != backup_buffer[..backup_read]
+        {
+            return Ok(false);
+        }
+        if source_read == 0 {
+            return Ok(true);
+        }
+    }
+}
+
 fn source_changed_during_backup(before: &fs::Metadata, after: &fs::Metadata) -> bool {
     before.dev() != after.dev()
         || before.ino() != after.ino()
@@ -116,8 +145,7 @@ fn source_changed_during_backup(before: &fs::Metadata, after: &fs::Metadata) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs::FileTimes;
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn directory_sync_failure_reports_that_backup_was_created() {
@@ -164,18 +192,7 @@ mod tests {
         let error = create_backup_with_hooks(
             &source,
             &destination,
-            || {
-                fs::write(&source, b"other-config").unwrap();
-                // Some build filesystems expose coarse timestamp resolution.
-                // Force a distinct mtime so this test checks same-size content
-                // changes reliably instead of depending on scheduler timing.
-                fs::File::options()
-                    .write(true)
-                    .open(&source)
-                    .unwrap()
-                    .set_times(FileTimes::new().set_modified(UNIX_EPOCH + Duration::from_secs(1)))
-                    .unwrap();
-            },
+            || fs::write(&source, b"other-config").unwrap(),
             |directory| directory.sync_all(),
         )
         .unwrap_err();
