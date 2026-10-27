@@ -109,6 +109,10 @@ pub struct ExpansionEngine {
     /// reservation is released only after successful injection; otherwise it
     /// is restored before subsequent input is matched.
     deferred_matches: Vec<String>,
+    /// How many trailing buffer characters `restore_deferred_matches` put
+    /// back. They already matched once, so they are context for later input
+    /// but must not complete a trigger again on their own.
+    restored_reservation_chars: usize,
     /// Bounded content-free categories for command completions that never
     /// reached output. Hosts drain these into their diagnostics surfaces.
     command_failures: VecDeque<CommandErrorKind>,
@@ -246,6 +250,7 @@ impl ExpansionEngine {
             undo_chord,
             last_expansion: None,
             deferred_matches: Vec::new(),
+            restored_reservation_chars: 0,
             command_failures: VecDeque::with_capacity(COMMAND_FAILURE_HISTORY_LIMIT),
             input_generation: 0,
             shared_input_generation: Arc::new(AtomicU64::new(0)),
@@ -750,6 +755,13 @@ impl ExpansionEngine {
         self.form_replacement_guarantee >= crate::ReplacementGuarantee::VerifiedSurroundingText
     }
 
+    /// Whether a deferred result still holds its trigger reservation: it was
+    /// matched and dispatched but neither injected nor restored yet, as while
+    /// its command runs on the expansion worker.
+    pub fn has_deferred_reservations(&self) -> bool {
+        !self.deferred_matches.is_empty()
+    }
+
     /// Restore a deferred trigger when its result will not be injected. The
     /// trigger is put back before any later input so matcher order remains the
     /// same as the non-exclusive application's input stream.
@@ -803,10 +815,22 @@ impl ExpansionEngine {
 
     fn restore_deferred_matches(&mut self) {
         let reservations = std::mem::take(&mut self.deferred_matches);
+        let mut restored = 0usize;
         for matched_text in reservations {
             self.restore_buffered(&matched_text);
+            restored = restored.saturating_add(matched_text.chars().count());
         }
+        // A command result is still on the worker when the next event
+        // arrives. That event makes it stale, but its trigger is back in the
+        // buffer and must not match a second time at the new generation.
+        self.restored_reservation_chars = restored.min(self.buffer.len());
         debug_assert!(self.buffer.len() <= self.max_buffer_chars);
+    }
+
+    /// Whether a suffix of `length` characters lies entirely inside text that
+    /// `restore_deferred_matches` put back.
+    fn suffix_is_restored_reservation(&self, length: usize) -> bool {
+        length <= self.restored_reservation_chars.min(self.buffer.len())
     }
 
     /// Append restored text through the same bounded path as ordinary input.
@@ -821,6 +845,7 @@ impl ExpansionEngine {
     /// Append one character while maintaining the configured rolling-buffer
     /// bound and its word-boundary truncation metadata.
     fn push_buffered(&mut self, character: char) {
+        self.restored_reservation_chars = 0;
         if !character.is_ascii() {
             self.non_ascii_buffer_chars += 1;
         }
@@ -1074,6 +1099,7 @@ impl ExpansionEngine {
     /// is no longer relevant to word-boundary checks.
     fn clear_buffer(&mut self) {
         self.buffer.clear();
+        self.restored_reservation_chars = 0;
         self.non_ascii_buffer_chars = 0;
         self.buffer_truncated = false;
         self.clipboard_prefetch_armed = false;

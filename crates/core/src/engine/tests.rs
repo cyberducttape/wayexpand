@@ -3645,8 +3645,10 @@ fn deferred_restoration_never_exceeds_the_configured_buffer_bound() {
     let first = engine.process_deferred(InputEvent::Text(":abc".into()));
     assert_eq!(first.len(), 1);
     assert_bounded(&engine);
+    // The unreleased ":abc" is restored as context only; it is not
+    // produced again when ":def" follows it.
     let second = engine.process_deferred(InputEvent::Text(":def".into()));
-    assert_eq!(second.len(), 2);
+    assert_eq!(second.len(), 1);
     assert_bounded(&engine);
 
     engine.restore_deferred_match(":abc");
@@ -3685,7 +3687,7 @@ fn deferred_restoration_never_exceeds_the_configured_buffer_bound() {
         bulk_engine
             .process_deferred(InputEvent::Text(":def".into()))
             .len(),
-        2
+        1
     );
     assert_bounded(&bulk_engine);
     bulk_engine.process_deferred(InputEvent::Key(KeyChord::parse("Ctrl+K").unwrap()));
@@ -5717,4 +5719,61 @@ fn a_command_result_survives_a_repeated_no_window_update() {
         thread::sleep(Duration::from_millis(10));
     };
     assert_eq!(completed[0].insert, "done");
+}
+
+#[test]
+fn deferred_command_trigger_is_not_matched_again_by_following_input() {
+    // The next event restores a running command's trigger into the buffer
+    // as context. Completing it again would start a second command at the
+    // new generation whose output erases text the user typed after it.
+    let config = r#"
+        [[expansion]]
+        trigger = ":slow"
+        replacement = ""
+        [expansion.command]
+        program = "/bin/sh"
+        args = ["-c", "sleep 0.05; printf stale"]
+        timeout_ms = 500
+    "#;
+    for following in [InputEvent::Text("x".into()), InputEvent::EndOfInput] {
+        let mut engine = ExpansionEngine::new(Config::parse(config).unwrap()).unwrap();
+        engine.enable_async_commands();
+        let pending = engine.process_deferred(InputEvent::Text(":slow".into()));
+        assert_eq!(pending.len(), 1);
+        for result in pending {
+            assert!(matches!(
+                engine.dispatch_pending_with_policy(result, 0),
+                Ok(PendingExpansionDispatch::Queued)
+            ));
+        }
+        assert!(engine.has_deferred_reservations());
+        assert!(engine.process_deferred(following).is_empty());
+        thread::sleep(Duration::from_millis(150));
+        assert!(engine.drain_completed_commands().is_empty());
+    }
+}
+
+#[test]
+fn unreleased_deferred_result_is_not_matched_again_by_following_input() {
+    // A static result still being typed by an output worker when the next
+    // key arrives must not be produced a second time.
+    let config =
+        Config::parse("[[expansion]]\ntrigger = \":sig\"\nreplacement = \"signature\"").unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    assert_eq!(
+        engine
+            .process_deferred(InputEvent::Text(":sig".into()))
+            .len(),
+        1
+    );
+    assert!(engine
+        .process_deferred(InputEvent::Text("x".into()))
+        .is_empty());
+    // The restored trigger stays context: retyping it later still matches.
+    assert_eq!(
+        engine
+            .process_deferred(InputEvent::Text(" :sig".into()))
+            .len(),
+        1
+    );
 }

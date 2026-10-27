@@ -4,6 +4,16 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Fixed lost user text when typing continued while a command expansion was
+  running. On the deferred matching path used by the daemon, the next event
+  restored the running command's trigger into the matcher, and the next
+  character (or the end of input) matched it a second time. That duplicate
+  started a fresh command whose output was not stale, so it was typed after
+  erasing the trigger's length of the user's newer text (`;slowx` became
+  `;slow-output`). A restored reservation is now context only and cannot
+  complete a trigger again. The stdin test source defers its per-line
+  end-of-input flush while a command from that line is still running, which
+  the duplicate match had been masking.
 - Added a headless real-client KWin certification driver for the
   `evdev+libei` path. `scripts/kwin-certification-prepare.sh` runs twelve
   scenarios against GTK, Qt, Konsole, gedit and Kate in private KWin sessions

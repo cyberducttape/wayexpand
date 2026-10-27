@@ -190,9 +190,10 @@ being certified, and a clean source tree. The following cells are
 `UNVERIFIED` whatever the store says: anything that needs physical keyboard
 capture (the private daemon reads its keys from stdin), key pass-through,
 the pending-output scenarios `focus-change-during-expansion`,
-`target-closes-during-expansion` and `expansion-cancellation` (stdin capture
-runs command expansions synchronously, but evdev capture hands them to its
-serialized output pipeline; the driver log keeps the stdin observation),
+`target-closes-during-expansion` and `expansion-cancellation` (evdev capture
+hands results to its serialized output pipeline and its key-release gating,
+which stdin capture never reaches; the driver log keeps the stdin
+observation),
 input hardware, suspend/resume, compositor restart, the RemoteDesktop portal
 (the session reaches EIS through a relay), the snippet picker, and clients
 the store does not cover. That includes Firefox and Chromium, whose snap

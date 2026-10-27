@@ -221,7 +221,9 @@ impl ExpansionEngine {
     /// case: `:a` matches only once the next character rules out `:address`.
     /// Returns the configured expansion and the matched suffix length.
     fn match_completed_by(&self, character: char) -> Option<(usize, usize)> {
-        let suffix = self.find_match_suffix()?;
+        let suffix = self
+            .find_match_suffix()
+            .filter(|suffix| !self.suffix_is_restored_reservation(suffix.raw_length))?;
         let config_index = self.matcher_indices.get(suffix.index).copied()?;
         // The configured trigger is the lowercase form. With propagate_case
         // the pending suffix may instead be `:A` or `:AB`, so continuation is
@@ -431,14 +433,14 @@ impl ExpansionEngine {
             }
             InputEvent::EndOfInput => {
                 self.bump_generation();
-                let result = self.find_match_suffix().and_then(|suffix| {
-                    self.matcher_indices
-                        .get(suffix.index)
-                        .copied()
-                        .and_then(|config_index| {
-                            P::take(self, config_index, suffix.raw_length, None)
-                        })
-                });
+                let result =
+                    self.find_match_suffix()
+                        .filter(|suffix| !self.suffix_is_restored_reservation(suffix.raw_length))
+                        .and_then(|suffix| {
+                            self.matcher_indices.get(suffix.index).copied().and_then(
+                                |config_index| P::take(self, config_index, suffix.raw_length, None),
+                            )
+                        });
                 self.clear_buffer();
                 result
                     .map(|output| P::finish_end_of_input(self, output))

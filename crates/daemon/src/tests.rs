@@ -1335,3 +1335,37 @@ fn text_the_route_cannot_type_is_classified_as_unsupported() {
     };
     assert_eq!(other.route_limit(&injector.capabilities()), None);
 }
+
+#[cfg(unix)]
+#[test]
+fn text_typed_while_a_command_runs_discards_its_output() {
+    let config = Config::parse(
+        r#"
+        [[expansion]]
+        trigger = ":slow"
+        replacement = ""
+        [expansion.command]
+        program = "/bin/sh"
+        args = ["-c", "sleep 0.2; printf stale"]
+        timeout_ms = 1000
+        "#,
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    assert!(engine.enable_async_commands());
+    let mut injector = RecordingInjector { calls: Vec::new() };
+    let policy = wayexpand_core::OrganizationPolicy::default();
+    for character in ":slowx".chars() {
+        process_event(
+            &mut engine,
+            InputEvent::Text(character.to_string()),
+            Some(&mut injector),
+            &policy,
+            "evdev",
+        )
+        .unwrap();
+    }
+    thread::sleep(Duration::from_millis(400));
+    assert!(engine.drain_completed_commands().is_empty());
+    assert!(injector.calls.is_empty());
+}

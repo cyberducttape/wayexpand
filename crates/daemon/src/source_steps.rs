@@ -425,14 +425,19 @@ impl Daemon {
                             self.output_retry_delay = Duration::from_millis(250);
                         }
                     }
+                    // The line break is the harness's, not typed text. While a
+                    // command from this line runs, ending the input would
+                    // discard it, so its flush waits for the next line.
                     if let Some(backend) = self.injector.as_deref_mut() {
-                        process_event(
-                            &mut self.config.engine,
-                            InputEvent::EndOfInput,
-                            Some(backend),
-                            &self.policy,
-                            self.active_backend,
-                        )?;
+                        if !self.config.engine.has_deferred_reservations() {
+                            process_event(
+                                &mut self.config.engine,
+                                InputEvent::EndOfInput,
+                                Some(backend),
+                                &self.policy,
+                                self.active_backend,
+                            )?;
+                        }
                     }
                 } else {
                     process_event(

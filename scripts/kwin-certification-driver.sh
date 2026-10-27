@@ -95,10 +95,10 @@ printf 'store: %s: %s (commit %s, capture %s, output %s)\n' "$outcome" "$detail"
     "$(store_field commit)" "$(store_field capture)" "$(store_field output_backend)"
 case "$scenario" in
     focus-change-during-expansion | target-closes-during-expansion | expansion-cancellation)
-        # The stdin source runs a command expansion synchronously; evdev
-        # capture hands it to the serialized output pipeline, which also
-        # handles keys typed while it is pending. The observation above is
-        # kept for review, but it is not evidence for the evdev route.
+        # Evdev capture hands results to its serialized output pipeline,
+        # with key-release and input-quiet gating that stdin capture never
+        # reaches. The observation above is kept for review, but it is not
+        # evidence for how the evdev route handles keys typed meanwhile.
         unverified 'pending-output handling runs in the evdev pipeline, which stdin capture does not exercise'
         ;;
 esac
