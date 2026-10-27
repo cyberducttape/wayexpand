@@ -1,0 +1,89 @@
+[[expansion]]
+trigger = ";;tls-expiry"
+description = "Show the certificate a server presents and when it expires"
+category = "Operations triage"
+tags = ["tls", "certificate"]
+replacement = "openssl s_client -connect {{field:host=example.net}}:{{field:port=443}} -servername {{field:host}} </dev/null 2>/dev/null | openssl x509 -noout -subject -issuer -dates"
+
+[[expansion]]
+trigger = ";;cert-file"
+description = "Inspect a local certificate file's subject, names, and validity"
+category = "Operations triage"
+tags = ["tls", "certificate"]
+replacement = "openssl x509 -in {{field:certificate=/etc/ssl/certs/example.crt}} -noout -subject -ext subjectAltName -dates"
+
+[[expansion]]
+trigger = ";;disk-triage"
+description = "Filesystem usage, then the largest directories one level down"
+category = "Operations triage"
+tags = ["disk", "diagnostics"]
+replacement = "df -hT -x tmpfs -x devtmpfs && sudo du -xh --max-depth=1 {{field:path=/var}} 2>/dev/null | sort -rh | head -n {{field:entries=15}}"
+
+[[expansion]]
+trigger = ";;mem-triage"
+description = "Memory summary and the processes using the most of it"
+category = "Operations triage"
+tags = ["memory", "diagnostics"]
+replacement = "free -h && ps -eo pid,user,rss,comm --sort=-rss | head -n {{field:processes=15}}"
+
+[[expansion]]
+trigger = ";;listening"
+description = "Listening TCP and UDP sockets with their processes"
+category = "Operations triage"
+tags = ["network", "diagnostics"]
+replacement = "sudo ss -tulpn"
+
+[[expansion]]
+trigger = ";;dns-check"
+description = "Resolve a name through the system resolver and one explicit server"
+category = "Operations triage"
+tags = ["dns", "network"]
+replacement = "resolvectl query {{field:name=example.net}}; dig +short {{field:name}} {{choice:type=A|AAAA|CNAME|MX|TXT}} @{{field:server=1.1.1.1}}"
+
+[[expansion]]
+trigger = ";;http-check"
+description = "Status, timing, and headers for one HTTP request, without the body"
+category = "Operations triage"
+tags = ["http", "network"]
+replacement = "curl -sS -o /dev/null -D - -w 'status=%{http_code} connect=%{time_connect}s ttfb=%{time_starttransfer}s total=%{time_total}s\\n' {{field:url=https://example.net/health}}"
+
+[[expansion]]
+trigger = ";;nginx-test"
+description = "Test the nginx configuration without reloading it"
+category = "Operations triage"
+tags = ["nginx", "web"]
+replacement = "sudo nginx -t"
+
+[[expansion]]
+trigger = ";;firewall-review"
+description = "Show the active firewall rules without changing them"
+category = "Operations triage"
+tags = ["firewall", "network"]
+replacement = "{{choice:tool=sudo ufw status numbered|sudo nft list ruleset|sudo firewall-cmd --list-all}}"
+
+[[expansion]]
+trigger = ";;failed-units"
+description = "List failed systemd units and the most recent errors"
+category = "Operations triage"
+tags = ["systemd", "diagnostics"]
+replacement = "systemctl --failed --no-pager && journalctl -p err -b --no-pager -n {{field:lines=50}}"
+
+[[expansion]]
+trigger = ";;incident-entry"
+description = "Timestamped incident timeline entry"
+category = "On-call notes"
+tags = ["incident", "notes"]
+replacement = "- {{local_datetime}} [{{choice:severity=SEV3|SEV2|SEV1}}] {{field:service=example-service}}: {{cursor}}"
+
+[[expansion]]
+trigger = ";;oncall-handoff"
+description = "On-call handoff note with open items and follow-ups"
+category = "On-call notes"
+tags = ["oncall", "notes"]
+replacement = """On-call handoff, {{local_date}}
+
+Status: {{choice:status=Quiet|Ongoing incident|Degraded}}
+Open incidents: {{field:incidents=none}}
+Watch items: {{cursor}}
+Follow-ups for the next shift:
+"""

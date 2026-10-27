@@ -1,0 +1,7 @@
+format_version = 1
+id = "wayexpand.ops-triage"
+version = "1.0.0"
+name = "Operations Triage"
+publisher = "WayExpand project"
+description = "Insert-only, read-only first-response checks for TLS, disk, memory, network, and web servers, plus on-call notes."
+capabilities = ["forms"]

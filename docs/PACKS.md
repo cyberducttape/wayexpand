@@ -2,7 +2,7 @@
 
 ## Optional sysadmin and developer libraries
 
-This repository includes five local example packs in `packs/`. They are
+This repository includes six local example packs in `packs/`. They are
 optional: inspect and import only the categories you want.
 
 | Pack | Contents |
@@ -12,6 +12,7 @@ optional: inspect and import only the categories you want.
 | `containers` | Docker, Podman, and Compose inspection templates |
 | `developer` | Git, SQL, shell, and Markdown starters |
 | `support-replies` | Status updates, maintenance notices, and support replies |
+| `ops-triage` | Read-only first-response checks (TLS expiry, disk, memory, sockets, DNS, HTTP, nginx, firewall, failed units) and on-call timeline and handoff notes |
 
 For example, review then import the Kubernetes pack:
 
@@ -20,6 +21,10 @@ wayexpand pack inspect ./packs/kubernetes
 wayexpand pack import ./packs/kubernetes > /tmp/kubernetes-snippets.toml
 wayexpand validate /tmp/kubernetes-snippets.toml
 ```
+
+CI checks every pack in this repository with
+`scripts/check-snippet-repo.sh --deny-risks packs`; run the same check on your
+own snippet repository (see [SNIPPET_REPOSITORIES.md](SNIPPET_REPOSITORIES.md)).
 
 Import produces ordinary TOML; it does not install or activate snippets.
 Review the triggers and defaults, then merge the entries into your library or

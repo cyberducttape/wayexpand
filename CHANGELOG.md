@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Added the `ops-triage` example pack: twelve insert-only snippets for
+  read-only first response (TLS expiry, certificate files, disk, memory,
+  listening sockets, DNS, HTTP timing, nginx and firewall checks, failed
+  units) plus on-call timeline and handoff notes. CI now checks every bundled
+  pack with `scripts/check-snippet-repo.sh --deny-risks packs`.
 - Added CI checks for snippet repositories: `scripts/check-snippet-repo.sh`,
   a composite GitHub Action (`action.yml`), and pre-commit hooks
   (`.pre-commit-hooks.yaml`). They validate snippet files and packs, verify
