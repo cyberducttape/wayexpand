@@ -7,6 +7,10 @@ set -eu
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 checker="$project_dir/scripts/check-snippet-repo.sh"
 WAYEXPAND_CLI=${1:-${WAYEXPAND_CLI:-$project_dir/target/debug/wayexpand}}
+case "$WAYEXPAND_CLI" in
+    /*) ;;
+    */*) WAYEXPAND_CLI="$(pwd -P)/$WAYEXPAND_CLI" ;;
+esac
 export WAYEXPAND_CLI
 repo=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-check-test.XXXXXX")
 trap 'rm -rf "$repo"' EXIT INT TERM

@@ -63,6 +63,14 @@ input and already-committed text. Active IME/preedit composition is
 intentionally out of scope and is reported as `unsupported-by-design`; a
 certification never implies otherwise.
 
+The preserved current-build smoke report at
+[`docs/evidence/doctor-certify-bc3b5e1b88f8.json`](evidence/doctor-certify-bc3b5e1b88f8.json)
+tested commit `bc3b5e1b88f8` on KWin 6.6.6. Twelve checks passed, one latency
+sample was measured, and three checks were not tested. With libei keysym
+fallback, 20 small replacements measured p50 12.529 ms and p95/p99 12.619 ms.
+This remains partial evidence: it does not test physical keyboard capture,
+sensitive-field behavior, suspend/resume, or long-running stability.
+
 For an operator evidence record after running the real-client scenarios, use
 the collector with `--format json` and a validated results file:
 

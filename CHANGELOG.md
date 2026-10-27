@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Fixed the snippet-repository checker test when given a relative CLI path:
+  it now resolves that path before switching into its temporary repository.
+- Preserved a current-build KWin 6.6.6 smoke report for commit
+  `bc3b5e1b88f8`: 12 checks passed, three were not tested, and 20 small
+  keysym-fallback replacements measured p95/p99 latency of 12.619 ms. The
+  report remains partial and records its capture and lifecycle limitations.
 - Fixed a flaky parallel process-supervisor test by serializing assertions
   against its process-global cleanup-failure counter. This keeps the CI stress
   lane checking process cleanup rather than concurrent test bookkeeping.
