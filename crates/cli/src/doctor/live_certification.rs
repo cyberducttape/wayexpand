@@ -177,6 +177,11 @@ fn run_harness() -> HarnessResult {
         }
         malformed_harness_output |= record_scenario_outcome(&mut outcomes, status, name);
     }
+    if !latency_profiles.is_empty()
+        && !valid_latency_evidence(latency_profile.as_ref(), &latency_profiles)
+    {
+        malformed_harness_output = true;
+    }
     let version = stdout
         .lines()
         .find_map(|line| line.split_once("(KWin ").map(|(_, tail)| tail))
@@ -444,6 +449,19 @@ fn valid_latency_profiles(profiles: &[serde_json::Value]) -> bool {
             .all(|profile| profile["backend_mode"] == mode)
 }
 
+fn valid_latency_evidence(
+    small_profile: Option<&serde_json::Value>,
+    profiles: &[serde_json::Value],
+) -> bool {
+    if profiles.is_empty() {
+        return small_profile.is_some_and(valid_latency_profile);
+    }
+    valid_latency_profiles(profiles)
+        && small_profile.is_some_and(|small| {
+            profiles.iter().find(|profile| profile["size"] == "small") == Some(small)
+        })
+}
+
 fn command_exists(name: &str) -> bool {
     env::var_os("PATH")
         .is_some_and(|path| env::split_paths(&path).any(|directory| directory.join(name).is_file()))
@@ -577,8 +595,10 @@ fn make_report_for_build(
     checks.push(check(
         "backend-latency-measurement",
         if latency_was_run
-            && result.latency_profile.is_some()
-            && (result.latency_profiles.is_empty() || valid_latency_profiles(&result.latency_profiles))
+            && valid_latency_evidence(
+                result.latency_profile.as_ref(),
+                &result.latency_profiles,
+            )
         {
             "measured"
         } else {
@@ -927,6 +947,16 @@ mod tests {
             different_mode,
             profile("large")
         ]));
+
+        let profiles = vec![profile("small"), profile("medium"), profile("large")];
+        assert!(valid_latency_evidence(Some(&profiles[0]), &profiles));
+        let mut inconsistent_small = profiles[0].clone();
+        inconsistent_small["p95_us"] = serde_json::json!(20000);
+        assert!(!valid_latency_evidence(
+            Some(&inconsistent_small),
+            &profiles
+        ));
+        assert!(!valid_latency_evidence(None, &profiles));
     }
 
     #[test]

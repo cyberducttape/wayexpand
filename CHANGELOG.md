@@ -21,6 +21,8 @@ All notable changes to WayExpand are documented here.
   sensitive-field verification, and zero-corruption acceptance criteria.
 - Measure headless KWin injector latency across small, medium, and large
   replacements, with separate percentiles for each negotiated output mode.
+- Reject certification reports whose legacy small-size latency profile
+  disagrees with the matching entry in the multi-size evidence.
 - Preserve current-source KWin 6.6.6 report evidence for `ff6eeeac8d83`:
   12 checks passed and three areas were not tested. Keysym-fallback p95 was
   12.630 ms for small, 780.887 ms for medium, and 3.144 s for large
