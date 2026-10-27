@@ -10,9 +10,9 @@ All notable changes to WayExpand are documented here.
   for `0d1b2138a8fd`: 12 checks passed, Unicode insertion, physical capture,
   and suspend/resume were not tested, and keysym fallback measured p50
   12.198 ms and p95/p99 12.220 ms. This remains partial compatibility evidence.
-- Exercise back-to-back `.ssl` and `.clarity` expansions through the daemon's
-  serialized output worker, with the second trigger queued during the first
-  replacement, to guard against duplicate insertion.
+- Verify sequential `.ssl` and `.clarity` expansions through the daemon's
+  serialized output worker. This does not cover physical typing during an
+  in-flight replacement; that remains a desktop certification gate.
 - Report the requested capture route accurately in private KWin E2E summaries;
   input-method-v2 probes are no longer mislabeled as simulated capture.
 - Made `wayexpand stats --clear` discard usage events that were still buffered

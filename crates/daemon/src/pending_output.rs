@@ -602,13 +602,12 @@ mod tests {
     }
 
     #[test]
-    fn adjacent_triggers_queued_during_output_are_each_inserted_once() {
+    fn adjacent_triggers_processed_after_output_are_each_inserted_once() {
         let mut harness = Harness::new(false);
 
-        // The first trigger starts a serialized replacement and blocks in the
-        // output worker. The second trigger is captured while that transaction
-        // is pending, so the reactor must process it only after the first
-        // result has been committed.
+        // Keep the first transaction blocked, then release it before delivering
+        // the second event. This covers sequential back-to-back expansions;
+        // it does not model physical typing during an in-flight replacement.
         harness
             .daemon
             .start_evdev_output(InputEvent::Text(".ssl".into()))
@@ -618,11 +617,12 @@ mod tests {
             assert!(Instant::now() < deadline, "first replacement never started");
             std::thread::sleep(Duration::from_millis(1));
         }
-        let queued_input = InputEvent::Text(".clarity".into());
-
         harness.open_gate();
         harness.run_until_resolved();
-        harness.daemon.start_evdev_output(queued_input).unwrap();
+        harness
+            .daemon
+            .start_evdev_output(InputEvent::Text(".clarity".into()))
+            .unwrap();
         harness.run_until_resolved();
         harness
             .daemon
