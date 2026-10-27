@@ -74,6 +74,16 @@ stdin; Unicode insertion, physical keyboard capture, sensitive-field behavior,
 suspend/resume, and long-running stability remain untested. This is partial
 compatibility evidence, not production compositor certification.
 
+The current-source private KWin E2E report at
+[`docs/evidence/kwin-e2e-71d6f1e43.txt`](evidence/kwin-e2e-71d6f1e43.txt)
+tested commit `71d6f1e4397c` on KWin 6.6.6. Twelve real-client output and
+focus scenarios passed, including focus changes during a command-backed
+expansion, client closure, reload, restart, and output latency. The production
+libei output backend and KWin focus tracker were exercised; keyboard capture
+was still simulated through stdin. The keysym fallback refused an unavailable
+character and did not test full Unicode insertion. This is fresh compatibility
+evidence, not production certification.
+
 The preserved current-build smoke report at
 [`docs/evidence/doctor-certify-bc3b5e1b88f8.json`](evidence/doctor-certify-bc3b5e1b88f8.json)
 tested commit `bc3b5e1b88f8` on KWin 6.6.6. Twelve checks passed, one latency

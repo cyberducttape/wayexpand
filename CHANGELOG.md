@@ -12,6 +12,11 @@ All notable changes to WayExpand are documented here.
   translation failures.
 - Increased the vendored Launchpad publisher to five bounded attempts and
   aligned its job timeout with that retry budget after repeated remote errors.
+- Preserved a current-source private KWin 6.6.6 real-client run for
+  `71d6f1e4397c`: all 12 output and focus scenarios passed, including focus
+  interruption, client closure, reload, and restart. Capture remained
+  simulated, so the report is compatibility evidence rather than production
+  certification.
 - Preserved a current-build private KWin 6.6.6 smoke report for
   `f34ce2bdcdeb`: 12 checks passed, three were not tested, and twenty small
   keysym-fallback transactions measured p50 12.536 ms and p95/p99 12.646 ms.
