@@ -41,8 +41,9 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 # shellcheck source=scripts/kwin-e2e-report.sh
-. "$project_dir/scripts/kwin-e2e-report.sh"
+. "$script_dir/kwin-e2e-report.sh"
 capture_label=$(kwin_e2e_capture_label "$input_source") || {
     printf 'error: no report label for capture source: %s\n' "$input_source" >&2
     exit 2

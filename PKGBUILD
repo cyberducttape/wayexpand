@@ -57,6 +57,7 @@ package() {
     install -Dm755 scripts/test-kwin-e2e.sh "${pkgdir}/usr/libexec/wayexpand-certification/test-kwin-e2e.sh"
     install -Dm755 scripts/kwin-e2e-session.sh "${pkgdir}/usr/libexec/wayexpand-certification/kwin-e2e-session.sh"
     install -Dm644 scripts/e2e-lib.sh "${pkgdir}/usr/libexec/wayexpand-certification/e2e-lib.sh"
+    install -Dm644 scripts/kwin-e2e-report.sh "${pkgdir}/usr/libexec/wayexpand-certification/kwin-e2e-report.sh"
 
     # Install desktop entry
     install -Dm644 desktop/wayexpand.desktop "${pkgdir}/usr/share/applications/wayexpand.desktop"

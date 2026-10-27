@@ -10,6 +10,7 @@ for relative in \
     systemd/wayexpand-action-broker.service \
     scripts/test-kwin-e2e.sh \
     scripts/kwin-e2e-session.sh \
+    scripts/kwin-e2e-report.sh \
     scripts/e2e-lib.sh \
     broker.toml.example \
     udev/71-wayexpand-evdev.rules \
@@ -29,7 +30,7 @@ for manifest in "$project_dir/debian/rules" "$project_dir/PKGBUILD" \
     }
 done
 
-for helper in wx-e2e-sink wx-e2e-type wx-e2e-eis-relay e2e-lib.sh; do
+for helper in wx-e2e-sink wx-e2e-type wx-e2e-eis-relay e2e-lib.sh kwin-e2e-report.sh; do
     for manifest in "$project_dir/PKGBUILD" "$project_dir/wayexpand.spec" \
         "$project_dir/debian/rules" "$project_dir/scripts/install-user.sh" \
         "$project_dir/scripts/install-release.sh" "$project_dir/scripts/package-release-binaries.sh"; do

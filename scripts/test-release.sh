@@ -79,6 +79,25 @@ for path in \
         exit 1
     }
 done
+report_helper="wayexpand-test-linux-$release_arch/libexec/wayexpand-certification/kwin-e2e-report.sh"
+grep -Fxq "$report_helper" "$archive_listing" || {
+    printf '%s\n' "release archive is missing $report_helper" >&2
+    exit 1
+}
+test -f "$extracted_archive/$report_helper"
+# Run the packaged harness far enough to resolve its adjacent sourced helper.
+# An isolated PATH forces the predictable missing-compositor error without
+# starting a desktop session or depending on the host's installed KWin tools.
+probe_bin="$test_root/harness-probe-bin"
+mkdir -m 0700 "$probe_bin"
+ln -s "$(command -v bash)" "$probe_bin/bash"
+ln -s "$(command -v dirname)" "$probe_bin/dirname"
+if PATH="$probe_bin" "$extracted_archive/wayexpand-test-linux-$release_arch/libexec/wayexpand-certification/test-kwin-e2e.sh" \
+    --source=stdin >"$test_root/harness-probe.out" 2>&1; then
+    printf '%s\n' 'packaged KWin harness unexpectedly ran without compositor tools' >&2
+    exit 1
+fi
+grep -F 'error: kwin_wayland is required' "$test_root/harness-probe.out" >/dev/null
 test "$(stat -c '%a' "$extracted_archive/wayexpand-test-linux-$release_arch/expansions.toml")" = 600
 packaged_cli="$extracted_archive/wayexpand-test-linux-$release_arch/bin/wayexpand"
 "$packaged_cli" --version | grep -F 'wayexpand ' >/dev/null

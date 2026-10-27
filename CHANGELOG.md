@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Ship the KWin E2E report helper beside the installed harness so
+  `wayexpand doctor --certify` works from user, package, and release installs.
 - Exercise back-to-back `.ssl` and `.clarity` expansions through the daemon's
   serialized output worker, with the second trigger queued during the first
   replacement, to guard against duplicate insertion.

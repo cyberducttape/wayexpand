@@ -153,7 +153,9 @@ done
 install -m 0755 "$project_dir/scripts/test-kwin-e2e.sh" \
     "$project_dir/scripts/kwin-e2e-session.sh" \
     "$stage_dir/libexec/wayexpand-certification/"
-install -m 0644 "$project_dir/scripts/e2e-lib.sh" "$stage_dir/libexec/wayexpand-certification/"
+install -m 0644 "$project_dir/scripts/e2e-lib.sh" \
+    "$project_dir/scripts/kwin-e2e-report.sh" \
+    "$stage_dir/libexec/wayexpand-certification/"
 install -m 0644 "$project_dir"/systemd/*.service "$stage_dir/systemd/"
 install -m 0644 "$project_dir/desktop/wayexpand.desktop" "$stage_dir/desktop/wayexpand.desktop"
 install -m 0644 "$project_dir/desktop/wayexpand-ibus.xml" "$stage_dir/ibus/wayexpand.xml"

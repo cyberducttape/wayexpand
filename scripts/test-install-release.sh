@@ -25,7 +25,9 @@ done
 install -m 0755 "$project_dir/scripts/test-kwin-e2e.sh" \
     "$project_dir/scripts/kwin-e2e-session.sh" \
     "$release_dir/libexec/wayexpand-certification/"
-install -m 0644 "$project_dir/scripts/e2e-lib.sh" "$release_dir/libexec/wayexpand-certification/"
+install -m 0644 "$project_dir/scripts/e2e-lib.sh" \
+    "$project_dir/scripts/kwin-e2e-report.sh" \
+    "$release_dir/libexec/wayexpand-certification/"
 install -m 0644 "$project_dir/systemd/wayexpand-input-method.service" "$release_dir/systemd/"
 install -m 0644 "$project_dir/systemd/wayexpand-evdev.service" "$release_dir/systemd/"
 install -m 0644 "$project_dir/systemd/wayexpand-action-broker.service" "$release_dir/systemd/"
@@ -102,6 +104,7 @@ XDG_CONFIG_HOME="$test_root/config" \
 [ -L "$test_root/home/.local/lib/wayexpand/current" ]
 [ -x "$test_root/home/.local/lib/wayexpand/current/bin/wayexpand-daemon" ]
 [ -x "$test_root/home/.local/lib/wayexpand/current/libexec/wayexpand-certification/bin/wx-e2e-sink" ]
+[ -f "$test_root/home/.local/lib/wayexpand/current/libexec/wayexpand-certification/kwin-e2e-report.sh" ]
 # Install directories are named by version and payload content.
 first_version=$(readlink "$test_root/home/.local/lib/wayexpand/current")
 case "$first_version" in

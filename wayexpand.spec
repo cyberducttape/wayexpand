@@ -42,6 +42,7 @@ install -Dm755 target/release/wx-e2e-eis-relay %{buildroot}%{_libexecdir}/wayexp
 install -Dm755 scripts/test-kwin-e2e.sh %{buildroot}%{_libexecdir}/wayexpand-certification/test-kwin-e2e.sh
 install -Dm755 scripts/kwin-e2e-session.sh %{buildroot}%{_libexecdir}/wayexpand-certification/kwin-e2e-session.sh
 install -Dm644 scripts/e2e-lib.sh %{buildroot}%{_libexecdir}/wayexpand-certification/e2e-lib.sh
+install -Dm644 scripts/kwin-e2e-report.sh %{buildroot}%{_libexecdir}/wayexpand-certification/kwin-e2e-report.sh
 install -Dm644 desktop/wayexpand.desktop %{buildroot}%{_datadir}/applications/wayexpand.desktop
 install -Dm644 desktop/wayexpand-ibus.xml %{buildroot}%{_datadir}/ibus/component/wayexpand-ibus.xml
 install -Dm644 io.github.cyberducttape.WayExpand.metainfo.xml %{buildroot}%{_datadir}/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml
@@ -79,6 +80,7 @@ install -Dm644 LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
 %{_libexecdir}/wayexpand-certification/test-kwin-e2e.sh
 %{_libexecdir}/wayexpand-certification/kwin-e2e-session.sh
 %{_libexecdir}/wayexpand-certification/e2e-lib.sh
+%{_libexecdir}/wayexpand-certification/kwin-e2e-report.sh
 %{_datadir}/ibus/component/wayexpand-ibus.xml
 %{_datadir}/applications/wayexpand.desktop
 %{_datadir}/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml
