@@ -13,6 +13,8 @@ All notable changes to WayExpand are documented here.
 - Verify sequential `.ssl` and `.clarity` expansions through the daemon's
   serialized output worker. This does not cover physical typing during an
   in-flight replacement; that remains a desktop certification gate.
+- Align the production release checklist with the 72-hour desktop soak,
+  sensitive-field verification, and zero-corruption acceptance criteria.
 - Report the requested capture route accurately in private KWin E2E summaries;
   input-method-v2 probes are no longer mislabeled as simulated capture.
 - Made `wayexpand stats --clear` discard usage events that were still buffered

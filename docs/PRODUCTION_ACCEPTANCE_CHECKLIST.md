@@ -23,6 +23,8 @@ session evidence; unit tests alone do not satisfy them.
 
 - [ ] Pass a compositor-specific integration matrix. See
       [CERTIFICATION_MATRIX](CERTIFICATION_MATRIX.md).
+- [ ] Record zero unintended deletions, duplicate insertions, or wrong-window
+      injections across the complete supported-client regression corpus.
 - [ ] Pass partial-insertion fault-injection tests against every approved
       output backend.
 - [ ] Pass rapid-typing, Unicode, and layout-change tests for every approved
@@ -33,6 +35,8 @@ session evidence; unit tests alone do not satisfy them.
       test does not satisfy this gate.
 - [ ] Verify command completion never inserts into an unintended context in a
       real focus-switch test.
+- [ ] Verify fail-closed behavior in password and credential fields for each
+      route that claims sensitive-field protection.
 
 ## Operations
 
@@ -48,7 +52,9 @@ session evidence; unit tests alone do not satisfy them.
 ## Performance
 
 - [ ] Publish p50/p95/p99 insertion latency per approved backend.
-- [ ] Complete a 24-hour continuous desktop soak test.
+- [ ] Complete a 72-hour real-desktop soak on each approved route, including
+      suspend/resume, compositor reconnect, daemon restart, and configuration
+      reload.
 - [ ] Demonstrate stable memory, thread count, and file descriptors during
       that soak. The isolated soak harness now enforces peak RSS, descriptor,
       and thread-count growth limits; it does not replace this desktop test.
