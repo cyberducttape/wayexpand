@@ -36,6 +36,14 @@ impl ExpansionEngine {
         debug_assert!(self.buffer.len() <= self.max_buffer_chars);
         results
     }
+
+    /// Clear matcher history when the preceding document text is already
+    /// present but was not observed as user input. Word-boundary matches then
+    /// remain conservative until a real boundary is typed.
+    pub fn reset_with_unknown_preceding_text(&mut self) {
+        self.on_reset();
+        self.buffer_truncated = true;
+    }
 }
 
 /// The policy-specific part of taking a match. The event transitions and

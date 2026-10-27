@@ -90,6 +90,18 @@ those sequences are active. External active preedit is an explicit out-of-scope 
 supported through a passing certification. The machine-readable report lists
 this boundary under `out_of_scope_capabilities`.
 
+**Observed limitation: more than one configured layout on KWin's EIS.** With
+two layouts configured (for example `us,de`), KWin 6.6.6 sends libei clients
+a two-layout keymap but never reports which layout is active, not at connect
+and not after a layout switch. The `ei_keyboard` keysym fallback refuses to
+guess, so on the `evdev+libei` route **no replacement is typed at all** while
+several layouts are configured. Nothing is erased, so it fails safe, but the
+route is unusable for those users. Observed in private headless KWin
+sessions on 2026-10-27 (commit `c8c27d86d632`, see
+[`evidence/kwin-real-client-c8c27d86d632.txt`](evidence/kwin-real-client-c8c27d86d632.txt)),
+not yet confirmed in a live Plasma session. Single-layout `us`, `de`, `fr`,
+and `us(altgr-intl)` sessions type correctly.
+
 The integration procedure is in
 [`docs/INTEGRATION_TESTING.md`](INTEGRATION_TESTING.md). A passing unit test,
 backend probe, or running systemd process is not certification evidence.

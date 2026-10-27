@@ -58,7 +58,15 @@ safe to recommend for everyday desktop use.
       `ei_keyboard.modifiers` reports layout-group and Caps Lock changes and
       that a keymap change replaces the device. The backend now follows those
       reports, refuses multi-layout keymaps until the active layout is known,
-      and reconnects when its device is paused or removed.
+      and reconnects when its device is paused or removed. Headless KWin
+      6.6.6 never reports the active layout of a `us,de` keymap, even after
+      a switch, so nothing is typed with several layouts configured (see
+      SUPPORT_MATRIX.md). Confirm in a live session, then raise it with KWin
+      or derive the group from another trusted source.
+- [ ] A multi-layout refusal happens before any key is sent, but because it
+      surfaces from `replace` on a non-atomic route it is reported as an
+      uncertain partial failure instead of "not applied". Move the check into
+      a preflight the transaction can classify.
 
 ### 5. Certification-driven route planner
 

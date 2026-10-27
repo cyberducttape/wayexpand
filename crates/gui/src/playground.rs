@@ -41,7 +41,9 @@ impl Playground {
     /// Forget the compiled library; it is rebuilt from the next saved config.
     pub fn invalidate(&mut self) {
         self.engine = None;
-        self.seen.clear();
+        // Keep the last observed document as the diff baseline. The next
+        // edit may already include a fresh keystroke; clearing this would
+        // mistake that character for old context and skip matching it.
         self.form_detected = false;
         self.explanation = None;
         self.config_error = None;
@@ -82,16 +84,14 @@ impl Playground {
         });
         if self.engine.is_none() {
             self.engine = build_engine(config);
-            // The visible field survives config invalidation. Rebuild matcher
-            // context from that text, but discard matches: it has already
-            // been rendered and must never be expanded a second time.
-            if let Some(engine) = self.engine.as_mut() {
-                for character in self.text.chars() {
-                    for result in engine.process(InputEvent::Text(character.to_string())) {
-                        engine.discard_deferred_result(&result);
-                    }
-                }
-                self.seen.clone_from(&self.text);
+            // The visible field survives config invalidation, but it may
+            // contain text produced by earlier expansions. Replaying it as
+            // keystrokes could complete a partial trigger in the replacement
+            // and expand that text a second time. Treat its preceding context
+            // as unknown until the user types a real boundary.
+            if !self.seen.is_empty() {
+                let engine = self.engine.as_mut()?;
+                engine.reset_with_unknown_preceding_text();
             }
         }
         let engine = self.engine.as_mut()?;
@@ -257,6 +257,10 @@ mod tests {
         let mut playground = Playground::default();
         type_text(&mut playground, &config, "brbx brb ");
         assert_eq!(playground.text, "brbx be right back ");
+
+        let mut fresh = Playground::default();
+        type_text(&mut fresh, &config, "brb ");
+        assert_eq!(fresh.text, "be right back ");
     }
 
     #[test]
@@ -324,6 +328,27 @@ mod tests {
         assert!(playground.edit(&config, "", "libei", &next, true).is_none());
 
         assert_eq!(playground.text, "Regards ;inner!");
+        assert_eq!(playground.expansions, 1);
+    }
+
+    #[test]
+    fn rebuild_does_not_complete_a_partial_trigger_inside_existing_output() {
+        let config = Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ";signature"
+            replacement = "Regards ;sig"
+            "#,
+        )
+        .unwrap();
+        let mut playground = Playground::default();
+        type_text(&mut playground, &config, "x;signature");
+        assert_eq!(playground.text, "xRegards ;sig");
+
+        playground.invalidate();
+        type_text(&mut playground, &config, "nature");
+
+        assert_eq!(playground.text, "xRegards ;signature");
         assert_eq!(playground.expansions, 1);
     }
 }

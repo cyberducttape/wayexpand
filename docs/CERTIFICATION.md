@@ -219,6 +219,35 @@ outside its declared certification paths, and requires the layout profiles
 drivers. A layout profile is evidence metadata only until the driver records
 the actual keymap and observed behavior.
 
+## Headless real-client evidence (not certification)
+
+[`evidence/kwin-real-client-c8c27d86d632.txt`](evidence/kwin-real-client-c8c27d86d632.txt)
+is the store from a clean-tree run of
+`scripts/kwin-certification-prepare.sh` at commit `c8c27d86d632` on KWin
+6.6.6, recorded 2026-10-27, and
+[`evidence/kwin-real-client-c8c27d86d632.summary.json`](evidence/kwin-real-client-c8c27d86d632.summary.json)
+summarizes the collector report built from it. The live doctor and daemon
+snapshots are left out because they describe the reporting workstation.
+
+In the four single-layout sessions (`us`, `de`, `fr`, `us(altgr-intl)`), 258
+of 288 driven cells passed and none failed across GTK 3, Qt 6, Konsole, a
+GTK password field, gedit and Kate. The 30 unverified cells are
+`unicode-combining` (the keysym route refuses combining marks cleanly but
+cannot show inserting them), `multiline-rapid` in the single-line password
+field, and two Kate `expansion-cancellation` cells. Those two came from a
+harness ordering race, which has since been fixed. In the
+`multi-layout-switching` session nothing could be typed, by the daemon or by
+the test typist, because KWin never reported the active layout (see
+[SUPPORT_MATRIX.md](SUPPORT_MATRIX.md)). All 72 of its cells are unverified.
+
+Through `run-certification-driver.sh` the full 1,800-cell matrix (45
+scenarios × 5 layouts × 8 apps) is 188 pass, 40 `unsupported-by-design`
+(password-field scenario: evdev has no sensitive-field signal) and 1,572
+`UNVERIFIED`. The collector reports `certified: false`, `status: incomplete`,
+scope `compatibility`. Capture is simulated, browsers and Electron are not
+driven, and the pending-output scenarios do not count for the evdev route.
+KDE remains uncertified.
+
 ## Supporting component evidence (not certification)
 
 [`evidence/kwin-tracker-live-2026-10-26.json`](evidence/kwin-tracker-live-2026-10-26.json)

@@ -50,10 +50,11 @@ All notable changes to WayExpand are documented here.
   `run-certification-driver.sh` cells from that build-bound store. Capture,
   hardware, session-lifecycle, browser and Electron cells stay `UNVERIFIED`,
   so the driver cannot certify KDE on its own.
-- Matcher preview rebuilds now seed matcher context from text already shown in
-  the preview while discarding historical match results. Editing or changing
-  preview context can no longer apply a trigger embedded in an earlier
-  expansion for a second time.
+- Matcher preview rebuilds no longer replay visible text as keystrokes. A
+  partial trigger inside already-rendered output cannot be completed after an
+  edit or config refresh and expand that output a second time. The preview
+  retains the last observed text as its edit baseline and treats its preceding
+  matcher context as unknown until new input arrives.
 - Clarified that matcher preview replaces only the trigger and preserves
   surrounding text; its reset action is now explicitly labeled "Clear preview"
   in English, German, and Indonesian. After a match, an inline note explains

@@ -508,8 +508,15 @@ cert_expansion_cancellation() {
     slow_command_config
     start_client "$1" && start_daemon || return 2
     expand_in_client "$1" "" ";slow" || return 2
-    client_types "$1" ";slowx" "x" || return 2
+    # Capture sees the key as it is typed, so the daemon is told at once,
+    # not after the client confirms it (AT-SPI readback can take longer
+    # than the command runs).
+    "$bin/wx-e2e-type" text "x" >>"$case_dir/type.log" 2>&1 || return 2
     daemon_sees "x"
+    wait_until 50 client_text_is "$1" ";slowx" || {
+        client_describe "$1"
+        return 1
+    }
     sleep 3
     client_text_is "$1" ";slowx"
     result=$?
