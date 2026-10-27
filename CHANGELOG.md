@@ -7,7 +7,8 @@ All notable changes to WayExpand are documented here.
 - Exposed the shared ranked input-route plan in `wayexpand setup`, GUI
   diagnostics, and `wayexpand doctor --json`, including policy standing,
   availability rationale, capture/injection modes, and catalog certification.
-  The report keeps route availability separate from certification.
+  The report keeps route availability separate from certification and reuses
+  one IBus availability probe per command.
 - Fixed the snippet-repository checker test when given a relative CLI path:
   it now resolves that path before switching into its temporary repository.
 - Preserved a current-build KWin 6.6.6 smoke report for commit

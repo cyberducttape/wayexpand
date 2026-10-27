@@ -50,7 +50,15 @@ pub(crate) fn recommended_setup_backend(
     capabilities: &wayexpand_backend_selection::Capabilities,
     policy: &OrganizationPolicy,
 ) -> SetupRecommendation {
-    match recommended_route(capabilities, ibus_engine_available(), |route| {
+    recommended_setup_backend_with_ibus(capabilities, ibus_engine_available(), policy)
+}
+
+pub(crate) fn recommended_setup_backend_with_ibus(
+    capabilities: &wayexpand_backend_selection::Capabilities,
+    ibus_available: bool,
+    policy: &OrganizationPolicy,
+) -> SetupRecommendation {
+    match recommended_route(capabilities, ibus_available, |route| {
         route_allowed_by_policy(policy, route)
     }) {
         Some(route) => {

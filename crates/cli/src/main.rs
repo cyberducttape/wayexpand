@@ -34,9 +34,11 @@ use doctor::support::support_bundle;
 use errors::{
     config_error, config_load_error, daemon_error, exit_code_for, normalize_error, usage_error,
 };
+#[cfg(test)]
+use setup::recommended_setup_backend;
 use setup::{
-    configure_setup_backend, libei_portal_candidate, prompt_mode_choice, recommended_setup_backend,
-    setup_backend_for_mode,
+    configure_setup_backend, libei_portal_candidate, prompt_mode_choice,
+    recommended_setup_backend_with_ibus, setup_backend_for_mode,
 };
 use std::{
     env, fs,

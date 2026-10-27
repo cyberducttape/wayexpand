@@ -55,9 +55,10 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     })?;
     let capabilities = probe_capabilities();
     let policy = load_policy()?;
-    let automatic = recommended_setup_backend(&capabilities, &policy);
+    let ibus_available = ibus_engine_available();
+    let automatic = recommended_setup_backend_with_ibus(&capabilities, ibus_available, &policy);
     let route_plan =
-        wayexpand_backend_selection::plan_routes(&capabilities, ibus_engine_available(), |route| {
+        wayexpand_backend_selection::plan_routes(&capabilities, ibus_available, |route| {
             route_allowed_by_policy(&policy, route)
         });
     println!();

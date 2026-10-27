@@ -63,7 +63,8 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
     let protocol_probes = protocol_probe_report(&live_capabilities, wayland_session);
     let (capture_state, capture_detail) =
         capture_readiness(&live_capabilities, ibus_installed, &policy);
-    let recommendation = recommended_setup_backend(&live_capabilities, &policy);
+    let recommendation =
+        recommended_setup_backend_with_ibus(&live_capabilities, ibus_installed, &policy);
     let route_plan =
         wayexpand_backend_selection::plan_routes(&live_capabilities, ibus_installed, |route| {
             wayexpand_backend_selection::route_allowed_by_policy(&policy, route)
