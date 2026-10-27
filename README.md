@@ -51,7 +51,7 @@ local, offline, no account, no telemetry.
 | Linux architectures | x86_64 and aarch64 build paths |
 | Desktop integration | Wayland backends available; compositor support varies |
 | Production certification | Run `wayexpand doctor`; see the [support matrix](docs/SUPPORT_MATRIX.md) |
-| Distribution packages | Experimental (uncertified) `.deb`, `.rpm`, and archives on the release page; certified releases pending |
+| Distribution packages | Experimental (uncertified) `.deb`, `.rpm`, and archives on the release page; Ubuntu 26.04 amd64 daily package in the PPA; certified releases pending |
 
 ## Install
 
@@ -70,6 +70,18 @@ tar -xzf wayexpand-*-linux-x86_64.tar.gz
 # or: sudo apt install ./wayexpand_*_amd64.deb
 # or: sudo dnf install ./wayexpand-*.x86_64.rpm
 ```
+
+Ubuntu 26.04 (Resolute) users can also install the experimental daily package
+from the [WayExpand PPA](https://launchpad.net/~cyberducttape/+archive/ubuntu/ppa):
+
+```sh
+sudo add-apt-repository ppa:cyberducttape/ppa
+sudo apt update
+sudo apt install wayexpand
+```
+
+The PPA's latest Resolute amd64 package built successfully on 2026-10-27, but
+it is not compositor-certified. Check the PPA page for current package status.
 
 ### From source
 
