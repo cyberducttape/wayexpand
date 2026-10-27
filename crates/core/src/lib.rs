@@ -82,7 +82,7 @@ pub use template::{
     SnippetLibrary, TemplateContext, TemplateError,
 };
 pub use usage::{
-    trigger_risks, usage_stats_path, SnippetUsage, TriggerRisk, UsageEvent, UsageLine, UsageReport,
-    UsageStats,
+    latest_usage_event_sequence, trigger_risks, usage_stats_path, SnippetUsage, TriggerRisk,
+    UsageEvent, UsageLine, UsageReport, UsageStats,
 };
 pub use wayexpand_broker_client::ActionError;
