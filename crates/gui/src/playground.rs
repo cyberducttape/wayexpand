@@ -82,6 +82,17 @@ impl Playground {
         });
         if self.engine.is_none() {
             self.engine = build_engine(config);
+            // The visible field survives config invalidation. Rebuild matcher
+            // context from that text, but discard matches: it has already
+            // been rendered and must never be expanded a second time.
+            if let Some(engine) = self.engine.as_mut() {
+                for character in self.text.chars() {
+                    for result in engine.process(InputEvent::Text(character.to_string())) {
+                        engine.discard_deferred_result(&result);
+                    }
+                }
+                self.seen.clone_from(&self.text);
+            }
         }
         let engine = self.engine.as_mut()?;
         let window = (!app.trim().is_empty()).then(|| WindowContext {
@@ -286,5 +297,33 @@ mod tests {
         playground.text = "X;si".into();
         type_text(&mut playground, &config, "g");
         assert_eq!(playground.text, "X;sig");
+    }
+
+    #[test]
+    fn rebuilding_after_invalidation_does_not_expand_trigger_text_in_existing_output() {
+        let config = Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ";sig"
+            replacement = "Regards ;inner"
+
+            [[expansion]]
+            trigger = ";inner"
+            replacement = "Expanded twice"
+            "#,
+        )
+        .unwrap();
+        let mut playground = Playground::default();
+        type_text(&mut playground, &config, ";sig");
+        assert_eq!(playground.text, "Regards ;inner");
+
+        playground.invalidate();
+        let mut next = playground.text.clone();
+        next.push('!');
+        playground.text = next.clone();
+        assert!(playground.edit(&config, "", "libei", &next, true).is_none());
+
+        assert_eq!(playground.text, "Regards ;inner!");
+        assert_eq!(playground.expansions, 1);
     }
 }

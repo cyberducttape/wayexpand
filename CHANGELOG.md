@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Matcher preview rebuilds now seed matcher context from text already shown in
+  the preview while discarding historical match results. Editing or changing
+  preview context can no longer apply a trigger embedded in an earlier
+  expansion for a second time.
 - Escaped control characters in the daemon's reported configuration path and
   made duplicate status fields unavailable to consumers. Custom filenames or
   malformed status can no longer spoof pause, health, or capability values in
