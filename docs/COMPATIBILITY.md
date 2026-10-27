@@ -312,6 +312,7 @@ Diagnostic output suitable for health checks and monitoring systems.
     "certified": false,
     "live_route": true,
     "capabilities": {
+      "exclusive_capture": false,
       "sensitive_field_detection": false,
       "composition_awareness": false,
       "local_compose_tracking": false,
@@ -321,6 +322,7 @@ Diagnostic output suitable for health checks and monitoring systems.
       "full_unicode": false
     },
     "blockers": [
+      "exclusive keyboard capture",
       "sensitive-field detection",
       "external IME/preedit awareness",
       "key pass-through",
