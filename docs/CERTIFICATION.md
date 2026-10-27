@@ -141,10 +141,68 @@ rejects an untrusted D-Bus focus event, and detects when its own temporary KWin
 script is unloaded. This is a focused backend integration check, not a typing
 or end-to-end certification result.
 The workflow still expects a compositor-specific executable driver configured
-by the runner. The repository does not yet provide that real-client driver;
-fake-driver contract tests verify orchestration only and are not compositor
-evidence. Until real driver implementations run and reviewed artifacts pass,
-every desktop remains uncertified.
+by the runner. Fake-driver contract tests verify orchestration only and are
+not compositor evidence. Until real driver implementations run and reviewed
+artifacts pass, every desktop remains uncertified.
+
+### Headless KWin real-client driver
+
+`scripts/kwin-certification-driver.sh` is a driver for the KDE target's
+`evdev+libei` path. Run the slow part once, then hand the store to the
+runner:
+
+```sh
+scripts/kwin-certification-prepare.sh --store kwin-store.txt
+WAYEXPAND_KWIN_CERTIFICATION_STORE=$PWD/kwin-store.txt \
+scripts/run-certification-driver.sh --driver scripts/kwin-certification-driver.sh \
+  --compositor kde --version 6.6.6 --backend evdev+libei \
+  --layout us,de,fr,altgr,multi-layout-switching \
+  --target-apps gtk3-textview,qt6-plaintextedit,terminal-konsole,password-field,text-editor-gedit,qt6-editor-kate,browser-firefox,electron-vscode \
+  --output kde-results.txt
+```
+
+For each layout profile the prepare step starts a private KWin with its own
+D-Bus session, accessibility bus, home and keyboard layout (`us`, `de`, `fr`,
+`us(altgr-intl)` for `altgr`, and `us,de` with a layout switch between the
+two halves of two-phase scenarios for `multi-layout-switching`). It runs the
+production daemon, libei output and KWin tracker against real clients, and
+each client reports the text it actually received:
+
+| Target app | Client | Read back through |
+|---|---|---|
+| `gtk3-textview` | GTK 3 `TextView` | the client's own state file |
+| `password-field` | GTK 3 password-purpose `Entry` | the client's own state file |
+| `qt6-plaintextedit` | Qt 6 `QPlainTextEdit` | the client's own state file |
+| `terminal-konsole` | Konsole with a raw-mode recorder | bytes the terminal sent to its pty |
+| `text-editor-gedit` | gedit | AT-SPI |
+| `qt6-editor-kate` | Kate | AT-SPI |
+
+Every case starts its client with empty settings so that session restore
+cannot bring back an earlier document. The driven scenarios are
+`multiline-rapid`, `focus-cross-window`, `focus-change-during-expansion`,
+`target-closes-during-expansion`, `config-reload`, `daemon-restart`,
+`daemon-restart-during-typing`, `failed-insertion`, `unicode-combining`,
+`command-timeout`, `expansion-cancellation`, and `text-editor-client`.
+
+The driver answers a cell from the store only if the store records the build
+commit of the CLI under certification (`WAYEXPAND_CLI`), the KWin version
+being certified, and a clean source tree. The following cells are
+`UNVERIFIED` whatever the store says: anything that needs physical keyboard
+capture (the private daemon reads its keys from stdin), key pass-through,
+the pending-output scenarios `focus-change-during-expansion`,
+`target-closes-during-expansion` and `expansion-cancellation` (stdin capture
+runs command expansions synchronously, but evdev capture hands them to its
+serialized output pipeline; the driver log keeps the stdin observation),
+input hardware, suspend/resume, compositor restart, the RemoteDesktop portal
+(the session reaches EIS through a relay), the snippet picker, and clients
+the store does not cover. That includes Firefox and Chromium, whose snap
+packages cannot join a private compositor, and Electron. `password-field` is
+`unsupported-by-design`, because evdev capture has no sensitive-field signal.
+The IBus path is not exercised. A run of this driver can therefore never
+certify KDE. It supplies reproducible real-client evidence for the output,
+focus and daemon-lifecycle part of the matrix, and leaves the rest explicitly
+open. `scripts/test-kwin-certification-driver.sh` checks the driver's
+contract without a compositor.
 
 Each driver invocation is capped at 120 seconds and the complete matrix has a
 60-minute deadline. A timed-out cell and every cell remaining after the overall

@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Added a headless real-client KWin certification driver for the
+  `evdev+libei` path. `scripts/kwin-certification-prepare.sh` runs twelve
+  scenarios against GTK, Qt, Konsole, gedit and Kate in private KWin sessions
+  for each layout profile, and `scripts/kwin-certification-driver.sh` answers
+  `run-certification-driver.sh` cells from that build-bound store. Capture,
+  hardware, session-lifecycle, browser and Electron cells stay `UNVERIFIED`,
+  so the driver cannot certify KDE on its own.
 - Matcher preview rebuilds now seed matcher context from text already shown in
   the preview while discarding historical match results. Editing or changing
   preview context can no longer apply a trigger embedded in an earlier

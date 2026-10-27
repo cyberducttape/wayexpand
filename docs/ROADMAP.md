@@ -21,6 +21,16 @@ safe to recommend for everyday desktop use.
       typing, shortcuts, focus changes, layout changes, restart, suspend/resume,
       portal revocation, and device reconnect.
 - [ ] Publish exact versions, backend choices, test dates, and known limitations.
+- [x] Headless real-client driver for the `evdev+libei` path
+      (`scripts/kwin-certification-driver.sh`): GTK, Qt, Konsole, gedit and
+      Kate in private KWin sessions across all five layout profiles. Output,
+      focus and daemon-lifecycle cells only; see
+      [CERTIFICATION.md](CERTIFICATION.md#headless-kwin-real-client-driver).
+- [ ] Capture-side cells need a live-session driver: physical keyboard
+      capture, key pass-through, pending-output concurrency through the evdev
+      pipeline, hardware reconnect, suspend/resume, portal revocation.
+- [ ] Browser and Electron cells: the snap Firefox/Chromium cannot join a
+      private compositor; drive non-snap builds or a live session.
 
 ### 2. GNOME certification
 
