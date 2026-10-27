@@ -96,7 +96,12 @@ validate_file() {
             done
     fi
     if [ "$status" -ne 0 ]; then
-        fail "$1" "$(printf '%s\n' "$output" | grep -v '^{' | sed 's/^Error: //' | tail -n 1)"
+        # anyhow appends a backtrace when RUST_BACKTRACE=1. Report its first
+        # error line instead of turning the final native frame into the
+        # snippet's diagnostic (and losing useful GitHub annotations).
+        error=$(printf '%s\n' "$output" | sed -n 's/^Error: //p' | head -n 1)
+        [ -n "$error" ] || error=$(printf '%s\n' "$output" | grep -v '^{' | tail -n 1)
+        fail "$1" "$error"
         return 0
     fi
     printf 'ok   %s (%s expansions, %s commands)\n' "$1" \

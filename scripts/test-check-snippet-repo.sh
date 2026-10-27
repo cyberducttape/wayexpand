@@ -4,6 +4,11 @@
 #   test-check-snippet-repo.sh [WAYEXPAND_CLI]
 set -eu
 
+# CI enables backtraces globally; keep the diagnostic assertion representative
+# of that environment so anyhow's trailing frames cannot obscure the cause.
+RUST_BACKTRACE=1
+export RUST_BACKTRACE
+
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 checker="$project_dir/scripts/check-snippet-repo.sh"
 WAYEXPAND_CLI=${1:-${WAYEXPAND_CLI:-$project_dir/target/debug/wayexpand}}

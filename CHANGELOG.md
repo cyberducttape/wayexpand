@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Kept snippet-checker errors and GitHub annotations actionable when Rust
+  backtraces are enabled by extracting the primary validation error instead of
+  the final stack frame.
 - Corrected KWin certification client-close coverage: detached client processes
   are terminated and verified stopped before the focus-change safety assertion.
   Reduced AT-SPI polling retries in text-entry and expected-refusal checks.
