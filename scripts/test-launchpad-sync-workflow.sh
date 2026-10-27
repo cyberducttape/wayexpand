@@ -23,6 +23,15 @@ grep -F -- "$main_lease" "$workflow" >/dev/null
 grep -F -- "$probe_timeout" "$workflow" >/dev/null
 grep -F -- "$probe_connect_timeout" "$workflow" >/dev/null
 
+# Authorization probing also retries transient Launchpad SSH failures instead
+# of aborting before the already-retried push phase can run.
+probe_line=$(grep -nF -- '- name: Verify Launchpad SSH authorization' "$workflow" | cut -d: -f1)
+push_line=$(grep -nF -- '- name: Push GitHub main to Launchpad' "$workflow" | cut -d: -f1)
+test -n "$probe_line" -a -n "$push_line"
+sed -n "$probe_line,$((push_line - 1))p" "$workflow" | grep -F -- 'for attempt in 1 2 3; do' >/dev/null
+sed -n "$probe_line,$((push_line - 1))p" "$workflow" | grep -F -- 'sleep $((attempt * 10))' >/dev/null
+sed -n "$probe_line,$((push_line - 1))p" "$workflow" | grep -F -- 'after three attempts' >/dev/null
+
 # Both main push forms must remain inside the branch guard. The two push lines
 # must occur after the guard and before the tag-only branch, so nested `if`
 # blocks cannot accidentally move one of them outside the protection.

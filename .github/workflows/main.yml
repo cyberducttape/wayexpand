@@ -45,19 +45,31 @@ jobs:
           test -s ~/.ssh/launchpad_key
           fingerprint="$(ssh-keygen -y -f ~/.ssh/launchpad_key | ssh-keygen -lf - | awk '{print $2}')"
           echo "Launchpad key fingerprint: $fingerprint"
-          set +e
-          response="$(timeout --signal=TERM --kill-after=10s 45s ssh \
-            -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
-            -o BatchMode=yes -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes -i ~/.ssh/launchpad_key \
-            -T cyberducttape@git.launchpad.net 2>&1)"
-          set -e
-          printf '%s\n' "$response"
-          # Launchpad may return different SSH statuses for its intentional
-          # no-shell response; the authenticated server text is the stable
-          # success signal. Permission and host-key failures do not emit it.
-          if ! printf '%s\n' "$response" | grep -Fq 'No shells on this server.'; then
-            echo 'Launchpad SSH authorization did not succeed.' >&2
+          authorized=false
+          for attempt in 1 2 3; do
+            set +e
+            response="$(timeout --signal=TERM --kill-after=10s 45s ssh \
+              -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+              -o BatchMode=yes -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=yes -i ~/.ssh/launchpad_key \
+              -T cyberducttape@git.launchpad.net 2>&1)"
+            ssh_status=$?
+            set -e
+            printf '%s\n' "$response"
+            # Launchpad may return different SSH statuses for its intentional
+            # no-shell response; the authenticated server text is the stable
+            # success signal. Permission and host-key failures do not emit it.
+            if printf '%s\n' "$response" | grep -Fq 'No shells on this server.'; then
+              authorized=true
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "Launchpad SSH authorization attempt $attempt failed (status $ssh_status); retrying." >&2
+              sleep $((attempt * 10))
+            fi
+          done
+          if [ "$authorized" != true ]; then
+            echo 'Launchpad SSH authorization failed after three attempts.' >&2
             exit 1
           fi
 
