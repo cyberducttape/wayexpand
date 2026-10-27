@@ -8,6 +8,8 @@ All notable changes to WayExpand are documented here.
   fallback now refreshes its active keyboard layout and validates the full
   replacement before deleting the trigger, so unknown multi-layout state is
   reported as not applied rather than an uncertain partial failure.
+- Updated the production roadmap to reflect that multi-layout output refusal
+  is now preflighted and leaves the trigger untouched.
 - Stabilized the asynchronous command metrics regression test: it now waits
   for both worker counters and delivered failure events, avoiding a timing
   race where counters advanced before completions reached the engine.

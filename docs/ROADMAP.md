@@ -63,10 +63,10 @@ safe to recommend for everyday desktop use.
       a switch, so nothing is typed with several layouts configured (see
       SUPPORT_MATRIX.md). Confirm in a live session, then raise it with KWin
       or derive the group from another trusted source.
-- [ ] A multi-layout refusal happens before any key is sent, but because it
-      surfaces from `replace` on a non-atomic route it is reported as an
-      uncertain partial failure instead of "not applied". Move the check into
-      a preflight the transaction can classify.
+- [x] Multi-layout and unrepresentable-text refusals are checked during
+      transaction preflight, before a non-atomic route erases the trigger;
+      these failures are classified as "not applied". The fallback still
+      refuses to type on KWin when EIS does not report the active group.
 
 ### 5. Certification-driven route planner
 
