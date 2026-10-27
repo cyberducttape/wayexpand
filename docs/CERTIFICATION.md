@@ -63,6 +63,17 @@ input and already-committed text. Active IME/preedit composition is
 intentionally out of scope and is reported as `unsupported-by-design`; a
 certification never implies otherwise.
 
+The current-source smoke report at
+[`docs/evidence/doctor-certify-f34ce2bdcdeb.json`](evidence/doctor-certify-f34ce2bdcdeb.json)
+tested build `f34ce2bdcdeb` on KWin 6.6.6 in a private headless session. Twelve
+checks passed, one backend latency measurement was recorded, and three checks
+were not tested. Twenty small libei keysym-fallback transactions measured
+12.536 ms p50 and 12.646 ms p95/p99 inside the injector. The run verified its
+CLI/daemon build identity and clean source tree. Capture was simulated through
+stdin; Unicode insertion, physical keyboard capture, sensitive-field behavior,
+suspend/resume, and long-running stability remain untested. This is partial
+compatibility evidence, not production compositor certification.
+
 The preserved current-build smoke report at
 [`docs/evidence/doctor-certify-bc3b5e1b88f8.json`](evidence/doctor-certify-bc3b5e1b88f8.json)
 tested commit `bc3b5e1b88f8` on KWin 6.6.6. Twelve checks passed, one latency

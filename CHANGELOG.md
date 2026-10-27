@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Preserved a current-build private KWin 6.6.6 smoke report for
+  `f34ce2bdcdeb`: 12 checks passed, three were not tested, and twenty small
+  keysym-fallback transactions measured p50 12.536 ms and p95/p99 12.646 ms.
+  Capture remained simulated, so the report is partial compatibility evidence.
 - Retry Linux `ETXTBSY` spawn failures for a short bounded window when launching
   a descriptor-pinned action. This handles transient filesystem contention
   before a child starts without retrying other spawn failures or duplicating
