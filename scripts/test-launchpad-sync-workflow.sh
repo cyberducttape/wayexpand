@@ -11,7 +11,7 @@ tag_message="Skipping Launchpad main update for \$GITHUB_REF; syncing tags only.
 main_lease="--force-with-lease=\"refs/heads/main:\$launchpad_main\""
 probe_timeout="response=\"\$(timeout --signal=TERM --kill-after=10s 45s ssh"
 probe_connect_timeout="-o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3"
-grep -F -- 'for attempt in 1 2 3; do' "$workflow" >/dev/null
+grep -F -- 'for attempt in 1 2 3 4 5; do' "$workflow" >/dev/null
 grep -F -- 'push_status=$?' "$workflow" >/dev/null
 grep -F -- "$expected_group" "$workflow" >/dev/null
 grep -F -- 'cancel-in-progress: false' "$workflow" >/dev/null
@@ -28,9 +28,9 @@ grep -F -- "$probe_connect_timeout" "$workflow" >/dev/null
 probe_line=$(grep -nF -- '- name: Verify Launchpad SSH authorization' "$workflow" | cut -d: -f1)
 push_line=$(grep -nF -- '- name: Push GitHub main to Launchpad' "$workflow" | cut -d: -f1)
 test -n "$probe_line" -a -n "$push_line"
-sed -n "$probe_line,$((push_line - 1))p" "$workflow" | grep -F -- 'for attempt in 1 2 3; do' >/dev/null
+sed -n "$probe_line,$((push_line - 1))p" "$workflow" | grep -F -- 'for attempt in 1 2 3 4 5; do' >/dev/null
 sed -n "$probe_line,$((push_line - 1))p" "$workflow" | grep -F -- "sleep \$((attempt * 10))" >/dev/null
-sed -n "$probe_line,$((push_line - 1))p" "$workflow" | grep -F -- 'after three attempts' >/dev/null
+sed -n "$probe_line,$((push_line - 1))p" "$workflow" | grep -F -- 'after five attempts' >/dev/null
 
 # A failed Launchpad ref lookup must be retried too; otherwise a transient
 # path-translation timeout exits before the branch and push retry loops.
@@ -38,7 +38,12 @@ grep -F -- 'retry_ls_remote() {' "$workflow" >/dev/null
 grep -F -- 'retry_ls_remote launchpad refs/heads/main' "$workflow" >/dev/null
 grep -F -- 'retry_ls_remote --tags launchpad' "$workflow" >/dev/null
 grep -F -- "Launchpad ref query attempt \$attempt failed" "$workflow" >/dev/null
-grep -F -- 'timeout --signal=TERM --kill-after=15s 90s' "$workflow" >/dev/null
+grep -F -- 'timeout --signal=TERM --kill-after=15s 45s' "$workflow" >/dev/null
+query_line=$(grep -nF -- 'retry_ls_remote() {' "$workflow" | cut -d: -f1)
+push_retry_line=$(grep -nF -- 'retry_push() {' "$workflow" | cut -d: -f1)
+test -n "$query_line" -a -n "$push_retry_line"
+sed -n "$query_line,$((push_retry_line - 1))p" "$workflow" | grep -F -- 'for attempt in 1 2 3 4 5 6 7; do' >/dev/null
+sed -n "$query_line,$((push_retry_line - 1))p" "$workflow" | grep -F -- 'if [ "$attempt" -lt 7 ]; then' >/dev/null
 push_step=$(grep -nF -- '- name: Push GitHub main to Launchpad' "$workflow" | cut -d: -f1)
 vendored_step=$(grep -nF -- '- name: Publish the vendored Launchpad build branch' "$workflow" | cut -d: -f1)
 test -n "$push_step" -a -n "$vendored_step"

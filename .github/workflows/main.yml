@@ -46,7 +46,7 @@ jobs:
           fingerprint="$(ssh-keygen -y -f ~/.ssh/launchpad_key | ssh-keygen -lf - | awk '{print $2}')"
           echo "Launchpad key fingerprint: $fingerprint"
           authorized=false
-          for attempt in 1 2 3; do
+          for attempt in 1 2 3 4 5; do
             set +e
             response="$(timeout --signal=TERM --kill-after=10s 45s ssh \
               -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
@@ -63,13 +63,13 @@ jobs:
               authorized=true
               break
             fi
-            if [ "$attempt" -lt 3 ]; then
+            if [ "$attempt" -lt 5 ]; then
               echo "Launchpad SSH authorization attempt $attempt failed (status $ssh_status); retrying." >&2
               sleep $((attempt * 10))
             fi
           done
           if [ "$authorized" != true ]; then
-            echo 'Launchpad SSH authorization failed after three attempts.' >&2
+            echo 'Launchpad SSH authorization failed after five attempts.' >&2
             exit 1
           fi
 
@@ -82,9 +82,9 @@ jobs:
             ssh://cyberducttape@git.launchpad.net/~cyberducttape/+git/wayexpand
           retry_ls_remote() {
             local attempt output query_status
-            for attempt in 1 2 3 4 5; do
+            for attempt in 1 2 3 4 5 6 7; do
               set +e
-              output="$(timeout --signal=TERM --kill-after=15s 90s \
+              output="$(timeout --signal=TERM --kill-after=15s 45s \
                 git ls-remote "$@")"
               query_status=$?
               set -e
@@ -92,7 +92,7 @@ jobs:
                 printf '%s\n' "$output"
                 return 0
               fi
-              if [ "$attempt" -lt 5 ]; then
+              if [ "$attempt" -lt 7 ]; then
                 echo "Launchpad ref query attempt $attempt failed with status $query_status; retrying." >&2
                 sleep $((attempt * 10))
               fi
