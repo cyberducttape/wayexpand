@@ -2,6 +2,14 @@
 set -euo pipefail
 
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+# shellcheck source=scripts/kwin-e2e-report.sh
+. "$project_dir/scripts/kwin-e2e-report.sh"
+[[ "$(kwin_e2e_capture_label stdin)" == stdin-simulated ]]
+[[ "$(kwin_e2e_capture_label input-method)" == input-method-v2-requested ]]
+if kwin_e2e_capture_label unknown >/dev/null 2>&1; then
+    printf '%s\n' 'unknown KWin capture source received a report label' >&2
+    exit 1
+fi
 test_root=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-kwin-timeout-test.XXXXXX")
 trap 'rm -rf "$test_root"' EXIT
 fake_bin="$test_root/bin"

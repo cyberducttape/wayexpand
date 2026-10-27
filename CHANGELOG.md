@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Report the requested capture route accurately in private KWin E2E summaries;
+  input-method-v2 probes are no longer mislabeled as simulated capture.
 - Made `wayexpand stats --clear` discard usage events that were still buffered
   in the engine when the clear began, while retaining expansions recorded
   after the clear boundary.

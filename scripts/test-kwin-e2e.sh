@@ -41,6 +41,12 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+# shellcheck source=scripts/kwin-e2e-report.sh
+. "$project_dir/scripts/kwin-e2e-report.sh"
+capture_label=$(kwin_e2e_capture_label "$input_source") || {
+    printf 'error: no report label for capture source: %s\n' "$input_source" >&2
+    exit 2
+}
 session_driver=$(dirname -- "$0")/kwin-e2e-session.sh
 if [ ! -f "$session_driver" ]; then
     session_driver="$project_dir/scripts/kwin-e2e-session.sh"
@@ -218,8 +224,9 @@ if [ -s "$work/runtime-status" ]; then
     printf 'route backend-mode %s\n' "$(status_field backend_mode)"
     printf 'route sensitive-field-detection %s\n' "$(status_field capture_sensitive_focus)"
 fi
-printf '\n%s passed, %s failed, %s unverified (KWin %s, headless, capture simulated)\n' \
-    "$pass" "$fail" "$unverified" "$(kwin_wayland --version 2>/dev/null | awk '{print $2}')"
+printf '\n%s passed, %s failed, %s unverified (KWin %s, headless, capture %s)\n' \
+    "$pass" "$fail" "$unverified" "$(kwin_wayland --version 2>/dev/null | awk '{print $2}')" \
+    "$capture_label"
 [ "$fail" -eq 0 ] && {
     [ "$unverified" -eq 0 ] || {
         [ "$allow_unicode_unverified" = true ] && [ "$required_unverified" -eq 0 ]
