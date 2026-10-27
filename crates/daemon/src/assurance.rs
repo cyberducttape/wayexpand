@@ -334,6 +334,10 @@ impl TextInjector for AssuredInjector {
             .admit(self.inner.name(), &self.inner.capabilities(), erases)
     }
 
+    fn preflight_text(&mut self, text: &str) -> Result<(), InjectorError> {
+        self.inner.preflight_text(text)
+    }
+
     fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {
         self.admit_erase()?;
         self.inner.erase(trigger)

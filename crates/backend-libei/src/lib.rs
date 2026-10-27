@@ -752,6 +752,22 @@ impl TextInjector for LibeiInjector {
         self.checkpoint = checkpoint;
     }
 
+    fn preflight_text(&mut self, text: &str) -> Result<(), InjectorError> {
+        // Refresh modifiers/layout before the transaction is classified. If
+        // the active group is unknown, refuse here so the trigger remains
+        // untouched and the engine reports a clean not-applied outcome.
+        self.sync_server_state()
+            .and_then(|()| {
+                validate_text(text)?;
+                self.ensure_representable(text)
+            })
+            .map_err(|error| InjectorError {
+                backend: BACKEND_NAME,
+                message: error.to_string(),
+                retryable: false,
+            })
+    }
+
     fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {
         self.sync_server_state()
             .and_then(|()| self.send_backspaces(erase_grapheme_count(trigger)))

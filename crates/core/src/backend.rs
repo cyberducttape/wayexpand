@@ -507,6 +507,12 @@ pub trait TextInjector: Send {
     fn admit(&self, _erases: bool) -> Result<(), InjectorError> {
         Ok(())
     }
+    /// Validate the replacement payload against current backend state before
+    /// the transaction starts. A refusal guarantees that no output was sent.
+    /// Stateful backends may refresh compositor state here before validating.
+    fn preflight_text(&mut self, _text: &str) -> Result<(), InjectorError> {
+        Ok(())
+    }
     /// Install a check for backends that type over time. They must call it
     /// before each synthesized character and stop with a non-retryable error
     /// when it fails. Backends that write in one burst may ignore it.
@@ -607,6 +613,10 @@ impl<T: TextInjector + ?Sized> TextInjector for Box<T> {
     // replace the boxed backend's own behavior.
     fn admit(&self, erases: bool) -> Result<(), InjectorError> {
         (**self).admit(erases)
+    }
+
+    fn preflight_text(&mut self, text: &str) -> Result<(), InjectorError> {
+        (**self).preflight_text(text)
     }
 
     fn set_output_checkpoint(&mut self, checkpoint: OutputCheckpoint) {

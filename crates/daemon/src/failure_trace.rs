@@ -169,6 +169,9 @@ impl TextInjector for TracedInjector<'_> {
             }
         }
     }
+    fn preflight_text(&mut self, text: &str) -> Result<(), InjectorError> {
+        self.inner.preflight_text(text)
+    }
     fn set_output_checkpoint(&mut self, checkpoint: OutputCheckpoint) {
         self.inner.set_output_checkpoint(checkpoint)
     }

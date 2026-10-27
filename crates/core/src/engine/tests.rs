@@ -1280,6 +1280,17 @@ impl crate::TextInjector for CapabilityInjector {
         self.capabilities
     }
 
+    fn preflight_text(&mut self, text: &str) -> Result<(), crate::InjectorError> {
+        if text == "refuse" {
+            return Err(crate::InjectorError {
+                backend: self.name(),
+                message: "test preflight refusal".into(),
+                retryable: false,
+            });
+        }
+        Ok(())
+    }
+
     fn erase(&mut self, trigger: &str) -> Result<(), crate::InjectorError> {
         self.calls.push(format!("erase:{trigger}"));
         Ok(())
@@ -1325,6 +1336,35 @@ fn apply_preflights_backend_capabilities_before_destructive_output() {
                 && source.message.contains("keystroke_max_chars")
     ));
     assert!(injector.calls.is_empty());
+}
+
+#[test]
+fn apply_reports_backend_text_preflight_refusal_as_not_applied() {
+    let result = ExpansionResult {
+        snippet_id: String::new(),
+        trigger: ":x".into(),
+        matched_text: ":x".into(),
+        insert: "refuse".into(),
+        cursor_offset: None,
+        reinsert_after: None,
+        command_backed: false,
+        undoable: true,
+        folded_suffix_chars: 0,
+    };
+    let mut injector = CapabilityInjector {
+        calls: Vec::new(),
+        capabilities: crate::InjectorCapabilities::default(),
+    };
+    let outcome = ExpansionEngine::apply(&mut injector, &result);
+    assert!(matches!(
+        outcome,
+        crate::TransactionOutcome::NotApplied { ref source }
+            if source.message == "test preflight refusal"
+    ));
+    assert!(
+        injector.calls.is_empty(),
+        "preflight refusal must send no output"
+    );
 }
 
 #[test]

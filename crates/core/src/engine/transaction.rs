@@ -3,6 +3,8 @@
 //! Handles undo history, deferred match reservations, and transaction tracking
 //! for expansion results that need to maintain undo semantics across async completion.
 
+use std::borrow::Cow;
+
 use super::{ExpansionEngine, ExpansionResult};
 use crate::{InjectorCapabilities, InjectorError, TextInjector};
 
@@ -170,13 +172,23 @@ pub fn route_limit(
 
 impl ExpansionEngine {
     fn preflight_output<I: TextInjector + ?Sized>(
-        injector: &I,
+        injector: &mut I,
         result: &ExpansionResult,
     ) -> Result<(), InjectorError> {
         let capabilities = injector.capabilities();
         // Checked first and before anything is typed, so a refusal is a clean
         // "not applied" rather than an uncertain partial write.
         injector.admit(!result.matched_text.is_empty() || result.reinsert_after.is_some())?;
+        let preflight_text = result.reinsert_after.map_or_else(
+            || Cow::Borrowed(result.insert.as_str()),
+            |character| {
+                let mut text = String::with_capacity(result.insert.len() + character.len_utf8());
+                text.push_str(&result.insert);
+                text.push(character);
+                Cow::Owned(text)
+            },
+        );
+        injector.preflight_text(&preflight_text)?;
         match route_limit(
             &capabilities,
             &result.insert,
