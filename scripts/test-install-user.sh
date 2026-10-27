@@ -225,6 +225,11 @@ HOME="$test_root/home" XDG_CONFIG_HOME="$space_config_home" \
 XDG_STATE_HOME="$space_state_home" "$project_dir/scripts/install-user.sh"
 grep -F "Environment=\"XDG_CONFIG_HOME=$space_config_systemd\"" \
     "$space_config_home/systemd/user/wayexpand-evdev.service.d/10-xdg-paths.conf"
+grep -Fx 'ConditionPathExists=' \
+    "$space_config_home/systemd/user/wayexpand-evdev.service.d/10-xdg-paths.conf"
+space_config_condition=$(printf '%s' "$space_config_systemd" | sed 's/ /\\x20/g')
+grep -F "ConditionPathExists=$space_config_condition/wayexpand/evdev-sensitive-fields-ack" \
+    "$space_config_home/systemd/user/wayexpand-evdev.service.d/10-xdg-paths.conf"
 grep -F 'config with spaces%%/wayexpand/broker.toml' \
     "$space_config_home/systemd/user/wayexpand-action-broker.service.d/10-xdg-paths.conf"
 

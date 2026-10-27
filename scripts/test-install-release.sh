@@ -134,8 +134,10 @@ if PATH="$stub_bin:$PATH" SYSTEMCTL_LOG="$systemctl_log" HOME="$test_root/home" 
     exit 1
 fi
 grep -F 'evdev-sensitive-fields-ack' "$test_root/evdev-no-consent.out" >/dev/null
-install -d -m 0700 "$test_root/home/.config/wayexpand"
-install -m 0600 /dev/null "$test_root/home/.config/wayexpand/evdev-sensitive-fields-ack"
+grep -F "install -d -m 0700 $test_root/config/wayexpand" \
+    "$test_root/evdev-no-consent.out" >/dev/null
+install -d -m 0700 "$test_root/config/wayexpand"
+install -m 0600 /dev/null "$test_root/config/wayexpand/evdev-sensitive-fields-ack"
 
 PATH="$stub_bin:$PATH" \
 SYSTEMCTL_LOG="$systemctl_log" \

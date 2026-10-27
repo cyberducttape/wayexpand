@@ -39,15 +39,34 @@ if [ "$enable_service" -eq 1 ] && ! command -v systemctl >/dev/null 2>&1; then
     printf '%s\n' 'error: systemctl is required for --enable' >&2
     exit 127
 fi
+config_home=${XDG_CONFIG_HOME:-"$HOME/.config"}
+config_dir="$config_home/wayexpand"
+state_home=${XDG_STATE_HOME:-"$HOME/.local/state"}
+state_dir="$state_home/wayexpand"
+unit_dir="$config_home/systemd/user"
+case "$config_home" in
+    /*) ;;
+    *)
+        printf '%s\n' "error: XDG_CONFIG_HOME must be an absolute path" >&2
+        exit 1
+        ;;
+esac
+case "$state_home" in
+    /*) ;;
+    *)
+        printf '%s\n' "error: XDG_STATE_HOME must be an absolute path" >&2
+        exit 1
+        ;;
+esac
 # The evdev unit is inert without its consent marker (ConditionPathExists),
 # and systemd reports a skipped condition as success. Refuse rather than
 # report an enabled service that never runs; never create the marker here.
-evdev_marker="$HOME/.config/wayexpand/evdev-sensitive-fields-ack"
+evdev_marker="$config_dir/evdev-sensitive-fields-ack"
 if [ "$enable_service" -eq 1 ] && [ "$service_name" = wayexpand-evdev.service ] \
     && [ ! -e "$evdev_marker" ]; then
     printf '%s\n' "error: wayexpand-evdev.service only starts after you accept that it captures password fields" >&2
     printf '%s\n' "review docs/BACKENDS_SENSITIVE_FIELDS.md, then create the marker and rerun:" >&2
-    printf '%s\n' "  install -d -m 0700 $HOME/.config/wayexpand" >&2
+    printf '%s\n' "  install -d -m 0700 $config_dir" >&2
     printf '%s\n' "  install -m 0600 /dev/null $evdev_marker" >&2
     exit 2
 fi
@@ -74,29 +93,9 @@ if [ -z "$version" ]; then
     printf '%s\n' 'error: release directory name must be wayexpand-VERSION-linux-ARCH' >&2
     exit 1
 fi
-config_home=${XDG_CONFIG_HOME:-"$HOME/.config"}
-config_dir="$config_home/wayexpand"
-state_home=${XDG_STATE_HOME:-"$HOME/.local/state"}
-state_dir="$state_home/wayexpand"
-unit_dir="$config_home/systemd/user"
 application_dir="$HOME/.local/share/applications"
 metainfo_dir="$HOME/.local/share/metainfo"
 man_dir="$HOME/.local/share/man/man1"
-case "$config_home" in
-    /*) ;;
-    *)
-        printf '%s\n' "error: XDG_CONFIG_HOME must be an absolute path" >&2
-        exit 1
-        ;;
-esac
-case "$state_home" in
-    /*) ;;
-    *)
-        printf '%s\n' "error: XDG_STATE_HOME must be an absolute path" >&2
-        exit 1
-        ;;
-esac
-
 config_path="$config_dir/expansions.toml"
 if [ "$enable_service" -eq 1 ]; then
     validation_path=

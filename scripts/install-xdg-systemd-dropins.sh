@@ -16,6 +16,11 @@ bin_dir=$6
 systemd_quote() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/%/%%/g'
 }
+systemd_condition_path() {
+    # ConditionPathExists consumes one path token rather than shell-style
+    # arguments; quote characters are data there, while spaces need C escapes.
+    printf '%s' "$1" | sed 's/\\/\\\\/g; s/ /\\x20/g; s/%/%%/g'
+}
 for path in "$config_home" "$config_dir" "$state_home" "$state_dir" "$bin_dir"; do
     case "$path" in
         /*) ;;
@@ -40,11 +45,23 @@ write_dropin() {
 
 config_home_q=$(systemd_quote "$config_home")
 config_dir_q=$(systemd_quote "$config_dir")
+evdev_ack_condition=$(systemd_condition_path "$config_dir/evdev-sensitive-fields-ack")
 state_home_q=$(systemd_quote "$state_home")
 state_dir_q=$(systemd_quote "$state_dir")
 bin_dir_q=$(systemd_quote "$bin_dir")
 for service in wayexpand-input-method.service wayexpand-evdev.service; do
-    write_dropin "$unit_dir/$service.d/10-xdg-paths.conf" "[Service]
+    unit_section=
+    if [ "$service" = wayexpand-evdev.service ]; then
+        # Unit conditions are evaluated by systemd before service environment
+        # variables are applied, so XDG_CONFIG_HOME must be encoded directly
+        # in this condition rather than inferred from the Environment entry.
+        unit_section="[Unit]
+ConditionPathExists=
+ConditionPathExists=$evdev_ack_condition
+
+"
+    fi
+    write_dropin "$unit_dir/$service.d/10-xdg-paths.conf" "${unit_section}[Service]
 Environment=\"XDG_CONFIG_HOME=$config_home_q\"
 Environment=\"XDG_STATE_HOME=$state_home_q\"
 Environment=\"WAYEXPAND_PORTAL_TOKEN_PATH=$config_dir_q/libei-portal-token\"

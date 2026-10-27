@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Fixed evdev consent checks for custom XDG configuration roots. The generated
+  systemd drop-in now overrides the unit condition using the resolved config
+  path, and the release installer checks and documents that same marker path.
 - Added a backend text preflight before replacement starts. The libei keysym
   fallback now refreshes its active keyboard layout and validates the full
   replacement before deleting the trigger, so unknown multi-layout state is
