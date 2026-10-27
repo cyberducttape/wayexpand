@@ -10,6 +10,8 @@ All notable changes to WayExpand are documented here.
   an action.
 - Increased Launchpad main-ref lookup and push retries to five bounded attempts
   with backoff after repeated Launchpad ref-permission timeouts.
+- Clarified stale-daemon upgrade guidance so it covers manually launched and
+  systemd-managed daemons, and tells users to verify the updated binary is used.
 - Preserved a 1,800-cell KWin 6.6.6 private real-client compatibility run for
   build `e075ddda6ada`: 187 cells passed, 40 password-field cells were
   unsupported by design, 1,573 remained unverified, and none failed. The

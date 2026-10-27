@@ -431,10 +431,10 @@ pub(crate) fn upgrade_status_from_snapshot(snapshot: &serde_json::Value) -> serd
             "The running daemon does not speak this CLI's status protocol; stop it and start the installed daemon."
         }
         "restart-required" => {
-            "The running daemon is from a different build; restart the user service before relying on this CLI."
+            "The running daemon is from a different build; stop and restart it using the same launch method, and ensure the updated binary is used. If systemd manages it, restart the corresponding user service before relying on this CLI."
         }
         "unverified" => {
-            "This CLI or the daemon was built without a commit ID (for example from a source archive), so it cannot tell whether the daemon is current; restart the user service after every upgrade."
+            "This CLI or the daemon was built without a commit ID (for example from a source archive), so it cannot tell whether the daemon is current; stop and restart it using the same launch method after every upgrade, and ensure the updated binary is used. If systemd manages it, restart the corresponding user service."
         }
         _ => "The running daemon matches this CLI build.",
     };

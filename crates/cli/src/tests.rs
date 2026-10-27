@@ -343,8 +343,15 @@ fn upgrade_status_distinguishes_current_stale_and_incompatible_daemons() {
             .as_str()
             .unwrap()
             .contains("cannot tell whether"));
+        assert!(stale["action"]
+            .as_str()
+            .unwrap()
+            .contains("same launch method"));
     } else {
-        assert!(stale["action"].as_str().unwrap().contains("restart"));
+        let action = stale["action"].as_str().unwrap();
+        assert!(action.contains("same launch method"));
+        assert!(action.contains("updated binary"));
+        assert!(action.contains("systemd"));
     }
 
     let incompatible = crate::doctor::status::upgrade_status_from_snapshot(
