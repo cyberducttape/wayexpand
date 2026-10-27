@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Make backend-allowlist setup tests exercise safe-mode enforcement; audit-mode
+  policies intentionally report restrictions without applying them.
 - Correct the README's Rust source-build minimum to match the declared Rust
   1.92 MSRV and its CI lane.
 - Preserve the latest private-KWin smoke report, including size-segmented

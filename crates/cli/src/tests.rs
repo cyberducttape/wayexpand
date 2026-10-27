@@ -752,6 +752,7 @@ fn setup_modes_respect_runtime_backend_policy_names() {
         ..Default::default()
     };
     let input_method_only = OrganizationPolicy {
+        safe_mode: true,
         allowed_backends: vec!["input-method-v2".into()],
         ..Default::default()
     };
@@ -797,6 +798,7 @@ fn setup_modes_respect_runtime_backend_policy_names() {
     ));
 
     let raw_only = OrganizationPolicy {
+        safe_mode: true,
         allowed_backends: vec!["libei".into()],
         ..Default::default()
     };
@@ -807,6 +809,7 @@ fn setup_modes_respect_runtime_backend_policy_names() {
     );
 
     let wlroots_only = OrganizationPolicy {
+        safe_mode: true,
         allowed_backends: vec!["wlroots".into()],
         ..Default::default()
     };
