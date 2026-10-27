@@ -14,6 +14,7 @@ use std::{
         unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     },
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -27,6 +28,20 @@ const MAX_DAILY_ENTRIES: usize = 400;
 const MAX_SNIPPET_ENTRIES: usize = 20_000;
 const SECONDS_PER_DAY: u64 = 86_400;
 const USAGE_LOCK_TIMEOUT: Duration = Duration::from_secs(2);
+static USAGE_EVENT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// Latest process-local sequence assigned to an applied expansion event.
+/// Hosts can use this to establish a precise boundary for clearing buffered
+/// usage events without coupling the engine to a persistence worker.
+pub fn latest_usage_event_sequence() -> u64 {
+    USAGE_EVENT_SEQUENCE.load(Ordering::Acquire)
+}
+
+pub(crate) fn next_usage_event_sequence() -> u64 {
+    USAGE_EVENT_SEQUENCE
+        .fetch_add(1, Ordering::AcqRel)
+        .saturating_add(1)
+}
 
 struct UsageLock(fs::File);
 

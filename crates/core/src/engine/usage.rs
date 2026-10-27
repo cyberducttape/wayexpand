@@ -28,6 +28,15 @@ impl ExpansionEngine {
     /// Collect applied-expansion events for local usage statistics. Hosts
     /// that never collect them lose only the oldest beyond a small bound.
     pub fn drain_usage_events(&mut self) -> Vec<crate::UsageEvent> {
+        self.usage_events
+            .drain(..)
+            .map(|(_, event)| event)
+            .collect()
+    }
+
+    /// Drain applied-expansion events with their process-local ordering keys.
+    /// Used by hosts that need an exact boundary for a concurrent clear.
+    pub fn drain_usage_events_sequenced(&mut self) -> Vec<(u64, crate::UsageEvent)> {
         self.usage_events.drain(..).collect()
     }
 
@@ -48,13 +57,17 @@ impl ExpansionEngine {
             self.usage_events.pop_front();
             self.usage_events_dropped = self.usage_events_dropped.saturating_add(1);
         }
-        self.usage_events.push_back(crate::UsageEvent {
-            snippet_id: result.snippet_id.clone(),
-            typed_chars: result.matched_text.chars().count(),
-            inserted_chars: result.insert.chars().count(),
-            unix_timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |duration| duration.as_secs()),
-        });
+        let sequence = crate::usage::next_usage_event_sequence();
+        self.usage_events.push_back((
+            sequence,
+            crate::UsageEvent {
+                snippet_id: result.snippet_id.clone(),
+                typed_chars: result.matched_text.chars().count(),
+                inserted_chars: result.insert.chars().count(),
+                unix_timestamp: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |duration| duration.as_secs()),
+            },
+        ));
     }
 }

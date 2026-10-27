@@ -150,7 +150,7 @@ pub struct ExpansionEngine {
     clipboard_prefetch_armed: bool,
     /// Applied expansions not yet collected by the host; see
     /// [`ExpansionEngine::drain_usage_events`].
-    usage_events: VecDeque<crate::UsageEvent>,
+    usage_events: VecDeque<(u64, crate::UsageEvent)>,
     /// Events evicted when the host does not collect usage events promptly.
     usage_events_dropped: u64,
     /// A snippet form is open; capture is suspended until it completes.

@@ -65,6 +65,7 @@ pub struct UsageRecorder {
     pending: UsageStats,
     pending_generation: u64,
     generation: Arc<Mutex<UsageGeneration>>,
+    collection_boundary: Arc<Mutex<()>>,
     worker: Option<JoinHandle<()>>,
     worker_done: Option<Receiver<()>>,
     outstanding_events: Arc<AtomicU64>,
@@ -79,6 +80,7 @@ enum UsageMessage {
     Clear(
         mpsc::SyncSender<std::io::Result<bool>>,
         Arc<Mutex<UsageGeneration>>,
+        u64,
     ),
 }
 
@@ -86,12 +88,14 @@ enum UsageMessage {
 struct UsageGeneration {
     value: u64,
     clear_pending: bool,
+    discard_through_sequence: u64,
 }
 
 #[derive(Clone)]
 pub struct UsageClearHandle {
     sender: SyncSender<UsageMessage>,
     generation: Arc<Mutex<UsageGeneration>>,
+    collection_boundary: Arc<Mutex<()>>,
     path: PathBuf,
 }
 
@@ -104,6 +108,10 @@ impl UsageClearHandle {
             ));
         }
         let (reply, result) = mpsc::sync_channel(1);
+        let _boundary = self
+            .collection_boundary
+            .lock()
+            .map_err(|_| std::io::Error::other("usage collection boundary lock poisoned"))?;
         {
             let mut generation = self
                 .generation
@@ -116,13 +124,19 @@ impl UsageClearHandle {
                 ));
             }
             generation.clear_pending = true;
+            let cutoff = wayexpand_core::latest_usage_event_sequence();
             self.sender
-                .try_send(UsageMessage::Clear(reply, Arc::clone(&self.generation)))
+                .try_send(UsageMessage::Clear(
+                    reply,
+                    Arc::clone(&self.generation),
+                    cutoff,
+                ))
                 .map_err(|error| {
                     generation.clear_pending = false;
                     std::io::Error::new(std::io::ErrorKind::WouldBlock, error.to_string())
                 })?;
         }
+        drop(_boundary);
         receive_clear_result(&result, CLEAR_REPLY_WAIT)
     }
 }
@@ -147,6 +161,7 @@ impl UsageRecorder {
     pub fn new(path: PathBuf) -> Self {
         let (sender, receiver) = mpsc::sync_channel(QUEUE_CAPACITY);
         let generation = Arc::new(Mutex::new(UsageGeneration::default()));
+        let collection_boundary = Arc::new(Mutex::new(()));
         let (done_sender, done_receiver) = mpsc::channel();
         let worker_path = path.clone();
         let outstanding_events = Arc::new(AtomicU64::new(0));
@@ -175,6 +190,7 @@ impl UsageRecorder {
                 pending: UsageStats::default(),
                 pending_generation: 0,
                 generation: Arc::clone(&generation),
+                collection_boundary: Arc::clone(&collection_boundary),
                 worker: Some(worker),
                 worker_done: Some(done_receiver),
                 outstanding_events,
@@ -188,6 +204,7 @@ impl UsageRecorder {
                     pending: UsageStats::default(),
                     pending_generation: 0,
                     generation,
+                    collection_boundary,
                     worker: None,
                     worker_done: None,
                     outstanding_events,
@@ -200,6 +217,7 @@ impl UsageRecorder {
         self.sender.as_ref().map(|sender| UsageClearHandle {
             sender: sender.clone(),
             generation: Arc::clone(&self.generation),
+            collection_boundary: Arc::clone(&self.collection_boundary),
             path: self.path.clone(),
         })
     }
@@ -207,23 +225,41 @@ impl UsageRecorder {
     /// Drain engine events and enqueue one bounded batch without waiting for
     /// the worker or the filesystem.
     pub fn collect(&mut self, engine: &mut ExpansionEngine) {
-        if let Ok(generation) = self.generation.lock() {
-            if self.pending_generation != generation.value {
-                // Events from before a successful clear are discarded by
-                // request; they are not queue rejections.
-                self.pending = UsageStats::default();
-                self.pending_generation = generation.value;
-            }
+        let boundary = Arc::clone(&self.collection_boundary);
+        let Ok(_boundary) = boundary.lock() else {
+            return;
+        };
+        let (clear_pending, generation_value, discard_through_sequence) =
+            if let Ok(generation) = self.generation.lock() {
+                (
+                    generation.clear_pending,
+                    generation.value,
+                    generation.discard_through_sequence,
+                )
+            } else {
+                return;
+            };
+        if clear_pending {
+            // Preserve events in the engine until the clear succeeds or
+            // fails. Their sequence keys let us discard only pre-clear work.
+            return;
         }
-        let events = engine.drain_usage_events();
+        if self.pending_generation != generation_value {
+            // Pre-clear events in the recorder's unqueued batch are cleared.
+            self.pending = UsageStats::default();
+            self.pending_generation = generation_value;
+        }
+        let events = engine.drain_usage_events_sequenced();
         let engine_dropped = engine.take_dropped_usage_event_count();
         EVENTS_RECORDED_TOTAL.fetch_add(
             (events.len() as u64).saturating_add(engine_dropped),
             Ordering::Relaxed,
         );
         record_dropped(engine_dropped);
-        for event in events {
-            self.pending.record(&event);
+        for (sequence, event) in events {
+            if sequence > discard_through_sequence {
+                self.pending.record(&event);
+            }
         }
         self.enqueue_pending();
     }
@@ -389,7 +425,7 @@ fn usage_writer(path: PathBuf, receiver: Receiver<UsageMessage>, outstanding: &A
             Ok(UsageMessage::Batch(batch)) => {
                 pending.merge(&batch);
             }
-            Ok(UsageMessage::Clear(reply, generation)) => {
+            Ok(UsageMessage::Clear(reply, generation, cutoff)) => {
                 let cleared_pending_events = event_count(&pending);
                 let result = clear_pending(&path, &mut pending);
                 if result.is_err() {
@@ -401,6 +437,8 @@ fn usage_writer(path: PathBuf, receiver: Receiver<UsageMessage>, outstanding: &A
                     generation.clear_pending = false;
                     if result.is_ok() {
                         generation.value = generation.value.wrapping_add(1);
+                        generation.discard_through_sequence =
+                            generation.discard_through_sequence.max(cutoff);
                     }
                 }
                 let _ = reply.send(result);
@@ -561,6 +599,47 @@ mod tests {
     }
 
     #[test]
+    fn clear_discards_engine_buffered_events_but_keeps_later_expansions() {
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-usage-clear-engine-{}-{suffix}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("usage-stats.json");
+        let config = wayexpand_core::Config::parse(
+            "[[expansion]]\ntrigger = ':sig'\nreplacement = 'Best regards'\n",
+        )
+        .unwrap();
+        let snippet_id = config.expansion[0].id.clone();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let mut recorder = UsageRecorder::new(path.clone());
+
+        let expand = |engine: &mut ExpansionEngine| {
+            let mut results = engine.process(InputEvent::Text(":sig".into()));
+            results.extend(engine.process(InputEvent::EndOfInput));
+            engine.commit_applied_expansion(&results[0]);
+        };
+        expand(&mut engine);
+        recorder
+            .clear_handle()
+            .unwrap()
+            .clear(&path)
+            .expect("clear should complete");
+        expand(&mut engine);
+        recorder.collect(&mut engine);
+        recorder.request_shutdown();
+        recorder.wait_for_shutdown();
+
+        let stats = UsageStats::load(&path).unwrap();
+        assert_eq!(stats.snippets[&snippet_id].count, 1);
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
     fn shutdown_persists_promptly_while_a_clear_handle_is_alive() {
         let suffix = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -709,6 +788,7 @@ mod tests {
             pending: pending.clone(),
             pending_generation: 0,
             generation: Arc::new(Mutex::new(UsageGeneration::default())),
+            collection_boundary: Arc::new(Mutex::new(())),
             worker: None,
             worker_done: None,
             outstanding_events: Arc::new(AtomicU64::new(0)),
