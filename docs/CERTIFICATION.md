@@ -260,6 +260,15 @@ or the compositor certification matrix.
 
 ## Supporting headless evidence
 
+[`evidence/doctor-certify-897eeecaaef7.json`](evidence/doctor-certify-897eeecaaef7.json)
+preserves the build-identity-checked `wayexpand doctor --certify --json` run
+from commit `897eeecaaef7` on KWin 6.6.6. Twelve output, focus, reload,
+restart, refusal, and build-identity checks passed. The libei keysym fallback
+measured 12,536 µs p50 and 12,575 µs p95/p99 across twenty small insertions.
+Keyboard capture was simulated through stdin; Unicode insertion and
+suspend/resume were not tested. This partial report does not certify a
+production compositor route.
+
 [`evidence/doctor-certify-061c3d366a9d.json`](evidence/doctor-certify-061c3d366a9d.json)
 preserves the build-identity-checked run from commit `061c3d366a9d` on KWin
 6.6.6. Ten isolated-client checks passed for insertion, focus transitions,

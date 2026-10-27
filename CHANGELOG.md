@@ -10,6 +10,8 @@ All notable changes to WayExpand are documented here.
   reported as not applied rather than an uncertain partial failure.
 - Updated the production roadmap to reflect that multi-layout output refusal
   is now preflighted and leaves the trigger untouched.
+- Preserved the current KWin 6.6.6 headless certification report, including
+  the exact tested build identity and keysym-fallback latency measurements.
 - Stabilized the asynchronous command metrics regression test: it now waits
   for both worker counters and delivered failure events, avoiding a timing
   race where counters advanced before completions reached the engine.
