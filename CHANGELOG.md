@@ -6,6 +6,10 @@ All notable changes to WayExpand are documented here.
 
 - Ship the KWin E2E report helper beside the installed harness so
   `wayexpand doctor --certify` works from user, package, and release installs.
+- Preserve current-source KWin 6.6.6 evidence for `5ec3122de9de`: 12 checks
+  passed, three areas were not tested, and keysym-fallback injector latency
+  measured 12.532 ms p50 and 12.579 ms p95/p99. Capture was simulated and the
+  result remains partial compatibility evidence.
 - Preserve a successful installed-build KWin 6.6.6 certification smoke report
   for `0d1b2138a8fd`: 12 checks passed, Unicode insertion, physical capture,
   and suspend/resume were not tested, and keysym fallback measured p50
