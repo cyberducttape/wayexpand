@@ -78,8 +78,9 @@ always require explicit consent.
 - [ ] Feed local certification evidence (from `wayexpand doctor --certify`
       records) into the planner, not only the catalog status.
 - [ ] Add Fcitx5 as a candidate once an integration exists.
-- [ ] Show the full ranked plan (standing and reason per route) in setup, the
-      GUI, and `doctor`.
+- [x] Show the full ranked plan (standing and reason per route) in setup, the
+      GUI diagnostics, and `doctor`; all three use the shared planner and keep
+      catalog certification separate from runtime availability.
 
 ### 6. IME and preedit strategy
 

@@ -9,7 +9,7 @@ use std::{
 use toml_edit::DocumentMut;
 use wayexpand_backend_ibus::engine_available as ibus_engine_available;
 use wayexpand_backend_selection::{
-    probe_capabilities, recommended_route, Capabilities, RecommendedRoute,
+    plan_routes, probe_capabilities, recommended_route, Capabilities, RecommendedRoute, RoutePlan,
 };
 use wayexpand_core::{discover_backends, Config, DaemonStatus, FleetConfig, CONTROL_STATUS_SCHEMA};
 
@@ -79,6 +79,7 @@ pub(crate) struct ReloadSnapshot {
 pub(crate) struct DiagnosticsSnapshot {
     pub backend_status: Vec<wayexpand_core::BackendStatus>,
     pub recommended_route: Option<RecommendedRoute>,
+    pub route_plan: RoutePlan,
     pub selection_capabilities: Capabilities,
     pub fleet_status: String,
     pub protocol_probes: Vec<(String, String)>,
@@ -440,13 +441,17 @@ fn run_diagnostics(config_path: PathBuf, announce: bool) -> DiagnosticsSnapshot 
     let backend_status = discover_backends();
     let selection_capabilities = probe_capabilities();
     let ibus_available = ibus_engine_available();
-    let recommended_route = wayexpand_core::load_organization_policy()
-        .ok()
-        .and_then(|policy| {
-            recommended_route(&selection_capabilities, ibus_available, |route| {
-                wayexpand_backend_selection::route_allowed_by_policy(&policy, route)
-            })
-        });
+    let policy = wayexpand_core::load_organization_policy().ok();
+    let recommended_route = policy.as_ref().and_then(|policy| {
+        recommended_route(&selection_capabilities, ibus_available, |route| {
+            wayexpand_backend_selection::route_allowed_by_policy(policy, route)
+        })
+    });
+    let route_plan = plan_routes(&selection_capabilities, ibus_available, |route| {
+        policy.as_ref().is_some_and(|policy| {
+            wayexpand_backend_selection::route_allowed_by_policy(policy, route)
+        })
+    });
     let fleet_status = match Config::load(config_path) {
         Ok(config) => match wayexpand_core::load_organization_policy().and_then(|policy| {
             FleetConfig::load_standard_with_base_and_policy(config, &policy)
@@ -490,6 +495,7 @@ fn run_diagnostics(config_path: PathBuf, announce: bool) -> DiagnosticsSnapshot 
     DiagnosticsSnapshot {
         backend_status,
         recommended_route,
+        route_plan,
         selection_capabilities,
         fleet_status,
         protocol_probes,

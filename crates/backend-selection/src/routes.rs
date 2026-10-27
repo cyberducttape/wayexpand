@@ -167,6 +167,18 @@ pub enum RouteStanding {
     Unavailable,
 }
 
+impl RouteStanding {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Recommended => "recommended",
+            Self::Available => "available",
+            Self::RequiresConsent => "requires-consent",
+            Self::BlockedByPolicy => "blocked-by-policy",
+            Self::Unavailable => "unavailable",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct PlannedRoute {
     pub contract: &'static RouteContract,

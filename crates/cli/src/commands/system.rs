@@ -56,6 +56,10 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     let capabilities = probe_capabilities();
     let policy = load_policy()?;
     let automatic = recommended_setup_backend(&capabilities, &policy);
+    let route_plan =
+        wayexpand_backend_selection::plan_routes(&capabilities, ibus_engine_available(), |route| {
+            route_allowed_by_policy(&policy, route)
+        });
     println!();
     println!("Compatibility modes");
     println!("  Recommended         safest detected path; run doctor/certify for verification");
@@ -64,6 +68,15 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     println!();
     println!("Automatic recommendation: {}", automatic.label);
     println!("  {}", automatic.detail);
+    println!("\nRanked routes (current session and policy):");
+    for planned in &route_plan.routes {
+        println!(
+            "  {:<24} {:<18} {}",
+            planned.contract.label,
+            planned.standing.as_str(),
+            planned.reason
+        );
+    }
     let backend = if let Some(backend) = requested_backend {
         backend
     } else if let Some(mode) = requested_mode {

@@ -64,6 +64,28 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
     let (capture_state, capture_detail) =
         capture_readiness(&live_capabilities, ibus_installed, &policy);
     let recommendation = recommended_setup_backend(&live_capabilities, &policy);
+    let route_plan =
+        wayexpand_backend_selection::plan_routes(&live_capabilities, ibus_installed, |route| {
+            wayexpand_backend_selection::route_allowed_by_policy(&policy, route)
+        });
+    let ranked_routes: Vec<_> = route_plan
+        .routes
+        .iter()
+        .map(|planned| {
+            let contract = planned.contract;
+            serde_json::json!({
+                "id": contract.id,
+                "label": contract.label,
+                "standing": planned.standing.as_str(),
+                "reason": planned.reason,
+                "capture": contract.capture,
+                "injection": contract.injection,
+                "certification": contract.status,
+                "replacement_assurance": contract.replacement_assurance,
+                "sensitive_field_protection": contract.sensitive_field_support.certified,
+            })
+        })
+        .collect();
     let setup_recommendation = serde_json::json!({
         "mode": if recommendation.backend == "unavailable" { "none" } else if recommendation.backend == "evdev" { "maximum" } else { "recommended" },
         "backend": recommendation.backend,
@@ -206,6 +228,10 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
             "capabilities": capabilities,
             "automatic_selection": automatic_selection,
             "setup_recommendation": setup_recommendation,
+            "route_plan": {
+                "selection_basis": "current capabilities, organization policy, and catalog certification status",
+                "routes": ranked_routes,
+            },
             "capture_readiness": {
                 "state": capture_state,
                 "detail": capture_detail,

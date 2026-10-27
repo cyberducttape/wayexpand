@@ -205,6 +205,7 @@ pub(crate) fn summarize_reports(
                 "backend": copy(&doctor["setup_recommendation"], "backend"),
                 "ready": copy(&doctor["setup_recommendation"], "ready"),
             },
+            "route_plan": copy(doctor, "route_plan"),
         },
         "daemon": {
             "available": copy(daemon, "available"),

@@ -45,6 +45,7 @@ impl GuiApp {
                 runtime::Completion::Diagnostics(snapshot) => {
                     self.backend_status = snapshot.backend_status;
                     self.recommended_route = snapshot.recommended_route;
+                    self.route_plan = Some(snapshot.route_plan);
                     self.selection_capabilities = Some(snapshot.selection_capabilities);
                     self.fleet_status = snapshot.fleet_status;
                     self.protocol_probes = snapshot.protocol_probes;

@@ -62,6 +62,43 @@ impl GuiApp {
 
     pub(crate) fn render_diagnostics_body(&mut self, ui: &mut egui::Ui, palette: &Palette) {
         theme::section_header(ui, "", self.strings.runtime_dashboard());
+        ui.collapsing("Ranked input routes", |ui| {
+            ui.label(
+                RichText::new(
+                    "Based on this session, organization policy, and catalog certification. Experimental routes remain uncertified.",
+                )
+                .small()
+                .color(palette.muted),
+            );
+            if let Some(plan) = &self.route_plan {
+                for route in &plan.routes {
+                    ui.group(|ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new(&route.contract.label).strong());
+                            let standing = route.standing.as_str();
+                            let color = match route.standing {
+                                wayexpand_backend_selection::RouteStanding::Recommended
+                                | wayexpand_backend_selection::RouteStanding::Available => palette.success,
+                                wayexpand_backend_selection::RouteStanding::RequiresConsent => palette.warning,
+                                wayexpand_backend_selection::RouteStanding::BlockedByPolicy
+                                | wayexpand_backend_selection::RouteStanding::Unavailable => palette.muted,
+                            };
+                            ui.colored_label(color, standing);
+                        });
+                        ui.label(
+                            RichText::new(format!(
+                                "{} capture · {} injection · {}",
+                                route.contract.capture, route.contract.injection, route.reason
+                            ))
+                            .small()
+                            .color(palette.muted),
+                        );
+                    });
+                }
+            } else {
+                ui.label(self.strings.not_checked());
+            }
+        });
         let source = compact_status_value(&self.daemon_status, "source").unwrap_or("unknown");
         let backend = compact_status_value(&self.daemon_status, "backend").unwrap_or("unknown");
         let capabilities = self.daemon_capabilities.as_ref();
