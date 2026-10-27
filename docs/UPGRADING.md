@@ -14,7 +14,7 @@ cd wayexpand
 git pull
 ./scripts/install-user.sh
 
-# If you already have a PPA build installed (no current PPA binaries are published)
+# If you already have an Ubuntu PPA daily build installed
 sudo apt update && sudo apt upgrade wayexpand
 
 # If built from the repository PKGBUILD preview

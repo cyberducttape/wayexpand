@@ -10,11 +10,13 @@ This guide covers deploying, managing, and supporting WayExpand in team and ente
 
 ### Individual User (Self-Service)
 
-**Publication status:** there are currently no downloadable production
-packages: the v1.3.3 release has no assets and the Ubuntu PPA publishes no
-WayExpand binaries. Do not deploy based on the example package workflows below;
-check the release page and PPA for actual published artifacts. Release assets
-remain gated on compositor certification.
+**Publication status:** there are no compositor-certified release packages:
+the v1.3.3 release has no assets. The Ubuntu PPA does publish an experimental
+daily package for Ubuntu 26.04 (Resolute), amd64; Launchpad reported build
+`1.3.3-0~202610270213~ubuntu26.04.1` successful on 2026-10-27 ([build
+result](https://launchpad.net/~cyberducttape/+archive/ubuntu/ppa/+build/33875568)).
+That build is not desktop certification and is not a managed-fleet release.
+Check the PPA for current publication state before installing.
 
 For local evaluation, users can build from source with Rust 1.92+:
 
@@ -30,7 +32,7 @@ cd wayexpand
 ```
 
 **Packaging Status:**
-- ⏳ Ubuntu: PPA configured, but currently no published binaries; Resolute now satisfies the Rust 1.92 build dependency
+- 🧪 Ubuntu: experimental daily PPA package published for Resolute amd64; successful build, not compositor-certified
 - ⏳ Debian: packaging maintained; no release asset or APT repository currently published
 - 📦 Arch: PKGBUILD prepared (not yet official AUR submission)
 - ⏳ Fedora: RPM spec/build maintained; no release asset or Copr repository currently published
@@ -46,7 +48,7 @@ For teams with shared machines or controlled environments:
 
 **Approach 1: Package distribution** (once artifacts are published)
 - Verify actual release/PPA availability and successful certification before deployment.
-- **Ubuntu:** PPA publication is pending; current Resolute build dependencies satisfy the Rust MSRV.
+- **Ubuntu:** an experimental daily package is published for Resolute amd64; no compositor-certified release package is available.
 - **Debian/Fedora:** No release packages are currently published; build and validate an internal package if needed.
 - **Arch:** Packaging prepared but not yet submitted to AUR.
 - Users self-install from organizational repo

@@ -16,14 +16,17 @@ packagers and source-build users need a compatible toolchain.
 **Current publication status:** experimental (uncertified) builds with
 x86_64 and aarch64 archives, a `.deb`, and an `.rpm` are published as GitHub
 prereleases (see [Experimental builds](#experimental-builds)). The v1.3.3
-release itself has no downloadable assets, and the Launchpad PPA currently
-publishes no WayExpand binaries. Certified releases remain gated on
-compositor certification.
+GitHub release itself has no downloadable assets. The Launchpad PPA publishes
+an experimental daily package for Ubuntu 26.04 (Resolute), amd64. Launchpad
+reported build `1.3.3-0~202610270213~ubuntu26.04.1` as successfully built on
+2026-10-27 ([build result](https://launchpad.net/~cyberducttape/+archive/ubuntu/ppa/+build/33875568)).
+This daily package is not compositor-certified; certified releases remain
+gated on compositor certification.
 
 | Distro | Package | Status | Maintainer |
 |--------|---------|--------|------------|
 | Arch Linux | `wayexpand` | Build locally | Packaging preview; not submitted to AUR |
-| Ubuntu | `wayexpand` | No published PPA binaries | Source packaging path exists; signed upload and successful series build are pending |
+| Ubuntu | `wayexpand` | Experimental daily PPA package published for Ubuntu 26.04 (Resolute), amd64 | Successful Launchpad build; not compositor-certified; other series and architectures are not implied |
 | Debian | `.deb` | Build locally from source | No release asset or APT repository currently published |
 | Fedora/RHEL | `.rpm` | Build locally from source/spec | No release asset or Copr repository currently published |
 | aarch64 | `wayexpand` | Build locally from source | No release archive currently published |
@@ -87,10 +90,11 @@ dpkg-buildpackage -b
 sudo dpkg -i ../wayexpand_${VERSION}-1_amd64.deb
 ```
 
-This documents a local packaging path; it does not imply that a package is
-currently published. Check the actual GitHub release and PPA before installing
-or deploying. The release workflow only builds artifacts after its certification
-gates pass.
+This documents a local packaging path. An experimental daily package is
+currently published for Ubuntu 26.04 (Resolute), amd64; check the PPA for the
+latest package and build state before installing. The daily package is not a
+certified release. The GitHub release workflow only publishes release
+artifacts after its certification gates pass.
 
 **To maintain:**
 1. Update version in `debian/changelog`
@@ -204,8 +208,10 @@ dput ppa:cyberducttape/ppa "wayexpand_${source_version}_source.changes"
 Launchpad builds from source, so only submit to Ubuntu series whose build
 archive provides both `rustc` and `cargo` at or above the project MSRV (1.92).
 Ubuntu 26.04 Resolute provides Rust 1.93 and satisfies this package's build
-dependencies. Check each Launchpad build result before advertising a series as
-installable.
+dependencies. The current daily amd64 build succeeded on 2026-10-27; see the
+[Launchpad build record](https://launchpad.net/~cyberducttape/+archive/ubuntu/ppa/+build/33875568).
+Check each series and architecture's current Launchpad build and publication
+state before advertising it as installable.
 
 **Daily builds:** the `main-daily` recipe builds the `launchpad-vendored`
 branch once a day when it has changed. Its text is
@@ -297,11 +303,11 @@ See [RELEASING.md](RELEASING.md) section "Release Checklist" for the complete wo
 
 Potential future work, not active publication paths:
 - **Copr webhook** after an official Copr repository is created
-- **Ubuntu PPA automation** after a supported series is selected and successful builds are published
+- **Additional Ubuntu PPA series and architectures** after their build dependencies and Launchpad results are verified
 
-GitHub release workflows are configured, but release artifacts remain gated
-on certification. Do not treat workflow configuration as evidence of published
-packages.
+GitHub release artifacts remain gated on certification. Ubuntu 26.04's daily
+PPA build is published but remains experimental; do not treat its successful
+package build as desktop certification.
 
 ---
 

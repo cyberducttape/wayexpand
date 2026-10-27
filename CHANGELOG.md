@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Update packaging and administrator guides to record the successful Ubuntu
+  26.04 Resolute amd64 Launchpad daily build while keeping its experimental
+  status distinct from desktop certification.
 - Add a safe-mode policy requiring exclusive keyboard capture independently
   of atomic replacement, and apply it consistently to daemon startup,
   IBus, setup recommendations, and CLI diagnostics.
