@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Record the 2026-10-28 GUI full-save benchmark follow-up, including the
+  isolated 1,000-snippet slowdown signal for future like-for-like monitoring.
 - Validate form-field definitions once, reject conflicting rules for repeated
   fields during configuration loading, and reuse the parsed definitions during
   trigger matching and route explanations.

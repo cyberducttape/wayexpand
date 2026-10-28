@@ -259,6 +259,26 @@ measurements show that large saves take hundreds of milliseconds, but no
 whole-library scan runs on each keystroke or GUI frame; save progress remains
 asynchronous and the full correctness gate is preserved.
 
+### GUI full-save follow-up: 2026-10-28
+
+Re-ran only `gui_full_save` on the same AMD Ryzen 7 7735U / Rust 1.96.0 host
+with 10 samples, a 0.5 s warmup, and a 1 s measurement window. Criterion's
+central estimates were:
+
+| Snippets | Full save pipeline |
+| ---: | ---: |
+| 100 | 3.064 ms |
+| 1,000 | 29.844 ms |
+| 5,000 | 166.86 ms |
+| 10,000 | 358.97 ms |
+
+Compared with the 2026-10-24 estimates, Criterion found the 1,000-snippet
+case about 3.6% slower and statistically significant in this short run. The
+100-snippet case improved; 5,000 and 10,000 showed no significant change.
+This is a follow-up measurement, not evidence of a broad save regression. The
+short run and shared-host noise make the isolated 1,000-snippet result worth
+monitoring rather than treating it as a release-level performance change.
+
 ### Typing preview measurements: 2026-10-25
 
 The `gui_typing_preview_edit` case models one replacement-field character edit
