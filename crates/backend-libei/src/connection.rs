@@ -2,7 +2,7 @@ use super::{
     read_portal_token_if_enabled, store_portal_token_if_enabled, ConnectCancellation, LibeiError,
     LibeiOptions,
 };
-use std::{os::unix::net::UnixStream, sync::OnceLock, time::Duration};
+use std::{future::Future, os::unix::net::UnixStream, sync::OnceLock, time::Duration};
 
 /// One Tokio runtime for every portal session in the process.
 ///
@@ -28,6 +28,17 @@ fn portal_runtime() -> Result<&'static tokio::runtime::Runtime, LibeiError> {
     // A concurrent first caller may have won; its runtime is used and this
     // one is dropped unused.
     Ok(RUNTIME.get_or_init(|| runtime))
+}
+
+async fn race_cancellation<T>(
+    operation: impl Future<Output = Result<T, LibeiError>>,
+    cancellation: &ConnectCancellation,
+) -> Result<T, LibeiError> {
+    futures_lite::future::race(operation, async {
+        cancellation.cancelled().await;
+        Err(LibeiError::Cancelled)
+    })
+    .await
 }
 
 /// Keeps a RemoteDesktop portal session open, and closes it when dropped.
@@ -153,16 +164,13 @@ pub(super) fn connect_portal(
             keepalive.proxy = Some(proxy);
             Ok::<_, LibeiError>((UnixStream::from(fd), keepalive))
         });
-        futures_lite::future::race(
+        race_cancellation(
             async {
                 attempt.await.map_err(|_| {
                     LibeiError::Portal("portal session timed out after 30 seconds".into())
                 })?
             },
-            async {
-                cancellation.cancelled().await;
-                Err(LibeiError::Cancelled)
-            },
+            cancellation,
         )
         .await
     })?;
@@ -193,15 +201,12 @@ mod tests {
             worker_cancellation.cancel();
         });
         let runtime = super::portal_runtime().unwrap();
-        let result = runtime.block_on(futures_lite::future::race(
+        let result = runtime.block_on(super::race_cancellation(
             async {
                 tokio::time::sleep(Duration::from_secs(5)).await;
                 Ok::<_, super::LibeiError>(())
             },
-            async {
-                cancellation.cancelled().await;
-                Err(super::LibeiError::Cancelled)
-            },
+            &cancellation,
         ));
         cancel_thread.join().unwrap();
         assert!(matches!(result, Err(super::LibeiError::Cancelled)));
