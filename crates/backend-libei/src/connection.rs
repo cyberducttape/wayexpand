@@ -185,6 +185,7 @@ mod tests {
 
     #[test]
     fn cancelling_a_pending_portal_attempt_returns_promptly() {
+        let started = std::time::Instant::now();
         let cancellation = super::ConnectCancellation::default();
         let worker_cancellation = cancellation.clone();
         let cancel_thread = std::thread::spawn(move || {
@@ -204,5 +205,6 @@ mod tests {
         ));
         cancel_thread.join().unwrap();
         assert!(matches!(result, Err(super::LibeiError::Cancelled)));
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 }

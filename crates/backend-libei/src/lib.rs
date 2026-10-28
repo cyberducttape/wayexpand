@@ -1220,6 +1220,28 @@ mod tests {
     }
 
     #[test]
+    fn handshake_cancellation_is_observed_between_bounded_reads() {
+        let (client, _server) = UnixStream::pair().unwrap();
+        let context = super::ei::Context::new(client).unwrap();
+        let cancellation = super::ConnectCancellation::default();
+        let worker_cancellation = cancellation.clone();
+        let cancel_thread = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            worker_cancellation.cancel();
+        });
+        let started = std::time::Instant::now();
+        let result = super::events::handshake_with_cancellation(
+            &context,
+            Duration::from_secs(5),
+            &cancellation,
+        );
+        let elapsed = started.elapsed();
+        cancel_thread.join().unwrap();
+        assert!(matches!(result, Err(super::LibeiError::Cancelled)));
+        assert!(elapsed < Duration::from_secs(1), "cancel took {elapsed:?}");
+    }
+
+    #[test]
     fn text_chunks_are_utf8_safe_and_protocol_sized() {
         let text = "🙂".repeat(200);
         let chunks = super::split_text_chunks(&text);
