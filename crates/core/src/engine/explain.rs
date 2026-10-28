@@ -7,7 +7,9 @@
 use serde::Serialize;
 
 use super::{route_limit, ExpansionEngine, RouteLimit};
-use crate::{render_template_with_cursor, AppFilter, InjectorCapabilities, MatchMode};
+use crate::{
+    render_template_with_cursor, AppFilter, InjectorCapabilities, MatchMode, ReplacementGuarantee,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -277,6 +279,21 @@ impl ExpansionEngine {
                         "replacement",
                         CheckStatus::Info,
                         format!("opens a form for {} before typing", labels.join(", ")),
+                    );
+                    let guarantee = self.form_replacement_guarantee();
+                    let route_verifiable = self.form_target_verifiable();
+                    explanation.push(
+                        "replacement assurance",
+                        if route_verifiable {
+                            CheckStatus::Pass
+                        } else {
+                            CheckStatus::Fail
+                        },
+                        match (guarantee, route_verifiable) {
+                            (_, true) => "the active route verifies the trigger at the cursor before opening the form",
+                            (ReplacementGuarantee::Unsupported, false) => "no connected route is known to verify the trigger at the cursor; the form will not open",
+                            (_, false) => "the active route cannot verify the trigger at the cursor; the form will not open",
+                        },
                     );
                     explanation.push(
                         "window identity",

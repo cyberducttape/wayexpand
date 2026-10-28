@@ -5386,6 +5386,47 @@ fn a_form_is_not_opened_when_the_route_cannot_verify_the_trigger_at_the_cursor()
 }
 
 #[test]
+fn form_explanation_matches_the_route_gate_used_by_dispatch() {
+    let mut engine = ExpansionEngine::new(Config::parse(FORM_CONFIG).unwrap()).unwrap();
+    engine.set_current_window(Some(crate::WindowContext {
+        app_id: Some("org.example.Mail".into()),
+        title: Some("Inbox".into()),
+        instance_id: Some("toplevel-mail-1".into()),
+    }));
+
+    let unknown = engine.explain(":tk", "libei");
+    assert_eq!(
+        unknown.suppressed_by().map(|check| check.name),
+        Some("replacement assurance"),
+        "{}",
+        unknown.render_text()
+    );
+    assert!(unknown
+        .suppressed_by()
+        .unwrap()
+        .detail
+        .contains("no connected route"));
+
+    engine.set_form_replacement_guarantee(crate::ReplacementGuarantee::BestEffort);
+    let blocked = engine.explain(":tk", "libei");
+    assert_eq!(
+        blocked.suppressed_by().map(|check| check.name),
+        Some("replacement assurance"),
+        "{}",
+        blocked.render_text()
+    );
+    assert!(blocked
+        .suppressed_by()
+        .unwrap()
+        .detail
+        .contains("form will not open"));
+
+    engine.set_form_replacement_guarantee(crate::ReplacementGuarantee::VerifiedSurroundingText);
+    let allowed = engine.explain(":tk", "input-method-v2");
+    assert!(allowed.would_expand(), "{}", allowed.render_text());
+}
+
+#[test]
 fn a_form_result_is_dropped_when_the_route_loses_cursor_verification() {
     let _helper = FakeFormHelper::new(
         "route-downgraded",
@@ -5453,6 +5494,7 @@ fn form_fields_are_parsed_and_validated() {
 #[test]
 fn explain_describes_form_snippets_instead_of_failing_to_render() {
     let mut engine = ExpansionEngine::new(Config::parse(FORM_CONFIG).unwrap()).unwrap();
+    engine.set_form_replacement_guarantee(crate::ReplacementGuarantee::VerifiedSurroundingText);
     let explanation = engine.explain(":tk", "libei");
     assert!(!explanation.would_expand(), "{}", explanation.render_text());
     assert!(explanation
