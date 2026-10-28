@@ -46,7 +46,7 @@ fn create_backup_with_hooks(
     // blocking the open before the regular-file check can reject it.
     let mut source_file = fs::OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NONBLOCK)
+        .custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW)
         .open(source)
         .with_context(|| format!("opening configuration {}", source.display()))?;
     let metadata = source_file
@@ -84,7 +84,9 @@ fn create_backup_with_hooks(
             ));
         }
         let final_metadata = source_file.metadata()?;
-        if source_changed_during_backup(&metadata, &final_metadata) {
+        if source_changed_during_backup(&metadata, &final_metadata)
+            || !source_path_matches_open_file(source, &metadata)?
+        {
             return Err(io::Error::other(
                 "configuration changed during backup; refusing to keep a possibly inconsistent copy",
             ));
@@ -149,6 +151,15 @@ fn source_changed_during_backup(before: &fs::Metadata, after: &fs::Metadata) -> 
         || before.ctime_nsec() != after.ctime_nsec()
 }
 
+/// A stable descriptor alone is not enough: an atomic rename can replace the
+/// configured path while the descriptor continues to refer to the old file.
+/// Confirm the pathname still identifies the original regular file before
+/// declaring the backup complete.
+fn source_path_matches_open_file(path: &Path, opened: &fs::Metadata) -> io::Result<bool> {
+    let current = fs::symlink_metadata(path)?;
+    Ok(current.is_file() && current.dev() == opened.dev() && current.ino() == opened.ino())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -205,6 +216,62 @@ mod tests {
         .unwrap_err();
 
         assert!(format!("{error:#}").contains("configuration changed during backup"));
+        assert!(!destination.exists());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn atomic_source_replacement_discards_a_backup_of_the_old_file() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-backup-source-rename-{}-{suffix}",
+            std::process::id()
+        ));
+        fs::create_dir(&directory).unwrap();
+        let source = directory.join("source.toml");
+        let replacement = directory.join("replacement.toml");
+        let destination = directory.join("source.toml.bak");
+        fs::write(&source, b"first-config").unwrap();
+        fs::write(&replacement, b"other-config").unwrap();
+
+        let error = create_backup_with_hooks(
+            &source,
+            &destination,
+            || fs::rename(&replacement, &source).unwrap(),
+            |directory| directory.sync_all(),
+        )
+        .unwrap_err();
+
+        assert!(format!("{error:#}").contains("configuration changed during backup"));
+        assert!(!destination.exists());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_source_is_rejected_without_creating_a_backup() {
+        use std::os::unix::fs::symlink;
+
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-backup-source-symlink-{}-{suffix}",
+            std::process::id()
+        ));
+        fs::create_dir(&directory).unwrap();
+        let target = directory.join("target.toml");
+        let source = directory.join("source.toml");
+        let destination = directory.join("source.toml.bak");
+        fs::write(&target, b"configuration").unwrap();
+        symlink(&target, &source).unwrap();
+
+        assert!(create_backup(&source, &destination).is_err());
+        assert_eq!(fs::read(&target).unwrap(), b"configuration");
         assert!(!destination.exists());
         fs::remove_dir_all(directory).unwrap();
     }
