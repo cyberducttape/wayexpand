@@ -10,6 +10,9 @@ All notable changes to WayExpand are documented here.
   and physical capture remain untested. Record 20 latency samples per size;
   the 257-character keysym-fallback replacement has a measured p95 of about
   3.14 seconds. The route remains uncertified for production.
+- Update the compositor certification matrix to point to the October 28
+  compatibility report while retaining the production-uncertified status for
+  every desktop route.
 - Keep the daemon reactor startable when a restricted kernel or sandbox
   reports `ENOSYS` for `eventfd`: fall back to a nonblocking close-on-exec pipe
   with the same wakeup contract, and preserve other `eventfd` failures.
