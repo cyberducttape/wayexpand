@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Require `wayexpand explain` to verify the running daemon's status schema and
+  build commit before trusting live matcher results. When the daemon is stale,
+  explain falls back to a clearly marked local result, preventing older route
+  safety behavior from being reported as current.
 - Preserve the current-source KWin 6.6.6 isolated smoke report for commit
   `d5153cb7a2a3`: 12 output/focus checks passed; capture was simulated, and
   production compositor certification remains incomplete.

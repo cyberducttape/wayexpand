@@ -13,6 +13,43 @@ use crate::doctor::status::{runtime_capabilities_from_status, status_schema_comp
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
+fn live_explain_requires_matching_daemon_build_and_status_schema() {
+    let current = format!(
+        "running\nstatus_schema={}\ndaemon_commit={}\n",
+        CONTROL_STATUS_SCHEMA,
+        crate::build_info::COMMIT
+    );
+    assert_eq!(
+        crate::commands::system::live_explain_build_gate(&current),
+        None
+    );
+
+    let stale = format!(
+        "running\nstatus_schema={}\ndaemon_commit=older-build\n",
+        CONTROL_STATUS_SCHEMA
+    );
+    assert!(crate::commands::system::live_explain_build_gate(&stale)
+        .unwrap()
+        .contains("different build"));
+
+    let unknown = format!("running\nstatus_schema={}\n", CONTROL_STATUS_SCHEMA);
+    assert!(crate::commands::system::live_explain_build_gate(&unknown)
+        .unwrap()
+        .contains("cannot be verified"));
+
+    let incompatible = format!(
+        "running\nstatus_schema={}\ndaemon_commit={}\n",
+        CONTROL_STATUS_SCHEMA - 1,
+        crate::build_info::COMMIT
+    );
+    assert!(
+        crate::commands::system::live_explain_build_gate(&incompatible)
+            .unwrap()
+            .contains("incompatible status protocol")
+    );
+}
+
+#[test]
 fn doctor_protocol_probe_report_distinguishes_available_and_missing_globals() {
     let capabilities = wayexpand_backend_selection::Capabilities {
         has_input_method_v2: false,

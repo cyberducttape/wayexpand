@@ -285,18 +285,24 @@ pub(crate) fn explain_command(mut args: Args) -> Result<()> {
 
     let mut daemon_unreachable = None;
     if !offline && app.is_none() && config_path.is_none() {
-        match control_operation(wayexpand_core::DaemonOperation::Explain {
-            text: text.clone(),
-            json: requested_json,
-        }) {
-            Ok(response) if !response.starts_with("unknown command") => {
-                print!("{response}");
-                return Ok(());
-            }
-            Ok(_) => {
-                daemon_unreachable =
-                    Some("the running daemon is too old to explain matches".to_owned())
-            }
+        match control_operation(wayexpand_core::DaemonOperation::Status) {
+            Ok(status) => match live_explain_build_gate(&status) {
+                None => match control_operation(wayexpand_core::DaemonOperation::Explain {
+                    text: text.clone(),
+                    json: requested_json,
+                }) {
+                    Ok(response) if !response.starts_with("unknown command") => {
+                        print!("{response}");
+                        return Ok(());
+                    }
+                    Ok(_) => {
+                        daemon_unreachable =
+                            Some("the running daemon is too old to explain matches".to_owned())
+                    }
+                    Err(error) => daemon_unreachable = Some(format!("not reachable ({error})")),
+                },
+                Some(reason) => daemon_unreachable = Some(reason.to_owned()),
+            },
             Err(error) => daemon_unreachable = Some(format!("not reachable ({error})")),
         }
     }
@@ -334,7 +340,7 @@ pub(crate) fn explain_command(mut args: Args) -> Result<()> {
         Some(reason) => explanation.push(
             "daemon",
             wayexpand_core::CheckStatus::Fail,
-            format!("{reason}; nothing expands until it runs"),
+            format!("{reason}; live session state is unavailable for verification"),
         ),
         None => explanation.push(
             "daemon",
@@ -360,4 +366,28 @@ pub(crate) fn explain_command(mut args: Args) -> Result<()> {
         print!("{}", explanation.render_text());
     }
     Ok(())
+}
+
+/// Live explanations depend on safety decisions made by the daemon. Never
+/// present an older or unidentifiable daemon's answer as authoritative: its
+/// route capabilities or form safeguards may differ from this CLI build.
+pub(crate) fn live_explain_build_gate(status_response: &str) -> Option<&'static str> {
+    let status = wayexpand_core::DaemonStatus::parse(status_response);
+    if status.status_schema() != Some(CONTROL_STATUS_SCHEMA) {
+        return Some(
+            "the running daemon uses an incompatible status protocol; restart it before relying on live explanations",
+        );
+    }
+    let daemon_commit = status.field("daemon_commit");
+    if crate::doctor::status::daemon_commit_matches(daemon_commit) {
+        None
+    } else if crate::doctor::status::daemon_commit_unknown(daemon_commit) {
+        Some(
+            "the running daemon build cannot be verified; restart it before relying on live explanations",
+        )
+    } else {
+        Some(
+            "the running daemon is from a different build; restart it before relying on live explanations",
+        )
+    }
 }
