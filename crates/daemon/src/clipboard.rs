@@ -189,14 +189,9 @@ fn lock(shared: &Shared) -> std::sync::MutexGuard<'_, Slot> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn queue_read(shared: &Shared, sender: &mpsc::SyncSender<ReadJob>, slot: &mut Slot) -> Option<u64> {
-    slot.generation = slot.generation.wrapping_add(1);
-    let generation = slot.generation;
+fn queue_read(sender: &mpsc::SyncSender<ReadJob>, slot: &mut Slot) -> Option<u64> {
+    let generation = slot.generation.wrapping_add(1);
     let deadline = Instant::now() + Duration::from_millis(CLIPBOARD_TIMEOUT_MS);
-    slot.value = Prefetched::Pending {
-        generation,
-        deadline,
-    };
     if sender
         .try_send(ReadJob {
             generation,
@@ -204,11 +199,17 @@ fn queue_read(shared: &Shared, sender: &mpsc::SyncSender<ReadJob>, slot: &mut Sl
         })
         .is_err()
     {
-        slot.value = Prefetched::Unavailable { generation };
         READ_FAILURES_TOTAL.fetch_add(1, Ordering::Relaxed);
-        shared.ready.notify_all();
         return None;
     }
+    // Publish the generation only after queue admission succeeds. The worker
+    // may receive the job immediately, but it must acquire this same slot
+    // mutex before checking whether the generation is still pending.
+    slot.generation = generation;
+    slot.value = Prefetched::Pending {
+        generation,
+        deadline,
+    };
     Some(generation)
 }
 
@@ -220,7 +221,7 @@ fn start_prefetch(shared: &Shared, sender: &mpsc::SyncSender<ReadJob>) {
     if matches!(slot.value, Prefetched::Pending { .. }) {
         return;
     }
-    let _ = queue_read(shared, sender, &mut slot);
+    let _ = queue_read(sender, &mut slot);
 }
 
 /// Wait for the current single-flight read. A timed-out prefetch remains
@@ -251,7 +252,7 @@ fn take_or_read(
         }
         Prefetched::Empty | Prefetched::Ready { .. } => {
             let _ = std::mem::take(&mut slot.value);
-            queue_read(shared, sender, &mut slot)?
+            queue_read(sender, &mut slot)?
         }
     };
 
@@ -456,7 +457,7 @@ mod tests {
     }
 
     #[test]
-    fn delayed_prefetch_deadline_does_not_start_a_duplicate_read() {
+    fn rapid_triggers_share_a_slow_read_then_recover_without_overlap() {
         let calls = Arc::new(AtomicUsize::new(0));
         let (started_sender, started_receiver) = mpsc::channel();
         let (release_sender, release_receiver) = mpsc::channel();
@@ -477,11 +478,14 @@ mod tests {
             .recv_timeout(Duration::from_secs(1))
             .expect("prefetch worker started the first read");
 
-        // A later trigger arrives while the first read is still in flight.
-        // It must share the pending operation and, once its deadline passes,
-        // report unavailable instead of starting a parallel read.
-        (prefetch.0)();
-        assert_eq!((reader.0)(), None);
+        // Multiple later triggers share this pending operation. Once its
+        // deadline passes, each reports unavailable instead of starting a
+        // duplicate command or consuming a result intended for another
+        // expansion.
+        for _ in 0..3 {
+            (prefetch.0)();
+            assert_eq!((reader.0)(), None);
+        }
         assert_eq!(calls.load(Ordering::SeqCst), 1);
 
         release_sender.send(()).unwrap();
@@ -505,8 +509,39 @@ mod tests {
 
         let started = Instant::now();
         let mut slot = lock(&shared);
-        assert_eq!(queue_read(&shared, &sender, &mut slot), None);
-        assert!(matches!(slot.value, Prefetched::Unavailable { .. }));
+        assert_eq!(queue_read(&sender, &mut slot), None);
+        assert!(matches!(slot.value, Prefetched::Empty));
+        assert_eq!(slot.generation, 0);
         assert!(started.elapsed() < Duration::from_millis(50));
+    }
+
+    #[test]
+    fn a_full_queue_does_not_discard_an_unconsumed_completed_value() {
+        let shared = Shared {
+            slot: Mutex::new(Slot {
+                generation: 7,
+                value: Prefetched::Ready {
+                    generation: 7,
+                    at: Instant::now(),
+                    value: "still available".into(),
+                },
+            }),
+            ready: Condvar::new(),
+        };
+        let (sender, _receiver) = mpsc::sync_channel(1);
+        sender
+            .try_send(ReadJob {
+                generation: 6,
+                deadline: Instant::now() + Duration::from_secs(1),
+            })
+            .unwrap();
+
+        let mut slot = lock(&shared);
+        assert_eq!(queue_read(&sender, &mut slot), None);
+        assert_eq!(slot.generation, 7);
+        assert!(matches!(
+            &slot.value,
+            Prefetched::Ready { value, .. } if value == "still available"
+        ));
     }
 }

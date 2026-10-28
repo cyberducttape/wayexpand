@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Keep clipboard prefetch state unchanged when the bounded worker queue rejects
+  a request, and cover rapid triggers against a slow single-flight read.
+- Wait for action child output and Linux pidfd readiness instead of waking every
+  5 ms. In a local 300 ms idle-child comparison, supervisor thread CPU fell
+  from 5 ms to below the benchmark's 1 ms display resolution; cancellation and
+  no-pidfd fallback waits remain bounded.
 - Preserve GUI TOML comments and formatting only when an expansion can be
   matched by stable ID or legacy trigger; new or renamed-ID snippets no longer
   inherit metadata from an unrelated array position.

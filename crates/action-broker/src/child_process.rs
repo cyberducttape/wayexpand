@@ -7,7 +7,7 @@ use std::sync::{
 use std::time::{Duration, Instant};
 
 #[cfg(unix)]
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, OwnedFd};
 #[cfg(unix)]
 use wayexpand_process_supervisor::ChildSupervisor;
 
@@ -40,6 +40,66 @@ fn set_nonblocking<R: AsRawFd>(stream: &R) -> Result<(), std::io::Error> {
         return Err(std::io::Error::last_os_error());
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn wait_for_child_event(
+    stdout: Option<&ChildStdout>,
+    stderr: Option<&ChildStderr>,
+    pidfd: Option<&OwnedFd>,
+    deadline: Instant,
+    cancellation_watch: bool,
+) -> Result<(), std::io::Error> {
+    let mut fds = [
+        libc::pollfd {
+            fd: stdout.map_or(-1, AsRawFd::as_raw_fd),
+            events: libc::POLLIN | libc::POLLHUP | libc::POLLERR,
+            revents: 0,
+        },
+        libc::pollfd {
+            fd: stderr.map_or(-1, AsRawFd::as_raw_fd),
+            events: libc::POLLIN | libc::POLLHUP | libc::POLLERR,
+            revents: 0,
+        },
+        libc::pollfd {
+            fd: pidfd.map_or(-1, AsRawFd::as_raw_fd),
+            events: libc::POLLIN,
+            revents: 0,
+        },
+    ];
+    let fallback_deadline = if pidfd.is_none() {
+        Some(Instant::now() + Duration::from_millis(5))
+    } else {
+        None
+    };
+    let cancellation_deadline =
+        cancellation_watch.then(|| Instant::now() + Duration::from_millis(50));
+    let wait_deadline = [Some(deadline), fallback_deadline, cancellation_deadline]
+        .into_iter()
+        .flatten()
+        .min()
+        .expect("the child deadline is always present");
+
+    loop {
+        let remaining = wait_deadline.saturating_duration_since(Instant::now());
+        let timeout_ms = remaining
+            .as_nanos()
+            .div_ceil(1_000_000)
+            .min(i32::MAX as u128) as i32;
+        // SAFETY: fds points to a stack-owned array of initialized pollfd
+        // values, each of which either names a live descriptor or is -1.
+        let result = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, timeout_ms) };
+        if result >= 0 {
+            return Ok(());
+        }
+        let error = std::io::Error::last_os_error();
+        if error.kind() != std::io::ErrorKind::Interrupted {
+            return Err(error);
+        }
+        if Instant::now() >= wait_deadline {
+            return Ok(());
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -161,13 +221,19 @@ pub fn run_child_unix_cancellable(
             let _ = guard.reap();
             return Err(ChildRunError::Cancelled);
         }
-        if Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(5));
-        } else {
+        if Instant::now() >= deadline {
             guard.kill_group();
             let _ = guard.reap();
             return Err(ChildRunError::Timeout);
         }
+        wait_for_child_event(
+            stdout.as_ref().filter(|_| !stdout_eof),
+            stderr.as_ref().filter(|_| !stderr_eof),
+            guard.pidfd(),
+            deadline,
+            cancelled.is_some(),
+        )
+        .map_err(ChildRunError::Io)?;
     };
 
     let drain_deadline = Instant::now() + Duration::from_millis(100);
@@ -195,7 +261,14 @@ pub fn run_child_unix_cancellable(
             stderr_truncated |= result.truncated;
         }
         if !stdout_eof || !stderr_eof {
-            std::thread::sleep(Duration::from_millis(5));
+            wait_for_child_event(
+                stdout.as_ref().filter(|_| !stdout_eof),
+                stderr.as_ref().filter(|_| !stderr_eof),
+                None,
+                drain_deadline,
+                false,
+            )
+            .map_err(ChildRunError::Io)?;
         }
     }
     if !stdout_eof || !stderr_eof {
