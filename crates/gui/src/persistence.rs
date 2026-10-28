@@ -37,12 +37,16 @@ fn merge_toml_item(old: &mut toml_edit::Item, replacement: toml_edit::Item) {
                     &str,
                     std::collections::VecDeque<usize>,
                 > = std::collections::HashMap::new();
+                let mut by_legacy_trigger: std::collections::HashMap<
+                    &str,
+                    std::collections::VecDeque<usize>,
+                > = std::collections::HashMap::new();
                 for (old_index, old_table) in old_array.iter().enumerate() {
-                    if let Some(id) = old_table
+                    let id = old_table
                         .get("id")
                         .and_then(toml_edit::Item::as_value)
-                        .and_then(toml_edit::Value::as_str)
-                    {
+                        .and_then(toml_edit::Value::as_str);
+                    if let Some(id) = id {
                         by_id.entry(id).or_default().push_back(old_index);
                     }
                     if let Some(trigger) = old_table
@@ -51,25 +55,41 @@ fn merge_toml_item(old: &mut toml_edit::Item, replacement: toml_edit::Item) {
                         .and_then(toml_edit::Value::as_str)
                     {
                         by_trigger.entry(trigger).or_default().push_back(old_index);
+                        if id.is_none() {
+                            by_legacy_trigger
+                                .entry(trigger)
+                                .or_default()
+                                .push_back(old_index);
+                        }
                     }
                 }
-                for (index, new_table) in new_array.iter().enumerate() {
-                    let id_match = new_table
+                for new_table in new_array.iter() {
+                    let new_id = new_table
                         .get("id")
                         .and_then(toml_edit::Item::as_value)
-                        .and_then(toml_edit::Value::as_str)
-                        .and_then(|id| take_unused(by_id.get_mut(id)?, &used));
-                    let matching_index = id_match
-                        .or_else(|| {
-                            new_table
-                                .get("trigger")
-                                .and_then(toml_edit::Item::as_value)
-                                .and_then(toml_edit::Value::as_str)
-                                .and_then(|trigger| {
-                                    take_unused(by_trigger.get_mut(trigger)?, &used)
+                        .and_then(toml_edit::Value::as_str);
+                    let trigger = new_table
+                        .get("trigger")
+                        .and_then(toml_edit::Item::as_value)
+                        .and_then(toml_edit::Value::as_str);
+                    let matching_index = if let Some(id) = new_id {
+                        by_id
+                            .get_mut(id)
+                            .and_then(|candidates| take_unused(candidates, &used))
+                            .or_else(|| {
+                                trigger.and_then(|trigger| {
+                                    by_legacy_trigger
+                                        .get_mut(trigger)
+                                        .and_then(|candidates| take_unused(candidates, &used))
                                 })
+                            })
+                    } else {
+                        trigger.and_then(|trigger| {
+                            by_trigger
+                                .get_mut(trigger)
+                                .and_then(|candidates| take_unused(candidates, &used))
                         })
-                        .or_else(|| (index < old_array.len() && !used[index]).then_some(index));
+                    };
                     let mut table = matching_index
                         .and_then(|old_index| {
                             used[old_index] = true;

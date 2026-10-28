@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Preserve GUI TOML comments and formatting only when an expansion can be
+  matched by stable ID or legacy trigger; new or renamed-ID snippets no longer
+  inherit metadata from an unrelated array position.
+- Verify that an abandoned background backend connection drops a late
+  successful injector instead of making its portal session available for
+  installation. A synchronous portal request itself remains non-cancellable.
 - Record isolated KWin 6.6.6 keysym pacing comparisons at 8, 10, and 12 ms.
   Faster variants reduced measured insertion latency and passed exact-text
   smoke samples, but physical capture and compositor-load reliability remain

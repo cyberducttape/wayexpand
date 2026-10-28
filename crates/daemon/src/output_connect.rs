@@ -27,9 +27,10 @@ pub(crate) struct ConnectRequest {
     pub portal_token_path: Option<PathBuf>,
 }
 
-/// One connection attempt in flight. Dropping it abandons the attempt: an
-/// injector that connects afterwards is dropped by the worker, which closes
-/// its portal session.
+/// One connection attempt in flight. Dropping it abandons collection of the
+/// result, but cannot interrupt a synchronous portal request already in
+/// progress. If that request later succeeds, the worker drops the unclaimed
+/// injector (and its portal session) when sending to the dropped receiver.
 pub(crate) struct BackgroundConnect {
     result: Receiver<ConnectResult>,
 }
@@ -128,5 +129,53 @@ mod tests {
             Waker::new().unwrap(),
         );
         assert!(matches!(wait_for(&connect), Err(error) if !error.retryable));
+    }
+
+    #[test]
+    fn abandoned_attempt_drops_a_late_connection_instead_of_installing_it() {
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
+
+        struct DropTrackedInjector(Arc<AtomicBool>);
+
+        impl TextInjector for DropTrackedInjector {
+            fn name(&self) -> &'static str {
+                "drop-tracked-test"
+            }
+
+            fn erase(&mut self, _trigger: &str) -> Result<(), wayexpand_core::InjectorError> {
+                Ok(())
+            }
+
+            fn insert(&mut self, _text: &str) -> Result<(), wayexpand_core::InjectorError> {
+                Ok(())
+            }
+        }
+
+        impl Drop for DropTrackedInjector {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::Release);
+            }
+        }
+
+        let (release, blocked) = mpsc::channel::<()>();
+        let dropped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let worker_drop = std::sync::Arc::clone(&dropped);
+        let connect = BackgroundConnect::spawn(Waker::new().unwrap(), move || {
+            blocked.recv().unwrap();
+            Ok(Box::new(DropTrackedInjector(worker_drop)) as Box<dyn TextInjector>)
+        });
+
+        assert!(connect.poll().is_none());
+        drop(connect);
+        release.send(()).unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !dropped.load(std::sync::atomic::Ordering::Acquire) {
+            assert!(Instant::now() < deadline, "late injector was not dropped");
+            thread::sleep(Duration::from_millis(5));
+        }
     }
 }

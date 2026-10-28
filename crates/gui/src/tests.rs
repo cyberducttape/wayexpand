@@ -2108,6 +2108,58 @@ fn format_merge_matches_duplicate_triggers_in_order() {
 }
 
 #[test]
+fn format_merge_does_not_reuse_positional_metadata_for_new_snippets() {
+    let old = persistence::read_config_document(
+        "[[expansion]]\nid = 'old-id'\ntrigger = ':old'\n# approved wording\nreplacement = 'Old text'\n",
+    )
+    .unwrap();
+    let new = persistence::read_config_document(
+        "[[expansion]]\nid = 'new-id'\ntrigger = ':new'\nreplacement = 'New text'\n",
+    )
+    .unwrap();
+
+    let merged = persistence::merge_config_document(old, new).to_string();
+    assert!(merged.contains("id = 'new-id'"), "{merged}");
+    assert!(merged.contains("trigger = ':new'"), "{merged}");
+    assert!(!merged.contains("approved wording"), "{merged}");
+    assert!(!merged.contains("old-id"), "{merged}");
+}
+
+#[test]
+fn format_merge_does_not_match_a_renamed_id_by_trigger() {
+    let old = persistence::read_config_document(
+        "[[expansion]]\nid = 'old-id'\ntrigger = ':same'\n# belongs to old identity\nreplacement = 'Old text'\n",
+    )
+    .unwrap();
+    let new = persistence::read_config_document(
+        "[[expansion]]\nid = 'new-id'\ntrigger = ':same'\nreplacement = 'New text'\n",
+    )
+    .unwrap();
+
+    let merged = persistence::merge_config_document(old, new).to_string();
+    assert!(merged.contains("id = 'new-id'"), "{merged}");
+    assert!(!merged.contains("old identity"), "{merged}");
+    assert!(!merged.contains("old-id"), "{merged}");
+}
+
+#[test]
+fn format_merge_drops_deleted_snippet_metadata_without_shifting_it() {
+    let old = persistence::read_config_document(
+        "[[expansion]]\nid = 'deleted'\ntrigger = ':gone'\n# deleted note\nreplacement = 'Gone'\n\n[[expansion]]\nid = 'kept'\ntrigger = ':kept'\n# kept note\nreplacement = 'Kept'\n",
+    )
+    .unwrap();
+    let new = persistence::read_config_document(
+        "[[expansion]]\nid = 'kept'\ntrigger = ':kept'\nreplacement = 'Still kept'\n",
+    )
+    .unwrap();
+
+    let merged = persistence::merge_config_document(old, new).to_string();
+    assert!(merged.contains("kept note"), "{merged}");
+    assert!(!merged.contains("deleted note"), "{merged}");
+    assert!(!merged.contains("id = 'deleted'"), "{merged}");
+}
+
+#[test]
 fn format_merge_follows_stable_ids_when_triggers_change_and_reorder() {
     let old = persistence::read_config_document(
         "# note for A\n[[expansion]]\nid = '00000000-0000-4000-8000-000000000001'\ntrigger = ':old-a'\n\n# note for B\n[[expansion]]\nid = '00000000-0000-4000-8000-000000000002'\ntrigger = ':old-b'\n",
