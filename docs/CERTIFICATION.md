@@ -539,17 +539,22 @@ evdev paths lack sensitive-field awareness and atomic replacement. IBus
 verifies surrounding text but is non-atomic and lacks exact window identity
 and composition awareness. KWin and Mutter do not advertise
 `zwp_input_method_manager_v2`, so input-method-v2 is not a valid target for
-either desktop ([protocol support matrix](https://wayland.app/protocols/input-method-unstable-v2)). No declared compositor route currently meets the production
-contract. The release workflow therefore fails closed before runner discovery
-until a compatible real-session route is added. Compatibility reports remain
-useful evidence but cannot satisfy the release gate.
+either desktop ([protocol support matrix](https://wayland.app/protocols/input-method-unstable-v2)). Sway and Hyprland are now declared as additional
+input-method-v2 test targets because their compositor stacks can expose that
+protocol. The live manager, seat, input context, capability contract, and
+complete real-session scenarios must still be verified on each target; this
+declaration is not a support or certification claim. No declared compositor
+route currently meets the production contract. The release workflow therefore
+fails closed before runner discovery until a compatible real-session route is
+added. Compatibility reports remain useful evidence but cannot satisfy the
+release gate.
 
 | Environment | Current workflow candidate | Certification eligibility |
 | --- | --- | --- |
 | KDE Plasma / KWin | Compatibility path declared; jobs are not dispatched while the gate is blocked | No eligible production route; input-method-v2 manager unavailable |
 | GNOME | IBus compatibility path declared; jobs are not dispatched while the gate is blocked | No eligible production route; IBus replacement is non-atomic and has no window tracker |
-| Sway | evdev plus wlroots compatibility path declared; jobs are not dispatched while the gate is blocked | Ineligible for production certification: evdev lacks sensitive-field awareness and atomic replacement |
-| Hyprland | evdev plus wlroots compatibility path declared; jobs are not dispatched while the gate is blocked | Ineligible for production certification: evdev lacks sensitive-field awareness and atomic replacement |
+| Sway | input-method-v2 is the current compatibility workflow candidate; evdev plus wlroots remains a declared fallback path | No production certification; the workflow does not yet require production evidence |
+| Hyprland | input-method-v2 is the current compatibility workflow candidate; evdev plus wlroots remains a declared fallback path | No production certification; the workflow does not yet require production evidence |
 
 The scenario contract still requires GTK and Qt clients, relevant password
 fields, and focus isolation on each desktop. Application-filter scenarios

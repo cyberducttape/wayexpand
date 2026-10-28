@@ -16,6 +16,8 @@ jq -e '
   ([.targets[] | select((.certification_status == "certified" and (.certification_evidence | type == "string")) or (.certification_status == "not-certified" and .certification_evidence == null))] | length == 4) and
   ([.targets[] | select((.certification_backend as $backend | (.input_paths | index($backend)) != null) and (.production_certification_required != true or .certification_backend == "input-method-v2"))] | length == 4) and
   ([.targets[] | select((.id == "sway" or .id == "hyprland") and (.input_paths | index("evdev+wlroots")))] | length == 2) and
+  ([.targets[] | select((.id == "sway" or .id == "hyprland") and (.input_paths | index("input-method-v2")))] | length == 2) and
+  ([.targets[] | select((.id == "sway" or .id == "hyprland") and .certification_backend == "input-method-v2" and .production_certification_required == false)] | length == 2) and
   ([.targets[] | select(.id == "kde" and .application_filter == "supported" and .window_tracker == "KWin application tracker")] | length == 1) and
   ([.targets[] | select((.id == "gnome" or .id == "sway" or .id == "hyprland") and .application_filter == "unavailable" and .window_tracker == "none")] | length == 3) and
   ([.required_scenarios | length] | all(. == 45)) and
@@ -79,6 +81,8 @@ for target in matrix["targets"]:
         )
     if not expected and target["id"] in ("kde", "gnome") and backend != "ibus":
         raise SystemExit(f"{target['id']} compatibility job must use the IBus route")
+    if target["id"] in ("sway", "hyprland") and backend != "input-method-v2":
+        raise SystemExit(f"{target['id']} compatibility job must exercise input-method-v2")
 
 generator_path = Path(matrix_path).resolve().parents[2] / "scripts/generate-desktop-matrix.py"
 sys.dont_write_bytecode = True
@@ -119,8 +123,9 @@ fi
 grep -F -- 'Require certified evidence' "$workflow" >/dev/null
 grep -F -- '.certified == true and .status == "certified"' "$workflow" >/dev/null
 grep -F -- "backend_certification_block_reason='IBus lacks atomic replacement, exact window identity, and composition awareness'" "$project_dir/scripts/certify-compositor.sh" >/dev/null
-grep -F -- 'No declared compositor route currently meets' "$project_dir/docs/CERTIFICATION.md" >/dev/null
-grep -F -- 'Ineligible for production certification: evdev lacks sensitive-field awareness and atomic replacement' "$project_dir/docs/CERTIFICATION.md" >/dev/null
+grep -F -- 'No declared compositor' "$project_dir/docs/CERTIFICATION.md" >/dev/null
+grep -F -- 'input-method-v2 is the current compatibility workflow candidate' "$project_dir/docs/CERTIFICATION.md" >/dev/null
+grep -F -- 'No production certification; the workflow does not yet require production evidence' "$project_dir/docs/CERTIFICATION.md" >/dev/null
 
 release_workflow="$project_dir/.github/workflows/release.yml"
 grep -F -- 'uses: ./.github/workflows/certification.yml' "$release_workflow" >/dev/null

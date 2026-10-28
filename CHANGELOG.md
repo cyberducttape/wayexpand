@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Declare input-method-v2 as the Sway and Hyprland certification candidate,
+  with evdev plus wlroots retained as an explicitly experimental fallback.
+  Automated evidence remains compatibility-only until real-session results
+  satisfy the production gate.
 - Correct evdev and libei source-level safety descriptions: non-exclusive
   observation and libei insertion do not make the whole replacement
   transaction atomic or prevent unintended text changes.
