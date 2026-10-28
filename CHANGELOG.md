@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Correct evdev and libei source-level safety descriptions: non-exclusive
+  observation and libei insertion do not make the whole replacement
+  transaction atomic or prevent unintended text changes.
 - Block direct command previews in organization safe mode when the systemd
   service sandbox is unavailable; named actions continue through the broker.
 - Keep onboarding tests accurate for source archives built without Git
@@ -12,10 +15,10 @@ All notable changes to WayExpand are documented here.
 - Stamp the CI RPM source archive with its checked-out commit so package builds
   without a `.git` directory retain a verifiable binary identity.
 - Preserve current-source private KWin 6.6.6 smoke evidence for commit
-  `d776185d5039`: eleven insertion/focus/reload/restart checks passed; capture
-  was simulated, and Unicode and suspend/resume remain untested. The report
-  records libei keysym-fallback latency by expansion size and is not production
-  compositor certification.
+  `a09536c13fa7`: eleven insertion/focus/reload/restart/refusal checks passed;
+  capture was simulated, and Unicode and suspend/resume remain untested. The
+  report records libei keysym-fallback latency by expansion size and is not
+  production compositor certification.
 - Clarify that GitHub binary releases are gated on a production-eligible real
   compositor certification route; Launchpad source-package synchronization
   does not satisfy that gate or publish GitHub release assets.

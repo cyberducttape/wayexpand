@@ -27,9 +27,12 @@
 //! behind a bounded serialized output actor, so pacing does not block physical
 //! input capture or matching.
 //!
-//! This tradeoff prioritizes correctness over speed for bounded replacements.
-//! Very large keysym fallbacks are refused before erasing the trigger rather
-//! than occupying the daemon's synchronous keyboard path for several seconds.
+//! This tradeoff prioritizes compositor and toolkit compatibility over
+//! speed. It does not make a multi-event replacement atomic or verify the
+//! text at the caret; replacement assurance is a route-level property of the
+//! capture and focus contracts. Very large keysym fallbacks are refused
+//! before erasing the trigger rather than occupying the daemon's synchronous
+//! keyboard path for several seconds.
 //! If latency is a concern:
 //! - Prefer ei_text when available (no per-character delay)
 //! - Consider enabling ei_text support in your EIS server if you control it

@@ -24,10 +24,14 @@
 //! watches the same stream and, on a trigger match, asks the paired
 //! `TextInjector` (typically `wayexpand-backend-libei`) to erase the
 //! trigger and insert the replacement -- the same reactive model the other
-//! sources use. It never takes over full keystroke pass-through the way an
-//! exclusive Wayland input-method grab does, which keeps this source's
-//! failure surface limited to "a match was missed," not "the user's typing
-//! breaks."
+//! sources use. Non-exclusive capture preserves normal physical-key
+//! delivery; it does not make replacement atomic with that delivery. The
+//! application can process the trigger, change focus, or otherwise move its
+//! cursor before synthetic erase and insertion events arrive. A partial or
+//! misdirected replacement can therefore alter unintended text, not just
+//! miss a match. Treat evdev replacement as experimental best effort and use
+//! the route assurance reported by the daemon; see `docs/BACKENDS.md` and
+//! `docs/SECURITY.md`.
 //!
 //! Kernel auto-repeat events are translated for matcher state while leaving
 //! XKB's physical key state unchanged. The focused application still receives
