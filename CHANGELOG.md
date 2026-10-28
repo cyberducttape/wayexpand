@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Preserve the current-source `wayexpand doctor --certify --json` report for
+  `ebd561df25a7`: 12 checks passed and three were not tested. KWin 6.6.6
+  keysym-fallback injection measured p50/p95/p99 latency of 8.538/8.587/8.629
+  ms (small), 523.584/526.632/527.838 ms (medium), and
+  2099.249/2104.039/2104.836 ms (large). This remains partial evidence with
+  stdin-simulated capture; it is not production certification.
 - Assert that a queued non-atomic output transaction does not reach the
   injector before the current transaction is acknowledged.
 - Preserve a clean-source KWin 6.6.6 `doctor --certify` report for
