@@ -2076,6 +2076,12 @@ fn first_run_requires_a_verified_build_before_offering_live_test() {
                 .nodes
         );
         assert!(semantics.contains(expected_warning), "{semantics}");
+        if case == "stale" {
+            assert!(
+                semantics.contains("systemctl --user restart wayexpand-evdev.service"),
+                "{semantics}"
+            );
+        }
         assert!(!semantics.contains("It expanded correctly"));
         let _ = fs::remove_file(path);
     }

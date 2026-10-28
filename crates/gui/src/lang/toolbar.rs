@@ -454,10 +454,11 @@ impl Strings {
         ready: bool,
         detail: &str,
         daemon_build: Option<crate::runtime::DaemonBuildState>,
+        restart_command: Option<&str>,
     ) -> String {
         match daemon_build {
             Some(crate::runtime::DaemonBuildState::RestartRequired) => {
-                return self.onboarding_stale_daemon_state().to_owned();
+                return self.onboarding_stale_daemon_state(restart_command);
             }
             Some(crate::runtime::DaemonBuildState::Unverified) => {
                 return self.onboarding_unverified_daemon_state().to_owned();
@@ -474,11 +475,20 @@ impl Strings {
         }
     }
 
-    pub fn onboarding_stale_daemon_state(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Not ready: the daemon is running a different build. Restart the WayExpand user service, then refresh these checks before testing snippets.",
-            Language::Indonesian => "Belum siap: daemon menjalankan build yang berbeda. Mulai ulang layanan pengguna WayExpand, lalu segarkan pemeriksaan ini sebelum menguji cuplikan.",
-            Language::German => "Noch nicht bereit: Der Daemon verwendet einen anderen Build. Starten Sie den WayExpand-Benutzerdienst neu und aktualisieren Sie diese Prüfungen, bevor Sie Snippets testen.",
+    pub fn onboarding_stale_daemon_state(&self, restart_command: Option<&str>) -> String {
+        match (self.lang, restart_command) {
+            (Language::English, Some(command)) => format!(
+                "Not ready: the daemon is running a different build. Run `{command}`, then refresh these checks before testing snippets."
+            ),
+            (Language::Indonesian, Some(command)) => format!(
+                "Belum siap: daemon menjalankan build yang berbeda. Jalankan `{command}`, lalu segarkan pemeriksaan ini sebelum menguji cuplikan."
+            ),
+            (Language::German, Some(command)) => format!(
+                "Noch nicht bereit: Der Daemon verwendet einen anderen Build. Führen Sie `{command}` aus und aktualisieren Sie diese Prüfungen, bevor Sie Snippets testen."
+            ),
+            (Language::English, None) => "Not ready: the daemon is running a different build. Restart the WayExpand service for this route, then refresh these checks before testing snippets.".into(),
+            (Language::Indonesian, None) => "Belum siap: daemon menjalankan build yang berbeda. Mulai ulang layanan WayExpand untuk jalur ini, lalu segarkan pemeriksaan sebelum menguji cuplikan.".into(),
+            (Language::German, None) => "Noch nicht bereit: Der Daemon verwendet einen anderen Build. Starten Sie den WayExpand-Dienst für diese Route neu und aktualisieren Sie diese Prüfungen, bevor Sie Snippets testen.".into(),
         }
     }
 

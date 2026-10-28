@@ -81,6 +81,13 @@ impl GuiApp {
                 .or_else(|| runtime::status_field(&self.daemon_status, key))
         };
         let source = status_value("source").unwrap_or_else(|| "unknown capture".into());
+        let restart_command = match source.as_str() {
+            "evdev" => Some("systemctl --user restart wayexpand-evdev.service"),
+            "input-method" | "input-method-v2" => {
+                Some("systemctl --user restart wayexpand-input-method.service")
+            }
+            _ => None,
+        };
         let injection = self
             .daemon_capabilities
             .as_ref()
@@ -102,7 +109,7 @@ impl GuiApp {
             Some(runtime::RouteState::Connected)
                 if daemon_build == Some(runtime::DaemonBuildState::RestartRequired) =>
             {
-                self.strings.onboarding_stale_daemon_state().into()
+                self.strings.onboarding_stale_daemon_state(restart_command)
             }
             Some(runtime::RouteState::Connected)
                 if daemon_build == Some(runtime::DaemonBuildState::Unverified) =>
@@ -202,6 +209,7 @@ impl GuiApp {
                                 route_ready,
                                 &route_state_detail,
                                 daemon_build,
+                                restart_command,
                             ))
                             .color(if route_ready {
                                 palette.success
@@ -383,8 +391,10 @@ impl GuiApp {
                             );
                         } else if daemon_build == Some(runtime::DaemonBuildState::RestartRequired) {
                             ui.label(
-                                RichText::new(self.strings.onboarding_stale_daemon_state())
-                                    .color(palette.warning),
+                                RichText::new(
+                                    self.strings.onboarding_stale_daemon_state(restart_command),
+                                )
+                                .color(palette.warning),
                             );
                         } else if daemon_build == Some(runtime::DaemonBuildState::Unverified) {
                             ui.label(

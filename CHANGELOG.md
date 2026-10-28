@@ -8,7 +8,8 @@ All notable changes to WayExpand are documented here.
   incomplete form-helper output in the privacy-preserving expansion trace
   without recording field names or values.
 - Keep the first-run real-app test unavailable until the daemon's build
-  identity matches the GUI, and explain stale or unverifiable daemon builds.
+  identity matches the GUI, and explain stale or unverifiable daemon builds
+  with the matching service restart command when the capture route is known.
 - Stamp Debian/Launchpad and RPM source builds with the originating Git
   revision so packaged CLI and daemon binaries can verify build identity
   instead of reporting `unknown` when the build environment omits `.git` metadata.
