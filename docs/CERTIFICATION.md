@@ -544,15 +544,15 @@ input-method-v2 test targets because their compositor stacks can expose that
 protocol. The live manager, seat, input context, capability contract, and
 complete real-session scenarios must still be verified on each target; this
 declaration is not a support or certification claim. No declared compositor
-route currently meets the production contract. The release workflow therefore
+route currently meets the production contract. A release invocation therefore
 fails closed before runner discovery until a compatible real-session route is
-added. Compatibility reports remain useful evidence but cannot satisfy the
-release gate.
+added. Manual and scheduled runs can still collect compatibility evidence from
+online compositor runners; those reports cannot satisfy the release gate.
 
 | Environment | Current workflow candidate | Certification eligibility |
 | --- | --- | --- |
-| KDE Plasma / KWin | Compatibility path declared; jobs are not dispatched while the gate is blocked | No eligible production route; input-method-v2 manager unavailable |
-| GNOME | IBus compatibility path declared; jobs are not dispatched while the gate is blocked | No eligible production route; IBus replacement is non-atomic and has no window tracker |
+| KDE Plasma / KWin | IBus compatibility path is run when its labeled real-session runner is online | No eligible production route; input-method-v2 manager unavailable |
+| GNOME | IBus compatibility path is run when its labeled real-session runner is online | No eligible production route; IBus replacement is non-atomic and has no window tracker |
 | Sway | input-method-v2 is the current compatibility workflow candidate; evdev plus wlroots remains a declared fallback path | No production certification; the workflow does not yet require production evidence |
 | Hyprland | input-method-v2 is the current compatibility workflow candidate; evdev plus wlroots remains a declared fallback path | No production certification; the workflow does not yet require production evidence |
 

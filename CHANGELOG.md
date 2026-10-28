@@ -8,6 +8,9 @@ All notable changes to WayExpand are documented here.
   with evdev plus wlroots retained as an explicitly experimental fallback.
   Automated evidence remains compatibility-only until real-session results
   satisfy the production gate.
+- Allow manual and scheduled certification runs to gather compatibility
+  evidence even while no production route is eligible; release calls still
+  fail closed unless production evidence is explicitly required and present.
 - Correct evdev and libei source-level safety descriptions: non-exclusive
   observation and libei insertion do not make the whole replacement
   transaction atomic or prevent unintended text changes.

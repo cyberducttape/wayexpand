@@ -56,6 +56,7 @@ jobs:
     secrets: inherit
     with:
       checkout_ref: ${{ inputs.release_ref || github.ref }}
+      require_production: true
 
   linux-aarch64:
     name: Linux aarch64 release

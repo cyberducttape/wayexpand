@@ -46,6 +46,10 @@ grep -F -- 'continue-on-error: true' "$workflow" >/dev/null
 grep -F -- 'if: always()' "$workflow" >/dev/null
 grep -F -- 'schedule:' "$workflow" >/dev/null
 grep -F -- '30 3 * * 1' "$workflow" >/dev/null
+grep -F -- 'require_production:' "$workflow" >/dev/null
+grep -F -- 'REQUIRE_PRODUCTION: ${{ inputs.require_production }}' "$workflow" >/dev/null
+grep -F -- 'if [ "$REQUIRE_PRODUCTION" = true ]; then' "$workflow" >/dev/null
+grep -F -- 'Compatibility jobs will still be selected when their real-session runners are online.' "$workflow" >/dev/null
 grep -F -- 'WAYEXPAND_CERTIFICATION_DRIVER' "$workflow" >/dev/null
 grep -F -- 'WAYEXPAND_CERTIFICATION_VERSION' "$workflow" >/dev/null
 grep -F -- 'WAYEXPAND_CERTIFICATION_LAYOUT' "$workflow" >/dev/null
@@ -129,6 +133,7 @@ grep -F -- 'No production certification; the workflow does not yet require produ
 
 release_workflow="$project_dir/.github/workflows/release.yml"
 grep -F -- 'uses: ./.github/workflows/certification.yml' "$release_workflow" >/dev/null
+grep -F -- 'require_production: true' "$release_workflow" >/dev/null
 python3 - "$release_workflow" <<'PY'
 import sys
 
