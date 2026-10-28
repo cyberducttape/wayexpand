@@ -147,6 +147,7 @@ pub(crate) fn record_preparation_failure(backend: &str, error: &wayexpand_core::
         Error::PolicyOutputTooLarge { .. } => "replacement exceeds configured size limit",
         Error::StaleInput => "input changed before expansion was prepared",
         Error::QueueFull | Error::WorkerUnavailable => "form worker unavailable",
+        Error::IncompleteOutput => "form values could not render the template",
         _ => "expansion could not be prepared",
     };
     record_blocked_expansion(backend, reason);
@@ -413,6 +414,25 @@ mod tests {
                 && trace["trigger_recognized"] == "yes"
                 && trace["backend_selected"] == "not reached"
                 && trace["insertion_attempted"] == false
+        }));
+    }
+
+    #[test]
+    fn form_render_failure_has_a_specific_content_free_reason() {
+        record_preparation_failure(
+            "evdev+libei",
+            &wayexpand_core::CommandError::IncompleteOutput,
+        );
+        let failures: serde_json::Value =
+            serde_json::from_str(&recent_json()).expect("failures should be JSON");
+        assert!(failures.as_array().unwrap().iter().any(|trace| {
+            trace["completion"] == "form values could not render the template"
+                && trace["backend"] == "evdev+libei"
+                && trace["trigger_recognized"] == "yes"
+                && trace["backend_selected"] == "not reached"
+                && trace["insertion_attempted"] == false
+                && trace.get("trigger").is_none()
+                && trace.get("replacement").is_none()
         }));
     }
 }
