@@ -22,7 +22,9 @@ an unreleased Git revision reports `-dev+<commit>` so bug reports can be tied to
 the exact source tree. `wayexpand doctor --json` exposes the same values as
 `wayexpand_version` and `wayexpand_commit`; certification evidence records them
 as well. Builds made from source archives without Git metadata use the package
-version and report the commit as `unknown`.
+version and report the commit as `unknown`, unless the packaging source carries
+an explicit source revision. Debian and Launchpad source publishers include
+that revision so their CLI and daemon binaries can identify the same build.
 
 ### `wayexpand upgrade-status [--json]`
 
@@ -36,8 +38,8 @@ The command reports one of these statuses:
 - `current`: the daemon status schema and build commit match the CLI.
 - `restart-required`: the daemon is compatible but came from another build.
 - `unverified`: the daemon is compatible, but this CLI or the daemon was
-  built without a commit ID (`unknown`, as source-archive builds such as
-  distribution packages report unless `WAYEXPAND_BUILD_SHA` is set), so a
+  built without a commit ID (`unknown`, as source-archive builds report unless
+  the package sets `WAYEXPAND_BUILD_SHA`), so a
   match cannot be shown. Restart the user service after every upgrade.
 - `incompatible`: the daemon status schema is missing or unsupported.
 - `unavailable`: no daemon responded.

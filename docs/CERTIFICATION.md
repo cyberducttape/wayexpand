@@ -55,7 +55,8 @@ The active route is verified only when its status schema and `daemon_commit`
 match the CLI that produced the report; a stale daemon is reported as
 unavailable and must be restarted or updated first. A build without Git
 metadata reports its commit as `unknown`, which cannot show a match either;
-set `WAYEXPAND_BUILD_SHA` when building packages from source archives. The daemon route remains a
+set `WAYEXPAND_BUILD_SHA` when building packages from source archives. Debian and
+Launchpad source publishers stamp this automatically. The daemon route remains a
 point-in-time status probe, not proof of correct typing or insertion. The
 report is safe to attach to a support report and contains no typed text or
 expansion contents. Certification scope is direct keyboard

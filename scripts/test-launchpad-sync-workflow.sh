@@ -5,6 +5,18 @@ set -euo pipefail
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 workflow="$project_dir/.github/workflows/main.yml"
 
+# Published trees lack .git, so preserve the upstream revision in Debian
+# metadata and pass it into every Cargo build.
+expected_source_commit="source_commit=\$(git -C \"\$project_dir\" rev-parse --short=12 HEAD)"
+expected_sha_export="WAYEXPAND_BUILD_SHA=\$(build_sha)"
+grep -F -- "$expected_source_commit" \
+    "$project_dir/scripts/publish-launchpad-branch.sh" >/dev/null
+grep -F -- 'debian/wayexpand-build-sha' \
+    "$project_dir/scripts/publish-launchpad-branch.sh" >/dev/null
+grep -F -- "$expected_sha_export" "$project_dir/debian/rules" >/dev/null
+grep -F -- 'debian/wayexpand-build-sha' \
+    "$project_dir/scripts/generate-release-tarballs.sh" >/dev/null
+
 expected_group="group: launchpad-sync-\${{ github.repository }}"
 main_guard="if [ \"\$GITHUB_REF\" = \"refs/heads/main\" ]; then"
 tag_message="Skipping Launchpad main update for \$GITHUB_REF; syncing tags only."

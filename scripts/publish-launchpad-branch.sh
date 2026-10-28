@@ -22,6 +22,7 @@ branch=${LAUNCHPAD_BRANCH:-launchpad-vendored}
 remote=${LAUNCHPAD_REMOTE:-launchpad}
 project_dir=$(pwd -P)
 version=$(sed -n 's/^version = "\([0-9][^"]*\)"/\1/p' "$project_dir/Cargo.toml" | head -n1)
+source_commit=$(git -C "$project_dir" rev-parse --short=12 HEAD)
 
 if [ -z "$version" ]; then
     printf '%s\n' 'error: unable to read the workspace version' >&2
@@ -47,6 +48,10 @@ GIT_INDEX_FILE="$tmpdir/index" git -C "$project_dir" read-tree HEAD
 git -C "$project_dir" ls-tree -r -z --name-only HEAD -- debian \
     | GIT_INDEX_FILE="$tmpdir/index" git -C "$project_dir" checkout-index \
         -z --stdin --prefix="$source_dir/"
+# Launchpad builds the published source tree without the originating Git
+# metadata. Preserve the actual application revision for build-info rather
+# than allowing packaged binaries to report an unverifiable "unknown".
+printf '%s\n' "$source_commit" > "$source_dir/debian/wayexpand-build-sha"
 sed -i '/^debian\/ export-ignore$/d' "$source_dir/.gitattributes"
 for required in debian/control debian/rules debian/changelog debian/source/format; do
     if [ ! -f "$source_dir/$required" ]; then

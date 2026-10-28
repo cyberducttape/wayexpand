@@ -21,6 +21,7 @@ version="$1"
 project_dir=$(pwd -P)
 output_dir=$(pwd -P)
 timestamp=$(date -u +%s)
+source_commit=$(git -C "$project_dir" rev-parse --short=12 HEAD)
 tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-release-${version}-${timestamp}.XXXXXXXXXX")
 
 cleanup() {
@@ -67,6 +68,7 @@ tar -xzf "${tmpdir}/wayexpand-${version}.tar.gz"
 # builds, so include it explicitly.
 cp -a "$project_dir/debian" "wayexpand-${version}/"
 cd "wayexpand-${version}"
+printf '%s\n' "$source_commit" > debian/wayexpand-build-sha
 
 # Generate vendor/ and the source replacement config
 printf '%s\n' "  Generating vendor/ directory..."

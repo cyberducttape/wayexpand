@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Stamp Debian/Launchpad source builds with the originating Git revision so
+  packaged CLI and daemon binaries can verify build identity instead of
+  reporting `unknown` when the build environment omits `.git` metadata.
 - Require `wayexpand explain` to verify the running daemon's status schema and
   build commit before trusting live matcher results. When the daemon is stale,
   explain falls back to a clearly marked local result, preventing older route
