@@ -482,6 +482,16 @@ impl Strings {
                 Language::Indonesian => "Ekspansi tidak dapat disiapkan".into(),
                 Language::German => "Expansion konnte nicht vorbereitet werden".into(),
             },
+            (_, "form requires verified replacement") => match self.lang {
+                Language::English => "This snippet asks for form fields, but the active route cannot verify the trigger at the cursor. Use an input-method route with verified replacement, or remove the `{{field:...}}` marker.".into(),
+                Language::Indonesian => "Cuplikan ini meminta isian formulir, tetapi rute aktif tidak dapat memverifikasi pemicu di kursor. Gunakan rute input-method dengan penggantian terverifikasi, atau hapus penanda `{{field:...}}`.".into(),
+                Language::German => "Dieses Snippet fragt Formularfelder ab, aber die aktive Route kann den Trigger am Cursor nicht verifizieren. Verwenden Sie eine Input-Method-Route mit verifizierter Ersetzung oder entfernen Sie den Marker `{{field:...}}`.".into(),
+            },
+            (_, "form requires exact window identity") => match self.lang {
+                Language::English => "This form needs exact application-window identity, which the active route does not provide. Use a supported input-method route.".into(),
+                Language::Indonesian => "Formulir ini memerlukan identitas jendela aplikasi yang tepat, tetapi rute aktif tidak menyediakannya. Gunakan rute input-method yang didukung.".into(),
+                Language::German => "Dieses Formular benötigt eine genaue Fensteridentität, die die aktive Route nicht bereitstellt. Verwenden Sie eine unterstützte Input-Method-Route.".into(),
+            },
             _ => completion.to_owned(),
         }
     }
@@ -670,6 +680,11 @@ mod tests {
                 "command context was no longer safe",
                 "Hasil perintah dibuang karena konteks tidak lagi aman",
                 "Befehlsergebnis verworfen, weil der Kontext nicht mehr sicher war",
+            ),
+            (
+                "form requires verified replacement",
+                "Cuplikan ini meminta isian formulir, tetapi rute aktif tidak dapat memverifikasi pemicu di kursor. Gunakan rute input-method dengan penggantian terverifikasi, atau hapus penanda `{{field:...}}`.",
+                "Dieses Snippet fragt Formularfelder ab, aber die aktive Route kann den Trigger am Cursor nicht verifizieren. Verwenden Sie eine Input-Method-Route mit verifizierter Ersetzung oder entfernen Sie den Marker `{{field:...}}`.",
             ),
             (
                 "input arrived before output",

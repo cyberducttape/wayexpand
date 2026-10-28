@@ -66,6 +66,10 @@ impl Status {
         &self.text
     }
 
+    pub(crate) fn is_error(&self) -> bool {
+        self.tone == StatusTone::Error
+    }
+
     /// The recorded tone. Only the renderer needs the colours, so this exists
     /// for tests that assert an outcome was classified correctly rather than
     /// asserting on its wording.

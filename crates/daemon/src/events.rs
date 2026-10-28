@@ -188,10 +188,7 @@ pub(crate) fn dispatch_pending_results(
                 if has_command {
                     failure_trace::record_command_failure(active_backend, error.kind());
                 } else {
-                    failure_trace::record_blocked_expansion(
-                        active_backend,
-                        "expansion could not be prepared",
-                    );
+                    failure_trace::record_preparation_failure(active_backend, &error);
                 }
                 warn!(%error, "expansion could not be queued or completed");
                 continue;

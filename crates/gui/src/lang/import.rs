@@ -457,13 +457,13 @@ impl Strings {
     pub fn try_live_form_detected(&self) -> &'static str {
         match self.lang {
             Language::English => {
-                "Form snippets can't be simulated here. Try them in an app, or write files with `wayexpand new`."
+                "Form snippets can't be simulated here. Typed forms need a route that verifies the trigger at the cursor; key-synthesis routes such as evdev + libei cannot do that. Use a verified input-method route, or remove the `{{field:...}}` marker."
             }
             Language::Indonesian => {
-                "Cuplikan formulir tidak dapat disimulasikan di sini. Coba di aplikasi, atau tulis berkas dengan `wayexpand new`."
+                "Cuplikan formulir tidak dapat disimulasikan di sini. Formulir ketik memerlukan rute yang memverifikasi pemicu di kursor; rute sintesis tombol seperti evdev + libei tidak dapat melakukannya. Gunakan rute input-method terverifikasi atau hapus penanda `{{field:...}}`."
             }
             Language::German => {
-                "Formular-Snippets lassen sich hier nicht simulieren. In einer App testen oder Dateien mit `wayexpand new` schreiben."
+                "Formular-Snippets lassen sich hier nicht simulieren. Getippte Formulare benötigen eine Route, die den Trigger am Cursor verifiziert; Tasten-Syntheserouten wie evdev + libei können das nicht. Verwenden Sie eine verifizierte Input-Method-Route oder entfernen Sie den Marker `{{field:...}}`."
             }
         }
     }
@@ -717,14 +717,6 @@ impl Strings {
             Language::English => "Start with a test snippet, write your own, or bring your Espanso library.",
             Language::Indonesian => "Mulai dengan cuplikan uji, tulis sendiri, atau bawa pustaka Espanso Anda.",
             Language::German => "Beginnen Sie mit einem Test-Snippet, schreiben Sie ein eigenes oder übernehmen Sie Ihre Espanso-Bibliothek.",
-        }
-    }
-
-    pub fn onboarding_details_title(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Desktop details",
-            Language::Indonesian => "Detail desktop",
-            Language::German => "Desktop-Details",
         }
     }
 }

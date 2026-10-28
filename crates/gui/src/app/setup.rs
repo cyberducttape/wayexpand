@@ -100,7 +100,13 @@ impl GuiApp {
                         .stdout(std::process::Stdio::piped())
                         .stderr(std::process::Stdio::piped())
                         .spawn()
-                        .map_err(|error| error.to_string())?;
+                        .map_err(|error| {
+                            if error.kind() == std::io::ErrorKind::NotFound {
+                                format!("could not find the `wayexpand` CLI at {} or on PATH; install WayExpand's CLI package and reopen the GUI", cli.display())
+                            } else {
+                                format!("could not start WayExpand setup: {error}")
+                            }
+                        })?;
                     let mut stdout = child
                         .stdout
                         .take()

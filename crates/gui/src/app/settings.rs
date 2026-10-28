@@ -26,6 +26,7 @@ impl GuiApp {
             self.colorpack,
             self.settings_font_scale,
             self.dark_mode,
+            self.onboarding_completed,
         ) {
             self.status = Status::warning(self.strings.status_appearance_save_failed(&error));
         }
@@ -39,6 +40,7 @@ impl GuiApp {
             self.colorpack,
             self.settings_font_scale,
             self.dark_mode,
+            self.onboarding_completed,
         ) {
             self.status = Status::warning(self.strings.status_appearance_save_failed(&error));
         }
@@ -52,6 +54,7 @@ impl GuiApp {
             self.colorpack,
             self.settings_font_scale,
             self.dark_mode,
+            self.onboarding_completed,
         ) {
             self.status = Status::warning(self.strings.status_appearance_save_failed(&error));
         }
@@ -70,7 +73,13 @@ impl GuiApp {
         // reported rather than silently producing a scale that resets on
         // the next launch.
         theme::install_pack(ctx, self.colorpack, scale);
-        match save_gui_prefs(self.language, self.colorpack, scale, self.dark_mode) {
+        match save_gui_prefs(
+            self.language,
+            self.colorpack,
+            scale,
+            self.dark_mode,
+            self.onboarding_completed,
+        ) {
             Ok(()) => self.status = Status::success(self.strings.status_font_size_saved()),
             Err(error) => {
                 self.status = Status::warning(self.strings.status_appearance_save_failed(&error))

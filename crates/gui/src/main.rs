@@ -227,6 +227,9 @@ struct GuiApp {
     settings_font_scale: FontScale,
     settings_error: Option<String>,
     dark_mode: bool,
+    onboarding_visible: bool,
+    onboarding_completed: bool,
+    onboarding_show_troubleshooting: bool,
     language: Language,
     strings: Strings,
     colorpack: ColorPack,
@@ -397,6 +400,13 @@ impl GuiApp {
         let settings_compatibility_mode = config.settings.compatibility_mode;
         let settings_keystroke_limit = config.settings.keystroke_max_chars.to_string();
         let prefs = load_gui_prefs();
+        let onboarding_completed = prefs.onboarding_completed;
+        let onboarding_visible = !onboarding_completed
+            && (config.expansion.is_empty()
+                || config.expansion.iter().any(|expansion| {
+                    expansion.replacement == "WayExpand is working!"
+                        && expansion.tags.iter().any(|tag| tag == "tutorial")
+                }));
         let settings_font_scale = prefs.font_scale;
         let strings = Strings::new(prefs.language);
         Ok(Self {
@@ -458,6 +468,9 @@ impl GuiApp {
             settings_font_scale,
             settings_error: None,
             dark_mode: prefs.dark_mode.unwrap_or(true),
+            onboarding_visible,
+            onboarding_completed,
+            onboarding_show_troubleshooting: false,
             language: prefs.language,
             strings,
             colorpack: prefs.colorpack,

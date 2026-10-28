@@ -108,6 +108,15 @@ pub(crate) fn preview_command(mut args: Args) -> Result<()> {
         .map(PathBuf::from)
         .unwrap_or_else(default_config_path);
     let config = Config::load(&path).map_err(|error| config_load_error(&path, error))?;
+    let form_triggers: Vec<(String, bool)> = config
+        .expansion
+        .iter()
+        .filter(|expansion| {
+            wayexpand_core::form_fields(&expansion.replacement)
+                .is_ok_and(|fields| !fields.is_empty())
+        })
+        .map(|expansion| (expansion.trigger.clone(), expansion.enabled))
+        .collect();
     let mut engine = ExpansionEngine::new(config).map_err(|error| {
         config_error(format!("configuration invalid: {}", error.safe_summary()))
     })?;
@@ -118,7 +127,7 @@ pub(crate) fn preview_command(mut args: Args) -> Result<()> {
             instance_id: None,
         }));
     }
-    let mut results = engine.process(InputEvent::Text(trigger));
+    let mut results = engine.process(InputEvent::Text(trigger.clone()));
     results.extend(engine.process(InputEvent::EndOfInput));
     match results.last() {
         Some(result) => {
@@ -138,8 +147,44 @@ pub(crate) fn preview_command(mut args: Args) -> Result<()> {
                 println!("{}", result.insert);
             }
         }
-        None if requested_json => println!("{}", serde_json::json!({"matched": false})),
-        None => println!("no expansion matched"),
+        None => {
+            let explanation = engine.explain(&trigger, "unknown");
+            let form = explanation
+                .snippet
+                .as_ref()
+                .and_then(|snippet| form_triggers.iter().find(|(trigger, _)| trigger == snippet));
+            if let Some((form_trigger, enabled)) = form {
+                let reason = if !enabled {
+                    "snippet is disabled"
+                } else {
+                    "interactive forms require a verified replacement route and cannot be rendered by this preview"
+                };
+                if requested_json {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "matched": *enabled,
+                            "trigger": form_trigger,
+                            "form": true,
+                            "previewable": false,
+                            "reason": reason,
+                        })
+                    );
+                } else if *enabled {
+                    println!("trigger: {form_trigger}");
+                    println!(
+                        "this snippet opens an interactive form and cannot be rendered by preview"
+                    );
+                    println!("forms require a verified replacement route; the active route may refuse them safely");
+                } else {
+                    println!("snippet {form_trigger} is disabled");
+                }
+            } else if requested_json {
+                println!("{}", serde_json::json!({"matched": false}));
+            } else {
+                println!("no expansion matched");
+            }
+        }
     }
     Ok(())
 }

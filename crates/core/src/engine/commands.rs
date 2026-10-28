@@ -196,6 +196,7 @@ pub enum CommandErrorKind {
     UnsafeContext,
     StaleInput,
     WindowIdentity,
+    FormTargetUnverifiable,
     QueueFull,
     WorkerUnavailable,
     InvalidOutput,
@@ -220,9 +221,8 @@ impl CommandError {
             }
             Self::PolicyBlocked => CommandErrorKind::Policy,
             Self::StaleInput => CommandErrorKind::StaleInput,
-            Self::WindowIdentityUnavailable | Self::FormTargetUnverifiable => {
-                CommandErrorKind::WindowIdentity
-            }
+            Self::WindowIdentityUnavailable => CommandErrorKind::WindowIdentity,
+            Self::FormTargetUnverifiable => CommandErrorKind::FormTargetUnverifiable,
             Self::QueueFull => CommandErrorKind::QueueFull,
             Self::WorkerUnavailable => CommandErrorKind::WorkerUnavailable,
             Self::InvalidUtf8 => CommandErrorKind::InvalidOutput,
@@ -316,6 +316,10 @@ mod tests {
         assert_eq!(
             CommandError::PolicyOutputTooLarge { size: 9, limit: 8 }.kind(),
             CommandErrorKind::OutputTooLarge
+        );
+        assert_eq!(
+            CommandError::FormTargetUnverifiable.kind(),
+            CommandErrorKind::FormTargetUnverifiable
         );
     }
 }

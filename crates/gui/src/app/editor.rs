@@ -292,6 +292,10 @@ impl GuiApp {
                     .inner_margin(egui::Margin::symmetric(22, 18)),
             )
             .show_inside(root, |ui| {
+                if self.onboarding_visible && !self.new_draft {
+                    self.render_first_run(ui, palette);
+                    return;
+                }
                 if self.selected_index().is_none()
                     && !self.new_draft
                     && !self.config.expansion.is_empty()
@@ -305,7 +309,20 @@ impl GuiApp {
                     .selected_index()
                     .or_else(|| self.new_draft.then_some(self.config.expansion.len()))
                 else {
-                    self.render_first_run(ui, palette);
+                    ui.centered_and_justified(|ui| {
+                        ui.vertical_centered(|ui| {
+                            ui.label(self.strings.empty_library_prompt());
+                            if theme::primary_button(ui, palette, self.strings.new_button())
+                                .clicked()
+                            {
+                                self.request_action(PendingAction::New);
+                            }
+                            if ui.button(self.strings.import_espanso()).clicked() {
+                                self.import_open = true;
+                                self.import_preview = None;
+                            }
+                        });
+                    });
                     return;
                 };
                 if index >= self.config.expansion.len() && !self.new_draft {

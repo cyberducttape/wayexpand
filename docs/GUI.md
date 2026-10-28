@@ -418,10 +418,18 @@ The warm amber (RGB 255, 191, 0) matches vintage monochrome displays:
   distro/desktop combination, including keyboard-only navigation, dialogs,
   error announcements, focus restoration, the picker, first-run setup, and
   200% scaling. Passing headless AccessKit tests alone is insufficient.
-- An empty configuration opens a guided first-run panel. It reports desktop and
-  backend probe results without treating probes as certification. The user can
-  explicitly add `:wayexpand-test`, then verify it in a normal text field;
-  this is a manual check, not an automated input-safety test.
+- An empty configuration opens a guided first-run flow covering installation,
+  the active backend and replacement assurance, creating or importing a test
+  snippet, local matcher preview, and a manual insertion check in a real text
+  field. Backend probes and user-reported success are not certification. A
+  failure expands into recovery steps and links to diagnostics; the flow can be
+  reopened from **More actions → Getting started**.
+- The editor's matcher preview tests the local draft and library only. It does
+  not exercise keyboard capture, focus tracking, or desktop insertion. Form
+  snippets containing `{{field:...}}` require verified replacement assurance;
+  best-effort evdev/libei key synthesis routes refuse to open them. Use a
+  verified input-method route for forms, or remove the field marker when a
+  static expansion is intended.
 
 ### Manual Orca verification
 

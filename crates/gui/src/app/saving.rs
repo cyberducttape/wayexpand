@@ -277,6 +277,10 @@ impl GuiApp {
         self.config_revision = revision;
         let newer_draft_exists = self.preview_revision != pending.preview_revision;
         let candidate = pending.candidate;
+        // The matcher preview caches a compiled engine. Every committed
+        // configuration may change its trigger set or rendering context, so
+        // discard that engine before any save intent adopts the new config.
+        self.playground.invalidate();
         match pending.intent {
             SaveIntent::Settings => {
                 let previous = std::mem::replace(&mut self.config, candidate);

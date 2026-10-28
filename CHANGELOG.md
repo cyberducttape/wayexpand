@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Keep the guided first-run workflow available until a user confirms a real
+  insertion, with backend-specific recovery steps and an explicit distinction
+  between local matcher preview and desktop verification. Explain that
+  interactive `{{field:...}}` snippets require verified replacement assurance;
+  `wayexpand preview` now identifies these forms instead of reporting a false
+  no-match result.
 - Add versioned, review-recorded offline packs for Linux administration,
   Docker/Podman, Kubernetes, Ansible, Nginx, Git, and customer support, alongside
   the existing developer and operations-triage libraries. Add local

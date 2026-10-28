@@ -1927,15 +1927,18 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
     ));
     let _ = fs::remove_file(&path);
     let mut app = GuiApp::load(path.clone()).unwrap();
+    app.onboarding_completed = false;
+    app.onboarding_visible = true;
     assert!(app.config.expansion.is_empty());
     let ctx = egui::Context::default();
+    ctx.enable_accesskit();
     for language in [Language::English, Language::German, Language::Indonesian] {
         app.language = language;
         app.strings.set_language(language);
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
-                egui::vec2(640.0, 600.0),
+                egui::vec2(900.0, 1200.0),
             )),
             ..Default::default()
         };
@@ -1945,9 +1948,67 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
         });
     }
     app.create_test_snippet();
+    assert!(
+        app.onboarding_visible,
+        "guide must remain after snippet save"
+    );
     assert_eq!(app.config.expansion.len(), 1, "{}", app.status.text());
     assert_eq!(app.config.expansion[0].trigger, ":wayexpand-test");
     assert_eq!(app.config.expansion[0].replacement, "WayExpand is working!");
+    assert!(app.config.expansion[0]
+        .tags
+        .iter()
+        .any(|tag| tag == "tutorial"));
+    app.daemon_reachable = Some(true);
+    app.route_state = Some(runtime::RouteState::Connected);
+    app.daemon_status = "source=input-method · backend=input-method-v2".into();
+    app.language = Language::English;
+    app.strings.set_language(Language::English);
+    if let Some(rewrite) =
+        app.playground
+            .edit(&app.config, "", "input-method-v2", ":wayexpand-test ", true)
+    {
+        app.playground.text = rewrite.text;
+    }
+    assert_eq!(app.playground.text, "WayExpand is working! ");
+    let after_save = run_gui_test_frame(
+        &ctx,
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(640.0, 600.0),
+            )),
+            ..Default::default()
+        },
+        |ui| {
+            let palette = Palette::for_pack(app.colorpack, app.dark_mode);
+            app.render_editor(ui, &palette);
+        },
+    );
+    let guide_semantics = format!(
+        "{:?}",
+        after_save
+            .platform_output
+            .accesskit_update
+            .expect("first-run guide should expose accessible controls")
+            .nodes
+    );
+    assert!(
+        guide_semantics.contains("Check the Matcher preview"),
+        "{guide_semantics}"
+    );
+    assert!(
+        guide_semantics.contains("Try it in a real app"),
+        "{guide_semantics}"
+    );
+    assert!(
+        guide_semantics.contains("It expanded correctly"),
+        "{guide_semantics}"
+    );
+    assert!(
+        guide_semantics.contains("Copy trigger"),
+        "{guide_semantics}"
+    );
     app.filter = "working".into();
     app.refresh_visible_indices_cache();
     assert!(app.visible_indices().is_empty());

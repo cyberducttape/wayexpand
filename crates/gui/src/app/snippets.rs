@@ -98,14 +98,22 @@ impl GuiApp {
     }
 
     pub(crate) fn create_test_snippet(&mut self) {
-        if !self.config.expansion.is_empty() {
-            self.status = Status::warning(self.strings.no_selection());
-            return;
+        let base_trigger = ":wayexpand-test";
+        let mut trigger = base_trigger.to_owned();
+        let mut suffix = 2;
+        while self
+            .config
+            .expansion
+            .iter()
+            .any(|expansion| expansion.answers_to(&trigger))
+        {
+            trigger = format!("{base_trigger}-{suffix}");
+            suffix += 1;
         }
         let mut candidate = self.config.clone();
         candidate.expansion.push(ExpansionConfig {
             id: ExpansionConfig::new_id(),
-            trigger: ":wayexpand-test".into(),
+            trigger,
             replacement: "WayExpand is working!".into(),
             description: self.strings.onboarding_sample_description().into(),
             tags: vec!["tutorial".into()],
@@ -118,6 +126,7 @@ impl GuiApp {
             aliases: Vec::new(),
             output_file: None,
         });
+        self.onboarding_visible = true;
         self.queue_save_config(candidate, SaveIntent::Created);
     }
 

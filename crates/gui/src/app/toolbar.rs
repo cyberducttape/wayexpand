@@ -181,6 +181,10 @@ impl GuiApp {
                     self.refresh_diagnostics(true);
                     ui.close();
                 }
+                if ui.button(self.strings.getting_started()).clicked() {
+                    self.open_getting_started();
+                    ui.close();
+                }
                 if self.library_is_synchronized()
                     && ui
                         .add_enabled(

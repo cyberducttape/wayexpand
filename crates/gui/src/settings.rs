@@ -24,6 +24,8 @@ pub(crate) struct GuiPrefs {
     /// `None` means no preference has been saved; the caller should use the
     /// desktop theme on first launch.
     pub(crate) dark_mode: Option<bool>,
+    /// Whether the user completed or skipped the first-run guide.
+    pub(crate) onboarding_completed: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -35,6 +37,8 @@ struct StoredGuiPrefs {
     font_scale: FontScale,
     #[serde(default)]
     dark_mode: Option<bool>,
+    #[serde(default)]
+    onboarding_completed: bool,
 }
 
 fn gui_prefs_path() -> PathBuf {
@@ -47,6 +51,7 @@ pub(crate) fn load_gui_prefs() -> GuiPrefs {
         colorpack: ColorPack::Default,
         font_scale: FontScale::Normal,
         dark_mode: None,
+        onboarding_completed: false,
     };
     let Ok(contents) = fs::read_to_string(gui_prefs_path()) else {
         return defaults;
@@ -65,6 +70,7 @@ pub(crate) fn load_gui_prefs() -> GuiPrefs {
         colorpack,
         font_scale: stored.font_scale,
         dark_mode: stored.dark_mode,
+        onboarding_completed: stored.onboarding_completed,
     }
 }
 
@@ -76,6 +82,7 @@ pub(crate) fn save_gui_prefs(
     colorpack: ColorPack,
     font_scale: FontScale,
     dark_mode: bool,
+    onboarding_completed: bool,
 ) -> Result<(), String> {
     let path = gui_prefs_path();
     let parent = path
@@ -88,6 +95,7 @@ pub(crate) fn save_gui_prefs(
         colorpack: colorpack.code().to_owned(),
         font_scale,
         dark_mode: Some(dark_mode),
+        onboarding_completed,
     };
     let contents = toml_edit::ser::to_string_pretty(&stored)
         .map_err(|error| format!("could not serialize preferences: {error}"))?;
@@ -196,6 +204,20 @@ mod tests {
             "language = \"en\"\ncolorpack = \"default\"\ndark_mode = \"maybe\"\n",
         );
         assert!(parsed.is_err());
+    }
+
+    #[test]
+    fn onboarding_completion_is_backward_compatible_and_persistable() {
+        let legacy = toml_edit::de::from_str::<StoredGuiPrefs>(
+            "language = \"en\"\ncolorpack = \"default\"\n",
+        )
+        .unwrap();
+        assert!(!legacy.onboarding_completed);
+        let completed = toml_edit::de::from_str::<StoredGuiPrefs>(
+            "language = \"en\"\ncolorpack = \"default\"\nonboarding_completed = true\n",
+        )
+        .unwrap();
+        assert!(completed.onboarding_completed);
     }
 
     #[test]

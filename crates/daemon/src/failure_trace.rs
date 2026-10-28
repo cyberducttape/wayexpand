@@ -121,6 +121,7 @@ pub(crate) fn record_command_failure(backend: &str, kind: wayexpand_core::Comman
         Kind::UnsafeContext => "command context was no longer safe",
         Kind::StaleInput => "command result became stale",
         Kind::WindowIdentity => "command focus could not be verified",
+        Kind::FormTargetUnverifiable => "form requires verified replacement",
         Kind::QueueFull | Kind::WorkerUnavailable => "command worker queue unavailable",
         Kind::Spawn
         | Kind::ProcessWait
@@ -130,6 +131,23 @@ pub(crate) fn record_command_failure(backend: &str, kind: wayexpand_core::Comman
         | Kind::InvalidOutput
         | Kind::OutputChannel
         | Kind::IncompleteOutput => "command execution failed before output",
+    };
+    record_blocked_expansion(backend, reason);
+}
+
+/// Preserve actionable, content-free reasons when a matched static snippet
+/// cannot be prepared. In particular, forms require stronger replacement
+/// guarantees than ordinary static insertions.
+pub(crate) fn record_preparation_failure(backend: &str, error: &wayexpand_core::CommandError) {
+    use wayexpand_core::CommandError as Error;
+    let reason = match error {
+        Error::FormTargetUnverifiable => "form requires verified replacement",
+        Error::WindowIdentityUnavailable => "form requires exact window identity",
+        Error::PolicyBlocked => "blocked by organization policy",
+        Error::PolicyOutputTooLarge { .. } => "replacement exceeds configured size limit",
+        Error::StaleInput => "input changed before expansion was prepared",
+        Error::QueueFull | Error::WorkerUnavailable => "form worker unavailable",
+        _ => "expansion could not be prepared",
     };
     record_blocked_expansion(backend, reason);
 }
@@ -377,6 +395,23 @@ mod tests {
         assert!(outcomes.as_array().unwrap().iter().any(|trace| {
             trace["backend"] == "input-method-v2"
                 && trace["completion"] == "command timed out before output"
+                && trace["insertion_attempted"] == false
+        }));
+    }
+
+    #[test]
+    fn form_route_failure_has_a_specific_content_free_reason() {
+        record_preparation_failure(
+            "evdev+libei",
+            &wayexpand_core::CommandError::FormTargetUnverifiable,
+        );
+        let failures: serde_json::Value =
+            serde_json::from_str(&recent_json()).expect("failures should be JSON");
+        assert!(failures.as_array().unwrap().iter().any(|trace| {
+            trace["completion"] == "form requires verified replacement"
+                && trace["backend"] == "evdev+libei"
+                && trace["trigger_recognized"] == "yes"
+                && trace["backend_selected"] == "not reached"
                 && trace["insertion_attempted"] == false
         }));
     }

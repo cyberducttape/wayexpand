@@ -173,6 +173,11 @@ Shows what an expansion would produce without actually expanding.
 }
 ```
 
+Interactive form snippets are recognized but cannot be rendered by this
+command. For those, JSON reports `form: true`, `previewable: false`, and a
+`reason`; `matched` indicates whether the snippet is enabled. Forms require a
+verified replacement route at runtime.
+
 **Field stability:**
 - `matched` (bool): Always present
 - `trigger` (string): Present only if `matched: true`
@@ -181,6 +186,10 @@ Shows what an expansion would produce without actually expanding.
   from the end of `replacement` where the cursor should land, for a
   template containing `{{cursor}}`; `null` if the template has no cursor
   marker.
+- `form` (bool): Present for recognized interactive form snippets.
+- `previewable` (bool): Present for recognized interactive form snippets;
+  currently `false` because this CLI does not collect form input.
+- `reason` (string): Present for recognized interactive form snippets.
 
 **Stability:** 🔒 **Stable** — presence of optional fields conditional on `matched`
 
