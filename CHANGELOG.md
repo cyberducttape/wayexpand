@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Preserve current-source private KWin 6.6.6 smoke evidence for commit
+  `d776185d5039`: eleven insertion/focus/reload/restart checks passed; capture
+  was simulated, and Unicode and suspend/resume remain untested. The report
+  records libei keysym-fallback latency by expansion size and is not production
+  compositor certification.
 - Clarify that GitHub binary releases are gated on a production-eligible real
   compositor certification route; Launchpad source-package synchronization
   does not satisfy that gate or publish GitHub release assets.
