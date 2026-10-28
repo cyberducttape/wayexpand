@@ -449,7 +449,15 @@ impl Strings {
         }
     }
 
-    pub fn onboarding_session_state(&self, ready: bool, detail: &str) -> String {
+    pub fn onboarding_session_state(
+        &self,
+        ready: bool,
+        detail: &str,
+        daemon_restart_required: bool,
+    ) -> String {
+        if daemon_restart_required {
+            return self.onboarding_stale_daemon_state().to_owned();
+        }
         match (self.lang, ready) {
             (Language::English, true) => format!("Connected in this session: {detail}. This is a live status check, not certification."),
             (Language::Indonesian, true) => format!("Terhubung di sesi ini: {detail}. Ini pemeriksaan status langsung, bukan sertifikasi."),
@@ -457,6 +465,14 @@ impl Strings {
             (Language::English, false) => format!("Not ready yet: {detail}. Refresh checks after granting desktop permissions or starting the service."),
             (Language::Indonesian, false) => format!("Belum siap: {detail}. Segarkan pemeriksaan setelah memberi izin desktop atau menjalankan layanan."),
             (Language::German, false) => format!("Noch nicht bereit: {detail}. Aktualisieren Sie nach der Desktop-Freigabe oder dem Start des Dienstes."),
+        }
+    }
+
+    pub fn onboarding_stale_daemon_state(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Not ready: the daemon is running a different build. Restart the WayExpand user service, then refresh these checks before testing snippets.",
+            Language::Indonesian => "Belum siap: daemon menjalankan build yang berbeda. Mulai ulang layanan pengguna WayExpand, lalu segarkan pemeriksaan ini sebelum menguji cuplikan.",
+            Language::German => "Noch nicht bereit: Der Daemon verwendet einen anderen Build. Starten Sie den WayExpand-Benutzerdienst neu und aktualisieren Sie diese Prüfungen, bevor Sie Snippets testen.",
         }
     }
 

@@ -7,6 +7,8 @@ All notable changes to WayExpand are documented here.
 - Distinguish form-template rendering failures, invalid submissions, and
   incomplete form-helper output in the privacy-preserving expansion trace
   without recording field names or values.
+- Keep the first-run real-app test unavailable when the connected daemon is
+  from a different build, and explain that the user service must be restarted.
 - Stamp Debian/Launchpad and RPM source builds with the originating Git
   revision so packaged CLI and daemon binaries can verify build identity
   instead of reporting `unknown` when the build environment omits `.git` metadata.

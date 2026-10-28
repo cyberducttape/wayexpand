@@ -2020,6 +2020,52 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
 }
 
 #[test]
+fn first_run_does_not_offer_live_test_for_a_stale_daemon() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-first-run-stale-daemon-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    app.onboarding_completed = false;
+    app.onboarding_visible = true;
+    app.create_test_snippet();
+    app.daemon_reachable = Some(true);
+    app.route_state = Some(runtime::RouteState::Connected);
+    app.daemon_status = "source=evdev · backend=libei · daemon_commit=older-build".into();
+    app.language = Language::English;
+    app.strings.set_language(Language::English);
+
+    let ctx = egui::Context::default();
+    ctx.enable_accesskit();
+    let frame = run_gui_test_frame(
+        &ctx,
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 1200.0),
+            )),
+            ..Default::default()
+        },
+        |ui| {
+            let palette = Palette::for_pack(app.colorpack, app.dark_mode);
+            app.render_editor(ui, &palette);
+        },
+    );
+    let semantics = format!(
+        "{:?}",
+        frame
+            .platform_output
+            .accesskit_update
+            .expect("first-run guide should expose accessible controls")
+            .nodes
+    );
+    assert!(semantics.contains("daemon is running a different build"));
+    assert!(!semantics.contains("It expanded correctly"));
+    let _ = fs::remove_file(path);
+}
+
+#[test]
 fn raw_input_setup_command_is_hidden_until_explicit_acknowledgement() {
     let path = std::env::temp_dir().join(format!(
         "wayexpand-gui-evdev-consent-{}.toml",

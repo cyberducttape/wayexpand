@@ -63,6 +63,10 @@ impl GuiApp {
         let route_connected = daemon_running
             && !self.paused
             && self.route_state == Some(runtime::RouteState::Connected);
+        let daemon_build = runtime::daemon_build_state(&self.daemon_status);
+        let daemon_restart_required =
+            daemon_running && daemon_build == runtime::DaemonBuildState::RestartRequired;
+        let route_ready = route_connected && !daemon_restart_required;
         let sample_trigger = onboarding_snippet(&self.config)
             .map(|expansion| expansion.trigger.clone())
             .unwrap_or_else(|| ONBOARDING_TRIGGER.to_owned());
@@ -96,6 +100,9 @@ impl GuiApp {
             Some(runtime::RouteState::Degraded) => "route is degraded".to_owned(),
             Some(runtime::RouteState::Stopped) => "route is stopped".to_owned(),
             Some(runtime::RouteState::Connected) if self.paused => "WayExpand is paused".to_owned(),
+            Some(runtime::RouteState::Connected) if daemon_restart_required => {
+                self.strings.onboarding_stale_daemon_state().into()
+            }
             Some(runtime::RouteState::Connected) => active_route.clone(),
             None if !daemon_running => "user service is not reachable".to_owned(),
             None => "waiting for live route status".to_owned(),
@@ -181,15 +188,16 @@ impl GuiApp {
                         palette,
                         2,
                         self.strings.onboarding_backend_title(),
-                        route_connected,
+                        route_ready,
                     );
                     ui.indent("first_run_backend", |ui| {
                         ui.label(
-                            RichText::new(
-                                self.strings
-                                    .onboarding_session_state(route_connected, &route_state_detail),
-                            )
-                            .color(if route_connected {
+                            RichText::new(self.strings.onboarding_session_state(
+                                route_ready,
+                                &route_state_detail,
+                                daemon_restart_required,
+                            ))
+                            .color(if route_ready {
                                 palette.success
                             } else {
                                 palette.warning
@@ -216,7 +224,7 @@ impl GuiApp {
                                 self.refresh_diagnostics(false);
                             }
                         });
-                        if !route_connected {
+                        if !route_ready {
                             ui.label(
                                 RichText::new(self.strings.onboarding_probe_caveat())
                                     .small()
@@ -316,7 +324,7 @@ impl GuiApp {
                             RichText::new(self.strings.onboarding_real_app_help())
                                 .color(palette.muted),
                         );
-                        if sample_exists && route_connected {
+                        if sample_exists && route_ready {
                             ui.horizontal_wrapped(|ui| {
                                 ui.label(
                                     RichText::new(self.strings.onboarding_trigger(&sample_trigger))
@@ -365,6 +373,11 @@ impl GuiApp {
                         } else if !sample_exists {
                             ui.label(
                                 RichText::new(self.strings.onboarding_create_sample_first())
+                                    .color(palette.warning),
+                            );
+                        } else if daemon_restart_required {
+                            ui.label(
+                                RichText::new(self.strings.onboarding_stale_daemon_state())
                                     .color(palette.warning),
                             );
                         } else {
