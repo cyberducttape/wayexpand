@@ -7,6 +7,8 @@
 //! A build from the exact `v<version>` tag with a clean tree reports the
 //! package version; any other git build reports `<version>-dev+<sha>`.
 //! `WAYEXPAND_BUILD_SHA` overrides the commit for builds without `.git`.
+//! `WAYEXPAND_BUILD_RELEASE_VERSION` marks an archive as an exact release only
+//! when it equals this crate's version and a source commit is supplied.
 
 use std::{env, path::Path, process::Command};
 
@@ -36,9 +38,15 @@ fn is_exact_release(
     package_version: &str,
     commit: Option<&str>,
     commit_overridden: bool,
+    release_version_override: Option<&str>,
 ) -> bool {
-    commit.is_some()
-        && !commit_overridden
+    if commit.is_none() {
+        return false;
+    }
+    if commit_overridden {
+        return release_version_override == Some(package_version);
+    }
+    release_version_override.is_none()
         && git_output(
             root,
             &[
@@ -57,6 +65,7 @@ fn is_exact_release(
 /// crate, plus the rerun triggers that keep them current across commits.
 pub fn emit() {
     println!("cargo:rerun-if-env-changed=WAYEXPAND_BUILD_SHA");
+    println!("cargo:rerun-if-env-changed=WAYEXPAND_BUILD_RELEASE_VERSION");
 
     let root = Path::new(&env::var("CARGO_MANIFEST_DIR").unwrap()).join("../..");
     // Source edits do not change Git's index. Watching the workspace source
@@ -89,11 +98,19 @@ pub fn emit() {
     let build_sha = env::var("WAYEXPAND_BUILD_SHA")
         .ok()
         .filter(|value| !value.is_empty());
+    let release_version = env::var("WAYEXPAND_BUILD_RELEASE_VERSION")
+        .ok()
+        .filter(|value| !value.is_empty());
     let sha = build_sha
         .clone()
         .or_else(|| git_output(&root, &["rev-parse", "--short=12", "HEAD"]));
-    let exact_release =
-        is_exact_release(&root, &package_version, sha.as_deref(), build_sha.is_some());
+    let exact_release = is_exact_release(
+        &root,
+        &package_version,
+        sha.as_deref(),
+        build_sha.is_some(),
+        release_version.as_deref(),
+    );
 
     let version = match sha.as_deref() {
         Some(_sha) if exact_release => package_version,
@@ -174,13 +191,36 @@ mod tests {
             &repository.0,
             "1.3.3",
             Some("native-commit"),
-            false
+            false,
+            None,
         ));
         assert!(!is_exact_release(
             &repository.0,
             "1.3.3",
             Some("override-commit"),
-            true
+            true,
+            None,
+        ));
+        assert!(is_exact_release(
+            &repository.0,
+            "1.3.3",
+            Some("archive-commit"),
+            true,
+            Some("1.3.3"),
+        ));
+        assert!(!is_exact_release(
+            &repository.0,
+            "1.3.3",
+            Some("archive-commit"),
+            true,
+            Some("1.3.4"),
+        ));
+        assert!(!is_exact_release(
+            &repository.0,
+            "1.3.3",
+            None,
+            true,
+            Some("1.3.3"),
         ));
 
         fs::write(repository.0.join("tracked.txt"), "unstaged edit\n").expect("edit tracked file");
@@ -189,7 +229,8 @@ mod tests {
             &repository.0,
             "1.3.3",
             Some("native-commit"),
-            false
+            false,
+            None,
         ));
 
         fs::write(repository.0.join("tracked.txt"), "staged edit\n").expect("edit tracked file");

@@ -22,6 +22,9 @@ project_dir=$(pwd -P)
 output_dir=$(pwd -P)
 timestamp=$(date -u +%s)
 source_commit=$(git -C "$project_dir" rev-parse --short=12 HEAD)
+release_tag=$(git -C "$project_dir" describe --tags --exact-match --match "v${version}" HEAD 2>/dev/null || true)
+release_inputs_status=$(git -C "$project_dir" status --porcelain=v1 --untracked-files=all -- \
+    Cargo.toml Cargo.lock crates debian scripts)
 tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-release-${version}-${timestamp}.XXXXXXXXXX")
 
 cleanup() {
@@ -69,6 +72,9 @@ tar -xzf "${tmpdir}/wayexpand-${version}.tar.gz"
 cp -a "$project_dir/debian" "wayexpand-${version}/"
 cd "wayexpand-${version}"
 printf '%s\n' "$source_commit" > debian/wayexpand-build-sha
+if [ "$release_tag" = "v${version}" ] && [ -z "$release_inputs_status" ]; then
+    printf '%s\n' "$version" > debian/wayexpand-build-version
+fi
 
 # Generate vendor/ and the source replacement config
 printf '%s\n' "  Generating vendor/ directory..."

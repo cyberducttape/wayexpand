@@ -9,12 +9,22 @@ workflow="$project_dir/.github/workflows/main.yml"
 # metadata and pass it into every Cargo build.
 expected_source_commit="source_commit=\$(git -C \"\$project_dir\" rev-parse --short=12 HEAD)"
 expected_sha_export="WAYEXPAND_BUILD_SHA=\$(build_sha)"
+expected_release_export="WAYEXPAND_BUILD_RELEASE_VERSION=\$(build_release_version)"
+expected_release_tag="release_tag=\$(git -C \"\$project_dir\" describe --tags --exact-match"
+expected_release_status="release_inputs_status=\$(git -C \"\$project_dir\" status --porcelain=v1"
 grep -F -- "$expected_source_commit" \
     "$project_dir/scripts/publish-launchpad-branch.sh" >/dev/null
 grep -F -- 'debian/wayexpand-build-sha' \
     "$project_dir/scripts/publish-launchpad-branch.sh" >/dev/null
 grep -F -- "$expected_sha_export" "$project_dir/debian/rules" >/dev/null
+grep -F -- "$expected_release_export" "$project_dir/debian/rules" >/dev/null
 grep -F -- 'debian/wayexpand-build-sha' \
+    "$project_dir/scripts/generate-release-tarballs.sh" >/dev/null
+grep -F -- 'debian/wayexpand-build-version' \
+    "$project_dir/scripts/generate-release-tarballs.sh" >/dev/null
+grep -F -- "$expected_release_tag" \
+    "$project_dir/scripts/generate-release-tarballs.sh" >/dev/null
+grep -F -- "$expected_release_status" \
     "$project_dir/scripts/generate-release-tarballs.sh" >/dev/null
 
 expected_group="group: launchpad-sync-\${{ github.repository }}"

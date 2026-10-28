@@ -7,6 +7,9 @@ All notable changes to WayExpand are documented here.
 - Stamp Debian/Launchpad source builds with the originating Git revision so
   packaged CLI and daemon binaries can verify build identity instead of
   reporting `unknown` when the build environment omits `.git` metadata.
+- Preserve the release version for clean, exact-tag Debian source archives;
+  non-release source snapshots continue to carry a development version and
+  commit identity.
 - Preserve a current-source private KWin 6.6.6 smoke report for commit
   `e91a694c417a`: 12 output/focus/reload checks passed; capture was simulated,
   and production compositor certification remains incomplete.
