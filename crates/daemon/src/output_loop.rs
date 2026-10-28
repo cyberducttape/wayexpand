@@ -900,6 +900,10 @@ mod tests {
                     retryable: false,
                 })?;
                 self.typed.lock().unwrap().push(character);
+                // Model a compositor/client that processes synthesized
+                // events slowly; the focus update must still stop the next
+                // character before it reaches the new window.
+                thread::sleep(Duration::from_millis(10));
                 if index == 2 && self.switch_on_third_character {
                     self.focus_sender
                         .send(Some(wayexpand_core::WindowContext {

@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Distinguish unverified, focus-tracked best-effort, blocked, and unknown
+  replacement guarantees in the GUI route summary; verified text and atomicity
+  remain separate labels. Extend modifier and slow-client focus-interruption
+  regressions for keystroke routes.
 - Keep clipboard prefetch state unchanged when the bounded worker queue rejects
   a request, and cover rapid triggers against a slow single-flight read.
 - Wait for action child output and Linux pidfd readiness instead of waking every

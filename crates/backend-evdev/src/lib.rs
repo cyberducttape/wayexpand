@@ -843,15 +843,19 @@ mod tests {
         };
         assert!(!source.keys_held());
 
-        // KEY_A = 30, KEY_B = 48. Overlapping presses, as a fast typist
-        // produces, must all be seen as held: injecting while any of them is
-        // down is what ate characters from a replacement.
+        // KEY_LEFTSHIFT = 42, KEY_A = 30, KEY_B = 48. Overlapping presses,
+        // including a modifier held across ordinary key releases, must all
+        // remain visible: injecting while any physical key is down can alter
+        // or consume replacement keystrokes.
+        source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 42, 1));
         source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 1));
         assert!(source.keys_held());
         source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 48, 1));
         source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 0));
         assert!(source.keys_held(), "the second key is still down");
         source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 48, 0));
+        assert!(source.keys_held(), "left shift is still physically held");
+        source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 42, 0));
         assert!(!source.keys_held());
     }
 

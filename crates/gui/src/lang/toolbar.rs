@@ -214,12 +214,26 @@ impl Strings {
             (Language::German, false) => "Zertifizierung ausstehend",
         };
         let assurance = match (self.lang, replacement_assurance) {
-            (Language::English, "verified") => "verified target text",
+            (Language::English, "verified") => "target text verified",
+            (Language::English, "focus-tracked-best-effort") => "focus-tracked best effort",
+            (Language::English, "unverified") => "target text unverified",
+            (Language::English, "blocked") => "replacement blocked",
+            (Language::English, "unavailable") => "replacement unavailable",
+            (Language::English, _) => "replacement assurance unknown",
             (Language::Indonesian, "verified") => "teks tujuan terverifikasi",
+            (Language::Indonesian, "focus-tracked-best-effort") => {
+                "upaya terbaik dengan pelacakan fokus"
+            }
+            (Language::Indonesian, "unverified") => "teks tujuan tidak terverifikasi",
+            (Language::Indonesian, "blocked") => "penggantian diblokir",
+            (Language::Indonesian, "unavailable") => "penggantian tidak tersedia",
+            (Language::Indonesian, _) => "jaminan penggantian tidak diketahui",
             (Language::German, "verified") => "verifizierter Zieltext",
-            (Language::English, _) => "best-effort target text",
-            (Language::Indonesian, _) => "teks tujuan upaya terbaik",
-            (Language::German, _) => "Zieltext nach bestem Bemühen",
+            (Language::German, "focus-tracked-best-effort") => "fokusgeprüft nach bestem Bemühen",
+            (Language::German, "unverified") => "unverifizierter Zieltext",
+            (Language::German, "blocked") => "Ersetzung blockiert",
+            (Language::German, "unavailable") => "Ersetzung nicht verfügbar",
+            (Language::German, _) => "Ersetzungssicherheit unbekannt",
         };
         format!("{route} · {assurance} · {maturity} · {semantics} · {evidence}")
     }
@@ -768,5 +782,39 @@ impl Strings {
             Language::Indonesian => "Jika akses perangkat papan ketik belum dikonfigurasi, selesaikan dahulu langkah izin administrator di Memulai. Lalu salin perintah di bawah ke terminal: perintah ini mengaktifkan layanan pengguna, dan desktop mungkin meminta Anda menyetujui portal masukan. Kembali ke sini, segarkan diagnostik, dan uji di kolom teks biasa.",
             Language::German => "Falls der Zugriff auf Tastaturgeräte noch nicht eingerichtet ist, schließen Sie zuerst den Administrator-Schritt in der Installationsanleitung ab. Kopieren Sie danach den folgenden Befehl in ein Terminal: Er aktiviert den Benutzerdienst; der Desktop kann um Freigabe des Eingabeportals bitten. Kehren Sie zurück, aktualisieren Sie die Diagnose und testen Sie in einem normalen Textfeld.",
         }
+    }
+}
+
+#[cfg(test)]
+mod route_trust_tests {
+    use super::*;
+    use crate::lang::Language;
+
+    #[test]
+    fn route_summary_distinguishes_unverified_from_best_effort_and_atomicity() {
+        let strings = Strings::new(Language::English);
+        let unverified = strings.route_trust_status(
+            "Evdev + libei",
+            "experimental",
+            false,
+            false,
+            "unverified",
+            false,
+        );
+        assert!(
+            unverified.contains("target text unverified"),
+            "{unverified}"
+        );
+        assert!(
+            unverified.contains("non-atomic replacement"),
+            "{unverified}"
+        );
+        assert!(!unverified.contains("best effort"), "{unverified}");
+
+        let verified =
+            strings.route_trust_status("IBus", "experimental", true, false, "verified", false);
+        assert!(verified.contains("target text verified"), "{verified}");
+        assert!(verified.contains("non-atomic replacement"), "{verified}");
+        assert!(!verified.contains("· atomic replacement"), "{verified}");
     }
 }
