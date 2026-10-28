@@ -155,7 +155,7 @@ pub(crate) fn record_preparation_failure(backend: &str, error: &wayexpand_core::
             "helper output exceeded the configured limit"
         }
         Error::FormTargetUnverifiable => "form requires verified replacement",
-        Error::WindowIdentityUnavailable => "form requires exact window identity",
+        Error::WindowIdentityUnavailable => "form requires exact input-target identity",
         Error::PolicyBlocked => "blocked by organization policy",
         Error::StaleInput => "input changed before expansion was prepared",
         Error::QueueFull | Error::WorkerUnavailable => "form worker unavailable",

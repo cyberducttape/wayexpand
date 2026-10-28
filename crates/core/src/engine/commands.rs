@@ -278,7 +278,7 @@ impl std::fmt::Display for CommandError {
             Self::StaleInput => write!(f, "input changed before the expansion completed"),
             Self::WindowIdentityUnavailable => write!(
                 f,
-                "cannot open a snippet form because this backend does not provide an exact window identity"
+                "cannot open a snippet form because this backend does not provide an exact input-target identity"
             ),
             Self::FormTargetUnverifiable => write!(
                 f,

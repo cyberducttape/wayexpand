@@ -266,7 +266,7 @@ impl ExpansionEngine {
                 if let Some(fields) = self.form_fields.get(index).and_then(Option::as_ref) {
                     let labels: Vec<&str> =
                         fields.iter().map(|field| field.label.as_str()).collect();
-                    let exact_window_identity = self
+                    let exact_target_identity = self
                         .normalized_window
                         .as_ref()
                         .and_then(|window| window.instance_id.as_ref())
@@ -295,16 +295,16 @@ impl ExpansionEngine {
                         },
                     );
                     explanation.push(
-                        "window identity",
-                        if exact_window_identity {
+                        "target identity",
+                        if exact_target_identity {
                             CheckStatus::Pass
                         } else {
                             CheckStatus::Fail
                         },
-                        if exact_window_identity {
-                            "form output is applied only if focus returns to the exact original toplevel"
+                        if exact_target_identity {
+                            "form output is applied only if focus returns to the exact original input target"
                         } else {
-                            "backend does not provide a bounded exact window identity; the form will not open"
+                            "backend does not provide a bounded exact input-target identity; the form will not open"
                         },
                     );
                     return explanation_with_policy(self, explanation, expansion, backend);

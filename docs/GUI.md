@@ -428,10 +428,12 @@ The warm amber (RGB 255, 191, 0) matches vintage monochrome displays:
   reopened from **More actions → Getting started**.
 - The editor's matcher preview tests the local draft and library only. It does
   not exercise keyboard capture, focus tracking, or desktop insertion. Form
-  snippets containing `{{field:...}}` require verified replacement assurance;
-  best-effort evdev/libei key synthesis routes refuse to open them. Use a
-  verified input-method route for forms, or remove the field marker when a
-  static expansion is intended.
+  snippets containing `{{field:...}}` require verified replacement and a
+  stable target identity. The IBus route binds a form to its unique IBus input
+  context and checks the surrounding text before replacement; its delete and
+  commit operations are still non-atomic and the route is not production
+  certified. Best-effort evdev/libei routes refuse to open forms. If IBus is
+  unavailable, remove the field marker for a static expansion.
 
 ### Manual Orca verification
 

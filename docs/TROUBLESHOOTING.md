@@ -63,6 +63,25 @@ echo "$WAYLAND_DISPLAY"    # Confirm Wayland session
 - Compositor doesn't support input-method-v2 (try `wayexpand doctor` to see what's available)
 - Wrong backend selected (check `wayexpand status`)
 
+### Form snippet is recognized but no form opens
+
+Form fields such as `{{field:hostname}}` need the route to verify the trigger
+at the text cursor and identify the same input target after the form closes.
+The IBus route uses the IBus input-context identity and checks surrounding
+text; its replacement is not atomic and the route is not production certified.
+The evdev/libei route cannot verify the trigger at the cursor, so it refuses
+forms even when ordinary static snippets work.
+
+```sh
+wayexpand status --json
+wayexpand explain '.incident' --json
+```
+
+Check `replacement_assurance` in status and the `replacement assurance` check
+in the explanation. On a best-effort route, remove `{{field:...}}` to make the
+snippet static, or switch to IBus if it is available and its limitations are
+acceptable. Do not disable replacement checks to make a form open.
+
 **Solution:** Verify `state=connected` and that the input-method unit (not the harness) is enabled:
 ```sh
 systemctl --user status wayexpand-input-method.service

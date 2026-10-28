@@ -487,10 +487,10 @@ impl Strings {
                 Language::Indonesian => "Cuplikan ini meminta isian formulir, tetapi rute aktif tidak dapat memverifikasi pemicu di kursor. Gunakan rute input-method dengan penggantian terverifikasi, atau hapus penanda `{{field:...}}`.".into(),
                 Language::German => "Dieses Snippet fragt Formularfelder ab, aber die aktive Route kann den Trigger am Cursor nicht verifizieren. Verwenden Sie eine Input-Method-Route mit verifizierter Ersetzung oder entfernen Sie den Marker `{{field:...}}`.".into(),
             },
-            (_, "form requires exact window identity") => match self.lang {
-                Language::English => "This form needs exact application-window identity, which the active route does not provide. Use a supported input-method route.".into(),
-                Language::Indonesian => "Formulir ini memerlukan identitas jendela aplikasi yang tepat, tetapi rute aktif tidak menyediakannya. Gunakan rute input-method yang didukung.".into(),
-                Language::German => "Dieses Formular benötigt eine genaue Fensteridentität, die die aktive Route nicht bereitstellt. Verwenden Sie eine unterstützte Input-Method-Route.".into(),
+            (_, "form requires exact input-target identity") => match self.lang {
+                Language::English => "This form needs an exact identity for the original text input, which the active route does not provide.".into(),
+                Language::Indonesian => "Formulir ini memerlukan identitas tepat untuk input teks asal, tetapi rute aktif tidak menyediakannya.".into(),
+                Language::German => "Dieses Formular benötigt eine genaue Identität für das ursprüngliche Texteingabefeld, die die aktive Route nicht bereitstellt.".into(),
             },
             (_, "form values could not render the template") => match self.lang {
                 Language::English => "The submitted form values could not render this template. Check the snippet's variables and form fields.".into(),

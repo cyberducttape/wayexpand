@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Bind IBus form completions to the unique input-context identity and enable
+  forms only with IBus's surrounding-text verification. Document that this
+  route remains non-atomic and uncertified; evdev/libei continues to refuse
+  forms when it cannot verify the trigger at the cursor.
 - Preserve current-source private KWin 6.6.6 smoke evidence for commit
   `7a5ee6b04f77`: eleven output, focus, reload, restart, and refusal checks
   passed. Capture was simulated; Unicode insertion, overlap, suspend/resume,

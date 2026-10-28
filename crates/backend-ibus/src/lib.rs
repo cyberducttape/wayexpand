@@ -15,7 +15,8 @@ use std::{
 use tracing::warn;
 use wayexpand_core::{
     CompletionNotifier, Config, ExpansionEngine, InjectorCapabilities, InputEvent,
-    InputSourceCapabilities, OrganizationPolicy, PendingExpansionDispatch,
+    InputSourceCapabilities, OrganizationPolicy, PendingExpansionDispatch, ReplacementGuarantee,
+    WindowContext, MAX_WINDOW_INSTANCE_ID_BYTES,
 };
 
 // IBus' public C API defines IBUS_RELEASE_MASK as (1 << 30). The ibus-rs
@@ -27,6 +28,7 @@ const IBUS_RELEASE_MASK: u32 = 1 << 30;
 /// field, and replacement guarantees differ, so `allowed_backends` must name
 /// `ibus` explicitly to permit it.
 pub const IBUS_BACKEND_NAME: &str = "ibus";
+const IBUS_CONTEXT_ID_PREFIX: &str = "ibus-context:";
 
 /// `IBUS_CAP_SURROUNDING_TEXT`: the client can report surrounding text and
 /// honour `DeleteSurroundingText`.
@@ -140,6 +142,11 @@ impl IbusEngineAdapter {
 
     fn build(mut engine: ExpansionEngine, policy: OrganizationPolicy) -> Self {
         policy::apply_to_engine(&mut engine, &policy);
+        // IBus checks the surrounding text before deleting a trigger. This
+        // is verified (though not atomic) replacement, which is sufficient
+        // for opening a form only when the IBus input-context identity is
+        // also available.
+        engine.set_form_replacement_guarantee(ReplacementGuarantee::VerifiedSurroundingText);
         // Keep IBus key handling non-blocking for broker actions. Direct
         // programs are still rejected by the backend-specific gate below.
         let _ = engine.enable_async_commands();
@@ -310,9 +317,29 @@ impl IbusEngineAdapter {
     /// follows FocusIn with Enable, SetCapabilities and SetContentType, so
     /// capture stays off until that content type arrives.
     pub fn focus_in(&mut self) {
+        self.focus_in_for_context(None);
+    }
+
+    /// A focused IBus engine object belongs to one input context. Retaining
+    /// that object's path lets a form result return only to the same text
+    /// context after the helper window closes. IBus documents the focus ID as
+    /// unique per input context; object paths are generated once per engine
+    /// instance by the service factory.
+    pub fn focus_in_for_context(&mut self, input_context_path: Option<&str>) {
         self.output_retired = false;
         self.enabled = true;
         self.surrounding = None;
+        let identity = input_context_path
+            .filter(|identity| {
+                !identity.is_empty()
+                    && identity.len() + IBUS_CONTEXT_ID_PREFIX.len() <= MAX_WINDOW_INSTANCE_ID_BYTES
+            })
+            .map(|identity| WindowContext {
+                app_id: None,
+                title: None,
+                instance_id: Some(format!("{IBUS_CONTEXT_ID_PREFIX}{identity}")),
+            });
+        self.engine.process(InputEvent::WindowChanged(identity));
         self.engine
             .process(InputEvent::FocusChanged { sensitive: true });
     }
@@ -320,6 +347,7 @@ impl IbusEngineAdapter {
     pub fn focus_out(&mut self) {
         self.enabled = false;
         self.surrounding = None;
+        self.engine.process(InputEvent::WindowChanged(None));
         self.engine
             .process(InputEvent::FocusChanged { sensitive: true });
     }
@@ -553,6 +581,52 @@ mod tests {
         adapter.set_capabilities(IBUS_CAP_SURROUNDING_TEXT);
         adapter.set_content_type(0, 0);
         adapter
+    }
+
+    #[test]
+    fn form_target_is_bound_to_the_focused_ibus_input_context() {
+        let config = Config::parse(
+            r#"[[expansion]]
+trigger = ":incident"
+replacement = "Incident {{field:hostname}}"
+"#,
+        )
+        .unwrap();
+        let mut adapter = IbusEngineAdapter::new(ExpansionEngine::new(config).unwrap());
+
+        adapter.focus_in();
+        adapter.set_capabilities(IBUS_CAP_SURROUNDING_TEXT);
+        adapter.set_content_type(0, 0);
+        let without_context = adapter.engine().explain(":incident", IBUS_BACKEND_NAME);
+        assert_eq!(
+            without_context.suppressed_by().map(|check| check.name),
+            Some("target identity"),
+            "{}",
+            without_context.render_text()
+        );
+
+        let context_path = "/org/freedesktop/IBus/Engine/WayExpand_42";
+        adapter.focus_in_for_context(Some(context_path));
+        adapter.set_capabilities(IBUS_CAP_SURROUNDING_TEXT);
+        adapter.set_content_type(0, 0);
+        let focused = adapter.engine().explain(":incident", IBUS_BACKEND_NAME);
+        assert!(focused.would_expand(), "{}", focused.render_text());
+        assert!(focused.checks.iter().any(|check| {
+            check.name == "replacement assurance"
+                && check.status == wayexpand_core::CheckStatus::Pass
+        }));
+        assert!(focused.checks.iter().any(|check| {
+            check.name == "target identity"
+                && check.status == wayexpand_core::CheckStatus::Pass
+                && check.detail.contains("exact original input target")
+        }));
+
+        adapter.focus_out();
+        let blurred = adapter.engine().explain(":incident", IBUS_BACKEND_NAME);
+        assert!(!blurred.would_expand(), "{}", blurred.render_text());
+        assert!(blurred.checks.iter().any(|check| {
+            check.name == "target identity" && check.status == wayexpand_core::CheckStatus::Fail
+        }));
     }
 
     /// A minimal IBus client. Like ibus-gtk it reports surrounding text before

@@ -299,7 +299,7 @@ impl EngineObject {
 
     async fn focus_in(&self) {
         if let Ok(mut adapter) = self.adapter.lock() {
-            adapter.focus_in();
+            adapter.focus_in_for_context(Some(self.path.as_str()));
         }
         self.require_surrounding_text().await;
     }
@@ -548,7 +548,7 @@ fn ibus_text_value(text: &str) -> zbus::zvariant::Structure<'static> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wayexpand_core::Config;
+    use wayexpand_core::{Config, ReplacementGuarantee};
     use zbus::zvariant::DynamicType;
 
     #[test]
@@ -891,6 +891,29 @@ replacement = "signature"
             }
             commits
         }
+    }
+
+    #[test]
+    fn focus_in_binds_forms_to_the_factory_input_context_path() {
+        let harness = Harness::start(
+            "[[expansion]]\ntrigger = ':incident'\nreplacement = 'Incident {{field:hostname}}'\n",
+        );
+        harness.focus_text_field();
+        let instances = harness.instances.lock().unwrap();
+        let instance = instances.get(&harness.engine).expect("created IBus engine");
+        let adapter = instance.adapter.lock().unwrap();
+        let context = adapter
+            .engine()
+            .current_window()
+            .expect("focused input context identity");
+        assert_eq!(
+            context.instance_id.as_deref(),
+            Some(format!("ibus-context:{}", harness.engine.as_str()).as_str())
+        );
+        assert_eq!(
+            adapter.engine().form_replacement_guarantee(),
+            ReplacementGuarantee::VerifiedSurroundingText
+        );
     }
 
     #[test]

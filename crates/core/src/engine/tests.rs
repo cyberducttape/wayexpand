@@ -5568,7 +5568,7 @@ fn explain_describes_form_snippets_instead_of_failing_to_render() {
         .iter()
         .any(|check| check.detail.contains("opens a form for name, id, Choice")));
     assert!(explanation.checks.iter().any(|check| {
-        check.name == "window identity"
+        check.name == "target identity"
             && check.status == CheckStatus::Fail
             && check.detail.contains("form will not open")
     }));
@@ -5585,9 +5585,9 @@ fn explain_describes_form_snippets_instead_of_failing_to_render() {
     let explanation = engine.explain(":tk", "libei");
     assert!(explanation.would_expand(), "{}", explanation.render_text());
     assert!(explanation.checks.iter().any(|check| {
-        check.name == "window identity"
+        check.name == "target identity"
             && check.status == CheckStatus::Pass
-            && check.detail.contains("exact original toplevel")
+            && check.detail.contains("exact original input target")
     }));
 }
 
