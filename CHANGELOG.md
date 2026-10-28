@@ -9,6 +9,11 @@ All notable changes to WayExpand are documented here.
   mode is enabled. Local dead-key/Compose support does not satisfy it; no
   currently shipped input source claims this capability.
 - Preserve a clean-source private KWin 6.6.6 smoke report for commit
+  `cdd4584673f6`: eleven output, focus, reload, restart, and refusal checks
+  passed. Capture was simulated; overlap, Unicode insertion, suspend/resume,
+  and physical capture remain untested. Record 20 latency samples per output
+  size while keeping the route explicitly uncertified for production.
+- Preserve a clean-source private KWin 6.6.6 smoke report for commit
   `0ba13e6fd4c2`: eleven output, focus, reload, restart, and refusal checks
   passed. Capture was simulated; overlap, Unicode insertion, suspend/resume,
   and physical capture remain untested. Record 20 latency samples per output
