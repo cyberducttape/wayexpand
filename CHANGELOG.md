@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Preserve a clean-source KWin 6.6.6 `doctor --certify` report for
+  `dfec5c52555a`: 12 checks passed, three were not tested, and 20 injector
+  samples per size bucket measured p50/p95/p99 latency. The result remains
+  partial evidence with stdin-simulated capture.
 - Correct upgrade guidance: a running daemon must be restarted after binary
   replacement, and `wayexpand upgrade-status` verifies the active build.
 - Make daemon status republish coverage compare publisher-owned fields and
