@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Correct upgrade guidance: a running daemon must be restarted after binary
+  replacement, and `wayexpand upgrade-status` verifies the active build.
 - Make daemon status republish coverage compare publisher-owned fields and
   remain deterministic while process-global diagnostic metrics change in
   concurrent tests.

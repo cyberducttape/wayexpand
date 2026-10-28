@@ -30,12 +30,18 @@ first, then restart and verify the service:
 wayexpand validate ~/.config/wayexpand/expansions.toml
 systemctl --user restart wayexpand-input-method.service
 systemctl --user is-active wayexpand-input-method.service
+wayexpand upgrade-status
 wayexpand doctor --json
 ```
 
 For an evdev deployment, use `wayexpand-evdev.service` in the restart and
 verification commands instead. Keep the previous release available until the
 health check and a real expansion test pass.
+
+`wayexpand upgrade-status` must report `current` before relying on the new
+build. A `restart-required` result means the responding daemon is still running
+different code; restart the service corresponding to the active capture route.
+For a manually launched daemon, stop and relaunch it with the updated binary.
 
 ---
 
@@ -75,8 +81,11 @@ it is never selected automatically.
 - input-method-v2 backend continues to suspend matching in password fields
 
 **Daemon restart:**
-- Not required — daemon will reload on upgrade
-- If using manual systemd units, `systemctl --user restart wayexpand-input-method.service` to apply immediately
+- Required after replacing binaries. A running daemon may reload its
+  configuration, but it continues executing the old binary until restarted.
+- Verify the running build with `wayexpand upgrade-status`; it should report
+  `current`. For systemd-managed services, restart the active route's service;
+  for manually launched daemons, stop and relaunch using the updated binary.
 
 ### Upgrading to v1.1.x from v1.0.x
 
