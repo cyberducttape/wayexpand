@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Clarify that GitHub binary releases are gated on a production-eligible real
+  compositor certification route; Launchpad source-package synchronization
+  does not satisfy that gate or publish GitHub release assets.
 - Distinguish form-template rendering failures, invalid submissions, and
   incomplete form-helper output in the privacy-preserving expansion trace
   without recording field names or values.

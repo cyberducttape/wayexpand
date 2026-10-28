@@ -171,13 +171,15 @@ docs/ACTION_BROKER_ARCHITECTURE.md.
 
 ### Distribution and release evidence
 
-- [ ] Publish installable release assets. Every tag-triggered Release run
-      since v1.2.0 has failed (v1.3.3 failed in "Package aarch64 release"),
-      so GitHub releases have no `.deb`, `.rpm`, or tarball assets even
-      though the packaging and workflows exist. The aarch64 job now builds
-      and checks every release binary, and the ancestry check is no longer
-      vacuous; the x86_64 publish job has never run on CI, so the next tag
-      is the first end-to-end test of it.
+- [ ] Publish installable release assets. The Release workflow requires the
+      real compositor-certification workflow to pass before either release
+      architecture can build or publish. Currently no route in
+      `tests/certification/compositor-matrix.json` is production eligible, so
+      a tag cannot reach packaging until a route passes the production
+      certification contract. The aarch64 job builds and checks every release
+      binary, and the x86_64 publish job still needs an end-to-end run after
+      certification is unblocked. Launchpad source-package synchronization is
+      a separate workflow and does not publish GitHub release assets.
 
 - [ ] Keep GitHub, Debian/Launchpad, RPM, Arch, and AppStream metadata
       synchronized for each release.
