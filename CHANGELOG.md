@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Report interactive form preview matches only when the snippet is enabled and
+  its app filter allows the requested preview application; identify recognized
+  but disabled or filtered form triggers explicitly.
 - Preserve clean-source KWin 6.6.6 output/focus smoke evidence for
   `e4d0d11eb69b`: 12 checks passed, three areas were not tested, and keysym
   fallback measured p50/p95/p99 of 12.529/12.630/12.668 ms (small),

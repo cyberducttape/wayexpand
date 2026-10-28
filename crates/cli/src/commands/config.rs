@@ -120,9 +120,9 @@ pub(crate) fn preview_command(mut args: Args) -> Result<()> {
     let mut engine = ExpansionEngine::new(config).map_err(|error| {
         config_error(format!("configuration invalid: {}", error.safe_summary()))
     })?;
-    if let Some(app_id) = preview_app {
+    if let Some(app_id) = preview_app.as_deref() {
         engine.set_current_window(Some(wayexpand_core::WindowContext {
-            app_id: Some(app_id),
+            app_id: Some(app_id.to_owned()),
             title: None,
             instance_id: None,
         }));
@@ -154,8 +154,16 @@ pub(crate) fn preview_command(mut args: Args) -> Result<()> {
                 .as_ref()
                 .and_then(|snippet| form_triggers.iter().find(|(trigger, _)| trigger == snippet));
             if let Some((form_trigger, enabled)) = form {
+                let app_filter_blocked = explanation.checks.iter().any(|check| {
+                    check.name == "app filter" && check.status == wayexpand_core::CheckStatus::Fail
+                });
+                let matched = *enabled && !app_filter_blocked;
                 let reason = if !enabled {
                     "snippet is disabled"
+                } else if app_filter_blocked && preview_app.is_some() {
+                    "preview application does not satisfy this snippet's app filter"
+                } else if app_filter_blocked {
+                    "snippet has an app filter; pass --preview-app APP to check it"
                 } else {
                     "interactive forms require a verified replacement route and cannot be rendered by this preview"
                 };
@@ -163,19 +171,22 @@ pub(crate) fn preview_command(mut args: Args) -> Result<()> {
                     println!(
                         "{}",
                         serde_json::json!({
-                            "matched": *enabled,
+                            "matched": matched,
+                            "trigger_recognized": true,
                             "trigger": form_trigger,
                             "form": true,
                             "previewable": false,
                             "reason": reason,
                         })
                     );
-                } else if *enabled {
+                } else if matched {
                     println!("trigger: {form_trigger}");
                     println!(
                         "this snippet opens an interactive form and cannot be rendered by preview"
                     );
                     println!("forms require a verified replacement route; the active route may refuse them safely");
+                } else if app_filter_blocked {
+                    println!("snippet {form_trigger} is not enabled for this application");
                 } else {
                     println!("snippet {form_trigger} is disabled");
                 }
