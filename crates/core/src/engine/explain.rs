@@ -263,8 +263,7 @@ impl ExpansionEngine {
                 if variables.iter().any(|name| name.starts_with("snippet:")) {
                     explanation.push("variables", CheckStatus::Info, "includes other snippets");
                 }
-                let fields = crate::form_fields(&expansion.replacement).unwrap_or_default();
-                if !fields.is_empty() {
+                if let Some(fields) = self.form_fields.get(index).and_then(Option::as_ref) {
                     let labels: Vec<&str> =
                         fields.iter().map(|field| field.label.as_str()).collect();
                     let exact_window_identity = self
@@ -411,17 +410,16 @@ impl ExpansionEngine {
         let Some(trigger) = explanation.snippet.as_deref() else {
             return;
         };
-        let Some(expansion) = self
+        let Some((index, expansion)) = self
             .config
             .expansion
             .iter()
-            .find(|expansion| expansion.answers_to(trigger))
+            .enumerate()
+            .find(|(_, expansion)| expansion.answers_to(trigger))
         else {
             return;
         };
-        if expansion.command.is_some()
-            || !crate::form_fields(&expansion.replacement).is_ok_and(|fields| fields.is_empty())
-        {
+        if expansion.command.is_some() || self.form_fields.get(index).is_some_and(Option::is_some) {
             return;
         }
         let Ok((rendered, cursor_offset)) =

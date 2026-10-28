@@ -234,10 +234,7 @@ impl ExpansionEngine {
             return None;
         }
         let expansion = &self.config.expansion[config_index];
-        let form = crate::form_fields(&expansion.replacement)
-            .ok()
-            .filter(|fields| !fields.is_empty())
-            .map(Arc::new);
+        let form = self.form_fields.get(config_index).cloned().flatten();
         let (replacement_text, cursor_offset) = if expansion.command.is_some() || form.is_some() {
             (expansion.replacement.clone(), None)
         } else {

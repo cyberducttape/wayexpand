@@ -72,6 +72,7 @@ pub struct ExpansionEngine {
     /// Case-folded app filters are immutable for the lifetime of an engine;
     /// avoid allocating them on every candidate match.
     app_filters: Vec<Vec<AppFilter>>,
+    form_fields: Vec<Option<Arc<Vec<crate::FormField>>>>,
     /// Compiled app-id globs corresponding positionally to `app_filters`.
     app_filter_globs: Vec<Vec<Option<GlobPattern>>>,
     matcher: Matcher,
@@ -217,6 +218,7 @@ impl ExpansionEngine {
                 .map(|(_, trigger)| trigger),
         );
         let app_filters = validated.app_filters;
+        let form_fields = validated.form_fields;
         let app_filter_globs = app_filters
             .iter()
             .map(|filters| {
@@ -237,6 +239,7 @@ impl ExpansionEngine {
         Ok(Self {
             config,
             app_filters,
+            form_fields,
             app_filter_globs,
             matcher,
             matcher_indices,

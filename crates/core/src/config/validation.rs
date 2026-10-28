@@ -135,6 +135,7 @@ impl Config {
         let mut total_trigger_chars = 0usize;
         let mut expansion_ids = HashMap::with_capacity(self.expansion.len());
         let mut app_filters = Vec::with_capacity(self.expansion.len());
+        let mut validated_form_fields = Vec::with_capacity(self.expansion.len());
         for (index, expansion) in self.expansion.iter().enumerate() {
             if !is_uuid(&expansion.id) {
                 return Err(ConfigError::InvalidExpansionId { index });
@@ -271,14 +272,21 @@ impl Config {
             {
                 return Err(ConfigError::InvalidTemplate { index, source });
             }
-            if expansion.command.is_some()
-                && crate::form_fields(&expansion.replacement).is_ok_and(|fields| !fields.is_empty())
-            {
-                return Err(ConfigError::InvalidTemplate {
-                    index,
-                    source: TemplateError::InvalidField,
-                });
-            }
+            let parsed_form_fields = if expansion.command.is_some() {
+                if crate::form_fields(&expansion.replacement).is_ok_and(|fields| !fields.is_empty())
+                {
+                    return Err(ConfigError::InvalidTemplate {
+                        index,
+                        source: TemplateError::InvalidField,
+                    });
+                }
+                None
+            } else {
+                let fields = crate::form_fields(&expansion.replacement)
+                    .map_err(|source| ConfigError::InvalidTemplate { index, source })?;
+                (!fields.is_empty()).then(|| Arc::new(fields))
+            };
+            validated_form_fields.push(parsed_form_fields);
             if expansion.enabled {
                 total_trigger_chars = total_trigger_chars.saturating_add(trigger_length);
                 if total_trigger_chars > MAX_TOTAL_TRIGGER_CHARS {
@@ -368,6 +376,7 @@ impl Config {
         Ok(ValidatedConfig {
             effective_triggers: enabled,
             app_filters,
+            form_fields: validated_form_fields,
             undo_chord,
             hotkeys: parsed_hotkeys,
         })

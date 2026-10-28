@@ -607,6 +607,8 @@ pub(crate) type EffectiveTriggers = Vec<(usize, String)>;
 pub(crate) struct ValidatedConfig {
     pub(crate) effective_triggers: EffectiveTriggers,
     pub(crate) app_filters: Vec<Vec<AppFilter>>,
+    /// Parsed once during validation and reused by matching and diagnostics.
+    pub(crate) form_fields: Vec<Option<Arc<Vec<crate::FormField>>>>,
     pub(crate) undo_chord: Option<KeyChord>,
     pub(crate) hotkeys: Vec<(KeyChord, usize)>,
 }

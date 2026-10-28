@@ -5529,6 +5529,24 @@ fn form_fields_are_parsed_and_validated() {
 }
 
 #[test]
+fn matched_forms_reuse_the_validated_field_definitions() {
+    let mut engine = ExpansionEngine::new(Config::parse(FORM_CONFIG).unwrap()).unwrap();
+    let validated_fields = engine.form_fields[0]
+        .as_ref()
+        .expect("the validated snippet contains form fields")
+        .clone();
+    assert_eq!(validated_fields.len(), 3);
+
+    let pending = engine.process_deferred(InputEvent::Text(":tk".into()));
+    assert_eq!(pending.len(), 1);
+    let matched_fields = pending[0]
+        .form
+        .as_ref()
+        .expect("the trigger match retains its form definition");
+    assert!(Arc::ptr_eq(&validated_fields, matched_fields));
+}
+
+#[test]
 fn explain_describes_form_snippets_instead_of_failing_to_render() {
     let mut engine = ExpansionEngine::new(Config::parse(FORM_CONFIG).unwrap()).unwrap();
     engine.set_form_replacement_guarantee(crate::ReplacementGuarantee::VerifiedSurroundingText);

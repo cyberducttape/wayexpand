@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Reuse validated form-field definitions during trigger matching and route
+  explanations instead of reparsing form templates on each use.
 - Declare input-method-v2 as the Sway and Hyprland certification candidate,
   with evdev plus wlroots retained as an explicitly experimental fallback.
   Automated evidence remains compatibility-only until real-session results
