@@ -555,6 +555,7 @@ jobs:
           git archive --format=tar "HEAD^{tree}" | tar -x -C "$source_dir"
           test -f "$source_dir/docs/wayexpand.1"
           source_commit=$(git rev-parse --short=12 HEAD)
+          mkdir -p "$source_dir/debian"
           printf '%s\n' "$source_commit" > "$source_dir/debian/wayexpand-build-sha"
           cp -a .cargo vendor "$source_dir/"
           tar -C "$top/sources" -czf "$top/rpmbuild/SOURCES/wayexpand-${version}-vendored.tar.gz" \
