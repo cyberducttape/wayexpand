@@ -322,6 +322,7 @@ mod tests {
     struct GatedInjector {
         gate: Arc<(Mutex<bool>, std::sync::Condvar)>,
         calls: Arc<Mutex<Vec<String>>>,
+        erase_started: Arc<std::sync::atomic::AtomicUsize>,
         fail: bool,
         /// Set once an operation (already admitted) is waiting at the gate.
         waiting: Arc<std::sync::atomic::AtomicBool>,
@@ -344,6 +345,7 @@ mod tests {
         }
 
         fn erase(&mut self, trigger: &str) -> std::result::Result<(), InjectorError> {
+            self.erase_started.fetch_add(1, Ordering::AcqRel);
             self.wait_for_gate();
             self.calls.lock().unwrap().push(format!("erase:{trigger}"));
             Ok(())
@@ -366,6 +368,7 @@ mod tests {
         daemon: Daemon,
         gate: Arc<(Mutex<bool>, std::sync::Condvar)>,
         calls: Arc<Mutex<Vec<String>>>,
+        erase_started: Arc<std::sync::atomic::AtomicUsize>,
         waiting: Arc<std::sync::atomic::AtomicBool>,
         directory: PathBuf,
     }
@@ -405,11 +408,13 @@ mod tests {
                 .unwrap();
             let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
             let calls = Arc::new(Mutex::new(Vec::new()));
+            let erase_started = Arc::new(std::sync::atomic::AtomicUsize::new(0));
             let waiting = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let waker = waker::Waker::new().unwrap();
             let backend: Box<dyn TextInjector> = Box::new(GatedInjector {
                 gate: Arc::clone(&gate),
                 calls: Arc::clone(&calls),
+                erase_started: Arc::clone(&erase_started),
                 fail,
                 waiting: Arc::clone(&waiting),
             });
@@ -464,6 +469,7 @@ mod tests {
                 daemon,
                 gate,
                 calls,
+                erase_started,
                 waiting,
                 directory,
             }
@@ -579,9 +585,8 @@ mod tests {
     }
 
     #[test]
-    fn completed_batch_is_output_in_order_on_one_route() {
+    fn output_batch_starts_next_transaction_only_after_previous_is_acknowledged() {
         let mut harness = Harness::new(false);
-        harness.open_gate();
         harness
             .daemon
             .start_output(
@@ -593,7 +598,23 @@ mod tests {
                 Vec::new(),
             )
             .unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while harness.erase_started.load(Ordering::Acquire) == 0 {
+            assert!(Instant::now() < deadline, "first transaction never started");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(harness.erase_started.load(Ordering::Acquire), 1);
+        assert!(harness.daemon.pending_output.is_some());
+
+        // A follow-up replacement in the same batch must not reach the
+        // non-atomic injector until the first operation has returned and its
+        // transaction outcome has been acknowledged by the reactor.
+        harness.daemon.service_pending_output().unwrap();
+        assert_eq!(harness.erase_started.load(Ordering::Acquire), 1);
+        harness.open_gate();
         harness.run_until_resolved();
+        assert_eq!(harness.erase_started.load(Ordering::Acquire), 2);
         assert_eq!(
             *harness.calls.lock().unwrap(),
             ["erase::a", "insert:first", "erase::b", "insert:second"]

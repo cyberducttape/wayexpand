@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Assert that a queued non-atomic output transaction does not reach the
+  injector before the current transaction is acknowledged.
 - Preserve a clean-source KWin 6.6.6 `doctor --certify` report for
   `dfec5c52555a`: 12 checks passed, three were not tested, and 20 injector
   samples per size bucket measured p50/p95/p99 latency. The result remains
