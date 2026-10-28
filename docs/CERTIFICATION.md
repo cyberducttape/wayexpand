@@ -65,6 +65,18 @@ intentionally out of scope and is reported as `unsupported-by-design`; a
 certification never implies otherwise.
 
 The latest current-source smoke report at
+[`docs/evidence/doctor-certify-0ba13e6fd4c2.json`](evidence/doctor-certify-0ba13e6fd4c2.json)
+tested clean commit `0ba13e6fd4c2` on KWin 6.6.6 in a private headless
+session. Eleven insertion, focus, reload, restart, and refusal checks passed;
+build identity also matched. Unicode, physical keyboard capture, suspend/resume,
+and the overlapping-trigger scenario were not tested. Twenty libei
+keysym-fallback transactions per size measured injector p50/p95/p99 of
+12.484/12.649/12.761 ms (small), 781.211/782.963/783.068 ms (medium), and
+3,135.241/3,140.408/3,140.473 ms (large). Capture was simulated through stdin.
+This is partial compatibility evidence, not production compositor
+certification.
+
+The previous current-source smoke report at
 [`docs/evidence/doctor-certify-1262b961d6f8.json`](evidence/doctor-certify-1262b961d6f8.json)
 tested clean commit `1262b961d6f8` on KWin 6.6.6 in a private headless session.
 Eleven insertion, focus, reload, restart, and refusal checks passed; build

@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Preserve a clean-source private KWin 6.6.6 smoke report for commit
+  `0ba13e6fd4c2`: eleven output, focus, reload, restart, and refusal checks
+  passed. Capture was simulated; overlap, Unicode insertion, suspend/resume,
+  and physical capture remain untested. Record 20 latency samples per output
+  size while keeping the route explicitly uncertified for production.
 - Reuse the first declared form-field rules when later bare markers reference
   the same field, restoring imports for templates that interpolate one prompt
   value in multiple places while retaining rejection of explicit conflicts.
