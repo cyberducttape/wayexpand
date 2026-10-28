@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Preserve clean-source KWin 6.6.6 output/focus smoke evidence for
+  `e4d0d11eb69b`: 12 checks passed, three areas were not tested, and keysym
+  fallback measured p50/p95/p99 of 12.529/12.630/12.668 ms (small),
+  781.704/785.215/785.405 ms (medium), and 3,141.102/3,150.865/3,151.163 ms
+  (large). Capture was simulated; this remains partial compatibility evidence,
+  not production certification.
 - Keep the guided first-run workflow available until a user confirms a real
   insertion, with backend-specific recovery steps and an explicit distinction
   between local matcher preview and desktop verification. Explain that

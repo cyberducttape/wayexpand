@@ -74,6 +74,18 @@ stdin; Unicode insertion, physical keyboard capture, sensitive-field behavior,
 suspend/resume, and long-running stability remain untested. This is partial
 compatibility evidence, not production compositor certification.
 
+The current-source smoke report at
+[`docs/evidence/doctor-certify-e4d0d11eb69b.json`](evidence/doctor-certify-e4d0d11eb69b.json)
+tested build `e4d0d11eb69b` on KWin 6.6.6 in a private headless session. Twelve
+checks passed and three were not tested. Twenty libei keysym-fallback
+transactions per size measured p50/p95/p99 of 12.529/12.630/12.668 ms (small),
+781.704/785.215/785.405 ms (medium), and 3,141.102/3,150.865/3,151.163 ms
+(large). The report verified build identity and a clean source tree. Capture
+was simulated through stdin; Unicode insertion, physical keyboard capture,
+suspend/resume, sensitive-field behavior, and long-running stability remain
+untested. This is partial compatibility evidence, not production compositor
+certification.
+
 The latest preserved smoke report at
 [`docs/evidence/doctor-certify-b9fdc52f3d7d.json`](evidence/doctor-certify-b9fdc52f3d7d.json)
 tested commit `b9fdc52f3d7d` on KWin 6.6.6 in a private headless session. It
