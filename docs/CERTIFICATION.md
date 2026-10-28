@@ -574,6 +574,12 @@ a pass. On backends marked “application filters unavailable”, configured app
 filters must remain visibly unavailable rather than being inferred from
 unreliable window metadata.
 
+The required scenario `second-trigger-during-nonatomic-replacement` sends a
+second physical trigger while a paced replacement is still running and checks
+for interleaved text corruption or a stale expansion. The private KWin driver
+uses stdin for capture, so it reports this case as `UNVERIFIED`; a passing
+result requires a real capture session that types during the in-flight output.
+
 ## Compatibility modes
 
 Normal setup uses compatibility modes instead of exposing protocol names:

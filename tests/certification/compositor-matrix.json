@@ -90,6 +90,7 @@
     "held-modifier-unsupported-key",
     "caps-lock",
     "fast-typing",
+    "second-trigger-during-nonatomic-replacement",
     "key-pass-through-injector-failure",
     "key-pass-through-reconnect",
     "key-pass-through-cancellation",

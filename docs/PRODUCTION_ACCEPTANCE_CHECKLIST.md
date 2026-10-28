@@ -30,9 +30,10 @@ session evidence; unit tests alone do not satisfy them.
 - [ ] Pass rapid-typing, Unicode, and layout-change tests for every approved
       backend/layout combination.
 - [ ] Type a second trigger during a long, non-atomic replacement on each
-      candidate route; verify the target text is not corrupted and no stale
-      trigger is expanded after the first transaction. A sequential event
-      test does not satisfy this gate.
+      candidate route using certification scenario
+      `second-trigger-during-nonatomic-replacement`; verify the target text is
+      not corrupted and no stale trigger is expanded after the first
+      transaction. A sequential event test does not satisfy this gate.
 - [ ] Verify command completion never inserts into an unintended context in a
       real focus-switch test.
 - [ ] Verify fail-closed behavior in password and credential fields for each

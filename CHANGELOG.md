@@ -14,6 +14,9 @@ All notable changes to WayExpand are documented here.
 - Document the live certification prerequisites: an Administration-read
   runner token and labeled compositor runners. The repository currently has
   neither, so real-session jobs cannot yet run.
+- Add a required real-session scenario for a second physical trigger arriving
+  during a long non-atomic replacement. The private stdin-capture KWin driver
+  reports it as `UNVERIFIED` instead of counting sequential typing as proof.
 - Correct evdev and libei source-level safety descriptions: non-exclusive
   observation and libei insertion do not make the whole replacement
   transaction atomic or prevent unintended text changes.

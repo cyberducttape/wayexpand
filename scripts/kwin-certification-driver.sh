@@ -34,6 +34,9 @@ unverified() {
 [ "$backend" = evdev+libei ] || unverified "backend $backend is not exercised by the headless KWin sessions"
 
 case "$scenario" in
+    second-trigger-during-nonatomic-replacement)
+        unverified 'the private KWin session simulates capture over stdin and cannot exercise physical input arriving during an in-flight replacement'
+        ;;
     password-field)
         printf '%s\n' 'unsupported-by-design: evdev capture has no sensitive-field signal (docs/adr/0001-evdev-best-effort-semantics.md)'
         exit 3

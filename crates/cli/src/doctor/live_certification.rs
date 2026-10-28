@@ -490,6 +490,11 @@ fn make_report_for_build(
         "The isolated Wayland test client verified the received replacement text.",
     )];
     checks.push(check(
+        "second-trigger-during-nonatomic-replacement",
+        "not-tested",
+        "The private KWin smoke session simulates capture over stdin and cannot test physical input arriving during an in-flight non-atomic replacement.",
+    ));
+    checks.push(check(
         "word-boundary-delimiter",
         result
             .outcomes
@@ -731,6 +736,9 @@ fn check(name: &str, status: &str, evidence: &str) -> serde_json::Value {
         "unicode-insertion" => "Unicode insertion",
         "focus-switching" => "Focus switching",
         "focus-change-during-expansion" => "Focus change during expansion",
+        "second-trigger-during-nonatomic-replacement" => {
+            "Second trigger during non-atomic replacement"
+        }
         "target-closes-during-expansion" => "Target closes during expansion",
         "command-completion" => "Command completion",
         "configuration-reload" => "Configuration reload",
@@ -1087,6 +1095,15 @@ mod tests {
                 .find(|check| check["name"] == "focus-change-during-expansion")
                 .unwrap()["status"],
             "passed"
+        );
+        assert_eq!(
+            report["checks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|check| check["name"] == "second-trigger-during-nonatomic-replacement")
+                .unwrap()["status"],
+            "not-tested"
         );
         assert_eq!(
             report["checks"]
