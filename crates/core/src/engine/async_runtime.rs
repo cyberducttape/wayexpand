@@ -206,7 +206,7 @@ impl AsyncCommandRuntime {
                                                     result.cursor_offset = cursor_offset;
                                                     Ok(text)
                                                 }
-                                                Err(_) => Err(CommandError::IncompleteOutput),
+                                                Err(_) => Err(CommandError::TemplateRenderFailed),
                                             }
                                         }
                                         Err(error) => Err(error),

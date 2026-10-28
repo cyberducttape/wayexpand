@@ -173,6 +173,7 @@ pub enum CommandError {
     QueueFull,
     WorkerUnavailable,
     InvalidUtf8,
+    TemplateRenderFailed,
     OutputChannelLost,
     IncompleteOutput,
 }
@@ -200,6 +201,7 @@ pub enum CommandErrorKind {
     QueueFull,
     WorkerUnavailable,
     InvalidOutput,
+    InvalidTemplate,
     OutputChannel,
     IncompleteOutput,
 }
@@ -226,6 +228,7 @@ impl CommandError {
             Self::QueueFull => CommandErrorKind::QueueFull,
             Self::WorkerUnavailable => CommandErrorKind::WorkerUnavailable,
             Self::InvalidUtf8 => CommandErrorKind::InvalidOutput,
+            Self::TemplateRenderFailed => CommandErrorKind::InvalidTemplate,
             Self::OutputChannelLost => CommandErrorKind::OutputChannel,
             Self::IncompleteOutput => CommandErrorKind::IncompleteOutput,
         }
@@ -279,6 +282,9 @@ impl std::fmt::Display for CommandError {
             Self::QueueFull => write!(f, "command queue is full"),
             Self::WorkerUnavailable => write!(f, "command workers are unavailable"),
             Self::InvalidUtf8 => write!(f, "produced output that was not valid UTF-8"),
+            Self::TemplateRenderFailed => {
+                write!(f, "form values could not render the template")
+            }
             Self::OutputChannelLost => write!(f, "output could not be read back"),
             Self::IncompleteOutput => write!(
                 f,
@@ -320,6 +326,10 @@ mod tests {
         assert_eq!(
             CommandError::FormTargetUnverifiable.kind(),
             CommandErrorKind::FormTargetUnverifiable
+        );
+        assert_eq!(
+            CommandError::TemplateRenderFailed.kind(),
+            CommandErrorKind::InvalidTemplate
         );
     }
 }

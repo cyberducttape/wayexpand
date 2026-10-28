@@ -129,6 +129,7 @@ pub(crate) fn record_command_failure(backend: &str, kind: wayexpand_core::Comman
         | Kind::BrokerRejected
         | Kind::NonZeroExit
         | Kind::InvalidOutput
+        | Kind::InvalidTemplate
         | Kind::OutputChannel
         | Kind::IncompleteOutput => "command execution failed before output",
     };
@@ -147,7 +148,8 @@ pub(crate) fn record_preparation_failure(backend: &str, error: &wayexpand_core::
         Error::PolicyOutputTooLarge { .. } => "replacement exceeds configured size limit",
         Error::StaleInput => "input changed before expansion was prepared",
         Error::QueueFull | Error::WorkerUnavailable => "form worker unavailable",
-        Error::IncompleteOutput => "form values could not render the template",
+        Error::TemplateRenderFailed => "form values could not render the template",
+        Error::IncompleteOutput => "form helper output stream did not close",
         _ => "expansion could not be prepared",
     };
     record_blocked_expansion(backend, reason);
@@ -421,7 +423,7 @@ mod tests {
     fn form_render_failure_has_a_specific_content_free_reason() {
         record_preparation_failure(
             "evdev+libei",
-            &wayexpand_core::CommandError::IncompleteOutput,
+            &wayexpand_core::CommandError::TemplateRenderFailed,
         );
         let failures: serde_json::Value =
             serde_json::from_str(&recent_json()).expect("failures should be JSON");
@@ -430,6 +432,22 @@ mod tests {
                 && trace["backend"] == "evdev+libei"
                 && trace["trigger_recognized"] == "yes"
                 && trace["backend_selected"] == "not reached"
+                && trace["insertion_attempted"] == false
+                && trace.get("trigger").is_none()
+                && trace.get("replacement").is_none()
+        }));
+    }
+
+    #[test]
+    fn incomplete_form_output_is_not_misreported_as_a_template_error() {
+        record_preparation_failure(
+            "evdev+libei",
+            &wayexpand_core::CommandError::IncompleteOutput,
+        );
+        let failures: serde_json::Value =
+            serde_json::from_str(&recent_json()).expect("failures should be JSON");
+        assert!(failures.as_array().unwrap().iter().any(|trace| {
+            trace["completion"] == "form helper output stream did not close"
                 && trace["insertion_attempted"] == false
                 && trace.get("trigger").is_none()
                 && trace.get("replacement").is_none()
