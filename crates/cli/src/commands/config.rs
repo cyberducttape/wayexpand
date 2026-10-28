@@ -20,14 +20,50 @@ pub(crate) fn test_command(mut args: Args) -> Result<()> {
         .map(PathBuf::from)
         .unwrap_or_else(default_config_path);
     let config = Config::load(&path).map_err(|error| config_load_error(&path, error))?;
+    let form_triggers: Vec<(String, bool)> = config
+        .expansion
+        .iter()
+        .filter(|expansion| {
+            wayexpand_core::form_fields(&expansion.replacement)
+                .is_ok_and(|fields| !fields.is_empty())
+        })
+        .map(|expansion| (expansion.trigger.clone(), expansion.enabled))
+        .collect();
     let mut engine = ExpansionEngine::new(config).map_err(|error| {
         config_error(format!("configuration invalid: {}", error.safe_summary()))
     })?;
-    let mut results = engine.process(InputEvent::Text(trigger));
+    let mut results = engine.process(InputEvent::Text(trigger.clone()));
     results.extend(engine.process(InputEvent::EndOfInput));
     if requested_json {
-        println!(
-            "{}",
+        let form = results
+            .is_empty()
+            .then(|| engine.explain(&trigger, "unknown"));
+        let form = form.as_ref().and_then(|explanation| {
+            let snippet = explanation.snippet.as_ref()?;
+            form_triggers
+                .iter()
+                .find(|(candidate, _)| candidate == snippet)
+                .map(|(trigger, enabled)| (explanation, trigger, enabled))
+        });
+        let response = if let Some((explanation, form_trigger, enabled)) = form {
+            serde_json::json!({
+                "matched": false,
+                "trigger_recognized": true,
+                "trigger": form_trigger,
+                "form": true,
+                "enabled": enabled,
+                "reason": if !enabled {
+                    "snippet is disabled"
+                } else if explanation.checks.iter().any(|check| {
+                    check.name == "app filter" && check.status == wayexpand_core::CheckStatus::Fail
+                }) {
+                    "snippet is blocked by its application filter"
+                } else {
+                    "interactive form fields are collected by the running GUI; the CLI simulation cannot collect them"
+                },
+                "results": [],
+            })
+        } else {
             serde_json::json!({
                 "matched": !results.is_empty(),
                 "results": results.iter().map(|result| serde_json::json!({
@@ -38,11 +74,33 @@ pub(crate) fn test_command(mut args: Args) -> Result<()> {
                     "cursor_offset": result.cursor_offset,
                 })).collect::<Vec<_>>(),
             })
-        );
+        };
+        println!("{response}");
     } else {
         match results.last() {
             Some(result) => println!("{}", result.insert),
-            None => println!("no expansion matched"),
+            None => {
+                let explanation = engine.explain(&trigger, "unknown");
+                let form = explanation.snippet.as_ref().and_then(|snippet| {
+                    form_triggers
+                        .iter()
+                        .find(|(candidate, _)| candidate == snippet)
+                });
+                if let Some((form_trigger, enabled)) = form {
+                    if !enabled {
+                        println!("snippet {form_trigger} is disabled");
+                    } else if explanation.checks.iter().any(|check| {
+                        check.name == "app filter"
+                            && check.status == wayexpand_core::CheckStatus::Fail
+                    }) {
+                        println!("snippet {form_trigger} is blocked by its application filter");
+                    } else {
+                        println!("snippet {form_trigger} opens an interactive form; use the running GUI to collect its fields");
+                    }
+                } else {
+                    println!("no expansion matched");
+                }
+            }
         }
     }
     Ok(())

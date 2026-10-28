@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Make `wayexpand test` identify recognized interactive form snippets, explaining
+  that their fields require the running GUI instead of reporting a misleading
+  no-match result.
 - Report interactive form preview matches only when the snippet is enabled and
   its app filter allows the requested preview application; identify recognized
   but disabled or filtered form triggers explicitly.
