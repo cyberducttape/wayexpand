@@ -429,7 +429,13 @@ fn default_value(field: &FormField) -> Option<String> {
     match &field.kind {
         FormFieldKind::Text { default } if default.is_empty() => None,
         FormFieldKind::Text { default } => Some(default.clone()),
-        FormFieldKind::Choice { options } => options.first().cloned(),
+        FormFieldKind::Choice { options, default } => {
+            default.clone().or_else(|| options.first().cloned())
+        }
+        FormFieldKind::Date { default } if default == "today" => {
+            Some(wayexpand_core::today_local_date())
+        }
+        FormFieldKind::Date { default } => Some(default.clone()),
     }
 }
 
@@ -437,10 +443,8 @@ fn check_value(field: &FormField, value: &str) -> Result<()> {
     if value.len() > MAX_VALUE_BYTES || value.contains('\0') {
         usage_bail!("the value for {} is too long or contains NUL", field.label);
     }
-    if let FormFieldKind::Choice { options } = &field.kind {
-        if !options.iter().any(|option| option == value) {
-            usage_bail!("{} must be one of: {}", field.label, options.join(", "));
-        }
+    if let Err(error) = field.validate_value(value) {
+        usage_bail!("invalid value for {}: {error}", field.label);
     }
     Ok(())
 }
@@ -456,13 +460,22 @@ fn ask_in_terminal(fields: &[&FormField]) -> Result<HashMap<String, String>> {
                     eprint!("{}: ", field.label)
                 }
                 FormFieldKind::Text { default } => eprint!("{} [{default}]: ", field.label),
-                FormFieldKind::Choice { options } => {
+                FormFieldKind::Choice { options, .. } => {
                     eprintln!("{}:", field.label);
                     for (number, option) in options.iter().enumerate() {
                         eprintln!("  {}) {option}", number + 1);
                     }
                     eprint!("Choose 1-{} [1]: ", options.len());
                 }
+                FormFieldKind::Date { default } => eprint!(
+                    "{} [{}] (YYYY-MM-DD): ",
+                    field.label,
+                    if default == "today" {
+                        wayexpand_core::today_local_date()
+                    } else {
+                        default.clone()
+                    }
+                ),
             }
             io::stderr().flush()?;
             let Some(line) = lines.next().transpose()? else {
@@ -474,7 +487,7 @@ fn ask_in_terminal(fields: &[&FormField]) -> Result<HashMap<String, String>> {
                     default_value(field).unwrap_or_default()
                 }
                 FormFieldKind::Text { .. } => answer.to_owned(),
-                FormFieldKind::Choice { options } => {
+                FormFieldKind::Choice { options, .. } => {
                     let answer = answer.trim();
                     if answer.is_empty() {
                         default_value(field).unwrap_or_default()
@@ -490,6 +503,13 @@ fn ask_in_terminal(fields: &[&FormField]) -> Result<HashMap<String, String>> {
                     } else {
                         eprintln!("Please pick a number from the list.");
                         continue;
+                    }
+                }
+                FormFieldKind::Date { .. } => {
+                    if answer.is_empty() {
+                        default_value(field).unwrap_or_default()
+                    } else {
+                        answer.to_owned()
                     }
                 }
             };

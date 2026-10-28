@@ -142,9 +142,14 @@ impl GuiApp {
             for (index, field) in fields.iter().enumerate() {
                 let default = match &field.kind {
                     wayexpand_core::FormFieldKind::Text { default } => default.clone(),
-                    wayexpand_core::FormFieldKind::Choice { options } => {
-                        options.first().cloned().unwrap_or_default()
+                    wayexpand_core::FormFieldKind::Choice { options, default } => default
+                        .clone()
+                        .or_else(|| options.first().cloned())
+                        .unwrap_or_default(),
+                    wayexpand_core::FormFieldKind::Date { default } if default == "today" => {
+                        wayexpand_core::today_local_date()
                     }
+                    wayexpand_core::FormFieldKind::Date { default } => default.clone(),
                 };
                 let value = self
                     .form_preview_values
@@ -156,7 +161,7 @@ impl GuiApp {
                         wayexpand_core::FormFieldKind::Text { .. } => {
                             ui.add(TextEdit::singleline(value).desired_width(260.0));
                         }
-                        wayexpand_core::FormFieldKind::Choice { options } => {
+                        wayexpand_core::FormFieldKind::Choice { options, .. } => {
                             egui::ComboBox::from_id_salt(("form_test_choice", index))
                                 .selected_text(value.as_str())
                                 .show_ui(ui, |ui| {
@@ -164,6 +169,9 @@ impl GuiApp {
                                         ui.selectable_value(value, option.clone(), option);
                                     }
                                 });
+                        }
+                        wayexpand_core::FormFieldKind::Date { .. } => {
+                            ui.add(TextEdit::singleline(value).desired_width(260.0));
                         }
                     }
                 });

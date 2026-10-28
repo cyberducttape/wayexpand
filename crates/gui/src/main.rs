@@ -136,7 +136,14 @@ const TEMPLATE_VARIABLE_GROUPS: &[(TemplateVariableGroup, &[&str])] = &[
     ),
     (
         TemplateVariableGroup::Fields,
-        &["{{field:name}}", "{{choice:name=A|B}}", "{{{{ }}}}"],
+        &[
+            "{{field:name}}",
+            "{{field:name|required|min=2|max=80}}",
+            "{{choice:name=A|B}}",
+            "{{choice:severity=Low|High;default=High}}",
+            "{{datefield:date=today}}",
+            "{{{{ }}}}",
+        ],
     ),
     (
         TemplateVariableGroup::Text,

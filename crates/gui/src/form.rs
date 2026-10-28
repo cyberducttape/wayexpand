@@ -31,16 +31,33 @@ pub(crate) struct FormApp {
     palette: Palette,
     outcome: Outcome,
     focused_once: bool,
+    error: Option<String>,
+    date_months: Vec<(i32, u32)>,
 }
 
 impl FormApp {
     pub(crate) fn new(spec: FormSpec, palette: Palette, outcome: Outcome) -> Self {
-        let values = spec
+        let values: Vec<String> = spec
             .fields
             .iter()
             .map(|field| match &field.kind {
                 FormFieldKind::Text { default } => default.clone(),
-                FormFieldKind::Choice { options } => options[0].clone(),
+                FormFieldKind::Choice { options, default } => default
+                    .clone()
+                    .or_else(|| options.first().cloned())
+                    .unwrap_or_default(),
+                FormFieldKind::Date { default } if default == "today" => {
+                    wayexpand_core::today_local_date()
+                }
+                FormFieldKind::Date { default } => default.clone(),
+            })
+            .collect();
+        let date_months = values
+            .iter()
+            .map(|value| {
+                parse_date(value)
+                    .map(|(year, month, _)| (year, month))
+                    .unwrap_or((2026, 1))
             })
             .collect();
         Self {
@@ -49,10 +66,19 @@ impl FormApp {
             palette,
             outcome,
             focused_once: false,
+            error: None,
+            date_months,
         }
     }
 
-    fn submit(&self, ctx: &egui::Context) {
+    fn submit(&mut self, ctx: &egui::Context) {
+        for (field, value) in self.spec.fields.iter().zip(&self.values) {
+            if let Err(error) = field.validate_value(value) {
+                self.error = Some(format!("{}: {error}", field.label));
+                return;
+            }
+        }
+        self.error = None;
         let values = self
             .spec
             .fields
@@ -123,7 +149,7 @@ impl FormApp {
                                         self.focused_once = true;
                                     }
                                 }
-                                FormFieldKind::Choice { options } => {
+                                FormFieldKind::Choice { options, .. } => {
                                     egui::ComboBox::from_id_salt(("choice", index))
                                         .selected_text(value.as_str())
                                         .width(320.0)
@@ -137,11 +163,17 @@ impl FormApp {
                                             }
                                         });
                                 }
+                                FormFieldKind::Date { .. } => {
+                                    date_picker(ui, value, &mut self.date_months[index], index);
+                                }
                             }
                             ui.end_row();
                         }
                     });
                 ui.add_space(12.0);
+                if let Some(error) = &self.error {
+                    ui.label(RichText::new(error).color(palette.danger));
+                }
                 ui.horizontal(|ui| {
                     if theme::primary_button(ui, &palette, "Insert").clicked() {
                         self.submit(&ctx);
@@ -157,6 +189,100 @@ impl FormApp {
                 });
             });
     }
+}
+
+fn date_picker(ui: &mut egui::Ui, value: &mut String, month: &mut (i32, u32), index: usize) {
+    let mut parsed = *month;
+    let mut selection = None;
+    ui.menu_button(value.clone(), |ui| {
+        ui.horizontal(|ui| {
+            if ui.small_button("‹").clicked() {
+                if parsed.1 == 1 {
+                    parsed.0 -= 1;
+                    parsed.1 = 12;
+                } else {
+                    parsed.1 -= 1;
+                }
+                *month = parsed;
+            }
+            ui.label(format!("{}-{:02}", parsed.0, parsed.1));
+            if ui.small_button("›").clicked() {
+                if parsed.1 == 12 {
+                    parsed.0 += 1;
+                    parsed.1 = 1;
+                } else {
+                    parsed.1 += 1;
+                }
+                *month = parsed;
+            }
+        });
+        egui::Grid::new(("date_calendar", index)).show(ui, |ui| {
+            for label in ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"] {
+                ui.label(label);
+            }
+            ui.end_row();
+            let offset = weekday_monday(parsed.0, parsed.1);
+            let days = days_in_month(parsed.0, parsed.1);
+            let mut cell = 0;
+            for _ in 0..offset {
+                ui.label("");
+                cell += 1;
+            }
+            for day in 1..=days {
+                if ui.button(day.to_string()).clicked() {
+                    selection = Some(format!("{:04}-{:02}-{:02}", parsed.0, parsed.1, day));
+                    ui.close();
+                }
+                cell += 1;
+                if cell % 7 == 0 {
+                    ui.end_row();
+                }
+            }
+        });
+    });
+    if let Some(selected) = selection {
+        *value = selected;
+    }
+}
+
+fn parse_date(value: &str) -> Option<(i32, u32, u32)> {
+    if value.len() != 10
+        || value.as_bytes().get(4) != Some(&b'-')
+        || value.as_bytes().get(7) != Some(&b'-')
+    {
+        return None;
+    }
+    let mut parts = value.split('-');
+    let date = (
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+    );
+    if parts.next().is_some()
+        || !(1..=12).contains(&date.1)
+        || !(1..=days_in_month(date.0, date.1)).contains(&date.2)
+    {
+        return None;
+    }
+    Some(date)
+}
+
+fn days_in_month(year: i32, month: u32) -> u32 {
+    match month {
+        2 if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    }
+}
+
+fn weekday_monday(year: i32, month: u32) -> usize {
+    let offsets = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+    let adjusted = year - i32::from(month < 3);
+    ((adjusted + adjusted / 4 - adjusted / 100 + adjusted / 400 + offsets[(month - 1) as usize] + 1)
+        .rem_euclid(7) as usize
+        + 6)
+        % 7
 }
 
 /// Show the form; print the values and exit 0, or exit 1 on cancel.
@@ -211,5 +337,28 @@ pub(crate) fn run(spec_json: &str) -> anyhow::Result<()> {
             Ok(())
         }
         None => std::process::exit(1),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn calendar_grid_uses_monday_first_and_leap_days() {
+        // 2024-02-01 was a Thursday (Monday-first column 3).
+        assert_eq!(weekday_monday(2024, 2), 3);
+        assert_eq!(days_in_month(2024, 2), 29);
+        assert_eq!(days_in_month(2100, 2), 28);
+        assert_eq!(days_in_month(2000, 2), 29);
+    }
+
+    #[test]
+    fn date_parser_requires_three_numeric_components() {
+        assert_eq!(parse_date("2026-10-27"), Some((2026, 10, 27)));
+        assert_eq!(parse_date("2026-10"), None);
+        assert_eq!(parse_date("today"), None);
+        assert_eq!(parse_date("2026-13-01"), None);
+        assert_eq!(parse_date("2025-02-29"), None);
     }
 }

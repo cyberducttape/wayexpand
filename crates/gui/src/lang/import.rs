@@ -349,9 +349,18 @@ impl Strings {
             (Language::German, "{{field:name}}") => {
                 "Fragt beim Erweitern nach einem Wert; {{field:name=default}} füllt ihn vor. Getippte Formulare brauchen eine Input-Method-Route; `wayexpand new` funktioniert überall"
             }
+            (Language::English, "{{field:name|required|min=2|max=80}}") => "Required text input with minimum and maximum character counts",
+            (Language::Indonesian, "{{field:name|required|min=2|max=80}}") => "Isian teks wajib dengan batas minimum dan maksimum karakter",
+            (Language::German, "{{field:name|required|min=2|max=80}}") => "Pflichtfeld mit Mindest- und Höchstlänge",
             (Language::English, "{{choice:name=A|B}}") => "A labelled drop-down with 2-32 options",
             (Language::Indonesian, "{{choice:name=A|B}}") => "Daftar pilihan berlabel dengan 2-32 opsi",
             (Language::German, "{{choice:name=A|B}}") => "Beschriftete Auswahlliste mit 2-32 Optionen",
+            (Language::English, "{{choice:severity=Low|High;default=High}}") => "A drop-down with a preselected option",
+            (Language::Indonesian, "{{choice:severity=Low|High;default=High}}") => "Daftar pilihan dengan opsi awal",
+            (Language::German, "{{choice:severity=Low|High;default=High}}") => "Auswahlliste mit vorausgewählter Option",
+            (Language::English, "{{datefield:date=today}}") => "Choose a calendar date, defaulting to today",
+            (Language::Indonesian, "{{datefield:date=today}}") => "Pilih tanggal kalender, dengan nilai awal hari ini",
+            (Language::German, "{{datefield:date=today}}") => "Kalenderdatum auswählen, standardmäßig heute",
             (Language::English, "{{{{ }}}}") => {
                 "Literal {{ and }}, for Ansible, Helm or GitHub Actions syntax"
             }

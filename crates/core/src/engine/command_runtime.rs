@@ -512,7 +512,7 @@ pub(super) fn configure_command_environment(process: &mut Command, command: &Com
 
 /// How long a snippet form may stay open before it is abandoned.
 const FORM_TIMEOUT: Duration = Duration::from_secs(600);
-use crate::limits::{MAX_FORM_OUTPUT_BYTES, MAX_FORM_VALUE_BYTES};
+use crate::limits::MAX_FORM_OUTPUT_BYTES;
 
 /// The program that shows snippet forms. `WAYEXPAND_FORM_HELPER` overrides
 /// it (tests, custom installs). Under systemd the GUI is started through
@@ -806,15 +806,7 @@ pub(super) fn run_form_helper(
             stop_transient_unit(transient_unit.as_deref());
             CommandError::IncompleteOutput
         })?;
-        let valid = value.len() <= MAX_FORM_VALUE_BYTES
-            && !value
-                .chars()
-                .any(|character| character.is_control() && character != '\n' && character != '\t')
-            && match &field.kind {
-                crate::FormFieldKind::Choice { options } => options.contains(value),
-                crate::FormFieldKind::Text { .. } => true,
-            };
-        if !valid {
+        if field.validate_value(value).is_err() {
             stop_transient_unit(transient_unit.as_deref());
             return Err(CommandError::IncompleteOutput);
         }

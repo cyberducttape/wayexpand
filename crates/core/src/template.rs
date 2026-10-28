@@ -71,36 +71,257 @@ pub struct FormField {
     /// Shown next to the input.
     pub label: String,
     pub kind: FormFieldKind,
+    /// Reject empty or whitespace-only submissions.
+    #[serde(default)]
+    pub required: bool,
+    /// Text fields may impose a character-count lower bound.
+    #[serde(default)]
+    pub min_chars: Option<usize>,
+    /// Text fields may impose a character-count upper bound.
+    #[serde(default)]
+    pub max_chars: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FormFieldKind {
-    Text { default: String },
-    Choice { options: Vec<String> },
+    Text {
+        default: String,
+    },
+    Choice {
+        options: Vec<String>,
+        #[serde(default)]
+        default: Option<String>,
+    },
+    /// An ISO 8601 calendar date (`YYYY-MM-DD`) chosen with a date picker.
+    Date {
+        default: String,
+    },
 }
 
-/// Parse one form marker body (`field:name`, `field:name=default`,
-/// `prompt:name`, or `choice:A|B|C`). Returns `None` for other variables.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum FormValueError {
+    #[error("a value is required")]
+    Required,
+    #[error("value is shorter than {minimum} characters")]
+    TooShort { minimum: usize },
+    #[error("value is longer than {maximum} characters")]
+    TooLong { maximum: usize },
+    #[error("value is not one of the available choices")]
+    InvalidChoice,
+    #[error("date must be a real calendar date in YYYY-MM-DD format")]
+    InvalidDate,
+    #[error("value contains a control character")]
+    ControlCharacter,
+    #[error("value exceeds the form size limit")]
+    TooLarge,
+}
+
+/// Resolve the form marker's `today` default using the system-local date.
+pub fn today_local_date() -> String {
+    let context = TemplateContext::system();
+    format_clock("local_date", context.unix_timestamp).unwrap_or_else(|| "1970-01-01".into())
+}
+
+impl FormField {
+    /// Apply the same value rules in the GUI, CLI, renderer, and daemon.
+    pub fn validate_value(&self, value: &str) -> Result<(), FormValueError> {
+        if value.len() > crate::limits::MAX_FORM_VALUE_BYTES {
+            return Err(FormValueError::TooLarge);
+        }
+        if value
+            .chars()
+            .any(|character| character.is_control() && character != '\n' && character != '\t')
+        {
+            return Err(FormValueError::ControlCharacter);
+        }
+        if self.required && value.trim().is_empty() {
+            return Err(FormValueError::Required);
+        }
+        match &self.kind {
+            FormFieldKind::Text { .. } => {
+                let count = value.chars().count();
+                if self.min_chars.is_some_and(|minimum| count < minimum) {
+                    return Err(FormValueError::TooShort {
+                        minimum: self.min_chars.unwrap_or_default(),
+                    });
+                }
+                if self.max_chars.is_some_and(|maximum| count > maximum) {
+                    return Err(FormValueError::TooLong {
+                        maximum: self.max_chars.unwrap_or_default(),
+                    });
+                }
+            }
+            FormFieldKind::Choice { options, .. } => {
+                if !options.iter().any(|option| option == value) {
+                    return Err(FormValueError::InvalidChoice);
+                }
+            }
+            FormFieldKind::Date { .. } => {
+                if !valid_iso_date(value) {
+                    return Err(FormValueError::InvalidDate);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn valid_iso_date(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() != 10
+        || bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || bytes
+            .iter()
+            .enumerate()
+            .any(|(index, byte)| index != 4 && index != 7 && !byte.is_ascii_digit())
+    {
+        return false;
+    }
+    let year = value[..4].parse::<u32>().ok();
+    let month = value[5..7].parse::<u32>().ok();
+    let day = value[8..10].parse::<u32>().ok();
+    let (Some(year), Some(month), Some(day)) = (year, month, day) else {
+        return false;
+    };
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return false,
+    };
+    (1..=days).contains(&day)
+}
+
+fn parse_form_attributes(
+    attributes: &[&str],
+    allow_length: bool,
+) -> Result<(bool, Option<usize>, Option<usize>), TemplateError> {
+    let mut required = false;
+    let mut min_chars = None;
+    let mut max_chars = None;
+    for attribute in attributes {
+        let attribute = attribute.trim();
+        if attribute == "required" && !required {
+            required = true;
+        } else if let Some(value) = attribute.strip_prefix("min=") {
+            if !allow_length || min_chars.is_some() {
+                return Err(TemplateError::InvalidField);
+            }
+            min_chars = Some(parse_field_length(value)?);
+        } else if let Some(value) = attribute.strip_prefix("max=") {
+            if !allow_length || max_chars.is_some() {
+                return Err(TemplateError::InvalidField);
+            }
+            max_chars = Some(parse_field_length(value)?);
+        } else {
+            return Err(TemplateError::InvalidField);
+        }
+    }
+    if min_chars.zip(max_chars).is_some_and(|(min, max)| min > max) {
+        return Err(TemplateError::InvalidField);
+    }
+    Ok((required, min_chars, max_chars))
+}
+
+fn parse_choice_attributes(attributes: &[&str]) -> Result<(bool, Option<String>), TemplateError> {
+    let mut required = false;
+    let mut default = None;
+    for attribute in attributes {
+        let attribute = attribute.trim();
+        if attribute == "required" && !required {
+            required = true;
+        } else if let Some(value) = attribute.strip_prefix("default=") {
+            if default.is_some() || value.is_empty() {
+                return Err(TemplateError::InvalidField);
+            }
+            default = Some(value.to_owned());
+        } else {
+            return Err(TemplateError::InvalidField);
+        }
+    }
+    Ok((required, default))
+}
+
+fn parse_field_length(value: &str) -> Result<usize, TemplateError> {
+    let parsed = value
+        .parse::<usize>()
+        .map_err(|_| TemplateError::InvalidField)?;
+    if parsed == 0 || parsed > 65_536 {
+        return Err(TemplateError::InvalidField);
+    }
+    Ok(parsed)
+}
+
+/// Parse a form marker. Returns `None` for other template variables.
 fn parse_form_field(name: &str) -> Option<Result<FormField, TemplateError>> {
     if let Some(spec) = name
         .strip_prefix("field:")
         .or_else(|| name.strip_prefix("prompt:"))
     {
-        let (label, default) = spec.split_once('=').unwrap_or((spec, ""));
+        let mut parts = spec.split('|');
+        let definition = parts.next().unwrap_or_default();
+        let attributes = parts.collect::<Vec<_>>();
+        let (label, default) = definition.split_once('=').unwrap_or((definition, ""));
         let label = label.trim();
         if label.is_empty() || label.chars().count() > 64 {
             return Some(Err(TemplateError::InvalidField));
         }
+        let validation = parse_form_attributes(&attributes, true);
+        let (required, min_chars, max_chars) = match validation {
+            Ok(validation) => validation,
+            Err(error) => return Some(Err(error)),
+        };
         return Some(Ok(FormField {
             key: format!("field:{label}"),
             label: label.to_owned(),
             kind: FormFieldKind::Text {
                 default: default.to_owned(),
             },
+            required,
+            min_chars,
+            max_chars,
+        }));
+    }
+    if let Some(spec) = name.strip_prefix("datefield:") {
+        let mut parts = spec.split('|');
+        let definition = parts.next().unwrap_or_default();
+        let attributes = parts.collect::<Vec<_>>();
+        let (label, default) = definition.split_once('=').unwrap_or((definition, "today"));
+        let label = label.trim();
+        if label.is_empty() || label.chars().count() > 64 {
+            return Some(Err(TemplateError::InvalidField));
+        }
+        let (required, min_chars, max_chars) = match parse_form_attributes(&attributes, false) {
+            Ok(validation) => validation,
+            Err(error) => return Some(Err(error)),
+        };
+        if default != "today" && !valid_iso_date(default) {
+            return Some(Err(TemplateError::InvalidField));
+        }
+        return Some(Ok(FormField {
+            key: format!("date:{label}"),
+            label: label.to_owned(),
+            kind: FormFieldKind::Date {
+                default: default.to_owned(),
+            },
+            required,
+            min_chars,
+            max_chars,
         }));
     }
     let spec = name.strip_prefix("choice:")?;
+    let (spec, attributes) = match spec.split_once(';') {
+        Some((spec, modifiers)) => (spec, modifiers.split(';').collect::<Vec<_>>()),
+        None => (spec, Vec::new()),
+    };
+    let (required, preferred_default) = match parse_choice_attributes(&attributes) {
+        Ok(validation) => validation,
+        Err(error) => return Some(Err(error)),
+    };
     // `choice:label=A|B` names the drop-down; the `=` must come before the
     // first option separator.
     let (label, spec) = match spec.split_once('=') {
@@ -114,6 +335,12 @@ fn parse_form_field(name: &str) -> Option<Result<FormField, TemplateError>> {
     if options.len() < 2 || options.len() > 32 || options.iter().any(String::is_empty) {
         return Some(Err(TemplateError::InvalidField));
     }
+    if preferred_default
+        .as_ref()
+        .is_some_and(|value| !options.contains(value))
+    {
+        return Some(Err(TemplateError::InvalidField));
+    }
     let (key, label) = match label {
         Some(label) if label.is_empty() || label.chars().count() > 64 => {
             return Some(Err(TemplateError::InvalidField));
@@ -124,7 +351,13 @@ fn parse_form_field(name: &str) -> Option<Result<FormField, TemplateError>> {
     Some(Ok(FormField {
         key,
         label,
-        kind: FormFieldKind::Choice { options },
+        kind: FormFieldKind::Choice {
+            options,
+            default: preferred_default,
+        },
+        required,
+        min_chars: None,
+        max_chars: None,
     }))
 }
 
@@ -137,12 +370,9 @@ pub fn form_fields(template: &str) -> Result<Vec<FormField>, TemplateError> {
             let field = field?;
             match fields.iter().find(|existing| existing.key == field.key) {
                 None => fields.push(field),
-                // `{{choice:env=dev|prod}}` twice is one field; the same
-                // name with other options would leave the form ambiguous.
-                Some(existing)
-                    if matches!(existing.kind, FormFieldKind::Choice { .. })
-                        && existing.kind != field.kind =>
-                {
+                // A repeated key is one input only when all of its rules and
+                // defaults agree; otherwise the prompt would be ambiguous.
+                Some(existing) if existing != &field => {
                     return Err(TemplateError::InvalidField);
                 }
                 Some(_) => {}
@@ -205,7 +435,9 @@ pub enum TemplateError {
     ClipboardDisabled,
     #[error("the clipboard could not be read")]
     ClipboardUnavailable,
-    #[error("a form field is malformed (field:name, field:name=default, or choice:A|B with 2-32 options)")]
+    #[error(
+        "a form field is malformed (see docs/TEMPLATES.md for field, choice, and datefield syntax)"
+    )]
     InvalidField,
     #[error("a form field has no value")]
     FieldValueMissing,
@@ -449,11 +681,17 @@ fn render_nested(
             other
                 if other.starts_with("field:")
                     || other.starts_with("prompt:")
-                    || other.starts_with("choice:") =>
+                    || other.starts_with("choice:")
+                    || other.starts_with("datefield:") =>
             {
                 let field = parse_form_field(other).expect("prefix checked")?;
                 match context.fields.get(&field.key) {
-                    Some(value) => value.clone(),
+                    Some(value) => {
+                        field
+                            .validate_value(value)
+                            .map_err(|_| TemplateError::InvalidField)?;
+                        value.clone()
+                    }
                     None if context.validating => String::new(),
                     None => return Err(TemplateError::FieldValueMissing),
                 }
@@ -1145,7 +1383,8 @@ mod tests {
         assert_eq!(
             fields[0].kind,
             FormFieldKind::Choice {
-                options: vec!["dev".to_owned(), "prod".to_owned()]
+                options: vec!["dev".to_owned(), "prod".to_owned()],
+                default: None,
             }
         );
         assert_eq!(fields[1].label, "Choice");
@@ -1154,7 +1393,8 @@ mod tests {
         assert_eq!(
             form_fields("{{choice:a|b=c}}").unwrap()[0].kind,
             FormFieldKind::Choice {
-                options: vec!["a".to_owned(), "b=c".to_owned()]
+                options: vec!["a".to_owned(), "b=c".to_owned()],
+                default: None,
             }
         );
         for invalid in [
@@ -1166,6 +1406,65 @@ mod tests {
                 form_fields(invalid),
                 Err(TemplateError::InvalidField),
                 "{invalid}"
+            );
+        }
+    }
+
+    #[test]
+    fn incident_form_parses_defaults_and_validates_values() {
+        let template = "{{datefield:reported_at=today|required}} {{field:hostname|required|max=253}} {{choice:severity=Low|Medium|High|Critical;default=High;required}} {{field:summary|required|min=10|max=2000}} {{field:resolution|required|min=3|max=4000}}";
+        let fields = form_fields(template).unwrap();
+        assert_eq!(fields.len(), 5);
+        assert!(
+            matches!(fields[0].kind, FormFieldKind::Date { ref default } if default == "today")
+        );
+        assert_eq!(fields[2].key, "choice:severity");
+        assert_eq!(
+            fields[2].kind,
+            FormFieldKind::Choice {
+                options: vec![
+                    "Low".into(),
+                    "Medium".into(),
+                    "High".into(),
+                    "Critical".into()
+                ],
+                default: Some("High".into()),
+            }
+        );
+        assert_eq!(fields[0].validate_value("2024-02-29"), Ok(()));
+        assert_eq!(
+            fields[0].validate_value("2025-02-29"),
+            Err(FormValueError::InvalidDate)
+        );
+        assert_eq!(
+            fields[1].validate_value("  "),
+            Err(FormValueError::Required)
+        );
+        assert_eq!(
+            fields[1].validate_value(&"h".repeat(254)),
+            Err(FormValueError::TooLong { maximum: 253 })
+        );
+        assert_eq!(
+            fields[3].validate_value("short"),
+            Err(FormValueError::TooShort { minimum: 10 })
+        );
+        assert_eq!(
+            fields[2].validate_value("Urgent"),
+            Err(FormValueError::InvalidChoice)
+        );
+    }
+
+    #[test]
+    fn invalid_form_rules_and_choice_defaults_are_rejected() {
+        for template in [
+            "{{datefield:when=2025-02-29}}",
+            "{{field:name|min=10|max=2}}",
+            "{{choice:severity=Low|High;default=Medium}}",
+        ] {
+            assert_eq!(
+                form_fields(template),
+                Err(TemplateError::InvalidField),
+                "{template}"
             );
         }
     }

@@ -162,6 +162,30 @@ Current status: {{choice:Open|Waiting on customer|Resolved}}
 | `{{field:name=default}}` | The same, prefilled. `{{prompt:name}}` is a synonym. |
 | `{{choice:A\|B\|C}}` | A drop-down with 2–32 options. |
 | `{{choice:name=A\|B\|C}}` | The same, labelled *name*; repeating it reuses the value. |
+| `{{datefield:reported_at=today}}` | A calendar date picker; use `today` or an ISO date such as `2026-10-27` as the default. |
+
+Add `|required` to reject blank text, and `|min=N` or `|max=N` to constrain
+the character count (text fields only). For example,
+`{{field:hostname|required|max=253}}`. A named choice can set a default with
+`;default=VALUE`, which must be one of its options; for example,
+`{{choice:severity=Low|Medium|High;default=High;required}}`.
+
+An incident-response form can collect structured details before inserting a
+ready-to-share update:
+
+```toml
+[[expansion]]
+trigger = ";incident"
+replacement = """Incident report — {{datefield:reported_at=today|required}}
+Host: {{field:hostname|required|max=253}}
+Severity: {{choice:severity=Low|Medium|High|Critical;default=High;required}}
+Summary: {{field:summary|required|min=10|max=2000}}
+Resolution: {{field:resolution|required|min=3|max=4000}}
+{{cursor}}"""
+```
+
+The GUI blocks insertion until all required values and constraints are valid.
+Date values are checked as real calendar dates in `YYYY-MM-DD` format.
 
 Tab moves between fields, Enter inserts, and Escape cancels, leaving the typed
 trigger in place. While the form is open, expansion is paused so typing in the

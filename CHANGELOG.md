@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add validated snippet forms with required and length-constrained text fields,
+  configurable dropdown defaults, and a calendar date picker. Include a
+  documented `;incident` response template and apply the same validation in
+  the GUI, renderer, daemon helper boundary, and `wayexpand new`.
 - Distinguish unverified, focus-tracked best-effort, blocked, and unknown
   replacement guarantees in the GUI route summary; verified text and atomicity
   remain separate labels. Extend modifier and slow-client focus-interruption
