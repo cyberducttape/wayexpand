@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Record isolated KWin 6.6.6 keysym pacing comparisons at 8, 10, and 12 ms.
+  Faster variants reduced measured insertion latency and passed exact-text
+  smoke samples, but physical capture and compositor-load reliability remain
+  untested; the production 12 ms default is unchanged.
 - Preserve the current-source `wayexpand doctor --certify --json` report for
   `70cdc0b4df6e`: 12 checks passed and three were not tested. KWin 6.6.6
   keysym-fallback injection measured p50/p95/p99 latency of 16.143/22.996/53.827
