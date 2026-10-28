@@ -11,6 +11,9 @@ All notable changes to WayExpand are documented here.
 - Allow manual and scheduled certification runs to gather compatibility
   evidence even while no production route is eligible; release calls still
   fail closed unless production evidence is explicitly required and present.
+- Document the live certification prerequisites: an Administration-read
+  runner token and labeled compositor runners. The repository currently has
+  neither, so real-session jobs cannot yet run.
 - Correct evdev and libei source-level safety descriptions: non-exclusive
   observation and libei insertion do not make the whole replacement
   transaction atomic or prevent unintended text changes.

@@ -596,18 +596,28 @@ daemon source/backend arguments in service configuration.
 
 ## Self-hosted workflow
 
-The `.github/workflows/certification.yml` workflow is the release-blocking
-gate. It currently fails before runner discovery because the matrix has no
-production-eligible route. Once one is established, the workflow runs the
-declared target desktops as a matrix on manual dispatch and weekly schedule.
-Each runner must provide an
-executable `WAYEXPAND_CERTIFICATION_DRIVER` and set
+The `.github/workflows/certification.yml` workflow has two modes. Release
+calls set `require_production: true` and fail closed unless each
+production-required target yields reviewed production evidence. Manual and
+scheduled runs default to compatibility evidence, which cannot satisfy the
+release gate. Set the manual `require_production` input to true to exercise the
+release gate directly.
+
+Both modes need the `CERTIFICATION_RUNNER_TOKEN` Actions secret: a fine-grained
+token with repository **Administration: read** permission, used only to
+discover online runners and their labels. Register a real-session runner with
+`wayexpand-certification` and its compositor label (`kde`, `gnome`, `sway`, or
+`hyprland`). Compatibility targets without an online runner are skipped;
+production-required targets without one fail preflight. Each runner must provide
+an executable `WAYEXPAND_CERTIFICATION_DRIVER` and set
 `WAYEXPAND_CERTIFICATION_COMPOSITOR`, `WAYEXPAND_CERTIFICATION_VERSION`,
 `WAYEXPAND_CERTIFICATION_LAYOUT`, and `WAYEXPAND_CERTIFICATION_TARGET_APPS`.
-The preflight will require an online runner for every production-required
-compositor and fail without one. Optional compositor jobs run only when their
-runner is online, so a missing optional runner neither fails nor stalls the
-workflow.
+
+As of 2026-10-28, the repository has no registered self-hosted runners and no
+`CERTIFICATION_RUNNER_TOKEN` secret. Therefore, no automated real-session
+certification job can currently run. The test suite and hosted headless jobs
+remain useful but do not substitute for this evidence.
+
 Missing driver or session metadata fails the job; hosted CI is never treated as
 a substitute for a real compositor session. Runners certifying a keystroke
 route (`evdev+libei`, `evdev+wlroots`) must give consent in the configuration
