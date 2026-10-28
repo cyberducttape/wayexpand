@@ -17,6 +17,8 @@ All notable changes to WayExpand are documented here.
 - Add a required real-session scenario for a second physical trigger arriving
   during a long non-atomic replacement. The private stdin-capture KWin driver
   reports it as `UNVERIFIED` instead of counting sequential typing as proof.
+- Keep the certification matrix-size assertion in one contract test so adding
+  scenarios does not leave a stale count in the CI workflow.
 - Preserve specific, content-free failure categories for helper and output
   preparation errors in the expansion reliability trace.
 - Correct evdev and libei source-level safety descriptions: non-exclusive
