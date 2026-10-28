@@ -174,6 +174,8 @@ pub enum CommandError {
     WorkerUnavailable,
     InvalidUtf8,
     TemplateRenderFailed,
+    InvalidFormOutput,
+    IncompleteFormOutput,
     OutputChannelLost,
     IncompleteOutput,
 }
@@ -202,6 +204,8 @@ pub enum CommandErrorKind {
     WorkerUnavailable,
     InvalidOutput,
     InvalidTemplate,
+    InvalidFormOutput,
+    IncompleteFormOutput,
     OutputChannel,
     IncompleteOutput,
 }
@@ -229,6 +233,8 @@ impl CommandError {
             Self::WorkerUnavailable => CommandErrorKind::WorkerUnavailable,
             Self::InvalidUtf8 => CommandErrorKind::InvalidOutput,
             Self::TemplateRenderFailed => CommandErrorKind::InvalidTemplate,
+            Self::InvalidFormOutput => CommandErrorKind::InvalidFormOutput,
+            Self::IncompleteFormOutput => CommandErrorKind::IncompleteFormOutput,
             Self::OutputChannelLost => CommandErrorKind::OutputChannel,
             Self::IncompleteOutput => CommandErrorKind::IncompleteOutput,
         }
@@ -285,6 +291,10 @@ impl std::fmt::Display for CommandError {
             Self::TemplateRenderFailed => {
                 write!(f, "form values could not render the template")
             }
+            Self::InvalidFormOutput => write!(f, "form values are invalid or incomplete"),
+            Self::IncompleteFormOutput => {
+                write!(f, "form helper output did not finish completely")
+            }
             Self::OutputChannelLost => write!(f, "output could not be read back"),
             Self::IncompleteOutput => write!(
                 f,
@@ -330,6 +340,14 @@ mod tests {
         assert_eq!(
             CommandError::TemplateRenderFailed.kind(),
             CommandErrorKind::InvalidTemplate
+        );
+        assert_eq!(
+            CommandError::InvalidFormOutput.kind(),
+            CommandErrorKind::InvalidFormOutput
+        );
+        assert_eq!(
+            CommandError::IncompleteFormOutput.kind(),
+            CommandErrorKind::IncompleteFormOutput
         );
     }
 }

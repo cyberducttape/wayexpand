@@ -4,9 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
-- Distinguish form-template rendering failures from incomplete form-helper
-  output in the privacy-preserving expansion trace without recording field
-  names or values.
+- Distinguish form-template rendering failures, invalid submissions, and
+  incomplete form-helper output in the privacy-preserving expansion trace
+  without recording field names or values.
 - Stamp Debian/Launchpad and RPM source builds with the originating Git
   revision so packaged CLI and daemon binaries can verify build identity
   instead of reporting `unknown` when the build environment omits `.git` metadata.

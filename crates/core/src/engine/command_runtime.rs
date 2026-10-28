@@ -782,7 +782,7 @@ pub(super) fn run_form_helper(
     }
     if !stdout_eof {
         stop_transient_unit(transient_unit.as_deref());
-        return Err(CommandError::IncompleteOutput);
+        return Err(CommandError::IncompleteFormOutput);
     }
     if !status.success() {
         // Cancelled: the trigger stays as typed.
@@ -797,18 +797,18 @@ pub(super) fn run_form_helper(
         Ok(values) => values,
         Err(_) => {
             stop_transient_unit(transient_unit.as_deref());
-            return Err(CommandError::IncompleteOutput);
+            return Err(CommandError::InvalidFormOutput);
         }
     };
     let mut checked = std::collections::HashMap::with_capacity(fields.len());
     for field in fields {
         let value = values.get(&field.key).ok_or_else(|| {
             stop_transient_unit(transient_unit.as_deref());
-            CommandError::IncompleteOutput
+            CommandError::InvalidFormOutput
         })?;
         if field.validate_value(value).is_err() {
             stop_transient_unit(transient_unit.as_deref());
-            return Err(CommandError::IncompleteOutput);
+            return Err(CommandError::InvalidFormOutput);
         }
         checked.insert(field.key.clone(), value.clone());
     }

@@ -5300,16 +5300,37 @@ fn cancelling_a_form_does_not_wait_for_a_descendant_holding_stdout() {
 }
 
 #[test]
-fn malformed_form_output_does_not_leave_an_inherited_pipe_alive() {
-    let _helper = FakeFormHelper::new("malformed-descendant", r#"printf '{'; sleep 30 &"#);
+fn malformed_form_output_is_reported_as_invalid() {
+    let _helper = FakeFormHelper::new("malformed-json", r#"printf '{'"#);
+    let fields = crate::form_fields("{{field:name}}").unwrap();
+    let shutdown = AtomicBool::new(false);
+    let result = super::command_runtime::run_form_helper("Test", &fields, &shutdown);
+    assert!(
+        matches!(result, Err(CommandError::InvalidFormOutput)),
+        "unexpected form helper result: {result:?}"
+    );
+}
+
+#[test]
+fn form_helper_reports_incomplete_output_when_detached_descendant_holds_pipe() {
+    // `setsid` escapes the helper's process group, so its inherited stdout
+    // stays open after the helper exits. The short sleep lets the test verify
+    // bounded draining without leaving a long-lived orphan process.
+    let _helper = FakeFormHelper::new(
+        "detached-pipe-holder",
+        r#"printf '{'; setsid sh -c 'sleep 0.5' &"#,
+    );
     let fields = crate::form_fields("{{field:name}}").unwrap();
     let shutdown = AtomicBool::new(false);
     let started = Instant::now();
     let result = super::command_runtime::run_form_helper("Test", &fields, &shutdown);
-    assert!(matches!(result, Err(CommandError::IncompleteOutput)));
+    assert!(
+        matches!(result, Err(CommandError::IncompleteFormOutput)),
+        "unexpected form helper result: {result:?}"
+    );
     assert!(
         started.elapsed() < Duration::from_secs(2),
-        "malformed form output waited on an inherited stdout pipe"
+        "form helper waited too long for a detached stdout holder"
     );
 }
 
@@ -5468,6 +5489,9 @@ fn form_values_outside_a_choice_are_rejected() {
     assert!(engine.enable_async_commands());
     queue_form(&mut engine);
     assert!(wait_for_completion(&mut engine).is_empty());
+    assert!(engine
+        .drain_command_failures()
+        .contains(&CommandErrorKind::InvalidFormOutput));
 }
 
 #[test]

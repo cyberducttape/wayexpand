@@ -492,6 +492,21 @@ impl Strings {
                 Language::Indonesian => "Formulir ini memerlukan identitas jendela aplikasi yang tepat, tetapi rute aktif tidak menyediakannya. Gunakan rute input-method yang didukung.".into(),
                 Language::German => "Dieses Formular benötigt eine genaue Fensteridentität, die die aktive Route nicht bereitstellt. Verwenden Sie eine unterstützte Input-Method-Route.".into(),
             },
+            (_, "form values could not render the template") => match self.lang {
+                Language::English => "The submitted form values could not render this template. Check the snippet's variables and form fields.".into(),
+                Language::Indonesian => "Nilai formulir yang dikirim tidak dapat merender templat ini. Periksa variabel dan isian formulir cuplikan.".into(),
+                Language::German => "Die übermittelten Formularwerte konnten diese Vorlage nicht rendern. Prüfen Sie Variablen und Formularfelder des Snippets.".into(),
+            },
+            (_, "form submission values are invalid or incomplete") => match self.lang {
+                Language::English => "The form submission was missing a value or contained a value that failed validation.".into(),
+                Language::Indonesian => "Formulir tidak memiliki nilai wajib atau berisi nilai yang gagal divalidasi.".into(),
+                Language::German => "Bei der Formularübermittlung fehlte ein Wert oder ein Wert hat die Prüfung nicht bestanden.".into(),
+            },
+            (_, "form helper output stream did not close") => match self.lang {
+                Language::English => "The form helper did not finish its response. Check the GUI helper process and try again.".into(),
+                Language::Indonesian => "Proses bantuan formulir tidak menyelesaikan responsnya. Periksa proses pembantu GUI lalu coba lagi.".into(),
+                Language::German => "Der Formularhelfer hat seine Antwort nicht abgeschlossen. Prüfen Sie den GUI-Hilfsprozess und versuchen Sie es erneut.".into(),
+            },
             _ => completion.to_owned(),
         }
     }
@@ -685,6 +700,21 @@ mod tests {
                 "form requires verified replacement",
                 "Cuplikan ini meminta isian formulir, tetapi rute aktif tidak dapat memverifikasi pemicu di kursor. Gunakan rute input-method dengan penggantian terverifikasi, atau hapus penanda `{{field:...}}`.",
                 "Dieses Snippet fragt Formularfelder ab, aber die aktive Route kann den Trigger am Cursor nicht verifizieren. Verwenden Sie eine Input-Method-Route mit verifizierter Ersetzung oder entfernen Sie den Marker `{{field:...}}`.",
+            ),
+            (
+                "form values could not render the template",
+                "Nilai formulir yang dikirim tidak dapat merender templat ini. Periksa variabel dan isian formulir cuplikan.",
+                "Die übermittelten Formularwerte konnten diese Vorlage nicht rendern. Prüfen Sie Variablen und Formularfelder des Snippets.",
+            ),
+            (
+                "form submission values are invalid or incomplete",
+                "Formulir tidak memiliki nilai wajib atau berisi nilai yang gagal divalidasi.",
+                "Bei der Formularübermittlung fehlte ein Wert oder ein Wert hat die Prüfung nicht bestanden.",
+            ),
+            (
+                "form helper output stream did not close",
+                "Proses bantuan formulir tidak menyelesaikan responsnya. Periksa proses pembantu GUI lalu coba lagi.",
+                "Der Formularhelfer hat seine Antwort nicht abgeschlossen. Prüfen Sie den GUI-Hilfsprozess und versuchen Sie es erneut.",
             ),
             (
                 "input arrived before output",

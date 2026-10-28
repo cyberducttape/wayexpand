@@ -129,9 +129,11 @@ pub(crate) fn record_command_failure(backend: &str, kind: wayexpand_core::Comman
         | Kind::BrokerRejected
         | Kind::NonZeroExit
         | Kind::InvalidOutput
-        | Kind::InvalidTemplate
         | Kind::OutputChannel
         | Kind::IncompleteOutput => "command execution failed before output",
+        Kind::InvalidTemplate => "form values could not render the template",
+        Kind::InvalidFormOutput => "form submission values are invalid or incomplete",
+        Kind::IncompleteFormOutput => "form helper output stream did not close",
     };
     record_blocked_expansion(backend, reason);
 }
@@ -149,7 +151,8 @@ pub(crate) fn record_preparation_failure(backend: &str, error: &wayexpand_core::
         Error::StaleInput => "input changed before expansion was prepared",
         Error::QueueFull | Error::WorkerUnavailable => "form worker unavailable",
         Error::TemplateRenderFailed => "form values could not render the template",
-        Error::IncompleteOutput => "form helper output stream did not close",
+        Error::InvalidFormOutput => "form submission values are invalid or incomplete",
+        Error::IncompleteFormOutput => "form helper output stream did not close",
         _ => "expansion could not be prepared",
     };
     record_blocked_expansion(backend, reason);
@@ -421,9 +424,9 @@ mod tests {
 
     #[test]
     fn form_render_failure_has_a_specific_content_free_reason() {
-        record_preparation_failure(
+        record_command_failure(
             "evdev+libei",
-            &wayexpand_core::CommandError::TemplateRenderFailed,
+            wayexpand_core::CommandErrorKind::InvalidTemplate,
         );
         let failures: serde_json::Value =
             serde_json::from_str(&recent_json()).expect("failures should be JSON");
@@ -440,14 +443,30 @@ mod tests {
 
     #[test]
     fn incomplete_form_output_is_not_misreported_as_a_template_error() {
-        record_preparation_failure(
+        record_command_failure(
             "evdev+libei",
-            &wayexpand_core::CommandError::IncompleteOutput,
+            wayexpand_core::CommandErrorKind::IncompleteFormOutput,
         );
         let failures: serde_json::Value =
             serde_json::from_str(&recent_json()).expect("failures should be JSON");
         assert!(failures.as_array().unwrap().iter().any(|trace| {
             trace["completion"] == "form helper output stream did not close"
+                && trace["insertion_attempted"] == false
+                && trace.get("trigger").is_none()
+                && trace.get("replacement").is_none()
+        }));
+    }
+
+    #[test]
+    fn invalid_form_values_have_a_content_free_reason() {
+        record_command_failure(
+            "evdev+libei",
+            wayexpand_core::CommandErrorKind::InvalidFormOutput,
+        );
+        let failures: serde_json::Value =
+            serde_json::from_str(&recent_json()).expect("failures should be JSON");
+        assert!(failures.as_array().unwrap().iter().any(|trace| {
+            trace["completion"] == "form submission values are invalid or incomplete"
                 && trace["insertion_attempted"] == false
                 && trace.get("trigger").is_none()
                 && trace.get("replacement").is_none()
