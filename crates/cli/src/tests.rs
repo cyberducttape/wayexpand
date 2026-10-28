@@ -14,13 +14,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
 fn live_explain_requires_matching_daemon_build_and_status_schema() {
+    let cli_commit = "tested-cli-build";
     let current = format!(
         "running\nstatus_schema={}\ndaemon_commit={}\n",
-        CONTROL_STATUS_SCHEMA,
-        crate::build_info::COMMIT
+        CONTROL_STATUS_SCHEMA, cli_commit
     );
     assert_eq!(
-        crate::commands::system::live_explain_build_gate(&current),
+        crate::commands::system::live_explain_build_gate(&current, cli_commit),
         None
     );
 
@@ -28,22 +28,36 @@ fn live_explain_requires_matching_daemon_build_and_status_schema() {
         "running\nstatus_schema={}\ndaemon_commit=older-build\n",
         CONTROL_STATUS_SCHEMA
     );
-    assert!(crate::commands::system::live_explain_build_gate(&stale)
-        .unwrap()
-        .contains("different build"));
+    assert!(
+        crate::commands::system::live_explain_build_gate(&stale, cli_commit)
+            .unwrap()
+            .contains("different build")
+    );
 
     let unknown = format!("running\nstatus_schema={}\n", CONTROL_STATUS_SCHEMA);
-    assert!(crate::commands::system::live_explain_build_gate(&unknown)
-        .unwrap()
-        .contains("cannot be verified"));
+    assert!(
+        crate::commands::system::live_explain_build_gate(&unknown, cli_commit)
+            .unwrap()
+            .contains("cannot be verified")
+    );
+
+    let source_archive = format!(
+        "running\nstatus_schema={}\ndaemon_commit=unknown\n",
+        CONTROL_STATUS_SCHEMA
+    );
+    assert!(
+        crate::commands::system::live_explain_build_gate(&source_archive, "unknown")
+            .unwrap()
+            .contains("cannot be verified")
+    );
 
     let incompatible = format!(
         "running\nstatus_schema={}\ndaemon_commit={}\n",
         CONTROL_STATUS_SCHEMA - 1,
-        crate::build_info::COMMIT
+        cli_commit
     );
     assert!(
-        crate::commands::system::live_explain_build_gate(&incompatible)
+        crate::commands::system::live_explain_build_gate(&incompatible, cli_commit)
             .unwrap()
             .contains("incompatible status protocol")
     );

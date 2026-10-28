@@ -286,7 +286,7 @@ pub(crate) fn explain_command(mut args: Args) -> Result<()> {
     let mut daemon_unreachable = None;
     if !offline && app.is_none() && config_path.is_none() {
         match control_operation(wayexpand_core::DaemonOperation::Status) {
-            Ok(status) => match live_explain_build_gate(&status) {
+            Ok(status) => match live_explain_build_gate(&status, crate::build_info::COMMIT) {
                 None => match control_operation(wayexpand_core::DaemonOperation::Explain {
                     text: text.clone(),
                     json: requested_json,
@@ -371,7 +371,10 @@ pub(crate) fn explain_command(mut args: Args) -> Result<()> {
 /// Live explanations depend on safety decisions made by the daemon. Never
 /// present an older or unidentifiable daemon's answer as authoritative: its
 /// route capabilities or form safeguards may differ from this CLI build.
-pub(crate) fn live_explain_build_gate(status_response: &str) -> Option<&'static str> {
+pub(crate) fn live_explain_build_gate(
+    status_response: &str,
+    cli_commit: &str,
+) -> Option<&'static str> {
     let status = wayexpand_core::DaemonStatus::parse(status_response);
     if status.status_schema() != Some(CONTROL_STATUS_SCHEMA) {
         return Some(
@@ -379,9 +382,11 @@ pub(crate) fn live_explain_build_gate(status_response: &str) -> Option<&'static 
         );
     }
     let daemon_commit = status.field("daemon_commit");
-    if crate::doctor::status::daemon_commit_matches(daemon_commit) {
+    if cli_commit != "unknown"
+        && daemon_commit.is_some_and(|commit| commit != "unknown" && commit == cli_commit)
+    {
         None
-    } else if crate::doctor::status::daemon_commit_unknown(daemon_commit) {
+    } else if cli_commit == "unknown" || daemon_commit.is_none_or(|commit| commit == "unknown") {
         Some(
             "the running daemon build cannot be verified; restart it before relying on live explanations",
         )
