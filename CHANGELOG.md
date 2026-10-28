@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Make the doctor-certification contract test require the overlapping-trigger
+  scenario to remain explicitly untested in the stdin-only harness.
 - Preserve a current-source private KWin smoke report with measured output
   latency and explicit untested capture, Unicode, suspend/resume, and overlap
   scenarios; it remains compatibility evidence, not production certification.
