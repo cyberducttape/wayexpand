@@ -370,8 +370,13 @@ pub fn form_fields(template: &str) -> Result<Vec<FormField>, TemplateError> {
             let field = field?;
             match fields.iter().find(|existing| existing.key == field.key) {
                 None => fields.push(field),
+                // A bare marker reuses the first definition of a named field.
+                // Packs and templates commonly declare a default at the first
+                // occurrence and interpolate that same value later without
+                // repeating the default or validation rules.
+                Some(_) if is_bare_form_field_reference(name) => {}
                 // A repeated key is one input only when all of its rules and
-                // defaults agree; otherwise the prompt would be ambiguous.
+                // explicit defaults agree; otherwise the prompt is ambiguous.
                 Some(existing) if existing != &field => {
                     return Err(TemplateError::InvalidField);
                 }
@@ -383,6 +388,13 @@ pub fn form_fields(template: &str) -> Result<Vec<FormField>, TemplateError> {
         return Err(TemplateError::InvalidField);
     }
     Ok(fields)
+}
+
+fn is_bare_form_field_reference(name: &str) -> bool {
+    ["field:", "prompt:", "datefield:"]
+        .iter()
+        .filter_map(|prefix| name.strip_prefix(prefix))
+        .any(|definition| !definition.contains('=') && !definition.contains('|'))
 }
 
 impl TemplateContext {
@@ -1408,6 +1420,33 @@ mod tests {
                 "{invalid}"
             );
         }
+    }
+
+    #[test]
+    fn bare_references_reuse_the_first_named_form_field_definition() {
+        let fields = form_fields(
+            "{{field:host=example.net|required|min=3}} {{field:host}} {{prompt:host}} {{datefield:reported=2026-10-28|required}} {{datefield:reported}}",
+        )
+        .unwrap();
+
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0].key, "field:host");
+        assert_eq!(
+            fields[0].kind,
+            FormFieldKind::Text {
+                default: "example.net".into()
+            }
+        );
+        assert!(fields[0].required);
+        assert_eq!(fields[0].min_chars, Some(3));
+        assert_eq!(fields[1].key, "date:reported");
+        assert_eq!(
+            fields[1].kind,
+            FormFieldKind::Date {
+                default: "2026-10-28".into()
+            }
+        );
+        assert!(fields[1].required);
     }
 
     #[test]

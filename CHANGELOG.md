@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Reuse the first declared form-field rules when later bare markers reference
+  the same field, restoring imports for templates that interpolate one prompt
+  value in multiple places while retaining rejection of explicit conflicts.
 - Make the doctor-certification contract test require the overlapping-trigger
   scenario to remain explicitly untested in the stdin-only harness.
 - Preserve a current-source private KWin smoke report with measured output
