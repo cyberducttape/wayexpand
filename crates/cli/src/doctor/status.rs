@@ -206,6 +206,252 @@ pub(crate) fn insertion_from_status(snapshot: &serde_json::Value) -> serde_json:
     })
 }
 
+/// Explain the five operational capabilities users most need to understand.
+/// These describe the daemon's current report and deliberately do not claim
+/// real-client certification based on protocol discovery alone.
+pub(crate) fn session_capabilities_from_status(snapshot: &serde_json::Value) -> serde_json::Value {
+    let text = |key: &str| snapshot.get(key).and_then(serde_json::Value::as_str);
+    let boolean = |key: &str| snapshot.get(key).and_then(serde_json::Value::as_bool);
+    let connected = matches!(text("state"), Some("connected" | "running"));
+    let source = text("source");
+    let backend = text("backend");
+    let source_name = source.unwrap_or("unknown source");
+    let backend_name = backend.unwrap_or("unknown backend");
+    let unavailable = !connected;
+
+    let capture = if unavailable {
+        capability(
+            "unavailable",
+            "No connected capture route is reported by the daemon.",
+            "Physical keyboard capture is not confirmed in this session.",
+            vec!["Start the user daemon with `systemctl --user start wayexpand.service`, then run `wayexpand doctor` again."],
+        )
+    } else if source == Some("stdin") {
+        capability(
+            "simulated",
+            "The active source is stdin; this does not capture physical keyboard input.",
+            "stdin is useful for tests and cannot establish desktop capture readiness.",
+            vec!["Configure a supported input source with `wayexpand setup`, then inspect the new active route."],
+        )
+    } else if source.is_none() {
+        capability(
+            "unknown",
+            "The daemon is connected but did not report its capture source.",
+            "Capture behavior cannot be attributed to a route.",
+            vec!["Check `wayexpand upgrade-status` and update the CLI and daemon together."],
+        )
+    } else {
+        let exclusive = boolean("capture_exclusive");
+        capability(
+            match exclusive {
+                Some(true) => "active-exclusive",
+                Some(false) => "active-shared",
+                None => "active-capability-unknown",
+            },
+            &format!("The daemon reports {source_name} capture connected."),
+            &format!("Exclusive capture: {}. Key state reliable: {}. Layout aware: {}.", display_bool(exclusive), display_bool(boolean("capture_reliable_key_state")), display_bool(boolean("capture_layout_aware"))),
+            vec!["Try a harmless test snippet in the application you use; this live status does not certify physical key delivery across clients."],
+        )
+    };
+
+    let insertion_mode = text("inject_insertion_mode");
+    let injection = if unavailable {
+        capability(
+            "unavailable",
+            "No connected injection route is reported by the daemon.",
+            "Text insertion cannot be confirmed in this session.",
+            vec!["Start or reconnect the daemon with `systemctl --user restart wayexpand.service`, then run `wayexpand doctor` again."],
+        )
+    } else if let Some(mode) = insertion_mode {
+        let full_unicode = boolean("inject_full_unicode");
+        let summary = if mode.contains("keysym fallback") {
+            format!("{backend_name} is inserting with {mode}; text is synthesized key by key and may be slow or limited for Unicode.")
+        } else {
+            format!("{backend_name} is inserting with {mode}.")
+        };
+        let steps = if mode.contains("keysym fallback") || full_unicode != Some(true) {
+            vec!["Check portal authorization and `wayexpand backend`; use a direct-text insertion mode when the compositor offers one.", "Confirm exact output with a harmless ASCII and Unicode test in the target application."]
+        } else {
+            vec!["Confirm exact output in the target application with a harmless short snippet; negotiated support is not a real-client certification."]
+        };
+        capability(
+            match full_unicode {
+                Some(true) => "active",
+                Some(false) => "active-limited",
+                None => "active-capability-unknown",
+            },
+            &summary,
+            &format!(
+                "Full Unicode reported: {}. Atomic replace reported: {}. Insertion mode: {mode}.",
+                display_bool(full_unicode),
+                display_bool(boolean("inject_atomic_replace"))
+            ),
+            steps,
+        )
+    } else {
+        capability(
+            "unknown",
+            "The daemon is connected but did not report its insertion mode.",
+            "The route's text-insertion behavior is unknown to this doctor version.",
+            vec!["Check `wayexpand upgrade-status` and update the CLI and daemon together."],
+        )
+    };
+
+    let tracker = boolean("window_tracker_connected");
+    let exact_identity = boolean("window_identity_exact");
+    let focus_assurance = text("focus_assurance");
+    let focus_tracking = if unavailable {
+        capability(
+            "unavailable",
+            "Focus tracking cannot be assessed without a connected daemon route.",
+            "No current focus observation is available.",
+            vec!["Reconnect the daemon, then inspect focus tracking again."],
+        )
+    } else if focus_assurance == Some("protocol") {
+        capability(
+            "protocol-bound",
+            "The active protocol binds output to the target text field.",
+            "This is field-bound protocol behavior, not a window-tracker observation.",
+            vec!["Use `wayexpand doctor --certify` for isolated route evidence and test the target client separately."],
+        )
+    } else if tracker == Some(true) && exact_identity == Some(true) {
+        capability(
+            "exact-window-tracked",
+            "A connected tracker reports an exact focused-window identity.",
+            "Window identity does not prove that the caret stayed beside the trigger.",
+            vec!["Avoid clicking or switching focus while a delayed expansion is running; verify the result in your target client."],
+        )
+    } else if tracker == Some(true) {
+        capability(
+            "partial",
+            "A tracker is connected, but exact window identity is not available.",
+            "Application or title matching alone cannot distinguish every window.",
+            vec!["Use a route that supplies exact window identity, or keep focus-tracked expansions disabled by policy."],
+        )
+    } else if tracker == Some(false) {
+        capability(
+            "unavailable",
+            "No window-focus tracker is connected for this route.",
+            "The input route may still have protocol-bound focus, but no independent window tracking is reported.",
+            vec!["On KDE, start or repair the WayExpand KWin bridge; otherwise use a protocol-bound input-method route."],
+        )
+    } else {
+        capability(
+            "unknown",
+            "The daemon did not report window-tracker state or protocol-bound focus assurance.",
+            "Focus tracking must not be inferred from a connected capture or injection route.",
+            vec!["Check `wayexpand upgrade-status` and update the CLI and daemon together."],
+        )
+    };
+
+    let sensitive = boolean("capture_sensitive_focus");
+    let password_protection = if unavailable {
+        capability(
+            "unknown",
+            "Password-field protection cannot be assessed without an active capture route.",
+            "No sensitive-focus capability report is available.",
+            vec!["Reconnect the daemon and check `capture_sensitive_focus` in `wayexpand doctor --json`."],
+        )
+    } else if sensitive == Some(true) {
+        capability(
+            "signal-available-unverified",
+            "The active input source reports sensitive-field awareness.",
+            "The signal is available, but this status alone does not prove every target client exposes password fields correctly.",
+            vec!["Treat this as an available signal, not a verified safety guarantee; check route-specific certification and never test with real credentials."],
+        )
+    } else if sensitive == Some(false) {
+        capability(
+            "unavailable",
+            "The active input source cannot identify password or sensitive fields.",
+            "Automatic expansion may observe and act on keystrokes in credential fields on this route.",
+            vec!["Switch to input-method-v2 or an IBus route with sensitive-field signaling; otherwise disable global evdev capture when this risk is unacceptable."],
+        )
+    } else {
+        capability(
+            "unknown",
+            "The daemon did not report sensitive-field awareness.",
+            "Do not assume that password fields are protected.",
+            vec!["Update CLI and daemon together, then inspect the active source's sensitive-focus capability."],
+        )
+    };
+
+    let replacement = insertion_from_status(snapshot);
+    let assurance = replacement["assurance"].as_str();
+    let replacement_assurance = match assurance {
+        Some("verified") => capability(
+            "verified-protocol",
+            replacement["explanation"].as_str().unwrap_or("Target text is verified by the active protocol."),
+            "The protocol-level guarantee does not replace compositor and client certification.",
+            vec!["Run a harmless replacement in each supported target application and review compositor certification evidence."],
+        ),
+        Some("focus-tracked-best-effort") => capability(
+            "best-effort",
+            replacement["explanation"].as_str().unwrap_or("Focus is tracked, but target text is not verified."),
+            "The route cannot prove that the characters being erased still equal the trigger.",
+            vec!["Use a verified or atomic route for higher assurance; otherwise enable only after accepting best-effort replacement."],
+        ),
+        Some("unverified") | Some("compatibility") => capability(
+            "unverified",
+            replacement["explanation"].as_str().unwrap_or("Replacement is not verified."),
+            "The route cannot verify target text before erasing it.",
+            vec!["Prefer a verified/atomic route; avoid enabling unverified replacement for important or destructive text."],
+        ),
+        Some("blocked") => capability(
+            "blocked",
+            replacement["explanation"].as_str().unwrap_or("Typed replacement is blocked by the current safety policy."),
+            "No trigger text is erased when the route refuses an expansion.",
+            vec!["Run `wayexpand setup` to select a safer route, or explicitly change compatibility policy only if best-effort behavior is acceptable."],
+        ),
+        Some("unavailable") => capability(
+            "unavailable",
+            "No injection route is currently connected.",
+            "Replacement cannot run until output reconnects.",
+            vec!["Restart the user daemon and inspect `wayexpand backend` for the failed route."],
+        ),
+        _ => capability(
+            "unknown",
+            "Replacement assurance was not reported by the daemon.",
+            "Do not infer atomicity from backend availability.",
+            vec!["Update the CLI and daemon together, then inspect `wayexpand doctor --json`."],
+        ),
+    };
+
+    serde_json::json!({
+        "session_state": text("state"),
+        "capture_source": source,
+        "injection_backend": backend,
+        "end_to_end_certified": false,
+        "certification_note": "Live capabilities are session status, not proof from an end-to-end test in each application.",
+        "capture": capture,
+        "injection": injection,
+        "focus_tracking": focus_tracking,
+        "password_field_protection": password_protection,
+        "replacement_assurance": replacement_assurance,
+    })
+}
+
+fn capability(
+    status: &str,
+    summary: &str,
+    details: &str,
+    next_steps: Vec<&str>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "status": status,
+        "summary": summary,
+        "details": details,
+        "next_steps": next_steps,
+    })
+}
+
+fn display_bool(value: Option<bool>) -> &'static str {
+    match value {
+        Some(true) => "yes",
+        Some(false) => "no",
+        None => "not reported",
+    }
+}
+
 pub(crate) fn runtime_route_summary(snapshot: &serde_json::Value) -> serde_json::Value {
     let text = |key: &str| snapshot.get(key).and_then(serde_json::Value::as_str);
     let number = |key: &str| snapshot.get(key).and_then(serde_json::Value::as_u64);
@@ -291,9 +537,11 @@ pub(crate) fn print_output_health_diagnostics() -> bool {
         .ok()
         .and_then(|response| status_as_json(&response).ok())
     else {
+        print_session_capabilities(&serde_json::Value::Null);
         return true;
     };
     let route = runtime_route_summary(&snapshot);
+    print_session_capabilities(&snapshot);
     if let (Some(source), Some(backend)) = (
         route["capture_source"].as_str(),
         route["injection_backend"].as_str(),
@@ -371,6 +619,33 @@ pub(crate) fn print_output_health_diagnostics() -> bool {
         return false;
     }
     insertion_ok && matches!(daemon_status, "current" | "unverified")
+}
+
+fn print_session_capabilities(snapshot: &serde_json::Value) {
+    let report = session_capabilities_from_status(snapshot);
+    println!("Current-session capabilities (live status, not end-to-end certification):");
+    for (key, label) in [
+        ("capture", "Capture"),
+        ("injection", "Injection"),
+        ("focus_tracking", "Focus tracking"),
+        ("password_field_protection", "Password-field protection"),
+        ("replacement_assurance", "Replacement assurance"),
+    ] {
+        let check = &report[key];
+        println!(
+            "  {label}: {} — {}",
+            check["status"].as_str().unwrap_or("unknown"),
+            check["summary"].as_str().unwrap_or("No details reported")
+        );
+        if let Some(details) = check["details"].as_str() {
+            println!("    {details}");
+        }
+        if let Some(steps) = check["next_steps"].as_array() {
+            for step in steps.iter().filter_map(serde_json::Value::as_str) {
+                println!("    Next: {step}");
+            }
+        }
+    }
 }
 
 fn print_latency_profiles(profiles: &serde_json::Value) {

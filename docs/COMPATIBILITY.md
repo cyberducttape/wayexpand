@@ -307,6 +307,16 @@ Diagnostic output suitable for health checks and monitoring systems.
     "configured": true,
     "exists": true
   },
+  "daemon": {
+    "session_capabilities": {
+      "end_to_end_certified": false,
+      "capture": { "status": "active-shared", "summary": "...", "details": "...", "next_steps": ["..."] },
+      "injection": { "status": "active", "summary": "...", "details": "...", "next_steps": ["..."] },
+      "focus_tracking": { "status": "exact-window-tracked", "summary": "...", "details": "...", "next_steps": ["..."] },
+      "password_field_protection": { "status": "unavailable", "summary": "...", "details": "...", "next_steps": ["..."] },
+      "replacement_assurance": { "status": "best-effort", "summary": "...", "details": "...", "next_steps": ["..."] }
+    }
+  },
   "production_readiness": {
     "status": "limited",
     "certified": false,
@@ -411,6 +421,7 @@ Diagnostic output suitable for health checks and monitoring systems.
 - `control_socket.exists` (bool): Socket file exists on filesystem
 - `control_socket.valid` (bool): Existing path is a user-owned, non-group/world-accessible Unix socket
 - `daemon.insertion` (object): Insertion assurance from the daemon status: `assurance`, `compatibility_mode`, `focus`, `refused_total`, `last_refusal` (null when none), and `explanation` (a plain-language description of the guarantee). A `blocked` route makes `healthy` false and adds a `production_readiness` blocker. Added with status schema 8.
+- `daemon.session_capabilities` (object): Current daemon-reported status for `capture`, `injection`, `focus_tracking`, `password_field_protection`, and `replacement_assurance`. Each check has a `status`, `summary`, `details`, and actionable `next_steps`. Capture/injection report live route state; focus and password-field reporting distinguish absent support from unavailable/unknown data. `end_to_end_certified` remains false because live protocol capabilities are not real-client certification. The report is also present when the daemon is unavailable, with checks marked unavailable or unknown.
 - `daemon.output` (object): Output-route health from the daemon status: `health`, `uncertain_transactions_total`, `retiring_workers`, `stalled_ms`, and `recovery` (restart guidance naming the running unit when `health` is `stalled`, otherwise null). A stalled route makes `healthy` false and adds a `production_readiness` blocker.
 - `production_readiness` (object): Derived safety summary for the connected daemon route. `status` is `unavailable`, `limited`, or `uncertified`; `certified` remains false until reviewed compositor/client evidence is collected. `blockers` names each missing guarantee rather than inferring readiness from daemon connectivity.
 - `production_readiness.capabilities` (object): Negotiated live-route guarantees for exclusive keyboard capture, sensitive-field detection, external IME/preedit awareness, local dead-key/Compose tracking, key pass-through, exact window identity, atomic replacement, and full Unicode injection. Exclusive capture and atomic replacement are separate guarantees. External IME/preedit awareness is separate and is not implied by local composition tracking.

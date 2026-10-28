@@ -21,6 +21,13 @@ Use the backend combination that `doctor` prints as usable. Backend support is
 compositor-dependent; an `Implemented` line means the code exists, not that
 your current session has advertised the protocol.
 
+When the daemon is running, `doctor` reports the active session's capture,
+injection, focus tracking, password-field signal, and replacement assurance
+separately. Each entry includes what the daemon observed and a suggested next
+step. These are live capability reports, not proof that every application
+handles real typing correctly; `doctor --certify` is an isolated smoke test
+and does not certify your active desktop session.
+
 Two feature limits apply across current backends: active IME/preedit, dead-key,
 and Compose composition is not handled (triggers are matched against committed
 text only), and app-filtered snippets currently have a working window tracker

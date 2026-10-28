@@ -298,6 +298,58 @@ fn doctor_explains_verified_compatibility_and_blocked_insertion() {
 }
 
 #[test]
+fn doctor_reports_current_session_capabilities_separately_with_recovery_steps() {
+    let report = crate::doctor::status::session_capabilities_from_status(&serde_json::json!({
+        "state": "connected",
+        "source": "evdev",
+        "backend": "libei",
+        "capture_exclusive": false,
+        "capture_reliable_key_state": true,
+        "capture_layout_aware": false,
+        "capture_sensitive_focus": false,
+        "window_tracker_connected": true,
+        "window_identity_exact": true,
+        "focus_assurance": "tracker",
+        "inject_insertion_mode": "ei_text",
+        "inject_full_unicode": true,
+        "inject_atomic_replace": false,
+        "replacement_assurance": "focus-tracked-best-effort",
+        "compatibility_mode": "tracked-focus",
+    }));
+
+    assert_eq!(report["capture_source"], "evdev");
+    assert_eq!(report["injection_backend"], "libei");
+    assert_eq!(report["capture"]["status"], "active-shared");
+    assert_eq!(report["injection"]["status"], "active");
+    assert_eq!(report["focus_tracking"]["status"], "exact-window-tracked");
+    assert_eq!(report["password_field_protection"]["status"], "unavailable");
+    assert_eq!(report["replacement_assurance"]["status"], "best-effort");
+    assert_eq!(report["end_to_end_certified"], false);
+    for key in [
+        "capture",
+        "injection",
+        "focus_tracking",
+        "password_field_protection",
+        "replacement_assurance",
+    ] {
+        assert!(
+            !report[key]["next_steps"].as_array().unwrap().is_empty(),
+            "{key}"
+        );
+    }
+}
+
+#[test]
+fn doctor_does_not_claim_capabilities_without_a_live_route() {
+    let report = crate::doctor::status::session_capabilities_from_status(&serde_json::Value::Null);
+    assert_eq!(report["capture"]["status"], "unavailable");
+    assert_eq!(report["injection"]["status"], "unavailable");
+    assert_eq!(report["focus_tracking"]["status"], "unavailable");
+    assert_eq!(report["password_field_protection"]["status"], "unknown");
+    assert_eq!(report["replacement_assurance"]["status"], "unknown");
+}
+
+#[test]
 fn doctor_reports_stalled_output_with_route_specific_recovery() {
     let stalled = crate::doctor::status::output_health_from_status(&serde_json::json!({
         "source": "evdev",

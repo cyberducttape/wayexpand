@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Extend `wayexpand doctor` with a current-session breakdown for capture,
+  injection, focus tracking, password-field signaling, and replacement
+  assurance. Each capability explains its evidence and gives recovery steps;
+  live route status remains distinct from end-to-end certification.
 - Add validated snippet forms with required and length-constrained text fields,
   configurable dropdown defaults, and a calendar date picker. Include a
   documented `;incident` response template and apply the same validation in

@@ -10,8 +10,8 @@ use super::policy::{
     load_policy, print_capabilities_diagnostics_json, print_policy_diagnostics_json,
 };
 use super::status::{
-    insertion_from_status, output_health_from_status, read_daemon_status, status_as_json,
-    status_schema_compatible,
+    insertion_from_status, output_health_from_status, read_daemon_status,
+    session_capabilities_from_status, status_as_json, status_schema_compatible,
 };
 use crate::*;
 
@@ -146,6 +146,7 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
                     "backend": snapshot.get("backend"),
                     "output": output_health_from_status(&snapshot),
                     "insertion": insertion_from_status(&snapshot),
+                    "session_capabilities": session_capabilities_from_status(&snapshot),
                     "capabilities": {
                         "exclusive_capture": snapshot.get("capture_exclusive"),
                         "sensitive_field_detection": snapshot.get("capture_sensitive_focus"),
@@ -170,6 +171,7 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
                 "compatible": false,
                 "commit_matches": false,
                 "error": error.to_string(),
+                "session_capabilities": session_capabilities_from_status(&serde_json::Value::Null),
             }),
         },
         Err(error) => serde_json::json!({
@@ -177,6 +179,7 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
             "compatible": false,
             "commit_matches": false,
             "error": error.to_string(),
+            "session_capabilities": session_capabilities_from_status(&serde_json::Value::Null),
         }),
     };
     let production_readiness = production_readiness(&daemon);
