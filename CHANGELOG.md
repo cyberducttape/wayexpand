@@ -16,6 +16,9 @@ All notable changes to WayExpand are documented here.
 - Preserve a current-source private KWin 6.6.6 smoke report for commit
   `e91a694c417a`: 12 output/focus/reload checks passed; capture was simulated,
   and production compositor certification remains incomplete.
+- Record a clean-source private KWin 6.6.6 smoke report for commit
+  `9cf097e42fa2`: 11 insertion/focus/reload/restart checks passed; Unicode and
+  physical capture were not tested, and production certification remains incomplete.
 - Require `wayexpand explain` to verify the running daemon's status schema and
   build commit before trusting live matcher results. When the daemon is stale,
   explain falls back to a clearly marked local result, preventing older route

@@ -65,13 +65,13 @@ intentionally out of scope and is reported as `unsupported-by-design`; a
 certification never implies otherwise.
 
 The latest current-source smoke report at
-[`docs/evidence/doctor-certify-e91a694c417a.json`](evidence/doctor-certify-e91a694c417a.json)
-tested commit `e91a694c417a` on KWin 6.6.6 in a private headless session.
-Twelve output, focus, reload, restart, and refusal checks passed; Unicode,
-physical keyboard capture, and suspend/resume were not tested. Twenty libei
-keysym-fallback transactions per size measured injector p50/p95/p99 of
-12.539/12.858/12.862 ms (small), 782.849/785.706/787.285 ms (medium), and
-3,143.046/3,148.539/3,148.735 ms (large). Capture was simulated through stdin.
+[`docs/evidence/doctor-certify-2026-10-28.json`](evidence/doctor-certify-2026-10-28.json)
+tested commit `9cf097e42fa2` on KWin 6.6.6 in a private headless session. Eleven
+insertion, focus, reload, restart, refusal, and build-identity checks passed;
+Unicode, physical keyboard capture, and suspend/resume were not tested. Twenty
+libei keysym-fallback transactions per size measured injector p50/p95/p99 of
+12.553/12.599/12.670 ms (small), 785.219/786.590/788.285 ms (medium), and
+3,151.191/3,157.320/3,158.108 ms (large). Capture was simulated through stdin.
 This is partial compatibility evidence, not production compositor
 certification.
 
