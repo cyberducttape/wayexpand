@@ -79,6 +79,11 @@ require_exclusive_capture = false
 # Require the input source to report password/sensitive-field focus
 require_sensitive_focus = false
 
+# Require an input source that can observe active external IME/preedit state.
+# This is separate from local dead-key and Compose tracking. No currently
+# shipped source satisfies this policy requirement.
+require_composition_aware = false
+
 # Refuse explicit snippet inserts unless they name the exact focused window
 # (`wayexpand insert --verified` or the quick-insert picker). Plain
 # `wayexpand insert` is best-effort: it targets whatever is focused when the
@@ -113,7 +118,10 @@ When `safe_mode = true`:
   before capture begins when the selected source/backend cannot provide the
   guarantee. `require_exclusive_capture` independently rejects evdev; libei
   and wlroots output are `best-effort`, IBus is `verified`, and input-method-v2
-  is `atomic`.
+  is `atomic`. `require_composition_aware` also rejects startup unless the
+  input source reports active external IME/preedit visibility; local
+  dead-key/Compose tracking does not satisfy it. No shipped source currently
+  meets this requirement.
 - Blocks: commands, hotkeys, title matching, oversized replacements, disallowed backends, unverified inserts (with `require_verified_insert_target`)
 - Can require absolute command paths so `program = "git"` is rejected
 
@@ -174,6 +182,9 @@ disable_title_matching = false
 require_atomic_replace = true
 require_exclusive_capture = true
 require_sensitive_focus = true
+# Uncomment only when the selected route reports external IME/preedit state.
+# No currently shipped input source satisfies this requirement.
+# require_composition_aware = true
 require_verified_insert_target = true
 max_replacement_size = 1024
 allowed_backends = ["input-method-v2"]

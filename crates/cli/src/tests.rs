@@ -6,8 +6,8 @@ use crate::doctor::certification::certification_selection_status;
 use crate::doctor::files::existing_control_socket_is_healthy;
 use crate::doctor::json::{production_readiness, protocol_probe_report};
 use crate::doctor::policy::{
-    absolute_command_policy_diagnostic, exclusive_capture_policy_diagnostic,
-    print_policy_diagnostics_json,
+    absolute_command_policy_diagnostic, composition_policy_diagnostic,
+    exclusive_capture_policy_diagnostic, print_policy_diagnostics_json,
 };
 use crate::doctor::status::{runtime_capabilities_from_status, status_schema_compatible};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -139,6 +139,31 @@ fn doctor_policy_json_reports_exclusive_capture_requirement() {
             ..policy
         }),
         Some("Require exclusive keyboard capture: audit only")
+    );
+}
+
+#[test]
+fn doctor_policy_reports_external_composition_requirement() {
+    let policy = OrganizationPolicy {
+        safe_mode: true,
+        require_composition_aware: true,
+        ..OrganizationPolicy::default()
+    };
+    let diagnostics = print_policy_diagnostics_json(&Ok(policy.clone()));
+    assert_eq!(
+        diagnostics["policy"]["require_composition_aware"],
+        serde_json::Value::Bool(true)
+    );
+    assert_eq!(
+        composition_policy_diagnostic(&policy),
+        Some("Require external IME/preedit awareness: enforced")
+    );
+    assert_eq!(
+        composition_policy_diagnostic(&OrganizationPolicy {
+            safe_mode: false,
+            ..policy
+        }),
+        Some("Require external IME/preedit awareness: audit only")
     );
 }
 

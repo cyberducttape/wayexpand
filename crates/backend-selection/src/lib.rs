@@ -740,6 +740,29 @@ mod tests {
     }
 
     #[test]
+    fn composition_aware_policy_blocks_all_current_setup_routes() {
+        let policy = wayexpand_core::OrganizationPolicy {
+            safe_mode: true,
+            require_composition_aware: true,
+            ..wayexpand_core::OrganizationPolicy::default()
+        };
+        for backend in ["input-method", "ibus", "evdev"] {
+            assert!(
+                !setup_backend_allowed(&policy, backend),
+                "{backend} does not currently report active external IME/preedit state"
+            );
+        }
+
+        let audit = wayexpand_core::OrganizationPolicy {
+            safe_mode: false,
+            ..policy
+        };
+        for backend in ["input-method", "ibus", "evdev"] {
+            assert!(setup_backend_allowed(&audit, backend));
+        }
+    }
+
+    #[test]
     fn atomic_capture_policy_also_filters_best_effort_setup_routes() {
         let policy = wayexpand_core::OrganizationPolicy {
             safe_mode: true,

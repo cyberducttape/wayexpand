@@ -30,6 +30,16 @@ pub(crate) fn exclusive_capture_policy_diagnostic(
         })
 }
 
+pub(crate) fn composition_policy_diagnostic(policy: &OrganizationPolicy) -> Option<&'static str> {
+    policy
+        .require_composition_aware
+        .then_some(if policy.safe_mode {
+            "Require external IME/preedit awareness: enforced"
+        } else {
+            "Require external IME/preedit awareness: audit only"
+        })
+}
+
 pub(crate) fn print_policy_diagnostics_json(
     policy_result: &Result<OrganizationPolicy>,
 ) -> serde_json::Value {
@@ -46,6 +56,7 @@ pub(crate) fn print_policy_diagnostics_json(
                     .minimum_replacement_guarantee
                     .map(wayexpand_core::ReplacementGuarantee::as_str),
                 "require_sensitive_focus": policy.require_sensitive_focus,
+                "require_composition_aware": policy.require_composition_aware,
                 "require_verified_insert_target": policy.require_verified_insert_target,
                 "disable_hotkeys": policy.disable_hotkeys,
                 "disable_title_matching": policy.disable_title_matching,
@@ -151,6 +162,9 @@ pub(crate) fn print_policy_diagnostics() -> bool {
                     println!("  {diagnostic}");
                 }
                 if let Some(diagnostic) = exclusive_capture_policy_diagnostic(&policy) {
+                    println!("  {diagnostic}");
+                }
+                if let Some(diagnostic) = composition_policy_diagnostic(&policy) {
                     println!("  {diagnostic}");
                 }
                 if policy.disable_hotkeys {

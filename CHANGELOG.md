@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add an organization-policy requirement for active external IME/preedit
+  awareness, reported by diagnostics and enforced at backend startup when safe
+  mode is enabled. Local dead-key/Compose support does not satisfy it; no
+  currently shipped input source claims this capability.
 - Preserve a clean-source private KWin 6.6.6 smoke report for commit
   `0ba13e6fd4c2`: eleven output, focus, reload, restart, and refusal checks
   passed. Capture was simulated; overlap, Unicode insertion, suspend/resume,

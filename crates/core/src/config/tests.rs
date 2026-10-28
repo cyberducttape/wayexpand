@@ -752,6 +752,56 @@ fn exclusive_capture_requirement_is_independent_and_enforced_only_in_safe_mode()
 }
 
 #[test]
+fn external_composition_requirement_is_distinct_from_local_compose_and_audit_only() {
+    let policy = OrganizationPolicy {
+        safe_mode: true,
+        require_composition_aware: true,
+        ..OrganizationPolicy::default()
+    };
+    assert_eq!(
+        policy
+            .capability_violation_for_source(
+                crate::InjectorCapabilities::default(),
+                crate::InputSourceCapabilities::INPUT_METHOD_V2,
+            )
+            .as_deref(),
+        Some("selected input source cannot observe active external IME/preedit composition")
+    );
+    assert!(policy
+        .capability_violation_for_source(
+            crate::InjectorCapabilities::default(),
+            crate::InputSourceCapabilities {
+                composition_aware: true,
+                local_compose_aware: false,
+                ..crate::InputSourceCapabilities::default()
+            }
+        )
+        .is_none());
+
+    let audit = OrganizationPolicy {
+        safe_mode: false,
+        ..policy
+    };
+    assert!(audit.is_active());
+    assert!(
+        !audit
+            .effective_enforcement_policy()
+            .require_composition_aware
+    );
+    assert!(audit
+        .effective_enforcement_policy()
+        .capability_violation_for_source(
+            crate::InjectorCapabilities::default(),
+            crate::InputSourceCapabilities::default(),
+        )
+        .is_none());
+
+    let parsed: OrganizationPolicy =
+        toml::from_str("safe_mode = true\nrequire_composition_aware = true\n").unwrap();
+    assert!(parsed.require_composition_aware);
+}
+
+#[test]
 fn minimum_replacement_guarantee_is_ordered_and_enforced_in_safe_mode() {
     use crate::ReplacementGuarantee::*;
     assert!(Unsupported < BestEffort && BestEffort < VerifiedSurroundingText);
@@ -832,6 +882,7 @@ fn audit_policy_has_no_effective_enforcement_values() {
     assert!(!effective.disable_title_matching);
     assert!(!effective.require_atomic_replace);
     assert!(!effective.require_sensitive_focus);
+    assert!(!effective.require_composition_aware);
     assert_eq!(effective.max_replacement_size, 0);
     assert!(effective.allowed_backends.is_empty());
     assert!(effective.allowed_packs.is_empty());

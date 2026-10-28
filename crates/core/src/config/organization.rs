@@ -59,6 +59,11 @@ pub struct OrganizationPolicy {
     /// focus (password, PIN, or equivalent).
     pub require_sensitive_focus: bool,
 
+    /// Refuse startup unless the selected input source can observe active
+    /// external IME/preedit composition. Local dead-key and Compose tracking
+    /// does not satisfy this requirement.
+    pub require_composition_aware: bool,
+
     /// Refuse explicit snippet inserts (`wayexpand insert`, the quick-insert
     /// picker) unless the request names the exact focused window it was
     /// prepared for and that window is still focused. Unverified best-effort
@@ -110,6 +115,7 @@ impl Default for OrganizationPolicy {
             require_exclusive_capture: false,
             minimum_replacement_guarantee: None,
             require_sensitive_focus: false,
+            require_composition_aware: false,
             require_verified_insert_target: false,
             max_replacement_size: 0,
             allowed_backends: Vec::new(),
@@ -144,6 +150,7 @@ impl OrganizationPolicy {
         effective.require_exclusive_capture = false;
         effective.minimum_replacement_guarantee = None;
         effective.require_sensitive_focus = false;
+        effective.require_composition_aware = false;
         effective.require_verified_insert_target = false;
         effective.max_replacement_size = 0;
         effective.allowed_backends.clear();
@@ -166,6 +173,7 @@ impl OrganizationPolicy {
             || self.require_exclusive_capture
             || self.minimum_replacement_guarantee.is_some()
             || self.require_sensitive_focus
+            || self.require_composition_aware
             || self.require_verified_insert_target
             || self.max_replacement_size > 0
             || !self.allowed_backends.is_empty()
@@ -225,6 +233,12 @@ impl OrganizationPolicy {
         if self.require_sensitive_focus && !source.sensitive_focus {
             return Some(
                 "selected input source cannot report password or sensitive-field focus".into(),
+            );
+        }
+        if self.require_composition_aware && !source.composition_aware {
+            return Some(
+                "selected input source cannot observe active external IME/preedit composition"
+                    .into(),
             );
         }
         None

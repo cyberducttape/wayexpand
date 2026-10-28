@@ -376,6 +376,7 @@ Diagnostic output suitable for health checks and monitoring systems.
       "require_exclusive_capture": false,
       "minimum_replacement_guarantee": null,
       "require_sensitive_focus": false,
+      "require_composition_aware": false,
       "is_active": false
     }
   },
@@ -452,6 +453,7 @@ Diagnostic output suitable for health checks and monitoring systems.
 - `policy.policy.require_exclusive_capture` (bool): Whether startup requires the input source to intercept physical keys before they reach the application; independent of atomic replacement and enforced only when `safe_mode` is true
 - `policy.policy.minimum_replacement_guarantee` (string|null): Minimum replacement guarantee the selected injector must provide: `"best-effort"`, `"verified"`, or `"atomic"`; null when unset; enforced only when `safe_mode` is true
 - `policy.policy.require_sensitive_focus` (bool): Whether startup requires an input source that reports password/sensitive-field focus; enforced only when `safe_mode` is true
+- `policy.policy.require_composition_aware` (bool): Whether startup requires an input source that reports active external IME/preedit composition; local dead-key/Compose tracking does not satisfy it, and enforcement is active only when `safe_mode` is true
 - `policy.policy.require_verified_insert_target` (bool): Whether explicit inserts must name the exact focused window (`insert --verified` or the picker); enforced only when `safe_mode` is true
 - `backends` (array): Available backends
   - `kind` (string): One of "input-method-v2", "evdev", "libei", "wlroots-virtual-keyboard", "uinput", "clipboard", "window-tracker"
