@@ -2,46 +2,78 @@
 //!
 //! The capture sources wait in `poll(2)`. Work that arrives from other
 //! threads (finished commands, control-socket requests, shutdown signals)
-//! signals this eventfd, which the sources include in their poll set, so the
-//! loop runs as soon as there is something to do instead of polling for it.
+//! signals this eventfd (or a nonblocking pipe where eventfd is unavailable),
+//! which the sources include in their poll set, so the loop runs as soon as
+//! there is something to do instead of polling for it.
 
 use std::{
     os::fd::OwnedFd,
     sync::{Arc, OnceLock},
 };
 
-/// A cloneable handle to a non-blocking eventfd.
+/// A cloneable handle to a non-blocking reactor wake descriptor.
 #[derive(Clone)]
 pub struct Waker {
-    fd: Arc<OwnedFd>,
+    read_fd: Arc<OwnedFd>,
+    /// Present only when the fallback pipe is used. Eventfd is readable and
+    /// writable through one descriptor; a pipe has separate ends.
+    write_fd: Option<Arc<OwnedFd>>,
 }
 
 impl Waker {
     pub fn new() -> std::io::Result<Self> {
-        let fd = rustix::event::eventfd(
-            0,
-            rustix::event::EventfdFlags::CLOEXEC | rustix::event::EventfdFlags::NONBLOCK,
-        )?;
-        Ok(Self { fd: Arc::new(fd) })
+        Self::new_with_eventfd(|| {
+            rustix::event::eventfd(
+                0,
+                rustix::event::EventfdFlags::CLOEXEC | rustix::event::EventfdFlags::NONBLOCK,
+            )
+            .map_err(std::io::Error::from)
+        })
+    }
+
+    fn new_with_eventfd(
+        eventfd: impl FnOnce() -> std::io::Result<OwnedFd>,
+    ) -> std::io::Result<Self> {
+        match eventfd() {
+            Ok(fd) => Ok(Self {
+                read_fd: Arc::new(fd),
+                write_fd: None,
+            }),
+            Err(error) if error.raw_os_error() == Some(rustix::io::Errno::NOSYS.raw_os_error()) => {
+                let (read_fd, write_fd) = rustix::pipe::pipe_with(
+                    rustix::pipe::PipeFlags::CLOEXEC | rustix::pipe::PipeFlags::NONBLOCK,
+                )?;
+                tracing::warn!(
+                    event = "reactor_waker_pipe_fallback",
+                    "eventfd is unavailable; using a nonblocking pipe for reactor wakeups"
+                );
+                Ok(Self {
+                    read_fd: Arc::new(read_fd),
+                    write_fd: Some(Arc::new(write_fd)),
+                })
+            }
+            Err(error) => Err(error),
+        }
     }
 
     /// Wake the reactor. Never blocks; a counter already at its limit means a
     /// wakeup is pending anyway.
     pub fn wake(&self) {
-        let _ = rustix::io::write(&*self.fd, &1_u64.to_ne_bytes());
+        let fd = self.write_fd.as_ref().unwrap_or(&self.read_fd);
+        let _ = rustix::io::write(&**fd, &1_u64.to_ne_bytes());
     }
 
     /// The descriptor capture sources add to their poll set. They drain it
     /// when it becomes readable.
     pub fn fd(&self) -> Arc<OwnedFd> {
-        Arc::clone(&self.fd)
+        Arc::clone(&self.read_fd)
     }
 
     /// Wait up to `timeout` for a wakeup and consume it. Used while the
     /// reactor is not polling a capture source.
     pub fn wait(&self, timeout: std::time::Duration) {
         let mut fds = [rustix::event::PollFd::new(
-            &*self.fd,
+            &*self.read_fd,
             rustix::event::PollFlags::IN,
         )];
         let timeout = rustix::event::Timespec {
@@ -50,7 +82,7 @@ impl Waker {
         };
         if rustix::event::poll(&mut fds, Some(&timeout)).is_ok_and(|ready| ready > 0) {
             let mut buffer = [0_u8; 8];
-            let _ = rustix::io::read(&*self.fd, &mut buffer);
+            let _ = rustix::io::read(&*self.read_fd, &mut buffer);
         }
     }
 }
@@ -103,5 +135,32 @@ mod tests {
         let mut buffer = [0_u8; 8];
         rustix::io::read(&*fd, &mut buffer).unwrap();
         assert!(!readable(&fd));
+    }
+
+    #[test]
+    fn unsupported_eventfd_uses_a_nonblocking_pipe() {
+        let waker = Waker::new_with_eventfd(|| Err(std::io::Error::from(rustix::io::Errno::NOSYS)))
+            .unwrap();
+        let fd = waker.fd();
+        assert!(!readable(&fd));
+        waker.wake();
+        assert!(readable(&fd));
+
+        let mut buffer = [0_u8; 8];
+        rustix::io::read(&*fd, &mut buffer).unwrap();
+        assert!(!readable(&fd));
+    }
+
+    #[test]
+    fn eventfd_errors_other_than_enosys_are_preserved() {
+        let error =
+            match Waker::new_with_eventfd(|| Err(std::io::Error::from(rustix::io::Errno::PERM))) {
+                Ok(_) => panic!("permission errors must not use the unsupported-syscall fallback"),
+                Err(error) => error,
+            };
+        assert_eq!(
+            error.raw_os_error(),
+            Some(rustix::io::Errno::PERM.raw_os_error())
+        );
     }
 }

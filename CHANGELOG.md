@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Keep the daemon reactor startable when a restricted kernel or sandbox
+  reports `ENOSYS` for `eventfd`: fall back to a nonblocking close-on-exec pipe
+  with the same wakeup contract, and preserve other `eventfd` failures.
 - Add an organization-policy requirement for active external IME/preedit
   awareness, reported by diagnostics and enforced at backend startup when safe
   mode is enabled. Local dead-key/Compose support does not satisfy it; no
