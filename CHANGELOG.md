@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Saturate usage-report daily totals so large but valid persisted counters
+  cannot panic debug builds or wrap in release builds.
 - Preserve the current-source `wayexpand doctor --certify --json` report for
   `ebd561df25a7`: 12 checks passed and three were not tested. KWin 6.6.6
   keysym-fallback injection measured p50/p95/p99 latency of 8.538/8.587/8.629

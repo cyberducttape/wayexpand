@@ -5136,6 +5136,22 @@ fn usage_report_counts_savings_unused_snippets_and_risky_triggers() {
 }
 
 #[test]
+fn usage_report_saturates_daily_expansion_totals() {
+    let config =
+        Config::parse("[[expansion]]\ntrigger = \":sig\"\nreplacement = \"Best regards\"\n")
+            .unwrap();
+    let mut stats = crate::UsageStats::default();
+    // A valid statistics file may contain saturated counters. Reporting must
+    // remain safe even when several recent daily buckets exceed u64 together.
+    stats.daily.insert("2023-11-13".into(), u64::MAX);
+    stats.daily.insert("2023-11-14".into(), 1);
+
+    let report = stats.report(&config, 1_700_000_000, 30);
+
+    assert_eq!(report.expansions, u64::MAX);
+}
+
+#[test]
 fn usage_stats_round_trip_through_a_private_file() {
     use std::os::unix::fs::PermissionsExt;
     let directory = std::env::temp_dir().join(format!("wayexpand-usage-{}", std::process::id()));

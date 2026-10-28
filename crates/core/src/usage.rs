@@ -325,7 +325,7 @@ impl UsageStats {
             .iter()
             .filter(|(day, _)| day.as_str() >= since_day.as_str())
             .map(|(_, count)| *count)
-            .sum();
+            .fold(0_u64, u64::saturating_add);
         let mut top: Vec<UsageLine> = Vec::new();
         let mut unused = Vec::new();
         let mut keystrokes_avoided: u64 = 0;
