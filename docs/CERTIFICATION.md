@@ -65,14 +65,15 @@ intentionally out of scope and is reported as `unsupported-by-design`; a
 certification never implies otherwise.
 
 The latest current-source smoke report at
-[`docs/evidence/doctor-certify-cdd4584673f6.json`](evidence/doctor-certify-cdd4584673f6.json)
-tested commit `cdd4584673f6` on KWin 6.6.6 in a private headless session.
+[`docs/evidence/doctor-certify-7a5ee6b04f77.json`](evidence/doctor-certify-7a5ee6b04f77.json)
+tested commit `7a5ee6b04f77` on KWin 6.6.6 in a private headless session.
 Eleven output, focus, reload, restart, and refusal checks passed; build identity
 matched. Unicode insertion, physical keyboard capture, suspend/resume, and the
 overlapping-trigger scenario were not tested. Twenty libei keysym-fallback
-transactions per size measured injector p50/p95/p99 of 12.556/12.616/12.669 ms
-(small), 781.350/784.247/786.693 ms (medium), and
-3,135.957/3,142.797/3,144.753 ms (large). Capture was simulated through stdin.
+transactions per size measured injector p50/p95/p99 of 12.543/12.586/12.700 ms
+(small), 781.823/783.276/783.431 ms (medium), and
+3,135.387/3,138.799/3,140.194 ms (large). Capture was simulated through stdin.
+The 257-character replacement took about 3.14 seconds at p95 on this route.
 This is partial compatibility evidence, not production compositor
 certification.
 

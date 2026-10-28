@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Preserve current-source private KWin 6.6.6 smoke evidence for commit
+  `7a5ee6b04f77`: eleven output, focus, reload, restart, and refusal checks
+  passed. Capture was simulated; Unicode insertion, overlap, suspend/resume,
+  and physical capture remain untested. Record 20 latency samples per size;
+  the 257-character keysym-fallback replacement has a measured p95 of about
+  3.14 seconds. The route remains uncertified for production.
 - Keep the daemon reactor startable when a restricted kernel or sandbox
   reports `ENOSYS` for `eventfd`: fall back to a nonblocking close-on-exec pipe
   with the same wakeup contract, and preserve other `eventfd` failures.
