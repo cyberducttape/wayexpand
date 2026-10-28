@@ -154,38 +154,26 @@ pub(crate) fn preview_command(mut args: Args) -> Result<()> {
                 .as_ref()
                 .and_then(|snippet| form_triggers.iter().find(|(trigger, _)| trigger == snippet));
             if let Some((form_trigger, enabled)) = form {
-                let app_filter_blocked = explanation.checks.iter().any(|check| {
-                    check.name == "app filter" && check.status == wayexpand_core::CheckStatus::Fail
-                });
-                let matched = *enabled && !app_filter_blocked;
-                let reason = if !enabled {
-                    "snippet is disabled"
-                } else if app_filter_blocked && preview_app.is_some() {
-                    "preview application does not satisfy this snippet's app filter"
-                } else if app_filter_blocked {
-                    "snippet has an app filter; pass --preview-app APP to check it"
-                } else {
-                    "interactive forms require a verified replacement route and cannot be rendered by this preview"
-                };
+                let state = form_preview_state(&explanation, *enabled, preview_app.is_some());
                 if requested_json {
                     println!(
                         "{}",
                         serde_json::json!({
-                            "matched": matched,
+                            "matched": state.matched,
                             "trigger_recognized": true,
                             "trigger": form_trigger,
                             "form": true,
                             "previewable": false,
-                            "reason": reason,
+                            "reason": state.reason,
                         })
                     );
-                } else if matched {
+                } else if state.matched {
                     println!("trigger: {form_trigger}");
                     println!(
                         "this snippet opens an interactive form and cannot be rendered by preview"
                     );
                     println!("forms require a verified replacement route; the active route may refuse them safely");
-                } else if app_filter_blocked {
+                } else if state.app_filter_blocked {
                     println!("snippet {form_trigger} is not enabled for this application");
                 } else {
                     println!("snippet {form_trigger} is disabled");
@@ -198,6 +186,87 @@ pub(crate) fn preview_command(mut args: Args) -> Result<()> {
         }
     }
     Ok(())
+}
+
+struct FormPreviewState {
+    matched: bool,
+    app_filter_blocked: bool,
+    reason: &'static str,
+}
+
+fn form_preview_state(
+    explanation: &wayexpand_core::Explanation,
+    enabled: bool,
+    preview_app_supplied: bool,
+) -> FormPreviewState {
+    let app_filter_blocked = explanation.checks.iter().any(|check| {
+        check.name == "app filter" && check.status == wayexpand_core::CheckStatus::Fail
+    });
+    let matched = enabled && !app_filter_blocked;
+    let reason = if !enabled {
+        "snippet is disabled"
+    } else if app_filter_blocked && preview_app_supplied {
+        "preview application does not satisfy this snippet's app filter"
+    } else if app_filter_blocked {
+        "snippet has an app filter; pass --preview-app APP to check it"
+    } else {
+        "interactive forms require a verified replacement route and cannot be rendered by this preview"
+    };
+    FormPreviewState {
+        matched,
+        app_filter_blocked,
+        reason,
+    }
+}
+
+#[cfg(test)]
+mod preview_form_tests {
+    use super::*;
+
+    fn explanation(app_id: Option<&str>) -> wayexpand_core::Explanation {
+        let config = Config::parse(
+            "[[expansion]]\ntrigger = '.form'\nreplacement = '{{field:summary|required}}'\napp_filter = ['org.example.allowed']\n",
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        if let Some(app_id) = app_id {
+            engine.set_current_window(Some(wayexpand_core::WindowContext {
+                app_id: Some(app_id.to_owned()),
+                title: None,
+                instance_id: None,
+            }));
+        }
+        engine.explain(".form", "unknown")
+    }
+
+    #[test]
+    fn form_preview_respects_the_requested_application_filter() {
+        let allowed = form_preview_state(&explanation(Some("org.example.allowed")), true, true);
+        assert!(allowed.matched);
+        assert!(!allowed.app_filter_blocked);
+        assert!(allowed.reason.contains("verified replacement route"));
+
+        let denied = form_preview_state(&explanation(Some("org.example.denied")), true, true);
+        assert!(!denied.matched);
+        assert!(denied.app_filter_blocked);
+        assert!(denied.reason.contains("does not satisfy"));
+    }
+
+    #[test]
+    fn form_preview_requires_an_application_to_check_a_filter() {
+        let state = form_preview_state(&explanation(None), true, false);
+        assert!(!state.matched);
+        assert!(state.app_filter_blocked);
+        assert!(state.reason.contains("pass --preview-app APP"));
+    }
+
+    #[test]
+    fn disabled_form_remains_unmatched_even_for_an_allowed_application() {
+        let state = form_preview_state(&explanation(Some("org.example.allowed")), false, true);
+        assert!(!state.matched);
+        assert!(!state.app_filter_blocked);
+        assert_eq!(state.reason, "snippet is disabled");
+    }
 }
 
 /// One human-readable library line: state, trigger, aliases, description.
