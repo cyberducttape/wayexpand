@@ -455,6 +455,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.checkout_ref || github.ref }}
+      - name: Record tested revision
+        id: tested_revision
+        run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
         with:
           toolchain: 1.96.0
@@ -466,13 +469,13 @@ jobs:
       - name: Test isolated doctor certification report
         run: bash scripts/test-doctor-certify.sh target/debug/wayexpand
       - name: Upload headless KWin diagnostics
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: headless-kwin-diagnostics
+          name: headless-kwin-e2e-${{ steps.tested_revision.outputs.commit }}
           path: target/kwin-e2e.*/**
           if-no-files-found: ignore
-          retention-days: 3
+          retention-days: 30
 
   sway-e2e:
     name: Headless Sway Output E2E
@@ -482,6 +485,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.checkout_ref || github.ref }}
+      - name: Record tested revision
+        id: tested_revision
+        run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
         with:
           toolchain: 1.96.0
@@ -491,13 +497,13 @@ jobs:
       - name: Test production wlroots output under Sway
         run: bash scripts/test-sway-e2e.sh --keep
       - name: Upload headless Sway diagnostics
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: headless-sway-diagnostics
+          name: headless-sway-e2e-${{ steps.tested_revision.outputs.commit }}
           path: target/sway-e2e.*/**
           if-no-files-found: ignore
-          retention-days: 3
+          retention-days: 30
 
   packaging:
     name: Debian and RPM Package Artifacts

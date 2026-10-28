@@ -19,6 +19,8 @@ All notable changes to WayExpand are documented here.
   reports it as `UNVERIFIED` instead of counting sequential typing as proof.
 - Keep the certification matrix-size assertion in one contract test so adding
   scenarios does not leave a stale count in the CI workflow.
+- Preserve headless KWin and Sway client-suite artifacts for 30 days on both
+  passing and failing runs, labeled with the revision actually checked out.
 - Preserve specific, content-free failure categories for helper and output
   preparation errors in the expansion reliability trace.
 - Correct evdev and libei source-level safety descriptions: non-exclusive
