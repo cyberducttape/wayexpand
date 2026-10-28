@@ -44,7 +44,10 @@ fn is_exact_release(
         return false;
     }
     if commit_overridden {
-        return release_version_override == Some(package_version);
+        return release_version_override == Some(package_version)
+            && commit.is_some_and(|sha| {
+                (12..=40).contains(&sha.len()) && sha.bytes().all(|byte| byte.is_ascii_hexdigit())
+            });
     }
     release_version_override.is_none()
         && git_output(
@@ -204,14 +207,14 @@ mod tests {
         assert!(is_exact_release(
             &repository.0,
             "1.3.3",
-            Some("archive-commit"),
+            Some("abcdef123456"),
             true,
             Some("1.3.3"),
         ));
         assert!(!is_exact_release(
             &repository.0,
             "1.3.3",
-            Some("archive-commit"),
+            Some("abcdef123456"),
             true,
             Some("1.3.4"),
         ));
@@ -219,6 +222,13 @@ mod tests {
             &repository.0,
             "1.3.3",
             None,
+            true,
+            Some("1.3.3"),
+        ));
+        assert!(!is_exact_release(
+            &repository.0,
+            "1.3.3",
+            Some("unknown"),
             true,
             Some("1.3.3"),
         ));

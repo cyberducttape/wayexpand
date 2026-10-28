@@ -8,8 +8,8 @@ All notable changes to WayExpand are documented here.
   packaged CLI and daemon binaries can verify build identity instead of
   reporting `unknown` when the build environment omits `.git` metadata.
 - Preserve the release version for clean, exact-tag Debian source archives;
-  non-release source snapshots continue to carry a development version and
-  commit identity.
+  require a matching package version and valid commit ID for that claim, while
+  non-release source snapshots keep a development version and commit identity.
 - Preserve a current-source private KWin 6.6.6 smoke report for commit
   `e91a694c417a`: 12 output/focus/reload checks passed; capture was simulated,
   and production compositor certification remains incomplete.
