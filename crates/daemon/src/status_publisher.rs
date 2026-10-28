@@ -220,28 +220,59 @@ mod tests {
                 false,
             );
         };
-        // Latency, usage, and output counters are process-wide and other
-        // tests update them concurrently; compare only what the publisher
-        // sets.
+        // Diagnostic counters, the recent outcome rings, and assurance state
+        // are process-wide and other tests update them concurrently. Compare
+        // the fields supplied by this publisher explicitly, so a newly added
+        // process-global status field cannot make this assertion flaky.
+        const PUBLISHER_FIELDS: &[&str] = &[
+            "source",
+            "backend",
+            "route_id",
+            "backend_mode",
+            "status_schema",
+            "daemon_commit",
+            "state",
+            "paused",
+            "config",
+            "config_state",
+            "capture_sensitive_focus",
+            "capture_exclusive",
+            "capture_reliable_key_state",
+            "capture_key_passthrough",
+            "capture_composition_aware",
+            "capture_local_compose_aware",
+            "capture_layout_aware",
+            "window_tracker_connected",
+            "window_identity_exact",
+            "inject_atomic_replace",
+            "inject_full_unicode",
+            "inject_cursor_reposition",
+            "inject_key_passthrough",
+            "inject_insertion_mode",
+            "inject_max_text_chars",
+            "inject_expected_throughput_chars_per_sec",
+            "command_queue_depth",
+            "command_in_flight",
+            "expansion_command_queue_depth",
+            "expansion_command_in_flight",
+            "hotkey_queue_depth",
+            "hotkey_in_flight",
+            "command_queue_rejected_total",
+            "command_timeout_total",
+            "command_failure_total",
+        ];
         let published = |control: &control::ControlServer| {
-            control
-                .status_text()
+            let status = control.status_text();
+            let fields = status
                 .lines()
                 .filter(|line| {
-                    ![
-                        "injection_latency_",
-                        "matcher_latency_",
-                        "usage_",
-                        "output_",
-                        "input_",
-                        "control_",
-                        "memory_",
-                    ]
-                    .iter()
-                    .any(|prefix| line.starts_with(prefix))
+                    line.split_once('=')
+                        .is_some_and(|(key, _)| PUBLISHER_FIELDS.contains(&key))
                 })
                 .map(str::to_owned)
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            assert_eq!(fields.len(), PUBLISHER_FIELDS.len(), "{status}");
+            fields
         };
         publish(&mut publisher);
         let full = published(&control);

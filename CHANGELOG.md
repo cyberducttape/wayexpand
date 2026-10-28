@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Make daemon status republish coverage compare publisher-owned fields and
+  remain deterministic while process-global diagnostic metrics change in
+  concurrent tests.
 - Make backend-allowlist setup tests exercise safe-mode enforcement; audit-mode
   policies intentionally report restrictions without applying them.
 - Correct the README's Rust source-build minimum to match the declared Rust
