@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Keep onboarding tests accurate for source archives built without Git
+  metadata: an unknown build identity remains fail-closed and cannot claim a
+  successful real-app test.
+- Stamp the CI RPM source archive with its checked-out commit so package builds
+  without a `.git` directory retain a verifiable binary identity.
 - Preserve current-source private KWin 6.6.6 smoke evidence for commit
   `d776185d5039`: eleven insertion/focus/reload/restart checks passed; capture
   was simulated, and Unicode and suspend/resume remain untested. The report

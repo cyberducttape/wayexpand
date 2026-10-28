@@ -2004,14 +2004,26 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
         guide_semantics.contains("Try it in a real app"),
         "{guide_semantics}"
     );
-    assert!(
-        guide_semantics.contains("It expanded correctly"),
-        "{guide_semantics}"
-    );
-    assert!(
-        guide_semantics.contains("Copy trigger"),
-        "{guide_semantics}"
-    );
+    if env!("WAYEXPAND_COMMIT") == "unknown" {
+        assert!(
+            guide_semantics.contains("daemon's build identity is unknown"),
+            "{guide_semantics}"
+        );
+        assert!(!guide_semantics.contains("It expanded correctly"));
+    } else {
+        assert!(
+            guide_semantics.contains("It expanded correctly"),
+            "{guide_semantics}"
+        );
+    }
+    if env!("WAYEXPAND_COMMIT") == "unknown" {
+        assert!(!guide_semantics.contains("Copy trigger"));
+    } else {
+        assert!(
+            guide_semantics.contains("Copy trigger"),
+            "{guide_semantics}"
+        );
+    }
     app.filter = "working".into();
     app.refresh_visible_indices_cache();
     assert!(app.visible_indices().is_empty());
@@ -2075,8 +2087,13 @@ fn first_run_requires_a_verified_build_before_offering_live_test() {
                 .expect("first-run guide should expose accessible controls")
                 .nodes
         );
+        let expected_warning = if env!("WAYEXPAND_COMMIT") == "unknown" {
+            "daemon's build identity is unknown"
+        } else {
+            expected_warning
+        };
         assert!(semantics.contains(expected_warning), "{semantics}");
-        if case == "stale" {
+        if case == "stale" && env!("WAYEXPAND_COMMIT") != "unknown" {
             assert!(
                 semantics.contains("systemctl --user restart wayexpand-evdev.service"),
                 "{semantics}"
