@@ -13,6 +13,9 @@ All notable changes to WayExpand are documented here.
 - Make matcher explanations enforce the same verified replacement-route gate
   as form dispatch, so `wayexpand explain` reports why a form is blocked on a
   best-effort route instead of claiming it would expand.
+- Allow bounded scheduler time for form-helper descendants to close inherited
+  stdout after process-group termination, avoiding premature cleanup failures
+  under concurrent load.
 - Preserve clean-source KWin 6.6.6 output/focus smoke evidence for
   `e4d0d11eb69b`: 12 checks passed, three areas were not tested, and keysym
   fallback measured p50/p95/p99 of 12.529/12.630/12.668 ms (small),

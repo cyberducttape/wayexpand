@@ -61,7 +61,9 @@ fn load_user_config(path: &Path, explicit: bool) -> Result<Config> {
 const MAX_VALUE_BYTES: usize = 64 * 1024;
 const GENERATED_FILE_MODE: u32 = 0o600;
 const FORM_HELPER_TIMEOUT: Duration = Duration::from_secs(600);
-const FORM_HELPER_DRAIN_TIMEOUT: Duration = Duration::from_millis(100);
+// A killed descendant may need scheduler time to close its inherited pipe.
+// Keep that cleanup bounded, but leave enough room for loaded CI and desktops.
+const FORM_HELPER_DRAIN_TIMEOUT: Duration = Duration::from_millis(500);
 const FORM_HELPER_READS_PER_DRAIN: usize = 64;
 
 pub(crate) fn new_command(args: Args) -> Result<()> {
