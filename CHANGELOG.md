@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Block direct command previews in organization safe mode when the systemd
+  service sandbox is unavailable; named actions continue through the broker.
 - Keep onboarding tests accurate for source archives built without Git
   metadata: an unknown build identity remains fail-closed and cannot claim a
   successful real-app test.

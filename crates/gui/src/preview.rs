@@ -28,6 +28,7 @@ pub(crate) fn render_form_template(
 pub(crate) fn command_preview_policy_violation(
     policy: &OrganizationPolicy,
     command: &wayexpand_core::CommandConfig,
+    sandbox_available: bool,
 ) -> Option<String> {
     let effective = policy.effective_enforcement_policy();
     if effective.disable_commands {
@@ -39,7 +40,15 @@ pub(crate) fn command_preview_policy_violation(
     if command.action.is_some() {
         return None;
     }
-    effective.command_path_violation(&command.program)
+    if let Some(reason) = effective.command_path_violation(&command.program) {
+        return Some(reason);
+    }
+    if effective.safe_mode && !sandbox_available {
+        return Some(
+            "safe mode requires the systemd service sandbox for direct command previews".into(),
+        );
+    }
+    None
 }
 
 #[cfg(test)]
@@ -150,15 +159,33 @@ mod tests {
             ..OrganizationPolicy::default()
         };
         assert_eq!(
-            command_preview_policy_violation(&policy, &direct_command("git")).as_deref(),
+            command_preview_policy_violation(&policy, &direct_command("git"), true).as_deref(),
             Some("command execution is disabled by organization policy")
         );
 
         policy.disable_commands = false;
         policy.require_absolute_commands = true;
-        assert!(command_preview_policy_violation(&policy, &direct_command("git")).is_some());
+        assert!(command_preview_policy_violation(&policy, &direct_command("git"), true).is_some());
         assert!(
-            command_preview_policy_violation(&policy, &direct_command("/usr/bin/git")).is_none()
+            command_preview_policy_violation(&policy, &direct_command("/usr/bin/git"), true)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn safe_mode_blocks_direct_previews_without_the_service_sandbox() {
+        let policy = OrganizationPolicy {
+            safe_mode: true,
+            ..OrganizationPolicy::default()
+        };
+        assert_eq!(
+            command_preview_policy_violation(&policy, &direct_command("/usr/bin/git"), false)
+                .as_deref(),
+            Some("safe mode requires the systemd service sandbox for direct command previews")
+        );
+        assert!(
+            command_preview_policy_violation(&policy, &direct_command("/usr/bin/git"), true)
+                .is_none()
         );
     }
 
@@ -171,14 +198,14 @@ mod tests {
         };
         let mut command = direct_command("");
         command.action = Some("approved-action".into());
-        assert!(command_preview_policy_violation(&policy, &command).is_none());
+        assert!(command_preview_policy_violation(&policy, &command, false).is_none());
 
         let blocked = OrganizationPolicy {
             safe_mode: true,
             disable_commands: true,
             ..OrganizationPolicy::default()
         };
-        assert!(command_preview_policy_violation(&blocked, &command).is_some());
+        assert!(command_preview_policy_violation(&blocked, &command, false).is_some());
     }
 
     fn direct_command(program: &str) -> wayexpand_core::CommandConfig {
@@ -200,7 +227,7 @@ mod tests {
             require_absolute_commands: true,
             ..OrganizationPolicy::default()
         };
-        assert!(command_preview_policy_violation(&policy, &direct_command("git")).is_none());
+        assert!(command_preview_policy_violation(&policy, &direct_command("git"), false).is_none());
     }
 
     #[test]

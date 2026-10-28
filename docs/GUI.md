@@ -71,7 +71,9 @@ snippets use an explicit preview action. Managed actions run through the
 configured Action Broker. Direct programs run in a transient systemd unit with
 the daemon's sandbox directives when the user manager is available; otherwise
 they run locally with GUI-process privileges. The preview label and warning
-describe the selected mode. Direct programs are not recorded in the broker
+describe the selected mode. In organization safe mode, direct previews are
+blocked when the service sandbox is unavailable; named broker actions continue
+to use the broker's own policy. Direct programs are not recorded in the broker
 audit. See the command security limits in the operations guide.
 
 If the daemon is not running, editing and preview still work. Pause/resume is
