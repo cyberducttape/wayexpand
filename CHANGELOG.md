@@ -17,6 +17,8 @@ All notable changes to WayExpand are documented here.
 - Add a required real-session scenario for a second physical trigger arriving
   during a long non-atomic replacement. The private stdin-capture KWin driver
   reports it as `UNVERIFIED` instead of counting sequential typing as proof.
+- Preserve specific, content-free failure categories for helper and output
+  preparation errors in the expansion reliability trace.
 - Correct evdev and libei source-level safety descriptions: non-exclusive
   observation and libei insertion do not make the whole replacement
   transaction atomic or prevent unintended text changes.

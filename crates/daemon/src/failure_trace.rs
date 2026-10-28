@@ -144,16 +144,27 @@ pub(crate) fn record_command_failure(backend: &str, kind: wayexpand_core::Comman
 pub(crate) fn record_preparation_failure(backend: &str, error: &wayexpand_core::CommandError) {
     use wayexpand_core::CommandError as Error;
     let reason = match error {
+        Error::SpawnFailed { .. } => "helper could not start",
+        Error::Timeout => "helper timed out",
+        Error::WaitFailed { .. } => "helper process supervision failed",
+        Error::BrokerUnavailable { .. } => "action broker unavailable",
+        Error::BrokerProtocol { .. } => "action broker protocol failed",
+        Error::BrokerRejected(_) => "action broker rejected the request",
+        Error::NonZeroExit { .. } => "helper exited unsuccessfully",
+        Error::OutputTooLarge | Error::PolicyOutputTooLarge { .. } => {
+            "helper output exceeded the configured limit"
+        }
         Error::FormTargetUnverifiable => "form requires verified replacement",
         Error::WindowIdentityUnavailable => "form requires exact window identity",
         Error::PolicyBlocked => "blocked by organization policy",
-        Error::PolicyOutputTooLarge { .. } => "replacement exceeds configured size limit",
         Error::StaleInput => "input changed before expansion was prepared",
         Error::QueueFull | Error::WorkerUnavailable => "form worker unavailable",
+        Error::InvalidUtf8 => "helper output was not valid UTF-8",
         Error::TemplateRenderFailed => "form values could not render the template",
         Error::InvalidFormOutput => "form submission values are invalid or incomplete",
         Error::IncompleteFormOutput => "form helper output stream did not close",
-        _ => "expansion could not be prepared",
+        Error::OutputChannelLost => "helper output channel was lost",
+        Error::IncompleteOutput => "helper output was incomplete",
     };
     record_blocked_expansion(backend, reason);
 }
@@ -439,6 +450,49 @@ mod tests {
                 && trace.get("trigger").is_none()
                 && trace.get("replacement").is_none()
         }));
+    }
+
+    #[test]
+    fn preparation_failures_use_specific_content_free_reasons() {
+        use wayexpand_core::CommandError;
+
+        for (error, expected) in [
+            (
+                CommandError::SpawnFailed {
+                    detail: "secret path must not be recorded".into(),
+                },
+                "helper could not start",
+            ),
+            (
+                CommandError::InvalidUtf8,
+                "helper output was not valid UTF-8",
+            ),
+            (
+                CommandError::OutputChannelLost,
+                "helper output channel was lost",
+            ),
+            (
+                CommandError::IncompleteOutput,
+                "helper output was incomplete",
+            ),
+        ] {
+            record_preparation_failure("test-backend", &error);
+            let failures: serde_json::Value =
+                serde_json::from_str(&recent_json()).expect("failures should be JSON");
+            assert!(failures.as_array().unwrap().iter().any(|trace| {
+                trace["completion"] == expected
+                    && trace["backend"] == "test-backend"
+                    && trace.get("trigger").is_none()
+                    && trace.get("replacement").is_none()
+            }));
+            assert!(!failures
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|trace| trace["completion"]
+                    .as_str()
+                    .is_some_and(|detail| { detail.contains("secret path") })));
+        }
     }
 
     #[test]
