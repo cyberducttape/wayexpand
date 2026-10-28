@@ -453,10 +453,16 @@ impl Strings {
         &self,
         ready: bool,
         detail: &str,
-        daemon_restart_required: bool,
+        daemon_build: Option<crate::runtime::DaemonBuildState>,
     ) -> String {
-        if daemon_restart_required {
-            return self.onboarding_stale_daemon_state().to_owned();
+        match daemon_build {
+            Some(crate::runtime::DaemonBuildState::RestartRequired) => {
+                return self.onboarding_stale_daemon_state().to_owned();
+            }
+            Some(crate::runtime::DaemonBuildState::Unverified) => {
+                return self.onboarding_unverified_daemon_state().to_owned();
+            }
+            Some(crate::runtime::DaemonBuildState::Current) | None => {}
         }
         match (self.lang, ready) {
             (Language::English, true) => format!("Connected in this session: {detail}. This is a live status check, not certification."),
@@ -473,6 +479,14 @@ impl Strings {
             Language::English => "Not ready: the daemon is running a different build. Restart the WayExpand user service, then refresh these checks before testing snippets.",
             Language::Indonesian => "Belum siap: daemon menjalankan build yang berbeda. Mulai ulang layanan pengguna WayExpand, lalu segarkan pemeriksaan ini sebelum menguji cuplikan.",
             Language::German => "Noch nicht bereit: Der Daemon verwendet einen anderen Build. Starten Sie den WayExpand-Benutzerdienst neu und aktualisieren Sie diese Prüfungen, bevor Sie Snippets testen.",
+        }
+    }
+
+    pub fn onboarding_unverified_daemon_state(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Not ready: the daemon's build identity is unknown. Install matching builds with a recorded commit identity before testing snippets.",
+            Language::Indonesian => "Belum siap: identitas build daemon tidak diketahui. Pasang build yang cocok dengan identitas commit tercatat sebelum menguji cuplikan.",
+            Language::German => "Noch nicht bereit: Die Build-Identität des Daemons ist unbekannt. Installieren Sie passende Builds mit aufgezeichneter Commit-Identität, bevor Sie Snippets testen.",
         }
     }
 

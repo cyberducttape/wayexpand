@@ -63,10 +63,9 @@ impl GuiApp {
         let route_connected = daemon_running
             && !self.paused
             && self.route_state == Some(runtime::RouteState::Connected);
-        let daemon_build = runtime::daemon_build_state(&self.daemon_status);
-        let daemon_restart_required =
-            daemon_running && daemon_build == runtime::DaemonBuildState::RestartRequired;
-        let route_ready = route_connected && !daemon_restart_required;
+        let daemon_build = daemon_running.then(|| runtime::daemon_build_state(&self.daemon_status));
+        let route_ready =
+            route_connected && daemon_build == Some(runtime::DaemonBuildState::Current);
         let sample_trigger = onboarding_snippet(&self.config)
             .map(|expansion| expansion.trigger.clone())
             .unwrap_or_else(|| ONBOARDING_TRIGGER.to_owned());
@@ -100,8 +99,15 @@ impl GuiApp {
             Some(runtime::RouteState::Degraded) => "route is degraded".to_owned(),
             Some(runtime::RouteState::Stopped) => "route is stopped".to_owned(),
             Some(runtime::RouteState::Connected) if self.paused => "WayExpand is paused".to_owned(),
-            Some(runtime::RouteState::Connected) if daemon_restart_required => {
+            Some(runtime::RouteState::Connected)
+                if daemon_build == Some(runtime::DaemonBuildState::RestartRequired) =>
+            {
                 self.strings.onboarding_stale_daemon_state().into()
+            }
+            Some(runtime::RouteState::Connected)
+                if daemon_build == Some(runtime::DaemonBuildState::Unverified) =>
+            {
+                self.strings.onboarding_unverified_daemon_state().into()
             }
             Some(runtime::RouteState::Connected) => active_route.clone(),
             None if !daemon_running => "user service is not reachable".to_owned(),
@@ -195,7 +201,7 @@ impl GuiApp {
                             RichText::new(self.strings.onboarding_session_state(
                                 route_ready,
                                 &route_state_detail,
-                                daemon_restart_required,
+                                daemon_build,
                             ))
                             .color(if route_ready {
                                 palette.success
@@ -375,9 +381,14 @@ impl GuiApp {
                                 RichText::new(self.strings.onboarding_create_sample_first())
                                     .color(palette.warning),
                             );
-                        } else if daemon_restart_required {
+                        } else if daemon_build == Some(runtime::DaemonBuildState::RestartRequired) {
                             ui.label(
                                 RichText::new(self.strings.onboarding_stale_daemon_state())
+                                    .color(palette.warning),
+                            );
+                        } else if daemon_build == Some(runtime::DaemonBuildState::Unverified) {
+                            ui.label(
+                                RichText::new(self.strings.onboarding_unverified_daemon_state())
                                     .color(palette.warning),
                             );
                         } else {
