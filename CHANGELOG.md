@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Cancel obsolete background output connections when their owner is dropped.
+  Portal waits now race cooperative cancellation against the existing deadline,
+  and EIS handshake/device discovery checks cancellation between bounded reads.
 - Make `wayexpand test` identify recognized interactive form snippets, explaining
   that their fields require the running GUI instead of reporting a misleading
   no-match result.

@@ -569,11 +569,28 @@ pub fn connect_output_backend(
     fcitx5_direct_commit: bool,
     portal_token_path_arg: Option<&Path>,
 ) -> std::result::Result<Box<dyn TextInjector>, OutputConnectError> {
+    connect_output_backend_with_cancellation(
+        name,
+        persist_portal_token,
+        fcitx5_direct_commit,
+        portal_token_path_arg,
+        wayexpand_backend_libei::ConnectCancellation::default(),
+    )
+}
+
+pub fn connect_output_backend_with_cancellation(
+    name: &str,
+    persist_portal_token: bool,
+    fcitx5_direct_commit: bool,
+    portal_token_path_arg: Option<&Path>,
+    cancellation: wayexpand_backend_libei::ConnectCancellation,
+) -> std::result::Result<Box<dyn TextInjector>, OutputConnectError> {
     connect_unguarded_output_backend(
         name,
         persist_portal_token,
         fcitx5_direct_commit,
         portal_token_path_arg,
+        cancellation,
     )
     .map(|injector| {
         crate::assurance::AssuredInjector::wrap(injector, crate::assurance::GuardState::global())
@@ -585,6 +602,7 @@ fn connect_unguarded_output_backend(
     persist_portal_token: bool,
     fcitx5_direct_commit: bool,
     portal_token_path_arg: Option<&Path>,
+    cancellation: wayexpand_backend_libei::ConnectCancellation,
 ) -> std::result::Result<Box<dyn TextInjector>, OutputConnectError> {
     match name {
         "wlroots" => WlrootsInjector::connect()
@@ -593,11 +611,14 @@ fn connect_unguarded_output_backend(
                 retryable: error.is_retryable(),
                 message: format!("connecting wlroots output backend: {error}"),
             }),
-        "libei" => LibeiInjector::connect(LibeiOptions {
-            persist_portal_token,
-            fcitx5_direct_commit,
-            portal_token_path: portal_token_path_arg.map(Path::to_path_buf),
-        })
+        "libei" => LibeiInjector::connect_with_cancellation(
+            LibeiOptions {
+                persist_portal_token,
+                fcitx5_direct_commit,
+                portal_token_path: portal_token_path_arg.map(Path::to_path_buf),
+            },
+            cancellation,
+        )
         .map(|injector| Box::new(injector) as Box<dyn TextInjector>)
         .map_err(|error| OutputConnectError {
             retryable: error.is_retryable(),

@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use reis::{ei, event::EiEvent};
 
-use super::LibeiError;
+use super::{ConnectCancellation, LibeiError};
 
 /// Converts the EIS connection's wire traffic into typed events while
 /// servicing handshake requests that may arrive between application events.
@@ -27,10 +27,17 @@ pub(super) struct EventPump {
 unsafe impl Send for EventPump {}
 
 impl EventPump {
-    pub(super) fn next(&mut self, timeout: Duration) -> Result<EiEvent, LibeiError> {
+    pub(super) fn next_with_cancellation(
+        &mut self,
+        timeout: Duration,
+        cancellation: Option<&ConnectCancellation>,
+    ) -> Result<EiEvent, LibeiError> {
         let deadline = Instant::now() + timeout;
         loop {
-            self.handle_pending_requests()?;
+            self.handle_pending_requests(cancellation)?;
+            if cancellation.is_some_and(ConnectCancellation::is_cancelled) {
+                return Err(LibeiError::Cancelled);
+            }
             if let Some(event) = self.converter.next_event() {
                 return Ok(event);
             }
@@ -53,8 +60,17 @@ impl EventPump {
         }
     }
 
-    fn handle_pending_requests(&mut self) -> Result<(), LibeiError> {
-        while let Some(result) = self.context.pending_event() {
+    fn handle_pending_requests(
+        &mut self,
+        cancellation: Option<&ConnectCancellation>,
+    ) -> Result<(), LibeiError> {
+        loop {
+            if cancellation.is_some_and(ConnectCancellation::is_cancelled) {
+                return Err(LibeiError::Cancelled);
+            }
+            let Some(result) = self.context.pending_event() else {
+                break;
+            };
             match result {
                 reis::PendingRequestResult::Request(request) => self
                     .converter
@@ -86,7 +102,7 @@ impl EventPump {
         let deadline = Instant::now() + budget.time;
         let mut handled = 0_usize;
         loop {
-            self.handle_pending_requests()?;
+            self.handle_pending_requests(None)?;
             while let Some(event) = self.converter.next_event() {
                 handle(event)?;
                 handled += 1;
@@ -170,15 +186,37 @@ pub(super) fn poll_context(context: &ei::Context, timeout: Duration) -> Result<b
     Ok(true)
 }
 
+#[cfg(test)]
 pub(super) fn handshake_with_timeout(
     context: &ei::Context,
     timeout: Duration,
+) -> Result<(reis::event::Connection, EventPump), LibeiError> {
+    handshake_with_cancellation(context, timeout, &ConnectCancellation::default())
+}
+
+pub(super) fn handshake_with_cancellation(
+    context: &ei::Context,
+    timeout: Duration,
+    cancellation: &ConnectCancellation,
 ) -> Result<(reis::event::Connection, EventPump), LibeiError> {
     let mut handshaker =
         reis::handshake::EiHandshaker::new("wayexpand", ei::handshake::ContextType::Sender);
     let deadline = Instant::now() + timeout;
     loop {
-        while let Some(result) = context.pending_event() {
+        loop {
+            if cancellation.is_cancelled() {
+                return Err(LibeiError::Cancelled);
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(LibeiError::Handshake(reis::Error::Io(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "EIS handshake deadline expired",
+                ))));
+            }
+            let Some(result) = context.pending_event() else {
+                break;
+            };
             let request = match result {
                 reis::PendingRequestResult::Request(request) => request,
                 reis::PendingRequestResult::ParseError(error) => {
@@ -205,11 +243,15 @@ pub(super) fn handshake_with_timeout(
                 ));
             }
         }
-        if !poll_context(context, deadline.saturating_duration_since(Instant::now()))? {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
             return Err(LibeiError::Handshake(reis::Error::Io(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
                 "EIS handshake deadline expired",
             ))));
+        }
+        if !poll_context(context, remaining.min(Duration::from_millis(50)))? {
+            continue;
         }
         context
             .read()

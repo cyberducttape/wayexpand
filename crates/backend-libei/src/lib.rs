@@ -40,6 +40,10 @@ use reis::{ei, enumflags2::BitFlags, event::DeviceCapability};
 use std::{
     os::unix::net::UnixStream,
     path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 use thiserror::Error;
@@ -55,7 +59,7 @@ mod portal_token;
 mod unicode;
 
 use connection::{connect_portal, PortalKeepalive};
-use events::{handshake_with_timeout, EventPump};
+use events::{handshake_with_cancellation, EventPump};
 use keymap::{decode_keymap, find_keycode_for_keysym, KeyStroke, KeysymTyper};
 #[cfg(test)]
 use keymap::{MOD_LEVEL3, MOD_SHIFT};
@@ -109,6 +113,8 @@ fn run_checkpointed<E>(
 
 #[derive(Debug, Error)]
 pub enum LibeiError {
+    #[error("libei connection attempt was cancelled")]
+    Cancelled,
     #[error("relative LIBEI_SOCKET requires XDG_RUNTIME_DIR")]
     RelativeSocketNeedsRuntime,
     #[error("could not connect to EIS socket: {0}")]
@@ -212,6 +218,28 @@ pub struct LibeiOptions {
     pub portal_token_path: Option<PathBuf>,
 }
 
+/// Cooperative cancellation shared by a connection owner and its worker.
+/// Portal requests observe cancellation promptly; protocol setup checks it
+/// between bounded reads.
+#[derive(Clone, Debug, Default)]
+pub struct ConnectCancellation(Arc<AtomicBool>);
+
+impl ConnectCancellation {
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+
+    async fn cancelled(&self) {
+        while !self.is_cancelled() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+}
+
 impl Default for LibeiOptions {
     fn default() -> Self {
         Self {
@@ -248,6 +276,16 @@ impl LibeiInjector {
     /// Portal use is deliberately explicit because it may display a consent
     /// dialog and grants desktop input-control capability for the session.
     pub fn connect(options: LibeiOptions) -> Result<Self, LibeiError> {
+        Self::connect_with_cancellation(options, ConnectCancellation::default())
+    }
+
+    pub fn connect_with_cancellation(
+        options: LibeiOptions,
+        cancellation: ConnectCancellation,
+    ) -> Result<Self, LibeiError> {
+        if cancellation.is_cancelled() {
+            return Err(LibeiError::Cancelled);
+        }
         let fcitx5_direct_commit = options.fcitx5_direct_commit;
         let (stream, portal) = if let Some(socket) = std::env::var_os("LIBEI_SOCKET") {
             let socket = PathBuf::from(socket);
@@ -260,24 +298,38 @@ impl LibeiInjector {
             };
             (UnixStream::connect(socket)?, None)
         } else {
-            connect_portal(options)?
+            connect_portal(options, &cancellation)?
         };
+        if cancellation.is_cancelled() {
+            drop(portal);
+            return Err(LibeiError::Cancelled);
+        }
         // Handshake and event polling use explicit deadlines. Keep later
         // protocol flushes from blocking indefinitely when an EIS server
         // stops consuming input; WouldBlock is classified as retryable.
         stream.set_nonblocking(true)?;
         let context = ei::Context::new(stream)?;
-        let (connection, mut events) = handshake_with_timeout(&context, EIS_HANDSHAKE_TIMEOUT)?;
+        let (connection, mut events) =
+            handshake_with_cancellation(&context, EIS_HANDSHAKE_TIMEOUT, &cancellation)?;
 
         let device_deadline = Instant::now() + EIS_HANDSHAKE_TIMEOUT;
         let (device, mode, keyboard) = loop {
-            let event = match events.next(device_deadline.saturating_duration_since(Instant::now()))
-            {
+            if cancellation.is_cancelled() {
+                return Err(LibeiError::Cancelled);
+            }
+            let remaining = device_deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(LibeiError::MissingRequiredDevice);
+            }
+            let event = match events.next_with_cancellation(
+                remaining.min(Duration::from_millis(50)),
+                Some(&cancellation),
+            ) {
                 Ok(event) => event,
                 Err(LibeiError::Handshake(reis::Error::Io(error)))
                     if error.kind() == std::io::ErrorKind::TimedOut =>
                 {
-                    return Err(LibeiError::MissingRequiredDevice)
+                    continue;
                 }
                 Err(error) => return Err(error),
             };
@@ -1037,7 +1089,7 @@ mod tests {
         let (client, _server) = UnixStream::pair().unwrap();
         let context = super::ei::Context::new(client).unwrap();
         let started = std::time::Instant::now();
-        let result = super::handshake_with_timeout(&context, Duration::from_millis(300));
+        let result = super::events::handshake_with_timeout(&context, Duration::from_millis(300));
         let elapsed = started.elapsed();
         done.store(true, std::sync::atomic::Ordering::Release);
         signaller.join().unwrap();
@@ -1100,7 +1152,7 @@ mod tests {
         let server = flooding_eis_server(server, 300, released);
         let context = super::ei::Context::new(client).unwrap();
         let (_connection, mut pump) =
-            super::handshake_with_timeout(&context, Duration::from_secs(5)).unwrap();
+            super::events::handshake_with_timeout(&context, Duration::from_secs(5)).unwrap();
         // Let the whole burst arrive, so the first drain meets a flood.
         std::thread::sleep(Duration::from_millis(200));
         let budget = super::events::DrainBudget {
@@ -1140,7 +1192,7 @@ mod tests {
         let server = flooding_eis_server(server, 10, released);
         let context = super::ei::Context::new(client).unwrap();
         let (_connection, mut pump) =
-            super::handshake_with_timeout(&context, Duration::from_secs(5)).unwrap();
+            super::events::handshake_with_timeout(&context, Duration::from_secs(5)).unwrap();
         std::thread::sleep(Duration::from_millis(100));
         let budget = super::events::DrainBudget {
             events: usize::MAX,
@@ -1158,7 +1210,8 @@ mod tests {
     fn handshake_has_a_bounded_deadline() {
         let (client, _server) = UnixStream::pair().unwrap();
         let context = super::ei::Context::new(client).unwrap();
-        let error = match super::handshake_with_timeout(&context, Duration::from_millis(10)) {
+        let error = match super::events::handshake_with_timeout(&context, Duration::from_millis(10))
+        {
             Err(error) => error,
             Ok(_) => panic!("idle EIS endpoint must time out"),
         };

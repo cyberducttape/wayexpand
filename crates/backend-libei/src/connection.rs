@@ -1,5 +1,6 @@
 use super::{
-    read_portal_token_if_enabled, store_portal_token_if_enabled, LibeiError, LibeiOptions,
+    read_portal_token_if_enabled, store_portal_token_if_enabled, ConnectCancellation, LibeiError,
+    LibeiOptions,
 };
 use std::{os::unix::net::UnixStream, sync::OnceLock, time::Duration};
 
@@ -70,6 +71,7 @@ impl Drop for PortalKeepalive {
 
 pub(super) fn connect_portal(
     options: LibeiOptions,
+    cancellation: &ConnectCancellation,
 ) -> Result<(UnixStream, Option<PortalKeepalive>), LibeiError> {
     use ashpd::desktop::{
         remote_desktop::{
@@ -79,7 +81,7 @@ pub(super) fn connect_portal(
     };
 
     let (stream, keepalive) = portal_runtime()?.block_on(async {
-        tokio::time::timeout(Duration::from_secs(30), async {
+        let attempt = tokio::time::timeout(Duration::from_secs(30), async {
             let proxy: RemoteDesktop = RemoteDesktop::new()
                 .await
                 .map_err(|error| LibeiError::Portal(error.to_string()))?;
@@ -150,9 +152,19 @@ pub(super) fn connect_portal(
                 .map_err(|error| LibeiError::Portal(error.to_string()))?;
             keepalive.proxy = Some(proxy);
             Ok::<_, LibeiError>((UnixStream::from(fd), keepalive))
-        })
+        });
+        futures_lite::future::race(
+            async {
+                attempt.await.map_err(|_| {
+                    LibeiError::Portal("portal session timed out after 30 seconds".into())
+                })?
+            },
+            async {
+                cancellation.cancelled().await;
+                Err(LibeiError::Cancelled)
+            },
+        )
         .await
-        .map_err(|_| LibeiError::Portal("portal session timed out after 30 seconds".into()))?
     })?;
 
     Ok((stream, Some(keepalive)))
@@ -160,6 +172,8 @@ pub(super) fn connect_portal(
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     #[test]
     fn every_portal_session_shares_one_runtime() {
         // A later session must reach the cached D-Bus connection's reader,
@@ -167,5 +181,28 @@ mod tests {
         let first = super::portal_runtime().unwrap() as *const tokio::runtime::Runtime;
         let second = super::portal_runtime().unwrap() as *const tokio::runtime::Runtime;
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn cancelling_a_pending_portal_attempt_returns_promptly() {
+        let cancellation = super::ConnectCancellation::default();
+        let worker_cancellation = cancellation.clone();
+        let cancel_thread = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            worker_cancellation.cancel();
+        });
+        let runtime = super::portal_runtime().unwrap();
+        let result = runtime.block_on(futures_lite::future::race(
+            async {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                Ok::<_, super::LibeiError>(())
+            },
+            async {
+                cancellation.cancelled().await;
+                Err(super::LibeiError::Cancelled)
+            },
+        ));
+        cancel_thread.join().unwrap();
+        assert!(matches!(result, Err(super::LibeiError::Cancelled)));
     }
 }
