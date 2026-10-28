@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Preserve the current-source KWin 6.6.6 isolated smoke report for commit
+  `d5153cb7a2a3`: 12 output/focus checks passed; capture was simulated, and
+  production compositor certification remains incomplete.
 - Cancel obsolete background output connections when their owner is dropped.
   Portal waits now race cooperative cancellation against the existing deadline,
   and EIS handshake/device discovery checks cancellation between bounded reads.
