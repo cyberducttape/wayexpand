@@ -98,6 +98,30 @@ grep -q -F -- '-vendored.tar.gz' "$project_dir/wayexpand.spec" || {
     printf '%s\n' 'RPM spec must use the offline-build vendored release source' >&2
     exit 1
 }
+grep -q -F '. scripts/load-build-identity.sh' "$project_dir/wayexpand.spec" || {
+    printf '%s\n' 'RPM build and test sections must load the stamped build identity' >&2
+    exit 1
+}
+test -f "$project_dir/scripts/load-build-identity.sh" || {
+    printf '%s\n' 'RPM build identity loader is missing' >&2
+    exit 1
+}
+grep -q -F 'wayexpand-build-sha' "$project_dir/scripts/build-release-packages.sh" || {
+    printf '%s\n' 'RPM package source does not carry its source commit identity' >&2
+    exit 1
+}
+grep -q -F 'WAYEXPAND_BUILD_RELEASE_VERSION=' "$project_dir/.github/workflows/release.yml" || {
+    printf '%s\n' 'release workflow does not stamp the exact release build version' >&2
+    exit 1
+}
+test "$(grep -Fc 'name: Set exact release build identity' "$project_dir/.github/workflows/release.yml")" -eq 2 || {
+    printf '%s\n' 'both native architecture release builds must use the exact release identity' >&2
+    exit 1
+}
+test "$(grep -Fc 'target/release/wayexpand-daemon --version' "$project_dir/.github/workflows/release.yml")" -eq 2 || {
+    printf '%s\n' 'both native architecture release builds must verify daemon version and commit' >&2
+    exit 1
+}
 
 # Distro packages may ship the policies as data, but must never install them
 # into udev's active rules directory as part of the base package.

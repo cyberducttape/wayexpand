@@ -335,6 +335,8 @@ jobs:
         run: cargo install cargo-machete --version 0.9.2 --locked && cargo machete
       - name: Test commit identity failure handling
         run: bash scripts/test-commit-identity.sh
+      - name: Test distribution build identity stamps
+        run: bash scripts/test-build-identity.sh
       - name: Test release ancestry check
         run: bash scripts/test-release-ancestry.sh
 

@@ -23,7 +23,7 @@ the exact source tree. `wayexpand doctor --json` exposes the same values as
 `wayexpand_version` and `wayexpand_commit`; certification evidence records them
 as well. Builds made from source archives without Git metadata use the package
 version and report the commit as `unknown`, unless the packaging source carries
-an explicit source revision. Debian and Launchpad source publishers include
+an explicit source revision. Debian, Launchpad, and RPM packaging paths include
 that revision so their CLI and daemon binaries can identify the same build.
 Clean vendored archives created from an exact `v<version>` release tag also
 carry the release version; development snapshots retain the `-dev+<commit>`

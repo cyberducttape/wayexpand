@@ -24,9 +24,11 @@ snippet templates, and optional command-backed expansions.
 %autosetup -n %{name}-%{version}
 
 %build
+. scripts/load-build-identity.sh
 cargo build --release --frozen -p wayexpand -p wayexpand-daemon -p action-broker -p wayexpand-ui -p wayexpand-gui -p wayexpand-backend-ibus -p wayexpand-e2e
 
 %check
+. scripts/load-build-identity.sh
 cargo test --frozen --workspace
 
 %install

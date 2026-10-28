@@ -76,13 +76,29 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install native dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config
+      - name: Set exact release build identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_version="${RELEASE_REF_NAME#v}"
+          source_sha=$(git rev-parse --short=12 HEAD)
+          [[ "$source_sha" =~ ^[0-9a-f]{12,40}$ ]]
+          echo "WAYEXPAND_BUILD_SHA=$source_sha" >> "$GITHUB_ENV"
+          echo "WAYEXPAND_BUILD_RELEASE_VERSION=$release_version" >> "$GITHUB_ENV"
       - name: Build release binaries natively on arm64
         run: cargo build --locked --release -p wayexpand -p wayexpand-daemon -p action-broker -p wayexpand-ui -p wayexpand-gui -p wayexpand-backend-ibus -p wayexpand-e2e
       - name: Verify every release binary was built
         run: |
+          set -euo pipefail
           for binary in wayexpand wayexpand-daemon wayexpand-action-broker wayexpand-ui wayexpand-gui wayexpand-ibus wx-e2e-sink wx-e2e-type wx-e2e-eis-relay; do
             test -x "target/release/$binary" || { echo "missing release binary: $binary" >&2; exit 1; }
           done
+          expected_version="${RELEASE_REF_NAME#v}"
+          expected_commit=$(git rev-parse --short=12 HEAD)
+          test "$(target/release/wayexpand --version)" = \
+            "wayexpand $expected_version (commit $expected_commit)"
+          test "$(target/release/wayexpand-daemon --version)" = \
+            "wayexpand-daemon $expected_version (commit $expected_commit)"
       - name: Package aarch64 release
         run: scripts/package-release-binaries.sh "${RELEASE_REF_NAME#v}" aarch64
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -118,7 +134,7 @@ jobs:
       - name: Install build and package dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config build-essential debhelper devscripts dpkg-dev rpm
       - name: Generate vendored dependencies (offline builds)
-        run: mkdir -p .cargo && cargo vendor --locked vendor/ > .cargo/config.toml && echo "vendor/" >> .gitignore
+        run: mkdir -p .cargo && cargo vendor --locked vendor/ > .cargo/config.toml
       - name: Verify version consistency across all sources
         shell: bash
         run: |
@@ -178,13 +194,29 @@ jobs:
           echo "  ✓ wayexpand.spec: $spec_version"
       - name: Verify release ancestry
         run: bash scripts/check-release-ancestry.sh "$RELEASE_REF_NAME"
+      - name: Set exact release build identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_version="${RELEASE_REF_NAME#v}"
+          source_sha=$(git rev-parse --short=12 HEAD)
+          [[ "$source_sha" =~ ^[0-9a-f]{12,40}$ ]]
+          echo "WAYEXPAND_BUILD_SHA=$source_sha" >> "$GITHUB_ENV"
+          echo "WAYEXPAND_BUILD_RELEASE_VERSION=$release_version" >> "$GITHUB_ENV"
       - name: Build release binaries
         run: cargo build --locked --release -p wayexpand -p wayexpand-daemon -p action-broker -p wayexpand-ui -p wayexpand-gui -p wayexpand-backend-ibus -p wayexpand-e2e
       - name: Verify every release binary was built
         run: |
+          set -euo pipefail
           for binary in wayexpand wayexpand-daemon wayexpand-action-broker wayexpand-ui wayexpand-gui wayexpand-ibus wx-e2e-sink wx-e2e-type wx-e2e-eis-relay; do
             test -x "target/release/$binary" || { echo "missing release binary: $binary" >&2; exit 1; }
           done
+          expected_version="${RELEASE_REF_NAME#v}"
+          expected_commit=$(git rev-parse --short=12 HEAD)
+          test "$(target/release/wayexpand --version)" = \
+            "wayexpand $expected_version (commit $expected_commit)"
+          test "$(target/release/wayexpand-daemon --version)" = \
+            "wayexpand-daemon $expected_version (commit $expected_commit)"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: wayexpand-linux-aarch64
@@ -192,10 +224,10 @@ jobs:
         run: scripts/package-release-binaries.sh "${RELEASE_REF_NAME#v}" x86_64
       - name: Generate Cargo metadata
         run: cargo metadata --locked --format-version 1 > "wayexpand-${RELEASE_REF_NAME#v}.cargo-metadata.json"
-      - name: Build Debian and RPM packages
-        run: scripts/build-release-packages.sh "${RELEASE_REF_NAME#v}"
       - name: Generate source tarballs (clean + vendored)
         run: bash scripts/generate-release-tarballs.sh "${RELEASE_REF_NAME#v}"
+      - name: Build Debian and RPM packages
+        run: scripts/build-release-packages.sh "${RELEASE_REF_NAME#v}"
       - name: Verify source archive checksum and vendored Debian inputs
         shell: bash
         run: |

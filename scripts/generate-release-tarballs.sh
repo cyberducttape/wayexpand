@@ -24,7 +24,7 @@ timestamp=$(date -u +%s)
 source_commit=$(git -C "$project_dir" rev-parse --short=12 HEAD)
 release_tag=$(git -C "$project_dir" describe --tags --exact-match --match "v${version}" HEAD 2>/dev/null || true)
 release_inputs_status=$(git -C "$project_dir" status --porcelain=v1 --untracked-files=all -- \
-    Cargo.toml Cargo.lock crates debian scripts)
+    Cargo.toml Cargo.lock crates debian scripts wayexpand.spec .gitignore .gitattributes)
 tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-release-${version}-${timestamp}.XXXXXXXXXX")
 
 cleanup() {
