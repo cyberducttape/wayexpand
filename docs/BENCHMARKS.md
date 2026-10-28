@@ -45,6 +45,15 @@ size bucket measured:
 | Medium | 521.704 ms | 524.514 ms | 525.020 ms |
 | Large | 2,093.778 ms | 2,099.291 ms | 2,099.619 ms |
 
+The follow-up [2026-10-28 report](evidence/doctor-certify-1262b961d6f8.json)
+tested clean commit `1262b961d6f8` in a private KWin 6.6.6 session. Eleven
+insertion/focus/lifecycle checks passed with matching build identity. The
+keysym fallback measured p50/p95/p99 of 12.553/12.680/12.952 ms for small,
+781.925/784.181/784.190 ms for medium, and 3,137.501/3,142.713/3,143.523 ms
+for large replacements. Capture used stdin simulation; the run did not test
+physical keyboard capture, Unicode insertion, suspend/resume, or overlapping
+triggers. It remains partial compatibility evidence.
+
 ## libei keysym fallback pacing: exploratory KWin 6.6.6 run (2026-10-27)
 
 The private headless KWin 6.6.6 output harness measured the production

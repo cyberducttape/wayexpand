@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Preserve a current-source private KWin smoke report with measured output
+  latency and explicit untested capture, Unicode, suspend/resume, and overlap
+  scenarios; it remains compatibility evidence, not production certification.
 - Refuse to report a configuration backup as consistent if its source path is
   atomically replaced during the copy; reject symlink sources at open time.
 - Record the 2026-10-28 GUI full-save benchmark follow-up, including the

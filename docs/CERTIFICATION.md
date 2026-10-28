@@ -65,15 +65,16 @@ intentionally out of scope and is reported as `unsupported-by-design`; a
 certification never implies otherwise.
 
 The latest current-source smoke report at
-[`docs/evidence/doctor-certify-a09536c13fa7.json`](evidence/doctor-certify-a09536c13fa7.json)
-tested commit `a09536c13fa7` on KWin 6.6.6 in a private headless session. Eleven
-insertion, focus, reload, restart, and refusal checks passed; the build identity
-also matched. Unicode, physical keyboard capture, and suspend/resume were not
-tested. Twenty libei keysym-fallback transactions per size measured injector
-p50/p95/p99 of 12.562/12.627/12.633 ms (small), 784.175/787.050/787.390 ms
-(medium), and 3,146.976/3,155.291/3,155.805 ms (large). Capture was simulated
-through stdin. This is partial compatibility evidence, not production
-compositor certification.
+[`docs/evidence/doctor-certify-1262b961d6f8.json`](evidence/doctor-certify-1262b961d6f8.json)
+tested clean commit `1262b961d6f8` on KWin 6.6.6 in a private headless session.
+Eleven insertion, focus, reload, restart, and refusal checks passed; build
+identity also matched. Unicode, physical keyboard capture, suspend/resume, and
+the overlapping-trigger scenario were not tested. Twenty libei keysym-fallback
+transactions per size measured injector p50/p95/p99 of 12.553/12.680/12.952 ms
+(small), 781.925/784.181/784.190 ms (medium), and
+3,137.501/3,142.713/3,143.523 ms (large). Capture was simulated through stdin.
+This is partial compatibility evidence, not production compositor
+certification.
 
 The previous current-source smoke report at
 [`docs/evidence/doctor-certify-d776185d5039.json`](evidence/doctor-certify-d776185d5039.json)
