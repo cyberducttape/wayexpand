@@ -5314,11 +5314,23 @@ fn malformed_form_output_is_reported_as_invalid() {
 #[test]
 fn form_helper_reports_incomplete_output_when_detached_descendant_holds_pipe() {
     // `setsid` escapes the helper's process group, so its inherited stdout
-    // stays open after the helper exits. The short sleep lets the test verify
-    // bounded draining without leaving a long-lived orphan process.
+    // stays open after the helper exits. Wait for the detached process to
+    // signal that it started before letting the helper exit; otherwise a
+    // heavily scheduled runner can finish the helper before `setsid` starts,
+    // turning this into a malformed-JSON test instead of a pipe-lifetime test.
+    let marker = std::env::temp_dir().join(format!(
+        "wayexpand-form-pipe-holder-started-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&marker);
+    let marker = marker.display().to_string();
     let _helper = FakeFormHelper::new(
         "detached-pipe-holder",
-        r#"printf '{'; setsid sh -c 'sleep 0.5' &"#,
+        &format!(
+            "printf '{{'; setsid sh -c 'touch {marker}; exec sleep 0.5' & \
+             i=0; while [ ! -e {marker} ] && [ $i -lt 100 ]; do \
+             sleep 0.01; i=$((i + 1)); done"
+        ),
     );
     let fields = crate::form_fields("{{field:name}}").unwrap();
     let shutdown = AtomicBool::new(false);
@@ -5332,6 +5344,7 @@ fn form_helper_reports_incomplete_output_when_detached_descendant_holds_pipe() {
         started.elapsed() < Duration::from_secs(2),
         "form helper waited too long for a detached stdout holder"
     );
+    let _ = std::fs::remove_file(marker);
 }
 
 #[test]
