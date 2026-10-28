@@ -75,13 +75,6 @@ impl Playground {
         new_text: &str,
         caret_at_end: bool,
     ) -> Option<Rewrite> {
-        self.form_detected = config.expansion.iter().any(|expansion| {
-            expansion.enabled
-                && form_fields(&expansion.replacement).is_ok_and(|fields| !fields.is_empty())
-                && std::iter::once(&expansion.trigger)
-                    .chain(&expansion.aliases)
-                    .any(|trigger| new_text.ends_with(trigger))
-        });
         if self.engine.is_none() {
             self.engine = build_engine(config);
             // The visible field survives config invalidation, but it may
@@ -124,7 +117,8 @@ impl Playground {
                 }
             }
             self.seen = new_text.to_owned();
-            self.explanation = Some(engine.explain(new_text, backend));
+            let explanation = engine.explain(new_text, backend);
+            self.set_explanation(config, explanation);
             return None;
         };
 
@@ -155,8 +149,22 @@ impl Playground {
         } else {
             &text
         };
-        self.explanation = Some(engine.explain(explained_text, backend));
+        let explanation = engine.explain(explained_text, backend);
+        self.set_explanation(config, explanation);
         rewritten.then_some(Rewrite { text, caret })
+    }
+
+    fn set_explanation(&mut self, config: &Config, explanation: Explanation) {
+        self.form_detected = explanation.snippet.as_ref().is_some_and(|trigger| {
+            !explanation.checks.iter().any(|check| {
+                matches!(check.name, "enabled" | "app filter")
+                    && check.status == wayexpand_core::CheckStatus::Fail
+            }) && config.expansion.iter().any(|expansion| {
+                expansion.trigger == *trigger
+                    && form_fields(&expansion.replacement).is_ok_and(|fields| !fields.is_empty())
+            })
+        });
+        self.explanation = Some(explanation);
     }
 }
 
@@ -279,6 +287,50 @@ mod tests {
         type_text(&mut playground, &config, ";cmd ");
         assert_eq!(playground.text, ";cmd ");
         assert_eq!(playground.expansions, 0);
+    }
+
+    #[test]
+    fn filtered_form_does_not_claim_it_will_open_for_the_wrong_app() {
+        let config = Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ";incident"
+            replacement = "Host: {{field:host}}"
+            app_filter = ["app_id_exact:org.allowed"]
+            "#,
+        )
+        .unwrap();
+        let mut playground = Playground::default();
+
+        playground.edit(&config, "org.blocked", "libei", ";incident", true);
+
+        assert!(!playground.form_detected);
+        assert!(playground
+            .explanation
+            .as_ref()
+            .unwrap()
+            .checks
+            .iter()
+            .any(|check| check.name == "app filter"
+                && check.status == wayexpand_core::CheckStatus::Fail));
+    }
+
+    #[test]
+    fn allowed_form_still_explains_that_the_text_playground_cannot_open_it() {
+        let config = Config::parse(
+            r#"
+            [[expansion]]
+            trigger = ";incident"
+            replacement = "Host: {{field:host}}"
+            app_filter = ["app_id_exact:org.allowed"]
+            "#,
+        )
+        .unwrap();
+        let mut playground = Playground::default();
+
+        playground.edit(&config, "org.allowed", "libei", ";incident", true);
+
+        assert!(playground.form_detected);
     }
 
     #[test]
