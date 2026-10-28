@@ -152,6 +152,12 @@ impl Layer {
             Layer::Organization => Some(PathBuf::from("/etc/wayexpand/snippets.d")),
             Layer::User => user_layer_dir(&crate::default_config_path()),
             Layer::Pack => {
+                if let Ok(data_home) = std::env::var("XDG_DATA_HOME") {
+                    let path = PathBuf::from(data_home);
+                    if path.is_absolute() {
+                        return Some(path.join("wayexpand/packs"));
+                    }
+                }
                 if let Ok(home) = std::env::var("HOME") {
                     Some(PathBuf::from(home).join(".local/share/wayexpand/packs"))
                 } else {

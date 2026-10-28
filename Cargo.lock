@@ -4297,6 +4297,7 @@ dependencies = [
  "getrandom 0.4.3",
  "libc",
  "rustix 1.1.5",
+ "semver",
  "serde_json",
  "toml",
  "unicode-segmentation",

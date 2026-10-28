@@ -1,7 +1,0 @@
-format_version = 1
-id = "wayexpand.support-replies"
-version = "1.0.0"
-name = "Support Replies"
-publisher = "WayExpand project"
-description = "Editable customer-support replies with explicit status and next-update fields."
-capabilities = ["forms"]

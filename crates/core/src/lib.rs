@@ -66,7 +66,7 @@ pub use migration::{
 };
 pub use pack::{
     import_pack, inspect_pack, pack_digest, sign_pack, trusted_signers_file, verify_pack_signature,
-    PackError, PackInspection, PackManifest, SIGNATURE_FILE,
+    PackError, PackInspection, PackManifest, PackReview, SIGNATURE_FILE,
 };
 pub use paths::default_config_path;
 pub use policy::{

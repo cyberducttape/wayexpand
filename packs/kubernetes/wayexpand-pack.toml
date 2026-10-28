@@ -5,3 +5,8 @@ name = "Kubernetes Operations"
 publisher = "WayExpand project"
 description = "Parameterized kubectl inspection commands with safe, read-only defaults."
 capabilities = ["forms"]
+
+[review]
+reviewed_by = "WayExpand project review"
+reviewed_at = "2026-10-27"
+summary = "Read-only kubectl inspection starters; no apply, delete, rollout restart, or mutation command is included."

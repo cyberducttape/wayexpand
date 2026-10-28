@@ -1,0 +1,12 @@
+format_version = 1
+id = "wayexpand.customer-support"
+version = "1.0.0"
+name = "Customer Support"
+publisher = "WayExpand project"
+description = "Editable customer-support replies with explicit status and next-update fields."
+capabilities = ["forms"]
+
+[review]
+reviewed_by = "WayExpand project review"
+reviewed_at = "2026-10-27"
+summary = "Customer-facing templates use explicit status, impact, follow-up, and timezone fields; no promises are prefilled."

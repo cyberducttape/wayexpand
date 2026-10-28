@@ -1,0 +1,68 @@
+[[expansion]]
+trigger = ";;ansible-syntax-check"
+description = "Check a playbook's syntax without executing its tasks"
+category = "Ansible"
+tags = ["ansible", "validation"]
+replacement = "ansible-playbook --syntax-check {{field:playbook=site.yml}}"
+
+[[expansion]]
+trigger = ";;ansible-inventory"
+description = "Inspect inventory grouping without connecting to hosts"
+category = "Ansible"
+tags = ["ansible", "inventory", "read-only"]
+replacement = "ansible-inventory --graph --inventory {{field:inventory=inventory.ini}}"
+
+[[expansion]]
+trigger = ";;ansible-package-play"
+description = "Idempotent package installation playbook starter; review before running"
+category = "Ansible"
+tags = ["ansible", "playbook", "package"]
+replacement = """---
+- name: Install a package on selected hosts
+  hosts: {{field:hosts=web}}
+  become: {{choice:become=false|true;default=false}}
+  gather_facts: true
+
+  tasks:
+    - name: Ensure package is installed
+      ansible.builtin.package:
+        name: {{field:package=nginx}}
+        state: present
+"""
+
+[[expansion]]
+trigger = ";;ansible-service-play"
+description = "Service enablement playbook starter; inspect target and service before running"
+category = "Ansible"
+tags = ["ansible", "playbook", "systemd"]
+replacement = """---
+- name: Ensure a service is enabled and running
+  hosts: {{field:hosts=web}}
+  become: {{choice:become=false|true;default=false}}
+  gather_facts: false
+
+  tasks:
+    - name: Enable and start service
+      ansible.builtin.service:
+        name: {{field:service=nginx}}
+        enabled: true
+        state: started
+"""
+
+[[expansion]]
+trigger = ";;ansible-role-meta"
+description = "Minimal role metadata starter"
+category = "Ansible"
+tags = ["ansible", "role"]
+replacement = """galaxy_info:
+  role_name: {{field:role_name=example_role}}
+  author: {{field:author=Your Name}}
+  description: {{field:description=Describe the role}}
+  license: MIT
+  min_ansible_version: '2.15'
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+dependencies: []
+"""

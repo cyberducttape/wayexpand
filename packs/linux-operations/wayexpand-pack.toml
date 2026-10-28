@@ -1,7 +1,0 @@
-format_version = 1
-id = "wayexpand.linux-operations"
-version = "1.0.0"
-name = "Linux Operations"
-publisher = "WayExpand project"
-description = "Parameterized, insert-only templates for Bash, SSH, and systemd operations."
-capabilities = ["forms"]

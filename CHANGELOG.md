@@ -4,6 +4,15 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add versioned, review-recorded offline packs for Linux administration,
+  Docker/Podman, Kubernetes, Ansible, Nginx, Git, and customer support, alongside
+  the existing developer and operations-triage libraries. Add local
+  `pack install/list/path/remove` commands with strict semantic-version and
+  manifest validation, protected staged copies, replacement backups, and an
+  explicit downgrade opt-in. Packs remain editable TOML, work without network
+  access, and refuse command or hotkey actions unless explicitly enabled.
+  Honor `XDG_DATA_HOME` for the fleet pack layer and document the full local
+  review, install, edit, validate, and removal workflow.
 - Extend `wayexpand doctor` with a current-session breakdown for capture,
   injection, focus tracking, password-field signaling, and replacement
   assurance. Each capability explains its evidence and gives recovery steps;

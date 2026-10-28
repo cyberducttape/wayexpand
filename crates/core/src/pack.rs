@@ -52,6 +52,19 @@ pub struct PackManifest {
     /// Action Broker actions the pack may call (with `broker_actions`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_actions: Vec<String>,
+    /// Human review record for curated content. This is descriptive metadata,
+    /// not a cryptographic trust signal; signatures authenticate the bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review: Option<PackReview>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PackReview {
+    pub reviewed_by: String,
+    /// Calendar date in `YYYY-MM-DD` form.
+    pub reviewed_at: String,
+    pub summary: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,6 +90,8 @@ pub enum PackError {
     UnsupportedFormat(u32),
     #[error("pack manifest field `{0}` is empty")]
     EmptyField(&'static str),
+    #[error("pack id `{0}` contains characters unsafe for a local directory name")]
+    InvalidId(String),
     #[error("pack has no snippets directory")]
     MissingSnippets,
     #[error("pack file operation failed for {path}: {source}")]
@@ -108,6 +123,8 @@ pub enum PackError {
     RequiresNewerVersion { required: String },
     #[error("pack manifest has invalid semantic version `{0}`")]
     InvalidVersion(String),
+    #[error("pack review date must be a real date in YYYY-MM-DD form")]
+    InvalidReviewDate,
     #[error("pack uses the `{0}` capability without declaring it")]
     UndeclaredCapability(String),
     #[error("pack calls Action Broker action `{0}` that is not in allowed_actions")]
@@ -178,6 +195,30 @@ fn read_manifest(path: &Path) -> Result<PackManifest, PackError> {
             return Err(PackError::EmptyField(field));
         }
     }
+    if manifest.id.len() > 128
+        || !manifest
+            .id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    {
+        return Err(PackError::InvalidId(manifest.id));
+    }
+    semver::Version::parse(&manifest.version)
+        .map_err(|_| PackError::InvalidVersion(manifest.version.clone()))?;
+    if let Some(review) = &manifest.review {
+        for (value, field) in [
+            (review.reviewed_by.as_str(), "review.reviewed_by"),
+            (review.reviewed_at.as_str(), "review.reviewed_at"),
+            (review.summary.as_str(), "review.summary"),
+        ] {
+            if value.trim().is_empty() {
+                return Err(PackError::EmptyField(field));
+            }
+        }
+        if !valid_review_date(&review.reviewed_at) {
+            return Err(PackError::InvalidReviewDate);
+        }
+    }
     if let Some(required) = &manifest.min_wayexpand_version {
         semver::Version::parse(required)
             .map_err(|_| PackError::InvalidVersion(required.clone()))?;
@@ -188,6 +229,29 @@ fn read_manifest(path: &Path) -> Result<PackManifest, PackError> {
         }
     }
     Ok(manifest)
+}
+
+fn valid_review_date(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
+        return false;
+    }
+    let digits = |range: std::ops::Range<usize>| bytes[range].iter().all(u8::is_ascii_digit);
+    if !digits(0..4) || !digits(5..7) || !digits(8..10) {
+        return false;
+    }
+    let year = value[..4].parse::<u32>().unwrap_or_default();
+    let month = value[5..7].parse::<u32>().unwrap_or_default();
+    let day = value[8..10].parse::<u32>().unwrap_or_default();
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let maximum = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return false,
+    };
+    (1..=maximum).contains(&day)
 }
 
 /// Whether dotted version `required` is newer than `current`.
@@ -1118,7 +1182,7 @@ mod tests {
         fs::write(
             path.join(MANIFEST_FILE),
             format!(
-                "format_version = 1\nid = \"demo\"\nversion = \"1\"\nname = \"{}\"\npublisher = \"Test\"\n",
+                "format_version = 1\nid = \"demo\"\nversion = \"1.0.0\"\nname = \"{}\"\npublisher = \"Test\"\n",
                 "x".repeat(MAX_MANIFEST_BYTES)
             ),
         )
@@ -1147,6 +1211,58 @@ mod tests {
         fs::remove_dir_all(path).unwrap();
     }
 
+    #[test]
+    fn pack_version_id_and_review_date_are_strictly_validated() {
+        let path = test_pack_path();
+        fs::create_dir_all(path.join(SNIPPETS_DIR)).unwrap();
+        let manifest = |version: &str, id: &str, date: &str| {
+            format!(
+                "format_version = 1\nid = {id:?}\nversion = {version:?}\nname = \"Reviewed\"\npublisher = \"WayExpand\"\n\n[review]\nreviewed_by = \"Maintainers\"\nreviewed_at = {date:?}\nsummary = \"Static insert-only templates\"\n"
+            )
+        };
+        fs::write(
+            path.join(MANIFEST_FILE),
+            manifest("future", "demo", "2026-10-27"),
+        )
+        .unwrap();
+        assert!(
+            matches!(inspect_pack(&path), Err(PackError::InvalidVersion(value)) if value == "future")
+        );
+
+        fs::write(
+            path.join(MANIFEST_FILE),
+            manifest("1.0.0", "../escape", "2026-10-27"),
+        )
+        .unwrap();
+        assert!(matches!(inspect_pack(&path), Err(PackError::InvalidId(_))));
+
+        fs::write(
+            path.join(MANIFEST_FILE),
+            manifest("1.0.0", "demo", "2025-02-29"),
+        )
+        .unwrap();
+        assert!(matches!(
+            inspect_pack(&path),
+            Err(PackError::InvalidReviewDate)
+        ));
+
+        fs::write(
+            path.join(MANIFEST_FILE),
+            manifest("1.0.0", "demo", "2024-02-29"),
+        )
+        .unwrap();
+        assert_eq!(
+            inspect_pack(&path)
+                .unwrap()
+                .manifest
+                .review
+                .unwrap()
+                .reviewed_at,
+            "2024-02-29"
+        );
+        fs::remove_dir_all(path).unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn symlinked_snippet_is_rejected() {
@@ -1157,7 +1273,7 @@ mod tests {
         fs::create_dir_all(path.join(SNIPPETS_DIR)).unwrap();
         fs::write(
             path.join(MANIFEST_FILE),
-            "format_version = 1\nid = \"demo\"\nversion = \"1\"\nname = \"Demo\"\npublisher = \"Test\"\n",
+            "format_version = 1\nid = \"demo\"\nversion = \"1.0.0\"\nname = \"Demo\"\npublisher = \"Test\"\n",
         )
         .unwrap();
         let target = path.join("outside.toml");

@@ -1,0 +1,12 @@
+format_version = 1
+id = "wayexpand.ansible"
+version = "1.0.0"
+name = "Ansible Administration"
+publisher = "WayExpand project"
+description = "Reviewed playbook and inventory starters with idempotent examples and validation commands."
+capabilities = ["forms"]
+
+[review]
+reviewed_by = "WayExpand project review"
+reviewed_at = "2026-10-27"
+summary = "Playbooks are inserted as text; package-install examples are idempotent but still make changes when an operator runs them."

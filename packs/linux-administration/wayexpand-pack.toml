@@ -1,0 +1,12 @@
+format_version = 1
+id = "wayexpand.linux-administration"
+version = "1.0.0"
+name = "Linux Administration"
+publisher = "WayExpand project"
+description = "Parameterized, insert-only templates for Bash, SSH, and systemd operations."
+capabilities = ["forms"]
+
+[review]
+reviewed_by = "WayExpand project review"
+reviewed_at = "2026-10-27"
+summary = "Insert-only Linux, Bash, SSH, and systemd administration templates; no command is executed by WayExpand."

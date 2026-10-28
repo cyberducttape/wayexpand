@@ -1,7 +1,9 @@
 //! Snippet library and configuration commands: test, preview, list, search, validate, import, packs, enable/mode edits, backup, edit, and fleet.
 
 use super::Args;
+use crate::args::take_flag;
 use crate::*;
+use std::os::unix::fs::PermissionsExt;
 
 pub(crate) fn test_command(mut args: Args) -> Result<()> {
     let trigger = args
@@ -466,15 +468,430 @@ fn pack_signers_override_refusal(
     })
 }
 
+fn installed_pack_root() -> Result<PathBuf> {
+    wayexpand_core::Layer::Pack
+        .default_dir()
+        .ok_or_else(|| config_error("HOME is required to locate the local pack directory"))
+}
+
+fn ensure_pack_id(id: &str) -> Result<()> {
+    if id.is_empty()
+        || id.len() > 128
+        || !id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    {
+        bail!("invalid pack id; use only letters, digits, '.', '_' or '-' ");
+    }
+    Ok(())
+}
+
+fn resolve_pack_path(path: &Path) -> PathBuf {
+    if path.exists() {
+        return path.to_owned();
+    }
+    let id = path.to_string_lossy();
+    if ensure_pack_id(&id).is_ok() {
+        if let Ok(root) = installed_pack_root() {
+            let installed = root.join(id.as_ref());
+            if installed.exists() {
+                return installed;
+            }
+        }
+    }
+    path.to_owned()
+}
+
+fn installed_pack_report() -> Result<Vec<serde_json::Value>> {
+    let root = installed_pack_root()?;
+    let metadata = match std::fs::symlink_metadata(&root) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => {
+            return Err(config_error(format!(
+                "could not read pack directory: {error}"
+            )))
+        }
+    };
+    if !metadata.file_type().is_dir() {
+        bail!(
+            "local pack path is not a real directory: {}",
+            root.display()
+        );
+    }
+    let mut entries = Vec::new();
+    for entry in std::fs::read_dir(&root)
+        .map_err(|error| config_error(format!("could not list local packs: {error}")))?
+    {
+        let entry =
+            entry.map_err(|error| config_error(format!("could not list local packs: {error}")))?;
+        let metadata = std::fs::symlink_metadata(entry.path())
+            .map_err(|error| config_error(format!("could not inspect local pack: {error}")))?;
+        if !metadata.file_type().is_dir() {
+            continue;
+        }
+        let path = entry.path();
+        match inspect_pack(&path) {
+            Ok(inspection) => entries.push(serde_json::json!({
+                "id": inspection.manifest.id,
+                "name": inspection.manifest.name,
+                "version": inspection.manifest.version,
+                "path": path,
+                "review": inspection.manifest.review.map(|review| format!("{} ({})", review.reviewed_by, review.reviewed_at)),
+                "expansions": inspection.expansion_count,
+                "valid": true,
+            })),
+            Err(error) => entries.push(serde_json::json!({
+                "id": entry.file_name().to_string_lossy(),
+                "path": path,
+                "valid": false,
+                "error": error.to_string(),
+            })),
+        }
+    }
+    entries.sort_by(|left, right| left["id"].as_str().cmp(&right["id"].as_str()));
+    Ok(entries)
+}
+
+fn remove_installed_pack(id: &str) -> Result<()> {
+    ensure_pack_id(id)?;
+    let root = installed_pack_root()?;
+    let target = root.join(id);
+    let metadata = std::fs::symlink_metadata(&target)
+        .map_err(|error| config_error(format!("could not find installed pack {id}: {error}")))?;
+    if !metadata.file_type().is_dir() {
+        bail!(
+            "installed pack path is not a real directory: {}",
+            target.display()
+        );
+    }
+    if metadata.uid() != unsafe { libc::geteuid() } {
+        bail!(
+            "refusing to remove pack not owned by the current user: {}",
+            target.display()
+        );
+    }
+    std::fs::remove_dir_all(&target)
+        .map_err(|error| config_error(format!("could not remove installed pack: {error}")))?;
+    sync_directory(&root)?;
+    Ok(())
+}
+
+fn install_local_pack(
+    source: &Path,
+    inspection: &wayexpand_core::PackInspection,
+    replace: bool,
+    allow_downgrade: bool,
+    trusted_signers: Option<&Path>,
+) -> Result<PathBuf> {
+    let root = installed_pack_root()?;
+    install_local_pack_at(
+        source,
+        inspection,
+        replace,
+        allow_downgrade,
+        trusted_signers,
+        &root,
+    )
+}
+
+fn install_local_pack_at(
+    source: &Path,
+    inspection: &wayexpand_core::PackInspection,
+    replace: bool,
+    allow_downgrade: bool,
+    trusted_signers: Option<&Path>,
+    root: &Path,
+) -> Result<PathBuf> {
+    let id = &inspection.manifest.id;
+    ensure_pack_id(id)?;
+    let parent = root
+        .parent()
+        .ok_or_else(|| config_error("local pack directory has no parent"))?;
+    // The fleet loader validates every parent of an installed TOML file. Keep
+    // the application-owned directory private as well as the packs leaf, or
+    // a permissive umask could make newly installed packs unloadable.
+    prepare_private_directory(parent)?;
+    let root_preexisting = std::fs::symlink_metadata(root).is_ok();
+    std::fs::create_dir_all(root)
+        .map_err(|error| config_error(format!("could not create local pack directory: {error}")))?;
+    if !root_preexisting {
+        let metadata = std::fs::symlink_metadata(root).map_err(|error| {
+            config_error(format!("could not inspect new pack directory: {error}"))
+        })?;
+        if !metadata.file_type().is_dir()
+            || metadata.file_type().is_symlink()
+            || metadata.uid() != unsafe { libc::geteuid() }
+        {
+            bail!("new pack directory is not a real directory owned by the current user");
+        }
+        std::fs::set_permissions(root, std::fs::Permissions::from_mode(0o700)).map_err(
+            |error| config_error(format!("could not secure new pack directory: {error}")),
+        )?;
+    }
+    let root_metadata = std::fs::symlink_metadata(root).map_err(|error| {
+        config_error(format!("could not inspect local pack directory: {error}"))
+    })?;
+    if !root_metadata.file_type().is_dir()
+        || root_metadata.file_type().is_symlink()
+        || root_metadata.uid() != unsafe { libc::geteuid() }
+        || root_metadata.mode() & 0o022 != 0
+    {
+        bail!(
+            "local pack directory must be a real, user-owned, non-writable-by-others directory: {} (dir={}, symlink={}, owner={}, mode={:o}, euid={})",
+            root.display(), root_metadata.file_type().is_dir(), root_metadata.file_type().is_symlink(), root_metadata.uid(), root_metadata.mode() & 0o777, unsafe { libc::geteuid() }
+        );
+    }
+    let lock_path = root.join(format!(".install-{id}.lock"));
+    let _lock = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&lock_path)
+        .map_err(|error| config_error(format!("another install may be running for {id}, or the install lock is unavailable: {error}")))?;
+    let _lock_guard = PackInstallLock(lock_path);
+
+    let staging_root = parent.join(".wayexpand-pack-staging");
+    let backup_root = parent.join("wayexpand-pack-backups");
+    prepare_private_directory(&staging_root)?;
+    prepare_private_directory(&backup_root)?;
+    let suffix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let stage = staging_root.join(format!("{id}-{}-{suffix}", std::process::id()));
+    let _stage_guard = StagedPackDirectory(stage.clone());
+    copy_pack_to_stage(source, &stage)?;
+    let staged = inspect_pack(&stage)
+        .map_err(|error| config_error(format!("copied pack failed validation: {error}")))?;
+    if staged.manifest != inspection.manifest {
+        let _ = std::fs::remove_dir_all(&stage);
+        bail!("pack source changed during installation; inspect it again and retry");
+    }
+    if let Some(signers) = trusted_signers {
+        wayexpand_core::verify_pack_signature(&stage, signers).map_err(|error| {
+            config_error(format!("copied pack signature did not verify: {error}"))
+        })?;
+    }
+
+    let target = root.join(id);
+    let existing_metadata = std::fs::symlink_metadata(&target);
+    let mut backup = None;
+    match existing_metadata {
+        Ok(metadata) => {
+            if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+                let _ = std::fs::remove_dir_all(&stage);
+                bail!(
+                    "refusing to replace non-directory or symlink pack path: {}",
+                    target.display()
+                );
+            }
+            if !replace {
+                let _ = std::fs::remove_dir_all(&stage);
+                bail!("pack {id} is already installed; use `pack install --replace` to update it");
+            }
+            let current = inspect_pack(&target).map_err(|error| {
+                config_error(format!(
+                    "installed pack must validate before replacement: {error}"
+                ))
+            })?;
+            let current_version =
+                semver::Version::parse(&current.manifest.version).map_err(|error| {
+                    config_error(format!("installed pack has invalid version: {error}"))
+                })?;
+            let incoming_version =
+                semver::Version::parse(&inspection.manifest.version).map_err(|error| {
+                    config_error(format!("incoming pack has invalid version: {error}"))
+                })?;
+            if incoming_version < current_version && !allow_downgrade {
+                let _ = std::fs::remove_dir_all(&stage);
+                bail!("refusing pack downgrade from {} to {}; install a higher version or remove the pack first", current.manifest.version, inspection.manifest.version);
+            }
+            let backup_path =
+                backup_root.join(format!("{id}-{}-{suffix}", current.manifest.version));
+            std::fs::rename(&target, &backup_path).map_err(|error| {
+                config_error(format!("could not preserve previous pack: {error}"))
+            })?;
+            backup = Some(backup_path);
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            let _ = std::fs::remove_dir_all(&stage);
+            return Err(config_error(format!(
+                "could not inspect installation target: {error}"
+            )));
+        }
+    }
+    if let Err(error) = std::fs::rename(&stage, &target) {
+        if let Some(backup) = &backup {
+            let _ = std::fs::rename(backup, &target);
+        }
+        let _ = std::fs::remove_dir_all(&stage);
+        return Err(config_error(format!(
+            "could not activate installed pack: {error}"
+        )));
+    }
+    sync_directory(root)?;
+    Ok(target)
+}
+
+struct PackInstallLock(PathBuf);
+
+impl Drop for PackInstallLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+struct StagedPackDirectory(PathBuf);
+
+impl Drop for StagedPackDirectory {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn prepare_private_directory(path: &Path) -> Result<()> {
+    let preexisting = std::fs::symlink_metadata(path).is_ok();
+    std::fs::create_dir_all(path).map_err(|error| {
+        config_error(format!("could not create private pack directory: {error}"))
+    })?;
+    let metadata = std::fs::symlink_metadata(path)
+        .map_err(|error| config_error(format!("could not inspect pack directory: {error}")))?;
+    if !metadata.file_type().is_dir()
+        || metadata.file_type().is_symlink()
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || (preexisting && metadata.mode() & 0o022 != 0)
+    {
+        bail!(
+            "pack staging/backup directory must be user-owned and not writable by others: {}",
+            path.display()
+        );
+    }
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).map_err(|error| {
+        config_error(format!("could not secure pack staging directory: {error}"))
+    })?;
+    Ok(())
+}
+
+fn copy_pack_to_stage(source: &Path, stage: &Path) -> Result<()> {
+    std::fs::create_dir(stage).map_err(|error| {
+        config_error(format!("could not create pack staging directory: {error}"))
+    })?;
+    std::fs::set_permissions(stage, std::fs::Permissions::from_mode(0o700)).map_err(|error| {
+        config_error(format!("could not secure pack staging directory: {error}"))
+    })?;
+    copy_pack_file(
+        &source.join("wayexpand-pack.toml"),
+        &stage.join("wayexpand-pack.toml"),
+    )?;
+    let signature = source.join(wayexpand_core::SIGNATURE_FILE);
+    if std::fs::symlink_metadata(&signature).is_ok() {
+        copy_pack_file(&signature, &stage.join(wayexpand_core::SIGNATURE_FILE))?;
+    }
+    let source_snippets = source.join("snippets");
+    let metadata = std::fs::symlink_metadata(&source_snippets)
+        .map_err(|error| config_error(format!("could not inspect pack snippets: {error}")))?;
+    if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+        bail!("pack snippets path is not a real directory");
+    }
+    let target_snippets = stage.join("snippets");
+    std::fs::create_dir(&target_snippets).map_err(|error| {
+        config_error(format!(
+            "could not create staged snippets directory: {error}"
+        ))
+    })?;
+    std::fs::set_permissions(&target_snippets, std::fs::Permissions::from_mode(0o700)).map_err(
+        |error| {
+            config_error(format!(
+                "could not secure staged snippets directory: {error}"
+            ))
+        },
+    )?;
+    for entry in std::fs::read_dir(&source_snippets)
+        .map_err(|error| config_error(format!("could not read pack snippets: {error}")))?
+    {
+        let entry =
+            entry.map_err(|error| config_error(format!("could not read pack snippet: {error}")))?;
+        if entry
+            .path()
+            .extension()
+            .is_some_and(|extension| extension == "toml")
+        {
+            copy_pack_file(&entry.path(), &target_snippets.join(entry.file_name()))?;
+        }
+    }
+    Ok(())
+}
+
+fn copy_pack_file(source: &Path, target: &Path) -> Result<()> {
+    let metadata = std::fs::symlink_metadata(source)
+        .map_err(|error| config_error(format!("could not inspect pack file: {error}")))?;
+    if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+        bail!(
+            "pack installation accepts regular files only: {}",
+            source.display()
+        );
+    }
+    let mut input = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(source)
+        .map_err(|error| config_error(format!("could not open pack file: {error}")))?;
+    let mut output = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(target)
+        .map_err(|error| config_error(format!("could not create staged pack file: {error}")))?;
+    std::io::copy(&mut input, &mut output)
+        .map_err(|error| config_error(format!("could not copy pack file: {error}")))?;
+    output
+        .sync_all()
+        .map_err(|error| config_error(format!("could not sync staged pack file: {error}")))?;
+    Ok(())
+}
+
+fn sync_directory(path: &Path) -> Result<()> {
+    std::fs::File::open(path)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| config_error(format!("could not sync pack directory: {error}")))
+}
+
 pub(crate) fn pack_command(args: Args) -> Result<()> {
-    const USAGE: &str = "usage: wayexpand pack inspect|import|verify <directory> [--signers FILE]\n       wayexpand pack sign <directory> --key FILE";
+    const USAGE: &str = "usage: wayexpand pack inspect|import|verify <directory-or-id> [--signers FILE]\n       wayexpand pack install <directory> [--replace [--allow-downgrade]] [--allow-actions] [--signers FILE]\n       wayexpand pack list [--json] | path <id> | remove <id>\n       wayexpand pack sign <directory> --key FILE";
     let mut rest: Vec<String> = args.collect();
     let key = take_option(&mut rest, "--key")?;
     let signers_override = take_option(&mut rest, "--signers")?;
+    let replace = take_flag(&mut rest, "--replace");
+    let allow_downgrade = take_flag(&mut rest, "--allow-downgrade");
+    let allow_actions = take_flag(&mut rest, "--allow-actions");
+    let requested_json = take_json_flag(&mut rest);
+    // `list` takes no positional path; normalize it to the shared two-field
+    // parser shape used by the other pack actions.
+    if rest.as_slice() == ["list"] {
+        rest.push(String::new());
+    }
     let [action, path] = rest.as_slice() else {
         usage_bail!("{USAGE}");
     };
-    let path = PathBuf::from(path);
+    if replace && action != "install" {
+        usage_bail!("--replace is only valid for `wayexpand pack install`");
+    }
+    if allow_downgrade && (action != "install" || !replace) {
+        usage_bail!("--allow-downgrade requires `wayexpand pack install --replace`");
+    }
+    if allow_actions && action != "install" {
+        usage_bail!("--allow-actions is only valid for `wayexpand pack install`");
+    }
+    if requested_json && action != "list" {
+        usage_bail!("--json is only supported by `wayexpand pack list`");
+    }
+    let requested_path = PathBuf::from(path);
+    let path = match action.as_str() {
+        "inspect" | "verify" | "sign" | "import" | "install" => resolve_pack_path(&requested_path),
+        _ => requested_path.clone(),
+    };
     let policy = load_policy()
         .map_err(|error| config_error(format!("organization policy is invalid: {error}")))?;
     // An explicit --signers file is the caller's own choice; the policy
@@ -509,6 +926,79 @@ pub(crate) fn pack_command(args: Args) -> Result<()> {
         }
     };
     match action.as_str() {
+        "list" => {
+            let packs = installed_pack_report()?;
+            if requested_json {
+                println!("{}", serde_json::json!({ "packs": packs }));
+            } else if packs.is_empty() {
+                println!("No local packs installed. Install one with `wayexpand pack install ./packs/<name>`. ");
+            } else {
+                for pack in packs {
+                    println!(
+                        "{} {} — {} [{}]",
+                        pack["id"].as_str().unwrap_or("unknown"),
+                        pack["version"].as_str().unwrap_or("invalid"),
+                        pack["name"].as_str().unwrap_or("Invalid pack"),
+                        pack["review"].as_str().unwrap_or("unreviewed")
+                    );
+                }
+                println!("Edit local TOML under the pack path; use `wayexpand validate --fleet` after changes.");
+            }
+        }
+        "path" => {
+            let id = path.to_string_lossy();
+            ensure_pack_id(&id)?;
+            let target = installed_pack_root()?.join(id.as_ref());
+            inspect_pack(&target)
+                .map_err(|error| config_error(format!("installed pack is invalid: {error}")))?;
+            println!("{}", target.display());
+        }
+        "remove" => {
+            let id = path.to_string_lossy();
+            ensure_pack_id(&id)?;
+            remove_installed_pack(&id)?;
+            println!("removed local pack {id}");
+            let _ = control_operation(wayexpand_core::DaemonOperation::Reload);
+        }
+        "install" => {
+            let inspection = inspect_pack(&path)?;
+            let signer = check_signature()?;
+            if !allow_actions && (inspection.command_count > 0 || inspection.hotkey_count > 0) {
+                bail!("refusing to install command or hotkey actions by default; review the pack and pass --allow-actions to activate them");
+            }
+            if policy.safe_mode && !policy.pack_allowed(&inspection.manifest.id) {
+                bail!(
+                    "organization policy does not allow pack {}; ask an administrator to add it to allowed_packs",
+                    inspection.manifest.id
+                );
+            }
+            if policy.safe_mode && policy.disable_commands && inspection.command_count > 0 {
+                bail!("organization policy disables commands; this pack contains command-backed entries");
+            }
+            if policy.safe_mode && policy.disable_hotkeys && inspection.hotkey_count > 0 {
+                bail!("organization policy disables hotkeys; this pack contains hotkeys");
+            }
+            let installed = install_local_pack(
+                &path,
+                &inspection,
+                replace,
+                allow_downgrade,
+                signer.is_some().then_some(&signers),
+            )?;
+            println!(
+                "installed {} {} at {}{}",
+                inspection.manifest.name,
+                inspection.manifest.version,
+                installed.display(),
+                if signer.is_some() {
+                    " (signature verified)"
+                } else {
+                    " (local pack; signature not verified)"
+                }
+            );
+            println!("The pack is offline and editable. Run `wayexpand validate --fleet` to check the active library.");
+            let _ = control_operation(wayexpand_core::DaemonOperation::Reload);
+        }
         "inspect" => {
             let inspection = inspect_pack(&path)?;
             println!(
@@ -519,6 +1009,14 @@ pub(crate) fn pack_command(args: Args) -> Result<()> {
             println!("publisher: {}", inspection.manifest.publisher);
             if !inspection.manifest.description.is_empty() {
                 println!("description: {}", inspection.manifest.description);
+            }
+            if let Some(review) = &inspection.manifest.review {
+                println!(
+                    "review record: {} on {} — {} (metadata; signature authenticates pack bytes)",
+                    review.reviewed_by, review.reviewed_at, review.summary
+                );
+            } else {
+                println!("review record: none");
             }
             if let Some(version) = &inspection.manifest.min_wayexpand_version {
                 println!("requires WayExpand: {version} or newer");
@@ -1020,5 +1518,89 @@ mod pack_policy_tests {
         policy.require_signed_packs = true;
         policy.safe_mode = false;
         assert!(pack_signers_override_refusal(&policy, true).is_none());
+    }
+}
+
+#[cfg(test)]
+mod pack_install_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path =
+            std::env::temp_dir().join(format!("wayexpand-{label}-{}-{nonce}", std::process::id()));
+        std::fs::create_dir(&path).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        path
+    }
+
+    fn make_pack(path: &Path, version: &str) -> wayexpand_core::PackInspection {
+        std::fs::create_dir_all(path.join("snippets")).unwrap();
+        std::fs::write(
+            path.join("wayexpand-pack.toml"),
+            format!(
+                "format_version=1\nid=\"sample.local\"\nversion=\"{version}\"\nname=\"Local sample\"\npublisher=\"Test\"\n\n[review]\nreviewed_by=\"Test\"\nreviewed_at=\"2026-10-27\"\nsummary=\"Insert-only test content\"\n"
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            path.join("snippets/main.toml"),
+            "[[expansion]]\ntrigger=\";;local-pack-test\"\nreplacement=\"offline\"\n",
+        )
+        .unwrap();
+        inspect_pack(path).unwrap()
+    }
+
+    #[test]
+    fn local_pack_install_validates_versions_and_keeps_replacement_backup() {
+        let base = temp_dir("pack-install");
+        let source_v1 = base.join("source-v1");
+        let source_v2 = base.join("source-v2");
+        let root = base.join("packs");
+        let first = make_pack(&source_v1, "1.0.0");
+        let first_path =
+            install_local_pack_at(&source_v1, &first, false, false, None, &root).unwrap();
+        assert_eq!(inspect_pack(&first_path).unwrap().manifest.version, "1.0.0");
+        assert!(install_local_pack_at(&source_v1, &first, false, false, None, &root).is_err());
+
+        let second = make_pack(&source_v2, "1.1.0");
+        let second_path =
+            install_local_pack_at(&source_v2, &second, true, false, None, &root).unwrap();
+        assert_eq!(
+            inspect_pack(&second_path).unwrap().manifest.version,
+            "1.1.0"
+        );
+        let backups = base.join("wayexpand-pack-backups");
+        assert!(std::fs::read_dir(backups).unwrap().any(|entry| {
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with("sample.local-1.0.0-")
+        }));
+        assert!(install_local_pack_at(&source_v1, &first, true, false, None, &root).is_err());
+        let restored = install_local_pack_at(&source_v1, &first, true, true, None, &root).unwrap();
+        assert_eq!(inspect_pack(restored).unwrap().manifest.version, "1.0.0");
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_pack_install_refuses_a_symlinked_install_root() {
+        use std::os::unix::fs::symlink;
+
+        let base = temp_dir("pack-symlink");
+        let source = base.join("source");
+        let outside = base.join("outside");
+        let root = base.join("packs");
+        let inspection = make_pack(&source, "1.0.0");
+        std::fs::create_dir_all(&outside).unwrap();
+        symlink(&outside, &root).unwrap();
+        assert!(install_local_pack_at(&source, &inspection, false, false, None, &root).is_err());
+        std::fs::remove_dir_all(base).unwrap();
     }
 }

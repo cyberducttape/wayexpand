@@ -1,0 +1,34 @@
+[[expansion]]
+trigger = ";;git-status-review"
+description = "Show branch and concise worktree status"
+category = "Git"
+tags = ["git", "review", "read-only"]
+replacement = "git status --short --branch"
+
+[[expansion]]
+trigger = ";;git-diff-review"
+description = "Check whitespace errors and summarize unstaged changes"
+category = "Git"
+tags = ["git", "diff", "read-only"]
+replacement = "git diff --check && git diff --stat"
+
+[[expansion]]
+trigger = ";;git-log-review"
+description = "Inspect a bounded recent commit list"
+category = "Git"
+tags = ["git", "history", "read-only"]
+replacement = "git log --oneline --decorate -{{field:count=12}} {{field:ref=HEAD}}"
+
+[[expansion]]
+trigger = ";;git-branch-review"
+description = "Compare a local branch with its upstream without changing refs"
+category = "Git"
+tags = ["git", "branch", "read-only"]
+replacement = "git fetch --dry-run && git log --oneline --left-right {{field:base=@{upstream}}}...{{field:branch=HEAD}}"
+
+[[expansion]]
+trigger = ";;git-commit-template"
+description = "Conventional commit message starter; inspect staged diff before committing"
+category = "Git"
+tags = ["git", "commit", "template"]
+replacement = "{{choice:type=feat|fix|docs|refactor|test|chore}}({{field:scope=scope}}): {{field:summary|required|min=8|max=72}}{{cursor}}\n\n{{field:body=Explain why this change is needed.}}"

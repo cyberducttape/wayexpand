@@ -15,7 +15,7 @@ See:
   2. `snippets.d/` next to the configuration file - User layer (personal
      snippets; `~/.config/wayexpand/snippets.d/` by default, or under
      `$XDG_CONFIG_HOME/wayexpand/` when that is set)
-  3. `~/.local/share/wayexpand/packs/` - Curated packs
+  3. `${XDG_DATA_HOME:-~/.local/share}/wayexpand/packs/` - Curated packs
 
 ## Quick Start
 
@@ -48,7 +48,7 @@ EOF
 ### Using Curated Packs
 ```sh
 umask 077
-mkdir -p ~/.local/share/wayexpand/packs/my-pack
+mkdir -p "${XDG_DATA_HOME:-$HOME/.local/share}/wayexpand/packs/my-pack"
 # Add TOML files to my-pack/
 ```
 

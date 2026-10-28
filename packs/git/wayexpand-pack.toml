@@ -1,0 +1,12 @@
+format_version = 1
+id = "wayexpand.git"
+version = "1.0.0"
+name = "Git Workflows"
+publisher = "WayExpand project"
+description = "Review-first Git commands and templates for common collaborative workflows."
+capabilities = ["forms"]
+
+[review]
+reviewed_by = "WayExpand project review"
+reviewed_at = "2026-10-27"
+summary = "Command snippets inspect repository state; no reset, force push, checkout, or commit is executed automatically."

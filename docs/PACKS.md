@@ -2,35 +2,62 @@
 
 ## Optional sysadmin and developer libraries
 
-This repository includes six local example packs in `packs/`. They are
-optional: inspect and import only the categories you want.
+The seven administration and support packs are versioned and carry a source
+review record in `packs/`; existing developer and operations-triage examples
+remain available alongside them. Every pack is optional and works entirely
+offline. Install only the libraries you want.
 
 | Pack | Contents |
 | --- | --- |
-| `linux-operations` | Bash, SSH, systemd, and journalctl templates |
+| `linux-administration` | Bash, SSH, systemd, and journalctl templates |
+| `docker` | Docker, Podman, and Compose inspection templates |
 | `kubernetes` | Parameterized, read-only `kubectl` inspection commands |
-| `containers` | Docker, Podman, and Compose inspection templates |
-| `developer` | Git, SQL, shell, and Markdown starters |
-| `support-replies` | Status updates, maintenance notices, and support replies |
+| `ansible` | Playbook, inventory, and role starters with syntax checks |
+| `nginx` | Configuration checks, request probes, and server-block starters |
+| `git` | Review-first Git commands and collaborative workflow templates |
+| `customer-support` | Status updates, maintenance notices, and support replies |
+| `developer` | SQL, shell, and Markdown starters |
 | `ops-triage` | Read-only first-response checks (TLS expiry, disk, memory, sockets, DNS, HTTP, nginx, firewall, failed units) and on-call timeline and handoff notes |
 
-For example, review then import the Kubernetes pack:
+Install and inspect a pack locally:
 
 ```bash
 wayexpand pack inspect ./packs/kubernetes
-wayexpand pack import ./packs/kubernetes > /tmp/kubernetes-snippets.toml
-wayexpand validate /tmp/kubernetes-snippets.toml
+wayexpand pack install ./packs/kubernetes
+wayexpand pack list
+wayexpand pack path wayexpand.kubernetes-operations
+wayexpand validate --fleet
+wayexpand reload
 ```
+
+Install copies a validated pack into
+`${XDG_DATA_HOME:-~/.local/share}/wayexpand/packs/<id>`. No network or account
+is used. Replacing an installed version requires `--replace`; lower versions
+require the additional `--allow-downgrade` flag. The prior version is kept in
+the sibling `wayexpand-pack-backups/` directory. `wayexpand pack remove <id>`
+removes the active local copy. Admin policy still controls whether an
+installed pack is eligible for fleet configuration.
+
+Installed packs are ordinary editable TOML directories. To customize one,
+locate it with `wayexpand pack path <id>`, edit files under `snippets/`, then
+run `wayexpand validate --fleet` and `wayexpand reload`. For a durable
+modification, update the source pack and its semantic version before sharing
+or reinstalling it. Local changes invalidate any pack signature.
 
 CI checks every pack in this repository with
 `scripts/check-snippet-repo.sh --deny-risks packs`; run the same check on your
 own snippet repository (see [SNIPPET_REPOSITORIES.md](SNIPPET_REPOSITORIES.md)).
 
-Import produces ordinary TOML; it does not install or activate snippets.
-Review the triggers and defaults, then merge the entries into your library or
-deploy them through your normal fleet configuration process. These repository
-examples are unsigned. Managed deployments that require signed packs must
-review and sign the selected content with their own trusted key.
+`pack inspect` shows the version, review record, signature state, capabilities,
+and action counts. The review record is descriptive repository metadata, not a
+signature; a trusted signature authenticates the exact reviewed bytes. The
+repository packs are unsigned. Managed deployments that require signed packs
+must review and sign the selected content with their own trusted key.
+
+`pack import` still produces ordinary TOML on stdout and does not install or
+activate snippets. It strips commands and hotkeys. `pack install` keeps the
+validated pack structure intact; it refuses command and hotkey actions unless
+you explicitly pass `--allow-actions` after reviewing them.
 
 The snippets insert command text for the user to inspect. They do not run the
 commands. Defaults favor inspection, explicit namespaces/targets, and bounded
@@ -57,11 +84,19 @@ version = "1.0.0"
 name = "Example Operations"
 publisher = "Example Team"
 description = "Common incident-response snippets"
+
+[review]
+reviewed_by = "Operations maintainers"
+reviewed_at = "2026-10-27"
+summary = "Insert-only incident templates and read-only diagnostics"
 ```
 
 Each file under `snippets/` is a normal WayExpand TOML configuration. Its
 expansions are merged in lexical filename order. The pack manifest and every
 snippet file are strict: unknown fields and invalid configuration are errors.
+Pack `version` must be semantic versioning, and `id` is restricted to safe
+directory-name characters. Review metadata must contain a reviewer, a real
+calendar date, and a summary.
 
 ## Inspect and import
 
@@ -134,7 +169,7 @@ signer in `pack_signers_file` (default `/etc/wayexpand/pack-signers`), which
 must be root-owned and not writable by others; `pack import --signers FILE`
 is refused rather than trusting a signers file the user chose. This applies to `pack import`
 and to the fleet pack layer: a pack directory under
-`~/.local/share/wayexpand/packs/` that contains a manifest is loaded from its
+`${XDG_DATA_HOME:-~/.local/share}/wayexpand/packs/` that contains a manifest is loaded from its
 `snippets/` directory as managed, read-only snippets, separate from the user's
 own library, and is excluded (and reported by `wayexpand fleet status`) unless
 it verifies. Packs without a manifest count as unsigned. In audit mode the same

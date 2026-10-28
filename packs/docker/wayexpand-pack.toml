@@ -1,0 +1,12 @@
+format_version = 1
+id = "wayexpand.docker"
+version = "1.0.0"
+name = "Docker and Podman"
+publisher = "WayExpand project"
+description = "Insert-only Docker and Podman inspection and Compose templates."
+capabilities = ["forms"]
+
+[review]
+reviewed_by = "WayExpand project review"
+reviewed_at = "2026-10-27"
+summary = "Insert-only Docker, Podman, and Compose inspection templates with bounded log defaults."

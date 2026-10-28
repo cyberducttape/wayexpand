@@ -1,0 +1,57 @@
+[[expansion]]
+trigger = ";;nginx-config-test"
+description = "Validate nginx configuration without reloading"
+category = "Nginx"
+tags = ["nginx", "validation", "read-only"]
+replacement = "sudo nginx -t"
+
+[[expansion]]
+trigger = ";;nginx-service-status"
+description = "Inspect nginx service state and recent unit messages"
+category = "Nginx"
+tags = ["nginx", "systemd", "read-only"]
+replacement = "systemctl status nginx --no-pager && journalctl -u nginx --since '{{field:since=30 minutes ago}}' --no-pager -n {{field:lines=100}}"
+
+[[expansion]]
+trigger = ";;nginx-http-probe"
+description = "Check response headers and timing for one virtual host"
+category = "Nginx"
+tags = ["nginx", "http", "read-only"]
+replacement = "curl --silent --show-error --head --max-time 10 --write-out 'status=%{http_code} total=%{time_total}s\\n' {{field:url=https://example.net/health}}"
+
+[[expansion]]
+trigger = ";;nginx-server-block"
+description = "HTTP virtual-host starter; review paths and enable TLS before production"
+category = "Nginx"
+tags = ["nginx", "configuration", "starter"]
+replacement = """server {
+    listen 80;
+    listen [::]:80;
+    server_name {{field:hostname=example.net}};
+
+    access_log /var/log/nginx/{{field:log_name=example_access}}.log;
+    error_log  /var/log/nginx/{{field:log_name}}_error.log warn;
+
+    location / {
+        proxy_pass http://127.0.0.1:{{field:upstream_port=8080}};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+"""
+
+[[expansion]]
+trigger = ";;nginx-maintenance"
+description = "Temporary maintenance response location snippet"
+category = "Nginx"
+tags = ["nginx", "maintenance"]
+replacement = """location = /maintenance.html {
+    root {{field:document_root=/var/www/example}};
+    internal;
+}
+
+error_page 502 503 504 /maintenance.html;
+"""
