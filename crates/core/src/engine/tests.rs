@@ -5547,6 +5547,17 @@ fn matched_forms_reuse_the_validated_field_definitions() {
 }
 
 #[test]
+fn conflicting_repeated_form_field_rules_fail_configuration_validation() {
+    let config = r#"
+        [[expansion]]
+        trigger = ":ambiguous"
+        replacement = "{{field:name|min=2}} {{field:name|min=3}}"
+    "#;
+    let error = Config::parse(config).expect_err("conflicting field rules must fail validation");
+    assert!(error.to_string().contains("template"));
+}
+
+#[test]
 fn explain_describes_form_snippets_instead_of_failing_to_render() {
     let mut engine = ExpansionEngine::new(Config::parse(FORM_CONFIG).unwrap()).unwrap();
     engine.set_form_replacement_guarantee(crate::ReplacementGuarantee::VerifiedSurroundingText);
