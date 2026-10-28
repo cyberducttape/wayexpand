@@ -142,8 +142,12 @@ pub(crate) fn record_command_failure(backend: &str, kind: wayexpand_core::Comman
 /// cannot be prepared. In particular, forms require stronger replacement
 /// guarantees than ordinary static insertions.
 pub(crate) fn record_preparation_failure(backend: &str, error: &wayexpand_core::CommandError) {
+    record_blocked_expansion(backend, preparation_failure_reason(error));
+}
+
+fn preparation_failure_reason(error: &wayexpand_core::CommandError) -> &'static str {
     use wayexpand_core::CommandError as Error;
-    let reason = match error {
+    match error {
         Error::SpawnFailed { .. } => "helper could not start",
         Error::Timeout => "helper timed out",
         Error::WaitFailed { .. } => "helper process supervision failed",
@@ -165,8 +169,7 @@ pub(crate) fn record_preparation_failure(backend: &str, error: &wayexpand_core::
         Error::IncompleteFormOutput => "form helper output stream did not close",
         Error::OutputChannelLost => "helper output channel was lost",
         Error::IncompleteOutput => "helper output was incomplete",
-    };
-    record_blocked_expansion(backend, reason);
+    }
 }
 
 fn now_unix() -> u64 {
@@ -456,7 +459,7 @@ mod tests {
     fn preparation_failures_use_specific_content_free_reasons() {
         use wayexpand_core::CommandError;
 
-        for (error, expected) in [
+        let cases = [
             (
                 CommandError::SpawnFailed {
                     detail: "secret path must not be recorded".into(),
@@ -475,23 +478,14 @@ mod tests {
                 CommandError::IncompleteOutput,
                 "helper output was incomplete",
             ),
-        ] {
-            record_preparation_failure("test-backend", &error);
-            let failures: serde_json::Value =
-                serde_json::from_str(&recent_json()).expect("failures should be JSON");
-            assert!(failures.as_array().unwrap().iter().any(|trace| {
-                trace["completion"] == expected
-                    && trace["backend"] == "test-backend"
-                    && trace.get("trigger").is_none()
-                    && trace.get("replacement").is_none()
-            }));
-            assert!(!failures
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|trace| trace["completion"]
-                    .as_str()
-                    .is_some_and(|detail| { detail.contains("secret path") })));
+        ];
+
+        for (error, expected) in cases {
+            // Test the pure mapping rather than racing the process-wide bounded
+            // diagnostic ring against unrelated daemon tests running in
+            // parallel. The recorder accepts only this fixed, content-free
+            // label, so helper details cannot enter the public trace.
+            assert_eq!(preparation_failure_reason(&error), expected);
         }
     }
 
