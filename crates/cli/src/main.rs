@@ -17,6 +17,7 @@ use commands::config::{
 use commands::daemon::{control_command, insert_command};
 use commands::metrics::metrics_command;
 use commands::new::new_command;
+use commands::profile::profile_command;
 use commands::system::{
     backend_command, certify_command, doctor_command, explain_backend_command, explain_command,
     portal_command, setup_command, upgrade_status_command,
@@ -111,6 +112,7 @@ fn run() -> Result<()> {
         Some("validate") => validate_command(args)?,
         Some("import") => import_command(args)?,
         Some("pack") => pack_command(args)?,
+        Some("profile") => profile_command(args)?,
         Some("set-enabled") => set_enabled_command(args)?,
         Some("set-mode") => set_mode_command(args)?,
         Some("backup") => backup_command(args)?,
@@ -239,6 +241,10 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
             (
                 "pack install|list|inspect|path|remove|import|verify|sign ...",
                 "Install and manage offline, versioned snippet packs",
+            ),
+            (
+                "profile list|create|switch|remove ...",
+                "Switch between validated personal/work configuration profiles",
             ),
         ],
     ),

@@ -162,6 +162,31 @@ support@example.com namespaces="wayexpand-pack" ssh-ed25519 AAAA...
 
 `pack import` verifies a signature when one is present.
 
+## Reviewing updates and rollback
+
+Install keeps the previous validated pack in the private local backup
+directory. Before replacing a pack, compare the candidate against the current
+version:
+
+```bash
+wayexpand pack diff incident-response ./incident-response-2.4.0
+wayexpand pack install ./incident-response-2.4.0 --replace --signers ./allowed_signers
+```
+
+The diff reports manifest changes, added/removed/changed snippet lines, and the
+candidate's command, hotkey, and capability disclosures. Treat snippet text as
+review-sensitive: the explicit diff command prints it to the terminal. Install
+continues to enforce signature trust, version ordering, and command/hotkey
+consent. To restore the most recently backed-up version:
+
+```bash
+wayexpand pack rollback incident-response --signers ./allowed_signers
+```
+
+Rollback revalidates the backup, enforces current organization policy and
+required signatures, stages the restored pack, and preserves the currently
+installed version as the next backup. It then asks the daemon to reload.
+
 ## Managed packs (organization policy)
 
 In safe mode, `require_signed_packs = true` accepts only packs signed by a
@@ -186,8 +211,9 @@ The workflow for an organization:
 ## Trust model and limits
 
 The `publisher` field is descriptive; the signature is the identity. Commands
-are still removed by `pack import`. There is no update channel or GUI trust
-review yet; keep the original signed pack when recording what was approved.
+are still removed by `pack import`. There is no central update channel or GUI
+trust review; review candidate diffs and retain the signed source pack when
+recording what was approved.
 
 Pack loading treats pack contents as hostile input. The manifest is limited to
 64 KiB; each snippet file to 1 MiB; the snippets directory to 1,024 entries;

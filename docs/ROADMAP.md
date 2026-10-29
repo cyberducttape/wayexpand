@@ -213,8 +213,10 @@ Still open:
       Runtime host restrictions remain a separate overlay. Template AST
       compilation and reuse during rendering, and end-to-end consistency tests
       across fleet/reload paths remain open.
-- [ ] Profiles/workspaces (personal, work, support, per-customer) switchable
-      at runtime by hotkey or selected automatically from the environment.
+- [ ] Named full-config profiles now support CLI create/list/switch/remove,
+      checkpointing on switch and daemon reload. Still open: GUI/hotkey
+      switching, profile-specific snippet layers, per-application automatic
+      selection, and per-profile rollback history.
 - [ ] Broader imports (TextExpander, AutoKey, aText, CSV).
 - [x] Form snippets through IBus: completions are bound to the originating
       input context and require surrounding-text verification (non-atomic,
@@ -224,10 +226,10 @@ Still open:
       and date fields. Open: clipboard defaults, conditional fields, a date
       picker, per-field history, and submission into parameterized broker
       actions.
-- [ ] Signed team-pack registry: `wayexpand pack search`, `pack install`,
-      `pack update`, `pack diff`, `pack rollback`, and `pack verify` against
-      organization trust roots, private registries, and a GUI trust review
-      for signed packs.
+- [ ] Signed team-pack registry: local `pack diff`, staged `pack install`,
+      `pack rollback`, and `pack verify` now work against signer files. Still
+      open: `pack search`/`pack update`, organization/private registry
+      transport, and GUI trust review for signed packs.
 - [ ] Repository-backed snippet libraries (`wayexpand library add <git url>`)
       building on Git sync: signed-commit verification, branch pinning,
       reviewed/approved updates, diff, rollback, and audit.

@@ -193,6 +193,23 @@ forms are converted; shell/script and clipboard execution or access are not
 enabled implicitly. The GUI's import merges by default and previews conflicts
 before anything changes. See [Migrating from Espanso](docs/MIGRATION_FROM_ESPANSO.md).
 
+## Configuration profiles
+
+Keep separate personal, work, or customer libraries and switch between them:
+
+```bash
+wayexpand profile create personal
+wayexpand profile create work
+wayexpand profile switch personal
+wayexpand profile list
+```
+
+Each profile stores a validated configuration snapshot beside the active
+configuration. Switching checkpoints edits to the outgoing profile, validates
+the selected configuration with shared `snippets.d` layers, replaces the
+active config atomically, and asks the daemon to reload. Per-profile app
+defaults can use the existing `app_filter` setting. See [Operations](docs/OPERATIONS.md#configuration-profiles).
+
 ## Documentation
 
 - [Getting started](docs/GETTING_STARTED.md) · [Troubleshooting](docs/TROUBLESHOOTING.md)

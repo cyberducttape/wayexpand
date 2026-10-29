@@ -3,6 +3,7 @@
 use super::Args;
 use crate::args::take_flag;
 use crate::*;
+use std::io::Read;
 use std::os::unix::fs::PermissionsExt;
 
 pub(crate) fn test_command(mut args: Args) -> Result<()> {
@@ -1037,8 +1038,213 @@ fn sync_directory(path: &Path) -> Result<()> {
         .map_err(|error| config_error(format!("could not sync pack directory: {error}")))
 }
 
+fn latest_pack_backup(installed_path: &Path) -> Result<PathBuf> {
+    let id = installed_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| config_error("installed pack path has no valid id"))?;
+    let root = installed_path
+        .parent()
+        .ok_or_else(|| config_error("installed pack path has no parent"))?
+        .parent()
+        .ok_or_else(|| config_error("installed pack path has no backup root"))?
+        .join("wayexpand-pack-backups");
+    let metadata = std::fs::symlink_metadata(&root)
+        .map_err(|error| config_error(format!("could not inspect pack backups: {error}")))?;
+    if !metadata.file_type().is_dir()
+        || metadata.file_type().is_symlink()
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.mode() & 0o022 != 0
+    {
+        bail!("pack backup directory is not a private user-owned directory");
+    }
+    let prefix = format!("{id}-");
+    let mut candidates = Vec::new();
+    for entry in std::fs::read_dir(&root)
+        .map_err(|error| config_error(format!("could not list pack backups: {error}")))?
+    {
+        let entry = entry
+            .map_err(|error| config_error(format!("could not read pack backup entry: {error}")))?;
+        let name = entry.file_name();
+        let name_text = name.to_string_lossy();
+        if let Some((backup_id, timestamp)) = name_text.rsplit_once('-') {
+            if !backup_id.starts_with(&prefix)
+                || timestamp.is_empty()
+                || !timestamp.bytes().all(|byte| byte.is_ascii_digit())
+            {
+                continue;
+            }
+            let metadata = std::fs::symlink_metadata(entry.path())
+                .map_err(|error| config_error(format!("could not inspect pack backup: {error}")))?;
+            if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
+                if let Ok(timestamp) = timestamp.parse::<u128>() {
+                    candidates.push((timestamp, entry.path()));
+                }
+            }
+        }
+    }
+    candidates
+        .into_iter()
+        .max_by_key(|(timestamp, _)| *timestamp)
+        .map(|(_, path)| path)
+        .ok_or_else(|| config_error(format!("no rollback backup exists for pack {id}")))
+}
+
+fn print_pack_diff(installed: &Path, candidate: &Path) -> Result<()> {
+    let old_manifest = inspect_pack(installed)
+        .map_err(|error| config_error(format!("installed pack is invalid: {error}")))?;
+    let new_manifest = inspect_pack(candidate)
+        .map_err(|error| config_error(format!("candidate pack is invalid: {error}")))?;
+    if old_manifest.manifest.id != new_manifest.manifest.id {
+        bail!("candidate pack id does not match installed id");
+    }
+    println!(
+        "{} {} → {}",
+        old_manifest.manifest.id, old_manifest.manifest.version, new_manifest.manifest.version
+    );
+    for (label, old, new) in [
+        (
+            "name",
+            &old_manifest.manifest.name,
+            &new_manifest.manifest.name,
+        ),
+        (
+            "publisher",
+            &old_manifest.manifest.publisher,
+            &new_manifest.manifest.publisher,
+        ),
+        (
+            "description",
+            &old_manifest.manifest.description,
+            &new_manifest.manifest.description,
+        ),
+    ] {
+        if old != new {
+            println!("manifest {label}: {old:?} → {new:?}");
+        }
+    }
+    println!(
+        "capabilities: {} → {}",
+        old_manifest.required_capabilities.join(", "),
+        new_manifest.required_capabilities.join(", ")
+    );
+    println!(
+        "candidate signature: {} (verification occurs during install)",
+        if new_manifest.signed {
+            "present"
+        } else {
+            "unsigned"
+        }
+    );
+    if old_manifest.manifest.allowed_actions != new_manifest.manifest.allowed_actions {
+        println!(
+            "allowed broker actions: {:?} → {:?}",
+            old_manifest.manifest.allowed_actions, new_manifest.manifest.allowed_actions
+        );
+    }
+    if old_manifest.manifest.capabilities != new_manifest.manifest.capabilities {
+        println!(
+            "declared capabilities: {:?} → {:?}",
+            old_manifest.manifest.capabilities, new_manifest.manifest.capabilities
+        );
+    }
+    let old_files = pack_snippet_files(installed)?;
+    let new_files = pack_snippet_files(candidate)?;
+    let names: std::collections::BTreeSet<_> = old_files.keys().chain(new_files.keys()).collect();
+    for name in names {
+        match (old_files.get(name), new_files.get(name)) {
+            (None, Some(content)) => {
+                println!("--- /dev/null\n+++ {name}");
+                for line in content.lines() {
+                    println!("+{line}");
+                }
+            }
+            (Some(content), None) => {
+                println!("--- {name}\n+++ /dev/null");
+                for line in content.lines() {
+                    println!("-{line}");
+                }
+            }
+            (Some(old), Some(new)) if old != new => {
+                println!("--- {name} (installed)\n+++ {name} (candidate)");
+                let old_lines: Vec<_> = old.lines().collect();
+                let new_lines: Vec<_> = new.lines().collect();
+                let prefix = old_lines
+                    .iter()
+                    .zip(&new_lines)
+                    .take_while(|(left, right)| left == right)
+                    .count();
+                let suffix = old_lines[prefix..]
+                    .iter()
+                    .rev()
+                    .zip(new_lines[prefix..].iter().rev())
+                    .take_while(|(left, right)| left == right)
+                    .count();
+                for line in &old_lines[prefix..old_lines.len().saturating_sub(suffix)] {
+                    println!("-{line}");
+                }
+                for line in &new_lines[prefix..new_lines.len().saturating_sub(suffix)] {
+                    println!("+{line}");
+                }
+            }
+            _ => {}
+        }
+    }
+    println!(
+        "permission disclosure: {} command(s), {} hotkey(s), capabilities [{}]",
+        new_manifest.command_count,
+        new_manifest.hotkey_count,
+        new_manifest.required_capabilities.join(", ")
+    );
+    Ok(())
+}
+
+fn pack_snippet_files(root: &Path) -> Result<std::collections::BTreeMap<String, String>> {
+    let mut files = std::collections::BTreeMap::new();
+    let snippets = root.join("snippets");
+    let metadata = std::fs::symlink_metadata(&snippets)
+        .map_err(|error| config_error(format!("could not inspect pack snippets: {error}")))?;
+    if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+        bail!("pack snippets path is not a real directory");
+    }
+    for entry in std::fs::read_dir(&snippets)
+        .map_err(|error| config_error(format!("could not read pack snippets: {error}")))?
+    {
+        let entry = entry
+            .map_err(|error| config_error(format!("could not read snippet entry: {error}")))?;
+        let path = entry.path();
+        if path
+            .extension()
+            .is_some_and(|extension| extension == "toml")
+        {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let mut file = std::fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NOFOLLOW)
+                .open(&path)
+                .map_err(|error| {
+                    config_error(format!(
+                        "could not safely open snippet file {name}: {error}"
+                    ))
+                })?;
+            let metadata = file.metadata().map_err(|error| {
+                config_error(format!("could not inspect snippet file {name}: {error}"))
+            })?;
+            if !metadata.is_file() || metadata.len() > 1024 * 1024 {
+                bail!("snippet file {name} is not a regular file within the size limit");
+            }
+            let mut content = String::new();
+            file.read_to_string(&mut content).map_err(|error| {
+                config_error(format!("could not read snippet file {name}: {error}"))
+            })?;
+            files.insert(name, content);
+        }
+    }
+    Ok(files)
+}
+
 pub(crate) fn pack_command(args: Args) -> Result<()> {
-    const USAGE: &str = "usage: wayexpand pack inspect|import|verify <directory-or-id> [--signers FILE]\n       wayexpand pack install <directory> [--replace [--allow-downgrade]] [--allow-actions] [--signers FILE]\n       wayexpand pack list [--json] | path <id> | remove <id>\n       wayexpand pack sign <directory> --key FILE";
+    const USAGE: &str = "usage: wayexpand pack inspect|import|verify <directory-or-id> [--signers FILE]\n       wayexpand pack install <directory> [--replace [--allow-downgrade]] [--allow-actions] [--signers FILE]\n       wayexpand pack diff <installed-id> <candidate-directory>\n       wayexpand pack rollback <installed-id> [--allow-actions] [--signers FILE]\n       wayexpand pack list [--json] | path <id> | remove <id>\n       wayexpand pack sign <directory> --key FILE";
     let mut rest: Vec<String> = args.collect();
     let key = take_option(&mut rest, "--key")?;
     let signers_override = take_option(&mut rest, "--signers")?;
@@ -1051,6 +1257,29 @@ pub(crate) fn pack_command(args: Args) -> Result<()> {
     if rest.as_slice() == ["list"] {
         rest.push(String::new());
     }
+    if rest.first().is_some_and(|action| action == "diff") {
+        if rest.len() != 3 {
+            usage_bail!("{USAGE}");
+        }
+        if key.is_some()
+            || signers_override.is_some()
+            || replace
+            || allow_downgrade
+            || allow_actions
+            || requested_json
+        {
+            usage_bail!("pack diff does not accept install or signing options");
+        }
+        // `diff` compares an installed pack with a candidate directory.
+        // Keep the pair explicit so the caller cannot accidentally compare
+        // two arbitrary paths without identifying the installed baseline.
+        let id = &rest[1];
+        ensure_pack_id(id)?;
+        let installed = installed_pack_root()?.join(id);
+        let candidate = resolve_pack_path(Path::new(&rest[2]));
+        print_pack_diff(&installed, &candidate)?;
+        return Ok(());
+    }
     let [action, path] = rest.as_slice() else {
         usage_bail!("{USAGE}");
     };
@@ -1060,8 +1289,10 @@ pub(crate) fn pack_command(args: Args) -> Result<()> {
     if allow_downgrade && (action != "install" || !replace) {
         usage_bail!("--allow-downgrade requires `wayexpand pack install --replace`");
     }
-    if allow_actions && action != "install" {
-        usage_bail!("--allow-actions is only valid for `wayexpand pack install`");
+    if allow_actions && action != "install" && action != "rollback" {
+        usage_bail!(
+            "--allow-actions is only valid for `wayexpand pack install` or `pack rollback`"
+        );
     }
     if requested_json && action != "list" {
         usage_bail!("--json is only supported by `wayexpand pack list`");
@@ -1137,6 +1368,69 @@ pub(crate) fn pack_command(args: Args) -> Result<()> {
             ensure_pack_id(&id)?;
             remove_installed_pack(&id)?;
             println!("removed local pack {id}");
+            let _ = control_operation(wayexpand_core::DaemonOperation::Reload);
+        }
+        "rollback" => {
+            ensure_pack_id(path.to_string_lossy().as_ref())?;
+            let target = installed_pack_root()?.join(&path);
+            let backup = latest_pack_backup(&target)?;
+            let inspection = inspect_pack(&backup)
+                .map_err(|error| config_error(format!("rollback pack is invalid: {error}")))?;
+            if inspection.manifest.id != path.to_string_lossy() {
+                bail!("rollback backup identity does not match installed pack id");
+            }
+            let required = policy.safe_mode && policy.require_signed_packs;
+            if let Some(refusal) = pack_signers_override_refusal(&policy, !policy_signers) {
+                bail!("{refusal}");
+            }
+            let verified = if policy_signers {
+                wayexpand_core::trusted_signers_file(&signers)
+                    .and_then(|()| wayexpand_core::verify_pack_signature(&backup, &signers))
+            } else {
+                wayexpand_core::verify_pack_signature(&backup, &signers)
+            };
+            let signer = match verified {
+                Ok(signer) => Some(signer),
+                Err(wayexpand_core::PackError::Unsigned) if !required => None,
+                Err(error) if !required && !signers.exists() => {
+                    eprintln!("warning: rollback signature not verified ({error})");
+                    None
+                }
+                Err(error) => bail!("rollback pack rejected: {error}"),
+            };
+            if policy.safe_mode && !policy.pack_allowed(&inspection.manifest.id) {
+                bail!(
+                    "organization policy does not allow pack {}; rollback refused",
+                    inspection.manifest.id
+                );
+            }
+            if policy.safe_mode && policy.disable_commands && inspection.command_count > 0 {
+                bail!("organization policy disables commands; rollback pack contains command-backed entries");
+            }
+            if policy.safe_mode && policy.disable_hotkeys && inspection.hotkey_count > 0 {
+                bail!("organization policy disables hotkeys; rollback pack contains hotkeys");
+            }
+            if !allow_actions && (inspection.command_count > 0 || inspection.hotkey_count > 0) {
+                bail!("refusing to reactivate command or hotkey actions by default; review the backup and pass --allow-actions");
+            }
+            let installed = install_local_pack(
+                &backup,
+                &inspection,
+                true,
+                true,
+                signer.as_ref().map(|_| signers.as_path()),
+            )?;
+            println!(
+                "rolled back {} to {} at {}{}",
+                inspection.manifest.id,
+                inspection.manifest.version,
+                installed.display(),
+                if signer.is_some() {
+                    " (signature verified)"
+                } else {
+                    " (signature not verified)"
+                }
+            );
             let _ = control_operation(wayexpand_core::DaemonOperation::Reload);
         }
         "install" => {
@@ -1775,8 +2069,54 @@ mod pack_install_tests {
                 .starts_with("sample.local-1.0.0-")
         }));
         assert!(install_local_pack_at(&source_v1, &first, true, false, None, &root).is_err());
+        let backup = latest_pack_backup(&root.join("sample.local")).unwrap();
+        assert_eq!(inspect_pack(backup).unwrap().manifest.version, "1.0.0");
         let restored = install_local_pack_at(&source_v1, &first, true, true, None, &root).unwrap();
         assert_eq!(inspect_pack(restored).unwrap().manifest.version, "1.0.0");
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn pack_diff_checks_identity_and_reads_candidate_snippets() {
+        let base = temp_dir("pack-diff");
+        let installed = base.join("installed");
+        let candidate = base.join("candidate");
+        make_pack(&installed, "1.0.0");
+        make_pack(&candidate, "1.1.0");
+        std::fs::write(
+            candidate.join("snippets/main.toml"),
+            "[[expansion]]\ntrigger=\";;local-pack-test\"\nreplacement=\"updated\"\n",
+        )
+        .unwrap();
+        assert!(print_pack_diff(&installed, &candidate).is_ok());
+
+        let other = base.join("other");
+        make_pack(&other, "1.1.0");
+        std::fs::write(
+            other.join("wayexpand-pack.toml"),
+            std::fs::read_to_string(other.join("wayexpand-pack.toml"))
+                .unwrap()
+                .replace("sample.local", "other.local"),
+        )
+        .unwrap();
+        assert!(print_pack_diff(&installed, &other).is_err());
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn rollback_selects_by_creation_time_not_semver_text() {
+        let base = temp_dir("pack-backup-order");
+        let packs = base.join("packs");
+        let target = packs.join("sample.local");
+        let backups = base.join("wayexpand-pack-backups");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::create_dir(&backups).unwrap();
+        std::fs::set_permissions(&backups, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let older = backups.join("sample.local-99.0.0-100");
+        let newer = backups.join("sample.local-1.0.0-200");
+        std::fs::create_dir(&older).unwrap();
+        std::fs::create_dir(&newer).unwrap();
+        assert_eq!(latest_pack_backup(&target).unwrap(), newer);
         std::fs::remove_dir_all(base).unwrap();
     }
 

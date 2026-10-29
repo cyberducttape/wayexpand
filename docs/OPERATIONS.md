@@ -2,6 +2,26 @@
 
 **Navigation:** [Home](../README.md) > [Getting Started](GETTING_STARTED.md) > **Operations**
 
+## Configuration profiles
+
+Profiles are separate primary TOML libraries stored in the private
+`profiles/` directory beside the selected configuration file. For example:
+
+```bash
+wayexpand profile create personal
+wayexpand profile create work
+wayexpand profile switch personal
+wayexpand profile list
+```
+
+Creating a profile snapshots the current configuration and activates it.
+Switching saves the latest active configuration back to its profile, validates
+the target together with shared `snippets.d` layers, and atomically replaces
+the active primary file. Existing app filters can keep customer or application
+specific snippets scoped within each profile. Profiles are local and work
+offline. Current limitations: snippet layers are shared across profiles, and
+switching is available through the CLI rather than a GUI control or hotkey.
+
 ---
 
 ## Configuration

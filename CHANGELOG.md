@@ -4,6 +4,15 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add local pack update review with `wayexpand pack diff <id> <directory>` and
+  rollback with `wayexpand pack rollback <id>`. Diffs show snippet changes and
+  command/hotkey/capability disclosures; rollback validates the stored pack,
+  applies current organization policy and signature requirements, and uses the
+  existing staged install/backup path.
+- Add named configuration profiles with create, list, switch, and remove
+  commands. Switching checkpoints the outgoing profile, validates the incoming
+  config against shared snippet layers, atomically replaces the active config,
+  and requests a daemon reload.
 - Expand Espanso migration to recursively import match directories and convert
   supported date, echo, choice, random, nested-match, cursor, and text/choice
   form syntax. Report
