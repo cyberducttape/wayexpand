@@ -155,6 +155,65 @@ impl GuiApp {
                 },
             )
         });
+        // Workspace switching is a frequent action, so keep it directly in
+        // the toolbar as well as in the profile-management menu. The list is
+        // still sourced from the CLI's validated profile inventory.
+        if !self.profile_loaded && self.profile_receiver.is_none() {
+            self.start_profile_operation(ProfileOperation::List);
+        }
+        let active_profile_label = self
+            .active_profile
+            .as_deref()
+            .map(|name| format!("{}: {name}", self.strings.profiles()))
+            .unwrap_or_else(|| self.strings.profiles().to_owned());
+        ui.menu_button(active_profile_label, |ui| {
+            if self.profile_receiver.is_some() {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(self.strings.profile_loading());
+                });
+            }
+            if let Some(config_path) = runtime::status_field(&self.daemon_status, "config") {
+                let config_path = std::path::Path::new(&config_path);
+                if config_path
+                    .parent()
+                    .and_then(std::path::Path::file_name)
+                    .is_some_and(|name| name == "profiles")
+                {
+                    if let Some(name) = config_path.file_stem().and_then(|name| name.to_str()) {
+                        ui.label(self.strings.profile_automatic_active(name));
+                    }
+                }
+            }
+            for profile in self.profiles.clone() {
+                let active = self.active_profile.as_deref() == Some(&profile.name);
+                let label = if profile.valid {
+                    profile.name.clone()
+                } else {
+                    format!("{} · {}", profile.name, self.strings.profile_invalid())
+                };
+                if ui
+                    .add_enabled(
+                        profile.valid && !active && self.profile_receiver.is_none(),
+                        egui::Button::new(if active {
+                            format!("✓ {label}")
+                        } else {
+                            label
+                        }),
+                    )
+                    .clicked()
+                {
+                    self.request_action(PendingAction::SwitchProfile(profile.name));
+                    ui.close();
+                }
+            }
+            if self.profiles.is_empty() && self.profile_loaded {
+                ui.label(self.strings.no_profiles());
+            }
+            if let Some(error) = self.profile_error.as_deref() {
+                ui.colored_label(palette.danger, error);
+            }
+        });
         let more_actions = self.strings.more_actions();
         let actions_response = ui
             .menu_button(more_actions, |ui| {

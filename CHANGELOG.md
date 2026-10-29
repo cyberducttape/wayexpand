@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Put profile switching directly in the main toolbar, showing the active profile
+  and keeping automatic per-application profile selection visible. Profile
+  management and application assignments remain available in the existing menu.
 - During non-atomic evdev replacement, monitor for new physical input and
   cancel further simulated output at backend checkpoints. Treat the result as
   uncertain, quarantine captured input, and never replay or continue queued
