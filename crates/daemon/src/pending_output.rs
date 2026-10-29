@@ -296,8 +296,13 @@ impl Daemon {
     /// input while output is pending and stop the paced stream at its next
     /// backend checkpoint. The transaction remains uncertain; never replay it.
     fn watches_non_atomic_output_for_input(&self) -> bool {
+        #[cfg(test)]
+        let test_event_pending = self.evdev_output_test_event.is_some();
+        #[cfg(not(test))]
+        let test_event_pending = false;
+
         self.evdev_mode
-            && (self.evdev.is_some() || self.connection_state != "connected")
+            && (self.evdev.is_some() || self.connection_state != "connected" || test_event_pending)
             && self
                 .injector
                 .as_ref()
@@ -310,6 +315,14 @@ impl Daemon {
 
     fn cancel_non_atomic_output_on_physical_input(&mut self, timeout: Duration) {
         if !self.watches_non_atomic_output_for_input() {
+            return;
+        }
+
+        #[cfg(test)]
+        if self.evdev_output_test_event.take().is_some() {
+            self.interrupt_pending_non_atomic_output(
+                "test physical input arrived during non-atomic replacement",
+            );
             return;
         }
 
@@ -408,6 +421,7 @@ mod tests {
         calls: Arc<Mutex<Vec<String>>>,
         erase_started: Arc<std::sync::atomic::AtomicUsize>,
         fail: bool,
+        checkpoint: wayexpand_core::OutputCheckpoint,
         /// Set once an operation (already admitted) is waiting at the gate.
         waiting: Arc<std::sync::atomic::AtomicBool>,
     }
@@ -436,6 +450,11 @@ mod tests {
         }
 
         fn insert(&mut self, text: &str) -> std::result::Result<(), InjectorError> {
+            self.checkpoint.check().map_err(|message| InjectorError {
+                backend: "gated-test",
+                message,
+                retryable: true,
+            })?;
             self.calls.lock().unwrap().push(format!("insert:{text}"));
             if self.fail {
                 return Err(InjectorError {
@@ -445,6 +464,10 @@ mod tests {
                 });
             }
             Ok(())
+        }
+
+        fn set_output_checkpoint(&mut self, checkpoint: wayexpand_core::OutputCheckpoint) {
+            self.checkpoint = checkpoint;
         }
     }
 
@@ -500,6 +523,7 @@ mod tests {
                 calls: Arc::clone(&calls),
                 erase_started: Arc::clone(&erase_started),
                 fail,
+                checkpoint: wayexpand_core::OutputCheckpoint::default(),
                 waiting: Arc::clone(&waiting),
             });
             let backend = match guard {
@@ -529,6 +553,7 @@ mod tests {
                 injector: Some(injector),
                 input_method: None,
                 evdev: None,
+                evdev_output_test_event: None,
                 receiver: None,
                 status_publisher: StatusPublisher::default(),
                 focus_state: FocusState::new(None),
@@ -782,7 +807,7 @@ mod tests {
     }
 
     #[test]
-    fn interrupted_non_atomic_output_drops_queued_jobs_and_follow_up_input() {
+    fn observed_physical_input_cancels_output_and_drops_queued_work() {
         let mut harness = Harness::new(false);
         harness
             .daemon
@@ -801,21 +826,29 @@ mod tests {
             std::thread::sleep(Duration::from_millis(1));
         }
 
-        harness
-            .daemon
-            .pending_output
-            .as_mut()
-            .unwrap()
-            .physical_input_interrupted = true;
+        harness.daemon.evdev_output_test_event = Some(InputEvent::Text("user input".into()));
+        harness.daemon.service_pending_output().unwrap();
+        assert!(
+            harness
+                .daemon
+                .pending_output
+                .as_ref()
+                .unwrap()
+                .physical_input_interrupted
+        );
         harness.open_gate();
         harness.run_until_resolved();
 
-        assert_eq!(*harness.calls.lock().unwrap(), ["erase::a", "insert:first"]);
+        assert_eq!(
+            *harness.calls.lock().unwrap(),
+            ["erase::a"],
+            "cancellation checkpoint prevents further simulated output"
+        );
         assert!(harness.daemon.evdev_quiet_since.is_some());
     }
 
     #[test]
-    fn focus_moving_while_a_transaction_types_refuses_the_queued_rest_of_the_batch() {
+    fn focus_moving_during_non_atomic_output_stops_the_stream_and_drops_the_batch() {
         use wayexpand_core::{window_update_channel, CompatibilityMode, WindowContext};
         let window = |instance: &str| {
             Some(WindowContext {
@@ -863,13 +896,12 @@ mod tests {
         harness.open_gate();
         harness.run_until_resolved();
 
-        // Only the transaction admitted in w1 was typed; the queued one was
-        // refused before typing anything into w2.
-        assert_eq!(*harness.calls.lock().unwrap(), ["erase::a", "insert:first"]);
-        assert_eq!(
-            guard.last_refusal(),
-            Some(crate::assurance::Refusal::FocusChanged)
-        );
+        // The first transaction is uncertain after its erase step. The
+        // checkpoint prevents its insertion and the queued transaction never
+        // starts, so no synthetic text is delivered into w2.
+        assert_eq!(*harness.calls.lock().unwrap(), ["erase::a"]);
+        assert!(harness.daemon.injector.is_none());
+        assert_eq!(harness.daemon.retiring_output_workers.len(), 1);
         // The focus update is still waiting for the reactor's next turn.
         let (pending_window, _) = harness
             .daemon

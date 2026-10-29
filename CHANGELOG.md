@@ -14,6 +14,10 @@ All notable changes to WayExpand are documented here.
   overlap reproduction separately. The smoke run passed 12 output/focus and
   lifecycle checks, but physical capture, Unicode insertion, suspend/resume, and
   concurrent-trigger safety remain unverified.
+- Add a daemon regression for an observed physical-input interruption: cancel
+  at the next output checkpoint, report an uncertain result, and drop queued
+  output and follow-up events. The test does not certify real evdev timing or
+  undo text already delivered to an application.
 - During non-atomic evdev replacement, monitor for new physical input and
   cancel further simulated output at backend checkpoints. Treat the result as
   uncertain, quarantine captured input, and never replay or continue queued
