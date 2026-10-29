@@ -147,7 +147,13 @@ impl GuiApp {
                         .or_else(|| options.first().cloned())
                         .unwrap_or_default(),
                     wayexpand_core::FormFieldKind::Date { default } if default == "today" => {
-                        wayexpand_core::today_local_date()
+                        match wayexpand_core::today_local_date() {
+                            Ok(date) => date,
+                            Err(error) => {
+                                ui.colored_label(palette.danger, error.to_string());
+                                String::new()
+                            }
+                        }
                     }
                     wayexpand_core::FormFieldKind::Date { default } => default.clone(),
                 };

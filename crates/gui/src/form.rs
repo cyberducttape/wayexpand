@@ -36,22 +36,12 @@ pub(crate) struct FormApp {
 }
 
 impl FormApp {
-    pub(crate) fn new(spec: FormSpec, palette: Palette, outcome: Outcome) -> Self {
-        let values: Vec<String> = spec
-            .fields
-            .iter()
-            .map(|field| match &field.kind {
-                FormFieldKind::Text { default } => default.clone(),
-                FormFieldKind::Choice { options, default } => default
-                    .clone()
-                    .or_else(|| options.first().cloned())
-                    .unwrap_or_default(),
-                FormFieldKind::Date { default } if default == "today" => {
-                    wayexpand_core::today_local_date()
-                }
-                FormFieldKind::Date { default } => default.clone(),
-            })
-            .collect();
+    pub(crate) fn new(
+        spec: FormSpec,
+        palette: Palette,
+        outcome: Outcome,
+    ) -> Result<Self, wayexpand_core::DateError> {
+        let values = initial_values(&spec.fields, wayexpand_core::today_local_date)?;
         let date_months = values
             .iter()
             .map(|value| {
@@ -60,7 +50,7 @@ impl FormApp {
                     .unwrap_or((2026, 1))
             })
             .collect();
-        Self {
+        Ok(Self {
             spec,
             values,
             palette,
@@ -68,7 +58,7 @@ impl FormApp {
             focused_once: false,
             error: None,
             date_months,
-        }
+        })
     }
 
     fn submit(&mut self, ctx: &egui::Context) {
@@ -91,6 +81,32 @@ impl FormApp {
         }
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
+}
+
+fn initial_values(
+    fields: &[FormField],
+    resolve_today: impl FnOnce() -> Result<String, wayexpand_core::DateError>,
+) -> Result<Vec<String>, wayexpand_core::DateError> {
+    let needs_today = fields
+        .iter()
+        .any(|field| matches!(&field.kind, FormFieldKind::Date { default } if default == "today"));
+    let today = if needs_today {
+        Some(resolve_today()?)
+    } else {
+        None
+    };
+    Ok(fields
+        .iter()
+        .map(|field| match &field.kind {
+            FormFieldKind::Text { default } => default.clone(),
+            FormFieldKind::Choice { options, default } => default
+                .clone()
+                .or_else(|| options.first().cloned())
+                .unwrap_or_default(),
+            FormFieldKind::Date { default } if default == "today" => today.clone().unwrap(),
+            FormFieldKind::Date { default } => default.clone(),
+        })
+        .collect())
 }
 
 impl eframe::App for FormApp {
@@ -326,7 +342,7 @@ pub(crate) fn run(spec_json: &str) -> anyhow::Result<()> {
                 spec,
                 Palette::for_pack(prefs.colorpack, dark),
                 app_outcome,
-            )))
+            )?))
         }),
     )
     .map_err(|error| anyhow::anyhow!("form failed: {error}"))?;
@@ -360,5 +376,15 @@ mod tests {
         assert_eq!(parse_date("today"), None);
         assert_eq!(parse_date("2026-13-01"), None);
         assert_eq!(parse_date("2025-02-29"), None);
+    }
+
+    #[test]
+    fn today_default_failure_prevents_form_initialization() {
+        let fields = wayexpand_core::form_fields("{{datefield:incident_date}}")
+            .expect("date form field should parse");
+        assert_eq!(
+            initial_values(&fields, || Err(wayexpand_core::DateError::Unrepresentable)),
+            Err(wayexpand_core::DateError::Unrepresentable)
+        );
     }
 }

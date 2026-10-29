@@ -152,7 +152,7 @@ pub(crate) fn new_command(args: Args) -> Result<()> {
             // only a field without one is an error.
             let mut unanswered = Vec::new();
             for field in missing {
-                match default_value(field) {
+                match default_value(field)? {
                     Some(value) => {
                         values.insert(field.key.clone(), value);
                     }
@@ -427,18 +427,18 @@ fn values_from_assignments(
 }
 
 /// What Enter accepts: a text field's default, or a choice's first option.
-fn default_value(field: &FormField) -> Option<String> {
-    match &field.kind {
+fn default_value(field: &FormField) -> Result<Option<String>> {
+    Ok(match &field.kind {
         FormFieldKind::Text { default } if default.is_empty() => None,
         FormFieldKind::Text { default } => Some(default.clone()),
         FormFieldKind::Choice { options, default } => {
             default.clone().or_else(|| options.first().cloned())
         }
         FormFieldKind::Date { default } if default == "today" => {
-            Some(wayexpand_core::today_local_date())
+            Some(wayexpand_core::today_local_date()?)
         }
         FormFieldKind::Date { default } => Some(default.clone()),
-    }
+    })
 }
 
 fn check_value(field: &FormField, value: &str) -> Result<()> {
@@ -473,7 +473,7 @@ fn ask_in_terminal(fields: &[&FormField]) -> Result<HashMap<String, String>> {
                     "{} [{}] (YYYY-MM-DD): ",
                     field.label,
                     if default == "today" {
-                        wayexpand_core::today_local_date()
+                        wayexpand_core::today_local_date()?
                     } else {
                         default.clone()
                     }
@@ -486,13 +486,13 @@ fn ask_in_terminal(fields: &[&FormField]) -> Result<HashMap<String, String>> {
             let answer = line.trim_end_matches(['\r', '\n']);
             let value = match &field.kind {
                 FormFieldKind::Text { .. } if answer.is_empty() => {
-                    default_value(field).unwrap_or_default()
+                    default_value(field)?.unwrap_or_default()
                 }
                 FormFieldKind::Text { .. } => answer.to_owned(),
                 FormFieldKind::Choice { options, .. } => {
                     let answer = answer.trim();
                     if answer.is_empty() {
-                        default_value(field).unwrap_or_default()
+                        default_value(field)?.unwrap_or_default()
                     } else if let Some(option) = answer
                         .parse::<usize>()
                         .ok()
@@ -509,7 +509,7 @@ fn ask_in_terminal(fields: &[&FormField]) -> Result<HashMap<String, String>> {
                 }
                 FormFieldKind::Date { .. } => {
                     if answer.is_empty() {
-                        default_value(field).unwrap_or_default()
+                        default_value(field)?.unwrap_or_default()
                     } else {
                         answer.to_owned()
                     }
@@ -930,7 +930,9 @@ replacement = "Regards"
                 .map(|field| {
                     (
                         field.key.clone(),
-                        default_value(field).unwrap_or_else(|| "value".into()),
+                        default_value(field)
+                            .unwrap()
+                            .unwrap_or_else(|| "value".into()),
                     )
                 })
                 .collect();
@@ -964,7 +966,7 @@ replacement = "Regards"
                     form_fields(&playbook.unwrap().replacement)
                         .unwrap()
                         .iter()
-                        .map(|field| (field.key.clone(), default_value(field).unwrap()))
+                        .map(|field| (field.key.clone(), default_value(field).unwrap().unwrap()))
                         .collect(),
                 ),
                 ..TemplateContext::default()

@@ -117,10 +117,19 @@ pub enum FormValueError {
     TooLarge,
 }
 
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+pub enum DateError {
+    #[error("the current instant cannot be represented as a local calendar date")]
+    Unrepresentable,
+}
+
 /// Resolve the form marker's `today` default using the system-local date.
-pub fn today_local_date() -> String {
-    let context = TemplateContext::system();
-    format_clock("local_date", context.unix_timestamp).unwrap_or_else(|| "1970-01-01".into())
+pub fn today_local_date() -> Result<String, DateError> {
+    local_date_at(TemplateContext::system().unix_timestamp)
+}
+
+fn local_date_at(timestamp: u64) -> Result<String, DateError> {
+    format_clock("local_date", timestamp).ok_or(DateError::Unrepresentable)
 }
 
 impl FormField {
@@ -1063,6 +1072,12 @@ pub(crate) fn civil_from_days(days_since_epoch: i64) -> (i64, i64, i64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_today_reports_an_unrepresentable_timestamp() {
+        assert_eq!(local_date_at(u64::MAX), Err(DateError::Unrepresentable));
+        assert_ne!(local_date_at(u64::MAX).ok().as_deref(), Some("1970-01-01"));
+    }
 
     #[test]
     fn preview_renderer_stops_at_its_output_budget_for_large_templates() {

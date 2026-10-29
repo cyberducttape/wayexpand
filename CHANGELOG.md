@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Return a date error when the local calendar date cannot be represented.
+  Form initialization and CLI template creation propagate that failure instead
+  of substituting the Unix epoch; add regressions for date-resolution failure.
+- Isolate libei's `TextInjector` implementation in `backend-libei/src/injection.rs`
+  and move initial EIS handshake/device negotiation into `lifecycle.rs`; move
+  backend tests into a separate test module. This keeps connection lifecycle
+  distinct from output sequencing.
 - Retain an immutable validated configuration snapshot in the expansion engine
   and build daemon reload engines from the final post-policy configuration.
   The snapshot carries normalized IDs, resolved policy, trigger/filter/hotkey

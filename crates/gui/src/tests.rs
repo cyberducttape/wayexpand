@@ -2364,7 +2364,8 @@ fn the_snippet_form_renders_every_field_kind_and_submits_with_enter() {
         spec,
         Palette::for_pack(ColorPack::Default, false),
         std::sync::Arc::clone(&outcome),
-    );
+    )
+    .unwrap();
     let ctx = egui::Context::default();
     let _ = run_gui_test_frame(&ctx, egui::RawInput::default(), |ui| app.render(ui));
     assert!(outcome.lock().unwrap().is_none());

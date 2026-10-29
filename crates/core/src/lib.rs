@@ -79,7 +79,7 @@ pub use policy::{
 pub use store::{ConfigSnapshot, ConfigStore, ConfigStoreStatus};
 pub use template::{
     form_fields, render_template, render_template_preview, render_template_with_cursor,
-    template_variables, today_local_date, ClipboardPrefetch, ClipboardReader, FormField,
+    template_variables, today_local_date, ClipboardPrefetch, ClipboardReader, DateError, FormField,
     FormFieldKind, FormValueError, SnippetLibrary, TemplateContext, TemplateError,
 };
 pub use usage::{
