@@ -764,6 +764,7 @@ replacement = "signature"
         client: Connection,
         engine: OwnedObjectPath,
         commits: mpsc::Receiver<String>,
+        deletions: mpsc::Receiver<u32>,
         instances: Instances,
     }
 
@@ -806,13 +807,20 @@ replacement = "signature"
                 });
             }
             let (commit_sender, commits) = mpsc::channel();
+            let (deletion_sender, deletions) = mpsc::channel();
             let messages = zbus::blocking::MessageIterator::from(&client);
             std::thread::spawn(move || {
                 for message in messages.flatten() {
-                    let header = message.header();
-                    if header.member().map(|member| member.as_str()) == Some("CommitText") {
-                        let (text,): (OwnedValue,) = message.body().deserialize().unwrap();
-                        let _ = commit_sender.send(ibus_text_string(&text).unwrap());
+                    match message.header().member().map(|member| member.as_str()) {
+                        Some("CommitText") => {
+                            let (text,): (OwnedValue,) = message.body().deserialize().unwrap();
+                            let _ = commit_sender.send(ibus_text_string(&text).unwrap());
+                        }
+                        Some("DeleteSurroundingText") => {
+                            let (_, nchars): (i32, u32) = message.body().deserialize().unwrap();
+                            let _ = deletion_sender.send(nchars);
+                        }
+                        _ => {}
                     }
                 }
             });
@@ -832,6 +840,7 @@ replacement = "signature"
                 client,
                 engine,
                 commits,
+                deletions,
                 instances,
             }
         }
@@ -985,6 +994,13 @@ replacement = "signature"
         assert!(
             commits.iter().any(|text| text == "Incident node-a"),
             "form result was not committed after refocus: {commits:?}"
+        );
+        assert_eq!(
+            harness
+                .deletions
+                .recv_timeout(Duration::from_millis(100))
+                .expect("form replacement must delete the original trigger"),
+            ":incident".chars().count() as u32
         );
     }
 
