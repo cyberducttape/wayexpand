@@ -9,6 +9,10 @@ All notable changes to WayExpand are documented here.
   explains the risk of switching layouts on a limited route, and gives a
   backend-specific recovery step. This does not claim active-layout
   certification where the route reports only general layout awareness.
+- Reduce the evdev interruption-check interval to 2 ms while a non-atomic
+  replacement is being paced. This narrows the period in which concurrent
+  physical input can interleave before cancellation; non-exclusive keyboard
+  injection remains best-effort and cannot provide atomic replacement.
 - Preserve current-source private KWin 6.6.6 E2E evidence for commit
   `6ddbfa854baa`: 14 real-client output/focus scenarios passed. Capture used
   stdin simulation; keysym-fallback p95 was 12.613 ms (small), 782.203 ms

@@ -25,6 +25,12 @@ use crate::output_loop::SubmittedTransaction;
 use crate::source_steps::Step;
 use crate::*;
 
+/// Physical keys must be checked frequently while libei is pacing a
+/// non-atomic replacement. The normal maintenance interval (250 ms) is long
+/// enough for many simulated characters to be delivered before cancellation.
+/// Keep this short and use it only while such a transaction is active.
+const NON_ATOMIC_INPUT_POLL_INTERVAL: Duration = Duration::from_millis(2);
+
 /// Where a batch of output came from; failures are handled as on the
 /// synchronous path for that source.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -234,10 +240,11 @@ impl Daemon {
                     .deadline
                     .saturating_duration_since(Instant::now());
                 if !remaining.is_zero() {
-                    let wait = remaining.min(input_loop::IDLE_MAINTENANCE_INTERVAL);
                     if self.watches_non_atomic_output_for_input() {
+                        let wait = remaining.min(NON_ATOMIC_INPUT_POLL_INTERVAL);
                         self.cancel_non_atomic_output_on_physical_input(wait);
                     } else {
+                        let wait = remaining.min(input_loop::IDLE_MAINTENANCE_INTERVAL);
                         self.waker.wait(wait);
                     }
                     return Ok(Step::Next);
