@@ -44,6 +44,11 @@ session evidence; unit tests alone do not satisfy them.
       synthetic characters may leave partial text, so the target-integrity
       gate still requires a passing real-session test or refusing automatic
       replacement on that route.
+      The same failure was reproduced against clean commit `afdcd03633df` in
+      [this report](evidence/kwin-overlap-reproduction-afdcd0363.json): 124 of
+      128 replacement characters remained, the concurrent trigger was
+      interleaved, and the stale second trigger expanded. Capture was simulated
+      over stdin, so this does not test the evdev interruption monitor.
       The latest clean-source reproduction on commit `6ddbfa854baa` is
       [preserved here](evidence/kwin-overlap-reproduction-6ddbfa854baa.json).
       It reproduces corruption: only 124 of 128 replacement characters

@@ -9,6 +9,12 @@ All notable changes to WayExpand are documented here.
   refusal checks passed; 20 latency samples per size were recorded. The report
   is partial: capture was simulated and overlap, Unicode, suspend/resume, and
   password-field behavior remain untested.
+- Reproduce the non-atomic overlap failure on clean commit `afdcd03633df`:
+  only 124 of 128 replacement characters remained, concurrent input was
+  interleaved, and the stale second trigger expanded. Capture was stdin
+  simulated, so this does not exercise the physical evdev interruption path;
+  the target-integrity release gate remains open. See
+  [preserved evidence](docs/evidence/kwin-overlap-reproduction-afdcd0363.json).
 - Add a dedicated keyboard-layout assessment to the compatibility dashboard.
   It distinguishes supported, unsupported, and unreported layout tracking,
   explains the risk of switching layouts on a limited route, and gives a
