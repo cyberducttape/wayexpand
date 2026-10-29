@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Record fresh private-KWin compatibility evidence for commit `be1fc06489b6`:
+  12 output, focus, reload, restart, and refusal checks passed on KWin 6.6.6.
+  The report preserves untested physical capture, Unicode, suspend/resume, and
+  overlapping-input cases, and labels keysym-fallback latency as injector-only.
 - Compile each replacement template once during validation and render
   expansions from the compiled form; one-shot renders and previews share
   the same variable parser and evaluator. A full render no longer scans the

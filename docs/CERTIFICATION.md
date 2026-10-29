@@ -65,15 +65,22 @@ intentionally out of scope and is reported as `unsupported-by-design`; a
 certification never implies otherwise.
 
 The latest current-source smoke report at
-[`docs/evidence/doctor-certify-6ef29b72b7.json`](evidence/doctor-certify-6ef29b72b7.json)
-tested commit `6ef29b72b7ea` on private headless KWin 6.6.6. Twelve output,
-focus, reload, restart, refusal, and build-identity checks passed. Unicode
-insertion, physical keyboard capture, suspend/resume, and the overlapping
-trigger scenario were not tested. Twenty libei keysym-fallback transactions per
-size measured injector p50/p95/p99 of 12.423/14.598/18.158 ms (small),
-779.206/806.913/812.945 ms (medium), and 3,130.304/3,273.456/3,307.155 ms
-(large). Capture was simulated through stdin. These are injector-only
-measurements, not desktop latency or production certification.
+[`docs/evidence/doctor-certify-be1fc06489b6.json`](evidence/doctor-certify-be1fc06489b6.json)
+tested clean commit `be1fc06489b6` on private headless KWin 6.6.6 on
+2026-10-29. Twelve output, focus, reload, restart, refusal, and build-identity
+checks passed. Unicode insertion, physical keyboard capture, suspend/resume,
+and the overlapping-trigger scenario were not tested. Twenty libei
+keysym-fallback transactions per size measured injector p50/p95/p99 of
+12.528/12.953/13.914 ms (small), 778.269/800.473/813.719 ms (medium), and
+3,127.535/3,137.499/3,140.324 ms (large). Capture was simulated through stdin.
+These are injector-only measurements, not desktop latency or production
+certification.
+
+The preceding current-source report at
+[`docs/evidence/doctor-certify-b78512554eb4.json`](evidence/doctor-certify-b78512554eb4.json)
+tested clean commit `b78512554eb4` on private headless KWin 6.6.6. It also
+passed twelve output, focus, reload, restart, refusal, and build-identity
+checks; its remaining coverage limitations are the same.
 
 The previous current-source smoke report at
 [`docs/evidence/doctor-certify-7a5ee6b04f77.json`](evidence/doctor-certify-7a5ee6b04f77.json)
