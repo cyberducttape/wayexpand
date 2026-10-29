@@ -192,6 +192,7 @@ impl GuiApp {
             json_string(manifest, "publisher"),
             json_string(manifest, "description")
         ));
+        self.render_signature_details(ui, details);
         if let Some(review_record) = manifest.get("review").filter(|value| value.is_object()) {
             ui.label(self.strings.pack_review_record(
                 &json_string(review_record, "reviewed_by"),
@@ -334,6 +335,7 @@ impl GuiApp {
             json_string(manifest, "publisher"),
             json_string(manifest, "description")
         ));
+        self.render_signature_details(ui, details);
         if let Some(review_record) = manifest.get("review").filter(|value| value.is_object()) {
             ui.label(self.strings.pack_review_record(
                 &json_string(review_record, "reviewed_by"),
@@ -449,6 +451,22 @@ impl GuiApp {
         }
     }
 
+    fn render_signature_details(&self, ui: &mut egui::Ui, details: &serde_json::Value) {
+        let signature = &details["signature"];
+        match signature["state"].as_str() {
+            Some("verified") => ui.label(self.strings.pack_signature_identity(
+                &json_string(signature, "signer"),
+                &json_string(signature, "signer_file_source"),
+                &json_string(signature, "signer_file"),
+            )),
+            Some("unverified" | "untrusted_signer_file" | "blocked_by_policy") => ui.label(
+                self.strings
+                    .pack_signature_reason(&json_string(signature, "reason")),
+            ),
+            _ => ui.label(self.strings.pack_signature_unsigned_detail()),
+        };
+    }
+
     fn render_pack_content(
         &self,
         ui: &mut egui::Ui,
@@ -552,6 +570,9 @@ fn pack_content_is_complete(
     let Some(capabilities) = details["required_capabilities"].as_array() else {
         return false;
     };
+    if !signature_review_is_complete(&details["signature"]) {
+        return false;
+    }
     if manifest_fields.iter().any(|key| {
         details["manifest"]
             .get(key)
@@ -606,6 +627,31 @@ fn pack_content_is_complete(
         reviewed_commands += 1;
     }
     reviewed_commands == command_count
+}
+
+fn signature_review_is_complete(signature: &serde_json::Value) -> bool {
+    let Some(state) = signature["state"].as_str() else {
+        return false;
+    };
+    match state {
+        "unsigned" => true,
+        "verified" => {
+            ["signer", "signer_file"].iter().all(|key| {
+                signature[*key].as_str().is_some_and(|value| {
+                    !value.is_empty() && value.chars().count() <= MAX_REVIEW_TEXT_CHARS
+                })
+            }) && matches!(
+                signature["signer_file_source"].as_str(),
+                Some("configured" | "explicit")
+            )
+        }
+        "unverified" | "untrusted_signer_file" | "blocked_by_policy" => {
+            signature["reason"].as_str().is_some_and(|reason| {
+                !reason.is_empty() && reason.chars().count() <= MAX_REVIEW_TEXT_CHARS
+            })
+        }
+        _ => false,
+    }
 }
 
 fn command_review_is_complete(command: &serde_json::Value) -> bool {
@@ -1050,6 +1096,24 @@ mod tests {
         let mut candidate = review();
         candidate.details["signature"]["state"] = serde_json::json!("blocked_by_policy");
         assert!(!pack_policy_allows(&candidate.details));
+    }
+
+    #[test]
+    fn verified_signature_review_requires_signer_and_trust_source() {
+        let mut candidate = review();
+        candidate.details["signature"] = serde_json::json!({ "state": "verified" });
+        assert!(!review_content_is_complete(&candidate));
+
+        candidate.details["signature"] = serde_json::json!({
+            "state": "verified",
+            "signer": "release@example.org",
+            "signer_file": "/etc/wayexpand/allowed_signers",
+            "signer_file_source": "configured"
+        });
+        assert!(review_content_is_complete(&candidate));
+
+        candidate.details["signature"]["signer_file_source"] = serde_json::json!("unknown");
+        assert!(!review_content_is_complete(&candidate));
     }
 
     #[test]

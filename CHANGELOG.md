@@ -8,6 +8,9 @@ All notable changes to WayExpand are documented here.
   inconsistent CLI JSON: require every expansion, hotkey, command, policy, and
   signature field to be present and reconcile reported inventory counts
   before enabling an action.
+- Show the verified pack signer and trust-file source in the GUI review. Require
+  signer identity and verification details in the response before enabling
+  install or rollback.
 - Preserve a current-source private-KWin report for `8d6a0ffe0614`. Output,
   focus, reload, restart, and refusal scenarios passed; physical capture,
   Unicode, suspend/resume, password-field behavior, and overlapping physical

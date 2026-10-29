@@ -281,6 +281,40 @@ impl Strings {
         }
     }
 
+    pub fn pack_signature_identity(&self, signer: &str, source: &str, path: &str) -> String {
+        match self.lang {
+            Language::English => {
+                format!("Verified signer: {signer} · trust source: {source} · {path}")
+            }
+            Language::Indonesian => format!(
+                "Penanda tangan terverifikasi: {signer} · sumber kepercayaan: {source} · {path}"
+            ),
+            Language::German => {
+                format!("Verifizierter Signierer: {signer} · Vertrauensquelle: {source} · {path}")
+            }
+        }
+    }
+
+    pub fn pack_signature_reason(&self, reason: &str) -> String {
+        match self.lang {
+            Language::English => format!("Signature verification detail: {reason}"),
+            Language::Indonesian => format!("Detail verifikasi tanda tangan: {reason}"),
+            Language::German => format!("Details zur Signaturprüfung: {reason}"),
+        }
+    }
+
+    pub fn pack_signature_unsigned_detail(&self) -> &'static str {
+        match self.lang {
+            Language::English => "No cryptographic signer identity is available for this pack.",
+            Language::Indonesian => {
+                "Identitas penanda tangan kriptografis tidak tersedia untuk paket ini."
+            }
+            Language::German => {
+                "Für dieses Paket ist keine kryptografische Signiereridentität verfügbar."
+            }
+        }
+    }
+
     pub fn pack_unsigned_warning(&self) -> &'static str {
         match self.lang {
             Language::English => "Unsigned pack: publisher and review text are self-asserted metadata.",
