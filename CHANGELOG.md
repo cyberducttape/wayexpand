@@ -8,6 +8,9 @@ All notable changes to WayExpand are documented here.
   modifier and lock keys that do not produce matcher input. This narrows one
   interleaving window; non-exclusive capture still cannot prevent already
   delivered input or guarantee atomic replacement.
+- Add a `modifier-during-nonatomic-replacement` certification scenario. The
+  headless KWin driver explicitly leaves it unverified because it does not
+  exercise physical capture.
 - Add a conservative AutoKey phrase importer for `.txt` files and JSON
   sidecars. It preserves aliases, supported trigger modes, cursor markers, and
   categories; reports unsupported modes, filters, macros, and matching rules

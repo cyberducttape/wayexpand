@@ -70,6 +70,8 @@ expect 2 expansion-cancellation
 grep -F 'stdin-path observation' "$test_root/out" >/dev/null
 expect 2 second-trigger-during-nonatomic-replacement
 grep -F 'cannot exercise physical input arriving during an in-flight replacement' "$test_root/out" >/dev/null
+expect 2 modifier-during-nonatomic-replacement
+grep -F 'cannot exercise physical modifier or lock-key activity during replacement' "$test_root/out" >/dev/null
 expect 2 keyboard-hotplug
 expect 3 password-field
 # Cells, clients and layouts the store does not cover.

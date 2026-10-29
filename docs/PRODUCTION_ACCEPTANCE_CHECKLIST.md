@@ -41,6 +41,9 @@ session evidence; unit tests alone do not satisfy them.
       regression covers the reactor polling path, but its input source is
       simulated. The monitor treats every raw key event as activity, including
       modifiers and lock keys ignored by matcher translation.
+      A separate `modifier-during-nonatomic-replacement` certification case
+      now records this requirement; the headless KWin driver marks it
+      unverified because it does not exercise physical capture.
       This is containment only: any already delivered physical keys or
       synthetic characters may leave partial text, so the target-integrity
       gate still requires a passing real-session test or refusing automatic
