@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add a form-field builder to the snippet editor for required or optional text,
+  dropdown, and date fields. It inserts markers at the replacement editor's
+  current selection and validates names, defaults, choice counts, and defaults
+  against the shared template parser before insertion.
 - Allow required snippet forms to drive named Action Broker actions through
   strict per-action enum/text schemas. The broker validates field names and
   values, replaces only configured argv slots, bounds submitted data, and

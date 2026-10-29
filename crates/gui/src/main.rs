@@ -253,6 +253,10 @@ struct GuiApp {
     preview_cache: Option<(u64, String, Result<String, String>)>,
     reusable_snippet_filter: String,
     reusable_snippet_choices: Option<ReusableSnippetChoices>,
+    form_field_name: String,
+    form_field_default: String,
+    form_field_options: String,
+    form_field_required: bool,
     /// Incremented on editor input that may change the draft or preview app.
     /// Preview cache validation therefore stays O(1) even for large snippets.
     preview_revision: u64,
@@ -482,6 +486,10 @@ impl GuiApp {
             preview_cache: None,
             reusable_snippet_filter: String::new(),
             reusable_snippet_choices: None,
+            form_field_name: "name".into(),
+            form_field_default: String::new(),
+            form_field_options: "Low,Medium,High".into(),
+            form_field_required: true,
             preview_revision: 0,
             app_detection: None,
             screenshot: screenshot::ScreenshotCapture::from_env(),

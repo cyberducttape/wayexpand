@@ -1,6 +1,88 @@
 use super::{Language, Strings};
 
 impl Strings {
+    pub fn form_builder_title(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Build a form field",
+            Language::Indonesian => "Buat kolom formulir",
+            Language::German => "Formularfeld erstellen",
+        }
+    }
+
+    pub fn form_builder_name(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Field name",
+            Language::Indonesian => "Nama kolom",
+            Language::German => "Feldname",
+        }
+    }
+
+    pub fn form_builder_default(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Default",
+            Language::Indonesian => "Nilai awal",
+            Language::German => "Standardwert",
+        }
+    }
+
+    pub fn form_builder_default_hint(&self) -> &'static str {
+        match self.lang {
+            Language::English => "optional text / first choice",
+            Language::Indonesian => "teks opsional / pilihan pertama",
+            Language::German => "optionaler Text / erste Auswahl",
+        }
+    }
+
+    pub fn form_builder_choices(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Choices",
+            Language::Indonesian => "Pilihan",
+            Language::German => "Auswahlwerte",
+        }
+    }
+
+    pub fn form_builder_required(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Required",
+            Language::Indonesian => "Wajib",
+            Language::German => "Erforderlich",
+        }
+    }
+
+    pub fn form_builder_text(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Insert text field",
+            Language::Indonesian => "Sisipkan kolom teks",
+            Language::German => "Textfeld einfügen",
+        }
+    }
+
+    pub fn form_builder_choice(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Insert dropdown",
+            Language::Indonesian => "Sisipkan daftar pilihan",
+            Language::German => "Auswahlliste einfügen",
+        }
+    }
+
+    pub fn form_builder_date(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Insert date picker",
+            Language::Indonesian => "Sisipkan pemilih tanggal",
+            Language::German => "Datumsauswahl einfügen",
+        }
+    }
+
+    pub fn form_builder_help(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Names use lowercase letters, digits, and underscores. Choices are comma-separated; edit the inserted marker for length rules or more options.",
+            Language::Indonesian => "Nama menggunakan huruf kecil, angka, dan garis bawah. Pilihan dipisahkan koma; edit penanda untuk aturan panjang atau pilihan lainnya.",
+            Language::German => "Namen verwenden Kleinbuchstaben, Ziffern und Unterstriche. Auswahlwerte sind durch Kommas getrennt; für Längenregeln oder weitere Werte den Marker bearbeiten.",
+        }
+    }
+}
+
+impl Strings {
     pub fn import_preview_summary(
         &self,
         fully_migrated: usize,

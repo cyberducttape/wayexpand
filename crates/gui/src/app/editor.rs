@@ -362,6 +362,10 @@ impl GuiApp {
         let mut detect_app_clicked = false;
         let mut variable_inserted = false;
         let daemon_capabilities = self.daemon_capabilities.clone();
+        ui.collapsing(self.strings.form_builder_title(), |ui| {
+            self.render_form_field_builder(ui, palette);
+        });
+        ui.add_space(6.0);
         egui::Frame::new()
             .fill(palette.surface)
             .stroke(egui::Stroke::new(1.0, palette.border))
@@ -785,6 +789,75 @@ impl GuiApp {
         ui.add_space(4.0);
     }
 
+    fn render_form_field_builder(&mut self, ui: &mut egui::Ui, palette: &Palette) {
+        ui.group(|ui| {
+            ui.horizontal(|ui| {
+                ui.label(self.strings.form_builder_name());
+                ui.add(
+                    TextEdit::singleline(&mut self.form_field_name)
+                        .desired_width(110.0)
+                        .hint_text("incident_id"),
+                );
+                ui.checkbox(
+                    &mut self.form_field_required,
+                    self.strings.form_builder_required(),
+                );
+            });
+            ui.horizontal(|ui| {
+                ui.label(self.strings.form_builder_default());
+                ui.add(
+                    TextEdit::singleline(&mut self.form_field_default)
+                        .desired_width(180.0)
+                        .hint_text(self.strings.form_builder_default_hint()),
+                );
+                ui.label(self.strings.form_builder_choices());
+                ui.add(
+                    TextEdit::singleline(&mut self.form_field_options)
+                        .desired_width(180.0)
+                        .hint_text("Low,Medium,High"),
+                );
+            });
+            ui.horizontal_wrapped(|ui| {
+                for (label, kind) in [
+                    (self.strings.form_builder_text(), FormBuilderKind::Text),
+                    (self.strings.form_builder_choice(), FormBuilderKind::Choice),
+                    (self.strings.form_builder_date(), FormBuilderKind::Date),
+                ] {
+                    if theme::secondary_button(ui, palette, label).clicked() {
+                        match build_form_field_marker(
+                            &self.form_field_name,
+                            &self.form_field_default,
+                            &self.form_field_options,
+                            self.form_field_required,
+                            kind,
+                        ) {
+                            Ok(marker) => {
+                                if let Some(draft) = self.draft.as_mut() {
+                                    insert_into_replacement_editor(
+                                        ui.ctx(),
+                                        &mut draft.replacement,
+                                        &marker,
+                                    );
+                                    self.preview_revision = self.preview_revision.wrapping_add(1);
+                                    self.preview_cache = None;
+                                    self.playground.invalidate();
+                                }
+                            }
+                            Err(message) => {
+                                self.status = Status::error(message);
+                            }
+                        }
+                    }
+                }
+            });
+            ui.label(
+                RichText::new(self.strings.form_builder_help())
+                    .small()
+                    .color(palette.muted),
+            );
+        });
+    }
+
     /// Start app-ID detection when requested and apply a finished detection.
     fn handle_app_detection(&mut self, ui: &mut egui::Ui, detect_app_clicked: bool) {
         if detect_app_clicked && self.app_detection.is_none() {
@@ -1127,7 +1200,171 @@ impl GuiApp {
     }
 }
 
-/// Column geometry shared by the rows of the snippet form./// Column geometry shared by the rows of the snippet form.
+#[derive(Clone, Copy)]
+enum FormBuilderKind {
+    Text,
+    Choice,
+    Date,
+}
+
+fn build_form_field_marker(
+    name: &str,
+    default: &str,
+    choice_source: &str,
+    required: bool,
+    kind: FormBuilderKind,
+) -> Result<String, String> {
+    let name = name.trim();
+    let mut bytes = name.bytes();
+    if !bytes.next().is_some_and(|byte| byte.is_ascii_lowercase())
+        || !bytes.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+        || name.len() > 64
+    {
+        return Err("Use a field name beginning with a lowercase letter, followed by lowercase letters, digits, or underscores (up to 64 characters).".into());
+    }
+    let safe_component = |value: &str| {
+        !value.chars().any(char::is_control)
+            && !value.contains("}}")
+            && !value.contains('|')
+            && value.chars().count() <= 4096
+    };
+    if !safe_component(default) {
+        return Err(
+            "The default contains characters that cannot be represented safely in a form marker."
+                .into(),
+        );
+    }
+    let required_suffix = if required { "|required" } else { "" };
+    let marker = match kind {
+        FormBuilderKind::Text => {
+            let default = if default.is_empty() {
+                String::new()
+            } else {
+                format!("={default}")
+            };
+            format!("{{{{field:{name}{default}{required_suffix}}}}}")
+        }
+        FormBuilderKind::Choice => {
+            let options = choice_source
+                .split(',')
+                .map(str::trim)
+                .filter(|option| !option.is_empty())
+                .collect::<Vec<_>>();
+            if !(2..=32).contains(&options.len())
+                || options.iter().any(|option| {
+                    !safe_component(option)
+                        || option.contains(';')
+                        || option.contains('=')
+                        || option.chars().count() > 256
+                })
+            {
+                return Err("Enter 2–32 safe dropdown choices separated by commas.".into());
+            }
+            let selected_default = if default.trim().is_empty() {
+                options[0]
+            } else {
+                default.trim()
+            };
+            if !options.contains(&selected_default) {
+                return Err("The dropdown default must exactly match one of its choices.".into());
+            }
+            format!(
+                "{{{{choice:{name}={};default={selected_default}{}}}}}",
+                options.join("|"),
+                if required { ";required" } else { "" }
+            )
+        }
+        FormBuilderKind::Date => {
+            format!("{{{{datefield:{name}=today{required_suffix}}}}}")
+        }
+    };
+    Ok(marker)
+}
+
+#[cfg(test)]
+mod form_builder_tests {
+    use super::{build_form_field_marker, FormBuilderKind};
+    use wayexpand_core::{form_fields, FormFieldKind};
+
+    #[test]
+    fn form_builder_creates_markers_accepted_by_the_shared_template_parser() {
+        let text = build_form_field_marker(
+            "hostname",
+            "node-01",
+            "Low,Medium,High",
+            true,
+            FormBuilderKind::Text,
+        )
+        .unwrap();
+        let choice = build_form_field_marker(
+            "severity",
+            "High",
+            "Low,Medium,High",
+            true,
+            FormBuilderKind::Choice,
+        )
+        .unwrap();
+        let date = build_form_field_marker(
+            "reported_at",
+            "",
+            "Low,Medium,High",
+            false,
+            FormBuilderKind::Date,
+        )
+        .unwrap();
+
+        let fields = form_fields(&format!("{text} {choice} {date}")).unwrap();
+        assert_eq!(fields.len(), 3);
+        assert_eq!(fields[0].key, "field:hostname");
+        assert!(fields[0].required);
+        assert_eq!(
+            fields[0].kind,
+            FormFieldKind::Text {
+                default: "node-01".into()
+            }
+        );
+        assert_eq!(fields[1].key, "choice:severity");
+        assert!(fields[1].required);
+        assert_eq!(fields[2].key, "date:reported_at");
+        assert!(!fields[2].required);
+    }
+
+    #[test]
+    fn form_builder_rejects_invalid_names_defaults_and_choice_schemas() {
+        for name in ["", "1field", "field-name", "name}} {{command:x}}"] {
+            assert!(
+                build_form_field_marker(name, "", "Low,High", true, FormBuilderKind::Text,)
+                    .is_err()
+            );
+        }
+        assert!(build_form_field_marker(
+            "summary",
+            "unsafe|marker",
+            "Low,High",
+            true,
+            FormBuilderKind::Text,
+        )
+        .is_err());
+        assert!(build_form_field_marker(
+            "severity",
+            "Urgent",
+            "Low,High",
+            true,
+            FormBuilderKind::Choice,
+        )
+        .is_err());
+        assert!(build_form_field_marker(
+            "severity",
+            "Low",
+            "Low;required,High",
+            true,
+            FormBuilderKind::Choice,
+        )
+        .is_err());
+    }
+}
+
+/// Column geometry shared by the rows of the snippet form.
 #[derive(Clone, Copy)]
 pub(crate) struct FormColumns {
     label_width: f32,

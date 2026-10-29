@@ -221,7 +221,10 @@ Still open:
 - [x] Form snippets through IBus: completions are bound to the originating
       input context and require surrounding-text verification (non-atomic,
       uncertified).
-- [ ] A GUI editor for form fields.
+- [x] A GUI form-field builder inserts validated text, dropdown, and date
+      markers at the replacement editor's selection. Advanced rules can still
+      be edited directly in the marker; form previews and final saves continue
+      through the shared template validator.
 - [ ] Richer forms. Shipped: required fields, length limits, choice defaults
       and date fields. Open: clipboard defaults, conditional fields, a date
       picker, and per-field history. Required fields now drive named broker
