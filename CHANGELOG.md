@@ -7,6 +7,10 @@ All notable changes to WayExpand are documented here.
 - Extract the compositor production-certification gate into a locally testable
   check. It rejects production releases when the matrix has no eligible route
   and distinguishes that state from compatibility-only runs.
+- In the diagnostics route ranking, mark the route active in this session and
+  show each route's replacement guarantee and focus-tracking capability. The
+  active route uses its runtime guarantee when available, since focus tracking
+  can refine the route's catalog baseline.
 - Interrupt paced non-atomic output on any physical evdev key event, including
   modifier and lock keys that do not produce matcher input. This narrows one
   interleaving window; non-exclusive capture still cannot prevent already

@@ -62,6 +62,12 @@ impl GuiApp {
 
     pub(crate) fn render_diagnostics_body(&mut self, ui: &mut egui::Ui, palette: &Palette) {
         theme::section_header(ui, "", self.strings.runtime_dashboard());
+        let active_route_id = compact_status_value(&self.daemon_status, "route_id");
+        let active_replacement = self
+            .daemon_capabilities
+            .as_ref()
+            .and_then(|capabilities| capabilities.replacement_assurance)
+            .map(|assurance| self.strings.replacement_pill(assurance).to_owned());
         ui.collapsing("Ranked input routes", |ui| {
             ui.label(
                 RichText::new(
@@ -75,6 +81,9 @@ impl GuiApp {
                     ui.group(|ui| {
                         ui.horizontal_wrapped(|ui| {
                             ui.label(RichText::new(&route.contract.label).strong());
+                            if active_route_id == Some(route.contract.id.as_str()) {
+                                ui.colored_label(palette.accent, self.strings.active_route());
+                            }
                             let standing = route.standing.as_str();
                             let color = match route.standing {
                                 wayexpand_backend_selection::RouteStanding::Recommended
@@ -87,8 +96,22 @@ impl GuiApp {
                         });
                         ui.label(
                             RichText::new(format!(
-                                "{} capture · {} injection · {}",
-                                route.contract.capture, route.contract.injection, route.reason
+                                "{} capture · {} injection · {} · focus tracking {} · {}",
+                                route.contract.capture,
+                                route.contract.injection,
+                                if active_route_id == Some(route.contract.id.as_str()) {
+                                    active_replacement.as_deref().unwrap_or(
+                                        route.contract.replacement_assurance.as_str(),
+                                    )
+                                } else {
+                                    route.contract.replacement_assurance.as_str()
+                                },
+                                if route.contract.focus_tracking {
+                                    "available"
+                                } else {
+                                    "unavailable"
+                                },
+                                route.reason
                             ))
                             .small()
                             .color(palette.muted),
@@ -101,7 +124,7 @@ impl GuiApp {
         });
         let source = compact_status_value(&self.daemon_status, "source").unwrap_or("unknown");
         let backend = compact_status_value(&self.daemon_status, "backend").unwrap_or("unknown");
-        let route_id = compact_status_value(&self.daemon_status, "route_id");
+        let route_id = active_route_id;
         let active_route_certified = route_id
             .and_then(wayexpand_backend_selection::route_contract_by_id)
             .map(|contract| contract.is_certified());
