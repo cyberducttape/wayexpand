@@ -533,57 +533,158 @@ fn pack_content_is_complete(
     diff: Option<&str>,
     diff_required: bool,
 ) -> bool {
+    let Some(expansions) = details["expansions"].as_array() else {
+        return false;
+    };
+    let Some(hotkeys) = details["hotkeys"].as_array() else {
+        return false;
+    };
+    let Some(expansion_count) = details["expansion_count"].as_u64() else {
+        return false;
+    };
+    let Some(hotkey_count) = details["hotkey_count"].as_u64() else {
+        return false;
+    };
+    let Some(command_count) = details["commands"].as_u64() else {
+        return false;
+    };
+    let manifest_fields = ["id", "version", "name", "publisher", "description"];
+    let Some(capabilities) = details["required_capabilities"].as_array() else {
+        return false;
+    };
+    if manifest_fields.iter().any(|key| {
+        details["manifest"]
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .is_none_or(|text| text.chars().count() > MAX_REVIEW_TEXT_CHARS)
+    }) || capabilities.iter().any(|capability| {
+        capability
+            .as_str()
+            .is_none_or(|text| text.chars().count() > MAX_REVIEW_TEXT_CHARS)
+    }) || expansion_count != expansions.len() as u64
+        || hotkey_count != hotkeys.len() as u64
+    {
+        return false;
+    }
     if diff_required && diff.is_none() {
         return false;
     }
     if diff.is_some_and(|diff| diff.contains("review output clipped")) {
         return false;
     }
-    for expansion in details["expansions"].as_array().into_iter().flatten() {
-        if expansion["replacement"]
-            .as_str()
-            .is_some_and(|text| text.chars().count() > MAX_REVIEW_TEXT_CHARS)
-            || command_review_is_too_large(&expansion["command"])
+    let mut reviewed_commands = 0u64;
+    for expansion in expansions {
+        if ["file", "id", "trigger", "description", "replacement"]
+            .iter()
+            .any(|key| {
+                expansion
+                    .get(key)
+                    .and_then(serde_json::Value::as_str)
+                    .is_none_or(|text| text.chars().count() > MAX_REVIEW_TEXT_CHARS)
+            })
         {
             return false;
         }
+        match expansion.get("command") {
+            Some(serde_json::Value::Null) => {}
+            Some(command) if command_review_is_complete(command) => reviewed_commands += 1,
+            _ => return false,
+        }
     }
-    details["hotkeys"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .all(|hotkey| !command_review_is_too_large(&hotkey["command"]))
+    for hotkey in hotkeys {
+        if ["file", "chord", "description"].iter().any(|key| {
+            hotkey
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .is_none_or(|text| text.chars().count() > MAX_REVIEW_TEXT_CHARS)
+        }) || !hotkey
+            .get("command")
+            .is_some_and(command_review_is_complete)
+        {
+            return false;
+        }
+        reviewed_commands += 1;
+    }
+    reviewed_commands == command_count
 }
 
-fn command_review_is_too_large(command: &serde_json::Value) -> bool {
-    command["program"]
+fn command_review_is_complete(command: &serde_json::Value) -> bool {
+    let Some(object) = command.as_object() else {
+        return false;
+    };
+    let Some(args) = command["args"].as_array() else {
+        return false;
+    };
+    let Some(pass_env) = command["pass_env"].as_array() else {
+        return false;
+    };
+    let action_valid = command["action"].is_null() || command["action"].is_string();
+    let action_is_named = command["action"]
         .as_str()
-        .is_some_and(|value| value.len() > MAX_REVIEW_TEXT_CHARS)
-        || command["args"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .any(|value| {
-                value
-                    .as_str()
-                    .is_some_and(|text| text.len() > MAX_REVIEW_TEXT_CHARS)
-            })
+        .is_some_and(|action| !action.is_empty());
+    let program_valid = command["program"]
+        .as_str()
+        .is_some_and(|program| !program.is_empty() || action_is_named);
+    object.contains_key("action")
+        && action_valid
+        && program_valid
+        && command["timeout_ms"].as_u64().is_some()
+        && matches!(command["environment"].as_str(), Some("minimal" | "inherit"))
+        && args.iter().all(|value| {
+            value
+                .as_str()
+                .is_some_and(|text| text.chars().count() <= MAX_REVIEW_TEXT_CHARS)
+        })
+        && pass_env.iter().all(|value| {
+            value
+                .as_str()
+                .is_some_and(|text| text.chars().count() <= MAX_REVIEW_TEXT_CHARS)
+        })
+        && ["program", "action"]
+            .iter()
+            .filter_map(|key| command[*key].as_str())
+            .all(|value| value.chars().count() <= MAX_REVIEW_TEXT_CHARS)
 }
 
 fn pack_policy_allows(details: &serde_json::Value) -> bool {
     let policy = &details["install_policy"];
-    let signature_ok = policy["signature_required"].as_bool() != Some(true)
-        || details["signature"]["state"] == "verified";
+    let Some(signature_required) = policy["signature_required"].as_bool() else {
+        return false;
+    };
+    let Some(pack_allowed) = policy["pack_allowed"].as_bool() else {
+        return false;
+    };
+    let Some(commands_allowed) = policy["commands_allowed"].as_bool() else {
+        return false;
+    };
+    let Some(hotkeys_allowed) = policy["hotkeys_allowed"].as_bool() else {
+        return false;
+    };
+    let Some(action_consent_required) = policy["explicit_action_consent_required"].as_bool() else {
+        return false;
+    };
+    if policy["safe_mode"].as_bool().is_none()
+        || policy.get("signer_override_refused") != Some(&serde_json::Value::Null)
+        || !valid_fingerprint(details["fingerprint"].as_str().unwrap_or_default())
+    {
+        return false;
+    }
+    let Some(command_count) = details["commands"].as_u64() else {
+        return false;
+    };
+    let Some(hotkey_count) = details["hotkey_count"].as_u64() else {
+        return false;
+    };
+    let Some(signature_state) = details["signature"]["state"].as_str() else {
+        return false;
+    };
+    let signature_ok = matches!(signature_state, "verified" | "unsigned" | "unverified")
+        && (!signature_required || signature_state == "verified");
     signature_ok
-        && policy["pack_allowed"].as_bool() != Some(false)
-        && (details["commands"].as_u64().unwrap_or_default() == 0
-            || policy["commands_allowed"].as_bool() != Some(false))
-        && (details["hotkey_count"].as_u64().unwrap_or_default() == 0
-            || policy["hotkeys_allowed"].as_bool() != Some(false))
-        && policy["signer_override_refused"].is_null()
-        && details["fingerprint"]
-            .as_str()
-            .is_some_and(valid_fingerprint)
+        && pack_allowed
+        && (command_count == 0 || commands_allowed)
+        && (hotkey_count == 0 || hotkeys_allowed)
+        && action_consent_required == (command_count > 0 || hotkey_count > 0)
 }
 
 fn signature_color(signature: &serde_json::Value, palette: &Palette) -> Color32 {
@@ -819,18 +920,33 @@ mod tests {
     fn review() -> PackReview {
         PackReview {
             details: serde_json::json!({
+                "manifest": {
+                    "id": "example",
+                    "version": "1.0.0",
+                    "name": "Example",
+                    "publisher": "WayExpand",
+                    "description": "Reviewed fixture"
+                },
                 "fingerprint": "a".repeat(64),
+                "expansion_count": 1,
+                "required_capabilities": [],
                 "commands": 0,
                 "hotkey_count": 0,
                 "signature": { "state": "unsigned" },
                 "install_policy": {
+                    "safe_mode": false,
                     "signature_required": false,
                     "pack_allowed": true,
                     "commands_allowed": true,
                     "hotkeys_allowed": true,
+                    "explicit_action_consent_required": false,
                     "signer_override_refused": null,
                 },
                 "expansions": [{
+                    "file": "snippets.toml",
+                    "id": "example",
+                    "trigger": ":example",
+                    "description": "Example",
                     "replacement": "reviewable contents",
                     "command": null,
                 }],
@@ -849,6 +965,7 @@ mod tests {
     #[test]
     fn pack_review_requires_policy_and_trust_gates_before_enabling_install() {
         let mut review = review();
+        assert!(review_content_is_complete(&review));
         assert!(pack_policy_allows(&review.details));
 
         review.details["install_policy"]["pack_allowed"] = serde_json::Value::Bool(false);
@@ -865,7 +982,22 @@ mod tests {
         // `hotkeys` is the reviewed hotkey list; the policy gate must use the
         // count that `pack inspect --json` reports separately.
         review.details["hotkey_count"] = serde_json::json!(1);
-        review.details["hotkeys"] = serde_json::json!([{ "chord": "Ctrl+Alt+K" }]);
+        review.details["commands"] = serde_json::json!(1);
+        review.details["install_policy"]["explicit_action_consent_required"] =
+            serde_json::Value::Bool(true);
+        review.details["hotkeys"] = serde_json::json!([{
+            "file": "hotkeys.toml",
+            "chord": "Ctrl+Alt+K",
+            "description": "Action",
+            "command": {
+                "action": "restart-service",
+                "program": "",
+                "args": [],
+                "timeout_ms": 1000,
+                "environment": "minimal",
+                "pass_env": []
+            }
+        }]);
         assert!(!pack_policy_allows(&review.details));
         review.details["install_policy"]["hotkeys_allowed"] = serde_json::Value::Bool(true);
         assert!(pack_policy_allows(&review.details));
@@ -873,6 +1005,51 @@ mod tests {
         review.details["install_policy"]["signer_override_refused"] =
             serde_json::Value::String("managed trust root".into());
         assert!(!pack_policy_allows(&review.details));
+    }
+
+    #[test]
+    fn incomplete_or_inconsistent_pack_review_fails_closed() {
+        let mut candidate = review();
+        candidate
+            .details
+            .as_object_mut()
+            .unwrap()
+            .remove("expansions");
+        assert!(!review_content_is_complete(&candidate));
+
+        let mut candidate = review();
+        candidate.details["expansion_count"] = serde_json::json!(2);
+        assert!(!review_content_is_complete(&candidate));
+
+        let mut candidate = review();
+        candidate.details["expansions"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("trigger");
+        assert!(!review_content_is_complete(&candidate));
+
+        let mut candidate = review();
+        candidate.details["expansions"][0]["command"] =
+            serde_json::json!({ "program": "/usr/bin/example" });
+        assert!(!review_content_is_complete(&candidate));
+
+        let mut candidate = review();
+        candidate.details["install_policy"]
+            .as_object_mut()
+            .unwrap()
+            .remove("pack_allowed");
+        assert!(!pack_policy_allows(&candidate.details));
+
+        let mut candidate = review();
+        candidate.details["install_policy"]
+            .as_object_mut()
+            .unwrap()
+            .remove("signer_override_refused");
+        assert!(!pack_policy_allows(&candidate.details));
+
+        let mut candidate = review();
+        candidate.details["signature"]["state"] = serde_json::json!("blocked_by_policy");
+        assert!(!pack_policy_allows(&candidate.details));
     }
 
     #[test]
@@ -896,10 +1073,36 @@ mod tests {
     #[test]
     fn rollback_requires_a_complete_fingerprinted_backup_and_diff() {
         let details = serde_json::json!({
+            "manifest": {
+                "id": "example",
+                "version": "1.0.0",
+                "name": "Example",
+                "publisher": "WayExpand",
+                "description": "Reviewed fixture"
+            },
             "fingerprint": "a".repeat(64),
+            "expansion_count": 1,
+            "required_capabilities": [],
             "commands": 0,
             "hotkey_count": 0,
-            "expansions": [{ "replacement": "reviewed backup", "command": null }],
+            "signature": { "state": "unsigned" },
+            "install_policy": {
+                "safe_mode": false,
+                "signature_required": false,
+                "pack_allowed": true,
+                "commands_allowed": true,
+                "hotkeys_allowed": true,
+                "explicit_action_consent_required": false,
+                "signer_override_refused": null
+            },
+            "expansions": [{
+                "file": "snippets.toml",
+                "id": "example",
+                "trigger": ":example",
+                "description": "Example",
+                "replacement": "reviewed backup",
+                "command": null
+            }],
             "hotkeys": [],
         });
         assert!(rollback_review_is_complete(&details, Some("complete diff")));
@@ -909,10 +1112,36 @@ mod tests {
             Some("diff\n… review output clipped …")
         ));
         let oversized = serde_json::json!({
+            "manifest": {
+                "id": "example",
+                "version": "1.0.0",
+                "name": "Example",
+                "publisher": "WayExpand",
+                "description": "Reviewed fixture"
+            },
             "fingerprint": "a".repeat(64),
+            "expansion_count": 1,
+            "required_capabilities": [],
             "commands": 0,
             "hotkey_count": 0,
-            "expansions": [{ "replacement": "x".repeat(64_001), "command": null }],
+            "signature": { "state": "unsigned" },
+            "install_policy": {
+                "safe_mode": false,
+                "signature_required": false,
+                "pack_allowed": true,
+                "commands_allowed": true,
+                "hotkeys_allowed": true,
+                "explicit_action_consent_required": false,
+                "signer_override_refused": null
+            },
+            "expansions": [{
+                "file": "snippets.toml",
+                "id": "example",
+                "trigger": ":example",
+                "description": "Example",
+                "replacement": "x".repeat(64_001),
+                "command": null
+            }],
             "hotkeys": [],
         });
         assert!(!rollback_review_is_complete(

@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Make GUI pack installation and rollback review fail closed on incomplete or
+  inconsistent CLI JSON: require every expansion, hotkey, command, policy, and
+  signature field to be present and reconcile reported inventory counts
+  before enabling an action.
 - Preserve a current-source private-KWin report for `8d6a0ffe0614`. Output,
   focus, reload, restart, and refusal scenarios passed; physical capture,
   Unicode, suspend/resume, password-field behavior, and overlapping physical
