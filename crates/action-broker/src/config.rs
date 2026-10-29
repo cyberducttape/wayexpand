@@ -125,8 +125,11 @@ impl ActionParameter {
     fn accepts(&self, value: &str) -> bool {
         match self.kind.as_str() {
             "enum" => self.values.iter().any(|allowed| allowed == value),
+            // A leading `-` would let a free-text value become an option of
+            // the configured program (`--kubeconfig=...`, `-o /path`).
             "text" => self.max_length.is_some_and(|maximum| {
                 !value.is_empty()
+                    && !value.starts_with('-')
                     && value.chars().count() <= maximum
                     && !value.chars().any(char::is_control)
             }),
@@ -290,30 +293,64 @@ impl ActionConfig {
 }
 
 fn is_interpreter_program(program: &str) -> bool {
-    let basename = std::path::Path::new(program)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
+    let path = std::path::Path::new(program);
+    // Check the resolved target too: a symlink named `report` can point at
+    // `/bin/sh`.
+    std::iter::once(path.to_path_buf())
+        .chain(std::fs::canonicalize(path).ok())
+        .any(|candidate| {
+            candidate
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(is_interpreter_basename)
+        })
+}
+
+fn is_interpreter_basename(basename: &str) -> bool {
+    let basename = basename.to_ascii_lowercase();
+    // Versioned names such as `python3.12`, `ruby3.2`, `perl5.38`, `node18`.
+    let unversioned =
+        basename.trim_end_matches(|character: char| character.is_ascii_digit() || character == '.');
     matches!(
-        basename.as_str(),
+        unversioned,
         "sh" | "bash"
             | "dash"
+            | "ash"
             | "zsh"
             | "fish"
             | "ksh"
+            | "mksh"
             | "csh"
             | "tcsh"
+            | "busybox"
             | "env"
+            | "xargs"
+            | "sudo"
+            | "doas"
+            | "nohup"
+            | "setsid"
+            | "nice"
+            | "timeout"
+            | "stdbuf"
             | "python"
-            | "python2"
-            | "python3"
+            | "pypy"
             | "perl"
             | "ruby"
             | "node"
+            | "nodejs"
+            | "deno"
+            | "bun"
             | "php"
             | "lua"
-    ) || basename.starts_with("python3.")
+            | "luajit"
+            | "tclsh"
+            | "wish"
+            | "awk"
+            | "gawk"
+            | "mawk"
+            | "nawk"
+            | "pwsh"
+    )
 }
 
 fn is_dangerous_environment_name(name: &str) -> bool {
@@ -644,6 +681,46 @@ mod tests {
             description: None,
         };
         assert!(action.validate().is_err());
+        for program in [
+            "/usr/bin/python3.12",
+            "/usr/bin/ruby3.2",
+            "/usr/bin/node18",
+            "/usr/bin/xargs",
+            "/bin/busybox",
+        ] {
+            assert!(is_interpreter_program(program), "{program}");
+        }
+        assert!(!is_interpreter_program("/usr/bin/kubectl"));
+        assert!(!is_interpreter_program("/usr/bin/k3s"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn parameterized_actions_reject_symlinks_to_shells() {
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-broker-interpreter-link-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir(&directory).unwrap();
+        let link = directory.join("report");
+        std::os::unix::fs::symlink("/bin/sh", &link).unwrap();
+        assert!(is_interpreter_program(&link.to_string_lossy()));
+        std::fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[test]
+    fn text_parameters_cannot_become_program_options() {
+        let parameter = ActionParameter {
+            arg_index: 0,
+            kind: "text".into(),
+            values: vec![],
+            max_length: Some(64),
+        };
+        assert!(parameter.accepts("platform"));
+        assert!(parameter.accepts("a-b"));
+        assert!(!parameter.accepts("--kubeconfig=/tmp/attacker"));
+        assert!(!parameter.accepts("-oyaml"));
     }
 
     fn config_with_timeout(timeout_ms: u64) -> ActionConfig {

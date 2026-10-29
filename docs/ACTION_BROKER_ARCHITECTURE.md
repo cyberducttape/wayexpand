@@ -94,12 +94,15 @@ values = ["staging", "production"]
 
 `arg_index` replaces one complete, fixed argv element. The broker never parses
 or interpolates submitted text as shell syntax. Enum values must match exactly;
-text values have an administrator-set length limit and cannot contain control
-characters. Each field must be marked `required`, and every submitted form
+text values have an administrator-set length limit, cannot contain control
+characters, and cannot begin with `-`, so they are never read as program
+options. Each field must be marked `required`, and every submitted form
 field must have exactly one schema entry. Parameter values are bounded and are
 not written to audit records. Parameterized actions cannot name a shell or
-language interpreter as their program; the broker also canonicalizes and
-revalidates the program before launch.
+language interpreter as their program, including versioned names, exec
+wrappers such as `env`, `xargs`, `busybox`, `sudo`, and `timeout`, and symlinks
+that resolve to any of them; the broker also canonicalizes and revalidates the
+program before launch.
 
 `server_env` values are read from the broker's environment and cannot be
 overridden by an IPC client. Use `client_forward_env` only for values that a

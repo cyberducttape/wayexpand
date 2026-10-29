@@ -177,7 +177,7 @@ impl GuiApp {
         );
         ui.label(self.strings.pack_action_counts(
             details["commands"].as_u64().unwrap_or_default(),
-            details["hotkeys"].as_u64().unwrap_or_default(),
+            details["hotkey_count"].as_u64().unwrap_or_default(),
         ));
         let actions = json_string_array(&manifest["allowed_actions"]);
         if !actions.is_empty() {
@@ -283,7 +283,7 @@ impl GuiApp {
         {
             ui.colored_label(palette.danger, self.strings.pack_commands_denied());
         }
-        if details["hotkeys"].as_u64().unwrap_or_default() > 0
+        if details["hotkey_count"].as_u64().unwrap_or_default() > 0
             && policy["hotkeys_allowed"].as_bool() == Some(false)
         {
             ui.colored_label(palette.danger, self.strings.pack_hotkeys_denied());
@@ -411,7 +411,7 @@ fn pack_policy_allows(details: &serde_json::Value) -> bool {
         && policy["pack_allowed"].as_bool() != Some(false)
         && (details["commands"].as_u64().unwrap_or_default() == 0
             || policy["commands_allowed"].as_bool() != Some(false))
-        && (details["hotkeys"].as_u64().unwrap_or_default() == 0
+        && (details["hotkey_count"].as_u64().unwrap_or_default() == 0
             || policy["hotkeys_allowed"].as_bool() != Some(false))
         && policy["signer_override_refused"].is_null()
         && details["fingerprint"]
@@ -598,7 +598,7 @@ mod tests {
             details: serde_json::json!({
                 "fingerprint": "a".repeat(64),
                 "commands": 0,
-                "hotkeys": 0,
+                "hotkey_count": 0,
                 "signature": { "state": "unsigned" },
                 "install_policy": {
                     "signature_required": false,
@@ -632,6 +632,16 @@ mod tests {
         review.details["install_policy"]["signature_required"] = serde_json::Value::Bool(true);
         assert!(!pack_policy_allows(&review.details));
         review.details["signature"]["state"] = serde_json::Value::String("verified".into());
+        assert!(pack_policy_allows(&review.details));
+
+        review.details["install_policy"]["hotkeys_allowed"] = serde_json::Value::Bool(false);
+        assert!(pack_policy_allows(&review.details));
+        // `hotkeys` is the reviewed hotkey list; the policy gate must use the
+        // count that `pack inspect --json` reports separately.
+        review.details["hotkey_count"] = serde_json::json!(1);
+        review.details["hotkeys"] = serde_json::json!([{ "chord": "Ctrl+Alt+K" }]);
+        assert!(!pack_policy_allows(&review.details));
+        review.details["install_policy"]["hotkeys_allowed"] = serde_json::Value::Bool(true);
         assert!(pack_policy_allows(&review.details));
 
         review.details["install_policy"]["signer_override_refused"] =

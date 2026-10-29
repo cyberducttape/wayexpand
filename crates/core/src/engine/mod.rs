@@ -667,11 +667,7 @@ impl ExpansionEngine {
             .as_ref()
             .is_some_and(|command| self.command_execution_disabled(command))
         {
-            if pending.command.is_some() {
-                self.restore_failed_command_match(&matched_text);
-            } else {
-                self.restore_deferred_match(&matched_text);
-            }
+            self.restore_failed_command_match(&matched_text);
             return Err(CommandError::PolicyBlocked);
         }
         if let Some(fields) = pending.form.clone() {

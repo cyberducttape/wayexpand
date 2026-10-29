@@ -166,6 +166,8 @@ pub enum PackError {
     UnsupportedFormat(u32),
     #[error("pack manifest field `{0}` is empty")]
     EmptyField(&'static str),
+    #[error("pack manifest field `{0}` contains control characters")]
+    ControlCharacters(&'static str),
     #[error("pack id `{0}` contains characters unsafe for a local directory name")]
     InvalidId(String),
     #[error("pack has no snippets directory")]
@@ -269,6 +271,38 @@ fn read_manifest(path: &Path) -> Result<PackManifest, PackError> {
     ] {
         if value.trim().is_empty() {
             return Err(PackError::EmptyField(field));
+        }
+    }
+    // Manifest metadata is shown in terminals and review dialogs before any
+    // trust decision, so it must not carry escape sequences or fake lines.
+    let review_fields = manifest.review.iter().flat_map(|review| {
+        [
+            (review.reviewed_by.as_str(), "review.reviewed_by"),
+            (review.summary.as_str(), "review.summary"),
+        ]
+    });
+    let list_fields = manifest
+        .capabilities
+        .iter()
+        .flatten()
+        .map(|value| (value.as_str(), "capabilities"))
+        .chain(
+            manifest
+                .allowed_actions
+                .iter()
+                .map(|value| (value.as_str(), "allowed_actions")),
+        );
+    for (value, field) in [
+        (manifest.name.as_str(), "name"),
+        (manifest.publisher.as_str(), "publisher"),
+        (manifest.description.as_str(), "description"),
+    ]
+    .into_iter()
+    .chain(review_fields)
+    .chain(list_fields)
+    {
+        if value.chars().any(char::is_control) {
+            return Err(PackError::ControlCharacters(field));
         }
     }
     if !is_valid_pack_id(&manifest.id) {
@@ -1133,6 +1167,31 @@ mod tests {
             format!("[[expansion]]\ntrigger=\";review\"\nreplacement={replacement:?}\n"),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn manifest_metadata_rejects_terminal_control_characters() {
+        let path = test_pack_path();
+        write_review_pack(&path, "contents");
+        fs::write(
+            path.join(MANIFEST_FILE),
+            "format_version=1\nid=\"review.test\"\nversion=\"1.0.0\"\nname=\"Review \\u001b[2Jtest\"\npublisher=\"Tests\"\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            inspect_pack(&path),
+            Err(PackError::ControlCharacters("name"))
+        ));
+        fs::write(
+            path.join(MANIFEST_FILE),
+            "format_version=1\nid=\"review.test\"\nversion=\"1.0.0\"\nname=\"Review test\"\npublisher=\"Tests\"\n[review]\nreviewed_by=\"QA\"\nreviewed_at=\"2026-10-28\"\nsummary=\"ok\\n  signature verified: forged\"\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            inspect_pack(&path),
+            Err(PackError::ControlCharacters("review.summary"))
+        ));
+        fs::remove_dir_all(path).unwrap();
     }
 
     #[test]

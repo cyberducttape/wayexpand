@@ -140,7 +140,10 @@ expansions are merged in lexical filename order. The pack manifest and every
 snippet file are strict: unknown fields and invalid configuration are errors.
 Pack `version` must be semantic versioning, and `id` is restricted to safe
 directory-name characters. Review metadata must contain a reviewer, a real
-calendar date, and a summary.
+calendar date, and a summary. Manifest text (name, publisher, description,
+review fields, capabilities, and allowed actions) cannot contain control
+characters, including newlines, because it is displayed before any trust
+decision.
 
 ## Inspect and import
 

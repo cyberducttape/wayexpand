@@ -4,6 +4,17 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Harden broker action parameters: free-text values may not begin with `-`
+  (option injection), and the interpreter refusal now also covers versioned
+  names, exec wrappers (`env`, `xargs`, `busybox`, `sudo`, `timeout`, ...) and
+  symlinks that resolve to a shell or interpreter.
+- Reject control characters in pack manifest metadata so `pack search` and
+  `pack inspect` cannot print terminal escape sequences or forged lines from
+  an untrusted catalog.
+- Fix the GUI pack review reading the hotkey list as a count: it showed zero
+  hotkeys and skipped its hotkey-policy gate (the CLI still refused the
+  install).
+
 - Add GUI review and installation for local signed/community packs. The review
   shows signer verification, publisher review metadata, capabilities, exact
   snippet contents, commands, hotkeys, and installed-version diffs. Installing
