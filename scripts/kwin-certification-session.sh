@@ -21,6 +21,7 @@ set -u
 
 # shellcheck source=scripts/e2e-lib.sh
 . "$(dirname -- "$0")/e2e-lib.sh"
+. "$(dirname -- "$0")/certification-processes.sh"
 
 export LIBEI_SOCKET="$XDG_RUNTIME_DIR/eis.sock"
 export WX_E2E_TYPIST=libei
@@ -129,18 +130,13 @@ client_describe() {
 
 client_pid=
 
-# Kate detaches from the shell that starts it, so $client_pid can miss the
-# real client. Every client of a case runs with that case's XDG_CONFIG_HOME;
-# stop whatever still carries it.
+# Some KDE launch paths delegate clients to systemd --user, so the process can
+# retain the host HOME and outlive the short-lived launcher. Find it by its
+# case-private XDG paths or by argv references to this unique case directory.
 # Editors with an unsaved document can outlive SIGTERM, so survivors get
 # SIGKILL.
 case_client_pids() {
-    for pid in $(ps -u "$(id -u)" -o pid=); do
-        if { tr '\0' '\n' <"/proc/$pid/environ"; } 2>/dev/null |
-            grep -Fqx "XDG_CONFIG_HOME=$case_dir/xdg/config"; then
-            printf '%s\n' "$pid"
-        fi
-    done
+    certification_private_pids "$(id -u)" "$case_dir"
 }
 
 no_case_clients() {

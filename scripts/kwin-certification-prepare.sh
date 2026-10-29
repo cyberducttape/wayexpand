@@ -54,6 +54,7 @@ esac
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 session_driver="$project_dir/scripts/kwin-certification-session.sh"
 clients="$project_dir/scripts/certification-clients"
+. "$project_dir/scripts/certification-processes.sh"
 
 for tool in kwin_wayland dbus-run-session gdbus jq mkfifo timeout python3; do
     command -v "$tool" >/dev/null || {
@@ -108,18 +109,25 @@ kwin_version=$(kwin_wayland --version 2>/dev/null | awk '{print $2}')
 work=$(mktemp -d "$target_dir/kwin-certification.XXXXXX")
 chmod 700 "$work"
 runtime=
-# KWin's start-up D-Bus-activates the desktop portal and other services that
-# outlive the private bus. Stop every process of this user whose HOME is one
-# of this run's private homes; no other process can have it.
+# A desktop launcher may delegate a client to the host systemd --user manager.
+# Such a process can have the user's normal HOME, so also match argv paths under
+# this run's unique private tree. Never match or stop the user manager itself.
 reap_session_processes() {
-    local pid home
-    for pid in $(ps -u "$(id -u)" -o pid=); do
-        home=$({ tr '\0' '\n' <"/proc/$pid/environ"; } 2>/dev/null | sed -n 's/^HOME=//p') ||
-            continue
-        case "$home" in
-            "$work"/*/home) kill "$pid" 2>/dev/null || true ;;
-        esac
+    local pid attempt
+    local pids
+    pids=$(certification_private_pids "$(id -u)" "$work")
+    [ -n "$pids" ] || return 0
+    # TERM gives GTK/Qt clients time to close; KILL ensures no portal or
+    # editor process survives after its private compositor and sockets go away.
+    for pid in $pids; do kill "$pid" 2>/dev/null || true; done
+    attempt=0
+    while [ "$attempt" -lt 20 ]; do
+        pids=$(certification_private_pids "$(id -u)" "$work")
+        [ -n "$pids" ] || return 0
+        sleep 0.1
+        attempt=$((attempt + 1))
     done
+    for pid in $pids; do kill -KILL "$pid" 2>/dev/null || true; done
 }
 cleanup() {
     reap_session_processes
@@ -132,6 +140,8 @@ cleanup() {
     fi
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 results="$work/results.txt"
 : >"$results"

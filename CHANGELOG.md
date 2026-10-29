@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Clean up private KWin certification clients even when KDE delegates them to
+  the host `systemd --user` manager, and cover process matching with a focused
+  regression test.
 - Make the seeded concurrency/fault regression script assert that every exact
   selected test ran and passed. This fixes a stale daemon test filter that
   Cargo had treated as a successful zero-test run.

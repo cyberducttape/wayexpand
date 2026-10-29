@@ -436,6 +436,7 @@ jobs:
           bash scripts/test-certification-matrix.sh
           bash scripts/test-certification.sh
           bash scripts/test-certification-driver.sh
+          sh scripts/test-certification-processes.sh
           sh scripts/test-kwin-certification-driver.sh
           sh scripts/test-check-snippet-repo.sh target/debug/wayexpand
           WAYEXPAND_CLI=target/debug/wayexpand sh scripts/check-snippet-repo.sh --deny-risks packs
