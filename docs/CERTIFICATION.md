@@ -703,3 +703,18 @@ physical keyboard capture, and a second trigger during non-atomic replacement
 were not tested. The measurements exclude capture and client paint latency.
 This report is partial compatibility evidence; it does not certify a compositor
 route or describe the user's active desktop.
+
+[`evidence/doctor-certify-8d6a0ffe0614.json`](evidence/doctor-certify-8d6a0ffe0614.json)
+records the current-source run for commit `8d6a0ffe0614` on private headless
+KWin 6.6.6. Trigger replacement, delimiter preservation, cursor placement,
+multiline output, focus switching and cancellation, target closure, command
+completion, reload, restart, unsupported-character refusal, and build identity
+passed. Twenty small, medium, and large libei keysym-fallback transactions
+measured p95 12,598 µs, 782,554 µs, and 3,143,175 µs respectively. This is
+injector transaction time; it excludes physical capture and client paint.
+
+Unicode insertion, physical keyboard capture, a second physical trigger during
+non-atomic output, suspend/resume, and password-field behavior were not tested.
+The private session used stdin capture simulation and reported no sensitive
+field detection. The report is partial compatibility evidence, not production
+certification or evidence about the active desktop.

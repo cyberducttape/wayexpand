@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Preserve a current-source private-KWin report for `8d6a0ffe0614`. Output,
+  focus, reload, restart, and refusal scenarios passed; physical capture,
+  Unicode, suspend/resume, password-field behavior, and overlapping physical
+  input remain untested. Keysym-fallback p95 was 12.6 ms for small, 782.6 ms
+  for medium, and 3.14 s for large replacements, excluding capture and client
+  paint.
 - Add GUI rollback review for installed signed/community packs. Show the exact
   previous version, signer state, contents, and diff; bind confirmation to its
   fingerprint; separately require consent to restore commands or hotkeys.
