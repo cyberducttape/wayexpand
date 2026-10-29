@@ -131,10 +131,11 @@ in configured argument slots; values are never interpolated into a shell
 command. The editor displays the selected action's schema and checks form
 field names, dropdown choices, and known text-length limits against it. It
 identifies missing or extra fields and known constraint mismatches before use.
-User-entered values are still checked by the broker at runtime. This is a
-read-only view of broker policy; the broker remains the authority and rejects
-invalid requests. Review the broker policy and action permissions before
-sharing that snippet.
+The action list and schema are read from one cached policy snapshot so the GUI
+does not combine metadata from different policy revisions. User-entered values
+are still checked by the broker at runtime. This is a read-only view of broker
+policy; the broker remains the authority and rejects invalid requests. Review
+the broker policy and action permissions before sharing that snippet.
 
 Keep the preview distinction in mind: static templates and forms can be
 previewed without running commands. A managed action runs only when the snippet

@@ -216,22 +216,10 @@ impl Draft {
 /// The picker asks on every frame it is shown, so the answer is cached for
 /// [`BROKER_ACTIONS_REFRESH`]; edits to the policy appear within that time.
 pub(crate) fn broker_action_ids() -> std::sync::Arc<[String]> {
-    static CACHE: std::sync::Mutex<Option<(std::time::Instant, std::sync::Arc<[String]>)>> =
-        std::sync::Mutex::new(None);
-    let mut cache = CACHE
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if let Some((read_at, ids)) = cache.as_ref() {
-        if read_at.elapsed() < BROKER_ACTIONS_REFRESH {
-            return std::sync::Arc::clone(ids);
-        }
-    }
-    let ids: std::sync::Arc<[String]> = read_broker_action_ids(&broker_config_path()).into();
-    *cache = Some((std::time::Instant::now(), std::sync::Arc::clone(&ids)));
-    ids
+    std::sync::Arc::clone(&broker_action_inventory().ids)
 }
 
-/// A read-only view of the broker's validated input contract. The editor
+/// A read-only view of the broker's declared input contract. The editor
 /// uses this to explain whether a form can call the selected action; policy
 /// remains owned and validated by the broker.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -244,24 +232,35 @@ pub(crate) struct BrokerParameterView {
 
 type BrokerParameterCache =
     std::collections::HashMap<String, std::sync::Arc<[BrokerParameterView]>>;
-type BrokerParameterCacheState = Option<(std::time::Instant, BrokerParameterCache)>;
+
+#[derive(Default)]
+struct BrokerActionInventory {
+    ids: std::sync::Arc<[String]>,
+    parameters: BrokerParameterCache,
+}
+
+type BrokerActionInventoryCache =
+    Option<(std::time::Instant, std::sync::Arc<BrokerActionInventory>)>;
+
+fn broker_action_inventory() -> std::sync::Arc<BrokerActionInventory> {
+    static CACHE: std::sync::Mutex<BrokerActionInventoryCache> = std::sync::Mutex::new(None);
+    let mut cache = CACHE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some((read_at, inventory)) = cache.as_ref() {
+        if read_at.elapsed() < BROKER_ACTIONS_REFRESH {
+            return std::sync::Arc::clone(inventory);
+        }
+    }
+    let inventory = std::sync::Arc::new(read_broker_action_inventory(&broker_config_path()));
+    *cache = Some((std::time::Instant::now(), std::sync::Arc::clone(&inventory)));
+    inventory
+}
 
 pub(crate) fn broker_action_parameters(
     action_id: &str,
 ) -> Option<std::sync::Arc<[BrokerParameterView]>> {
-    static CACHE: std::sync::Mutex<BrokerParameterCacheState> = std::sync::Mutex::new(None);
-    let mut cache = CACHE
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if let Some((read_at, actions)) = cache.as_ref() {
-        if read_at.elapsed() < BROKER_ACTIONS_REFRESH {
-            return actions.get(action_id).cloned();
-        }
-    }
-    let actions = read_broker_action_parameters(&broker_config_path());
-    let result = actions.get(action_id).cloned();
-    *cache = Some((std::time::Instant::now(), actions));
-    result
+    broker_action_inventory().parameters.get(action_id).cloned()
 }
 
 const BROKER_ACTIONS_REFRESH: std::time::Duration = std::time::Duration::from_secs(2);
@@ -284,7 +283,26 @@ fn broker_config_path() -> std::path::PathBuf {
         })
 }
 
+#[cfg(test)]
 fn read_broker_action_ids(path: &std::path::Path) -> Vec<String> {
+    read_broker_document(path)
+        .and_then(|document| {
+            document
+                .get("actions")
+                .and_then(toml_edit::Item::as_table)
+                .map(|actions| {
+                    let mut ids = actions
+                        .iter()
+                        .map(|(id, _)| id.to_owned())
+                        .collect::<Vec<_>>();
+                    ids.sort();
+                    ids
+                })
+        })
+        .unwrap_or_default()
+}
+
+fn read_broker_document(path: &std::path::Path) -> Option<toml_edit::DocumentMut> {
     use std::io::Read;
     use std::os::unix::fs::OpenOptionsExt;
     // Non-blocking, so a FIFO at the path cannot stall the UI thread; only
@@ -294,67 +312,41 @@ fn read_broker_action_ids(path: &std::path::Path) -> Vec<String> {
         .custom_flags(libc::O_CLOEXEC | libc::O_NONBLOCK)
         .open(path)
     else {
-        return Vec::new();
+        return None;
     };
     if !file
         .metadata()
         .is_ok_and(|metadata| metadata.is_file() && metadata.len() <= MAX_BROKER_CONFIG_BYTES)
     {
-        return Vec::new();
+        return None;
     }
     let mut source = String::new();
     if file
-        .take(MAX_BROKER_CONFIG_BYTES)
+        .take(MAX_BROKER_CONFIG_BYTES + 1)
         .read_to_string(&mut source)
         .is_err()
     {
-        return Vec::new();
+        return None;
     }
-    let Ok(document) = source.parse::<toml_edit::DocumentMut>() else {
-        return Vec::new();
+    if source.len() as u64 > MAX_BROKER_CONFIG_BYTES {
+        return None;
+    }
+    source.parse::<toml_edit::DocumentMut>().ok()
+}
+
+fn read_broker_action_inventory(path: &std::path::Path) -> BrokerActionInventory {
+    let Some(document) = read_broker_document(path) else {
+        return BrokerActionInventory::default();
     };
     let Some(actions) = document.get("actions").and_then(toml_edit::Item::as_table) else {
-        return Vec::new();
+        return BrokerActionInventory::default();
     };
     let mut ids = actions
         .iter()
         .map(|(id, _)| id.to_owned())
         .collect::<Vec<_>>();
     ids.sort();
-    ids
-}
-
-fn read_broker_action_parameters(path: &std::path::Path) -> BrokerParameterCache {
-    use std::io::Read;
-    use std::os::unix::fs::OpenOptionsExt;
-    let Ok(file) = std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NONBLOCK)
-        .open(path)
-    else {
-        return std::collections::HashMap::new();
-    };
-    if !file
-        .metadata()
-        .is_ok_and(|metadata| metadata.is_file() && metadata.len() <= MAX_BROKER_CONFIG_BYTES)
-    {
-        return std::collections::HashMap::new();
-    }
-    let mut source = String::new();
-    if file
-        .take(MAX_BROKER_CONFIG_BYTES)
-        .read_to_string(&mut source)
-        .is_err()
-    {
-        return std::collections::HashMap::new();
-    }
-    let Ok(document) = source.parse::<toml_edit::DocumentMut>() else {
-        return std::collections::HashMap::new();
-    };
-    let Some(actions) = document.get("actions").and_then(toml_edit::Item::as_table) else {
-        return std::collections::HashMap::new();
-    };
-    actions
+    let parameters = actions
         .iter()
         .filter_map(|(id, action)| {
             let parameters_item = action.get("parameters");
@@ -388,7 +380,11 @@ fn read_broker_action_parameters(path: &std::path::Path) -> BrokerParameterCache
                 .collect::<Option<Vec<_>>>()?;
             Some((id.to_owned(), parameters.into()))
         })
-        .collect()
+        .collect();
+    BrokerActionInventory {
+        ids: ids.into(),
+        parameters,
+    }
 }
 
 /// `tokens` plus the trimmed `pending` entry, unless it is empty or already
