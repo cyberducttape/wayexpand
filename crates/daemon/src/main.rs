@@ -158,7 +158,7 @@ struct Daemon {
     input_method: Option<wayexpand_backend_input_method::InputMethodSource>,
     evdev: Option<EvdevSource>,
     #[cfg(test)]
-    evdev_output_test_event: Option<InputEvent>,
+    evdev_output_test_events: Option<mpsc::Receiver<InputEvent>>,
     receiver: Option<mpsc::Receiver<String>>,
     status_publisher: StatusPublisher,
     focus_state: FocusState,
@@ -529,7 +529,7 @@ fn main() -> Result<()> {
         input_method,
         evdev,
         #[cfg(test)]
-        evdev_output_test_event: None,
+        evdev_output_test_events: None,
         receiver,
         status_publisher,
         focus_state,

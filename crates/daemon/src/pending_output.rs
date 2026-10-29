@@ -304,7 +304,7 @@ impl Daemon {
     /// backend checkpoint. The transaction remains uncertain; never replay it.
     fn watches_non_atomic_output_for_input(&self) -> bool {
         #[cfg(test)]
-        let test_event_pending = self.evdev_output_test_event.is_some();
+        let test_event_pending = self.evdev_output_test_events.is_some();
         #[cfg(not(test))]
         let test_event_pending = false;
 
@@ -326,10 +326,25 @@ impl Daemon {
         }
 
         #[cfg(test)]
-        if self.evdev_output_test_event.take().is_some() {
-            self.interrupt_pending_non_atomic_output(
-                "test physical input arrived during non-atomic replacement",
-            );
+        if let Some(events) = self.evdev_output_test_events.as_ref() {
+            match if timeout.is_zero() {
+                events.try_recv().map_err(|error| match error {
+                    mpsc::TryRecvError::Empty => mpsc::RecvTimeoutError::Timeout,
+                    mpsc::TryRecvError::Disconnected => mpsc::RecvTimeoutError::Disconnected,
+                })
+            } else {
+                events.recv_timeout(timeout)
+            } {
+                Ok(_event) => self.interrupt_pending_non_atomic_output(
+                    "test physical input arrived during non-atomic replacement",
+                ),
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    self.interrupt_pending_non_atomic_output(
+                        "test physical input monitor disconnected during replacement",
+                    );
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+            }
             return;
         }
 
@@ -484,6 +499,7 @@ mod tests {
         calls: Arc<Mutex<Vec<String>>>,
         erase_started: Arc<std::sync::atomic::AtomicUsize>,
         waiting: Arc<std::sync::atomic::AtomicBool>,
+        physical_input: mpsc::Sender<InputEvent>,
         directory: PathBuf,
     }
 
@@ -524,6 +540,7 @@ mod tests {
             let calls = Arc::new(Mutex::new(Vec::new()));
             let erase_started = Arc::new(std::sync::atomic::AtomicUsize::new(0));
             let waiting = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let (physical_input, physical_input_events) = mpsc::channel();
             let waker = waker::Waker::new().unwrap();
             let backend: Box<dyn TextInjector> = Box::new(GatedInjector {
                 gate: Arc::clone(&gate),
@@ -560,7 +577,7 @@ mod tests {
                 injector: Some(injector),
                 input_method: None,
                 evdev: None,
-                evdev_output_test_event: None,
+                evdev_output_test_events: Some(physical_input_events),
                 receiver: None,
                 status_publisher: StatusPublisher::default(),
                 focus_state: FocusState::new(None),
@@ -590,6 +607,7 @@ mod tests {
                 calls,
                 erase_started,
                 waiting,
+                physical_input,
                 directory,
             }
         }
@@ -833,7 +851,10 @@ mod tests {
             std::thread::sleep(Duration::from_millis(1));
         }
 
-        harness.daemon.evdev_output_test_event = Some(InputEvent::Text("user input".into()));
+        harness
+            .physical_input
+            .send(InputEvent::Text("user input".into()))
+            .unwrap();
         harness.daemon.service_pending_output().unwrap();
         assert!(
             harness
@@ -852,6 +873,57 @@ mod tests {
             "cancellation checkpoint prevents further simulated output"
         );
         assert!(harness.daemon.evdev_quiet_since.is_some());
+    }
+
+    #[test]
+    fn input_arriving_during_the_short_poll_cancels_before_the_batch_continues() {
+        let mut harness = Harness::new(false);
+        harness
+            .daemon
+            .start_output(
+                OutputOrigin::Command,
+                vec![
+                    OutputJob::Expansion(result(":a", "first")),
+                    OutputJob::Expansion(result(":b", "second")),
+                ],
+                Vec::new(),
+            )
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !harness.waiting.load(Ordering::Acquire) {
+            assert!(Instant::now() < deadline, "first transaction never started");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+
+        let sender = harness.physical_input.clone();
+        let input_thread = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(10));
+            sender
+                .send(InputEvent::Text("concurrent key".into()))
+                .unwrap();
+        });
+        let poll_deadline = Instant::now() + Duration::from_millis(100);
+        while !harness
+            .daemon
+            .pending_output
+            .as_ref()
+            .is_some_and(|pending| pending.physical_input_interrupted)
+        {
+            assert!(
+                Instant::now() < poll_deadline,
+                "input was not observed promptly"
+            );
+            harness.daemon.service_pending_output().unwrap();
+        }
+        input_thread.join().unwrap();
+        harness.open_gate();
+        harness.run_until_resolved();
+
+        assert_eq!(
+            *harness.calls.lock().unwrap(),
+            ["erase::a"],
+            "the cancelled transaction must not continue insertion or start queued work"
+        );
     }
 
     #[test]

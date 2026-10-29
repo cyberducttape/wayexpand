@@ -13,6 +13,10 @@ All notable changes to WayExpand are documented here.
   replacement is being paced. This narrows the period in which concurrent
   physical input can interleave before cancellation; non-exclusive keyboard
   injection remains best-effort and cannot provide atomic replacement.
+- Add a delayed-input regression to verify that an event arriving during the
+  short polling wait cancels the in-flight transaction before insertion or
+  queued output continues. This exercises the reactor polling path with a
+  simulated event source, not physical compositor input.
 - Preserve current-source private KWin 6.6.6 E2E evidence for commit
   `6ddbfa854baa`: 14 real-client output/focus scenarios passed. Capture used
   stdin simulation; keysym-fallback p95 was 12.613 ms (small), 782.203 ms
