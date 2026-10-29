@@ -46,7 +46,7 @@ availability claims, and no target is certified without reviewed evidence.
 ## Current evidence
 
 The latest private KWin compatibility smoke evidence is
-[`doctor-certify-fe4712d2a79e.json`](evidence/doctor-certify-fe4712d2a79e.json):
+[`doctor-certify-6f9d5d584af4.json`](evidence/doctor-certify-6f9d5d584af4.json):
 12 output, focus, lifecycle, refusal, and build-identity checks passed, with 20
 latency samples per size. Keyboard capture was simulated; Unicode insertion,
 suspend/resume, and overlapping triggers were not tested. This is not a

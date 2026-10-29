@@ -65,17 +65,25 @@ intentionally out of scope and is reported as `unsupported-by-design`; a
 certification never implies otherwise.
 
 The latest current-source smoke report at
-[`docs/evidence/doctor-certify-ca98ac77f411.json`](evidence/doctor-certify-ca98ac77f411.json)
-tested clean commit `ca98ac77f411` on private headless KWin 6.6.6 on
+[`docs/evidence/doctor-certify-6f9d5d584af4.json`](evidence/doctor-certify-6f9d5d584af4.json)
+tested clean commit `6f9d5d584af4` on private headless KWin 6.6.6 on
 2026-10-29. Twelve output, focus, reload, restart, refusal, and build-identity
 checks passed. Unicode insertion, physical keyboard capture, suspend/resume,
 and the overlapping-trigger scenario were not tested. Twenty libei
 keysym-fallback transactions per size measured injector p50/p95/p99 of
-12.557/12.594/12.606 ms (small), 782.230/786.948/789.099 ms (medium), and
-3,141.761/3,149.582/3,154.151 ms (large). Capture was simulated through stdin.
-The 257-character replacement took about 3.15 seconds at p95 on this route.
+12.512/12.593/12.911 ms (small), 779.106/780.875/781.037 ms (medium), and
+3,126.814/3,131.604/3,132.121 ms (large). Capture was simulated through stdin.
+The 257-character replacement took about 3.13 seconds at p95 on this route.
 These are injector-only measurements, not desktop latency or production
 certification.
+
+The preceding current-source smoke report at
+[`docs/evidence/doctor-certify-ca98ac77f411.json`](evidence/doctor-certify-ca98ac77f411.json)
+tested clean commit `ca98ac77f411` on private headless KWin 6.6.6 on
+2026-10-29. Twelve output, focus, reload, restart, refusal, and build-identity
+checks passed; Unicode insertion, physical capture, suspend/resume, and
+overlapping triggers were not tested. Its injector-only large replacement p95
+was 3,149.582 ms. This report is also partial compatibility evidence.
 
 The preceding current-source smoke report at
 [`docs/evidence/doctor-certify-fe4712d2a79e.json`](evidence/doctor-certify-fe4712d2a79e.json)

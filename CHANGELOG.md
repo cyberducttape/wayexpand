@@ -10,6 +10,10 @@ All notable changes to WayExpand are documented here.
 - Correct release documentation to state that the current certification matrix
   has no production-eligible route and blocks release before runner discovery;
   compatibility reports cannot satisfy that gate.
+- Preserve current-source private-KWin smoke evidence and the current negative
+  overlap reproduction separately. The smoke run passed 12 output/focus and
+  lifecycle checks, but physical capture, Unicode insertion, suspend/resume, and
+  concurrent-trigger safety remain unverified.
 - During non-atomic evdev replacement, monitor for new physical input and
   cancel further simulated output at backend checkpoints. Treat the result as
   uncertain, quarantine captured input, and never replay or continue queued
