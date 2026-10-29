@@ -342,17 +342,18 @@ measured 69.429 µs after the change; this remains on the Unicode normalization
 path and is not a paired before/after comparison. These microbenchmarks are
 host-specific and do not measure end-to-end keyboard-to-client latency.
 
-## Current headless KWin injector measurements: 2026-10-28
+## Current headless KWin injector measurements: 2026-10-29
 
-The [preserved `doctor --certify` report](evidence/doctor-certify-6638e14d2e.json)
+The [preserved `doctor --certify` report](evidence/doctor-certify-6ef29b72b7.json)
 records 20 verified libei keysym-fallback transactions in each size bucket on
-private headless KWin 6.6.6:
+private headless KWin 6.6.6. The report tested commit `6ef29b72b7ea`; all
+measured values are injector-only:
 
 | Replacement size | p50 | p95 | p99 |
 | --- | ---: | ---: | ---: |
-| Small | 12.541 ms | 12.581 ms | 12.586 ms |
-| Medium | 781.089 ms | 783.692 ms | 784.985 ms |
-| Large | 3,135.947 ms | 3,142.036 ms | 3,145.543 ms |
+| Small | 12.423 ms | 14.598 ms | 18.158 ms |
+| Medium | 779.206 ms | 806.913 ms | 812.945 ms |
+| Large | 3,130.304 ms | 3,273.456 ms | 3,307.155 ms |
 
 These measurements time the injector transaction only. Capture was simulated
 through stdin, and the values exclude client paint latency. They are not an

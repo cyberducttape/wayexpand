@@ -14,6 +14,10 @@ All notable changes to WayExpand are documented here.
   physical capture remain untested. Record 20 latency samples per size; the
   measured p95 is 12.581 ms for small, 783.692 ms for medium, and 3.142 s
   for large keysym-fallback replacements. The route remains uncertified.
+- Refresh private KWin compatibility evidence for `6ef29b72b7ea`: 12 output,
+  focus, lifecycle, refusal, and build-identity checks passed, with 20 latency
+  samples per size. Capture was simulated; Unicode, suspend/resume, and
+  overlapping triggers remain untested. This is not production certification.
 - Record expected failed and unverified compositor scenarios instead of
   aborting the private session, and wait for latency samples to reach the
   status snapshot before evaluating the measurement.
