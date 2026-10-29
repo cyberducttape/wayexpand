@@ -1,0 +1,36 @@
+WayExpand private KWin E2E report
+=================================
+Tested build: 6ddbfa854baa
+Source tree: clean
+Compositor: KWin 6.6.6 (headless private session)
+Capture: stdin-simulated
+Output: libei, keysym fallback, 12 ms key pacing
+Sensitive-field detection: false
+
+pass expansion-replaces-trigger             text=Best regards$ cursor=12
+pass word-boundary-reinserts-delimiter      text=so by the way $ cursor=14
+pass cursor-placement                       text=<b></b>$ cursor=3
+pass multiline-replacement                  text=1 Example Way$Springfield$Exampleland$ cursor=37
+pass unreachable-character-is-refused       text=;cafe$ cursor=5
+pass app-filter-follows-focus               A: text=only in A$ cursor=9; B: text=;only$ cursor=5
+pass command-expansion-completes            text=slow-output$ cursor=11
+pass focus-change-during-expansion          A: text=;slow$ cursor=5; B: text=$ cursor=0
+pass target-closes-during-expansion         B: text=$ cursor=0
+pass config-reload                          text=firstsecond$ cursor=11
+pass daemon-restart                         text=Best regardsBest regards$ cursor=24
+pass clipboard-variable                     text=> copied text$ cursor=13
+pass clipboard-empty-fails-closed           text=;quote$ cursor=6
+pass output-latency                         text_chars=6441 cursor=6440
+
+Latency samples per size: 20
+Injection mode: libei_keysym_fallback
+small:  p50=12570 us p95=12613 us p99=12617 us
+medium: p50=781012 us p95=782203 us p99=782649 us
+large:  p50=3133147 us p95=3139824 us p99=3140812 us
+
+14 passed, 0 failed, 0 unverified
+
+Limitations: capture was simulated through stdin. This report does not certify
+physical keyboard capture, password-field behavior, suspend/resume, active
+IME/preedit composition, or concurrent physical-input integrity. It is partial
+KWin compatibility evidence, not production certification.

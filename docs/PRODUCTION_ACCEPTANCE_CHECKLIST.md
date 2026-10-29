@@ -41,14 +41,17 @@ session evidence; unit tests alone do not satisfy them.
       synthetic characters may leave partial text, so the target-integrity
       gate still requires a passing real-session test or refusing automatic
       replacement on that route.
-      The latest clean-source reproduction on commit `ad8f169c4402` is
-      [preserved here](evidence/kwin-overlap-reproduction-ad8f169c4402.json).
-      It again reproduces corruption: only 124 of 128
-      replacement characters remained, the second trigger was interleaved,
-      and stale input expanded. Capture was simulated over stdin while the
-      concurrent trigger was typed through an independent EIS session, so
-      this does not test the new physical-evdev interruption path. The prior
-      Earlier reports from
+      The latest clean-source reproduction on commit `6ddbfa854baa` is
+      [preserved here](evidence/kwin-overlap-reproduction-6ddbfa854baa.json).
+      It reproduces corruption: only 124 of 128 replacement characters
+      remained, the second trigger was interleaved, and stale input expanded.
+      The daemon's uncertain-output counter remained zero because capture was
+      simulated over stdin while the concurrent trigger was typed through an
+      independent EIS session. This does not test the physical-evdev
+      interruption path. The prior
+      [ad8f169c4402 reproduction](evidence/kwin-overlap-reproduction-ad8f169c4402.json)
+      also reproduced corruption: 124 of 128 characters remained. Earlier
+      reports from
       [6d18b08c1f06](evidence/kwin-overlap-reproduction-6d18b08c1f06.json)
       and [3aac97291](evidence/kwin-overlap-reproduction-3aac97291.json)
       showed the same failure. The current serialized evdev output clears matcher

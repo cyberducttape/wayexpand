@@ -4,6 +4,16 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Preserve current-source private KWin 6.6.6 E2E evidence for commit
+  `6ddbfa854baa`: 14 real-client output/focus scenarios passed. Capture used
+  stdin simulation; keysym-fallback p95 was 12.613 ms (small), 782.203 ms
+  (medium), and 3.140 s (large). Password-field behavior, physical capture,
+  suspend/resume, and concurrent physical-input integrity remain uncertified.
+- Reproduce the non-atomic overlap failure on current commit `6ddbfa854baa`:
+  concurrent input interleaved with the first replacement and the stale second
+  trigger expanded. Capture was stdin-simulated, so this does not evaluate the
+  physical evdev cancellation monitor; keep the target-integrity release gate
+  open.
 - Make the toolbar profile selector name the profile currently loaded for the
   focused application, while keeping manual switching tied to the base profile.
   The existing local workflow covers personal/work libraries and exact
