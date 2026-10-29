@@ -358,7 +358,7 @@ impl Daemon {
             self.active_source,
             self.active_backend,
             self.connection_state,
-            &self.path,
+            self.config.path(),
             self.config.healthy(),
             metrics,
             backend_mode,
@@ -444,7 +444,7 @@ impl Daemon {
                     self.active_source,
                     wayexpand_backend_selection::injection_status_label(self.backend_name),
                     self.connection_state,
-                    &self.path,
+                    self.config.path(),
                     self.config.healthy(),
                 );
                 crate::counters::note_output_reconnect();
@@ -499,7 +499,7 @@ impl Daemon {
             self.active_source,
             self.active_backend,
             self.connection_state,
-            &self.path,
+            self.config.path(),
             self.config.healthy(),
         );
         self.output_retry_at = Some(Instant::now());

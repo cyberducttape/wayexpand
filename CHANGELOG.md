@@ -8,7 +8,9 @@ All notable changes to WayExpand are documented here.
   `profiles/applications.toml`, manage them with `wayexpand profile assign-app`
   and `unassign-app`, and pause matching while a selected profile validates and
   loads. Stale background loads cannot replace the profile for the newly focused
-  application; unknown applications use the base library.
+  application; unknown applications use the base library. The GUI Profiles menu
+  now manages exact application assignments and shows the runtime-selected
+  profile; daemon status reports the profile library currently in use.
 - Add offline pack-catalog browsing to the GUI: search local catalogs by
   metadata, disclose signature identity and capabilities, and open candidates
   in the existing fingerprint-bound content and diff review before install.

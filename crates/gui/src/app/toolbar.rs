@@ -165,6 +165,21 @@ impl GuiApp {
                     if let Some(active) = self.active_profile.as_deref() {
                         ui.label(format!("{}: {active}", self.strings.profiles()));
                     }
+                    if let Some(config_path) = runtime::status_field(&self.daemon_status, "config")
+                    {
+                        let config_path = std::path::Path::new(&config_path);
+                        let is_profile = config_path
+                            .parent()
+                            .and_then(std::path::Path::file_name)
+                            .is_some_and(|name| name == "profiles");
+                        if is_profile {
+                            if let Some(name) =
+                                config_path.file_stem().and_then(|name| name.to_str())
+                            {
+                                ui.label(self.strings.profile_automatic_active(name));
+                            }
+                        }
+                    }
                     if self.profile_receiver.is_some() {
                         ui.horizontal(|ui| {
                             ui.spinner();
@@ -216,6 +231,73 @@ impl GuiApp {
                             ui.close();
                         }
                     });
+                    ui.separator();
+                    ui.label(self.strings.profile_app_defaults());
+                    ui.label(self.strings.profile_app_id_help());
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            TextEdit::singleline(&mut self.profile_app_id_draft)
+                                .hint_text(self.strings.profile_app_id_hint())
+                                .desired_width(170.0),
+                        );
+                        let selected = self
+                            .profile_app_target
+                            .as_deref()
+                            .unwrap_or(self.strings.profile_select_app_target());
+                        egui::ComboBox::from_id_salt("profile-app-target")
+                            .selected_text(selected)
+                            .show_ui(ui, |ui| {
+                                for profile in self.profiles.iter().filter(|profile| profile.valid)
+                                {
+                                    ui.selectable_value(
+                                        &mut self.profile_app_target,
+                                        Some(profile.name.clone()),
+                                        &profile.name,
+                                    );
+                                }
+                            });
+                    });
+                    let app_id = self.profile_app_id_draft.trim().to_owned();
+                    let target_profile = self.profile_app_target.clone();
+                    if ui
+                        .add_enabled(
+                            !app_id.is_empty()
+                                && target_profile.is_some()
+                                && self.profile_receiver.is_none(),
+                            egui::Button::new(self.strings.profile_assign_app()),
+                        )
+                        .clicked()
+                    {
+                        if let Some(profile) = target_profile {
+                            self.start_profile_operation(ProfileOperation::AssignApp {
+                                app_id,
+                                profile,
+                            });
+                        }
+                    }
+                    egui::ScrollArea::vertical()
+                        .max_height(140.0)
+                        .show(ui, |ui| {
+                            for assignment in self.profile_app_assignments.clone() {
+                                ui.horizontal(|ui| {
+                                    ui.small(format!(
+                                        "{} → {}",
+                                        assignment.app_id, assignment.profile
+                                    ));
+                                    if ui
+                                        .add_enabled(
+                                            self.profile_receiver.is_none(),
+                                            egui::Button::new(self.strings.profile_unassign_app()),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.start_profile_operation(
+                                            ProfileOperation::UnassignApp(assignment.app_id),
+                                        );
+                                    }
+                                });
+                            }
+                        });
                     if self.profile_error.is_some() {
                         ui.colored_label(
                             palette.danger,

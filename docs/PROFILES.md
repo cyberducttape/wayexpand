@@ -24,6 +24,10 @@ wayexpand profile unassign-app org.kde.konsole
 wayexpand profile list
 ```
 
+The GUI's **More actions → Profiles** menu also lists current assignments and
+lets you add or remove them. It displays the runtime-selected profile when an
+application assignment is active.
+
 The daemon uses the focused window's application ID. Assignments are exact and
 case-insensitive; wildcard patterns and window titles are not used. When no
 assignment matches, WayExpand returns to the base configuration. The mapping

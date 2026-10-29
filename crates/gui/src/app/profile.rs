@@ -23,6 +23,12 @@ impl GuiApp {
                     ProfileOperation::Create(name) => {
                         command.arg("create").arg(name);
                     }
+                    ProfileOperation::AssignApp { app_id, profile } => {
+                        command.arg("assign-app").arg(app_id).arg(profile);
+                    }
+                    ProfileOperation::UnassignApp(app_id) => {
+                        command.arg("unassign-app").arg(app_id);
+                    }
                 }
                 let result = command
                     .arg(path)
@@ -75,7 +81,13 @@ impl GuiApp {
         self.profile_receiver = None;
         match (operation, result) {
             (ProfileOperation::List, Ok(output)) => {
-                (self.profiles, self.active_profile) = parse_profile_list(&output);
+                let (profiles, active, assignments) = parse_profile_list(&output);
+                self.profiles = profiles;
+                self.active_profile = active;
+                self.profile_app_assignments = assignments;
+                if self.profile_app_target.is_none() {
+                    self.profile_app_target = self.profiles.first().map(|entry| entry.name.clone());
+                }
                 self.profile_loaded = true;
                 self.profile_error = None;
             }
@@ -84,6 +96,12 @@ impl GuiApp {
                 self.profile_error = None;
                 self.status = Status::success(format!("Active profile: {name}"));
                 self.perform_reload();
+                self.profile_loaded = false;
+                self.start_profile_operation(ProfileOperation::List);
+            }
+            (ProfileOperation::AssignApp { .. }, Ok(_))
+            | (ProfileOperation::UnassignApp(_), Ok(_)) => {
+                self.profile_error = None;
                 self.profile_loaded = false;
                 self.start_profile_operation(ProfileOperation::List);
             }
@@ -114,10 +132,22 @@ pub(crate) fn wayexpand_cli() -> std::path::PathBuf {
     "wayexpand".into()
 }
 
-fn parse_profile_list(output: &str) -> (Vec<ProfileEntry>, Option<String>) {
+fn parse_profile_list(
+    output: &str,
+) -> (Vec<ProfileEntry>, Option<String>, Vec<AppProfileAssignment>) {
     let mut profiles = Vec::new();
     let mut active_profile = None;
+    let mut assignments = Vec::new();
     for line in output.lines() {
+        if let Some((app_id, profile)) = line.trim().split_once(" -> ") {
+            if !app_id.is_empty() && !profile.is_empty() {
+                assignments.push(AppProfileAssignment {
+                    app_id: app_id.to_owned(),
+                    profile: profile.to_owned(),
+                });
+            }
+            continue;
+        }
         let (active, entry) = if let Some(entry) = line.strip_prefix("* ") {
             (true, entry)
         } else if let Some(entry) = line.strip_prefix("  ") {
@@ -142,7 +172,7 @@ fn parse_profile_list(output: &str) -> (Vec<ProfileEntry>, Option<String>) {
             valid: state == "valid",
         });
     }
-    (profiles, active_profile)
+    (profiles, active_profile, assignments)
 }
 
 #[cfg(test)]
@@ -151,7 +181,7 @@ mod tests {
 
     #[test]
     fn parses_cli_profile_rows_and_keeps_invalid_entries_disabled() {
-        let (profiles, active) = parse_profile_list(
+        let (profiles, active, assignments) = parse_profile_list(
             "* personal [valid]\n  work [valid]\n  broken [invalid]\nNo profiles yet",
         );
         assert_eq!(active.as_deref(), Some("personal"));
@@ -159,5 +189,6 @@ mod tests {
         assert!(profiles[0].valid && profiles[1].valid);
         assert!(!profiles[2].valid);
         assert_eq!(profiles[2].name, "broken");
+        assert!(assignments.is_empty());
     }
 }

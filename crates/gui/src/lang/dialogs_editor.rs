@@ -73,6 +73,62 @@ impl Strings {
         }
     }
 
+    pub fn profile_app_defaults(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Application defaults",
+            Language::Indonesian => "Profil bawaan aplikasi",
+            Language::German => "App-Standardprofile",
+        }
+    }
+
+    pub fn profile_app_id_help(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Assign a profile to an exact desktop application ID.",
+            Language::Indonesian => "Tetapkan profil ke ID aplikasi desktop yang tepat.",
+            Language::German => "Einem exakten Desktop-App-ID ein Profil zuweisen.",
+        }
+    }
+
+    pub fn profile_app_id_hint(&self) -> &'static str {
+        match self.lang {
+            Language::English => "org.example.Application",
+            Language::Indonesian => "org.example.Application",
+            Language::German => "org.example.Application",
+        }
+    }
+
+    pub fn profile_assign_app(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Assign application",
+            Language::Indonesian => "Tetapkan aplikasi",
+            Language::German => "App zuweisen",
+        }
+    }
+
+    pub fn profile_unassign_app(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Remove",
+            Language::Indonesian => "Hapus",
+            Language::German => "Entfernen",
+        }
+    }
+
+    pub fn profile_select_app_target(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Select profile",
+            Language::Indonesian => "Pilih profil",
+            Language::German => "Profil auswählen",
+        }
+    }
+
+    pub fn profile_automatic_active(&self, name: &str) -> String {
+        match self.lang {
+            Language::English => format!("Application-selected profile: {name}"),
+            Language::Indonesian => format!("Profil yang dipilih aplikasi: {name}"),
+            Language::German => format!("Von der App ausgewähltes Profil: {name}"),
+        }
+    }
+
     pub fn unsaved_title(&self) -> &'static str {
         match self.lang {
             Language::English => "Unsaved changes",

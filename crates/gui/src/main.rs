@@ -218,6 +218,9 @@ struct GuiApp {
     profiles: Vec<ProfileEntry>,
     active_profile: Option<String>,
     profile_name_draft: String,
+    profile_app_id_draft: String,
+    profile_app_target: Option<String>,
+    profile_app_assignments: Vec<AppProfileAssignment>,
     profile_loaded: bool,
     profile_error: Option<String>,
     profile_receiver: Option<mpsc::Receiver<(ProfileOperation, Result<String, String>)>>,
@@ -334,10 +337,18 @@ pub(crate) struct ProfileEntry {
 }
 
 #[derive(Clone, Debug)]
+pub(crate) struct AppProfileAssignment {
+    pub(crate) app_id: String,
+    pub(crate) profile: String,
+}
+
+#[derive(Clone, Debug)]
 pub(crate) enum ProfileOperation {
     List,
     Switch(String),
     Create(String),
+    AssignApp { app_id: String, profile: String },
+    UnassignApp(String),
 }
 
 #[derive(Clone, Debug)]
@@ -546,6 +557,9 @@ impl GuiApp {
             profiles: Vec::new(),
             active_profile: None,
             profile_name_draft: String::new(),
+            profile_app_id_draft: String::new(),
+            profile_app_target: None,
+            profile_app_assignments: Vec::new(),
             profile_loaded: false,
             profile_error: None,
             profile_receiver: None,
