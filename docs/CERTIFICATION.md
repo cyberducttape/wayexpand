@@ -79,7 +79,17 @@ and client paint latency. This is partial compatibility evidence, not
 production certification; physical capture, password-field behavior,
 suspend/resume, and concurrent physical-input integrity remain unverified.
 
-The latest current-source smoke report at
+The latest current-source isolated KWin smoke run is preserved in
+[`docs/evidence/doctor-certify-ce6bcb5b019f.json`](evidence/doctor-certify-ce6bcb5b019f.json).
+It tested commit `ce6bcb5b019f` on KWin 6.6.6 and passed 12 output, focus,
+reload, restart, refusal, and build-identity checks. The negotiated route was
+libei keysym fallback with stdin-simulated capture; the second-trigger overlap,
+Unicode insertion, suspend/resume, and physical keyboard capture were not
+tested. Twenty injector transactions per size measured p95 of 12.599 ms
+(small), 785.510 ms (medium), and 3,137.942 ms (large). These are isolated
+injector measurements, not end-to-end latency or production certification.
+
+The preceding current-source smoke report at
 [`docs/evidence/doctor-certify-6f9d5d584af4.json`](evidence/doctor-certify-6f9d5d584af4.json)
 tested clean commit `6f9d5d584af4` on private headless KWin 6.6.6 on
 2026-10-29. Twelve output, focus, reload, restart, refusal, and build-identity
