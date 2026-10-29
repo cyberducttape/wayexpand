@@ -87,7 +87,11 @@ impl GuiApp {
     }
 
     pub(crate) fn any_dialog_open(&self) -> bool {
-        self.diagnostics_open || self.import_open || self.settings_open || self.evdev_setup_open
+        self.diagnostics_open
+            || self.import_open
+            || self.pack_dialog_open
+            || self.settings_open
+            || self.evdev_setup_open
     }
 
     /// Escape closes one dialog at a time, most recently opened first. The
@@ -103,6 +107,8 @@ impl GuiApp {
             self.evdev_setup_open = false;
         } else if self.settings_open {
             self.settings_open = false;
+        } else if self.pack_dialog_open {
+            self.pack_dialog_open = false;
         } else if self.import_open {
             if self.import_preview.is_some() {
                 self.import_preview = None;

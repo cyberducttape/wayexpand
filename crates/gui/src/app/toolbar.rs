@@ -272,6 +272,12 @@ impl GuiApp {
                     self.import_preview = None;
                     ui.close();
                 }
+                if ui.button(self.strings.review_packs()).clicked() {
+                    self.pack_dialog_open = true;
+                    self.pack_review = None;
+                    self.pack_error = None;
+                    ui.close();
+                }
                 ui.separator();
                 if ui.button(self.strings.settings()).clicked() {
                     self.open_settings();

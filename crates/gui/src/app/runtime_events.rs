@@ -15,6 +15,7 @@ impl GuiApp {
 
     pub(crate) fn poll_runtime(&mut self, ctx: &egui::Context) {
         self.poll_profiles(ctx);
+        self.poll_pack_operation(ctx);
         let mut completions = Vec::new();
         let mut disconnected = false;
         if let Some(receiver) = self.runtime_receiver.as_ref() {

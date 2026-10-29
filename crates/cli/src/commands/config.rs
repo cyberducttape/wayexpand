@@ -666,6 +666,17 @@ fn ensure_pack_id(id: &str) -> Result<()> {
     Ok(())
 }
 
+fn validate_pack_fingerprint(fingerprint: &str) -> Result<()> {
+    if fingerprint.len() != 64
+        || !fingerprint
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        bail!("expected pack fingerprint must be 64 lowercase hexadecimal characters");
+    }
+    Ok(())
+}
+
 fn pack_matches_query(inspection: &wayexpand_core::PackInspection, query: &str) -> bool {
     let query = query.trim();
     if query.is_empty() {
@@ -1043,7 +1054,7 @@ fn install_local_pack_at(
     copy_pack_to_stage(source, &stage)?;
     let staged = inspect_pack(&stage)
         .map_err(|error| config_error(format!("copied pack failed validation: {error}")))?;
-    if staged.manifest != inspection.manifest {
+    if staged.manifest != inspection.manifest || staged.fingerprint != inspection.fingerprint {
         let _ = std::fs::remove_dir_all(&stage);
         bail!("pack source changed during installation; inspect it again and retry");
     }
@@ -1443,10 +1454,14 @@ fn pack_snippet_files(root: &Path) -> Result<std::collections::BTreeMap<String, 
 }
 
 pub(crate) fn pack_command(args: Args) -> Result<()> {
-    const USAGE: &str = "usage: wayexpand pack inspect|import|verify <directory-or-id> [--signers FILE]\n       wayexpand pack search <catalog-directory> [query] [--json] [--signers FILE]\n       wayexpand pack install <directory> [--replace [--allow-downgrade]] [--allow-actions] [--signers FILE]\n       wayexpand pack diff <installed-id> <candidate-directory>\n       wayexpand pack rollback <installed-id> [--allow-actions] [--signers FILE]\n       wayexpand pack list [--json] | path <id> | remove <id>\n       wayexpand pack sign <directory> --key FILE";
+    const USAGE: &str = "usage: wayexpand pack inspect <directory-or-id> [--json] [--signers FILE]\n       wayexpand pack search <catalog-directory> [query] [--json] [--signers FILE]\n       wayexpand pack install <directory> [--replace [--allow-downgrade]] [--allow-actions] [--expected-fingerprint SHA256] [--signers FILE]\n       wayexpand pack diff <installed-id> <candidate-directory>\n       wayexpand pack rollback <installed-id> [--allow-actions] [--signers FILE]\n       wayexpand pack list [--json] | path <id> | remove <id>\n       wayexpand pack sign <directory> --key FILE";
     let mut rest: Vec<String> = args.collect();
     let key = take_option(&mut rest, "--key")?;
     let signers_override = take_option(&mut rest, "--signers")?;
+    let expected_fingerprint = take_option(&mut rest, "--expected-fingerprint")?;
+    if let Some(fingerprint) = expected_fingerprint.as_deref() {
+        validate_pack_fingerprint(fingerprint)?;
+    }
     let replace = take_flag(&mut rest, "--replace");
     let allow_downgrade = take_flag(&mut rest, "--allow-downgrade");
     let allow_actions = take_flag(&mut rest, "--allow-actions");
@@ -1462,6 +1477,7 @@ pub(crate) fn pack_command(args: Args) -> Result<()> {
         }
         if key.is_some()
             || signers_override.is_some()
+            || expected_fingerprint.is_some()
             || replace
             || allow_downgrade
             || allow_actions
@@ -1482,6 +1498,7 @@ pub(crate) fn pack_command(args: Args) -> Result<()> {
     if rest.first().is_some_and(|action| action == "search") {
         if !(2..=3).contains(&rest.len())
             || key.is_some()
+            || expected_fingerprint.is_some()
             || replace
             || allow_downgrade
             || allow_actions
@@ -1513,6 +1530,9 @@ pub(crate) fn pack_command(args: Args) -> Result<()> {
     if replace && action != "install" {
         usage_bail!("--replace is only valid for `wayexpand pack install`");
     }
+    if expected_fingerprint.is_some() && action != "install" {
+        usage_bail!("--expected-fingerprint is only valid for `wayexpand pack install`");
+    }
     if allow_downgrade && (action != "install" || !replace) {
         usage_bail!("--allow-downgrade requires `wayexpand pack install --replace`");
     }
@@ -1521,8 +1541,8 @@ pub(crate) fn pack_command(args: Args) -> Result<()> {
             "--allow-actions is only valid for `wayexpand pack install` or `pack rollback`"
         );
     }
-    if requested_json && action != "list" {
-        usage_bail!("--json is only supported by `wayexpand pack list`");
+    if requested_json && action != "list" && action != "inspect" {
+        usage_bail!("--json is only supported by `wayexpand pack list` and `pack inspect`");
     }
     let requested_path = PathBuf::from(path);
     let path = match action.as_str() {
@@ -1662,6 +1682,14 @@ pub(crate) fn pack_command(args: Args) -> Result<()> {
         }
         "install" => {
             let inspection = inspect_pack(&path)?;
+            if expected_fingerprint
+                .as_deref()
+                .is_some_and(|fingerprint| fingerprint != inspection.fingerprint)
+            {
+                bail!(
+                    "pack contents changed since review; review the updated pack before installing"
+                );
+            }
             let signer = check_signature()?;
             if !allow_actions && (inspection.command_count > 0 || inspection.hotkey_count > 0) {
                 bail!("refusing to install command or hotkey actions by default; review the pack and pass --allow-actions to activate them");
@@ -1701,6 +1729,64 @@ pub(crate) fn pack_command(args: Args) -> Result<()> {
         }
         "inspect" => {
             let inspection = inspect_pack(&path)?;
+            if requested_json {
+                let signatures_required = policy.safe_mode && policy.require_signed_packs;
+                let override_refusal = pack_signers_override_refusal(&policy, !policy_signers);
+                let signer_file_error = if policy_signers && signatures_required {
+                    wayexpand_core::trusted_signers_file(&signers).err()
+                } else {
+                    None
+                };
+                let signature = if !inspection.signed {
+                    serde_json::json!({ "state": "unsigned" })
+                } else if let Some(reason) = override_refusal.as_ref() {
+                    serde_json::json!({ "state": "blocked_by_policy", "reason": reason })
+                } else if let Some(error) = signer_file_error.as_ref() {
+                    serde_json::json!({
+                        "state": "untrusted_signer_file",
+                        "reason": error.to_string()
+                    })
+                } else {
+                    match wayexpand_core::verify_pack_signature(&path, &signers) {
+                        Ok(signer) => serde_json::json!({
+                            "state": "verified",
+                            "signer": signer,
+                            "signer_file": signers.display().to_string(),
+                            "signer_file_source": if policy_signers { "configured" } else { "explicit" },
+                        }),
+                        Err(error) => serde_json::json!({
+                            "state": "unverified",
+                            "reason": error.to_string(),
+                        }),
+                    }
+                };
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "manifest": inspection.manifest,
+                        "path": path.display().to_string(),
+                        "fingerprint": inspection.fingerprint,
+                        "snippet_files": inspection.snippet_files,
+                        "expansion_count": inspection.expansion_count,
+                        "hotkey_count": inspection.hotkey_count,
+                        "commands": inspection.command_count,
+                        "required_capabilities": inspection.required_capabilities,
+                        "expansions": inspection.expansions,
+                        "hotkeys": inspection.hotkeys,
+                        "signature": signature,
+                        "install_policy": {
+                            "safe_mode": policy.safe_mode,
+                            "signature_required": signatures_required,
+                            "pack_allowed": !policy.safe_mode || policy.pack_allowed(&inspection.manifest.id),
+                            "commands_allowed": !policy.safe_mode || !policy.disable_commands,
+                            "hotkeys_allowed": !policy.safe_mode || !policy.disable_hotkeys,
+                            "explicit_action_consent_required": inspection.command_count > 0 || inspection.hotkey_count > 0,
+                            "signer_override_refused": override_refusal,
+                        },
+                    })
+                );
+                return Ok(());
+            }
             println!(
                 "{} {}",
                 inspection.manifest.name, inspection.manifest.version
@@ -2289,6 +2375,23 @@ mod pack_install_tests {
         let alias = base.join("alias");
         std::os::unix::fs::symlink(&actual, &alias).unwrap();
         assert!(search_pack_catalog(&alias, "", &base.join("signers"), true).is_err());
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn installation_refuses_pack_content_changed_after_review() {
+        let base = temp_dir("pack-review-fingerprint");
+        let source = base.join("source");
+        let root = base.join("packs");
+        let reviewed = make_pack(&source, "1.0.0");
+        assert_eq!(reviewed.fingerprint.len(), 64);
+        std::fs::write(
+            source.join("snippets/main.toml"),
+            "[[expansion]]\ntrigger=\";;local-pack-test\"\nreplacement=\"changed after review\"\n",
+        )
+        .unwrap();
+        assert!(install_local_pack_at(&source, &reviewed, false, false, None, &root).is_err());
+        assert!(!root.join("sample.local").exists());
         std::fs::remove_dir_all(base).unwrap();
     }
 

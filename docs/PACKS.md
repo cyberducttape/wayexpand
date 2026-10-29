@@ -79,6 +79,25 @@ signature; a trusted signature authenticates the exact reviewed bytes. The
 repository packs are unsigned. Managed deployments that require signed packs
 must review and sign the selected content with their own trusted key.
 
+### Review and install in the GUI
+
+Open **Review local packs…** from the GUI menu and select a checked-out pack
+directory. The review displays the publisher and review record, signature
+verification state, declared and detected capabilities, exact replacement
+text, command arguments and environment forwarding, hotkeys, and an update
+diff when that pack is already installed. Commands are described for review;
+the review itself does not execute them. Installing any pack that contains a
+command or hotkey requires a separate explicit consent checkbox, and current
+organization policy and signature requirements still apply.
+
+The GUI binds installation to a SHA-256 fingerprint of the manifest and
+snippet files shown during review. The CLI checks that fingerprint before
+installation and verifies the staged copy again, so changing the source after
+review causes installation to fail and asks for a new review. Review text is
+displayed as untrusted content. If the GUI cannot display all of a pack or its
+diff within its review limits, installation is disabled; use `wayexpand pack
+inspect` in a terminal to examine it.
+
 `pack import` still produces ordinary TOML on stdout and does not install or
 activate snippets. It strips commands and hotkeys. `pack install` keeps the
 validated pack structure intact; it refuses command and hotkey actions unless

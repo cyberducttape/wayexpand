@@ -1,6 +1,272 @@
 use super::{Language, Strings};
 
 impl Strings {
+    pub fn pack_review_title(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Review a local snippet pack",
+            Language::Indonesian => "Tinjau paket cuplikan lokal",
+            Language::German => "Lokales Snippet-Paket prüfen",
+        }
+    }
+
+    pub fn review_packs(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Review local packs…",
+            Language::Indonesian => "Tinjau paket lokal…",
+            Language::German => "Lokale Pakete prüfen…",
+        }
+    }
+
+    pub fn pack_review_source(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Pack directory from a local catalog or Git checkout",
+            Language::Indonesian => "Direktori paket dari katalog lokal atau checkout Git",
+            Language::German => "Paketverzeichnis aus lokalem Katalog oder Git-Checkout",
+        }
+    }
+
+    pub fn pack_review_button(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Review pack",
+            Language::Indonesian => "Tinjau paket",
+            Language::German => "Paket prüfen",
+        }
+    }
+
+    pub fn pack_install_button(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Install reviewed pack",
+            Language::Indonesian => "Pasang paket yang ditinjau",
+            Language::German => "Geprüftes Paket installieren",
+        }
+    }
+
+    pub fn pack_install_update(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Install reviewed update",
+            Language::Indonesian => "Pasang pembaruan yang ditinjau",
+            Language::German => "Geprüftes Update installieren",
+        }
+    }
+
+    pub fn pack_operation_running(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Checking pack…",
+            Language::Indonesian => "Memeriksa paket…",
+            Language::German => "Paket wird geprüft…",
+        }
+    }
+
+    pub fn pack_no_review_record(&self) -> &'static str {
+        match self.lang {
+            Language::English => "No review record is included. Treat this pack as unreviewed.",
+            Language::Indonesian => "Tidak ada catatan tinjauan. Anggap paket ini belum ditinjau.",
+            Language::German => "Kein Prüfvermerk enthalten. Dieses Paket gilt als ungeprüft.",
+        }
+    }
+
+    pub fn pack_review_record(&self, reviewer: &str, date: &str, summary: &str) -> String {
+        match self.lang {
+            Language::English => {
+                format!("Review record: {reviewer} · {date} · {summary} (metadata only)")
+            }
+            Language::Indonesian => {
+                format!("Catatan tinjauan: {reviewer} · {date} · {summary} (hanya metadata)")
+            }
+            Language::German => {
+                format!("Prüfvermerk: {reviewer} · {date} · {summary} (nur Metadaten)")
+            }
+        }
+    }
+
+    pub fn pack_capability_disclosure(&self, capabilities: &[String]) -> String {
+        let values = if capabilities.is_empty() {
+            "none".to_owned()
+        } else {
+            capabilities.join(", ")
+        };
+        match self.lang {
+            Language::English => format!("Required capabilities: {values}"),
+            Language::Indonesian => format!("Kemampuan yang dibutuhkan: {values}"),
+            Language::German => format!("Benötigte Fähigkeiten: {values}"),
+        }
+    }
+
+    pub fn pack_action_counts(&self, commands: u64, hotkeys: u64) -> String {
+        match self.lang {
+            Language::English => {
+                format!("Executable entries: {commands} commands · {hotkeys} hotkeys")
+            }
+            Language::Indonesian => {
+                format!("Entri yang dapat dijalankan: {commands} perintah · {hotkeys} hotkey")
+            }
+            Language::German => {
+                format!("Ausführbare Einträge: {commands} Befehle · {hotkeys} Hotkeys")
+            }
+        }
+    }
+
+    pub fn pack_broker_actions(&self, actions: &[String]) -> String {
+        match self.lang {
+            Language::English => format!("Named broker actions requested: {}", actions.join(", ")),
+            Language::Indonesian => {
+                format!("Aksi broker bernama yang diminta: {}", actions.join(", "))
+            }
+            Language::German => format!("Angeforderte Broker-Aktionen: {}", actions.join(", ")),
+        }
+    }
+
+    pub fn pack_declared_capabilities(&self, capabilities: &[String]) -> String {
+        match self.lang {
+            Language::English => format!(
+                "Publisher-declared capabilities: {}",
+                capabilities.join(", ")
+            ),
+            Language::Indonesian => format!(
+                "Kemampuan yang dinyatakan penerbit: {}",
+                capabilities.join(", ")
+            ),
+            Language::German => format!(
+                "Vom Herausgeber deklarierte Fähigkeiten: {}",
+                capabilities.join(", ")
+            ),
+        }
+    }
+
+    pub fn pack_minimum_version(&self, version: &str) -> String {
+        match self.lang {
+            Language::English => format!("Requires WayExpand {version} or newer"),
+            Language::Indonesian => format!("Memerlukan WayExpand {version} atau lebih baru"),
+            Language::German => format!("Benötigt WayExpand {version} oder neuer"),
+        }
+    }
+
+    pub fn pack_source_file(&self, file: &str) -> String {
+        match self.lang {
+            Language::English => format!("Source file: {file}"),
+            Language::Indonesian => format!("Berkas sumber: {file}"),
+            Language::German => format!("Quelldatei: {file}"),
+        }
+    }
+
+    pub fn pack_snippets(&self, count: usize) -> String {
+        match self.lang {
+            Language::English => format!("Review snippet contents ({count})"),
+            Language::Indonesian => format!("Tinjau isi cuplikan ({count})"),
+            Language::German => format!("Snippet-Inhalte prüfen ({count})"),
+        }
+    }
+
+    pub fn pack_allow_actions_consent(&self) -> &'static str {
+        match self.lang {
+            Language::English => "I reviewed these executable entries and allow them to become active. Installation does not run them.",
+            Language::Indonesian => "Saya telah meninjau entri yang dapat dijalankan dan mengizinkannya aktif. Pemasangan tidak menjalankannya.",
+            Language::German => "Ich habe die ausführbaren Einträge geprüft und erlaube ihre Aktivierung. Die Installation führt sie nicht aus.",
+        }
+    }
+
+    pub fn pack_install_blocked(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Resolve policy requirements and review action consent above.",
+            Language::Indonesian => "Penuhi kebijakan dan persetujuan aksi di atas.",
+            Language::German => "Richtlinienanforderungen und Aktionsfreigabe oben erfüllen.",
+        }
+    }
+
+    pub fn pack_review_truncated(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Some content is too large to display fully here. Review it in a terminal before installing.",
+            Language::Indonesian => "Sebagian konten terlalu besar untuk ditampilkan penuh. Tinjau melalui terminal sebelum memasang.",
+            Language::German => "Einige Inhalte sind hier zu groß für die vollständige Anzeige. Vor der Installation im Terminal prüfen.",
+        }
+    }
+
+    pub fn pack_diff_required(&self) -> &'static str {
+        match self.lang {
+            Language::English => "The update diff could not be reviewed, so installation is disabled. Retry the review or inspect the update in a terminal.",
+            Language::Indonesian => "Diff pembaruan tidak dapat ditinjau, jadi pemasangan dinonaktifkan. Ulangi peninjauan atau periksa pembaruan melalui terminal.",
+            Language::German => "Das Update-Diff konnte nicht geprüft werden; die Installation ist deaktiviert. Prüfung wiederholen oder das Update im Terminal ansehen.",
+        }
+    }
+
+    pub fn pack_signature_required(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Organization policy requires a signature verified by its trusted signer list.",
+            Language::Indonesian => "Kebijakan organisasi mewajibkan tanda tangan dari daftar penanda tangan tepercaya.",
+            Language::German => "Die Organisationsrichtlinie verlangt eine Signatur aus der vertrauenswürdigen Signaturliste.",
+        }
+    }
+
+    pub fn pack_signature_unverified(&self) -> &'static str {
+        match self.lang {
+            Language::English => "The signature could not be verified. Installation may be refused by current policy.",
+            Language::Indonesian => "Tanda tangan tidak dapat diverifikasi. Kebijakan saat ini mungkin menolak pemasangan.",
+            Language::German => "Die Signatur konnte nicht geprüft werden. Die Richtlinie kann die Installation ablehnen.",
+        }
+    }
+
+    pub fn pack_unsigned_warning(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Unsigned pack: publisher and review text are self-asserted metadata.",
+            Language::Indonesian => "Paket tanpa tanda tangan: penerbit dan teks tinjauan adalah metadata yang dinyatakan sendiri.",
+            Language::German => "Unsigniertes Paket: Herausgeber und Prüftext sind nicht bestätigte Metadaten.",
+        }
+    }
+
+    pub fn pack_denied_by_policy(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Organization policy does not allow this pack ID.",
+            Language::Indonesian => "Kebijakan organisasi tidak mengizinkan ID paket ini.",
+            Language::German => "Die Organisationsrichtlinie erlaubt diese Paket-ID nicht.",
+        }
+    }
+
+    pub fn pack_commands_denied(&self) -> &'static str {
+        match self.lang {
+            Language::English => {
+                "Organization policy disables command-backed entries in this pack."
+            }
+            Language::Indonesian => {
+                "Kebijakan organisasi menonaktifkan entri berbasis perintah dalam paket ini."
+            }
+            Language::German => {
+                "Die Organisationsrichtlinie deaktiviert befehlsbasierte Einträge in diesem Paket."
+            }
+        }
+    }
+
+    pub fn pack_hotkeys_denied(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Organization policy disables hotkeys in this pack.",
+            Language::Indonesian => "Kebijakan organisasi menonaktifkan hotkey dalam paket ini.",
+            Language::German => "Die Organisationsrichtlinie deaktiviert Hotkeys in diesem Paket.",
+        }
+    }
+
+    pub fn pack_diff_title(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Changes from installed version",
+            Language::Indonesian => "Perubahan dari versi terpasang",
+            Language::German => "Änderungen zur installierten Version",
+        }
+    }
+
+    pub fn pack_install_complete(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Pack installed and daemon reload requested",
+            Language::Indonesian => "Paket terpasang dan pemuatan ulang daemon diminta",
+            Language::German => "Paket installiert und Neuladen des Daemons angefordert",
+        }
+    }
+
+    pub fn pack_install_result(&self, output: &str) -> String {
+        match self.lang {
+            Language::English => format!("Install result: {output}"),
+            Language::Indonesian => format!("Hasil pemasangan: {output}"),
+            Language::German => format!("Installationsergebnis: {output}"),
+        }
+    }
+
     pub fn form_builder_title(&self) -> &'static str {
         match self.lang {
             Language::English => "Build a form field",

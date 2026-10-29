@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add GUI review and installation for local signed/community packs. The review
+  shows signer verification, publisher review metadata, capabilities, exact
+  snippet contents, commands, hotkeys, and installed-version diffs. Installing
+  commands or hotkeys requires explicit consent; the install is bound to the
+  reviewed content fingerprint, and source changes during inspection or
+  staging are rejected.
 - Add offline `wayexpand pack search <catalog-directory> [query]` discovery for
   checked-out community and organization pack catalogs. Search skips invalid
   pack directories, rejects a symlinked catalog root, and reports signer

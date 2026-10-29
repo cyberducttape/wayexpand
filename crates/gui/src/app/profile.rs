@@ -98,7 +98,7 @@ impl GuiApp {
     }
 }
 
-fn wayexpand_cli() -> std::path::PathBuf {
+pub(crate) fn wayexpand_cli() -> std::path::PathBuf {
     if let Some(path) = std::env::var_os("WAYEXPAND_CLI") {
         return path.into();
     }

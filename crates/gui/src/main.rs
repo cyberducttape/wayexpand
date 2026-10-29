@@ -221,6 +221,13 @@ struct GuiApp {
     profile_loaded: bool,
     profile_error: Option<String>,
     profile_receiver: Option<mpsc::Receiver<(ProfileOperation, Result<String, String>)>>,
+    pack_dialog_open: bool,
+    pack_candidate_path: String,
+    pack_action_consent: bool,
+    pack_review: Option<PackReview>,
+    pack_operation_receiver:
+        Option<mpsc::Receiver<(PackOperation, Result<PackWorkerResult, String>)>>,
+    pack_error: Option<String>,
     import_open: bool,
     import_path: String,
     import_preview: Option<(Config, wayexpand_core::EspansoImportReport)>,
@@ -324,6 +331,36 @@ pub(crate) enum ProfileOperation {
     List,
     Switch(String),
     Create(String),
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct PackReview {
+    pub(crate) details: serde_json::Value,
+    pub(crate) installed: bool,
+    pub(crate) diff: Option<String>,
+    pub(crate) diff_error: Option<String>,
+    pub(crate) install_output: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum PackOperation {
+    Review,
+    Install {
+        replace: bool,
+        allow_actions: bool,
+        fingerprint: String,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum PackWorkerResult {
+    Review {
+        details: serde_json::Value,
+        installed: bool,
+        diff: Option<String>,
+        diff_error: Option<String>,
+    },
+    Installed(String),
 }
 
 enum SaveIntent {
@@ -485,6 +522,12 @@ impl GuiApp {
             profile_loaded: false,
             profile_error: None,
             profile_receiver: None,
+            pack_dialog_open: false,
+            pack_candidate_path: String::new(),
+            pack_action_consent: false,
+            pack_review: None,
+            pack_operation_receiver: None,
+            pack_error: None,
             import_open: false,
             import_path: String::new(),
             import_preview: None,
@@ -640,6 +683,7 @@ impl eframe::App for GuiApp {
         self.render_toolbar(root, &palette);
         self.render_diagnostics(ctx, &palette);
         self.render_import_dialog(ctx, &palette);
+        self.render_pack_dialog(ctx, &palette);
         self.render_settings_dialog(ctx, &palette);
         // Panel order decides how the remaining space is carved up: the
         // status line spans the full width, the sidebar then claims the left

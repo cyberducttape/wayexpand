@@ -1,4 +1,4 @@
-use crate::Config;
+use crate::{CommandConfig, Config};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, OpenOptions},
@@ -74,10 +74,84 @@ pub struct PackInspection {
     pub expansion_count: usize,
     pub hotkey_count: usize,
     pub command_count: usize,
+    /// Read-only content and action declarations for trust review. Callers
+    /// should present these as untrusted pack data, never execute them.
+    pub expansions: Vec<PackExpansionReview>,
+    pub hotkeys: Vec<PackHotkeyReview>,
+    /// SHA-256 fingerprint of the canonical manifest and snippet-file digest.
+    pub fingerprint: String,
     /// Capabilities the snippets actually use.
     pub required_capabilities: Vec<String>,
     /// Whether a signature file is present (not whether it verifies).
     pub signed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct PackExpansionReview {
+    pub file: String,
+    pub id: String,
+    pub trigger: String,
+    pub description: String,
+    pub replacement: String,
+    pub command: Option<PackCommandReview>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct PackHotkeyReview {
+    pub file: String,
+    pub chord: String,
+    pub description: String,
+    pub command: PackCommandReview,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct PackCommandReview {
+    pub action: Option<String>,
+    pub program: String,
+    pub args: Vec<String>,
+    pub timeout_ms: u64,
+    pub environment: crate::CommandEnvironment,
+    pub pass_env: Vec<String>,
+}
+
+fn review_command(command: &CommandConfig) -> PackCommandReview {
+    PackCommandReview {
+        action: command.action.clone(),
+        program: command.program.clone(),
+        args: command.args.clone(),
+        timeout_ms: command.timeout_ms,
+        environment: command.environment,
+        pass_env: command.pass_env.clone(),
+    }
+}
+
+fn review_content(
+    configs: &[(PathBuf, Config)],
+) -> (Vec<PackExpansionReview>, Vec<PackHotkeyReview>) {
+    let mut expansions = Vec::new();
+    let mut hotkeys = Vec::new();
+    for (file, config) in configs {
+        let file = file.to_string_lossy().into_owned();
+        for expansion in &config.expansion {
+            expansions.push(PackExpansionReview {
+                file: file.clone(),
+                id: expansion.id.clone(),
+                trigger: expansion.trigger.clone(),
+                description: expansion.description.clone(),
+                replacement: expansion.replacement.clone(),
+                command: expansion.command.as_ref().map(review_command),
+            });
+        }
+        for hotkey in &config.hotkey {
+            hotkeys.push(PackHotkeyReview {
+                file: file.clone(),
+                chord: hotkey.chord.clone(),
+                description: hotkey.description.clone(),
+                command: review_command(&hotkey.command),
+            });
+        }
+    }
+    (expansions, hotkeys)
 }
 
 #[derive(Debug, Error)]
@@ -86,6 +160,8 @@ pub enum PackError {
     NotDirectory(PathBuf),
     #[error("pack manifest is invalid: {0}")]
     Manifest(#[from] toml::de::Error),
+    #[error("pack contents changed while they were being inspected")]
+    ChangedDuringInspection,
     #[error("pack format version {0} is unsupported")]
     UnsupportedFormat(u32),
     #[error("pack manifest field `{0}` is empty")]
@@ -367,6 +443,26 @@ fn load_pack(path: &Path) -> Result<(PackManifest, Vec<(PathBuf, Config)>), Pack
     Ok((manifest, configs))
 }
 
+struct StablePack {
+    manifest: PackManifest,
+    configs: Vec<(PathBuf, Config)>,
+    fingerprint: String,
+}
+
+fn load_pack_stable(path: &Path) -> Result<StablePack, PackError> {
+    let before = pack_fingerprint(path)?;
+    let (manifest, configs) = load_pack(path)?;
+    let after = pack_fingerprint(path)?;
+    if before != after {
+        return Err(PackError::ChangedDuringInspection);
+    }
+    Ok(StablePack {
+        manifest,
+        configs,
+        fingerprint: after,
+    })
+}
+
 /// The capabilities a set of snippet files uses.
 fn required_capabilities(configs: &[(PathBuf, Config)]) -> std::collections::BTreeSet<String> {
     let mut required = std::collections::BTreeSet::new();
@@ -475,6 +571,16 @@ pub fn pack_digest(path: impl AsRef<Path>) -> Result<String, PackError> {
         append_pack_digest_file(&mut digest, &file_path, &name)?;
     }
     Ok(digest)
+}
+
+/// Compact stable fingerprint of every file covered by the pack signature.
+pub fn pack_fingerprint(path: impl AsRef<Path>) -> Result<String, PackError> {
+    use sha2::{Digest, Sha256};
+    let digest = pack_digest(path)?;
+    Ok(Sha256::digest(digest.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
 }
 
 fn append_pack_digest_file(digest: &mut String, path: &Path, label: &str) -> Result<(), PackError> {
@@ -900,7 +1006,11 @@ pub fn verify_pack_signature(
 
 pub fn inspect_pack(path: impl AsRef<Path>) -> Result<PackInspection, PackError> {
     let path = path.as_ref();
-    let (manifest, configs) = load_pack(path)?;
+    let StablePack {
+        manifest,
+        configs,
+        fingerprint,
+    } = load_pack_stable(path)?;
     let expansion_count = configs
         .iter()
         .map(|(_, config)| config.expansion.len())
@@ -917,6 +1027,7 @@ pub fn inspect_pack(path: impl AsRef<Path>) -> Result<PackInspection, PackError>
                 + config.hotkey.len()
         })
         .sum();
+    let (expansions, hotkeys) = review_content(&configs);
     Ok(PackInspection {
         required_capabilities: required_capabilities(&configs).into_iter().collect(),
         signed: path.join(SIGNATURE_FILE).is_file(),
@@ -925,6 +1036,9 @@ pub fn inspect_pack(path: impl AsRef<Path>) -> Result<PackInspection, PackError>
         expansion_count,
         hotkey_count,
         command_count,
+        expansions,
+        hotkeys,
+        fingerprint,
     })
 }
 
@@ -933,7 +1047,12 @@ pub fn inspect_pack(path: impl AsRef<Path>) -> Result<PackInspection, PackError>
 /// privileges implicitly.
 pub fn import_pack(path: impl AsRef<Path>) -> Result<(PackInspection, Config, usize), PackError> {
     let path = path.as_ref();
-    let (manifest, configs) = load_pack(path)?;
+    let StablePack {
+        manifest,
+        configs,
+        fingerprint,
+    } = load_pack_stable(path)?;
+    let (expansions, hotkeys) = review_content(&configs);
     let inspection = PackInspection {
         required_capabilities: required_capabilities(&configs).into_iter().collect(),
         signed: path.join(SIGNATURE_FILE).is_file(),
@@ -955,6 +1074,9 @@ pub fn import_pack(path: impl AsRef<Path>) -> Result<(PackInspection, Config, us
                     + config.hotkey.len()
             })
             .sum(),
+        expansions,
+        hotkeys,
+        fingerprint,
     };
     let mut merged = Config {
         expansion: Vec::new(),
@@ -982,14 +1104,50 @@ pub fn import_pack(path: impl AsRef<Path>) -> Result<(PackInspection, Config, us
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static TEST_PACK_ID: AtomicU64 = AtomicU64::new(0);
 
     fn test_pack_path() -> PathBuf {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!("wayexpand-pack-{}-{nonce}", std::process::id()))
+        let unique = TEST_PACK_ID.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "wayexpand-pack-{}-{nonce}-{unique}",
+            std::process::id()
+        ))
+    }
+
+    fn write_review_pack(path: &Path, replacement: &str) {
+        fs::create_dir_all(path.join(SNIPPETS_DIR)).unwrap();
+        fs::write(
+            path.join(MANIFEST_FILE),
+            "format_version=1\nid=\"review.test\"\nversion=\"1.0.0\"\nname=\"Review test\"\npublisher=\"Tests\"\n",
+        )
+        .unwrap();
+        fs::write(
+            path.join(SNIPPETS_DIR).join("main.toml"),
+            format!("[[expansion]]\ntrigger=\";review\"\nreplacement={replacement:?}\n"),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn pack_review_fingerprint_tracks_manifest_and_snippet_content() {
+        let path = test_pack_path();
+        write_review_pack(&path, "first version");
+        let first = inspect_pack(&path).unwrap();
+        assert_eq!(first.fingerprint.len(), 64);
+        assert_eq!(first.expansions[0].replacement, "first version");
+
+        write_review_pack(&path, "second version");
+        let second = inspect_pack(&path).unwrap();
+        assert_ne!(first.fingerprint, second.fingerprint);
+        assert_eq!(second.expansions[0].replacement, "second version");
+        fs::remove_dir_all(path).unwrap();
     }
 
     #[test]

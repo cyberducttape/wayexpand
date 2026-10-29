@@ -236,9 +236,11 @@ Still open:
       packs in an offline Git checkout and discloses signer status, review
       metadata, capabilities, commands, and hotkeys. `pack diff`, staged
       `pack install`, `pack rollback`, and `pack verify` use existing signer
-      policy. Still open: registry-wide version lockfiles and update flow,
-      organization/private registry transport, and GUI trust review for signed
-      packs.
+      policy. The GUI can review local pack contents and diffs, disclose signer
+      and capability status, require action consent, and install only the
+      reviewed fingerprint. Still open: registry-wide version lockfiles and
+      update flow, organization/private registry transport, and centralized
+      pack governance.
 - [ ] Repository-backed snippet libraries (`wayexpand library add <git url>`)
       building on Git sync: signed-commit verification, branch pinning,
       reviewed/approved updates, diff, rollback, and audit.
