@@ -30,6 +30,31 @@ wayexpand validate --fleet
 wayexpand reload
 ```
 
+## Search a shared catalog
+
+A catalog can be a checked-out Git repository or any local directory containing
+pack directories (or a `packs/` subdirectory). Search works offline and reports
+the pack version, publisher, review record, declared capabilities, command and
+hotkey counts, and signature status against the configured signer list. It
+does not install or activate results:
+
+```bash
+git clone https://example.org/team/wayexpand-packs.git ~/src/wayexpand-packs
+wayexpand pack search ~/src/wayexpand-packs kubernetes
+wayexpand pack search ~/src/wayexpand-packs --json
+wayexpand pack inspect ~/src/wayexpand-packs/packs/kubernetes
+wayexpand pack diff wayexpand.kubernetes-operations ~/src/wayexpand-packs/packs/kubernetes
+wayexpand pack install ~/src/wayexpand-packs/packs/kubernetes --replace
+```
+
+Catalog search skips invalid pack directories and refuses a symlink as the
+catalog root. It is a discovery aid, not a trust decision: read the diff and
+permission disclosures, then install explicitly. Installation still checks
+signature requirements, organization policy, version ordering, and command or
+hotkey consent. The current installed manifest records the selected semantic
+version; automatic updates and a registry-wide version lockfile are not
+implemented yet.
+
 Install copies a validated pack into
 `${XDG_DATA_HOME:-~/.local/share}/wayexpand/packs/<id>`. No network or account
 is used. Replacing an installed version requires `--replace`; lower versions

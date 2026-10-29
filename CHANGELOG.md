@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add offline `wayexpand pack search <catalog-directory> [query]` discovery for
+  checked-out community and organization pack catalogs. Search skips invalid
+  pack directories, rejects a symlinked catalog root, and reports signer
+  verification, review metadata, capabilities, command/hotkey counts, and
+  allowed broker actions in text or JSON. Installation remains an explicit
+  separate step subject to the existing signature and policy checks.
 - Add an asynchronous profile menu to the GUI. It shows which profiles validate,
   disables invalid profiles, supports creating and switching profiles, confirms
   unsaved editor changes first, and reloads the active library after a switch.

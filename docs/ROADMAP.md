@@ -232,10 +232,13 @@ Still open:
       picker, and per-field history. Required fields now drive named broker
       actions with enum/text schemas and fixed argv slots; a GUI broker-policy
       schema editor and richer field-to-parameter mapping remain open.
-- [ ] Signed team-pack registry: local `pack diff`, staged `pack install`,
-      `pack rollback`, and `pack verify` now work against signer files. Still
-      open: `pack search`/`pack update`, organization/private registry
-      transport, and GUI trust review for signed packs.
+- [ ] Signed team-pack registry: local `pack search` now discovers versioned
+      packs in an offline Git checkout and discloses signer status, review
+      metadata, capabilities, commands, and hotkeys. `pack diff`, staged
+      `pack install`, `pack rollback`, and `pack verify` use existing signer
+      policy. Still open: registry-wide version lockfiles and update flow,
+      organization/private registry transport, and GUI trust review for signed
+      packs.
 - [ ] Repository-backed snippet libraries (`wayexpand library add <git url>`)
       building on Git sync: signed-commit verification, branch pinning,
       reviewed/approved updates, diff, rollback, and audit.

@@ -666,6 +666,205 @@ fn ensure_pack_id(id: &str) -> Result<()> {
     Ok(())
 }
 
+fn pack_matches_query(inspection: &wayexpand_core::PackInspection, query: &str) -> bool {
+    let query = query.trim();
+    if query.is_empty() {
+        return true;
+    }
+    let manifest = &inspection.manifest;
+    format!(
+        "{} {} {} {} {} {}",
+        manifest.id,
+        manifest.name,
+        manifest.publisher,
+        manifest.description,
+        manifest.version,
+        inspection.required_capabilities.join(" ")
+    )
+    .to_lowercase()
+    .contains(&query.to_lowercase())
+}
+
+fn search_pack_catalog(root: &Path, query: &str, signers: &Path, json_output: bool) -> Result<()> {
+    const MAX_CATALOG_ENTRIES: usize = 512;
+    const MAX_SIGNATURE_CHECK_TIME: std::time::Duration = std::time::Duration::from_secs(30);
+    let root_metadata = std::fs::symlink_metadata(root)
+        .map_err(|error| config_error(format!("could not inspect pack catalog: {error}")))?;
+    if !root_metadata.file_type().is_dir() || root_metadata.file_type().is_symlink() {
+        bail!("pack catalog must be a real directory");
+    }
+    let pack_root = root.join("packs");
+    let root = if std::fs::symlink_metadata(&pack_root)
+        .is_ok_and(|metadata| metadata.file_type().is_dir() && !metadata.file_type().is_symlink())
+        && !root.join("wayexpand-pack.toml").exists()
+    {
+        pack_root
+    } else {
+        root.to_owned()
+    };
+    let query = query.trim().to_lowercase();
+    let mut candidates = Vec::new();
+    let mut invalid_candidates = 0usize;
+    let mut scanned_directories = 0usize;
+    let signature_check_started = std::time::Instant::now();
+    for entry in std::fs::read_dir(&root)
+        .map_err(|error| config_error(format!("could not read pack catalog: {error}")))?
+    {
+        let entry = entry
+            .map_err(|error| config_error(format!("could not read catalog entry: {error}")))?;
+        let path = entry.path();
+        let metadata = match std::fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(_) => {
+                invalid_candidates = invalid_candidates.saturating_add(1);
+                continue;
+            }
+        };
+        if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+            continue;
+        }
+        scanned_directories += 1;
+        if scanned_directories > MAX_CATALOG_ENTRIES {
+            bail!("pack catalog exceeds the {MAX_CATALOG_ENTRIES} directory limit");
+        }
+        let inspection = match wayexpand_core::inspect_pack(&path) {
+            Ok(inspection) => inspection,
+            Err(_) => {
+                invalid_candidates = invalid_candidates.saturating_add(1);
+                continue;
+            }
+        };
+        let manifest = &inspection.manifest;
+        if !pack_matches_query(&inspection, &query) {
+            continue;
+        }
+        let relative_path = path.strip_prefix(&root).unwrap_or(&path);
+        let signature = if signature_check_started.elapsed() >= MAX_SIGNATURE_CHECK_TIME {
+            serde_json::json!({
+                "state": "unverified",
+                "reason": "catalog signature verification time budget reached"
+            })
+        } else {
+            match wayexpand_core::verify_pack_signature(&path, signers) {
+                Ok(signer) => serde_json::json!({ "state": "verified", "signer": signer }),
+                Err(wayexpand_core::PackError::Unsigned) => {
+                    serde_json::json!({ "state": "unsigned" })
+                }
+                Err(error) => {
+                    serde_json::json!({ "state": "unverified", "reason": error.to_string() })
+                }
+            }
+        };
+        candidates.push(serde_json::json!({
+            "id": manifest.id,
+            "version": manifest.version,
+            "name": manifest.name,
+            "publisher": manifest.publisher,
+            "description": manifest.description,
+            "review": manifest.review.as_ref(),
+            "required_capabilities": inspection.required_capabilities,
+            "allowed_actions": &manifest.allowed_actions,
+            "commands": inspection.command_count,
+            "hotkeys": inspection.hotkey_count,
+            "signature": signature,
+            "path": relative_path.display().to_string(),
+        }));
+    }
+    candidates.sort_by(|left, right| {
+        let id_order = left["id"].as_str().cmp(&right["id"].as_str());
+        id_order.then_with(|| {
+            let left_version = left["version"]
+                .as_str()
+                .and_then(|version| semver::Version::parse(version).ok());
+            let right_version = right["version"]
+                .as_str()
+                .and_then(|version| semver::Version::parse(version).ok());
+            left_version.cmp(&right_version)
+        })
+    });
+    if json_output {
+        println!(
+            "{}",
+            serde_json::json!({
+                "query": query,
+                "signers_file": signers.display().to_string(),
+                "packs": candidates,
+                "invalid_candidates": invalid_candidates,
+            })
+        );
+    } else if candidates.is_empty() {
+        println!("No matching packs found in {}", root.display());
+    } else {
+        println!("Found {} pack(s):", candidates.len());
+        println!(
+            "Signature results use the signer list at {}.",
+            signers.display()
+        );
+        for pack in &candidates {
+            let signature = &pack["signature"];
+            let signature_label = match signature["state"].as_str().unwrap_or("unverified") {
+                "verified" => format!(
+                    "signature verified: {}",
+                    signature["signer"].as_str().unwrap_or("unknown signer")
+                ),
+                "unsigned" => "unsigned".to_owned(),
+                _ => format!(
+                    "signature unverified: {}",
+                    signature["reason"].as_str().unwrap_or("unknown error")
+                ),
+            };
+            println!(
+                "{} {} — {} by {} [{}]",
+                pack["id"].as_str().unwrap_or("unknown"),
+                pack["version"].as_str().unwrap_or("unknown"),
+                pack["name"].as_str().unwrap_or("unknown"),
+                pack["publisher"].as_str().unwrap_or("unknown"),
+                signature_label
+            );
+            let capabilities = pack["required_capabilities"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(serde_json::Value::as_str)
+                .collect::<Vec<_>>();
+            println!(
+                "  capabilities: {}; commands: {}; hotkeys: {}",
+                if capabilities.is_empty() {
+                    "none".to_owned()
+                } else {
+                    capabilities.join(", ")
+                },
+                pack["commands"],
+                pack["hotkeys"]
+            );
+            let allowed_actions = pack["allowed_actions"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(serde_json::Value::as_str)
+                .collect::<Vec<_>>();
+            if !allowed_actions.is_empty() {
+                println!("  broker actions: {}", allowed_actions.join(", "));
+            }
+            if let Some(review) = pack["review"].as_object() {
+                println!(
+                    "  review record: {} on {} — {}",
+                    review["reviewed_by"].as_str().unwrap_or("unknown"),
+                    review["reviewed_at"].as_str().unwrap_or("unknown"),
+                    review["summary"].as_str().unwrap_or("no summary")
+                );
+            } else {
+                println!("  review record: none");
+            }
+            println!("  path: {}", pack["path"].as_str().unwrap_or("unknown"));
+        }
+        if invalid_candidates > 0 {
+            println!("Skipped {invalid_candidates} invalid catalog entr(y/ies).");
+        }
+    }
+    Ok(())
+}
+
 fn resolve_pack_path(path: &Path) -> PathBuf {
     if path.exists() {
         return path.to_owned();
@@ -1244,7 +1443,7 @@ fn pack_snippet_files(root: &Path) -> Result<std::collections::BTreeMap<String, 
 }
 
 pub(crate) fn pack_command(args: Args) -> Result<()> {
-    const USAGE: &str = "usage: wayexpand pack inspect|import|verify <directory-or-id> [--signers FILE]\n       wayexpand pack install <directory> [--replace [--allow-downgrade]] [--allow-actions] [--signers FILE]\n       wayexpand pack diff <installed-id> <candidate-directory>\n       wayexpand pack rollback <installed-id> [--allow-actions] [--signers FILE]\n       wayexpand pack list [--json] | path <id> | remove <id>\n       wayexpand pack sign <directory> --key FILE";
+    const USAGE: &str = "usage: wayexpand pack inspect|import|verify <directory-or-id> [--signers FILE]\n       wayexpand pack search <catalog-directory> [query] [--json] [--signers FILE]\n       wayexpand pack install <directory> [--replace [--allow-downgrade]] [--allow-actions] [--signers FILE]\n       wayexpand pack diff <installed-id> <candidate-directory>\n       wayexpand pack rollback <installed-id> [--allow-actions] [--signers FILE]\n       wayexpand pack list [--json] | path <id> | remove <id>\n       wayexpand pack sign <directory> --key FILE";
     let mut rest: Vec<String> = args.collect();
     let key = take_option(&mut rest, "--key")?;
     let signers_override = take_option(&mut rest, "--signers")?;
@@ -1278,6 +1477,34 @@ pub(crate) fn pack_command(args: Args) -> Result<()> {
         let installed = installed_pack_root()?.join(id);
         let candidate = resolve_pack_path(Path::new(&rest[2]));
         print_pack_diff(&installed, &candidate)?;
+        return Ok(());
+    }
+    if rest.first().is_some_and(|action| action == "search") {
+        if !(2..=3).contains(&rest.len())
+            || key.is_some()
+            || replace
+            || allow_downgrade
+            || allow_actions
+        {
+            usage_bail!("{USAGE}");
+        }
+        let policy = load_policy()
+            .map_err(|error| config_error(format!("organization policy is invalid: {error}")))?;
+        let policy_signers = signers_override.is_none();
+        if let Some(refusal) = pack_signers_override_refusal(&policy, !policy_signers) {
+            bail!("{refusal}");
+        }
+        let signers = signers_override
+            .as_deref()
+            .map(Path::new)
+            .unwrap_or_else(|| Path::new(&policy.pack_signers_file));
+        if policy_signers && policy.safe_mode && policy.require_signed_packs {
+            wayexpand_core::trusted_signers_file(signers)
+                .map_err(|error| config_error(format!("pack signer trust is invalid: {error}")))?;
+        }
+        let catalog = resolve_pack_path(Path::new(&rest[1]));
+        let query = rest.get(2).map(String::as_str).unwrap_or_default();
+        search_pack_catalog(&catalog, query, signers, requested_json)?;
         return Ok(());
     }
     let [action, path] = rest.as_slice() else {
@@ -2039,6 +2266,30 @@ mod pack_install_tests {
         )
         .unwrap();
         inspect_pack(path).unwrap()
+    }
+
+    #[test]
+    fn local_catalog_search_matches_metadata_and_capability_names_case_insensitively() {
+        let base = temp_dir("pack-catalog-search");
+        let pack_dir = base.join("kubernetes");
+        let inspection = make_pack(&pack_dir, "1.2.3");
+        assert!(pack_matches_query(&inspection, "LOCAL SAMPLE"));
+        assert!(pack_matches_query(&inspection, "test"));
+        assert!(pack_matches_query(&inspection, "1.2.3"));
+        assert!(!pack_matches_query(&inspection, "docker"));
+        assert!(pack_matches_query(&inspection, "  "));
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn local_catalog_search_rejects_a_symlinked_catalog_root() {
+        let base = temp_dir("pack-catalog-symlink");
+        let actual = base.join("actual");
+        std::fs::create_dir(&actual).unwrap();
+        let alias = base.join("alias");
+        std::os::unix::fs::symlink(&actual, &alias).unwrap();
+        assert!(search_pack_catalog(&alias, "", &base.join("signers"), true).is_err());
+        std::fs::remove_dir_all(base).unwrap();
     }
 
     #[test]

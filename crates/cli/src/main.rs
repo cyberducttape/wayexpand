@@ -239,8 +239,8 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "Convert Espanso match files, forms, and supported variables to TOML",
             ),
             (
-                "pack install|list|inspect|path|remove|import|verify|sign ...",
-                "Install and manage offline, versioned snippet packs",
+                "pack search|install|list|inspect|path|remove|import|verify|sign ...",
+                "Discover, review, and manage offline versioned snippet packs",
             ),
             (
                 "profile list|create|switch|remove ...",
