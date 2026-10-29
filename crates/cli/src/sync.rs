@@ -149,8 +149,30 @@ fn git_command(directory: &Path, args: &[&str]) -> Command {
 }
 
 fn git(directory: &Path, args: &[&str]) -> Result<Output> {
+    git_with_config(directory, args, false)
+}
+
+/// Run Git without system or global config. Repository intake must not execute
+/// user configured clean/smudge filters while checking out untrusted content.
+pub(crate) fn git_library_output(directory: &Path, args: &[&str]) -> Result<Output> {
+    git_with_config(directory, args, true)
+}
+
+pub(crate) fn git_library_ok(directory: &Path, args: &[&str]) -> Result<String> {
+    let output = git_library_output(directory, args)?;
+    if !output.status.success() {
+        bail!(
+            "git {} failed: {}",
+            redact_git_diagnostic(&args.join(" ")),
+            redact_git_diagnostic(String::from_utf8_lossy(&output.stderr).trim())
+        );
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+}
+
+fn git_with_config(directory: &Path, args: &[&str], isolated_config: bool) -> Result<Output> {
     let mut stdout = Vec::new();
-    let (status, stderr) = run_git(directory, args, None, &mut |chunk| {
+    let (status, stderr) = run_git(directory, args, None, isolated_config, &mut |chunk| {
         stdout.extend_from_slice(chunk);
         if stdout.len() > MAX_GIT_OUTPUT_BYTES {
             bail!("git output exceeded the safety limit");
@@ -171,9 +193,19 @@ fn run_git(
     directory: &Path,
     args: &[&str],
     stdin: Option<Vec<u8>>,
+    isolated_config: bool,
     on_stdout: &mut dyn FnMut(&[u8]) -> Result<()>,
 ) -> Result<(std::process::ExitStatus, Vec<u8>)> {
     let mut command = git_command(directory, args);
+    if isolated_config {
+        command
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env_remove("GIT_SSH")
+            .env_remove("GIT_SSH_COMMAND")
+            .env_remove("GIT_ASKPASS")
+            .env_remove("SSH_ASKPASS");
+    }
     configure_process_group(&mut command);
     let mut child = command
         .stdin(if stdin.is_some() {
@@ -390,7 +422,7 @@ fn git_records(
         }
         on_record(std::str::from_utf8(record).context("git reported a non-UTF-8 path")?)
     };
-    let (status, stderr) = run_git(directory, args, stdin, &mut |chunk| {
+    let (status, stderr) = run_git(directory, args, stdin, false, &mut |chunk| {
         let mut rest = chunk;
         while let Some(end) = rest.iter().position(|&byte| byte == 0) {
             if pending.is_empty() {
@@ -667,6 +699,10 @@ fn redact_git_diagnostic(value: &str) -> String {
         .collect()
 }
 
+pub(crate) fn redact_library_diagnostic(value: &str) -> String {
+    redact_git_diagnostic(value)
+}
+
 /// Interpret `git ls-remote --exit-code`: 0 lists the branch and 2 means
 /// the remote has no such branch. Anything else (authentication, DNS, an
 /// unreachable host) is a failure, not an empty remote, and must not lead
@@ -786,18 +822,19 @@ fn commit_library(directory: &Path, primary: &str, message: &str) -> Result<bool
         "--pathspec-from-file=-",
         "--pathspec-file-nul",
     ];
-    let output = run_git(directory, &commit, Some(library_paths), &mut |_| Ok(())).and_then(
-        |(status, stderr)| {
-            if status.success() {
-                Ok(())
-            } else {
-                bail!(
-                    "git commit failed: {}",
-                    redact_git_diagnostic(String::from_utf8_lossy(&stderr).trim())
-                )
-            }
-        },
-    );
+    let output = run_git(directory, &commit, Some(library_paths), false, &mut |_| {
+        Ok(())
+    })
+    .and_then(|(status, stderr)| {
+        if status.success() {
+            Ok(())
+        } else {
+            bail!(
+                "git commit failed: {}",
+                redact_git_diagnostic(String::from_utf8_lossy(&stderr).trim())
+            )
+        }
+    });
     output.context(
         "could not commit; set git user.name and user.email (globally or in the library repository)",
     )?;

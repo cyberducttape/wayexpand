@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add `wayexpand library add/list/path/search/remove` for private, offline
+  Git catalog checkouts. Source intake rejects unsafe transports, embedded
+  credentials, symlinks, submodules, and non-file Git entries; adding a source
+  never installs its packs. Catalog search reuses signed-pack trust policy.
+  Branch refresh and reviewed repository updates remain open.
 - Preserve a fresh KWin 6.6.6 `doctor --certify` report for commit
   `dd8047c7c3e2`; 12 output/focus checks passed and the report keeps capture,
   Unicode insertion, suspend/resume, and non-atomic overlap explicitly

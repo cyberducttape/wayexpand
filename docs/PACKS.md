@@ -30,6 +30,29 @@ wayexpand validate --fleet
 wayexpand reload
 ```
 
+## Add and browse a shared Git catalog
+
+Register a Git repository as a local catalog source. HTTPS, SSH (including an
+SSH agent), and absolute `file://` URLs are supported. Embedded HTTPS
+credentials and custom Git transport helpers are rejected. The checkout is
+shallow, branch-selected, and stored under
+`${XDG_DATA_HOME:-~/.local/share}/wayexpand/libraries/`:
+
+```bash
+wayexpand library add https://example.org/team/wayexpand-packs.git --branch main
+wayexpand library list
+wayexpand library search wayexpand-packs kubernetes
+wayexpand library path wayexpand-packs
+```
+
+Adding a source does not install or activate packs. Search uses the same
+configured signer policy as `pack search`; inspect the candidate, review its
+diff and capability disclosures, and explicitly install the selected pack.
+Remove a catalog with `wayexpand library remove NAME`; installed packs are
+left in place. Catalog refresh and branch update automation are not provided
+yet, so manage repository revisions through your normal Git workflow and
+review each changed pack before reinstalling it.
+
 ## Search a shared catalog
 
 A catalog can be a checked-out Git repository or any local directory containing

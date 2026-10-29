@@ -269,9 +269,11 @@ Still open:
       can search checked-out catalogs offline, disclose signer identity and
       capabilities, and send a candidate into the existing fingerprint-bound
       content and diff review.
-- [ ] Repository-backed snippet libraries (`wayexpand library add <git url>`)
-      building on Git sync: signed-commit verification, branch pinning,
-      reviewed/approved updates, diff, rollback, and audit.
+- [ ] Repository-backed snippet libraries now support private local Git
+      checkouts, branch selection, offline catalog search, and removal. Pack
+      installs still use signer policy and fingerprint-bound review. Open:
+      signed-commit verification, refresh/update workflow with reviewed diffs,
+      rollback of source revisions, and audit history.
 - [x] Parameterized broker actions validate enum and bounded text values
       against a per-action schema, replace complete fixed argv slots, and
       accept values from required named forms. Parameterized actions refuse

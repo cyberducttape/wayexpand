@@ -790,7 +790,12 @@ pub(crate) fn scan_pack_catalog(root: &Path) -> Result<CatalogScan> {
     })
 }
 
-fn search_pack_catalog(root: &Path, query: &str, signers: &Path, json_output: bool) -> Result<()> {
+pub(crate) fn search_pack_catalog(
+    root: &Path,
+    query: &str,
+    signers: &Path,
+    json_output: bool,
+) -> Result<()> {
     const MAX_SIGNATURE_CHECK_TIME: std::time::Duration = std::time::Duration::from_secs(30);
     let CatalogScan {
         root,

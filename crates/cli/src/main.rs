@@ -113,6 +113,7 @@ fn run() -> Result<()> {
         Some("import") => import_command(args)?,
         Some("pack") => pack_command(args)?,
         Some("profile") => profile_command(args)?,
+        Some("library") => commands::library::library_command(args)?,
         Some("set-enabled") => set_enabled_command(args)?,
         Some("set-mode") => set_mode_command(args)?,
         Some("backup") => backup_command(args)?,
@@ -245,6 +246,10 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
             (
                 "profile list|create|switch|remove ...",
                 "Switch between validated personal/work configuration profiles",
+            ),
+            (
+                "library add|list|path|search|remove ...",
+                "Browse signed, offline Git snippet catalogs",
             ),
         ],
     ),
