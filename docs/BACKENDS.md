@@ -358,7 +358,13 @@ This is the primary security limitation of the evdev backend. Before enabling
 evdev, ensure your deployment model accepts this tradeoff (see SECURITY.md).
 Evdev is also a best-effort timing backend: because capture is non-exclusive,
 the application may receive the terminating key before WayExpand can erase and
-replace the trigger. The quiet-period mitigation cannot make this atomic. See
+replace the trigger. Serialized output can also take seconds on a keysym
+fallback. Once that output finishes, WayExpand now clears matcher context and
+discards captured evdev events until 40 ms of input quiet, preventing queued
+keystrokes from being replayed as fresh triggers. This can cause a concurrent
+typed trigger to remain literal; it cannot stop the application receiving
+physical keys while synthetic output is in progress, and therefore cannot
+make the replacement atomic or guarantee that overlapping text is intact. See
 [ADR 0001](adr/0001-evdev-best-effort-semantics.md) for the architectural
 boundary and the risks of a future exclusive proxy.
 

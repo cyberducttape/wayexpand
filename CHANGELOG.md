@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- After serialized evdev output, clear matcher context and discard captured
+  events until 40 ms of input quiet. This prevents keystrokes accumulated
+  during slow keysym fallback from being replayed as stale triggers. The
+  evdev route remains non-exclusive and cannot prevent physical input from
+  interleaving in the target application.
 - Record fresh private-KWin compatibility evidence for commit `be1fc06489b6`:
   12 output, focus, reload, restart, and refusal checks passed on KWin 6.6.6.
   The report preserves untested physical capture, Unicode, suspend/resume, and

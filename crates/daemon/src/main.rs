@@ -179,6 +179,9 @@ struct Daemon {
     /// A transaction in flight on the serialized output worker; see
     /// `pending_output`.
     pending_output: Option<pending_output::PendingOutput>,
+    /// Evdev is non-exclusive: keystrokes captured during a slow replacement
+    /// must not be replayed into the matcher as fresh input afterward.
+    evdev_quiet_since: Option<Instant>,
     stdin_closed: bool,
     logged_queue_rejections: u64,
     waker: waker::Waker,
@@ -530,6 +533,7 @@ fn main() -> Result<()> {
         output_worker,
         retiring_output_workers: Vec::new(),
         pending_output: None,
+        evdev_quiet_since: None,
         stdin_closed,
         logged_queue_rejections,
         waker,

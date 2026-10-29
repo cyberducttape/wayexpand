@@ -17,6 +17,28 @@ pub(crate) enum Step {
 }
 
 impl Daemon {
+    const EVDEV_POST_OUTPUT_QUIET: Duration = Duration::from_millis(40);
+
+    /// Start a quiet window after serialized output. Any evdev events already
+    /// queued by typing during the injection are discarded, and matching
+    /// resumes only after a short interval with no captured input.
+    pub(crate) fn quarantine_evdev_input(&mut self) {
+        if !self.evdev_mode {
+            return;
+        }
+        self.config.engine.reset_with_unknown_preceding_text();
+        self.evdev_quiet_since = Some(Instant::now());
+    }
+
+    pub(crate) fn discard_quarantined_evdev_input(&mut self) -> bool {
+        if self.evdev_quiet_since.is_none() {
+            return false;
+        }
+        self.config.engine.reset_with_unknown_preceding_text();
+        self.evdev_quiet_since = Some(Instant::now());
+        true
+    }
+
     /// Wait out a scheduled input reconnect on the waker rather than in a
     /// sleep, so stop, reload, and control requests keep their turns.
     /// Returns whether the retry is still pending.
@@ -248,7 +270,15 @@ impl Daemon {
         let Some(source) = self.evdev.as_mut() else {
             return Err(anyhow::anyhow!("evdev mode lost its input source"));
         };
-        let event_result = source.next_event_timeout(poll_interval);
+        let timeout = self
+            .evdev_quiet_since
+            .map(|since| {
+                Self::EVDEV_POST_OUTPUT_QUIET
+                    .saturating_sub(since.elapsed())
+                    .min(poll_interval)
+            })
+            .unwrap_or(poll_interval);
+        let event_result = source.next_event_timeout(timeout);
         match event_result {
             Ok(Some(event)) => {
                 drain_pending_window_events(
@@ -259,6 +289,12 @@ impl Daemon {
                     &self.control,
                     &mut self.focus_state,
                 )?;
+                if self.discard_quarantined_evdev_input() {
+                    // The event may have been physically typed while a slow
+                    // keysym fallback was still writing. Replaying it now can
+                    // trigger a second replacement against stale text.
+                    return Ok(Step::Next);
+                }
                 if self.serialized_output() {
                     self.start_evdev_output(event)?;
                     return Ok(Step::Next);
@@ -309,7 +345,14 @@ impl Daemon {
                     }
                 }
             }
-            Ok(None) => {}
+            Ok(None) => {
+                if self
+                    .evdev_quiet_since
+                    .is_some_and(|since| since.elapsed() >= Self::EVDEV_POST_OUTPUT_QUIET)
+                {
+                    self.evdev_quiet_since = None;
+                }
+            }
             Err(error) if error.retryable => {
                 warn!(%error, "evdev connection lost; reconnecting");
                 self.evdev = None;

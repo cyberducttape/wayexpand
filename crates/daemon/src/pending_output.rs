@@ -172,6 +172,7 @@ impl Daemon {
     /// its follow-up; command completions and inserts still replayed it.
     fn end_failed_batch(&mut self, origin: OutputOrigin, follow_up: Vec<InputEvent>) -> Result<()> {
         if origin == OutputOrigin::Typed {
+            self.quarantine_evdev_input();
             return Ok(());
         }
         self.replay_follow_up(follow_up)
@@ -186,6 +187,7 @@ impl Daemon {
         ) {
             self.recover_from_output_error(*error)?;
         }
+        self.quarantine_evdev_input();
         Ok(())
     }
 
@@ -460,6 +462,7 @@ mod tests {
                 output_worker: Some(worker),
                 retiring_output_workers: Vec::new(),
                 pending_output: None,
+                evdev_quiet_since: None,
                 stdin_closed: false,
                 logged_queue_rejections: 0,
                 waker,
@@ -661,6 +664,32 @@ mod tests {
             "each queued trigger must produce exactly one output transaction"
         );
         assert!(harness.daemon.pending_output.is_none());
+    }
+
+    #[test]
+    fn completed_serialized_output_quarantines_evdev_events_until_quiet() {
+        let mut harness = Harness::new(false);
+        harness.open_gate();
+        harness
+            .daemon
+            .start_output(
+                OutputOrigin::Typed,
+                vec![OutputJob::Expansion(result(":slow", "replacement"))],
+                Vec::new(),
+            )
+            .unwrap();
+        harness.run_until_resolved();
+
+        assert!(harness.daemon.evdev_quiet_since.is_some());
+        let first_activity = harness.daemon.evdev_quiet_since.unwrap();
+        std::thread::sleep(Duration::from_millis(2));
+        assert!(harness.daemon.discard_quarantined_evdev_input());
+        assert!(harness.daemon.evdev_quiet_since.unwrap() > first_activity);
+        assert_eq!(
+            *harness.calls.lock().unwrap(),
+            ["erase::slow", "insert:replacement"],
+            "a discarded captured event must not start another output transaction"
+        );
     }
 
     #[test]
