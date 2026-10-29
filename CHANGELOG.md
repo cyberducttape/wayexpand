@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Make the toolbar profile selector name the profile currently loaded for the
+  focused application, while keeping manual switching tied to the base profile.
+  The existing local workflow covers personal/work libraries and exact
+  application defaults. Signed-pack review, version pinning and rollback,
+  schema-bound form actions, and route compatibility diagnostics remain
+  available through their existing GUI flows; none imply compositor
+  certification unless the route has recorded certification evidence.
 - Show the selected managed action's enum/text input contract in the snippet
   editor and compare it with form fields by name, including enum choices and
   known text-length limits. Action IDs and schemas come from one cached policy

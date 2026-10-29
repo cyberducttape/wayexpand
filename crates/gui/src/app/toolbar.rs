@@ -161,10 +161,15 @@ impl GuiApp {
         if !self.profile_loaded && self.profile_receiver.is_none() {
             self.start_profile_operation(ProfileOperation::List);
         }
-        let active_profile_label = self
-            .active_profile
+        let runtime_profile = runtime_selected_profile(&self.daemon_status);
+        let active_profile_label = runtime_profile
             .as_deref()
-            .map(|name| format!("{}: {name}", self.strings.profiles()))
+            .map(|name| self.strings.profile_automatic_active(name))
+            .or_else(|| {
+                self.active_profile
+                    .as_deref()
+                    .map(|name| format!("{}: {name}", self.strings.profiles()))
+            })
             .unwrap_or_else(|| self.strings.profiles().to_owned());
         ui.menu_button(active_profile_label, |ui| {
             if self.profile_receiver.is_some() {
@@ -173,17 +178,8 @@ impl GuiApp {
                     ui.label(self.strings.profile_loading());
                 });
             }
-            if let Some(config_path) = runtime::status_field(&self.daemon_status, "config") {
-                let config_path = std::path::Path::new(&config_path);
-                if config_path
-                    .parent()
-                    .and_then(std::path::Path::file_name)
-                    .is_some_and(|name| name == "profiles")
-                {
-                    if let Some(name) = config_path.file_stem().and_then(|name| name.to_str()) {
-                        ui.label(self.strings.profile_automatic_active(name));
-                    }
-                }
+            if let Some(name) = runtime_profile.as_deref() {
+                ui.label(self.strings.profile_automatic_active(name));
             }
             for profile in self.profiles.clone() {
                 let active = self.active_profile.as_deref() == Some(&profile.name);
@@ -620,4 +616,21 @@ impl GuiApp {
         .response
         .on_hover_text(self.strings.search_fields());
     }
+}
+
+fn runtime_selected_profile(status: &str) -> Option<String> {
+    let config = runtime::status_field(status, "config")?;
+    let config_path = std::path::Path::new(&config);
+    if config_path
+        .parent()
+        .and_then(std::path::Path::file_name)
+        .is_none_or(|name| name != "profiles")
+    {
+        return None;
+    }
+    config_path
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
 }

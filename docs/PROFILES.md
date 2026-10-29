@@ -24,11 +24,12 @@ wayexpand profile unassign-app org.kde.konsole
 wayexpand profile list
 ```
 
-Switch profiles from the profile selector in the main GUI toolbar. The GUI's
-**More actions → Profiles** menu also lists current assignments and lets you
-add or remove them. The selector displays the active base profile, while its
-menu identifies the runtime-selected profile when an application assignment
-is active.
+Switch profiles from the profile selector in the main GUI toolbar. The toolbar
+label follows the profile currently loaded by the daemon, so an
+application-selected profile is visible without opening the menu. The menu
+also lists current assignments and lets you add or remove them. Manual profile
+selection continues to target the base profile; an exact application
+assignment takes effect again when that application is focused.
 
 The daemon uses the focused window's application ID. Assignments are exact and
 case-insensitive; wildcard patterns and window titles are not used. When no
