@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Preserve a fresh KWin 6.6.6 `doctor --certify` report for commit
+  `dd8047c7c3e2`; 12 output/focus checks passed and the report keeps capture,
+  Unicode insertion, suspend/resume, and non-atomic overlap explicitly
+  unverified.
 - Clean up private KWin certification clients even when KDE delegates them to
   the host `systemd --user` manager, and cover process matching with a focused
   regression test.

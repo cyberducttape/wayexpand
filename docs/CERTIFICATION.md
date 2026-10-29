@@ -748,7 +748,25 @@ records only; the support matrix should not mark a compositor certified until a
 reviewed artifact reports `certified: true` for the relevant compositor,
 backend, layout, and client set.
 
-## Latest current-source compatibility report (2026-10-28)
+## Latest current-source compatibility report (2026-10-29)
+
+[`evidence/doctor-certify-dd8047c7c3e2.json`](evidence/doctor-certify-dd8047c7c3e2.json)
+records `wayexpand doctor --certify --json` for clean commit `dd8047c7c3e2`
+on private headless KWin 6.6.6. Twelve checks passed: trigger insertion,
+delimiter preservation, cursor placement, multiline output, focus switching,
+focus-change cancellation, target closure, command completion, configuration
+reload, daemon restart, refusal of unavailable Unicode, and build identity.
+The latency check measured 20 transactions per size in libei keysym fallback:
+small p50/p95/p99 12,542/12,603/12,623 µs, medium
+781,568/783,822/783,925 µs, and large 3,137,954/3,141,301/3,142,272 µs.
+
+Capture was simulated through stdin. Unicode insertion, a second trigger during
+non-atomic replacement, suspend/resume, password-field behavior, and long-term
+stability remain untested. Latency excludes physical capture and client paint.
+This is partial compatibility evidence only; it does not certify the route or
+describe the active desktop.
+
+## Previous current-source compatibility report (2026-10-28)
 
 [`evidence/doctor-certify-6638e14d2e.json`](evidence/doctor-certify-6638e14d2e.json)
 records commit `6638e14d2ec3` on private headless KWin 6.6.6. The report passed
