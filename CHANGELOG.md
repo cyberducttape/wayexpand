@@ -9,7 +9,8 @@ All notable changes to WayExpand are documented here.
   known text-length limits. Action IDs and schemas come from one cached policy
   snapshot, avoiding mixed views during policy replacement. Standard and
   inline TOML tables are recognized. Missing or extra fields are identified
-  before use; runtime values remain subject to broker validation.
+  before use; runtime values remain subject to broker validation. Regression
+  coverage exercises both TOML table forms and nonblocking FIFO handling.
 - Reproduced the non-atomic KWin overlap failure on clean source commit
   `ad8f169c4402`: concurrent input interleaved with output, four replacement
   characters were lost, and the stale trigger expanded. Preserve the negative

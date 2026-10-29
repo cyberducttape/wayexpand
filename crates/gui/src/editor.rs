@@ -403,7 +403,55 @@ pub(crate) fn with_pending_token(tokens: &[String], pending: &str) -> Vec<String
 
 #[cfg(test)]
 mod broker_policy_tests {
-    use super::read_broker_action_ids;
+    use super::{read_broker_action_ids, read_broker_action_inventory};
+
+    fn assert_cluster_action_schema(path: &std::path::Path) {
+        let inventory = read_broker_action_inventory(path);
+        assert_eq!(inventory.ids.as_ref(), ["cluster-list"]);
+        let parameters = inventory.parameters.get("cluster-list").unwrap();
+        assert_eq!(parameters.len(), 1);
+        assert_eq!(parameters[0].name, "namespace");
+        assert_eq!(parameters[0].kind, "enum");
+        assert_eq!(parameters[0].values, ["default", "production"]);
+        assert_eq!(parameters[0].max_length, None);
+    }
+
+    #[test]
+    fn broker_inventory_reads_standard_action_and_parameter_tables() {
+        let directory = tempfile::tempdir().unwrap();
+        let policy = directory.path().join("broker.toml");
+        std::fs::write(
+            &policy,
+            r#"
+                [actions.cluster-list]
+                program = "/usr/bin/kubectl"
+                args = ["get", "pods", "--namespace", "default"]
+
+                [actions.cluster-list.parameters.namespace]
+                arg_index = 3
+                type = "enum"
+                values = ["default", "production"]
+            "#,
+        )
+        .unwrap();
+
+        assert_cluster_action_schema(&policy);
+    }
+
+    #[test]
+    fn broker_inventory_reads_inline_action_and_parameter_tables() {
+        let directory = tempfile::tempdir().unwrap();
+        let policy = directory.path().join("broker.toml");
+        std::fs::write(
+            &policy,
+            r#"
+                actions = { "cluster-list" = { program = "/usr/bin/kubectl", args = ["get", "pods", "--namespace", "default"], parameters = { namespace = { arg_index = 3, type = "enum", values = ["default", "production"] } } } }
+            "#,
+        )
+        .unwrap();
+
+        assert_cluster_action_schema(&policy);
+    }
 
     #[test]
     fn broker_action_ids_read_a_policy_and_never_block_on_a_fifo() {
