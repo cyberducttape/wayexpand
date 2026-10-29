@@ -9,6 +9,11 @@ All notable changes to WayExpand are documented here.
   blocked or best-effort insertion, incomplete focus tracking, and unverified
   sensitive-field protection. Runtime capability reports remain clearly
   distinct from compositor certification.
+- Run and preserve the isolated KWin 6.6.6 output/focus smoke report for
+  `ca98ac77f411`. Twelve checks passed; the 257-character libei keysym fallback
+  measured 3.15 s p95 inside the injector. The report remains partial because
+  it does not exercise physical capture, sensitive fields, suspend/resume, or
+  overlapping physical input.
 - Add exact, per-application local profile routing. Store private assignments in
   `profiles/applications.toml`, manage them with `wayexpand profile assign-app`
   and `unassign-app`, and pause matching while a selected profile validates and

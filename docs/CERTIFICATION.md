@@ -65,6 +65,19 @@ intentionally out of scope and is reported as `unsupported-by-design`; a
 certification never implies otherwise.
 
 The latest current-source smoke report at
+[`docs/evidence/doctor-certify-ca98ac77f411.json`](evidence/doctor-certify-ca98ac77f411.json)
+tested clean commit `ca98ac77f411` on private headless KWin 6.6.6 on
+2026-10-29. Twelve output, focus, reload, restart, refusal, and build-identity
+checks passed. Unicode insertion, physical keyboard capture, suspend/resume,
+and the overlapping-trigger scenario were not tested. Twenty libei
+keysym-fallback transactions per size measured injector p50/p95/p99 of
+12.557/12.594/12.606 ms (small), 782.230/786.948/789.099 ms (medium), and
+3,141.761/3,149.582/3,154.151 ms (large). Capture was simulated through stdin.
+The 257-character replacement took about 3.15 seconds at p95 on this route.
+These are injector-only measurements, not desktop latency or production
+certification.
+
+The preceding current-source smoke report at
 [`docs/evidence/doctor-certify-fe4712d2a79e.json`](evidence/doctor-certify-fe4712d2a79e.json)
 tested clean commit `fe4712d2a79e` on private headless KWin 6.6.6 on
 2026-10-29. Twelve output, focus, reload, restart, refusal, and build-identity
