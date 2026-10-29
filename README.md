@@ -207,8 +207,10 @@ wayexpand profile list
 Each profile stores a validated configuration snapshot beside the active
 configuration. Switching checkpoints edits to the outgoing profile, validates
 the selected configuration with shared `snippets.d` layers, replaces the
-active config atomically, and asks the daemon to reload. Per-profile app
-defaults can use the existing `app_filter` setting. See [Operations](docs/OPERATIONS.md#configuration-profiles).
+active config atomically, and asks the daemon to reload. Assign exact desktop
+application IDs with `wayexpand profile assign-app <app-id> <profile>`;
+matching pauses while a newly focused app's library loads. See the
+[profile guide](docs/PROFILES.md) and [Operations](docs/OPERATIONS.md#configuration-profiles).
 
 ## Documentation
 

@@ -228,12 +228,13 @@ Still open:
       parser and evaluator, with a parity test. `tests/snapshot_consistency`
       checks that the daemon's fleet merge, a saved-and-reloaded copy, and
       direct engine construction expand a layered library identically.
-- [ ] Named full-config profiles support CLI create/list/switch/remove,
+- [x] Named full-config profiles support CLI create/list/switch/remove,
       checkpointing on switch and daemon reload. The GUI now lists validated
       profiles and can create or switch them asynchronously, preserving its
       unsaved-edit confirmation and reloading the open library. Still open:
-      hotkey switching, profile-specific snippet layers, per-application
-      automatic selection, and per-profile rollback history.
+      hotkey switching, profile-specific snippet layers, and per-profile
+      rollback history. Exact per-application assignments load asynchronously
+      on focus changes and pause matching until validation succeeds.
 - [ ] Broader imports (TextExpander, AutoKey, aText, CSV).
 - [x] Form snippets through IBus: completions are bound to the originating
       input context and require surrounding-text verification (non-atomic,

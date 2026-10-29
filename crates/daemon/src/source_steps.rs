@@ -147,6 +147,7 @@ impl Daemon {
                     &self.control,
                     &mut self.focus_state,
                 )?;
+                self.update_profile_for_focus()?;
                 let result = match self.input_method.as_mut() {
                     Some(source) => process_event(
                         &mut self.config.engine,
@@ -290,6 +291,7 @@ impl Daemon {
                     &self.control,
                     &mut self.focus_state,
                 )?;
+                self.update_profile_for_focus()?;
                 if self.discard_quarantined_evdev_input() {
                     // The event may have been physically typed while a slow
                     // keysym fallback was still writing. Replaying it now can
@@ -401,6 +403,7 @@ impl Daemon {
                     &self.control,
                     &mut self.focus_state,
                 )?;
+                self.update_profile_for_focus()?;
                 if self.injector.is_some() {
                     for character in line.chars() {
                         let event = InputEvent::Text(character.to_string());

@@ -62,6 +62,7 @@ pub struct ReloadableConfig {
 /// during which typing would otherwise stall.
 struct InFlightReload {
     result: Receiver<BuildResult>,
+    path: PathBuf,
     /// The file stamp seen when the build started.
     current: Option<FileStamp>,
 }
@@ -455,6 +456,37 @@ impl ReloadableConfig {
         self.reload_current(current);
     }
 
+    /// Select a different primary library. The old engine remains installed
+    /// while the new one is built; callers should pause matching until the
+    /// selected path is healthy.
+    pub fn switch_path(&mut self, path: PathBuf) {
+        if self.path == path && self.healthy {
+            self.reload_now();
+            return;
+        }
+        if self.path == path
+            && self
+                .in_flight
+                .as_ref()
+                .is_some_and(|load| load.path == path)
+        {
+            return;
+        }
+        self.path = path;
+        self.healthy = false;
+        self.stamp = None;
+        self.observed = file_stamp(&self.path);
+        self.watch_dirty.store(false, Ordering::Release);
+        self.watch_check_after = None;
+        self.last_integrity_check = Instant::now();
+        self._watcher = start_config_watcher(&self.path, self.fleet, Arc::clone(&self.watch_dirty));
+        if self.in_flight.is_some() {
+            self.rebuild_after_in_flight = true;
+        } else {
+            self.reload_current(self.observed);
+        }
+    }
+
     /// Start building the configuration on disk off the reactor; its result
     /// replaces the engine on a later turn (see [`Self::collect_reload`]).
     fn reload_current(&mut self, current: Option<FileStamp>) {
@@ -464,6 +496,7 @@ impl ReloadableConfig {
         }
         let (sender, result) = mpsc::sync_channel(1);
         let path = self.path.clone();
+        let in_flight_path = path.clone();
         let fleet = self.fleet;
         let policy = self.policy.clone();
         let waker = self.waker.clone();
@@ -477,7 +510,13 @@ impl ReloadableConfig {
                 }
             });
         match spawned {
-            Ok(_) => self.in_flight = Some(InFlightReload { result, current }),
+            Ok(_) => {
+                self.in_flight = Some(InFlightReload {
+                    result,
+                    current,
+                    path: in_flight_path,
+                })
+            }
             Err(error) => {
                 // Without a worker, reloading inline is slower but correct.
                 warn!(%error, "could not start configuration reload worker; reloading inline");
@@ -501,8 +540,11 @@ impl ReloadableConfig {
             ))),
         };
         let current = in_flight.current;
+        let built_path = in_flight.path.clone();
         self.in_flight = None;
-        self.apply_reload(built, current);
+        if built_path == self.path {
+            self.apply_reload(built, current);
+        }
         if std::mem::take(&mut self.rebuild_after_in_flight) {
             let current = file_stamp(&self.path);
             self.observed = current;

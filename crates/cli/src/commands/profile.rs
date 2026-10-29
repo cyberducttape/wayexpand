@@ -9,8 +9,24 @@ use std::os::unix::fs::PermissionsExt;
 /// Switching atomically replaces the active primary config; shared fleet
 /// layers remain attached to the config directory and are validated normally.
 pub(crate) fn profile_command(mut args: Args) -> Result<()> {
-    const USAGE: &str = "usage: wayexpand profile list [config]\n       wayexpand profile create <name> [config]\n       wayexpand profile switch <name> [config]\n       wayexpand profile remove <name> [config]";
+    const USAGE: &str = "usage: wayexpand profile list [config]\n       wayexpand profile create <name> [config]\n       wayexpand profile switch <name> [config]\n       wayexpand profile remove <name> [config]\n       wayexpand profile assign-app <app-id> <profile> [config]\n       wayexpand profile unassign-app <app-id> [config]";
     let action = args.next().ok_or_else(|| usage_error(USAGE))?;
+    if matches!(action.as_str(), "assign-app" | "unassign-app") {
+        let app_id = args.next().ok_or_else(|| usage_error(USAGE))?;
+        let profile = (action == "assign-app").then(|| args.next()).flatten();
+        if action == "assign-app" && profile.is_none() {
+            usage_bail!("{USAGE}");
+        }
+        let config_path = args
+            .next()
+            .map(PathBuf::from)
+            .unwrap_or_else(default_config_path);
+        if args.next().is_some() {
+            usage_bail!("{USAGE}");
+        }
+        update_app_profile_assignment(&config_path, &app_id, profile.as_deref())?;
+        return Ok(());
+    }
     let name = if action == "list" { None } else { args.next() };
     if action != "list" && name.is_none() {
         usage_bail!("{USAGE}");
@@ -31,6 +47,13 @@ pub(crate) fn profile_command(mut args: Args) -> Result<()> {
     }
     let active_path = root.join("active");
     let active = read_profile_active(&active_path)?;
+    let assignments_path = root.join("applications.toml");
+    let assignments = if action == "list" && !root.exists() {
+        wayexpand_core::ProfileAssignments::default()
+    } else {
+        wayexpand_core::ProfileAssignments::load(&assignments_path)
+            .map_err(|error| config_error(error.to_string()))?
+    };
     match action.as_str() {
         "list" => {
             if !root.exists() {
@@ -71,6 +94,9 @@ pub(crate) fn profile_command(mut args: Args) -> Result<()> {
                         profile
                     );
                 }
+            }
+            for (app_id, profile) in &assignments.applications {
+                println!("  {app_id} -> {profile}");
             }
         }
         "create" => {
@@ -155,6 +181,13 @@ pub(crate) fn profile_command(mut args: Args) -> Result<()> {
             if active.as_deref() == Some(name) {
                 bail!("cannot remove the active profile; switch to another profile first");
             }
+            if assignments
+                .applications
+                .values()
+                .any(|profile| profile == name)
+            {
+                bail!("cannot remove profile {name}; unassign its applications first");
+            }
             let target = root.join(format!("{name}.toml"));
             let metadata = std::fs::symlink_metadata(&target)
                 .map_err(|error| config_error(format!("could not inspect profile: {error}")))?;
@@ -166,6 +199,65 @@ pub(crate) fn profile_command(mut args: Args) -> Result<()> {
             println!("removed profile {name}");
         }
         _ => usage_bail!("{USAGE}"),
+    }
+    Ok(())
+}
+
+fn update_app_profile_assignment(
+    config_path: &Path,
+    app_id: &str,
+    profile: Option<&str>,
+) -> Result<()> {
+    let root = config_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("profiles");
+    prepare_profile_root(&root)?;
+    let assignments_path = root.join("applications.toml");
+    let mut assignments = wayexpand_core::ProfileAssignments::load(&assignments_path)
+        .map_err(|error| config_error(error.to_string()))?;
+    let normalized_app = wayexpand_core::ProfileAssignments::normalize_application_id(app_id)
+        .map_err(|error| config_error(error.to_string()))?;
+    if profile.is_some() {
+        let name = profile.unwrap();
+        validate_profile_name(name)?;
+        let profile_path = root.join(format!("{name}.toml"));
+        let config = Config::load_versioned(&profile_path)
+            .map_err(|error| config_load_error(&profile_path, error))?;
+        wayexpand_core::FleetConfig::validate_library(
+            config.config,
+            config_path.parent().unwrap_or_else(|| Path::new(".")),
+        )
+        .map_err(|error| config_error(format!("profile library is invalid: {error}")))?;
+        assignments
+            .applications
+            .insert(normalized_app, name.to_owned());
+        println!(
+            "assigned application {} to profile {name}",
+            app_id.to_ascii_lowercase()
+        );
+    } else {
+        if assignments.applications.remove(&normalized_app).is_none() {
+            bail!("application {} has no profile assignment", app_id);
+        }
+        println!(
+            "removed profile assignment for {}",
+            app_id.to_ascii_lowercase()
+        );
+    }
+    assignments
+        .save(&assignments_path)
+        .map_err(|error| config_error(error.to_string()))?;
+    let using_default_config = std::fs::canonicalize(config_path)
+        .ok()
+        .zip(std::fs::canonicalize(default_config_path()).ok())
+        .is_some_and(|(selected, default)| selected == default);
+    if using_default_config {
+        if let Err(error) = wayexpand_core::DaemonClient::from_environment()
+            .and_then(|client| client.execute(wayexpand_core::DaemonOperation::Reload))
+        {
+            eprintln!("warning: application profile assignment was saved, but the daemon did not confirm a reload: {error}");
+        }
     }
     Ok(())
 }

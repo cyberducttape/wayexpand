@@ -36,6 +36,7 @@ impl Daemon {
             &self.control,
             &mut self.focus_state,
         )?;
+        self.update_profile_for_focus()?;
         let transition = reactor::ReactorTransition::sample(
             &self.control.stop_requested,
             &self.control.pause_requested,
@@ -54,12 +55,14 @@ impl Daemon {
             info!(self.paused, "expansion processing policy changed");
         }
         if transition.reload_requested() {
+            self.reload_profile_assignments();
             self.config.reload_now();
         }
         if transition.should_stop() {
             return Ok(ControlFlow::Break(()));
         }
         self.config.reload_if_changed();
+        self.update_profile_for_focus()?;
         // After any reload this turn: outputs use the consent now in effect.
         crate::assurance::GuardState::global().set_mode(self.config.engine.compatibility_mode());
         // Read by keystroke routes as they type, so no reconnect is needed.
@@ -209,6 +212,7 @@ impl Daemon {
                 &self.control,
                 &mut self.focus_state,
             )?;
+            self.update_profile_for_focus()?;
             // An explicit insert (quick-insert picker, `wayexpand insert`)
             // types a snippet at the cursor through the same injector and
             // evdev safety gate as a typed expansion. It is a user action,

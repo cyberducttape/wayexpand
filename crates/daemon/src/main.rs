@@ -162,6 +162,8 @@ struct Daemon {
     receiver: Option<mpsc::Receiver<String>>,
     status_publisher: StatusPublisher,
     focus_state: FocusState,
+    profile_assignments: wayexpand_core::ProfileAssignments,
+    profile_switch_pending: bool,
     connection_state: &'static str,
     paused: bool,
     reconnect_delay: Duration,
@@ -495,6 +497,14 @@ fn main() -> Result<()> {
     );
     let focus_state = FocusState::new(config.engine.current_window().cloned());
     publish_focus_snapshot(&control, &focus_state);
+    let profile_assignments_path = path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("profiles")
+        .join("applications.toml");
+    let profile_assignments =
+        wayexpand_core::ProfileAssignments::load(&profile_assignments_path)
+            .map_err(|error| anyhow::anyhow!("invalid application profile assignments: {error}"))?;
 
     let stdin_closed = false;
     let logged_queue_rejections = 0;
@@ -521,6 +531,8 @@ fn main() -> Result<()> {
         receiver,
         status_publisher,
         focus_state,
+        profile_assignments,
+        profile_switch_pending: false,
         connection_state,
         paused,
         reconnect_delay,

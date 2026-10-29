@@ -50,6 +50,67 @@ pub(crate) fn publish_focus_snapshot(control: &ControlServer, state: &FocusState
     });
 }
 
+impl Daemon {
+    /// Route exact application IDs to private local profiles. A transition
+    /// pauses matching until the requested library has loaded successfully.
+    pub(crate) fn update_profile_for_focus(&mut self) -> Result<()> {
+        let app_id = self
+            .config
+            .engine
+            .current_window()
+            .and_then(|window| window.app_id.as_deref());
+        let profile = self.profile_assignments.profile_for_app(app_id);
+        let target = profile.map_or_else(
+            || self.path.clone(),
+            |name| {
+                self.path
+                    .parent()
+                    .unwrap_or_else(|| std::path::Path::new("."))
+                    .join("profiles")
+                    .join(format!("{name}.toml"))
+            },
+        );
+        if target != self.config.path() {
+            if !self.profile_switch_pending {
+                process_event(
+                    &mut self.config.engine,
+                    InputEvent::PauseChanged(true),
+                    None,
+                    &self.policy,
+                    self.active_backend,
+                )?;
+                self.profile_switch_pending = true;
+            }
+            self.config.switch_path(target);
+        } else if self.profile_switch_pending && self.config.healthy() {
+            process_event(
+                &mut self.config.engine,
+                InputEvent::PauseChanged(self.paused),
+                None,
+                &self.policy,
+                self.active_backend,
+            )?;
+            self.profile_switch_pending = false;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn reload_profile_assignments(&mut self) {
+        let path = self
+            .path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join("profiles")
+            .join("applications.toml");
+        match wayexpand_core::ProfileAssignments::load(&path) {
+            Ok(assignments) => self.profile_assignments = assignments,
+            Err(error) => {
+                warn!(%error, "application profile assignments rejected; keeping the last valid assignments")
+            }
+        }
+    }
+}
+
 /// Drain any pending window-change events from the tracker's receiver
 /// and apply them to the engine. This prevents app-filter races where a
 /// focus change arrives between input-event wait and processing.
