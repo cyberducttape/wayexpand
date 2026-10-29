@@ -65,14 +65,14 @@ intentionally out of scope and is reported as `unsupported-by-design`; a
 certification never implies otherwise.
 
 The latest current-source smoke report at
-[`docs/evidence/doctor-certify-be1fc06489b6.json`](evidence/doctor-certify-be1fc06489b6.json)
-tested clean commit `be1fc06489b6` on private headless KWin 6.6.6 on
+[`docs/evidence/doctor-certify-fe4712d2a79e.json`](evidence/doctor-certify-fe4712d2a79e.json)
+tested clean commit `fe4712d2a79e` on private headless KWin 6.6.6 on
 2026-10-29. Twelve output, focus, reload, restart, refusal, and build-identity
 checks passed. Unicode insertion, physical keyboard capture, suspend/resume,
 and the overlapping-trigger scenario were not tested. Twenty libei
 keysym-fallback transactions per size measured injector p50/p95/p99 of
-12.528/12.953/13.914 ms (small), 778.269/800.473/813.719 ms (medium), and
-3,127.535/3,137.499/3,140.324 ms (large). Capture was simulated through stdin.
+12.553/12.612/12.661 ms (small), 781.182/782.840/784.208 ms (medium), and
+3,135.588/3,152.029/3,241.044 ms (large). Capture was simulated through stdin.
 These are injector-only measurements, not desktop latency or production
 certification.
 

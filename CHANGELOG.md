@@ -12,10 +12,11 @@ All notable changes to WayExpand are documented here.
 - Clarify the release gate: the recorded KWin overlap failure is historical
   evidence from a dirty revision; rerun target-integrity certification against
   the current build and physical capture before evaluating that route again.
-- Record fresh private-KWin compatibility evidence for commit `be1fc06489b6`:
-  12 output, focus, reload, restart, and refusal checks passed on KWin 6.6.6.
-  The report preserves untested physical capture, Unicode, suspend/resume, and
-  overlapping-input cases, and labels keysym-fallback latency as injector-only.
+- Record fresh private-KWin compatibility evidence for clean commit
+  `fe4712d2a79e`: 12 output, focus, reload, restart, and refusal checks passed
+  on KWin 6.6.6. The report preserves untested physical capture, Unicode,
+  suspend/resume, and overlapping-input cases, and labels keysym-fallback
+  latency as injector-only.
 - Compile each replacement template once during validation and render
   expansions from the compiled form; one-shot renders and previews share
   the same variable parser and evaluator. A full render no longer scans the
