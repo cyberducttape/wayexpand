@@ -233,6 +233,13 @@ impl TransactionSubmitter {
             retryable: true,
         }
     }
+
+    /// Stop a non-atomic keystroke stream when new physical input arrives.
+    /// The current replacement may already be partial, so its result remains
+    /// uncertain and must never be replayed.
+    pub fn cancel_for_physical_input(&self) {
+        self.cancel.store(true, Ordering::Release);
+    }
 }
 
 /// A serialized TextInjector actor. Each operation carries a completion
@@ -336,7 +343,7 @@ pub fn spawn_async_injector(
     let checkpoint_cancel = Arc::clone(&cancel);
     backend.set_output_checkpoint(wayexpand_core::OutputCheckpoint::new(move || {
         if checkpoint_cancel.load(Ordering::Acquire) {
-            Err("output was cancelled after its deadline".into())
+            Err("output was cancelled while in progress; the application may contain a partial replacement".into())
         } else {
             Ok(())
         }
@@ -1058,6 +1065,52 @@ mod tests {
             .expect("the worker reports the interrupted transaction");
         assert!(!outcome.is_applied(), "{outcome}");
         // At most the character already being typed may follow cancellation.
+        let typed_after = typed.lock().unwrap().len();
+        assert!(
+            typed_after <= typed_at_cancel + 1,
+            "{typed_at_cancel} -> {typed_after}"
+        );
+        assert!(typed_after < 200);
+    }
+
+    #[test]
+    fn physical_input_cancels_a_non_atomic_keystroke_transaction_without_replay() {
+        use wayexpand_core::TransactionOutcome;
+
+        let typed = Arc::new(Mutex::new(String::new()));
+        let (_injector, _failures, worker) = spawn_async_injector(
+            Box::new(PacedInjector {
+                typed: Arc::clone(&typed),
+                checkpoint: wayexpand_core::OutputCheckpoint::default(),
+            }),
+            None,
+        )
+        .unwrap();
+        let submitter = worker.submitter().unwrap();
+        let result = ExpansionResult {
+            snippet_id: String::new(),
+            trigger: ":t".into(),
+            matched_text: ":t".into(),
+            insert: "x".repeat(200),
+            cursor_offset: None,
+            reinsert_after: None,
+            command_backed: false,
+            undoable: false,
+            folded_suffix_chars: 0,
+        };
+        let transaction = submitter.submit(&result).unwrap();
+        thread::sleep(Duration::from_millis(100));
+        submitter.cancel_for_physical_input();
+        let typed_at_cancel = typed.lock().unwrap().len();
+
+        let outcome = transaction
+            .outcome
+            .recv_timeout(Duration::from_secs(2))
+            .expect("the interrupted transaction reports its uncertain result");
+        assert!(matches!(
+            outcome,
+            TransactionOutcome::UnknownPartialFailure { .. }
+        ));
         let typed_after = typed.lock().unwrap().len();
         assert!(
             typed_after <= typed_at_cancel + 1,

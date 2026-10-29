@@ -34,6 +34,13 @@ session evidence; unit tests alone do not satisfy them.
       `second-trigger-during-nonatomic-replacement`; verify the target text is
       not corrupted and no stale trigger is expanded after the first
       transaction. A sequential event test does not satisfy this gate.
+      The daemon now attempts to cancel an in-flight non-atomic transaction
+      when evdev reports new physical input, records an uncertain outcome, and
+      quarantines the input instead of replaying or continuing queued output.
+      This is containment only: any already delivered physical keys or
+      synthetic characters may leave partial text, so the target-integrity
+      gate still requires a passing real-session test or refusing automatic
+      replacement on that route.
       The [current-source negative KWin evidence](evidence/kwin-overlap-reproduction-3aac97291.json)
       reproduces target corruption and stale-trigger expansion on clean commit
       `3aac97291a4d`: only 124 of 128 replacement characters remained, and the

@@ -58,7 +58,7 @@ impl Daemon {
     }
 
     /// Schedule the next input reconnect with exponential backoff.
-    fn schedule_input_retry(&mut self) {
+    pub(crate) fn schedule_input_retry(&mut self) {
         self.input_retry_at = Some(Instant::now() + self.reconnect_delay);
         self.reconnect_delay = next_retry_delay(self.reconnect_delay);
     }

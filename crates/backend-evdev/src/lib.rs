@@ -544,6 +544,33 @@ impl EvdevSource {
         }
         Ok(self.pending.pop_front())
     }
+
+    /// Poll already-open keyboard devices without sleeping or refreshing
+    /// discovery state. The daemon uses this while a non-atomic output
+    /// transaction is in progress so new physical input can interrupt a
+    /// paced replacement promptly.
+    pub fn next_event_during_output(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<Option<InputEvent>, InputSourceError> {
+        if let Some(event) = self.pending.pop_front() {
+            return Ok(Some(event));
+        }
+        self.poll_once(timeout, true)
+            .map_err(|error| InputSourceError {
+                source: SOURCE_NAME,
+                retryable: error.is_retryable(),
+                message: error.to_string(),
+            })?;
+        if self.devices.is_empty() {
+            return Err(InputSourceError {
+                source: SOURCE_NAME,
+                retryable: true,
+                message: EvdevError::AllDevicesLost.to_string(),
+            });
+        }
+        Ok(self.pending.pop_front())
+    }
 }
 
 impl InputSource for EvdevSource {
@@ -760,6 +787,40 @@ mod tests {
         assert!(source.devices.is_empty());
         assert!(!source.keys_held());
         assert_eq!(source.pending.pop_front(), Some(InputEvent::Reset));
+    }
+
+    #[test]
+    fn output_monitor_observes_physical_input_without_refreshing_devices() {
+        let path = PathBuf::from("/dev/input/test-keyboard");
+        let (reader, mut writer) = UnixStream::pair().unwrap();
+        reader.set_nonblocking(true).unwrap();
+        let events = Arc::new(Mutex::new(vec![evdev::InputEvent::new(
+            evdev::EventType::KEY.0,
+            30,
+            1,
+        )]));
+        let mut source = EvdevSource {
+            devices: vec![Box::new(TestKeyboard {
+                path: path.clone(),
+                reader,
+                events,
+            })],
+            state: test_state(),
+            pending: VecDeque::new(),
+            pressed: HashMap::from([(path, HashSet::new())]),
+            last_device_refresh: Instant::now(),
+            wake: None,
+        };
+        writer.write_all(b"event").unwrap();
+
+        assert!(matches!(
+            source.next_event_during_output(Duration::ZERO).unwrap(),
+            Some(InputEvent::Key(_))
+        ));
+        assert_eq!(
+            source.pending.pop_front(),
+            Some(InputEvent::Text("a".into()))
+        );
     }
 
     /// A press on a resolvable key always yields a candidate hotkey chord

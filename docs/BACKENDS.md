@@ -361,10 +361,14 @@ the application may receive the terminating key before WayExpand can erase and
 replace the trigger. Serialized output can also take seconds on a keysym
 fallback. Once that output finishes, WayExpand now clears matcher context and
 discards captured evdev events until 40 ms of input quiet, preventing queued
-keystrokes from being replayed as fresh triggers. This can cause a concurrent
-typed trigger to remain literal; it cannot stop the application receiving
-physical keys while synthetic output is in progress, and therefore cannot
-make the replacement atomic or guarantee that overlapping text is intact. See
+keystrokes from being replayed as fresh triggers. During serialized,
+non-atomic replacement the daemon also monitors evdev readiness and cancels
+further synthetic output at the backend's next safety checkpoint when new
+physical input arrives. The transaction is treated as uncertain, never
+replayed, and captured input is quarantined. This can still leave a partial
+replacement because already delivered physical keys and already injected
+characters cannot be recalled. It therefore does not make replacement atomic
+or guarantee that overlapping text is intact. See
 [ADR 0001](adr/0001-evdev-best-effort-semantics.md) for the architectural
 boundary and the risks of a future exclusive proxy.
 

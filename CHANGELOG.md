@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- During non-atomic evdev replacement, monitor for new physical input and
+  cancel further simulated output at backend checkpoints. Treat the result as
+  uncertain, quarantine captured input, and never replay or continue queued
+  output. This limits additional damage but cannot undo text already delivered.
 - Promote matcher and insertion p95 latency into the active-session dashboard,
   keeping input-processing cost distinct from backend output delay.
 - Make the diagnostics dashboard show the active route's certification level

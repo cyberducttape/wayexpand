@@ -56,6 +56,7 @@ pub(crate) struct PendingOutput {
     transaction: SubmittedTransaction,
     queued: VecDeque<OutputJob>,
     follow_up: Vec<InputEvent>,
+    physical_input_interrupted: bool,
 }
 
 impl Daemon {
@@ -126,6 +127,7 @@ impl Daemon {
                         transaction,
                         queued,
                         follow_up,
+                        physical_input_interrupted: false,
                     });
                     return Ok(());
                 }
@@ -203,6 +205,7 @@ impl Daemon {
             return Ok(Step::Stop);
         }
         self.answer_explain_request();
+        self.cancel_non_atomic_output_on_physical_input(Duration::ZERO);
         let metrics = self.config.engine.command_metrics();
         self.publish_status(metrics);
         let Some(pending) = self.pending_output.as_ref() else {
@@ -231,8 +234,12 @@ impl Daemon {
                     .deadline
                     .saturating_duration_since(Instant::now());
                 if !remaining.is_zero() {
-                    self.waker
-                        .wait(remaining.min(input_loop::IDLE_MAINTENANCE_INTERVAL));
+                    let wait = remaining.min(input_loop::IDLE_MAINTENANCE_INTERVAL);
+                    if self.watches_non_atomic_output_for_input() {
+                        self.cancel_non_atomic_output_on_physical_input(wait);
+                    } else {
+                        self.waker.wait(wait);
+                    }
                     return Ok(Step::Next);
                 }
                 let source = self
@@ -264,16 +271,91 @@ impl Daemon {
             in_flight,
             queued,
             follow_up,
+            physical_input_interrupted,
             ..
         }) = self.pending_output.take()
         else {
             return Ok(());
         };
-        if self.complete_job(origin, in_flight, outcome)? {
+        let completed = self.complete_job(origin, in_flight, outcome)?;
+        if physical_input_interrupted {
+            // The input event has already reached the application. Do not
+            // replay captured input or continue a queued batch against text
+            // that may have changed while output was in progress.
+            self.quarantine_evdev_input();
+            Ok(())
+        } else if completed {
             self.advance_output(origin, queued, follow_up)
         } else {
             self.end_failed_batch(origin, follow_up)
         }
+    }
+
+    /// Non-exclusive evdev capture cannot prevent new keys from reaching the
+    /// application during a slow simulated-key replacement. Detect that
+    /// input while output is pending and stop the paced stream at its next
+    /// backend checkpoint. The transaction remains uncertain; never replay it.
+    fn watches_non_atomic_output_for_input(&self) -> bool {
+        self.evdev_mode
+            && (self.evdev.is_some() || self.connection_state != "connected")
+            && self
+                .injector
+                .as_ref()
+                .is_some_and(|injector| !injector.capabilities().atomic_replace)
+            && self
+                .pending_output
+                .as_ref()
+                .is_some_and(|pending| !pending.physical_input_interrupted)
+    }
+
+    fn cancel_non_atomic_output_on_physical_input(&mut self, timeout: Duration) {
+        if !self.watches_non_atomic_output_for_input() {
+            return;
+        }
+
+        let Some(source) = self.evdev.as_mut() else {
+            self.interrupt_pending_non_atomic_output(
+                "evdev capture is unavailable while replacement is in progress",
+            );
+            return;
+        };
+        match source.next_event_during_output(timeout) {
+            Ok(None) => {}
+            Ok(Some(_event)) => {
+                self.interrupt_pending_non_atomic_output(
+                    "physical input arrived during non-atomic replacement; current text may be partially changed",
+                );
+            }
+            Err(error) => {
+                self.evdev = None;
+                self.schedule_input_retry();
+                warn!(
+                    %error,
+                    event = "non_atomic_output_capture_lost",
+                    "evdev capture became unavailable during non-atomic replacement; cancelling further output"
+                );
+                self.interrupt_pending_non_atomic_output(
+                    "evdev capture was lost during non-atomic replacement",
+                );
+            }
+        }
+    }
+
+    fn interrupt_pending_non_atomic_output(&mut self, reason: &str) {
+        if let Some(pending) = self.pending_output.as_mut() {
+            pending.physical_input_interrupted = true;
+        }
+        if let Some(submitter) = self
+            .output_worker
+            .as_ref()
+            .and_then(OutputWorkerState::submitter)
+        {
+            submitter.cancel_for_physical_input();
+        }
+        warn!(
+            event = "non_atomic_output_interrupted",
+            reason, "cancelling further simulated output; the transaction outcome may be partial"
+        );
     }
 
     /// Match one evdev event and start any resulting output on the
@@ -697,6 +779,39 @@ mod tests {
             ["erase::slow", "insert:replacement"],
             "a discarded captured event must not start another output transaction"
         );
+    }
+
+    #[test]
+    fn interrupted_non_atomic_output_drops_queued_jobs_and_follow_up_input() {
+        let mut harness = Harness::new(false);
+        harness
+            .daemon
+            .start_output(
+                OutputOrigin::Command,
+                vec![
+                    OutputJob::Expansion(result(":a", "first")),
+                    OutputJob::Expansion(result(":b", "second")),
+                ],
+                vec![InputEvent::Text(".ssl".into()), InputEvent::Delimiter(' ')],
+            )
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !harness.waiting.load(Ordering::Acquire) {
+            assert!(Instant::now() < deadline, "first transaction never started");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+
+        harness
+            .daemon
+            .pending_output
+            .as_mut()
+            .unwrap()
+            .physical_input_interrupted = true;
+        harness.open_gate();
+        harness.run_until_resolved();
+
+        assert_eq!(*harness.calls.lock().unwrap(), ["erase::a", "insert:first"]);
+        assert!(harness.daemon.evdev_quiet_since.is_some());
     }
 
     #[test]
