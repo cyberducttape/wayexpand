@@ -271,9 +271,12 @@ EOF
             sample=$((sample + 1))
         done
     done
-    status=$(daemon_status) || return 2
-    profiles=$(printf '%s\n' "$status" | sed -n 's/^injection_latency_profiles=//p')
-    latency_profiles=$(printf '%s' "$profiles" | jq -ce '
+    attempts=0
+    latency_profiles='[]'
+    while [ "$attempts" -lt 50 ]; do
+        status=$(daemon_status) || return 2
+        profiles=$(printf '%s\n' "$status" | sed -n 's/^injection_latency_profiles=//p')
+        latency_profiles=$(printf '%s' "$profiles" | jq -ce '
         [to_entries[] as $mode
          | ["small", "medium", "large"][] as $size
          | select($mode.value[$size].sample_count >= 20)
@@ -287,8 +290,17 @@ EOF
              p99_us: $mode.value[$size].p99_us
            }]
         | sort_by(.size)
-    ') || return 2
-    [ "$(printf '%s' "$latency_profiles" | jq 'length')" -eq 3 ] || return 2
+        ' 2>/dev/null) || latency_profiles='[]'
+        if [ "$(printf '%s' "$latency_profiles" | jq 'length')" -eq 3 ]; then
+            break
+        fi
+        sleep 0.1
+        attempts=$((attempts + 1))
+    done
+    if [ "$(printf '%s' "$latency_profiles" | jq 'length')" -ne 3 ]; then
+        printf 'latency profiles incomplete after %s polls: %s' "$attempts" "${profiles:-unavailable}"
+        return 2
+    fi
     small_profile=$(printf '%s' "$latency_profiles" | jq -ce '.[] | select(.size == "small")') || return 2
     printf 'latency-profile=%s latency-profiles=%s ' "$small_profile" "$latency_profiles"
     printf 'text_chars=%s cursor=%s' \
@@ -592,8 +604,11 @@ run_scenarios() {
         begin_case "$name"
         # Run in this shell (not a $(...) subshell) so end_case can stop the
         # daemon and sinks the scenario started.
-        "$function_name" >"$case_dir/detail" 2>>"$case_dir/scenario.log"
-        code=$?
+        if "$function_name" >"$case_dir/detail" 2>>"$case_dir/scenario.log"; then
+            code=0
+        else
+            code=$?
+        fi
         end_case
         detail=$(cat "$case_dir/detail")
         case "$code" in
