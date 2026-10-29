@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Extract the compositor production-certification gate into a locally testable
+  check. It rejects production releases when the matrix has no eligible route
+  and distinguishes that state from compatibility-only runs.
 - Interrupt paced non-atomic output on any physical evdev key event, including
   modifier and lock keys that do not produce matcher input. This narrows one
   interleaving window; non-exclusive capture still cannot prevent already

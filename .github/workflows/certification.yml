@@ -49,25 +49,8 @@ jobs:
           REQUIRE_PRODUCTION: ${{ inputs.require_production }}
         run: |
           set -euo pipefail
-          production_targets=$(jq '[.targets[] | select(.production_certification_required == true)] | length' tests/certification/compositor-matrix.json)
-          if [ "$production_targets" -eq 0 ]; then
-            message='No declared compositor route currently meets WayExpand production certification requirements. The release gate remains blocked until a real-session route demonstrates sensitive-field handling, atomic replacement, and the required input/output contract.'
-            if [ "$REQUIRE_PRODUCTION" = true ]; then
-              echo "$message" >&2
-              {
-                echo '## Production compositor certification blocked'
-                echo "$message"
-                echo 'Compatibility jobs cannot satisfy this gate. Do not mark a route production-certified from protocol availability or headless tests.'
-              } >>"$GITHUB_STEP_SUMMARY"
-              exit 1
-            fi
-            {
-              echo '## Compatibility certification run'
-              echo "$message"
-              echo 'This run gathers compatibility evidence only; it cannot satisfy the release gate.'
-            } >>"$GITHUB_STEP_SUMMARY"
-            echo "::warning::$message Compatibility jobs will still be selected when their real-session runners are online."
-          fi
+          scripts/check-production-certification.sh \
+            "$REQUIRE_PRODUCTION" tests/certification/compositor-matrix.json
           if [ -z "$CERTIFICATION_RUNNER_TOKEN" ]; then
             message='Missing CERTIFICATION_RUNNER_TOKEN. Configure a fine-grained token with repository Administration: read permission, then store it as this repository secret.'
             echo "$message" >&2

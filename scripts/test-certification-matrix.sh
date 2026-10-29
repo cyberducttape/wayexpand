@@ -27,14 +27,17 @@ jq -e '
 ' "$matrix" >/dev/null
 
 workflow="$project_dir/.github/workflows/certification.yml"
+gate_script="$project_dir/scripts/check-production-certification.sh"
+gate_test="$project_dir/scripts/test-production-certification-gate.sh"
 [ -f "$workflow" ]
+[ -x "$gate_script" ]
+[ -x "$gate_test" ]
 grep -F -- 'runner-preflight:' "$workflow" >/dev/null
 grep -F -- 'needs: runner-preflight' "$workflow" >/dev/null
 grep -F -- 'gh api --paginate --slurp' "$workflow" >/dev/null
 grep -F -- 'CERTIFICATION_RUNNER_TOKEN' "$workflow" >/dev/null
 grep -F -- 'Missing CERTIFICATION_RUNNER_TOKEN.' "$workflow" >/dev/null
 grep -F -- 'Could not list repository Actions runners.' "$workflow" >/dev/null
-grep -F -- 'GITHUB_STEP_SUMMARY' "$workflow" >/dev/null
 grep -F -- 'actions: read' "$workflow" >/dev/null
 grep -F -- 'fromJSON(needs.runner-preflight.outputs.matrix)' "$workflow" >/dev/null
 grep -F -- "targets=\$(jq -r '.targets[]" "$workflow" >/dev/null
@@ -48,13 +51,14 @@ grep -F -- 'schedule:' "$workflow" >/dev/null
 grep -F -- '30 3 * * 1' "$workflow" >/dev/null
 grep -F -- 'require_production:' "$workflow" >/dev/null
 grep -F -- "REQUIRE_PRODUCTION: \${{ inputs.require_production }}" "$workflow" >/dev/null
-grep -F -- "if [ \"\$REQUIRE_PRODUCTION\" = true ]; then" "$workflow" >/dev/null
-grep -F -- 'Compatibility jobs will still be selected when their real-session runners are online.' "$workflow" >/dev/null
+grep -F -- 'scripts/check-production-certification.sh' "$workflow" >/dev/null
+grep -F -- 'GITHUB_STEP_SUMMARY' "$gate_script" >/dev/null
+grep -F -- 'Compatibility jobs will still be selected when their real-session runners are online.' "$gate_script" >/dev/null
 grep -F -- 'WAYEXPAND_CERTIFICATION_DRIVER' "$workflow" >/dev/null
 grep -F -- 'WAYEXPAND_CERTIFICATION_VERSION' "$workflow" >/dev/null
 grep -F -- 'WAYEXPAND_CERTIFICATION_LAYOUT' "$workflow" >/dev/null
 grep -F -- 'WAYEXPAND_CERTIFICATION_TARGET_APPS' "$workflow" >/dev/null
-grep -F -- 'No declared compositor route currently meets WayExpand production certification requirements.' "$workflow" >/dev/null
+grep -F -- 'No declared compositor route currently meets WayExpand production certification requirements.' "$gate_script" >/dev/null
 
 python3 - "$matrix" "$workflow" <<'PY'
 import json

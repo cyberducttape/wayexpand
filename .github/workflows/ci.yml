@@ -333,6 +333,8 @@ jobs:
         run: bash scripts/test-private-home-cleanup.sh
       - name: Verify compositor scenario failures are recorded
         run: bash scripts/test-e2e-scenario-results.sh
+      - name: Verify production certification release gate
+        run: sh scripts/test-production-certification-gate.sh
       - name: Check Rust dependency hygiene
         run: cargo install cargo-machete --version 0.9.2 --locked && cargo machete
       - name: Test commit identity failure handling
