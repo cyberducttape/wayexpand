@@ -9,6 +9,9 @@ All notable changes to WayExpand are documented here.
   during slow keysym fallback from being replayed as stale triggers. The
   evdev route remains non-exclusive and cannot prevent physical input from
   interleaving in the target application.
+- Clarify the release gate: the recorded KWin overlap failure is historical
+  evidence from a dirty revision; rerun target-integrity certification against
+  the current build and physical capture before evaluating that route again.
 - Record fresh private-KWin compatibility evidence for commit `be1fc06489b6`:
   12 output, focus, reload, restart, and refusal checks passed on KWin 6.6.6.
   The report preserves untested physical capture, Unicode, suspend/resume, and
