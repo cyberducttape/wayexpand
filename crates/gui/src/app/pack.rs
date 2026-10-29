@@ -21,9 +21,11 @@ impl GuiApp {
                         allow_actions,
                         fingerprint,
                     } => install_pack(&source, *replace, *allow_actions, fingerprint),
-                    PackOperation::Rollback { id, allow_actions } => {
-                        rollback_pack(id, *allow_actions)
-                    }
+                    PackOperation::Rollback {
+                        id,
+                        allow_actions,
+                        fingerprint,
+                    } => rollback_pack(id, *allow_actions, fingerprint),
                 };
                 let _ = sender.send((worker_operation, result));
             });
@@ -63,6 +65,9 @@ impl GuiApp {
                     installed,
                     diff,
                     diff_error,
+                    rollback_details,
+                    rollback_diff,
+                    rollback_diff_error,
                 }),
             ) => {
                 self.pack_review = Some(PackReview {
@@ -70,6 +75,9 @@ impl GuiApp {
                     installed,
                     diff,
                     diff_error,
+                    rollback_details,
+                    rollback_diff,
+                    rollback_diff_error,
                     install_output: None,
                 });
                 self.pack_action_consent = false;
@@ -81,7 +89,10 @@ impl GuiApp {
                 operation @ (PackOperation::Install { .. } | PackOperation::Rollback { .. }),
                 Ok(PackWorkerResult::Installed(output)),
             ) => {
-                if let Some(review) = self.pack_review.as_mut() {
+                let rolled_back = matches!(&operation, PackOperation::Rollback { .. });
+                if rolled_back {
+                    self.pack_review = None;
+                } else if let Some(review) = self.pack_review.as_mut() {
                     review.install_output = Some(output);
                 }
                 self.pack_rollback_confirmation = None;
@@ -91,6 +102,9 @@ impl GuiApp {
                     _ => self.strings.pack_install_complete(),
                 });
                 self.refresh_diagnostics(true);
+                if rolled_back {
+                    self.start_pack_operation(PackOperation::Review);
+                }
             }
             (_, Err(error)) => {
                 self.pack_error = Some(error.clone());
@@ -279,41 +293,123 @@ impl GuiApp {
         }
 
         if review.installed {
-            let pack_id = json_string(manifest, "id");
-            let confirming = self.pack_rollback_confirmation.as_deref() == Some(&pack_id);
+            self.render_rollback_review(ui, palette, review);
+        }
+    }
+
+    fn render_rollback_review(
+        &mut self,
+        ui: &mut egui::Ui,
+        palette: &Palette,
+        review: &PackReview,
+    ) {
+        ui.separator();
+        theme::section_header(ui, "", self.strings.pack_rollback_review_title());
+        let Some(details) = review.rollback_details.as_ref() else {
+            if let Some(error) = review.rollback_diff_error.as_deref() {
+                ui.colored_label(palette.warning, error);
+            } else {
+                ui.colored_label(palette.warning, self.strings.pack_rollback_unavailable());
+            }
+            return;
+        };
+        let manifest = &details["manifest"];
+        ui.horizontal_wrapped(|ui| {
+            ui.heading(format!(
+                "{} · {}",
+                json_string(manifest, "name"),
+                json_string(manifest, "version")
+            ));
+            let signature_color = signature_color(&details["signature"], palette);
+            theme::pill(
+                ui,
+                json_string(&details["signature"], "state"),
+                signature_color,
+                theme::tint(signature_color, 36),
+            );
+        });
+        ui.label(format!(
+            "{} · {} · {}",
+            json_string(manifest, "id"),
+            json_string(manifest, "publisher"),
+            json_string(manifest, "description")
+        ));
+        if let Some(review_record) = manifest.get("review").filter(|value| value.is_object()) {
+            ui.label(self.strings.pack_review_record(
+                &json_string(review_record, "reviewed_by"),
+                &json_string(review_record, "reviewed_at"),
+                &json_string(review_record, "summary"),
+            ));
+        } else {
+            ui.colored_label(palette.warning, self.strings.pack_no_review_record());
+        }
+        ui.label(
+            self.strings
+                .pack_capability_disclosure(&json_string_array(&details["required_capabilities"])),
+        );
+        ui.label(self.strings.pack_action_counts(
+            details["commands"].as_u64().unwrap_or_default(),
+            details["hotkey_count"].as_u64().unwrap_or_default(),
+        ));
+        self.render_pack_policy(ui, palette, details);
+        self.render_pack_content(ui, palette, details);
+        if let Some(error) = review.rollback_diff_error.as_deref() {
+            ui.colored_label(palette.warning, error);
+        }
+        if let Some(diff) = review.rollback_diff.as_deref() {
+            ui.collapsing(self.strings.pack_rollback_diff_title(), |ui| {
+                render_untrusted_text(ui, diff, MAX_PACK_DIFF_DISPLAY_CHARS);
+            });
+        }
+        let has_actions = details["commands"].as_u64().unwrap_or_default() > 0
+            || details["hotkey_count"].as_u64().unwrap_or_default() > 0;
+        if has_actions {
             ui.checkbox(
                 &mut self.pack_rollback_action_consent,
                 self.strings.pack_rollback_allow_actions(),
             );
-            let button_label = if confirming {
-                self.strings.pack_rollback_confirm()
-            } else {
-                self.strings.pack_rollback_button()
-            };
-            ui.horizontal_wrapped(|ui| {
-                if ui
-                    .add_enabled(
-                        self.pack_operation_receiver.is_none(),
-                        egui::Button::new(button_label),
-                    )
-                    .clicked()
-                {
-                    if confirming {
-                        let allow_actions = self.pack_rollback_action_consent;
-                        self.start_pack_operation(PackOperation::Rollback {
-                            id: pack_id.clone(),
-                            allow_actions,
-                        });
+        }
+        let fingerprint = details["fingerprint"].as_str().unwrap_or_default();
+        let confirming = !fingerprint.is_empty()
+            && self.pack_rollback_confirmation.as_deref() == Some(fingerprint);
+        let review_ready = review.rollback_diff.as_deref().is_some()
+            && rollback_review_is_complete(details, review.rollback_diff.as_deref())
+            && pack_policy_allows(details)
+            && (!has_actions || self.pack_rollback_action_consent);
+        ui.horizontal_wrapped(|ui| {
+            if ui
+                .add_enabled(
+                    review_ready && self.pack_operation_receiver.is_none(),
+                    egui::Button::new(if confirming {
+                        self.strings.pack_rollback_confirm()
                     } else {
-                        self.pack_rollback_confirmation = Some(pack_id.clone());
-                    }
+                        self.strings.pack_rollback_button()
+                    }),
+                )
+                .clicked()
+            {
+                if confirming {
+                    let id = json_string(manifest, "id");
+                    self.start_pack_operation(PackOperation::Rollback {
+                        id,
+                        allow_actions: has_actions && self.pack_rollback_action_consent,
+                        fingerprint: fingerprint.to_owned(),
+                    });
+                } else {
+                    self.pack_rollback_confirmation = Some(fingerprint.to_owned());
                 }
-                ui.label(
-                    RichText::new(self.strings.pack_rollback_explanation())
-                        .small()
-                        .color(palette.muted),
-                );
-            });
+            }
+            ui.label(
+                RichText::new(self.strings.pack_rollback_explanation())
+                    .small()
+                    .color(palette.muted),
+            );
+        });
+        if !review_ready {
+            ui.colored_label(
+                palette.warning,
+                self.strings.pack_rollback_review_required(),
+            );
         }
     }
 
@@ -415,17 +511,34 @@ impl GuiApp {
 const MAX_REVIEW_TEXT_CHARS: usize = 64_000;
 
 fn review_content_is_complete(review: &PackReview) -> bool {
-    if review.installed && review.diff.is_none() {
+    pack_content_is_complete(&review.details, review.diff.as_deref(), review.installed)
+}
+
+fn rollback_review_is_complete(details: &serde_json::Value, diff: Option<&str>) -> bool {
+    details["fingerprint"]
+        .as_str()
+        .is_some_and(valid_fingerprint)
+        && pack_content_is_complete(details, diff, true)
+}
+
+fn valid_fingerprint(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+fn pack_content_is_complete(
+    details: &serde_json::Value,
+    diff: Option<&str>,
+    diff_required: bool,
+) -> bool {
+    if diff_required && diff.is_none() {
         return false;
     }
-    if review
-        .diff
-        .as_deref()
-        .is_some_and(|diff| diff.contains("review output clipped"))
-    {
+    if diff.is_some_and(|diff| diff.contains("review output clipped")) {
         return false;
     }
-    let details = &review.details;
     for expansion in details["expansions"].as_array().into_iter().flatten() {
         if expansion["replacement"]
             .as_str()
@@ -470,7 +583,7 @@ fn pack_policy_allows(details: &serde_json::Value) -> bool {
         && policy["signer_override_refused"].is_null()
         && details["fingerprint"]
             .as_str()
-            .is_some_and(|value| value.len() == 64)
+            .is_some_and(valid_fingerprint)
 }
 
 fn signature_color(signature: &serde_json::Value, palette: &Palette) -> Color32 {
@@ -575,11 +688,50 @@ fn review_pack(source: &std::path::Path) -> Result<PackWorkerResult, String> {
         },
         None => (false, None, None),
     };
+    let (rollback_details, rollback_diff, rollback_diff_error) = if installed {
+        match run_wayexpand(&["pack", "rollback-review", id, "--json"]) {
+            Ok(bytes) => match serde_json::from_slice::<serde_json::Value>(&bytes) {
+                Ok(details) => {
+                    let backup_path = details["backup_path"].as_str();
+                    let rollback_diff = backup_path
+                        .map(|backup| run_wayexpand(&["pack", "diff", id, backup]))
+                        .transpose();
+                    match rollback_diff {
+                        Ok(Some(diff)) => (
+                            Some(details),
+                            Some(clip_chars(
+                                &String::from_utf8_lossy(&diff),
+                                MAX_PACK_DIFF_DISPLAY_CHARS,
+                            )),
+                            None,
+                        ),
+                        Ok(None) => (
+                            Some(details),
+                            None,
+                            Some("Rollback review did not return a backup path".into()),
+                        ),
+                        Err(error) => (Some(details), None, Some(error)),
+                    }
+                }
+                Err(error) => (
+                    None,
+                    None,
+                    Some(format!("Rollback review returned invalid JSON: {error}")),
+                ),
+            },
+            Err(error) => (None, None, Some(error)),
+        }
+    } else {
+        (None, None, None)
+    };
     Ok(PackWorkerResult::Review {
         details,
         installed,
         diff,
         diff_error,
+        rollback_details,
+        rollback_diff,
+        rollback_diff_error,
     })
 }
 
@@ -605,11 +757,17 @@ fn install_pack(
     ))
 }
 
-fn rollback_pack(id: &str, allow_actions: bool) -> Result<PackWorkerResult, String> {
+fn rollback_pack(
+    id: &str,
+    allow_actions: bool,
+    fingerprint: &str,
+) -> Result<PackWorkerResult, String> {
     let mut args = vec!["pack", "rollback", id];
     if allow_actions {
         args.push("--allow-actions");
     }
+    args.push("--expected-fingerprint");
+    args.push(fingerprint);
     let output = run_wayexpand(&args)?;
     Ok(PackWorkerResult::Installed(
         String::from_utf8_lossy(&output).trim().to_owned(),
@@ -655,7 +813,7 @@ fn clip_chars(value: &str, maximum: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{pack_policy_allows, review_content_is_complete};
+    use super::{pack_policy_allows, review_content_is_complete, rollback_review_is_complete};
     use crate::PackReview;
 
     fn review() -> PackReview {
@@ -681,6 +839,9 @@ mod tests {
             installed: false,
             diff: None,
             diff_error: None,
+            rollback_details: None,
+            rollback_diff: None,
+            rollback_diff_error: None,
             install_output: None,
         }
     }
@@ -730,5 +891,33 @@ mod tests {
         review.details["expansions"][0]["replacement"] =
             serde_json::Value::String("x".repeat(64_001));
         assert!(!review_content_is_complete(&review));
+    }
+
+    #[test]
+    fn rollback_requires_a_complete_fingerprinted_backup_and_diff() {
+        let details = serde_json::json!({
+            "fingerprint": "a".repeat(64),
+            "commands": 0,
+            "hotkey_count": 0,
+            "expansions": [{ "replacement": "reviewed backup", "command": null }],
+            "hotkeys": [],
+        });
+        assert!(rollback_review_is_complete(&details, Some("complete diff")));
+        assert!(!rollback_review_is_complete(&details, None));
+        assert!(!rollback_review_is_complete(
+            &details,
+            Some("diff\n… review output clipped …")
+        ));
+        let oversized = serde_json::json!({
+            "fingerprint": "a".repeat(64),
+            "commands": 0,
+            "hotkey_count": 0,
+            "expansions": [{ "replacement": "x".repeat(64_001), "command": null }],
+            "hotkeys": [],
+        });
+        assert!(!rollback_review_is_complete(
+            &oversized,
+            Some("complete diff")
+        ));
     }
 }

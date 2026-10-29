@@ -150,6 +150,12 @@ lower versions additionally require \fB--allow-downgrade\fR.
 List, locate, or remove locally installed packs. Installed TOML files can be
 edited directly; run \fBwayexpand validate --fleet\fR after edits.
 .TP
+.B pack rollback ID [--allow-actions] [--expected-fingerprint SHA256] [--signers FILE]
+Restore the latest validated backup of an installed pack. Review the backup
+first; the expected fingerprint binds the restore to the reviewed content.
+Commands and hotkeys are refused unless explicitly enabled, and current
+organization policy and signature requirements apply.
+.TP
 .B pack inspect|import|verify DIRECTORY [--signers FILE] | pack sign DIRECTORY --key FILE
 Inspect, verify, or import a local snippet pack, or sign one with an SSH key.
 Import prints the converted TOML with command actions disabled. When

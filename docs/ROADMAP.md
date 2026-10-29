@@ -253,8 +253,9 @@ Still open:
       `pack install`, `pack rollback`, and `pack verify` use existing signer
       policy. The GUI can review local pack contents and diffs, disclose signer
       and capability status, require action consent, and install only the
-      reviewed fingerprint; it also offers a confirmed rollback and separate
-      consent before restoring commands or hotkeys from the backup. `pack
+      reviewed fingerprint; rollback shows the exact backup version, signer,
+      content, and diff, binds confirmation to the backup fingerprint, and asks
+      separate consent before restoring commands or hotkeys. `pack
       lock`/`lock --check`, `pack outdated`,
       `pack update`, and `pack sync --lock` pin, verify, and update installed
       packs against a catalog by content fingerprint. Still open:

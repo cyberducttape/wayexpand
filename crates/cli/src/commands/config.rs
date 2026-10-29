@@ -677,6 +677,17 @@ pub(crate) fn validate_pack_fingerprint(fingerprint: &str) -> Result<()> {
     Ok(())
 }
 
+fn require_expected_pack_fingerprint(
+    expected: Option<&str>,
+    actual: &str,
+    subject: &str,
+) -> Result<()> {
+    if expected.is_some_and(|fingerprint| fingerprint != actual) {
+        bail!("{subject} changed since review; review the current content before proceeding");
+    }
+    Ok(())
+}
+
 fn pack_matches_query(inspection: &wayexpand_core::PackInspection, query: &str) -> bool {
     let query = query.trim();
     if query.is_empty() {
@@ -1476,7 +1487,7 @@ fn pack_snippet_files(root: &Path) -> Result<std::collections::BTreeMap<String, 
 }
 
 pub(crate) fn pack_command(args: Args) -> Result<()> {
-    const USAGE: &str = "usage: wayexpand pack inspect <directory-or-id> [--json] [--signers FILE]\n       wayexpand pack search <catalog-directory> [query] [--json] [--signers FILE]\n       wayexpand pack install <directory> [--replace [--allow-downgrade]] [--allow-actions] [--expected-fingerprint SHA256] [--signers FILE]\n       wayexpand pack diff <installed-id> <candidate-directory>\n       wayexpand pack rollback <installed-id> [--allow-actions] [--signers FILE]\n       wayexpand pack list [--json] | path <id> | remove <id>\n       wayexpand pack lock [--check [--json]] [--lock FILE]\n       wayexpand pack outdated <catalog-directory> [--json] [--signers FILE]\n       wayexpand pack update <catalog-directory> <id> [--allow-actions] [--expected-fingerprint SHA256] [--signers FILE]\n       wayexpand pack sync <catalog-directory> [--lock FILE] [--allow-actions] [--signers FILE]\n       wayexpand pack sign <directory> --key FILE";
+    const USAGE: &str = "usage: wayexpand pack inspect <directory-or-id> [--json] [--signers FILE]\n       wayexpand pack search <catalog-directory> [query] [--json] [--signers FILE]\n       wayexpand pack install <directory> [--replace [--allow-downgrade]] [--allow-actions] [--expected-fingerprint SHA256] [--signers FILE]\n       wayexpand pack diff <installed-id> <candidate-directory>\n       wayexpand pack rollback-review <installed-id> --json [--signers FILE]\n       wayexpand pack rollback <installed-id> [--allow-actions] [--expected-fingerprint SHA256] [--signers FILE]\n       wayexpand pack list [--json] | path <id> | remove <id>\n       wayexpand pack lock [--check [--json]] [--lock FILE]\n       wayexpand pack outdated <catalog-directory> [--json] [--signers FILE]\n       wayexpand pack update <catalog-directory> <id> [--allow-actions] [--expected-fingerprint SHA256] [--signers FILE]\n       wayexpand pack sync <catalog-directory> [--lock FILE] [--allow-actions] [--signers FILE]\n       wayexpand pack sign <directory> --key FILE";
     let mut rest: Vec<String> = args.collect();
     let key = take_option(&mut rest, "--key")?;
     let signers_override = take_option(&mut rest, "--signers")?;
@@ -1557,6 +1568,94 @@ pub(crate) fn pack_command(args: Args) -> Result<()> {
         (Some("lock" | "outdated" | "update" | "sync"), _) => usage_bail!("{USAGE}"),
         _ => {}
     }
+    if rest
+        .first()
+        .is_some_and(|action| action == "rollback-review")
+    {
+        if rest.len() != 2
+            || !requested_json
+            || key.is_some()
+            || expected_fingerprint.is_some()
+            || replace
+            || allow_downgrade
+            || allow_actions
+            || lock_file.is_some()
+            || check
+        {
+            usage_bail!(
+                "usage: wayexpand pack rollback-review <installed-id> --json [--signers FILE]"
+            );
+        }
+        let id = &rest[1];
+        ensure_pack_id(id)?;
+        let trust = super::pack_trust::PackTrust::load(signers_override)?;
+        let target = installed_pack_root()?.join(id);
+        let current = inspect_pack(&target)
+            .map_err(|error| config_error(format!("installed pack is invalid: {error}")))?;
+        if current.manifest.id != *id {
+            bail!("installed pack identity does not match requested id");
+        }
+        let backup = latest_pack_backup(&target)?;
+        let inspection = inspect_pack(&backup)
+            .map_err(|error| config_error(format!("rollback pack is invalid: {error}")))?;
+        if inspection.manifest.id != *id {
+            bail!("rollback backup identity does not match installed pack id");
+        }
+        let policy = &trust.policy;
+        let override_refusal = pack_signers_override_refusal(policy, !trust.policy_signers);
+        let signatures_required = policy.safe_mode && policy.require_signed_packs;
+        let signer_file_error = if trust.policy_signers && signatures_required {
+            wayexpand_core::trusted_signers_file(&trust.signers).err()
+        } else {
+            None
+        };
+        let signature = if !inspection.signed {
+            serde_json::json!({ "state": "unsigned" })
+        } else if let Some(reason) = override_refusal.as_ref() {
+            serde_json::json!({ "state": "blocked_by_policy", "reason": reason })
+        } else if let Some(error) = signer_file_error.as_ref() {
+            serde_json::json!({ "state": "untrusted_signer_file", "reason": error.to_string() })
+        } else {
+            match wayexpand_core::verify_pack_signature(&backup, &trust.signers) {
+                Ok(signer) => serde_json::json!({
+                    "state": "verified",
+                    "signer": signer,
+                    "signer_file": trust.signers.display().to_string(),
+                    "signer_file_source": if trust.policy_signers { "configured" } else { "explicit" },
+                }),
+                Err(error) => serde_json::json!({
+                    "state": "unverified",
+                    "reason": error.to_string(),
+                }),
+            }
+        };
+        println!(
+            "{}",
+            serde_json::json!({
+                "manifest": inspection.manifest,
+                "backup_path": backup.display().to_string(),
+                "fingerprint": inspection.fingerprint,
+                "snippet_files": inspection.snippet_files,
+                "expansion_count": inspection.expansion_count,
+                "hotkey_count": inspection.hotkey_count,
+                "commands": inspection.command_count,
+                "required_capabilities": inspection.required_capabilities,
+                "expansions": inspection.expansions,
+                "hotkeys": inspection.hotkeys,
+                "signature": signature,
+                "install_policy": {
+                    "safe_mode": policy.safe_mode,
+                    "signature_required": signatures_required,
+                    "pack_allowed": !policy.safe_mode || policy.pack_allowed(id),
+                    "commands_allowed": !policy.safe_mode || !policy.disable_commands,
+                    "hotkeys_allowed": !policy.safe_mode || !policy.disable_hotkeys,
+                    "explicit_action_consent_required": inspection.command_count > 0 || inspection.hotkey_count > 0,
+                    "signer_override_refused": override_refusal,
+                },
+            })
+        );
+        return Ok(());
+    }
     // `list` takes no positional path; normalize it to the shared two-field
     // parser shape used by the other pack actions.
     if rest.as_slice() == ["list"] {
@@ -1621,8 +1720,10 @@ pub(crate) fn pack_command(args: Args) -> Result<()> {
     if replace && action != "install" {
         usage_bail!("--replace is only valid for `wayexpand pack install`");
     }
-    if expected_fingerprint.is_some() && action != "install" {
-        usage_bail!("--expected-fingerprint is only valid for `wayexpand pack install`");
+    if expected_fingerprint.is_some() && action != "install" && action != "rollback" {
+        usage_bail!(
+            "--expected-fingerprint is only valid for `wayexpand pack install` or `pack rollback`"
+        );
     }
     if allow_downgrade && (action != "install" || !replace) {
         usage_bail!("--allow-downgrade requires `wayexpand pack install --replace`");
@@ -1690,6 +1791,11 @@ pub(crate) fn pack_command(args: Args) -> Result<()> {
             if inspection.manifest.id != path.to_string_lossy() {
                 bail!("rollback backup identity does not match installed pack id");
             }
+            require_expected_pack_fingerprint(
+                expected_fingerprint.as_deref(),
+                &inspection.fingerprint,
+                "rollback backup",
+            )?;
             let required = policy.safe_mode && policy.require_signed_packs;
             if let Some(refusal) = pack_signers_override_refusal(policy, !policy_signers) {
                 bail!("{refusal}");
@@ -1747,14 +1853,11 @@ pub(crate) fn pack_command(args: Args) -> Result<()> {
         }
         "install" => {
             let inspection = inspect_pack(&path)?;
-            if expected_fingerprint
-                .as_deref()
-                .is_some_and(|fingerprint| fingerprint != inspection.fingerprint)
-            {
-                bail!(
-                    "pack contents changed since review; review the updated pack before installing"
-                );
-            }
+            require_expected_pack_fingerprint(
+                expected_fingerprint.as_deref(),
+                &inspection.fingerprint,
+                "pack contents",
+            )?;
             let (installed, signer) =
                 trust.install(&path, &inspection, replace, allow_downgrade, allow_actions)?;
             println!(
@@ -2331,7 +2434,7 @@ pub(crate) fn sync_command(args: Args) -> Result<()> {
 
 #[cfg(test)]
 mod pack_policy_tests {
-    use super::pack_signers_override_refusal;
+    use super::{pack_signers_override_refusal, require_expected_pack_fingerprint};
 
     #[test]
     fn required_pack_signatures_refuse_a_user_chosen_signers_file() {
@@ -2349,6 +2452,24 @@ mod pack_policy_tests {
         policy.require_signed_packs = true;
         policy.safe_mode = false;
         assert!(pack_signers_override_refusal(&policy, true).is_none());
+    }
+
+    #[test]
+    fn expected_pack_fingerprint_rejects_content_changed_after_review() {
+        let fingerprint = "a".repeat(64);
+        assert!(require_expected_pack_fingerprint(
+            Some(&fingerprint),
+            &fingerprint,
+            "rollback backup"
+        )
+        .is_ok());
+        let changed = "b".repeat(64);
+        let error =
+            require_expected_pack_fingerprint(Some(&fingerprint), &changed, "rollback backup")
+                .unwrap_err()
+                .to_string();
+        assert!(error.contains("changed since review"));
+        assert!(require_expected_pack_fingerprint(None, &changed, "pack contents").is_ok());
     }
 }
 

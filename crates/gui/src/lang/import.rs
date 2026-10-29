@@ -57,6 +57,38 @@ impl Strings {
         }
     }
 
+    pub fn pack_rollback_review_title(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Previous version to restore",
+            Language::Indonesian => "Versi sebelumnya yang akan dipulihkan",
+            Language::German => "Wiederherzustellende vorherige Version",
+        }
+    }
+
+    pub fn pack_rollback_unavailable(&self) -> &'static str {
+        match self.lang {
+            Language::English => "No reviewable rollback backup is available.",
+            Language::Indonesian => "Tidak ada cadangan pemulihan yang dapat ditinjau.",
+            Language::German => "Keine prüfbare Rollback-Sicherung verfügbar.",
+        }
+    }
+
+    pub fn pack_rollback_diff_title(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Diff from the installed version",
+            Language::Indonesian => "Perbedaan dari versi terpasang",
+            Language::German => "Unterschied zur installierten Version",
+        }
+    }
+
+    pub fn pack_rollback_review_required(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Review the complete backup and satisfy its trust and policy checks before rollback.",
+            Language::Indonesian => "Tinjau seluruh cadangan dan penuhi pemeriksaan kepercayaan serta kebijakannya sebelum pemulihan.",
+            Language::German => "Prüfen Sie die vollständige Sicherung und erfüllen Sie Vertrauens- und Richtlinienprüfungen vor dem Rollback.",
+        }
+    }
+
     pub fn pack_rollback_confirm(&self) -> &'static str {
         match self.lang {
             Language::English => "Confirm rollback",

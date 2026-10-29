@@ -232,12 +232,21 @@ continues to enforce signature trust, version ordering, and command/hotkey
 consent. To restore the most recently backed-up version:
 
 ```bash
-wayexpand pack rollback incident-response --signers ./allowed_signers
+wayexpand pack rollback incident-response --expected-fingerprint <sha256> --signers ./allowed_signers
 ```
+
+The read-only `wayexpand pack rollback-review ID --json` command returns the
+exact latest backup and its fingerprint for review tools. Rollback accepts
+that fingerprint and refuses to restore if the latest backup changed after
+review.
 
 Rollback revalidates the backup, enforces current organization policy and
 required signatures, stages the restored pack, and preserves the currently
-installed version as the next backup. It then asks the daemon to reload.
+installed version as the next backup. It then asks the daemon to reload. The
+GUI shows the exact backup version, signer state, contents, and diff before
+confirmation, then supplies its reviewed fingerprint to the CLI; if the
+backup changes after review, rollback is refused and the user must review it
+again.
 
 ## Updating from a catalog and pinning versions
 

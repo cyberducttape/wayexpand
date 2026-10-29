@@ -341,6 +341,9 @@ pub(crate) struct PackReview {
     pub(crate) installed: bool,
     pub(crate) diff: Option<String>,
     pub(crate) diff_error: Option<String>,
+    pub(crate) rollback_details: Option<serde_json::Value>,
+    pub(crate) rollback_diff: Option<String>,
+    pub(crate) rollback_diff_error: Option<String>,
     pub(crate) install_output: Option<String>,
 }
 
@@ -355,6 +358,7 @@ pub(crate) enum PackOperation {
     Rollback {
         id: String,
         allow_actions: bool,
+        fingerprint: String,
     },
 }
 
@@ -365,6 +369,9 @@ pub(crate) enum PackWorkerResult {
         installed: bool,
         diff: Option<String>,
         diff_error: Option<String>,
+        rollback_details: Option<serde_json::Value>,
+        rollback_diff: Option<String>,
+        rollback_diff_error: Option<String>,
     },
     Installed(String),
 }
