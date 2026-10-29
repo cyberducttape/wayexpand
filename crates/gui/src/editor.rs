@@ -289,7 +289,7 @@ fn read_broker_action_ids(path: &std::path::Path) -> Vec<String> {
         .and_then(|document| {
             document
                 .get("actions")
-                .and_then(toml_edit::Item::as_table)
+                .and_then(toml_edit::Item::as_table_like)
                 .map(|actions| {
                     let mut ids = actions
                         .iter()
@@ -338,7 +338,10 @@ fn read_broker_action_inventory(path: &std::path::Path) -> BrokerActionInventory
     let Some(document) = read_broker_document(path) else {
         return BrokerActionInventory::default();
     };
-    let Some(actions) = document.get("actions").and_then(toml_edit::Item::as_table) else {
+    let Some(actions) = document
+        .get("actions")
+        .and_then(toml_edit::Item::as_table_like)
+    else {
         return BrokerActionInventory::default();
     };
     let mut ids = actions
@@ -351,7 +354,7 @@ fn read_broker_action_inventory(path: &std::path::Path) -> BrokerActionInventory
         .filter_map(|(id, action)| {
             let parameters_item = action.get("parameters");
             let parameters_table = match parameters_item {
-                Some(item) => item.as_table()?,
+                Some(item) => item.as_table_like()?,
                 None => return Some((id.to_owned(), Vec::new().into())),
             };
             let parameters = parameters_table
