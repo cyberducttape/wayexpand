@@ -67,8 +67,10 @@ check_installed() {
             esac
         fi
     done
-    for unit in wayexpand.service wayexpand-input-method.service \
-        wayexpand-evdev.service wayexpand-action-broker.service; do
+    # Packages ship the system-wide routes; the generic wayexpand.service
+    # belongs to the per-user installer.
+    for unit in wayexpand-input-method.service wayexpand-evdev.service \
+        wayexpand-action-broker.service; do
         [ -f "/usr/lib/systemd/user/$unit" ] || {
             printf 'error: user unit %s is missing\n' "$unit" >&2
             return 1
