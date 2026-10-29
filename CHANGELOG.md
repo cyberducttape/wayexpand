@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add Criterion coverage for template substitutions, maximum-depth snippet
+  includes, and full versus bounded rendering at the configured output limit.
 - Add optional per-action Landlock filesystem profiles with canonicalized
   read/write path grants. Sandboxed actions are refused if the kernel cannot
   enforce their profile. Keep the packaged broker's network denial global;

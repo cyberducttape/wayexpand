@@ -42,3 +42,7 @@ harness = false
 [[bench]]
 name = "config_edit"
 harness = false
+
+[[bench]]
+name = "template_render"
+harness = false

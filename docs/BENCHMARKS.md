@@ -238,6 +238,41 @@ matcher measurements in `target/criterion`. Compare them on the same host and
 toolchain; these are local file-system and core construction benchmarks, not
 an end-to-end daemon reload latency guarantee.
 
+## Template rendering
+
+The `template_render` benchmark covers built-in variable substitution,
+eight-level static snippet inclusion (the supported include-depth limit),
+rendering a 1 MiB output (the current output limit), and a 512-byte preview of
+that same input. It is a core renderer benchmark; clipboard access, GUI work,
+forms, and backend insertion are excluded.
+
+```sh
+cargo bench --locked -p wayexpand-core --bench template_render
+```
+
+Record the Criterion estimates with the CPU and Rust toolchain. The full
+render and bounded-preview cases intentionally measure different output sizes;
+the preview processes the same 1 MiB input but stops after producing 512
+bytes.
+
+### Baseline: 2026-10-28
+
+AMD Ryzen 7 7735U, Linux 7.0.0-38-generic, `rustc 1.96.0`, Criterion 0.8.2.
+The ordinary cases used 30 samples; near-limit cases used 10 samples. Values
+are Criterion estimates and 95% confidence intervals:
+
+| Workload | Estimate | 95% interval |
+| --- | ---: | ---: |
+| Built-in substitutions and local date/time | 5.243 µs | 4.871–5.715 µs |
+| Eight-level static include | 521 ns | 495–559 ns |
+| Full 1 MiB render | 1.035 ms | 1.034–1.037 ms |
+| 512-byte preview from 1 MiB input | 316.88 µs | 313.48–319.76 µs |
+
+This is a single-host baseline, not a p95/p99 event-latency measurement or a
+release target. In particular, the preview still scans the large source up to
+its first output limit; its result allocation is bounded, but its runtime is
+not constant in the preview byte budget alone.
+
 An exploratory before/after run on the AMD Ryzen 7 7735U / Rust 1.96.0 host
 measured the 10,000-snippet stable check at 348.30 ms (95% interval
 271.37–436.14 ms) when both reads parsed and validated TOML, and 93.89 ms
