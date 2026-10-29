@@ -340,9 +340,9 @@ impl Strings {
 
     pub fn source_yaml(&self) -> &'static str {
         match self.lang {
-            Language::English => "Source YAML file",
-            Language::Indonesian => "Berkas YAML sumber",
-            Language::German => "YAML-Quelldatei",
+            Language::English => "Source YAML file or Espanso match directory",
+            Language::Indonesian => "Berkas YAML sumber atau direktori match Espanso",
+            Language::German => "YAML-Quelldatei oder Espanso-Match-Verzeichnis",
         }
     }
 

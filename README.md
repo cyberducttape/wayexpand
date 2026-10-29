@@ -183,13 +183,15 @@ a security sandbox. See [SECURITY.md](SECURITY.md) and the
 ## Migrating from Espanso
 
 ```sh
-wayexpand import espanso ~/.config/espanso/match/base.yml > imported.toml
+wayexpand import espanso ~/.config/espanso > imported.toml
 ```
 
 `--strict` rejects entries whose Espanso semantics cannot be preserved, and
-`--report-json` writes a machine-readable migration report to stderr. The
-GUI's import merges by default and previews duplicates and conflicts before
-anything changes. See [Migrating from Espanso](docs/MIGRATION_FROM_ESPANSO.md).
+`--report-json` writes a machine-readable migration report to stderr. Directory
+imports include nested match files. Supported dynamic variables and basic
+forms are converted; shell/script and clipboard execution or access are not
+enabled implicitly. The GUI's import merges by default and previews conflicts
+before anything changes. See [Migrating from Espanso](docs/MIGRATION_FROM_ESPANSO.md).
 
 ## Documentation
 

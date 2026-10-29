@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Expand Espanso migration to recursively import match directories and convert
+  supported date, echo, choice, random, nested-match, cursor, and text/choice
+  form syntax. Report
+  unsupported executable and clipboard variables without enabling them.
 - Add Criterion coverage for template substitutions, maximum-depth snippet
   includes, and full versus bounded rendering at the configured output limit.
 - Add optional per-action Landlock filesystem profiles with canonicalized

@@ -19,11 +19,20 @@ before switching a production workflow.
 
 ## Import first, decide second
 
-Point the importer at an Espanso match file:
+Point the importer at an Espanso match file, a `match/` directory, or an
+Espanso configuration root containing `match/`:
 
 ```bash
-wayexpand import espanso ~/.config/espanso/match/base.yml > imported.toml
+wayexpand import espanso ~/.config/espanso > imported.toml
 ```
+
+Directory imports walk nested package directories in stable path order and
+merge `.yml` and `.yaml` matches into one TOML document. YAML symlinks are
+refused, symlinked package directories are refused, non-match files are
+ignored, and limits of 1,024 match files, 16 MiB aggregate source, 32
+directory levels, and 16,384 entries bound the import. Duplicate triggers
+across files are reported as an error so the importer never silently chooses
+a different match.
 
 Use `--strict` to discard matches whose Espanso behavior cannot be preserved;
 unmapped top-level options reject the import. Use `--report-json` to emit the
@@ -32,7 +41,13 @@ machine-readable report on stderr for review or fleet tooling. Without
 
 The command writes converted TOML to stdout and prints a migration report to
 stderr. The report separates fully migrated entries, entries migrated with
-warnings or unmapped options, and unsupported dynamic matches.
+warnings or unmapped options, and unsupported matches. Supported dynamic
+variables include fixed `echo`, compatible `date`, `choice`, `random`, and
+nested `match` extensions. Espanso's `form:` shorthand and text/choice controls
+convert to WayExpand fields; one `$|$` cursor marker converts to `{{cursor}}`.
+See the upstream [dynamic extension](https://espanso.org/docs/matches/extensions/)
+and [form](https://espanso.org/docs/matches/forms/) references for the source
+syntax.
 
 The source file is never modified. In the GUI, Import Espanso previews the
 same report and merges by default: new triggers are added, identical
@@ -88,19 +103,23 @@ Alex"""
 An Espanso match with a `triggers:` list imports as one snippet: the first
 trigger becomes `trigger` and the rest become `aliases`.
 
-Categories, tags, descriptions, enabled state, and case propagation have
-direct WayExpand representations. Dynamic matches, external filters, forms,
-extensions, and options with no direct equivalent are reported for manual
-review rather than silently approximated.
+Labels and case propagation have direct WayExpand representations. Dynamic
+`date`, `echo`, `choice`, `random`, and nested `match` variables and the basic
+text/choice form controls are converted. One cursor marker maps to WayExpand
+cursor placement. Date offsets are translated to local-time WayExpand
+templates and reported for review because timezone and daylight-saving
+semantics can differ. Unsupported date formats, structured choice values,
+complex form controls, options without a direct equivalent, and arbitrary
+extensions are reported for manual review rather than silently approximated.
 
 ## Capability comparison
 
 | Capability | Espanso | WayExpand today |
 | --- | --- | --- |
 | Static and multiline replacements | Supported | Supported |
-| Forms and interactive variables | Supported | Not yet supported as a general form system |
-| Scripts and command integrations | Supported | Structured command expansions with bounds and timeouts |
-| Community package workflow | Espanso Hub and package commands | Manual/local packs; signed bundles are future work |
+| Forms and interactive variables | Supported | Text and choice forms; supported built-in variables convert during import |
+| Scripts and command integrations | Supported | Structured command expansions with bounds and timeouts; imported scripts are not enabled automatically |
+| Community package workflow | Espanso Hub and package commands | Versioned offline packs, Git-based sharing, review checks, and optional signatures; no central registry or automatic update service |
 | Search interface | Supported | GUI library search and filtering |
 | Application-specific configuration | Supported on supported platforms; Espanso documents this as unavailable on Wayland | `app_filter` through the KWin tracker path; currently uncertified and fail-closed elsewhere |
 | Linux Wayland input route | Wayland distribution path with documented limitations | Native input/injection routes with explicit capability and lifecycle diagnostics |
@@ -197,8 +216,9 @@ intended differentiators are:
 - local-only diagnostics that explain why a snippet did or did not expand;
 - administrative policy and fleet-friendly configuration;
 - safe, reviewable imports with compatibility reports;
-- eventually, signed snippet bundles, forms, richer template variables, and
-  rollback/history workflows.
+- continued Espanso extension coverage, richer form controls, and
+  rollback/history workflows. Versioned local packs and signatures are already
+  available; a central discovery service is not required for offline sharing.
 
 The product promise is deliberately narrower and more testable: a Wayland
 text expander that tells you what its current route can provide.
@@ -208,9 +228,12 @@ text expander that tells you what its current route can provide.
 If import reports an unsupported feature, do not delete the source entry. Keep
 it in the report and adapt it manually. Common cases include:
 
-- Espanso forms or interactive variables: no general WayExpand equivalent yet;
-- `external_filter` or shell variables: consider a bounded structured command,
-  after reviewing its execution and data exposure;
+- shell/script variables: these execute external code and are deliberately
+  excluded from import; recreate them as reviewed WayExpand command actions
+  only after checking execution policy and data exposure;
+- clipboard variables: import refuses to enable clipboard access implicitly;
+- Espanso list controls, ID-mapped choices, and complex form controls: convert
+  manually and validate the resulting form;
 - application filters: verify that the current session is a certified KWin
   route before relying on them;
 - IME/preedit workflows: active composition is currently outside WayExpand's

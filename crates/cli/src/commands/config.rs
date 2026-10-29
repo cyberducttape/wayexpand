@@ -588,7 +588,8 @@ pub(crate) fn schema_command(mut args: Args) -> Result<()> {
 }
 
 pub(crate) fn import_command(mut args: Args) -> Result<()> {
-    const USAGE: &str = "usage: wayexpand import espanso <file> [--strict] [--report-json]";
+    const USAGE: &str =
+        "usage: wayexpand import espanso <file-or-match-directory> [--strict] [--report-json]";
     let format = args.next().ok_or_else(|| usage_error(USAGE))?;
     let source = args.next().ok_or_else(|| usage_error(USAGE))?;
     if format != "espanso" {

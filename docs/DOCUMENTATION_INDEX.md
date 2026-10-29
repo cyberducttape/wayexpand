@@ -268,7 +268,7 @@ and status snapshots are not a substitute for the current contracts above.
 
 ### "I'm switching from Espanso"
 1. [MIGRATION_FROM_ESPANSO.md](MIGRATION_FROM_ESPANSO.md) — overview
-2. `wayexpand import espanso ~/.config/espanso/default.yml` — import config
+2. `wayexpand import espanso ~/.config/espanso` — import the match tree
 3. [TROUBLESHOOTING.md](TROUBLESHOOTING.md) — if issues
 
 ### "I want to contribute code"

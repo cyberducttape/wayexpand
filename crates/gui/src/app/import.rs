@@ -71,7 +71,7 @@ impl GuiApp {
                     ui.add(
                         TextEdit::singleline(&mut self.import_path)
                             .margin(theme::FIELD_MARGIN)
-                            .hint_text("~/.config/espanso/match/base.yml")
+                            .hint_text("~/.config/espanso or match/base.yml")
                             .desired_width(520.0),
                     );
                     ui.label(

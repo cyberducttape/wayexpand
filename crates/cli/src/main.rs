@@ -233,8 +233,8 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "Create a non-overwriting config backup",
             ),
             (
-                "import espanso <file> [--strict] [--report-json]",
-                "Convert an Espanso YAML file to TOML on stdout",
+                "import espanso <file-or-match-directory> [--strict] [--report-json]",
+                "Convert Espanso match files, forms, and supported variables to TOML",
             ),
             (
                 "pack install|list|inspect|path|remove|import|verify|sign ...",

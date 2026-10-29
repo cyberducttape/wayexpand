@@ -215,14 +215,17 @@ refused/stopped. An acknowledgement does not prove that the target application
 displayed the text; unmatched typing and typed or inserted content are never
 recorded. Use the editor's Matcher preview to explain a test input.
 
-`Import Espanso` accepts an existing Espanso YAML file, validates it, and
-previews a migration report: fully migrated snippets, snippets with semantic
-warnings, and unsupported dynamic matches. Unmapped fields and top-level
-options are listed before applying the import. The default merge action adds
-new triggers, ignores identical duplicates, and keeps the current snippet on
-trigger conflicts; an explicit replace action remains available. The current
-TOML is preserved in the bounded undo history, and the daemon is asked to
-reload only after the new file is durably saved.
+`Import Espanso` accepts a YAML match file or an Espanso root/match directory,
+validates it, and previews fully migrated snippets, semantic warnings, and
+unsupported matches. It converts supported date, echo, choice, random, nested
+match, cursor, and basic text/choice form syntax. Shell/script and clipboard
+variables remain unsupported so import cannot grant execution or clipboard
+access implicitly. Unmapped fields and top-level options are listed before
+applying. The default merge action adds new triggers, ignores identical
+duplicates, and keeps the current snippet on trigger conflicts; an explicit
+replace action remains available. The current TOML is preserved in the bounded
+undo history, and the daemon is asked to reload only after the new file is
+durably saved.
 
 It requires a Wayland-capable desktop session for window creation, but does
 not require the global input-method backend to edit configuration.

@@ -321,7 +321,7 @@ human-readable strings.
 Espanso libraries can be converted without modifying the source file:
 
 ```sh
-wayexpand import espanso ~/.config/espanso/match/base.yml > imported.toml
+wayexpand import espanso ~/.config/espanso > imported.toml
 wayexpand validate imported.toml
 ```
 

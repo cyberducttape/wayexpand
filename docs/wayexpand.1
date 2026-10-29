@@ -89,10 +89,12 @@ format for the node_exporter textfile collector. No snippet content, commands,
 titles or paths are included. --output replaces FILE atomically. A stopped
 daemon is reported as a value, not an error.
 .TP
-.B import espanso FILE [--strict] [--report-json]
-Import an Espanso YAML file and print converted TOML. Strict mode discards
-matches with unmapped semantics; report-json emits a machine-readable report
-on stderr.
+.B import espanso FILE-OR-DIRECTORY [--strict] [--report-json]
+Import an Espanso YAML match file or recursively import a match directory and
+print converted TOML. Supported dynamic variables and basic forms are
+converted; shell, script and clipboard access are not enabled implicitly.
+Strict mode discards matches with semantic warnings; report-json emits a
+machine-readable report on stderr.
 .TP
 .B set-enabled TRIGGER on|off [CONFIG]
 Enable or disable an expansion and save the configuration atomically.
