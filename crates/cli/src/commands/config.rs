@@ -641,7 +641,7 @@ pub(crate) fn import_command(mut args: Args) -> Result<()> {
 /// When policy requires signed packs, its signers file is the
 /// organization's trust root: a signers file the user chooses would let any
 /// self-signed pack through.
-fn pack_signers_override_refusal(
+pub(crate) fn pack_signers_override_refusal(
     policy: &wayexpand_core::OrganizationPolicy,
     signers_overridden: bool,
 ) -> Option<String> {
@@ -653,20 +653,20 @@ fn pack_signers_override_refusal(
     })
 }
 
-fn installed_pack_root() -> Result<PathBuf> {
+pub(crate) fn installed_pack_root() -> Result<PathBuf> {
     wayexpand_core::Layer::Pack
         .default_dir()
         .ok_or_else(|| config_error("HOME is required to locate the local pack directory"))
 }
 
-fn ensure_pack_id(id: &str) -> Result<()> {
+pub(crate) fn ensure_pack_id(id: &str) -> Result<()> {
     if !wayexpand_core::is_valid_pack_id(id) {
         bail!("invalid pack id; start with a letter or digit and use only letters, digits, '.', '_' or '-'");
     }
     Ok(())
 }
 
-fn validate_pack_fingerprint(fingerprint: &str) -> Result<()> {
+pub(crate) fn validate_pack_fingerprint(fingerprint: &str) -> Result<()> {
     if fingerprint.len() != 64
         || !fingerprint
             .bytes()
@@ -696,9 +696,17 @@ fn pack_matches_query(inspection: &wayexpand_core::PackInspection, query: &str) 
     .contains(&query.to_lowercase())
 }
 
-fn search_pack_catalog(root: &Path, query: &str, signers: &Path, json_output: bool) -> Result<()> {
+/// Valid packs found in a checked-out catalog, and how many directories did
+/// not validate. The catalog is `<root>/packs` when that exists and the root
+/// is not itself a pack.
+pub(crate) struct CatalogScan {
+    pub(crate) root: PathBuf,
+    pub(crate) packs: Vec<(PathBuf, wayexpand_core::PackInspection)>,
+    pub(crate) invalid: usize,
+}
+
+pub(crate) fn scan_pack_catalog(root: &Path) -> Result<CatalogScan> {
     const MAX_CATALOG_ENTRIES: usize = 512;
-    const MAX_SIGNATURE_CHECK_TIME: std::time::Duration = std::time::Duration::from_secs(30);
     let root_metadata = std::fs::symlink_metadata(root)
         .map_err(|error| config_error(format!("could not inspect pack catalog: {error}")))?;
     if !root_metadata.file_type().is_dir() || root_metadata.file_type().is_symlink() {
@@ -713,11 +721,9 @@ fn search_pack_catalog(root: &Path, query: &str, signers: &Path, json_output: bo
     } else {
         root.to_owned()
     };
-    let query = query.trim().to_lowercase();
-    let mut candidates = Vec::new();
-    let mut invalid_candidates = 0usize;
+    let mut packs = Vec::new();
+    let mut invalid = 0usize;
     let mut scanned_directories = 0usize;
-    let signature_check_started = std::time::Instant::now();
     for entry in std::fs::read_dir(&root)
         .map_err(|error| config_error(format!("could not read pack catalog: {error}")))?
     {
@@ -727,7 +733,7 @@ fn search_pack_catalog(root: &Path, query: &str, signers: &Path, json_output: bo
         let metadata = match std::fs::symlink_metadata(&path) {
             Ok(metadata) => metadata,
             Err(_) => {
-                invalid_candidates = invalid_candidates.saturating_add(1);
+                invalid = invalid.saturating_add(1);
                 continue;
             }
         };
@@ -738,13 +744,29 @@ fn search_pack_catalog(root: &Path, query: &str, signers: &Path, json_output: bo
         if scanned_directories > MAX_CATALOG_ENTRIES {
             bail!("pack catalog exceeds the {MAX_CATALOG_ENTRIES} directory limit");
         }
-        let inspection = match wayexpand_core::inspect_pack(&path) {
-            Ok(inspection) => inspection,
-            Err(_) => {
-                invalid_candidates = invalid_candidates.saturating_add(1);
-                continue;
-            }
-        };
+        match wayexpand_core::inspect_pack(&path) {
+            Ok(inspection) => packs.push((path, inspection)),
+            Err(_) => invalid = invalid.saturating_add(1),
+        }
+    }
+    Ok(CatalogScan {
+        root,
+        packs,
+        invalid,
+    })
+}
+
+fn search_pack_catalog(root: &Path, query: &str, signers: &Path, json_output: bool) -> Result<()> {
+    const MAX_SIGNATURE_CHECK_TIME: std::time::Duration = std::time::Duration::from_secs(30);
+    let CatalogScan {
+        root,
+        packs,
+        invalid: invalid_candidates,
+    } = scan_pack_catalog(root)?;
+    let query = query.trim().to_lowercase();
+    let mut candidates = Vec::new();
+    let signature_check_started = std::time::Instant::now();
+    for (path, inspection) in packs {
         let manifest = &inspection.manifest;
         if !pack_matches_query(&inspection, &query) {
             continue;
@@ -876,7 +898,7 @@ fn search_pack_catalog(root: &Path, query: &str, signers: &Path, json_output: bo
     Ok(())
 }
 
-fn resolve_pack_path(path: &Path) -> PathBuf {
+pub(crate) fn resolve_pack_path(path: &Path) -> PathBuf {
     if path.exists() {
         return path.to_owned();
     }
@@ -967,7 +989,7 @@ fn remove_installed_pack(id: &str) -> Result<()> {
     Ok(())
 }
 
-fn install_local_pack(
+pub(crate) fn install_local_pack(
     source: &Path,
     inspection: &wayexpand_core::PackInspection,
     replace: bool,
@@ -1141,7 +1163,7 @@ impl Drop for StagedPackDirectory {
     }
 }
 
-fn prepare_private_directory(path: &Path) -> Result<()> {
+pub(crate) fn prepare_private_directory(path: &Path) -> Result<()> {
     let preexisting = std::fs::symlink_metadata(path).is_ok();
     std::fs::create_dir_all(path).map_err(|error| {
         config_error(format!("could not create private pack directory: {error}"))
@@ -1242,7 +1264,7 @@ fn copy_pack_file(source: &Path, target: &Path) -> Result<()> {
     Ok(())
 }
 
-fn sync_directory(path: &Path) -> Result<()> {
+pub(crate) fn sync_directory(path: &Path) -> Result<()> {
     std::fs::File::open(path)
         .and_then(|directory| directory.sync_all())
         .map_err(|error| config_error(format!("could not sync pack directory: {error}")))
@@ -1454,7 +1476,7 @@ fn pack_snippet_files(root: &Path) -> Result<std::collections::BTreeMap<String, 
 }
 
 pub(crate) fn pack_command(args: Args) -> Result<()> {
-    const USAGE: &str = "usage: wayexpand pack inspect <directory-or-id> [--json] [--signers FILE]\n       wayexpand pack search <catalog-directory> [query] [--json] [--signers FILE]\n       wayexpand pack install <directory> [--replace [--allow-downgrade]] [--allow-actions] [--expected-fingerprint SHA256] [--signers FILE]\n       wayexpand pack diff <installed-id> <candidate-directory>\n       wayexpand pack rollback <installed-id> [--allow-actions] [--signers FILE]\n       wayexpand pack list [--json] | path <id> | remove <id>\n       wayexpand pack sign <directory> --key FILE";
+    const USAGE: &str = "usage: wayexpand pack inspect <directory-or-id> [--json] [--signers FILE]\n       wayexpand pack search <catalog-directory> [query] [--json] [--signers FILE]\n       wayexpand pack install <directory> [--replace [--allow-downgrade]] [--allow-actions] [--expected-fingerprint SHA256] [--signers FILE]\n       wayexpand pack diff <installed-id> <candidate-directory>\n       wayexpand pack rollback <installed-id> [--allow-actions] [--signers FILE]\n       wayexpand pack list [--json] | path <id> | remove <id>\n       wayexpand pack lock [--check [--json]] [--lock FILE]\n       wayexpand pack outdated <catalog-directory> [--json] [--signers FILE]\n       wayexpand pack update <catalog-directory> <id> [--allow-actions] [--expected-fingerprint SHA256] [--signers FILE]\n       wayexpand pack sync <catalog-directory> [--lock FILE] [--allow-actions] [--signers FILE]\n       wayexpand pack sign <directory> --key FILE";
     let mut rest: Vec<String> = args.collect();
     let key = take_option(&mut rest, "--key")?;
     let signers_override = take_option(&mut rest, "--signers")?;
@@ -1466,6 +1488,75 @@ pub(crate) fn pack_command(args: Args) -> Result<()> {
     let allow_downgrade = take_flag(&mut rest, "--allow-downgrade");
     let allow_actions = take_flag(&mut rest, "--allow-actions");
     let requested_json = take_json_flag(&mut rest);
+    let lock_file = take_option(&mut rest, "--lock")?;
+    let check = take_flag(&mut rest, "--check");
+    let lock_action = rest.first().map(String::as_str);
+    if !matches!(lock_action, Some("lock" | "sync")) && lock_file.is_some() {
+        usage_bail!("--lock is only valid for `wayexpand pack lock` and `pack sync`");
+    }
+    if lock_action != Some("lock") && check {
+        usage_bail!("--check is only valid for `wayexpand pack lock`");
+    }
+    match (lock_action, rest.len()) {
+        (Some("lock"), 1) => {
+            if key.is_some()
+                || signers_override.is_some()
+                || expected_fingerprint.is_some()
+                || replace
+                || allow_downgrade
+                || allow_actions
+            {
+                usage_bail!("pack lock accepts only --check, --json and --lock");
+            }
+            return super::pack_lock::lock_command(lock_file, check, requested_json);
+        }
+        (Some("outdated"), 2) => {
+            if key.is_some()
+                || expected_fingerprint.is_some()
+                || replace
+                || allow_downgrade
+                || allow_actions
+            {
+                usage_bail!("pack outdated accepts only --json and --signers");
+            }
+            let catalog = resolve_pack_path(Path::new(&rest[1]));
+            return super::pack_lock::outdated_command(&catalog, signers_override, requested_json);
+        }
+        (Some("update"), 3) => {
+            if key.is_some() || replace || allow_downgrade || requested_json {
+                usage_bail!(
+                    "pack update accepts only --allow-actions, --expected-fingerprint and --signers"
+                );
+            }
+            let catalog = resolve_pack_path(Path::new(&rest[1]));
+            return super::pack_lock::update_command(
+                &catalog,
+                &rest[2],
+                expected_fingerprint.as_deref(),
+                allow_actions,
+                signers_override,
+            );
+        }
+        (Some("sync"), 2) => {
+            if key.is_some()
+                || expected_fingerprint.is_some()
+                || replace
+                || allow_downgrade
+                || requested_json
+            {
+                usage_bail!("pack sync accepts only --lock, --allow-actions and --signers");
+            }
+            let catalog = resolve_pack_path(Path::new(&rest[1]));
+            return super::pack_lock::sync_command(
+                &catalog,
+                lock_file,
+                allow_actions,
+                signers_override,
+            );
+        }
+        (Some("lock" | "outdated" | "update" | "sync"), _) => usage_bail!("{USAGE}"),
+        _ => {}
+    }
     // `list` takes no positional path; normalize it to the shared two-field
     // parser shape used by the other pack actions.
     if rest.as_slice() == ["list"] {
@@ -1549,39 +1640,11 @@ pub(crate) fn pack_command(args: Args) -> Result<()> {
         "inspect" | "verify" | "sign" | "import" | "install" => resolve_pack_path(&requested_path),
         _ => requested_path.clone(),
     };
-    let policy = load_policy()
-        .map_err(|error| config_error(format!("organization policy is invalid: {error}")))?;
-    // An explicit --signers file is the caller's own choice; the policy
-    // default must be root-owned to be trusted.
-    let policy_signers = signers_override.is_none();
-    let signers = signers_override
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(&policy.pack_signers_file));
-    // Verify a signature when present; require one when policy says so.
-    let check_signature = || -> Result<Option<String>> {
-        let required = policy.safe_mode && policy.require_signed_packs;
-        if let Some(refusal) = pack_signers_override_refusal(&policy, !policy_signers) {
-            return Err(config_error(refusal));
-        }
-        let verified = if policy_signers {
-            wayexpand_core::trusted_signers_file(&signers)
-                .and_then(|()| wayexpand_core::verify_pack_signature(&path, &signers))
-        } else {
-            wayexpand_core::verify_pack_signature(&path, &signers)
-        };
-        match verified {
-            Ok(signer) => Ok(Some(signer)),
-            Err(wayexpand_core::PackError::Unsigned) if !required => Ok(None),
-            Err(error) if !required && !signers.exists() => {
-                eprintln!(
-                    "warning: pack signature not verified ({error}); no signers file at {}",
-                    signers.display()
-                );
-                Ok(None)
-            }
-            Err(error) => Err(config_error(format!("pack rejected: {error}"))),
-        }
-    };
+    let trust = super::pack_trust::PackTrust::load(signers_override)?;
+    let policy = &trust.policy;
+    let policy_signers = trust.policy_signers;
+    let signers = trust.signers.clone();
+    let check_signature = || trust.verify(&path);
     match action.as_str() {
         "list" => {
             let packs = installed_pack_report()?;
@@ -1615,6 +1678,7 @@ pub(crate) fn pack_command(args: Args) -> Result<()> {
             ensure_pack_id(&id)?;
             remove_installed_pack(&id)?;
             println!("removed local pack {id}");
+            super::pack_lock::refresh_default_lock();
             let _ = control_operation(wayexpand_core::DaemonOperation::Reload);
         }
         "rollback" => {
@@ -1627,7 +1691,7 @@ pub(crate) fn pack_command(args: Args) -> Result<()> {
                 bail!("rollback backup identity does not match installed pack id");
             }
             let required = policy.safe_mode && policy.require_signed_packs;
-            if let Some(refusal) = pack_signers_override_refusal(&policy, !policy_signers) {
+            if let Some(refusal) = pack_signers_override_refusal(policy, !policy_signers) {
                 bail!("{refusal}");
             }
             let verified = if policy_signers {
@@ -1678,6 +1742,7 @@ pub(crate) fn pack_command(args: Args) -> Result<()> {
                     " (signature not verified)"
                 }
             );
+            super::pack_lock::refresh_default_lock();
             let _ = control_operation(wayexpand_core::DaemonOperation::Reload);
         }
         "install" => {
@@ -1690,29 +1755,8 @@ pub(crate) fn pack_command(args: Args) -> Result<()> {
                     "pack contents changed since review; review the updated pack before installing"
                 );
             }
-            let signer = check_signature()?;
-            if !allow_actions && (inspection.command_count > 0 || inspection.hotkey_count > 0) {
-                bail!("refusing to install command or hotkey actions by default; review the pack and pass --allow-actions to activate them");
-            }
-            if policy.safe_mode && !policy.pack_allowed(&inspection.manifest.id) {
-                bail!(
-                    "organization policy does not allow pack {}; ask an administrator to add it to allowed_packs",
-                    inspection.manifest.id
-                );
-            }
-            if policy.safe_mode && policy.disable_commands && inspection.command_count > 0 {
-                bail!("organization policy disables commands; this pack contains command-backed entries");
-            }
-            if policy.safe_mode && policy.disable_hotkeys && inspection.hotkey_count > 0 {
-                bail!("organization policy disables hotkeys; this pack contains hotkeys");
-            }
-            let installed = install_local_pack(
-                &path,
-                &inspection,
-                replace,
-                allow_downgrade,
-                signer.is_some().then_some(&signers),
-            )?;
+            let (installed, signer) =
+                trust.install(&path, &inspection, replace, allow_downgrade, allow_actions)?;
             println!(
                 "installed {} {} at {}{}",
                 inspection.manifest.name,
@@ -1725,13 +1769,14 @@ pub(crate) fn pack_command(args: Args) -> Result<()> {
                 }
             );
             println!("The pack is offline and editable. Run `wayexpand validate --fleet` to check the active library.");
+            super::pack_lock::refresh_default_lock();
             let _ = control_operation(wayexpand_core::DaemonOperation::Reload);
         }
         "inspect" => {
             let inspection = inspect_pack(&path)?;
             if requested_json {
                 let signatures_required = policy.safe_mode && policy.require_signed_packs;
-                let override_refusal = pack_signers_override_refusal(&policy, !policy_signers);
+                let override_refusal = pack_signers_override_refusal(policy, !policy_signers);
                 let signer_file_error = if policy_signers && signatures_required {
                     wayexpand_core::trusted_signers_file(&signers).err()
                 } else {

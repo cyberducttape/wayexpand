@@ -234,6 +234,50 @@ Rollback revalidates the backup, enforces current organization policy and
 required signatures, stages the restored pack, and preserves the currently
 installed version as the next backup. It then asks the daemon to reload.
 
+## Updating from a catalog and pinning versions
+
+`pack outdated` lists installed packs that have a newer version in a checked-out
+catalog, with each candidate's signer status and any change in its command or
+hotkey count. `pack update` installs the newest one through the same signature,
+policy and action-consent checks as `pack install`; it never downgrades.
+
+```bash
+wayexpand pack outdated ~/src/team-packs
+wayexpand pack diff incident-response ~/src/team-packs/packs/incident-response-2.4.0
+wayexpand pack update ~/src/team-packs incident-response --expected-fingerprint <sha256>
+```
+
+`--expected-fingerprint` (shown by `pack outdated --json` and
+`pack inspect --json`) binds the update to the exact contents you reviewed.
+
+A lockfile records the exact version and content fingerprint of every
+installed pack:
+
+```bash
+wayexpand pack lock                 # write ~/.local/share/wayexpand/packs.lock
+wayexpand pack lock --check         # report drift; exits 3 when anything differs
+```
+
+Drift is a pack that is locked but missing, installed but not locked,
+installed at another version, installed with different content (usually a
+local edit), or invalid. Once a lockfile exists, `pack install`, `update`,
+`remove`, `rollback` and `sync` keep it current; locking is opt-in, so nothing
+creates one implicitly.
+
+To give a team the same packs, commit a lockfile next to the catalog and sync
+each machine to it:
+
+```bash
+wayexpand pack sync ~/src/team-packs --lock ~/src/team-packs/packs.lock
+```
+
+Sync installs, replaces or downgrades only what differs, choosing the catalog
+pack whose id, version and fingerprint all match the lock. Every entry is
+found, signature-checked and admitted by policy before the first one is
+installed; if any entry cannot be satisfied, nothing changes. Packs that are
+installed but not locked are reported and left in place. Packs with commands
+or hotkeys still need `--allow-actions`.
+
 ## Managed packs (organization policy)
 
 In safe mode, `require_signed_packs = true` accepts only packs signed by a

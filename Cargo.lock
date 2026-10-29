@@ -4310,6 +4310,7 @@ dependencies = [
  "libc",
  "rustix 1.1.5",
  "semver",
+ "serde",
  "serde_json",
  "toml",
  "unicode-segmentation",

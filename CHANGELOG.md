@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add pack lockfiles and catalog updates: `pack lock [--check]` records and
+  verifies the exact version and content fingerprint of installed packs,
+  `pack outdated` and `pack update` move packs to newer catalog versions
+  through the install trust gate, and `pack sync --lock FILE` installs exactly
+  a team lockfile's pinned set after preflighting every entry.
 - Read `{{clipboard}}` natively over `ext-data-control-v1` when the
   compositor offers it, falling back to `wl-paste` elsewhere. On KWin 6,
   wl-clipboard 2.2.1 cannot bind that protocol and maps a focus-taking window
