@@ -916,6 +916,78 @@ replacement = "signature"
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn form_completion_pump_delivers_after_the_origin_context_refocuses() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _env_lock = crate::FORM_HELPER_ENV_LOCK.lock().unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "wayexpand-ibus-form-pump-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let helper = root.join("form-helper");
+        let release = root.join("release");
+        let script = format!(
+            "#!/bin/sh\nwhile [ ! -e '{}' ]; do sleep 0.01; done\nprintf '%s' '{{\"field:hostname\":\"node-a\"}}'\n",
+            release.display()
+        );
+        std::fs::write(&helper, script).unwrap();
+        std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        struct RestoreFormHelper {
+            previous: Option<std::ffi::OsString>,
+            root: std::path::PathBuf,
+        }
+        impl Drop for RestoreFormHelper {
+            fn drop(&mut self) {
+                if let Some(value) = self.previous.take() {
+                    std::env::set_var("WAYEXPAND_FORM_HELPER", value);
+                } else {
+                    std::env::remove_var("WAYEXPAND_FORM_HELPER");
+                }
+                let _ = std::fs::remove_dir_all(&self.root);
+            }
+        }
+        let _restore_helper = RestoreFormHelper {
+            previous: std::env::var_os("WAYEXPAND_FORM_HELPER"),
+            root,
+        };
+        std::env::set_var("WAYEXPAND_FORM_HELPER", &helper);
+
+        let harness = Harness::start(
+            "[[expansion]]\ntrigger = ':incident'\nreplacement = 'Incident {{field:hostname}}'\n",
+        );
+        harness.focus_text_field();
+        let mut before = String::new();
+        for character in ":incident".chars() {
+            harness.key(character, &before);
+            before.push(character);
+        }
+
+        // Hold the helper open while its IBus context loses and regains focus.
+        // This exercises the real completion pump, not just adapter polling.
+        harness.call("FocusOut", &());
+        harness.focus_text_field();
+        let cursor = before.chars().count() as u32;
+        harness.call(
+            "SetSurroundingText",
+            &(Value::from(ibus_text_value(&before)), cursor, cursor),
+        );
+        std::fs::write(&release, "ready").unwrap();
+
+        let commits = harness.commits(Duration::from_secs(2));
+        assert!(
+            commits.iter().any(|text| text == "Incident node-a"),
+            "form result was not committed after refocus: {commits:?}"
+        );
+    }
+
     #[test]
     fn broker_result_reaches_the_ibus_client_through_the_completion_pump() {
         let mut broker =

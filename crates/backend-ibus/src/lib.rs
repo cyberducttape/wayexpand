@@ -30,6 +30,9 @@ const IBUS_RELEASE_MASK: u32 = 1 << 30;
 pub const IBUS_BACKEND_NAME: &str = "ibus";
 const IBUS_CONTEXT_ID_PREFIX: &str = "ibus-context:";
 
+#[cfg(test)]
+pub(crate) static FORM_HELPER_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// `IBUS_CAP_SURROUNDING_TEXT`: the client can report surrounding text and
 /// honour `DeleteSurroundingText`.
 pub const IBUS_CAP_SURROUNDING_TEXT: u32 = 1 << 5;
@@ -634,7 +637,6 @@ replacement = "Incident {{field:hostname}}"
     fn form_completes_after_the_original_ibus_context_regains_focus() {
         use std::os::unix::fs::PermissionsExt;
 
-        static FORM_HELPER_ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
         struct RestoreFormHelperEnv(Option<std::ffi::OsString>);
         impl Drop for RestoreFormHelperEnv {
             fn drop(&mut self) {
@@ -646,7 +648,7 @@ replacement = "Incident {{field:hostname}}"
             }
         }
 
-        let _env_lock = FORM_HELPER_ENV.lock().unwrap();
+        let _env_lock = FORM_HELPER_ENV_LOCK.lock().unwrap();
         let helper = std::env::temp_dir().join(format!(
             "wayexpand-ibus-form-helper-{}-{}",
             std::process::id(),
