@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Make the diagnostics dashboard show the active route's certification level
+  and give prioritized recovery guidance for unavailable daemon/permissions,
+  blocked or best-effort insertion, incomplete focus tracking, and unverified
+  sensitive-field protection. Runtime capability reports remain clearly
+  distinct from compositor certification.
 - Add exact, per-application local profile routing. Store private assignments in
   `profiles/applications.toml`, manage them with `wayexpand profile assign-app`
   and `unassign-app`, and pause matching while a selected profile validates and

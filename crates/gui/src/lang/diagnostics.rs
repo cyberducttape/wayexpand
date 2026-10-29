@@ -18,6 +18,96 @@ impl Strings {
         }
     }
 
+    pub fn route_certification(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Route certification",
+            Language::Indonesian => "Sertifikasi rute",
+            Language::German => "Routenzertifizierung",
+        }
+    }
+
+    pub fn route_certification_value(&self, certified: Option<bool>) -> String {
+        match (self.lang, certified) {
+            (_, None) => "Unknown".into(),
+            (Language::English, Some(true)) => "Certified".into(),
+            (Language::English, Some(false)) => "Not certified".into(),
+            (Language::Indonesian, Some(true)) => "Tersertifikasi".into(),
+            (Language::Indonesian, Some(false)) => "Belum tersertifikasi".into(),
+            (Language::German, Some(true)) => "Zertifiziert".into(),
+            (Language::German, Some(false)) => "Nicht zertifiziert".into(),
+        }
+    }
+
+    pub fn next_steps_title(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Recommended next steps",
+            Language::Indonesian => "Langkah berikutnya yang disarankan",
+            Language::German => "Empfohlene nächste Schritte",
+        }
+    }
+
+    pub fn next_step_daemon(&self) -> &'static str {
+        match self.lang {
+            Language::English => {
+                "Start or restart the WayExpand user service, then refresh diagnostics."
+            }
+            Language::Indonesian => {
+                "Mulai ulang layanan pengguna WayExpand, lalu segarkan diagnostik."
+            }
+            Language::German => {
+                "Starten Sie den WayExpand-Benutzerdienst neu und aktualisieren Sie die Diagnose."
+            }
+        }
+    }
+
+    pub fn next_step_permission(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Restore the compositor or device permission for the selected route, then refresh diagnostics.",
+            Language::Indonesian => "Pulihkan izin kompositor atau perangkat untuk rute yang dipilih, lalu segarkan diagnostik.",
+            Language::German => "Stellen Sie die Compositor- oder Geräteberechtigung für die ausgewählte Route wieder her und aktualisieren Sie die Diagnose.",
+        }
+    }
+
+    pub fn next_step_insertion_blocked(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Insertion is blocked by this route or safety policy. Review the ranked routes and choose a verified replacement route when available; do not retry the trigger until the route is healthy.",
+            Language::Indonesian => "Penyisipan diblokir oleh rute atau kebijakan keselamatan ini. Tinjau urutan rute dan pilih rute penggantian terverifikasi jika tersedia; jangan ulangi pemicu sebelum rute sehat.",
+            Language::German => "Diese Route oder Sicherheitsrichtlinie blockiert die Ausgabe. Prüfen Sie die Routenliste und wählen Sie, falls verfügbar, eine verifizierte Ersetzungsroute. Wiederholen Sie das Kürzel erst, wenn die Route bereit ist.",
+        }
+    }
+
+    pub fn next_step_insertion_limited(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Replacement is best-effort on this route. Prefer a verified route for important text; compatibility mode can be disabled to refuse uncertain keystroke replacement.",
+            Language::Indonesian => "Penggantian pada rute ini bersifat upaya terbaik. Gunakan rute terverifikasi untuk teks penting; mode kompatibilitas dapat dimatikan untuk menolak penggantian tombol yang tidak pasti.",
+            Language::German => "Die Ersetzung ist auf dieser Route bestmöglich, aber nicht verifiziert. Verwenden Sie für wichtige Texte eine verifizierte Route; der Kompatibilitätsmodus lässt sich deaktivieren, um unsichere Tastenersetzungen abzulehnen.",
+        }
+    }
+
+    pub fn next_step_focus(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Focus tracking is incomplete. Check window-tracker permission and keep compatibility mode off when focus cannot be confirmed.",
+            Language::Indonesian => "Pelacakan fokus belum lengkap. Periksa izin pelacak jendela dan nonaktifkan mode kompatibilitas saat fokus tidak dapat dikonfirmasi.",
+            Language::German => "Die Fokusverfolgung ist unvollständig. Prüfen Sie die Berechtigung des Fenster-Trackers und lassen Sie den Kompatibilitätsmodus deaktiviert, wenn der Fokus nicht bestätigt werden kann.",
+        }
+    }
+
+    pub fn next_step_sensitive_fields(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Password-field protection is not verified for this session. Avoid automatic expansion in credential fields; prefer a route with a reported sensitive-field signal.",
+            Language::Indonesian => "Perlindungan kolom kata sandi belum terverifikasi untuk sesi ini. Hindari ekspansi otomatis pada kolom kredensial; utamakan rute dengan sinyal bidang sensitif.",
+            Language::German => "Der Schutz von Passwortfeldern ist für diese Sitzung nicht verifiziert. Vermeiden Sie automatische Expansionen in Anmeldefeldern und bevorzugen Sie eine Route mit Sensitivitätssignal.",
+        }
+    }
+
+    pub fn next_step_certification(&self) -> &'static str {
+        match self.lang {
+            Language::English => "This route is not certified for the current compositor. Treat runtime capability reports as diagnostics, not proof of reliable behavior in applications.",
+            Language::Indonesian => "Rute ini belum tersertifikasi untuk kompositor saat ini. Anggap laporan kemampuan runtime sebagai diagnostik, bukan bukti keandalan di aplikasi.",
+            Language::German => "Diese Route ist für den aktuellen Compositor nicht zertifiziert. Laufzeitangaben sind Diagnosewerte und kein Nachweis zuverlässigen Verhaltens in Anwendungen.",
+        }
+    }
+
     pub fn capture_availability_label(&self) -> &'static str {
         match self.lang {
             Language::English => "Capture availability",

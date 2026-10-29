@@ -101,6 +101,10 @@ impl GuiApp {
         });
         let source = compact_status_value(&self.daemon_status, "source").unwrap_or("unknown");
         let backend = compact_status_value(&self.daemon_status, "backend").unwrap_or("unknown");
+        let route_id = compact_status_value(&self.daemon_status, "route_id");
+        let active_route_certified = route_id
+            .and_then(wayexpand_backend_selection::route_contract_by_id)
+            .map(|contract| contract.is_certified());
         let capabilities = self.daemon_capabilities.as_ref();
         let mean = capabilities.and_then(|caps| caps.injection_latency_mean_us);
         let protection_available = capabilities
@@ -126,8 +130,21 @@ impl GuiApp {
                 dashboard_value(
                     &mut columns[0],
                     self.strings.route_id(),
-                    compact_status_value(&self.daemon_status, "route_id").unwrap_or("unknown"),
+                    route_id.unwrap_or("unknown"),
                     palette.muted,
+                );
+                let certification_color = match active_route_certified {
+                    Some(true) => palette.success,
+                    Some(false) => palette.warning,
+                    None => palette.muted,
+                };
+                dashboard_value(
+                    &mut columns[1],
+                    self.strings.route_certification(),
+                    &self
+                        .strings
+                        .route_certification_value(active_route_certified),
+                    certification_color,
                 );
                 dashboard_value(
                     &mut columns[1],
@@ -269,6 +286,45 @@ impl GuiApp {
                 &self.strings,
             );
         });
+
+        let mut next_steps = Vec::new();
+        if self.daemon_reachable == Some(false) {
+            next_steps.push(self.strings.next_step_daemon());
+        }
+        if matches!(
+            self.route_state,
+            Some(
+                wayexpand_core::DaemonRouteState::PermissionRequired
+                    | wayexpand_core::DaemonRouteState::PortalRevoked
+            )
+        ) {
+            next_steps.push(self.strings.next_step_permission());
+        }
+        if assessment.insertion == diagnostics::AssessmentState::Blocked {
+            next_steps.push(self.strings.next_step_insertion_blocked());
+        } else if assessment.insertion == diagnostics::AssessmentState::Warning {
+            next_steps.push(self.strings.next_step_insertion_limited());
+        }
+        if assessment.focus == diagnostics::AssessmentState::Warning {
+            next_steps.push(self.strings.next_step_focus());
+        }
+        if capabilities.and_then(|caps| caps.capture_sensitive_focus) != Some(true) {
+            next_steps.push(self.strings.next_step_sensitive_fields());
+        }
+        if active_route_certified != Some(true) {
+            next_steps.push(self.strings.next_step_certification());
+        }
+        if !next_steps.is_empty() {
+            theme::section_header(ui, "", self.strings.next_steps_title());
+            theme::card(ui, palette, |ui| {
+                for step in next_steps {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.colored_label(palette.accent, "•");
+                        ui.add(egui::Label::new(step).wrap());
+                    });
+                }
+            });
+        }
 
         ui.collapsing(self.strings.recent_expansion_outcomes(), |ui| {
             let traces = capabilities
