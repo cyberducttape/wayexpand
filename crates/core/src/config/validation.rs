@@ -310,15 +310,39 @@ impl Config {
                     .map(str::to_owned)
                     .collect(),
             );
-            let parsed_form_fields = if expansion.command.is_some() {
-                if crate::form_fields(&expansion.replacement).is_ok_and(|fields| !fields.is_empty())
-                {
-                    return Err(ConfigError::InvalidTemplate {
-                        index,
-                        source: TemplateError::InvalidField,
-                    });
+            let parsed_form_fields = if let Some(command) = &expansion.command {
+                match crate::form_fields(&expansion.replacement) {
+                    Ok(fields) if !fields.is_empty() => {
+                        if command.action.is_none() {
+                            return Err(ConfigError::InvalidTemplate {
+                                index,
+                                source: TemplateError::InvalidField,
+                            });
+                        }
+                        let mut parameter_names = std::collections::HashSet::new();
+                        if fields.iter().any(|field| {
+                            !field.required
+                                || !form_action_parameter_name(&field.key).is_some_and(|name| {
+                                    !name.is_empty()
+                                        && name.len() <= 32
+                                        && name.as_bytes()[0].is_ascii_lowercase()
+                                        && name.bytes().all(|byte| {
+                                            byte.is_ascii_lowercase()
+                                                || byte.is_ascii_digit()
+                                                || byte == b'_'
+                                        })
+                                        && parameter_names.insert(name)
+                                })
+                        }) {
+                            return Err(ConfigError::InvalidTemplate {
+                                index,
+                                source: TemplateError::InvalidField,
+                            });
+                        }
+                        Some(Arc::new(fields))
+                    }
+                    _ => None,
                 }
-                None
             } else {
                 let fields = crate::form_fields(&expansion.replacement)
                     .map_err(|source| ConfigError::InvalidTemplate { index, source })?;
@@ -440,6 +464,11 @@ impl Config {
         }
         self.validate()
     }
+}
+
+fn form_action_parameter_name(key: &str) -> Option<&str> {
+    let (kind, name) = key.split_once(':')?;
+    matches!(kind, "field" | "date" | "choice").then_some(name)
 }
 
 /// `output_file` is where `wayexpand new` writes a snippet: a relative path

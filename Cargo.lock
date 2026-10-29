@@ -4446,6 +4446,7 @@ name = "wayexpand-broker-protocol"
 version = "1.3.3"
 dependencies = [
  "serde",
+ "serde_json",
 ]
 
 [[package]]

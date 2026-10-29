@@ -32,7 +32,7 @@ pub mod protocol;
 mod sandbox;
 
 pub use audit::{policy_hash, AuditEvent, AuditHealth, AuditLogger, CallerIdentity};
-pub use config::{ActionConfig, ActionSandbox, BrokerConfig};
+pub use config::{ActionConfig, ActionParameter, ActionSandbox, BrokerConfig};
 pub use executor::ActionExecutor;
 #[doc(hidden)]
 pub use ipc::decode_request_frame;
@@ -52,6 +52,7 @@ mod tests {
             inherit_env: false,
             env_vars: vec![],
             stdout_capture: true,
+            parameters: std::collections::BTreeMap::new(),
         };
         let json = serde_json::to_string(&req).unwrap();
         let deserialized: ActionRequest = serde_json::from_str(&json).unwrap();

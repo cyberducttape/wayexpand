@@ -629,6 +629,7 @@ mod tests {
             inherit_env: false,
             env_vars: vec![],
             stdout_capture: true,
+            parameters: std::collections::BTreeMap::new(),
         };
         client.send_request(&request).unwrap();
 

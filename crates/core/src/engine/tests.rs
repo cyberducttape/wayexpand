@@ -5244,6 +5244,55 @@ fn wait_for_completion(engine: &mut ExpansionEngine) -> Vec<ExpansionResult> {
     Vec::new()
 }
 
+#[cfg(unix)]
+struct FakeFormActionEnvironment {
+    _guard: std::sync::MutexGuard<'static, ()>,
+    directory: std::path::PathBuf,
+    previous_helper: Option<std::ffi::OsString>,
+    previous_socket: Option<std::ffi::OsString>,
+}
+
+#[cfg(unix)]
+impl FakeFormActionEnvironment {
+    fn new(directory: std::path::PathBuf, socket: &std::path::Path) -> Self {
+        let guard = FORM_HELPER_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let helper = directory.join("form-helper");
+        std::fs::write(
+            &helper,
+            "#!/bin/sh\nprintf '%s' '{\"choice:environment\":\"staging\",\"field:namespace\":\"default\"}'\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let previous_helper = std::env::var_os("WAYEXPAND_FORM_HELPER");
+        let previous_socket = std::env::var_os("WAYEXPAND_ACTION_BROKER_SOCKET");
+        std::env::set_var("WAYEXPAND_FORM_HELPER", &helper);
+        std::env::set_var("WAYEXPAND_ACTION_BROKER_SOCKET", socket);
+        Self {
+            _guard: guard,
+            directory,
+            previous_helper,
+            previous_socket,
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for FakeFormActionEnvironment {
+    fn drop(&mut self) {
+        match self.previous_helper.take() {
+            Some(value) => std::env::set_var("WAYEXPAND_FORM_HELPER", value),
+            None => std::env::remove_var("WAYEXPAND_FORM_HELPER"),
+        }
+        match self.previous_socket.take() {
+            Some(value) => std::env::set_var("WAYEXPAND_ACTION_BROKER_SOCKET", value),
+            None => std::env::remove_var("WAYEXPAND_ACTION_BROKER_SOCKET"),
+        }
+        let _ = std::fs::remove_dir_all(&self.directory);
+    }
+}
+
 #[test]
 fn a_submitted_form_renders_its_values_and_suspends_capture_meanwhile() {
     let _helper = FakeFormHelper::new(
@@ -5521,11 +5570,22 @@ fn form_fields_are_parsed_and_validated() {
     // A synchronous match never types raw field markers.
     let mut engine = ExpansionEngine::new(Config::parse(FORM_CONFIG).unwrap()).unwrap();
     assert!(engine.process(InputEvent::Text(":tk".into())).is_empty());
-    // Forms cannot be command-backed.
+    // Arbitrary direct commands cannot receive form values.
     assert!(Config::parse(
         "[[expansion]]\ntrigger = \":x\"\nreplacement = \"{{field:a}}\"\n[expansion.command]\nprogram = \"/bin/true\"\n"
     )
     .is_err());
+    // Named broker actions may receive values after form validation. The
+    // broker's independent parameter schema remains authoritative.
+    assert!(Config::parse(
+        r#"[[expansion]]
+trigger = ":lookup"
+replacement = "{{field:namespace=default|required|max=63}}"
+[expansion.command]
+action = "pod-list"
+"#
+    )
+    .is_ok());
 }
 
 #[test]
@@ -5544,6 +5604,85 @@ fn matched_forms_reuse_the_validated_field_definitions() {
         .as_ref()
         .expect("the trigger match retains its form definition");
     assert!(Arc::ptr_eq(&validated_fields, matched_fields));
+}
+
+#[cfg(unix)]
+#[test]
+fn form_values_are_sent_to_the_named_broker_action_and_its_result_inserts() {
+    use std::io::{BufRead, Write};
+    use std::os::unix::net::UnixListener;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let directory = std::env::temp_dir().join(format!(
+        "wayexpand-form-action-{}-{nonce}",
+        std::process::id()
+    ));
+    std::fs::create_dir(&directory).unwrap();
+    std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let socket = directory.join("broker.sock");
+    let listener = UnixListener::bind(&socket).unwrap();
+    let broker = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request_line = String::new();
+        std::io::BufReader::new(&stream)
+            .read_line(&mut request_line)
+            .unwrap();
+        let request: wayexpand_broker_client::ActionRequest =
+            serde_json::from_str(&request_line).unwrap();
+        let response = wayexpand_broker_client::ActionResponse::Success(
+            wayexpand_broker_client::ActionOutput {
+                exit_code: 0,
+                stdout: "pod-a\npod-b".into(),
+                stderr: String::new(),
+                stdout_truncated: false,
+                stderr_truncated: false,
+                duration_ms: 2,
+            },
+        );
+        stream
+            .write_all(&serde_json::to_vec(&response).unwrap())
+            .unwrap();
+        stream.write_all(b"\n").unwrap();
+        request
+    });
+    let _environment = FakeFormActionEnvironment::new(directory.clone(), &socket);
+    let config = Config::parse(
+        r#"
+        [[expansion]]
+        trigger = ":pods"
+        replacement = "{{choice:environment=staging|production;required}} {{field:namespace=default|required|max=63}}"
+        [expansion.command]
+        action = "list-pods"
+        timeout_ms = 3000
+        "#,
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    assert!(engine.enable_async_commands());
+    engine.set_form_replacement_guarantee(crate::ReplacementGuarantee::VerifiedSurroundingText);
+    engine.set_current_window(Some(WindowContext {
+        app_id: Some("org.example.Terminal".into()),
+        title: Some("shell".into()),
+        instance_id: Some("terminal-window-1".into()),
+    }));
+    let pending = engine.process_deferred(InputEvent::Text(":pods".into()));
+    assert_eq!(pending.len(), 1);
+    assert_eq!(
+        engine.dispatch_pending_with_policy(pending.into_iter().next().unwrap(), 0),
+        Ok(PendingExpansionDispatch::Queued)
+    );
+    let output = wait_for_completion(&mut engine);
+    assert_eq!(output.len(), 1);
+    assert_eq!(output[0].insert, "pod-a\npod-b");
+    let request = broker.join().unwrap();
+    assert_eq!(request.action_id, "list-pods");
+    assert_eq!(request.parameters.get("environment").unwrap(), "staging");
+    assert_eq!(request.parameters.get("namespace").unwrap(), "default");
+    drop(_environment);
 }
 
 #[test]

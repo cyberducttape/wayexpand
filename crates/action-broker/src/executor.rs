@@ -87,6 +87,13 @@ impl ActionExecutor {
             });
         }
 
+        let arguments = action_config
+            .arguments_for(&request.parameters)
+            .map_err(|reason| ActionError::ActionBlocked {
+                action_id: request.action_id.clone(),
+                reason: format!("action parameters rejected: {reason}"),
+            })?;
+
         if request.timeout_ms == 0 {
             return Err(ActionError::ActionBlocked {
                 action_id: request.action_id.clone(),
@@ -162,7 +169,7 @@ impl ActionExecutor {
             crate::sandbox::configure_command(&mut cmd, ruleset);
         }
 
-        for arg in &action_config.args {
+        for arg in &arguments {
             cmd.arg(arg);
         }
 
@@ -476,10 +483,72 @@ mod tests {
             inherit_env: false,
             env_vars: vec![],
             stdout_capture: true,
+            parameters: std::collections::BTreeMap::new(),
         };
 
         let result = executor.execute(request).await;
         assert!(matches!(result, Err(ActionError::ActionNotFound { .. })));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn parameter_values_are_validated_and_passed_as_single_argv_values() {
+        let mut config = BrokerConfig::default();
+        config.actions.insert(
+            "print-value".into(),
+            ActionConfig {
+                parameters: [(
+                    "value".into(),
+                    crate::config::ActionParameter {
+                        arg_index: 1,
+                        kind: "text".into(),
+                        values: vec![],
+                        max_length: Some(128),
+                    },
+                )]
+                .into_iter()
+                .collect(),
+                sandbox: None,
+                program: "/usr/bin/printf".into(),
+                args: vec!["%s".into(), "placeholder".into()],
+                timeout_ms: 1000,
+                server_env: vec![],
+                client_forward_env: vec![],
+                allow_dangerous_env: false,
+                inherit_env: false,
+                cwd: None,
+                log_output: false,
+                enabled: true,
+                description: None,
+            },
+        );
+        let executor = ActionExecutor::new(&config).unwrap();
+        let value = "hello; $(touch /tmp/wayexpand-param-must-not-execute)";
+        let response = executor
+            .execute(ActionRequest {
+                action_id: "print-value".into(),
+                timeout_ms: 1000,
+                inherit_env: false,
+                env_vars: vec![],
+                stdout_capture: true,
+                parameters: [("value".into(), value.into())].into_iter().collect(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(response.output().unwrap().stdout, value);
+        assert!(!std::path::Path::new("/tmp/wayexpand-param-must-not-execute").exists());
+
+        let rejected = executor
+            .execute(ActionRequest {
+                action_id: "print-value".into(),
+                timeout_ms: 1000,
+                inherit_env: false,
+                env_vars: vec![],
+                stdout_capture: true,
+                parameters: [("wrong".into(), "value".into())].into_iter().collect(),
+            })
+            .await;
+        assert!(matches!(rejected, Err(ActionError::ActionBlocked { .. })));
     }
 
     #[cfg(target_os = "linux")]
@@ -489,6 +558,7 @@ mod tests {
         config.actions.insert(
             "restricted-cat".to_string(),
             ActionConfig {
+                parameters: std::collections::HashMap::new(),
                 sandbox: Some(crate::config::ActionSandbox::default()),
                 program: "/usr/bin/cat".to_string(),
                 args: vec!["/etc/passwd".to_string()],
@@ -512,6 +582,7 @@ mod tests {
                 inherit_env: false,
                 env_vars: vec![],
                 stdout_capture: true,
+                parameters: std::collections::BTreeMap::new(),
             })
             .await;
 
@@ -541,6 +612,7 @@ mod tests {
         config.actions.insert(
             "restricted-touch".to_string(),
             ActionConfig {
+                parameters: std::collections::HashMap::new(),
                 sandbox: Some(crate::config::ActionSandbox {
                     read_paths: vec![],
                     write_paths: vec![directory.to_string_lossy().into_owned()],
@@ -567,6 +639,7 @@ mod tests {
                 inherit_env: false,
                 env_vars: vec![],
                 stdout_capture: true,
+                parameters: std::collections::BTreeMap::new(),
             })
             .await;
         assert!(
@@ -599,6 +672,7 @@ mod tests {
         config.actions.insert(
             "action".to_string(),
             ActionConfig {
+                parameters: std::collections::HashMap::new(),
                 sandbox: None,
                 program: program.to_string_lossy().into_owned(),
                 args: vec![],
@@ -620,6 +694,7 @@ mod tests {
             inherit_env: false,
             env_vars: vec![],
             stdout_capture: true,
+            parameters: std::collections::BTreeMap::new(),
         };
         assert!(executor.execute(request()).await.is_ok());
 
@@ -639,6 +714,7 @@ mod tests {
         config.actions.insert(
             "disabled".to_string(),
             ActionConfig {
+                parameters: std::collections::HashMap::new(),
                 sandbox: None,
                 program: "/bin/echo".to_string(),
                 args: vec![],
@@ -661,6 +737,7 @@ mod tests {
             inherit_env: false,
             env_vars: vec![],
             stdout_capture: true,
+            parameters: std::collections::BTreeMap::new(),
         };
 
         let result = executor.execute(request).await;
@@ -693,6 +770,7 @@ mod tests {
         config.actions.insert(
             "sleeper".to_string(),
             ActionConfig {
+                parameters: std::collections::HashMap::new(),
                 sandbox: None,
                 program: "/bin/sleep".to_string(),
                 args: vec!["60".to_string()],
@@ -715,6 +793,7 @@ mod tests {
             inherit_env: false,
             env_vars: vec![],
             stdout_capture: true,
+            parameters: std::collections::BTreeMap::new(),
         };
 
         let result = executor.execute(request).await;
@@ -735,6 +814,7 @@ mod tests {
         config.actions.insert(
             "holds-output".to_string(),
             ActionConfig {
+                parameters: std::collections::HashMap::new(),
                 sandbox: None,
                 program: "/bin/sh".to_string(),
                 args: vec![
@@ -761,6 +841,7 @@ mod tests {
             inherit_env: false,
             env_vars: vec![],
             stdout_capture: true,
+            parameters: std::collections::BTreeMap::new(),
         };
 
         let result = executor.execute(request).await;
@@ -789,6 +870,7 @@ mod tests {
         config.actions.insert(
             "echo".to_string(),
             ActionConfig {
+                parameters: std::collections::HashMap::new(),
                 sandbox: None,
                 program: "/bin/echo".to_string(),
                 args: vec!["hi".to_string()],
@@ -812,6 +894,7 @@ mod tests {
                 inherit_env: false,
                 env_vars: vec![],
                 stdout_capture: true,
+                parameters: std::collections::BTreeMap::new(),
             },
             500,
         );
@@ -825,6 +908,7 @@ mod tests {
         config.actions.insert(
             "stream".to_string(),
             ActionConfig {
+                parameters: std::collections::HashMap::new(),
                 sandbox: None,
                 program: "/bin/sh".to_string(),
                 args: vec!["-c".to_string(), "while :; do printf x; done".to_string()],
@@ -856,6 +940,7 @@ mod tests {
                     inherit_env: false,
                     env_vars: vec![],
                     stdout_capture: true,
+                    parameters: std::collections::BTreeMap::new(),
                 },
                 shutdown,
             )
@@ -883,6 +968,7 @@ mod tests {
         config.actions.insert(
             "report-stdout".to_string(),
             ActionConfig {
+                parameters: std::collections::HashMap::new(),
                 sandbox: None,
                 program: "/bin/sh".to_string(),
                 args: vec![
@@ -912,6 +998,7 @@ mod tests {
                 inherit_env: false,
                 env_vars: vec![],
                 stdout_capture: false,
+                parameters: std::collections::BTreeMap::new(),
             })
             .await;
         let targets = std::fs::read_to_string(&target_file).unwrap_or_default();
@@ -925,6 +1012,7 @@ mod tests {
         config.actions.insert(
             "true".to_string(),
             ActionConfig {
+                parameters: std::collections::HashMap::new(),
                 sandbox: None,
                 program: "/bin/true".to_string(),
                 args: vec![],
@@ -949,6 +1037,7 @@ mod tests {
             inherit_env: false,
             env_vars: vec![],
             stdout_capture: true,
+            parameters: std::collections::BTreeMap::new(),
         }
     }
 
@@ -1009,6 +1098,7 @@ mod tests {
         config.actions.insert(
             "print-env".to_string(),
             ActionConfig {
+                parameters: std::collections::HashMap::new(),
                 sandbox: None,
                 program: "/usr/bin/env".to_string(),
                 args: vec![],
@@ -1034,6 +1124,7 @@ mod tests {
                     "LD_PRELOAD=/should-not-pass.so".to_string(),
                 ],
                 stdout_capture: true,
+                parameters: std::collections::BTreeMap::new(),
             })
             .await
             .expect("environment command should succeed");
@@ -1053,6 +1144,7 @@ mod tests {
         config.actions.insert(
             "print-env".to_string(),
             ActionConfig {
+                parameters: std::collections::HashMap::new(),
                 sandbox: None,
                 program: "/usr/bin/env".to_string(),
                 args: vec![],
@@ -1078,6 +1170,7 @@ mod tests {
                     "CLIENT_VALUE=accepted".to_string(),
                 ],
                 stdout_capture: true,
+                parameters: std::collections::BTreeMap::new(),
             })
             .await
             .expect("environment command should succeed");
@@ -1097,6 +1190,7 @@ mod tests {
         config.actions.insert(
             "noisy".to_string(),
             ActionConfig {
+                parameters: std::collections::HashMap::new(),
                 sandbox: None,
                 program: "/bin/sh".to_string(),
                 args: vec!["-c".to_string(), "yes x | head -c 20971520".to_string()],
@@ -1119,6 +1213,7 @@ mod tests {
                 inherit_env: false,
                 env_vars: vec![],
                 stdout_capture: true,
+                parameters: std::collections::BTreeMap::new(),
             })
             .await
             .expect("large output should be drained without a timeout");

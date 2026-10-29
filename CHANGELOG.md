@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Allow required snippet forms to drive named Action Broker actions through
+  strict per-action enum/text schemas. The broker validates field names and
+  values, replaces only configured argv slots, bounds submitted data, and
+  refuses interpreter programs for parameterized actions; no shell
+  interpolation is used. Add protocol compatibility and end-to-end form/action
+  tests.
 - Add local pack update review with `wayexpand pack diff <id> <directory>` and
   rollback with `wayexpand pack rollback <id>`. Diffs show snippet changes and
   command/hotkey/capability disclosures; rollback validates the stored pack,

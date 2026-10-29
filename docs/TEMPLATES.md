@@ -184,6 +184,12 @@ Resolution: {{field:resolution|required|min=3|max=4000}}
 {{cursor}}"""
 ```
 
+Required, explicitly named form fields can also feed a named Action Broker
+action. Each field must have a matching administrator-defined parameter
+schema; see [parameterized actions](ACTION_BROKER_ARCHITECTURE.md#parameterized-actions-from-forms).
+Text is passed as a single argv value and is never interpolated into shell
+syntax. The broker rejects values outside its schema.
+
 The GUI blocks insertion until all required values and constraints are valid.
 Date values are checked as real calendar dates in `YYYY-MM-DD` format.
 

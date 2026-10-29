@@ -83,8 +83,19 @@ pub(super) fn run_command_with_shutdown(
     command: &CommandConfig,
     shutdown: Option<&AtomicBool>,
 ) -> Result<String, CommandError> {
+    run_command_with_parameters(command, &std::collections::HashMap::new(), shutdown)
+}
+
+pub(super) fn run_command_with_parameters(
+    command: &CommandConfig,
+    parameters: &std::collections::HashMap<String, String>,
+    shutdown: Option<&AtomicBool>,
+) -> Result<String, CommandError> {
     if let Some(action_id) = &command.action {
-        return run_broker_action(action_id, command, shutdown);
+        return run_broker_action(action_id, command, parameters, shutdown);
+    }
+    if !parameters.is_empty() {
+        return Err(CommandError::PolicyBlocked);
     }
     #[cfg(unix)]
     {
@@ -117,6 +128,7 @@ pub(super) fn run_command_with_shutdown(
 fn run_broker_action(
     action_id: &str,
     command: &CommandConfig,
+    parameters: &std::collections::HashMap<String, String>,
     shutdown: Option<&AtomicBool>,
 ) -> Result<String, CommandError> {
     let deadline = Instant::now() + Duration::from_millis(command.timeout_ms);
@@ -164,6 +176,10 @@ fn run_broker_action(
             inherit_env: false,
             env_vars,
             stdout_capture: true,
+            parameters: parameters
+                .iter()
+                .map(|(name, value)| (name.clone(), value.clone()))
+                .collect(),
         })
         .map_err(|error| broker_command_error(BrokerOperation::SendRequest, error))?;
     match client
@@ -815,9 +831,62 @@ pub(super) fn run_form_helper(
     Ok(checked)
 }
 
+pub(super) fn normalize_form_action_parameters(
+    fields: &std::collections::HashMap<String, String>,
+) -> Result<std::collections::HashMap<String, String>, CommandError> {
+    let mut normalized = std::collections::HashMap::with_capacity(fields.len());
+    for (field_key, value) in fields {
+        let Some((kind, name)) = field_key.split_once(':') else {
+            return Err(CommandError::InvalidFormOutput);
+        };
+        if !matches!(kind, "field" | "date" | "choice")
+            || name.is_empty()
+            || name.len() > 32
+            || !name.as_bytes()[0].is_ascii_lowercase()
+            || !name
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+            || normalized.insert(name.to_owned(), value.clone()).is_some()
+        {
+            return Err(CommandError::InvalidFormOutput);
+        }
+    }
+    Ok(normalized)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn form_action_parameters_drop_template_kind_prefixes() {
+        let fields = [
+            ("field:namespace".into(), "platform".into()),
+            ("choice:environment".into(), "staging".into()),
+            ("date:incident_date".into(), "2026-10-28".into()),
+        ]
+        .into_iter()
+        .collect();
+        let normalized = normalize_form_action_parameters(&fields).unwrap();
+        assert_eq!(normalized.get("namespace").unwrap(), "platform");
+        assert_eq!(normalized.get("environment").unwrap(), "staging");
+        assert_eq!(normalized.get("incident_date").unwrap(), "2026-10-28");
+    }
+
+    #[test]
+    fn form_action_parameters_reject_ambiguous_or_unsafe_names() {
+        let duplicate = [
+            ("field:host".into(), "one".into()),
+            ("date:host".into(), "two".into()),
+        ]
+        .into_iter()
+        .collect();
+        assert!(normalize_form_action_parameters(&duplicate).is_err());
+        let invalid = [("choice:prod|stage".into(), "prod".into())]
+            .into_iter()
+            .collect();
+        assert!(normalize_form_action_parameters(&invalid).is_err());
+    }
 
     fn output(
         stdout_truncated: bool,

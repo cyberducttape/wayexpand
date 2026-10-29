@@ -1,10 +1,12 @@
 //! Stable wire types shared by the WayExpand daemon and Action Broker.
 
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use std::{collections::BTreeMap, time::Duration};
 
 pub const MAX_OUTPUT_BYTES: usize = 128 * 1024;
 pub const MAX_ACTION_ID_BYTES: usize = 256;
+pub const MAX_ACTION_PARAMETERS: usize = 16;
+pub const MAX_ACTION_PARAMETER_BYTES: usize = 4096;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ActionRequest {
@@ -13,11 +15,47 @@ pub struct ActionRequest {
     pub inherit_env: bool,
     pub env_vars: Vec<String>,
     pub stdout_capture: bool,
+    /// User-supplied values validated against the broker's action schema.
+    /// Older clients omit this field and remain compatible with actions that
+    /// do not declare parameters.
+    #[serde(default)]
+    pub parameters: BTreeMap<String, String>,
 }
 
 impl ActionRequest {
     pub fn timeout(&self) -> Duration {
         Duration::from_millis(self.timeout_ms)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn action_requests_without_parameters_remain_wire_compatible() {
+        let request: ActionRequest = serde_json::from_str(
+            r#"{"action_id":"report","timeout_ms":1000,"inherit_env":false,"env_vars":[],"stdout_capture":true}"#,
+        )
+        .unwrap();
+        assert!(request.parameters.is_empty());
+    }
+
+    #[test]
+    fn parameterized_requests_round_trip_as_plain_data() {
+        let request = ActionRequest {
+            action_id: "list-pods".into(),
+            timeout_ms: 1000,
+            inherit_env: false,
+            env_vars: vec![],
+            stdout_capture: true,
+            parameters: [("namespace".into(), "prod; $(echo data)".into())]
+                .into_iter()
+                .collect(),
+        };
+        let encoded = serde_json::to_vec(&request).unwrap();
+        let decoded: ActionRequest = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(decoded.parameters, request.parameters);
     }
 }
 

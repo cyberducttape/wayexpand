@@ -21,6 +21,11 @@ pub struct ActionConfig {
     #[serde(default)]
     pub args: Vec<String>,
 
+    /// Optional strict parameter schema. Each parameter replaces exactly one
+    /// configured argv slot; values are never interpolated into another token.
+    #[serde(default)]
+    pub parameters: HashMap<String, ActionParameter>,
+
     /// Maximum execution time in milliseconds.
     #[serde(default = "default_timeout_ms")]
     pub timeout_ms: u64,
@@ -69,6 +74,65 @@ pub struct ActionConfig {
     /// action is refused unless the running kernel can enforce the profile.
     #[serde(default)]
     pub sandbox: Option<ActionSandbox>,
+}
+
+/// Input contract for one named broker action parameter.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ActionParameter {
+    /// Index in `ActionConfig.args` that this value replaces.
+    pub arg_index: usize,
+    /// `enum` requires an exact allowlisted value; `text` accepts bounded
+    /// UTF-8 without control characters, with a broker-configured maximum.
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(default)]
+    pub values: Vec<String>,
+    #[serde(default)]
+    pub max_length: Option<usize>,
+}
+
+impl ActionParameter {
+    fn validate(&self) -> Result<(), String> {
+        match self.kind.as_str() {
+            "enum" => {
+                if self.values.len() < 2
+                    || self.values.len() > 128
+                    || self.values.iter().any(|value| {
+                        value.is_empty()
+                            || value.chars().count() > 256
+                            || value.chars().any(char::is_control)
+                    })
+                    || self.max_length.is_some()
+                {
+                    return Err("enum parameters need 2..=128 safe values and no max_length".into());
+                }
+            }
+            "text" => {
+                if !self.values.is_empty()
+                    || !self
+                        .max_length
+                        .is_some_and(|length| (1..=4096).contains(&length))
+                {
+                    return Err("text parameters need max_length in 1..=4096 and no values".into());
+                }
+            }
+            _ => return Err("parameter type must be `enum` or `text`".into()),
+        }
+        Ok(())
+    }
+
+    fn accepts(&self, value: &str) -> bool {
+        match self.kind.as_str() {
+            "enum" => self.values.iter().any(|allowed| allowed == value),
+            "text" => self.max_length.is_some_and(|maximum| {
+                !value.is_empty()
+                    && value.chars().count() <= maximum
+                    && !value.chars().any(char::is_control)
+            }),
+            _ => false,
+        }
+    }
 }
 
 /// Per-action filesystem grants. Paths are canonicalized when the broker
@@ -130,8 +194,37 @@ impl ActionConfig {
         if self.program.is_empty() || self.program.contains('\0') {
             return Err("program cannot be empty".to_string());
         }
+        if !self.parameters.is_empty() && is_interpreter_program(&self.program) {
+            return Err(
+                "parameterized actions cannot invoke a shell or language interpreter".into(),
+            );
+        }
         if self.args.iter().any(|argument| argument.contains('\0')) {
             return Err("args cannot contain NUL characters".to_string());
+        }
+        if self.parameters.len() > wayexpand_broker_protocol::MAX_ACTION_PARAMETERS {
+            return Err("too many action parameters".into());
+        }
+        let mut occupied_slots = std::collections::HashSet::new();
+        for (name, parameter) in &self.parameters {
+            if name.is_empty()
+                || name.len() > 32
+                || !name.as_bytes()[0].is_ascii_lowercase()
+                || !name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+            {
+                return Err(format!("invalid action parameter name `{name}`"));
+            }
+            if parameter.arg_index >= self.args.len() || !occupied_slots.insert(parameter.arg_index)
+            {
+                return Err(format!(
+                    "parameter `{name}` has an invalid or duplicate arg_index"
+                ));
+            }
+            parameter
+                .validate()
+                .map_err(|reason| format!("parameter `{name}`: {reason}"))?;
         }
         if self.server_env.len() > 64 || self.client_forward_env.len() > 64 {
             return Err("environment allowlist is too large".to_string());
@@ -160,6 +253,67 @@ impl ActionConfig {
         }
         Ok(())
     }
+
+    /// Validate submitted values and return the fixed argv with configured
+    /// slots replaced. This performs no shell parsing or string interpolation.
+    pub fn arguments_for(
+        &self,
+        values: &std::collections::BTreeMap<String, String>,
+    ) -> Result<Vec<String>, String> {
+        let submitted_bytes = values
+            .iter()
+            .map(|(name, value)| name.len().saturating_add(value.len()))
+            .sum::<usize>();
+        if values.len() > wayexpand_broker_protocol::MAX_ACTION_PARAMETERS
+            || submitted_bytes > wayexpand_broker_protocol::MAX_ACTION_PARAMETER_BYTES
+            || values.len() != self.parameters.len()
+            || values
+                .keys()
+                .any(|name| !self.parameters.contains_key(name))
+        {
+            return Err("submitted parameter names do not match the action schema".into());
+        }
+        let mut arguments = self.args.clone();
+        for (name, schema) in &self.parameters {
+            let value = values
+                .get(name)
+                .ok_or_else(|| format!("required parameter `{name}` is missing"))?;
+            if !schema.accepts(value) {
+                return Err(format!(
+                    "parameter `{name}` does not satisfy its configured schema"
+                ));
+            }
+            arguments[schema.arg_index] = value.clone();
+        }
+        Ok(arguments)
+    }
+}
+
+fn is_interpreter_program(program: &str) -> bool {
+    let basename = std::path::Path::new(program)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    matches!(
+        basename.as_str(),
+        "sh" | "bash"
+            | "dash"
+            | "zsh"
+            | "fish"
+            | "ksh"
+            | "csh"
+            | "tcsh"
+            | "env"
+            | "python"
+            | "python2"
+            | "python3"
+            | "perl"
+            | "ruby"
+            | "node"
+            | "php"
+            | "lua"
+    ) || basename.starts_with("python3.")
 }
 
 fn is_dangerous_environment_name(name: &str) -> bool {
@@ -360,7 +514,7 @@ impl BrokerConfig {
                 }
             }
         }
-        Ok(())
+        self.validate()
     }
 }
 
@@ -371,6 +525,7 @@ mod tests {
     #[test]
     fn action_config_validation() {
         let config = ActionConfig {
+            parameters: std::collections::HashMap::new(),
             sandbox: None,
             program: "/usr/bin/kubectl".to_string(),
             args: vec!["get".to_string()],
@@ -388,8 +543,112 @@ mod tests {
         assert!(config.is_enabled());
     }
 
+    #[test]
+    fn action_parameter_schema_replaces_only_fixed_argument_slots() {
+        let mut action = ActionConfig {
+            parameters: std::collections::HashMap::new(),
+            sandbox: None,
+            program: "/usr/bin/kubectl".to_string(),
+            args: vec!["get".into(), "pods".into(), "production".into()],
+            timeout_ms: 5000,
+            server_env: vec![],
+            client_forward_env: vec![],
+            allow_dangerous_env: false,
+            inherit_env: false,
+            cwd: None,
+            log_output: false,
+            enabled: true,
+            description: None,
+        };
+        action.parameters.insert(
+            "environment".into(),
+            ActionParameter {
+                arg_index: 2,
+                kind: "enum".into(),
+                values: vec!["production".into(), "staging".into()],
+                max_length: None,
+            },
+        );
+        assert!(action.validate().is_ok());
+        let submitted = [("environment".into(), "staging".into())]
+            .into_iter()
+            .collect();
+        assert_eq!(
+            action.arguments_for(&submitted).unwrap(),
+            ["get", "pods", "staging"]
+        );
+        let rejected = [("environment".into(), "production; rm -rf /".into())]
+            .into_iter()
+            .collect();
+        assert!(action.arguments_for(&rejected).is_err());
+        let unknown = [("other".into(), "staging".into())].into_iter().collect();
+        assert!(action.arguments_for(&unknown).is_err());
+    }
+
+    #[test]
+    fn parameter_schema_rejects_duplicate_and_out_of_range_argument_slots() {
+        let mut action = ActionConfig {
+            parameters: std::collections::HashMap::new(),
+            sandbox: None,
+            program: "/usr/bin/true".into(),
+            args: vec!["fixed".into()],
+            timeout_ms: 5000,
+            server_env: vec![],
+            client_forward_env: vec![],
+            allow_dangerous_env: false,
+            inherit_env: false,
+            cwd: None,
+            log_output: false,
+            enabled: true,
+            description: None,
+        };
+        let schema = ActionParameter {
+            arg_index: 0,
+            kind: "text".into(),
+            values: vec![],
+            max_length: Some(80),
+        };
+        action.parameters.insert("first".into(), schema.clone());
+        action.parameters.insert("second".into(), schema.clone());
+        assert!(action.validate().is_err());
+        action.parameters.remove("second");
+        action.parameters.get_mut("first").unwrap().arg_index = 1;
+        assert!(action.validate().is_err());
+    }
+
+    #[test]
+    fn parameterized_actions_cannot_launch_shells_or_interpreters() {
+        let action = ActionConfig {
+            parameters: [(
+                "value".into(),
+                ActionParameter {
+                    arg_index: 0,
+                    kind: "text".into(),
+                    values: vec![],
+                    max_length: Some(20),
+                },
+            )]
+            .into_iter()
+            .collect(),
+            sandbox: None,
+            program: "/bin/sh".into(),
+            args: vec!["-c".into()],
+            timeout_ms: 1000,
+            server_env: vec![],
+            client_forward_env: vec![],
+            allow_dangerous_env: false,
+            inherit_env: false,
+            cwd: None,
+            log_output: false,
+            enabled: true,
+            description: None,
+        };
+        assert!(action.validate().is_err());
+    }
+
     fn config_with_timeout(timeout_ms: u64) -> ActionConfig {
         ActionConfig {
+            parameters: std::collections::HashMap::new(),
             sandbox: None,
             program: "/bin/true".to_string(),
             args: vec![],
@@ -429,6 +688,7 @@ mod tests {
     #[test]
     fn action_config_empty_program() {
         let config = ActionConfig {
+            parameters: std::collections::HashMap::new(),
             sandbox: None,
             program: String::new(),
             args: vec![],
@@ -448,6 +708,7 @@ mod tests {
     #[test]
     fn action_config_rejects_process_argument_and_environment_nuls() {
         let mut config = ActionConfig {
+            parameters: std::collections::HashMap::new(),
             sandbox: None,
             program: "/usr/bin/echo".to_string(),
             args: vec!["ok\0bad".to_string()],
@@ -474,6 +735,7 @@ mod tests {
     #[test]
     fn action_config_rejects_dangerous_environment_by_default() {
         let mut config = ActionConfig {
+            parameters: std::collections::HashMap::new(),
             sandbox: None,
             program: "/usr/bin/echo".to_string(),
             args: vec![],
@@ -507,6 +769,33 @@ timeout_ms = 5000
         let config = BrokerConfig::from_toml(toml_str).unwrap();
         assert!(config.require_absolute_paths);
         assert!(config.get_action("test_action").is_some());
+    }
+
+    #[test]
+    fn broker_config_parses_parameterized_argument_slots() {
+        let config = BrokerConfig::from_toml(
+            r#"
+require_absolute_paths = false
+
+[actions."cluster-list"]
+program = "/usr/bin/echo"
+args = ["--namespace", "default"]
+
+[actions."cluster-list".parameters.namespace]
+type = "text"
+arg_index = 1
+max_length = 63
+"#,
+        )
+        .unwrap();
+        let action = config.get_action("cluster-list").unwrap();
+        let values = [("namespace".into(), "platform".into())]
+            .into_iter()
+            .collect();
+        assert_eq!(
+            action.arguments_for(&values).unwrap(),
+            ["--namespace", "platform"]
+        );
     }
 
     #[test]
@@ -557,6 +846,7 @@ program = "echo"
         config.actions.insert(
             "test".to_string(),
             ActionConfig {
+                parameters: std::collections::HashMap::new(),
                 sandbox: None,
                 program: "echo".to_string(), // Not absolute
                 args: vec![],
@@ -707,6 +997,7 @@ enabled = true
             actions: HashMap::from([(
                 "self".to_string(),
                 ActionConfig {
+                    parameters: std::collections::HashMap::new(),
                     sandbox: None,
                     program: executable.to_string_lossy().into_owned(),
                     args: vec![],
@@ -738,6 +1029,7 @@ enabled = true
             actions: HashMap::from([(
                 "missing".to_string(),
                 ActionConfig {
+                    parameters: std::collections::HashMap::new(),
                     sandbox: None,
                     program: "/definitely/missing/wayexpand-action".to_string(),
                     args: vec![],
@@ -760,6 +1052,7 @@ enabled = true
             actions: HashMap::from([(
                 "directory".to_string(),
                 ActionConfig {
+                    parameters: std::collections::HashMap::new(),
                     sandbox: None,
                     program: std::env::current_exe()
                         .unwrap()

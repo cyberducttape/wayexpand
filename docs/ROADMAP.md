@@ -224,8 +224,9 @@ Still open:
 - [ ] A GUI editor for form fields.
 - [ ] Richer forms. Shipped: required fields, length limits, choice defaults
       and date fields. Open: clipboard defaults, conditional fields, a date
-      picker, per-field history, and submission into parameterized broker
-      actions.
+      picker, and per-field history. Required fields now drive named broker
+      actions with enum/text schemas and fixed argv slots; a GUI broker-policy
+      schema editor and richer field-to-parameter mapping remain open.
 - [ ] Signed team-pack registry: local `pack diff`, staged `pack install`,
       `pack rollback`, and `pack verify` now work against signer files. Still
       open: `pack search`/`pack update`, organization/private registry
@@ -233,10 +234,10 @@ Still open:
 - [ ] Repository-backed snippet libraries (`wayexpand library add <git url>`)
       building on Git sync: signed-commit verification, branch pinning,
       reviewed/approved updates, diff, rollback, and audit.
-- [ ] Parameterized broker actions: a per-action parameter schema (for
-      example `type = "enum"` with fixed values) that validates every input
-      before it is placed in a fixed argument slot, so forms can drive
-      allowlisted, shell-free commands. No free-form interpolation.
+- [x] Parameterized broker actions validate enum and bounded text values
+      against a per-action schema, replace complete fixed argv slots, and
+      accept values from required named forms. Parameterized actions refuse
+      shell and language-interpreter executables; no free-form interpolation.
 - [ ] Runtime keyboard-layout updates for evdev capture (today a layout change
       needs a daemon restart).
 - [ ] Real external IME/preedit cooperation (see section 6).

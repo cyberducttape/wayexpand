@@ -662,16 +662,20 @@ impl ExpansionEngine {
             }
             return Err(CommandError::StaleInput);
         }
-        if let Some(fields) = pending.form.clone() {
-            return self.queue_form(pending, fields, additional_max_size);
-        }
         if pending
             .command
             .as_ref()
             .is_some_and(|command| self.command_execution_disabled(command))
         {
-            self.restore_deferred_match(&matched_text);
+            if pending.command.is_some() {
+                self.restore_failed_command_match(&matched_text);
+            } else {
+                self.restore_deferred_match(&matched_text);
+            }
             return Err(CommandError::PolicyBlocked);
+        }
+        if let Some(fields) = pending.form.clone() {
+            return self.queue_form(pending, fields, additional_max_size);
         }
 
         let Some(command) = pending.command.as_ref() else {
@@ -757,11 +761,13 @@ impl ExpansionEngine {
             self.restore_deferred_match(&matched_text);
             return Err(CommandError::WorkerUnavailable);
         };
+        let command_backed = pending.command.is_some();
         let job = AsyncCommandJob::Form {
             config_index: pending.config_index,
             additional_max_size,
             template: pending.template_text,
             fields,
+            command: pending.command.clone(),
             context: self.template_context(),
             title: pending.trigger.clone(),
             origin,
@@ -772,7 +778,7 @@ impl ExpansionEngine {
                 insert: String::new(),
                 cursor_offset: None,
                 reinsert_after: pending.reinsert_after,
-                command_backed: false,
+                command_backed,
                 undoable: pending.undoable,
                 folded_suffix_chars: 0,
             },

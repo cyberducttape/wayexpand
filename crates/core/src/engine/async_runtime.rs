@@ -186,6 +186,7 @@ impl AsyncCommandRuntime {
                                     additional_max_size,
                                     template,
                                     fields,
+                                    command,
                                     mut context,
                                     title,
                                     origin,
@@ -198,15 +199,28 @@ impl AsyncCommandRuntime {
                                         &command_shutdown,
                                     ) {
                                         Ok(values) => {
-                                            context.fields = Arc::new(values);
-                                            match crate::render_template_with_cursor(
-                                                &template, &context,
-                                            ) {
-                                                Ok((text, cursor_offset)) => {
-                                                    result.cursor_offset = cursor_offset;
-                                                    Ok(text)
+                                            if let Some(command) = &command {
+                                                match super::command_runtime::normalize_form_action_parameters(&values) {
+                                                    Ok(parameters) => super::command_runtime::run_command_with_parameters(
+                                                        command,
+                                                        &parameters,
+                                                        Some(&command_shutdown),
+                                                    ),
+                                                    Err(error) => Err(error),
                                                 }
-                                                Err(_) => Err(CommandError::TemplateRenderFailed),
+                                            } else {
+                                                context.fields = Arc::new(values);
+                                                match crate::render_template_with_cursor(
+                                                    &template, &context,
+                                                ) {
+                                                    Ok((text, cursor_offset)) => {
+                                                        result.cursor_offset = cursor_offset;
+                                                        Ok(text)
+                                                    }
+                                                    Err(_) => {
+                                                        Err(CommandError::TemplateRenderFailed)
+                                                    }
+                                                }
                                             }
                                         }
                                         Err(error) => Err(error),
@@ -421,6 +435,7 @@ pub(super) enum AsyncCommandJob {
         additional_max_size: usize,
         template: String,
         fields: Arc<Vec<crate::FormField>>,
+        command: Option<CommandConfig>,
         context: crate::TemplateContext,
         title: String,
         origin: FormOrigin,

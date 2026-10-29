@@ -110,6 +110,7 @@ async fn broker_client_server_echo_request_response() {
         inherit_env: false,
         env_vars: vec![],
         stdout_capture: true,
+        parameters: std::collections::BTreeMap::new(),
     };
     client.send_request(&request).expect("Failed to send");
 
@@ -186,6 +187,7 @@ timeout_ms = 60000
             inherit_env: false,
             env_vars: vec![],
             stdout_capture: true,
+            parameters: std::collections::BTreeMap::new(),
         })
         .expect("submit continuous-output action");
     let action_deadline = Instant::now() + Duration::from_secs(5);
@@ -246,6 +248,7 @@ fn broker_config_validation() {
     config.actions.insert(
         "valid".to_string(),
         ActionConfig {
+            parameters: std::collections::HashMap::new(),
             sandbox: None,
             program: "/usr/bin/echo".to_string(),
             args: vec!["hello".to_string()],
@@ -277,6 +280,7 @@ fn broker_config_rejects_relative_paths_when_required() {
     config.actions.insert(
         "relative".to_string(),
         ActionConfig {
+            parameters: std::collections::HashMap::new(),
             sandbox: None,
             program: "echo".to_string(), // Not absolute
             args: vec![],
@@ -332,6 +336,7 @@ async fn action_request_with_environment_variables() {
             "PATH=/usr/bin:/bin".to_string(),
         ],
         stdout_capture: true,
+        parameters: std::collections::BTreeMap::new(),
     };
 
     // Should serialize/deserialize correctly

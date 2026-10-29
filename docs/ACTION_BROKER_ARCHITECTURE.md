@@ -59,6 +59,48 @@ timeout_ms = 3000
 cwd = "/home/stephan/reports"
 ```
 
+## Parameterized actions from forms
+
+Named broker actions can also receive values from a snippet form. The form
+field names must match the broker parameter names, and the broker validates
+them again before starting the process:
+
+```toml
+# User's expansions.toml
+[[expansion]]
+trigger = ":pods"
+replacement = "{{choice:environment=staging|production;required}} {{field:namespace=default|required|max=63}}"
+
+[expansion.command]
+action = "list-pods"
+```
+
+```toml
+# broker.toml
+[actions."list-pods"]
+program = "/usr/bin/kubectl"
+args = ["get", "pods", "--namespace", "default", "--context", "staging"]
+
+[actions."list-pods".parameters.namespace]
+type = "text"
+arg_index = 3
+max_length = 63
+
+[actions."list-pods".parameters.environment]
+type = "enum"
+arg_index = 5
+values = ["staging", "production"]
+```
+
+`arg_index` replaces one complete, fixed argv element. The broker never parses
+or interpolates submitted text as shell syntax. Enum values must match exactly;
+text values have an administrator-set length limit and cannot contain control
+characters. Each field must be marked `required`, and every submitted form
+field must have exactly one schema entry. Parameter values are bounded and are
+not written to audit records. Parameterized actions cannot name a shell or
+language interpreter as their program; the broker also canonicalizes and
+revalidates the program before launch.
+
 `server_env` values are read from the broker's environment and cannot be
 overridden by an IPC client. Use `client_forward_env` only for values that a
 same-UID client is explicitly allowed to provide. Loader and interpreter
