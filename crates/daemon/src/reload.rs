@@ -950,6 +950,35 @@ mod tests {
     }
 
     #[test]
+    fn profile_path_switch_discards_an_obsolete_in_flight_library() {
+        let (directory, base_path) = isolated_temporary_config();
+        let profiles = directory.join("profiles");
+        fs::create_dir(&profiles).unwrap();
+        fs::set_permissions(&profiles, fs::Permissions::from_mode(0o700)).unwrap();
+        let obsolete = profiles.join("work.toml");
+        let selected = profiles.join("support.toml");
+        write_config(&base_path, &config_text("base"));
+        write_config(&obsolete, &config_text("work"));
+        write_config(&selected, &config_text("support"));
+        let mut config =
+            ReloadableConfig::load_with_policy(&base_path, OrganizationPolicy::default()).unwrap();
+
+        config.switch_path(obsolete);
+        config.switch_path(selected.clone());
+        config.finish_pending_reload();
+
+        assert_eq!(config.path(), selected);
+        assert!(config.healthy());
+        let result = config
+            .engine
+            .process(InputEvent::Text(":x".into()))
+            .pop()
+            .unwrap();
+        assert_eq!(result.insert, "support");
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn non_fleet_load_applies_administrator_absolute_command_policy() {
         let path = temporary_config();
         write_config(

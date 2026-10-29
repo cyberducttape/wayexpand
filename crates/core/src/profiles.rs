@@ -194,3 +194,77 @@ fn validate_profile_directory(path: &Path) -> Result<(), ProfileAssignmentsError
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::ProfileAssignments;
+    use std::{
+        collections::BTreeMap,
+        os::unix::fs::{symlink, MetadataExt, PermissionsExt},
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    fn private_directory() -> PathBuf {
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-profile-assignments-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+        directory
+    }
+
+    #[test]
+    fn assignments_normalize_ids_and_round_trip_with_private_permissions() {
+        let directory = private_directory();
+        let path = directory.join("applications.toml");
+        let mut assignments = ProfileAssignments {
+            applications: BTreeMap::from([("org.KDE.Konsole".into(), "work".into())]),
+        };
+        assignments.validate_and_normalize().unwrap();
+        assert_eq!(
+            assignments.profile_for_app(Some("ORG.KDE.KONSOLE")),
+            Some("work")
+        );
+        assignments.save(&path).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().mode() & 0o777, 0o600);
+        assert_eq!(ProfileAssignments::load(&path).unwrap(), assignments);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn assignments_reject_patterns_bad_profiles_and_symlink_files() {
+        let mut assignments = ProfileAssignments {
+            applications: BTreeMap::from([("org.*".into(), "work".into())]),
+        };
+        assert!(assignments.validate_and_normalize().is_err());
+        let mut assignments = ProfileAssignments {
+            applications: BTreeMap::from([("org.example.app".into(), "../work".into())]),
+        };
+        assert!(assignments.validate_and_normalize().is_err());
+
+        let directory = private_directory();
+        let target = directory.join("target.toml");
+        std::fs::write(&target, "[applications]\n\"org.example.app\" = \"work\"\n").unwrap();
+        let path = directory.join("applications.toml");
+        symlink(target, &path).unwrap();
+        assert!(ProfileAssignments::load(&path).is_err());
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn missing_assignments_are_empty_but_missing_profile_directory_is_safe() {
+        let directory = private_directory();
+        let missing = directory.join("profiles").join("applications.toml");
+        assert_eq!(
+            ProfileAssignments::load(&missing).unwrap(),
+            ProfileAssignments::default()
+        );
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+}

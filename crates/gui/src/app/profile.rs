@@ -182,13 +182,15 @@ mod tests {
     #[test]
     fn parses_cli_profile_rows_and_keeps_invalid_entries_disabled() {
         let (profiles, active, assignments) = parse_profile_list(
-            "* personal [valid]\n  work [valid]\n  broken [invalid]\nNo profiles yet",
+            "* personal [valid]\n  work [valid]\n  broken [invalid]\n  org.kde.konsole -> work\nNo profiles yet",
         );
         assert_eq!(active.as_deref(), Some("personal"));
         assert_eq!(profiles.len(), 3);
         assert!(profiles[0].valid && profiles[1].valid);
         assert!(!profiles[2].valid);
         assert_eq!(profiles[2].name, "broken");
-        assert!(assignments.is_empty());
+        assert_eq!(assignments.len(), 1);
+        assert_eq!(assignments[0].app_id, "org.kde.konsole");
+        assert_eq!(assignments[0].profile, "work");
     }
 }
