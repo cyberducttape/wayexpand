@@ -411,6 +411,31 @@ impl GuiApp {
         if let Some((trust_label, trust_color)) = route_trust {
             theme::pill(ui, trust_label, trust_color, theme::tint(trust_color, 34));
         }
+        if let Some(count) = self
+            .daemon_capabilities
+            .as_ref()
+            .and_then(|capabilities| capabilities.output_uncertain_total)
+            .filter(|count| *count > 0)
+        {
+            let notice = self.strings.output_uncertain_notice(count);
+            if ui
+                .add(
+                    egui::Button::new(
+                        RichText::new(self.strings.output_uncertain_badge(count))
+                            .color(palette.danger),
+                    )
+                    .fill(theme::tint(palette.danger, 42))
+                    .stroke(egui::Stroke::NONE)
+                    .corner_radius(egui::CornerRadius::same(255))
+                    .min_size(egui::vec2(0.0, 30.0)),
+                )
+                .on_hover_text(notice)
+                .clicked()
+            {
+                self.diagnostics_open = true;
+                self.refresh_diagnostics(true);
+            }
+        }
         // Whether replacing a trigger is verified against the field's text or
         // relies on keystrokes, shown wherever the route is visible.
         if let Some(capabilities) = self.daemon_capabilities.as_ref() {

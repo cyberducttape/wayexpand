@@ -118,6 +118,14 @@ impl Strings {
         }
     }
 
+    pub fn output_uncertain_badge(&self, count: u64) -> String {
+        match self.lang {
+            Language::English => format!("Partial output · {count}"),
+            Language::German => format!("Teilausgabe · {count}"),
+            Language::Indonesian => format!("Keluaran parsial · {count}"),
+        }
+    }
+
     pub fn keystroke_limit(&self) -> &'static str {
         match self.lang {
             Language::English => "Longest keystroke-typed replacement",

@@ -1686,6 +1686,7 @@ fn diagnostics_accessibly_explains_keysym_fallback_and_separates_latency() {
     app.daemon_capabilities = Some(runtime::DaemonCapabilities {
         injection_mode: Some("libei keysym fallback"),
         replacement_assurance: Some(runtime::ReplacementAssurance::FocusTrackedBestEffort),
+        output_uncertain_total: Some(1),
         injection_latency_mean_us: Some(420_000),
         injection_latency_p50_us: Some(400),
         injection_latency_p95_us: Some(700),
@@ -1718,6 +1719,7 @@ fn diagnostics_accessibly_explains_keysym_fallback_and_separates_latency() {
         |ui| {
             let palette = Palette::for_pack(app.colorpack, app.dark_mode);
             app.render_diagnostics_body(ui, &palette);
+            app.render_toolbar_controls(ui, &palette);
         },
     );
     let semantics = format!(
@@ -1730,6 +1732,7 @@ fn diagnostics_accessibly_explains_keysym_fallback_and_separates_latency() {
     );
     assert!(semantics.contains("libei keysym fallback"));
     assert!(semantics.contains("Keysym fallback is active"));
+    assert!(semantics.contains("Partial output · 1"));
     assert!(semantics.contains("Matcher latency"));
     assert!(semantics.contains("Backend injection latency"));
     assert!(semantics.contains("Usage statistics persistence"));
