@@ -629,6 +629,93 @@ replacement = "Incident {{field:hostname}}"
         }));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn form_completes_after_the_original_ibus_context_regains_focus() {
+        use std::os::unix::fs::PermissionsExt;
+
+        static FORM_HELPER_ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        struct RestoreFormHelperEnv(Option<std::ffi::OsString>);
+        impl Drop for RestoreFormHelperEnv {
+            fn drop(&mut self) {
+                if let Some(value) = self.0.take() {
+                    std::env::set_var("WAYEXPAND_FORM_HELPER", value);
+                } else {
+                    std::env::remove_var("WAYEXPAND_FORM_HELPER");
+                }
+            }
+        }
+
+        let _env_lock = FORM_HELPER_ENV.lock().unwrap();
+        let helper = std::env::temp_dir().join(format!(
+            "wayexpand-ibus-form-helper-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(
+            &helper,
+            "#!/bin/sh\nprintf '%s' '{\"field:hostname\":\"node-a\"}'\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let _restore_env = RestoreFormHelperEnv(std::env::var_os("WAYEXPAND_FORM_HELPER"));
+        std::env::set_var("WAYEXPAND_FORM_HELPER", &helper);
+
+        let config = Config::parse(
+            r#"[[expansion]]
+trigger = ":incident"
+replacement = "Incident {{field:hostname}}"
+"#,
+        )
+        .unwrap();
+        let context_path = "/org/freedesktop/IBus/Engine/WayExpand_form_test";
+        let mut adapter = IbusEngineAdapter::new(ExpansionEngine::new(config).unwrap());
+        adapter.focus_in_for_context(Some(context_path));
+        adapter.set_capabilities(IBUS_CAP_SURROUNDING_TEXT);
+        adapter.set_content_type(0, 0);
+        let mut client = Client::default();
+        client.type_text(&mut adapter, ":incident");
+
+        // Opening the helper temporarily moves focus away from the original
+        // IBus context. The same context must be able to resume and receive
+        // the result, while surrounding-text verification still guards the
+        // actual replacement.
+        adapter.focus_out();
+        adapter.focus_in_for_context(Some(context_path));
+        adapter.set_capabilities(IBUS_CAP_SURROUNDING_TEXT);
+        adapter.set_content_type(0, 0);
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut replacement = Vec::new();
+        while Instant::now() < deadline {
+            adapter.set_surrounding_text(
+                &client.text(),
+                client.cursor as u32,
+                client.cursor as u32,
+            );
+            replacement = adapter.drain_completed_commands();
+            if !replacement.is_empty() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        drop(adapter);
+        let _ = std::fs::remove_file(&helper);
+
+        assert!(
+            replacement.iter().any(|action| matches!(
+                action,
+                IbusAction::CommitText(text) if text == "Incident node-a"
+            )),
+            "form completion was not delivered: {replacement:?}"
+        );
+        client.apply(&replacement);
+        assert_eq!(client.text(), "Incident node-a");
+    }
+
     /// A minimal IBus client. Like ibus-gtk it reports surrounding text before
     /// every key press, inserts keys the engine does not handle, and applies
     /// the engine's delete/commit actions to its own document.
