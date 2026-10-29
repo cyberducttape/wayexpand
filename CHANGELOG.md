@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Promote matcher and insertion p95 latency into the active-session dashboard,
+  keeping input-processing cost distinct from backend output delay.
 - Make the diagnostics dashboard show the active route's certification level
   and give prioritized recovery guidance for unavailable daemon/permissions,
   blocked or best-effort insertion, incomplete focus tracking, and unverified

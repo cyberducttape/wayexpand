@@ -106,7 +106,8 @@ impl GuiApp {
             .and_then(wayexpand_backend_selection::route_contract_by_id)
             .map(|contract| contract.is_certified());
         let capabilities = self.daemon_capabilities.as_ref();
-        let mean = capabilities.and_then(|caps| caps.injection_latency_mean_us);
+        let output_p95 = capabilities.and_then(|caps| caps.injection_latency_p95_us);
+        let matcher_p95 = capabilities.and_then(|caps| caps.matcher_latency_p95_us);
         let protection_available = capabilities
             .and_then(|caps| caps.capture_sensitive_focus)
             .unwrap_or(false);
@@ -173,8 +174,17 @@ impl GuiApp {
                 );
                 dashboard_value(
                     &mut columns[0],
-                    self.strings.average_latency(),
-                    &mean.map_or_else(
+                    self.strings.matcher_latency_p95(),
+                    &matcher_p95.map_or_else(
+                        || self.strings.no_samples().to_owned(),
+                        |value| format!("{value} µs"),
+                    ),
+                    palette.accent,
+                );
+                dashboard_value(
+                    &mut columns[0],
+                    self.strings.insertion_latency_p95(),
+                    &output_p95.map_or_else(
                         || self.strings.no_samples().to_owned(),
                         |value| format!("{value} µs"),
                     ),

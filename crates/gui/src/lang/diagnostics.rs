@@ -417,11 +417,19 @@ impl Strings {
         }
     }
 
-    pub fn average_latency(&self) -> &'static str {
+    pub fn matcher_latency_p95(&self) -> &'static str {
         match self.lang {
-            Language::English => "Average injection latency",
-            Language::Indonesian => "Latensi penyisipan rata-rata",
-            Language::German => "Durchschnittliche Ausgabelatenz",
+            Language::English => "Matcher p95",
+            Language::Indonesian => "P95 pencocokan",
+            Language::German => "Matcher p95",
+        }
+    }
+
+    pub fn insertion_latency_p95(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Insertion p95",
+            Language::Indonesian => "P95 penyisipan",
+            Language::German => "Ausgabe p95",
         }
     }
 
