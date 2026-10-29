@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Document the end-to-end visual automation workflow in the GUI guide: static
+  templates, reusable/date variables, form playground, file templates, and
+  schema-validated broker actions, with links to profiles and signed offline
+  packs. Correct pack documentation to distinguish supported lockfile pinning
+  from intentionally manual catalog refresh and updates.
 - Put profile switching directly in the main toolbar, showing the active profile
   and keeping automatic per-application profile selection visible. Profile
   management and application assignments remain available in the existing menu.

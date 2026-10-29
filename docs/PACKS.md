@@ -51,9 +51,11 @@ Catalog search skips invalid pack directories and refuses a symlink as the
 catalog root. It is a discovery aid, not a trust decision: read the diff and
 permission disclosures, then install explicitly. Installation still checks
 signature requirements, organization policy, version ordering, and command or
-hotkey consent. The current installed manifest records the selected semantic
-version; automatic updates and a registry-wide version lockfile are not
-implemented yet.
+hotkey consent. The installed manifest records the selected semantic version.
+Version pinning and reproducible multi-pack sync are available through
+`wayexpand pack lock` and `wayexpand pack sync` (described below). Catalog
+refresh and update installation are explicit operator actions; WayExpand does
+not run a background updater or depend on a hosted registry.
 
 Install copies a validated pack into
 `${XDG_DATA_HOME:-~/.local/share}/wayexpand/packs/<id>`. No network or account

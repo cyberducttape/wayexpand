@@ -115,6 +115,34 @@ time, hostname, username, newline, and tab at the replacement editor's caret
 validation. Its **Reusable snippets** section inserts a reference to any
 enabled static snippet, so common text can be maintained once and included in
 other replacements.
+
+### Build a reusable automation
+
+The editor's replacement area is the static-text block. From **Template
+variables**, insert date/time values, cursor placement, or reusable snippet
+references at the caret. The **Form field builder** adds required or optional
+text, choice, and date inputs; the adjacent form playground lets you supply
+sample values and inspect the rendered result before saving. Set **Output
+file** when the expansion should create or update a project file from the same
+template. For an approved operation, enable **Managed action**, choose a named
+Action Broker entry, and describe its required inputs with form fields. The
+broker validates those values against its enum/text schema and places them only
+in configured argument slots; values are never interpolated into a shell
+command. Review the broker policy and action permissions before sharing that
+snippet.
+
+Keep the preview distinction in mind: static templates and forms can be
+previewed without running commands. A managed action runs only when the snippet
+is triggered and is subject to broker policy. The editor's explicit command
+preview is a separate, user-initiated execution path.
+
+For separate personal, work, development, or support libraries, use
+[`PROFILES.md`](PROFILES.md); exact application IDs can select a profile
+automatically. To share reviewed templates offline, use the signed local pack
+workflow in [`PACKS.md`](PACKS.md), including diffs, fingerprints, rollback,
+and optional lockfile-based version pinning. The session dashboard and its
+recovery guidance are described below under Diagnostics.
+
 Tags and "Only in these apps" filters are edited as chips: type a value and
 press Enter to add it, or click a chip's `×` to remove it. A value that has
 been typed but not yet confirmed is still saved with the snippet.
