@@ -653,8 +653,8 @@ second physical trigger while a paced replacement is still running and checks
 for interleaved text corruption or a stale expansion. The private KWin driver
 uses stdin for capture, so it reports this case as `UNVERIFIED`; a passing
 result requires a real capture session that types during the in-flight output.
-The current-source negative reproduction is preserved in
-[`evidence/kwin-overlap-reproduction-949123d3011d.json`](evidence/kwin-overlap-reproduction-949123d3011d.json):
+The latest current-source negative reproduction is preserved in
+[`evidence/kwin-overlap-reproduction-6d18b08c1f06.json`](evidence/kwin-overlap-reproduction-6d18b08c1f06.json):
 the stdin-simulated route lost four replacement characters and expanded stale
 input. It does not exercise the daemon's evdev interruption monitor and cannot
 be counted as a pass for that containment path.

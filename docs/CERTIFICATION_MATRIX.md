@@ -45,15 +45,16 @@ availability claims, and no target is certified without reviewed evidence.
 
 ## Current evidence
 
-The latest private KWin compatibility evidence is
+The latest private KWin compatibility smoke evidence is
 [`doctor-certify-fe4712d2a79e.json`](evidence/doctor-certify-fe4712d2a79e.json):
 12 output, focus, lifecycle, refusal, and build-identity checks passed, with 20
 latency samples per size. Keyboard capture was simulated; Unicode insertion,
 suspend/resume, and overlapping triggers were not tested. This is not a
 production certification artifact.
-The current-source concurrent-input failure is preserved separately in the
-[negative overlap report](evidence/kwin-overlap-reproduction-0803d915.json);
-it uses simulated capture and therefore does not test the evdev queue guard.
+The latest current-source concurrent-input failure is preserved separately in
+the [negative overlap report](evidence/kwin-overlap-reproduction-6d18b08c1f06.json).
+It uses simulated stdin capture and therefore does not test the evdev
+interruption monitor.
 The generated tables above are authoritative: every listed desktop and route
 remains uncertified.
 Historical manual observations below do not establish current compatibility. See

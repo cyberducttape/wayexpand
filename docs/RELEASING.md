@@ -79,14 +79,16 @@ git push origin v<version>
 ```
 
 The release workflow runs the full CI verification suite (`ci.yml`) and
-requires the real compositor certification workflow to run all four desktop
-target jobs at the exact release ref. KDE and GNOME must produce certified
-evidence for the production-required input-method-v2 route; Sway and Hyprland
-are compatibility-only jobs and remain explicitly ineligible for production
-certification. Missing self-hosted drivers, incomplete production-route
-capabilities, or unverified required scenario cells block packaging and
-publishing. It then builds the Linux x86_64 binaries with the locked
-dependency graph and publishes the end-user packages and source archives.
+requires production compositor certification before packaging. **No route is
+currently declared production-eligible**, so the certification workflow fails
+closed before runner discovery and no release artifacts are published. The
+current compatibility candidates are listed in
+[CERTIFICATION.md](CERTIFICATION.md); their reports cannot satisfy the release
+gate. Once a route is eligible, missing self-hosted drivers, incomplete route
+capabilities, or unverified required scenario cells will continue to block
+publishing. A successful certification run then builds the Linux x86_64
+binaries with the locked dependency graph and publishes the end-user packages
+and source archives.
 When manually dispatched with a `launchpad_series` input, it also produces an
 unsigned Debian source package from the vendored archive targeted to that
 Ubuntu series. It intentionally does not guess a suite during tag-push
