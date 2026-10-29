@@ -34,6 +34,7 @@ impl Daemon {
         if self.evdev_quiet_since.is_none() {
             return false;
         }
+        crate::counters::note_evdev_quarantined_event();
         self.config.engine.reset_with_unknown_preceding_text();
         self.evdev_quiet_since = Some(Instant::now());
         true

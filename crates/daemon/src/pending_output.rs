@@ -682,9 +682,14 @@ mod tests {
 
         assert!(harness.daemon.evdev_quiet_since.is_some());
         let first_activity = harness.daemon.evdev_quiet_since.unwrap();
+        let discarded_before = crate::counters::snapshot().evdev_quarantined_events_total;
         std::thread::sleep(Duration::from_millis(2));
         assert!(harness.daemon.discard_quarantined_evdev_input());
         assert!(harness.daemon.evdev_quiet_since.unwrap() > first_activity);
+        assert_eq!(
+            crate::counters::snapshot().evdev_quarantined_events_total,
+            discarded_before + 1
+        );
         assert_eq!(
             *harness.calls.lock().unwrap(),
             ["erase::slow", "insert:replacement"],

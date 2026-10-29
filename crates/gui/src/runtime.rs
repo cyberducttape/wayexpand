@@ -45,7 +45,7 @@ pub(crate) enum Operation {
 }
 
 pub(crate) enum Completion {
-    Diagnostics(DiagnosticsSnapshot),
+    Diagnostics(Box<DiagnosticsSnapshot>),
     Control {
         operation: Operation,
         result: anyhow::Result<String>,
@@ -124,6 +124,7 @@ pub(crate) struct DaemonCapabilities {
     pub output_refused_total: Option<u64>,
     pub output_last_refusal: Option<OutputRefusal>,
     pub output_uncertain_total: Option<u64>,
+    pub evdev_quarantined_events_total: Option<u64>,
     pub recent_expansion_outcomes: Vec<ExpansionTrace>,
 }
 
@@ -267,6 +268,9 @@ impl DaemonCapabilities {
                 });
         capabilities.output_refused_total = status.u64_field("output_refused_total");
         capabilities.output_uncertain_total = status.u64_field("output_uncertain_total");
+        capabilities.evdev_quarantined_events_total =
+            status.u64_field("evdev_quarantined_events_total");
+        found |= capabilities.evdev_quarantined_events_total.is_some();
         let recent_outcomes = status
             .field("recent_expansion_outcomes")
             .or_else(|| status.field("recent_expansion_failures"));
@@ -386,7 +390,8 @@ pub(crate) fn start() -> std::io::Result<(
                 else {
                     continue;
                 };
-                let completion = Completion::Diagnostics(run_diagnostics(config_path, announce));
+                let completion =
+                    Completion::Diagnostics(Box::new(run_diagnostics(config_path, announce)));
                 if completion_sender.send(completion).is_err() {
                     break;
                 }
@@ -641,7 +646,7 @@ mod tests {
     #[test]
     fn daemon_capability_parser_reads_replacement_assurance_and_refusals() {
         let capabilities = super::DaemonCapabilities::parse(
-            "status_schema=13\nreplacement_assurance=focus-tracked-best-effort\nfocus_assurance=tracker\noutput_refused_total=4\noutput_last_refusal=focus-changed\noutput_uncertain_total=1\n",
+            "status_schema=13\nreplacement_assurance=focus-tracked-best-effort\nfocus_assurance=tracker\noutput_refused_total=4\noutput_last_refusal=focus-changed\noutput_uncertain_total=1\nevdev_quarantined_events_total=7\n",
         )
         .unwrap();
         assert_eq!(
@@ -654,6 +659,7 @@ mod tests {
             Some(super::OutputRefusal::FocusChanged)
         );
         assert_eq!(capabilities.output_uncertain_total, Some(1));
+        assert_eq!(capabilities.evdev_quarantined_events_total, Some(7));
 
         let blocked = super::DaemonCapabilities::parse(
             "status_schema=13\nreplacement_assurance=blocked\nfocus_assurance=unconfirmed\noutput_last_refusal=none\n",

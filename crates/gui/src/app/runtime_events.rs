@@ -45,6 +45,7 @@ impl GuiApp {
         for completion in completions {
             match completion {
                 runtime::Completion::Diagnostics(snapshot) => {
+                    let snapshot = *snapshot;
                     self.backend_status = snapshot.backend_status;
                     self.recommended_route = snapshot.recommended_route;
                     self.route_plan = Some(snapshot.route_plan);

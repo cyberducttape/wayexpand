@@ -77,6 +77,7 @@
     "output_reconnect_total": "integer",
     "input_reconnect_total": "integer",
     "input_overflow_total": "integer",
+    "evdev_quarantined_events_total": "integer",
     "control_rejected_total": "integer",
     "memory_rss_kib": "integer",
     "memory_high_water_kib": "integer",

@@ -105,6 +105,7 @@ fn daemon_status_body_matches_documented_stable_contract() {
             "config_state",
             "control_rejected_total",
             "daemon_commit",
+            "evdev_quarantined_events_total",
             "expansion_command_in_flight",
             "expansion_command_queue_depth",
             "focus_assurance",

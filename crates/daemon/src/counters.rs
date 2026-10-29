@@ -10,6 +10,7 @@ use wayexpand_core::RouteLimit;
 
 static OUTPUT_RECONNECTS: AtomicU64 = AtomicU64::new(0);
 static INPUT_RECONNECTS: AtomicU64 = AtomicU64::new(0);
+static EVDEV_QUARANTINED_EVENTS: AtomicU64 = AtomicU64::new(0);
 static CONTROL_REJECTED: AtomicU64 = AtomicU64::new(0);
 static OUTPUT_UNSUPPORTED: AtomicU64 = AtomicU64::new(0);
 static LAST_UNSUPPORTED: AtomicU8 = AtomicU8::new(0);
@@ -20,6 +21,10 @@ pub(crate) fn note_output_reconnect() {
 
 pub(crate) fn note_input_reconnect() {
     INPUT_RECONNECTS.fetch_add(1, Ordering::Relaxed);
+}
+
+pub(crate) fn note_evdev_quarantined_event() {
+    EVDEV_QUARANTINED_EVENTS.fetch_add(1, Ordering::Relaxed);
 }
 
 pub(crate) fn note_control_rejected() {
@@ -54,6 +59,7 @@ pub(crate) struct Snapshot {
     pub(crate) output_last_unsupported: &'static str,
     pub(crate) output_reconnect_total: u64,
     pub(crate) input_reconnect_total: u64,
+    pub(crate) evdev_quarantined_events_total: u64,
     pub(crate) input_overflow_total: u64,
     pub(crate) control_rejected_total: u64,
     pub(crate) memory_rss_kib: u64,
@@ -69,6 +75,7 @@ pub(crate) fn snapshot() -> Snapshot {
         output_last_unsupported: last_unsupported_name(LAST_UNSUPPORTED.load(Ordering::Relaxed)),
         output_reconnect_total: OUTPUT_RECONNECTS.load(Ordering::Relaxed),
         input_reconnect_total: INPUT_RECONNECTS.load(Ordering::Relaxed),
+        evdev_quarantined_events_total: EVDEV_QUARANTINED_EVENTS.load(Ordering::Relaxed),
         input_overflow_total: wayexpand_backend_evdev::input_queue_overflow_total(),
         control_rejected_total: CONTROL_REJECTED.load(Ordering::Relaxed),
         memory_rss_kib,

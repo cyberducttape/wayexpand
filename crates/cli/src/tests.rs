@@ -632,6 +632,7 @@ fn status_json_matches_documented_stable_contract() {
          output_reconnect_total=1\n\
          input_reconnect_total=2\n\
          input_overflow_total=3\n\
+         evdev_quarantined_events_total=7\n\
          control_rejected_total=4\n\
          memory_rss_kib=5\n\
          memory_high_water_kib=6";
@@ -695,6 +696,7 @@ fn status_json_matches_documented_stable_contract() {
     assert_eq!(value["output_reconnect_total"], 1);
     assert_eq!(value["input_reconnect_total"], 2);
     assert_eq!(value["input_overflow_total"], 3);
+    assert_eq!(value["evdev_quarantined_events_total"], 7);
     assert_eq!(value["control_rejected_total"], 4);
     assert_eq!(value["memory_rss_kib"], 5);
     assert_eq!(value["memory_high_water_kib"], 6);
@@ -817,6 +819,7 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "output_reconnect_total",
             "input_reconnect_total",
             "input_overflow_total",
+            "evdev_quarantined_events_total",
             "control_rejected_total",
             "memory_rss_kib",
             "memory_high_water_kib",

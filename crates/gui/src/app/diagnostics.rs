@@ -393,6 +393,15 @@ impl GuiApp {
                             self.strings.output_uncertain_notice(uncertain),
                         );
                     }
+                    if let Some(discarded) = capabilities
+                        .evdev_quarantined_events_total
+                        .filter(|n| *n > 0)
+                    {
+                        ui.colored_label(
+                            palette.warning,
+                            self.strings.evdev_quarantine_notice(discarded),
+                        );
+                    }
                 });
             }
             if capabilities.capture_sensitive_focus != Some(true) {

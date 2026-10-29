@@ -1644,10 +1644,12 @@ fn diagnostics_accessibly_explains_keysym_fallback_and_separates_latency() {
     app.daemon_status = "source=evdev · backend=libei · route_id=kde-evdev-libei".into();
     app.daemon_capabilities = Some(runtime::DaemonCapabilities {
         injection_mode: Some("libei keysym fallback"),
+        replacement_assurance: Some(runtime::ReplacementAssurance::FocusTrackedBestEffort),
         injection_latency_mean_us: Some(420_000),
         injection_latency_p50_us: Some(400),
         injection_latency_p95_us: Some(700),
         injection_latency_p99_us: Some(900),
+        evdev_quarantined_events_total: Some(3),
         matcher_latency_p50_us: Some(4),
         matcher_latency_p95_us: Some(10),
         matcher_latency_p99_us: Some(16),
@@ -1686,6 +1688,8 @@ fn diagnostics_accessibly_explains_keysym_fallback_and_separates_latency() {
     assert!(semantics.contains("kde-evdev-libei"));
     assert!(semantics.contains("700 µs"));
     assert!(semantics.contains("10 µs"));
+    assert!(semantics.contains("3 captured input events were ignored"));
+    assert!(semantics.contains("type it again after output settles"));
     fs::remove_file(path).unwrap();
 }
 
@@ -1834,6 +1838,7 @@ fn every_panel_and_dialog_renders_for_supported_languages_and_settings_tabs() {
         output_refused_total: Some(2),
         output_last_refusal: Some(runtime::OutputRefusal::FocusChanged),
         output_uncertain_total: Some(1),
+        evdev_quarantined_events_total: None,
         recent_expansion_outcomes: Vec::new(),
     });
     app.import_open = true;
@@ -2818,6 +2823,20 @@ fn best_effort_route_explains_concurrent_typing_risk_in_all_languages() {
                 "explanation should describe possible text corruption: {language:?} {assurance:?}: {explanation}"
             );
         }
+    }
+}
+
+#[test]
+fn quarantine_notice_explains_that_skipped_input_can_be_retried() {
+    for language in [Language::English, Language::German, Language::Indonesian] {
+        let notice = crate::lang::Strings::new(language).evdev_quarantine_notice(3);
+        assert!(notice.contains('3'));
+        assert!(
+            notice.contains("type it again")
+                || notice.contains("erneut ein")
+                || notice.contains("ketik ulang"),
+            "notice should tell the user how to recover: {language:?} {notice}"
+        );
     }
 }
 

@@ -65,6 +65,7 @@ pub(crate) fn status_as_json(response: &str) -> Result<serde_json::Value> {
                         | "output_unsupported_total"
                         | "input_reconnect_total"
                         | "input_overflow_total"
+                        | "evdev_quarantined_events_total"
                         | "control_rejected_total"
                         | "memory_rss_kib"
                         | "memory_high_water_kib"
@@ -471,6 +472,7 @@ pub(crate) fn runtime_route_summary(snapshot: &serde_json::Value) -> serde_json:
         "insertion_mode": insertion_mode,
         "keysym_fallback": insertion_mode.is_some_and(|mode| mode.contains("keysym fallback")),
         "sensitive_field_detection": snapshot.get("capture_sensitive_focus"),
+        "evdev_quarantined_events_total": number("evdev_quarantined_events_total"),
         "injection_latency": latency("injection"),
         "matcher_latency": latency("matcher"),
         "injection_latency_profiles": snapshot
@@ -559,6 +561,14 @@ pub(crate) fn print_output_health_diagnostics() -> bool {
     if route["keysym_fallback"] == true {
         println!(
             "Injection warning: keysym fallback types text key by key; Unicode coverage is limited and longer expansions take longer."
+        );
+    }
+    if let Some(discarded) = route["evdev_quarantined_events_total"]
+        .as_u64()
+        .filter(|count| *count > 0)
+    {
+        println!(
+            "Input note: {discarded} captured evdev event(s) were discarded after output to prevent stale triggers; retry a missed trigger once output settles."
         );
     }
     match route["sensitive_field_detection"].as_bool() {
@@ -792,6 +802,7 @@ mod runtime_route_tests {
             "matcher_latency_p95_us": 12,
             "matcher_latency_p99_us": 20,
             "matcher_latency_sample_count": 500,
+            "evdev_quarantined_events_total": 7,
             "status_schema": CONTROL_STATUS_SCHEMA,
             "daemon_commit": crate::build_info::COMMIT,
         });
@@ -802,6 +813,7 @@ mod runtime_route_tests {
         assert_eq!(summary["injection_backend"], "libei");
         assert_eq!(summary["keysym_fallback"], true);
         assert_eq!(summary["sensitive_field_detection"], false);
+        assert_eq!(summary["evdev_quarantined_events_total"], 7);
         assert_eq!(summary["injection_latency"]["p95_us"], 1_200_000);
         assert_eq!(summary["injection_latency"]["sample_count"], 12);
         assert_eq!(

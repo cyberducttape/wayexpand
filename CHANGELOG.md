@@ -9,6 +9,9 @@ All notable changes to WayExpand are documented here.
   during slow keysym fallback from being replayed as stale triggers. The
   evdev route remains non-exclusive and cannot prevent physical input from
   interleaving in the target application.
+- Expose the number of evdev events discarded by that quiet window in daemon
+  status, `doctor --json`, and GUI diagnostics, with guidance to retry a
+  trigger that was skipped. No input text is recorded.
 - Clarify the KWin overlap release gate: an older failure report came from a
   dirty revision, while current clean-build evidence still requires a
   physical-capture target-integrity run before this route can be reconsidered.

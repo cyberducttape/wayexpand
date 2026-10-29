@@ -42,6 +42,20 @@ impl Strings {
         }
     }
 
+    pub fn evdev_quarantine_notice(&self, count: u64) -> String {
+        match self.lang {
+            Language::English => format!(
+                "{count} captured input events were ignored after output to prevent stale input from triggering again. If a trigger did not expand, type it again after output settles."
+            ),
+            Language::Indonesian => format!(
+                "{count} peristiwa input yang tertangkap diabaikan setelah output untuk mencegah input lama memicu ekspansi lagi. Jika pemicu tidak berekspansi, ketik ulang setelah output selesai."
+            ),
+            Language::German => format!(
+                "{count} erfasste Eingabeereignisse wurden nach der Ausgabe verworfen, damit veraltete Eingaben keine erneute Expansion auslösen. Falls ein Kürzel nicht expandiert wurde, geben Sie es nach Abschluss der Ausgabe erneut ein."
+            ),
+        }
+    }
+
     pub fn insertion_unicode_limited(&self) -> &'static str {
         match self.lang {
             Language::English => "Some Unicode text may not be supported by this route.",

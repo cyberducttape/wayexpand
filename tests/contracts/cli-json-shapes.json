@@ -105,6 +105,7 @@
     "output_reconnect_total",
     "input_reconnect_total",
     "input_overflow_total",
+    "evdev_quarantined_events_total",
     "control_rejected_total",
     "memory_rss_kib",
     "memory_high_water_kib"

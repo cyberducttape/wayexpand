@@ -595,6 +595,7 @@ side never counts as a match (`commit_matches` is then `false`).
   "output_reconnect_total": 0,
   "input_reconnect_total": 0,
   "input_overflow_total": 0,
+  "evdev_quarantined_events_total": 0,
   "control_rejected_total": 0,
   "memory_rss_kib": 18432,
   "memory_high_water_kib": 20480
@@ -666,6 +667,7 @@ side never counts as a match (`commit_matches` is then `false`).
 - `output_reconnect_total` (integer): Output routes reconnected since daemon start, after the first connection was lost. Steady growth means the route keeps dropping (portal revoked, compositor restarting). Added in 1.2.x without a schema change.
 - `input_reconnect_total` (integer): Input sources (input-method or evdev) reconnected since daemon start. Added in 1.2.x without a schema change.
 - `input_overflow_total` (integer): Times evdev input arrived faster than it could be applied and the queue (4,096 events) was dropped, resetting the matcher; always 0 for other sources. Added in 1.2.x without a schema change.
+- `evdev_quarantined_events_total` (integer): Captured evdev events discarded after serialized output until 40 ms of input quiet, preventing queued input from being replayed as stale triggers. The GUI diagnostics displays the count and explains that a skipped trigger may need to be retried after output settles. This does not prevent physical input from interleaving in the target application. Additive status field; no schema change.
 - `control_rejected_total` (integer): Control requests answered `error=busy` because all control workers were occupied. Added in 1.2.x without a schema change.
 - `memory_rss_kib`, `memory_high_water_kib` (integers): The daemon's current and peak resident memory (`VmRSS`, `VmHWM`), in KiB; 0 where `/proc` is unavailable. For soak tests: a peak that keeps rising under a steady workload is a leak. Added in 1.2.x without a schema change.
 
