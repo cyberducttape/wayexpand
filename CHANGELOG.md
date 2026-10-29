@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Make the seeded concurrency/fault regression script assert that every exact
+  selected test ran and passed. This fixes a stale daemon test filter that
+  Cargo had treated as a successful zero-test run.
 - Extract the compositor production-certification gate into a locally testable
   check. It rejects production releases when the matrix has no eligible route
   and distinguishes that state from compatibility-only runs.
