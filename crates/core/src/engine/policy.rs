@@ -59,11 +59,11 @@ impl ExpansionEngine {
     /// jobs are queued. This is separate from the config-owned organization
     /// policy because the daemon also loads `/etc/wayexpand/policy.toml`.
     pub fn set_commands_disabled(&mut self, disabled: bool) {
-        self.config.organization.disable_commands = disabled;
+        self.runtime_policy.disable_commands = disabled;
     }
 
     pub fn commands_disabled(&self) -> bool {
-        self.config.organization.disable_commands
+        self.runtime_policy.disable_commands
     }
 
     /// Disable only direct executable commands while retaining managed broker
@@ -78,7 +78,7 @@ impl ExpansionEngine {
     }
 
     pub(super) fn command_execution_disabled(&self, command: &CommandConfig) -> bool {
-        self.config.organization.disable_commands
+        self.runtime_policy.disable_commands
             || (self.direct_commands_disabled && command.action.is_none())
     }
 
@@ -91,8 +91,7 @@ impl ExpansionEngine {
         injector: InjectorCapabilities,
         sensitive_focus: bool,
     ) -> Option<String> {
-        self.config
-            .organization
+        self.runtime_policy
             .effective_enforcement_policy()
             .capability_violation(injector, sensitive_focus)
     }
@@ -104,17 +103,16 @@ impl ExpansionEngine {
         injector: InjectorCapabilities,
         source: crate::InputSourceCapabilities,
     ) -> Option<String> {
-        self.config
-            .organization
+        self.runtime_policy
             .effective_enforcement_policy()
             .capability_violation_for_source(injector, source)
     }
 
     pub fn set_title_matching_disabled(&mut self, disabled: bool) {
-        self.config.organization.disable_title_matching = disabled;
+        self.runtime_policy.disable_title_matching = disabled;
     }
 
     pub fn title_matching_disabled(&self) -> bool {
-        self.config.organization.disable_title_matching
+        self.runtime_policy.disable_title_matching
     }
 }

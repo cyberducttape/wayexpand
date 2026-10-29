@@ -70,7 +70,13 @@ struct DeferredMatchReservation {
 pub const MAX_WINDOW_INSTANCE_ID_BYTES: usize = 192;
 
 pub struct ExpansionEngine {
-    config: Config,
+    config: Arc<Config>,
+    /// The validated source snapshot remains alive for this engine's entire
+    /// lifetime, so runtime matching and diagnostics share its interpretation.
+    validated: Arc<crate::ValidatedConfig>,
+    /// Runtime-only restrictions supplied by the host (for example command
+    /// worker availability) are kept outside the immutable source snapshot.
+    runtime_policy: crate::OrganizationPolicy,
     /// Case-folded app filters are immutable for the lifetime of an engine;
     /// avoid allocating them on every candidate match.
     app_filters: Vec<Vec<AppFilter>>,
@@ -167,6 +173,13 @@ pub struct ExpansionEngine {
 }
 
 impl ExpansionEngine {
+    /// The immutable validated source and derived metadata used by this
+    /// engine. Runtime-only host restrictions are exposed separately through
+    /// policy diagnostics and do not mutate the snapshot.
+    pub fn validated_config(&self) -> &Arc<crate::ValidatedConfig> {
+        &self.validated
+    }
+
     pub fn new(config: Config) -> Result<Self, ConfigError> {
         Self::new_with_snippets(config, None)
     }
@@ -178,9 +191,15 @@ impl ExpansionEngine {
         config: Config,
         snippets: Option<Arc<crate::SnippetLibrary>>,
     ) -> Result<Self, ConfigError> {
-        // Build the static snippet library once and share it between
-        // validation and rendering; it can hold large replacements.
-        let snippets = snippets.unwrap_or_else(|| config.includable_snippets());
+        let validated = Arc::new(config.validate_snapshot_with_snippets(snippets)?);
+        Ok(Self::from_validated(validated))
+    }
+
+    /// Construct directly from a snapshot that has already passed the full
+    /// validator. Reload and preview paths can carry the same object through
+    /// validation and engine construction without reparsing derived data.
+    pub fn from_validated(validated: Arc<crate::ValidatedConfig>) -> Self {
+        let config = Arc::clone(&validated.config);
         // Triggers match literally (see `Matcher`, a case-sensitive char
         // trie), so a `propagate_case` expansion is matched by inserting
         // its uppercase and capitalized forms as additional trigger
@@ -191,7 +210,6 @@ impl ExpansionEngine {
         // replacement. Validation builds these from `effective_triggers()`
         // and rejects collisions across exactly these variants, so its
         // result is reused here instead of being recomputed.
-        let validated = config.validate_with_snippets(Some(Arc::clone(&snippets)))?;
         let matcher_indices = validated
             .effective_triggers
             .iter()
@@ -201,7 +219,9 @@ impl ExpansionEngine {
             validated.effective_triggers.iter().partition(|(index, _)| {
                 let expansion = &config.expansion[*index];
                 expansion.command.is_none()
-                    && crate::template_variables(&expansion.replacement).contains(&"clipboard")
+                    && validated.template_variables[*index]
+                        .iter()
+                        .any(|name| name == "clipboard")
             });
         let clipboard_triggers = ClipboardTriggers::new(
             clipboard
@@ -216,11 +236,12 @@ impl ExpansionEngine {
         let matcher = Matcher::new(
             validated
                 .effective_triggers
-                .into_iter()
+                .iter()
+                .cloned()
                 .map(|(_, trigger)| trigger),
         );
-        let app_filters = validated.app_filters;
-        let form_fields = validated.form_fields;
+        let app_filters = validated.app_filters.clone();
+        let form_fields = validated.form_fields.clone();
         let app_filter_globs = app_filters
             .iter()
             .map(|filters| {
@@ -233,13 +254,16 @@ impl ExpansionEngine {
                     .collect()
             })
             .collect();
-        let template_base = config.template_context_with_snippets(None, snippets);
+        let template_base =
+            config.template_context_with_snippets(None, Arc::clone(&validated.snippets));
         let max_buffer_chars = config.settings.max_buffer_chars;
         let command_cache = vec![None; config.expansion.len()];
-        let undo_chord = validated.undo_chord;
-        let hotkeys = validated.hotkeys;
-        Ok(Self {
+        let undo_chord = validated.undo_chord.clone();
+        let hotkeys = validated.hotkeys.clone();
+        Self {
             config,
+            validated: Arc::clone(&validated),
+            runtime_policy: validated.resolved_policy.clone(),
             app_filters,
             form_fields,
             app_filter_globs,
@@ -278,7 +302,7 @@ impl ExpansionEngine {
             usage_events_dropped: 0,
             form_active: false,
             form_replacement_guarantee: crate::ReplacementGuarantee::Unsupported,
-        })
+        }
     }
 
     /// Replace the library portion of template context without rebuilding the
@@ -295,7 +319,16 @@ impl ExpansionEngine {
         &mut self,
         policy: &crate::OrganizationPolicy,
     ) -> Result<(), ConfigError> {
-        self.config.apply_administrator_policy(policy)
+        let mut candidate = (*self.config).clone();
+        candidate.apply_administrator_policy(policy)?;
+        let validated = Arc::new(
+            candidate
+                .validate_snapshot_with_snippets(Some(Arc::clone(&self.validated.snippets)))?,
+        );
+        self.config = Arc::clone(&validated.config);
+        self.runtime_policy = validated.resolved_policy.clone();
+        self.validated = validated;
+        Ok(())
     }
 
     /// Configure whether a match's terminating delimiter is erased with the

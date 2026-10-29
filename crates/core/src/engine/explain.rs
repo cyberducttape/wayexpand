@@ -351,7 +351,7 @@ impl ExpansionEngine {
             return;
         };
         let app = window.app_id.as_deref().unwrap_or("(unknown app ID)");
-        let title_disabled = self.config.organization.disable_title_matching
+        let title_disabled = self.runtime_policy.disable_title_matching
             && self.app_filters[index]
                 .iter()
                 .any(|filter| matches!(filter, AppFilter::TitleContains(_)));
@@ -496,12 +496,12 @@ fn explanation_with_policy(
     backend: &str,
 ) -> Explanation {
     let size = expansion.replacement.len();
-    match engine.config.organization.expansion_policy_violation(
+    match engine.runtime_policy.expansion_policy_violation(
         size,
         expansion.command.is_some(),
         backend,
     ) {
-        Some(violation) if engine.config.organization.safe_mode => {
+        Some(violation) if engine.runtime_policy.safe_mode => {
             explanation.push("policy", CheckStatus::Fail, violation);
         }
         Some(violation) => explanation.push(

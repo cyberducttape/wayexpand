@@ -206,15 +206,15 @@ Still open:
 - [x] Publish a canonical `route_id` in daemon status (schema 11); the GUI
       resolves route contracts from that ID instead of reconstructing routes
       from `source`/`backend`.
-- [ ] Build one `ValidatedConfig` (effective triggers, compiled app filters,
-      template library and parsed templates, parsed hotkeys, normalized IDs,
-      policy-resolved settings) during validation, and have the engine, reload
-      and GUI consume it instead of recompiling, so validation and runtime
-      cannot disagree. Engine construction now consumes effective triggers,
-      parsed app filters, enabled hotkey chords, and the undo chord directly
-      from its validation pass. Template compilation, normalized IDs,
-      policy-resolved settings, and retaining the validated snapshot across
-      config loading/reload remain open.
+- [ ] Complete the shared immutable `ValidatedConfig` pipeline. The snapshot
+      now retains the exact source config, resolved organization policy,
+      normalized IDs, effective triggers, parsed app filters/form fields,
+      template variable metadata, snippet library, and parsed hotkeys. The
+      engine retains it and daemon reload builds the engine from the validated
+      snapshot; GUI preview uses the same validator through engine creation.
+      Runtime host restrictions remain a separate overlay. Template AST
+      compilation and reuse during rendering, and end-to-end consistency tests
+      across fleet/reload paths remain open.
 - [ ] Profiles/workspaces (personal, work, support, per-customer) switchable
       at runtime by hotkey or selected automatically from the environment.
 - [ ] Broader imports (TextExpander, AutoKey, aText, CSV).

@@ -601,16 +601,50 @@ fn default_enabled() -> bool {
 /// computes this anyway, so engine construction reuses it for the matcher.
 pub(crate) type EffectiveTriggers = Vec<(usize, String)>;
 
-/// Parsed runtime data produced by the same pass that validates a `Config`.
-/// Keeping these values together prevents the engine from parsing a subtly
-/// different view of filters or hotkeys after validation has succeeded.
-pub(crate) struct ValidatedConfig {
+/// Immutable configuration snapshot plus the derived data validated from it.
+/// Runtime consumers should use this object rather than parsing triggers,
+/// filters, templates, IDs, or hotkeys independently.
+#[derive(Clone)]
+pub struct ValidatedConfig {
+    pub(crate) config: Arc<Config>,
+    pub(crate) resolved_policy: OrganizationPolicy,
+    pub(crate) normalized_ids: Vec<String>,
     pub(crate) effective_triggers: EffectiveTriggers,
     pub(crate) app_filters: Vec<Vec<AppFilter>>,
     /// Parsed once during validation and reused by matching and diagnostics.
     pub(crate) form_fields: Vec<Option<Arc<Vec<crate::FormField>>>>,
+    /// Variable names parsed once for each configured expansion.
+    pub(crate) template_variables: Vec<Vec<String>>,
+    pub(crate) snippets: Arc<crate::SnippetLibrary>,
     pub(crate) undo_chord: Option<KeyChord>,
     pub(crate) hotkeys: Vec<(KeyChord, usize)>,
+}
+
+pub(crate) struct ValidatedMetadata {
+    pub(crate) effective_triggers: EffectiveTriggers,
+    pub(crate) app_filters: Vec<Vec<AppFilter>>,
+    pub(crate) form_fields: Vec<Option<Arc<Vec<crate::FormField>>>>,
+    pub(crate) template_variables: Vec<Vec<String>>,
+    pub(crate) snippets: Arc<crate::SnippetLibrary>,
+    pub(crate) undo_chord: Option<KeyChord>,
+    pub(crate) hotkeys: Vec<(KeyChord, usize)>,
+}
+
+impl ValidatedConfig {
+    /// The exact immutable source configuration this snapshot validates.
+    pub fn config(&self) -> &Config {
+        &self.config
+    }
+
+    /// The administrator and user policy values resolved for runtime use.
+    pub fn resolved_policy(&self) -> &OrganizationPolicy {
+        &self.resolved_policy
+    }
+
+    /// Lowercase stable identifiers in expansion order.
+    pub fn normalized_ids(&self) -> &[String] {
+        &self.normalized_ids
+    }
 }
 
 impl Config {

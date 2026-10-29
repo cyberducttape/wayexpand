@@ -1047,3 +1047,22 @@ fn output_file_must_stay_below_the_current_directory() {
     assert_eq!(plain.expansion[0].output_file, None);
     assert!(!toml::to_string(&plain).unwrap().contains("output_file"));
 }
+#[test]
+fn validated_snapshot_retains_the_config_and_normalized_ids() {
+    let config = Config::parse(
+        "[[expansion]]\nid = 'A0000000-0000-4000-8000-000000000001'\ntrigger = ':x'\nreplacement = 'value'\n",
+    )
+    .unwrap();
+    let snapshot = config.validate_snapshot().unwrap();
+
+    assert_eq!(snapshot.config(), &config);
+    assert_eq!(snapshot.normalized_ids().len(), config.expansion.len());
+    assert!(snapshot
+        .normalized_ids()
+        .iter()
+        .all(|id| id.bytes().all(|byte| !byte.is_ascii_uppercase())));
+    assert_eq!(
+        snapshot.normalized_ids()[0],
+        "a0000000-0000-4000-8000-000000000001"
+    );
+}

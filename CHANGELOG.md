@@ -4,6 +4,15 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Retain an immutable validated configuration snapshot in the expansion engine
+  and build daemon reload engines from the final post-policy configuration.
+  The snapshot carries normalized IDs, resolved policy, trigger/filter/hotkey
+  metadata, form fields, template variables, and the snippet library. Runtime
+  host restrictions remain a separate overlay; compiled template rendering
+  remains future work.
+- Preserve fail-closed handling for unknown libei keyboard layout groups and
+  clearly document that evdev has neither live layout tracking nor a
+  sensitive-field signal.
 - Add ordered, content-free transaction phases to recent expansion diagnostics:
   `prepared`, `validated`, `applying`, then `committed`, `failed`, or
   `uncertain`. Uncertain results remain terminal and are never automatically

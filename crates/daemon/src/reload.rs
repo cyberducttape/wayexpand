@@ -89,8 +89,10 @@ fn build_config(path: &Path, fleet: bool, policy: &OrganizationPolicy) -> BuildR
     let fleet_signature = if fleet { standard_fleet_signature() } else { 0 };
     let (config, stamp) = load_for_mode(path, fleet, policy).map_err(BuildFailure::Load)?;
     let expansions = config.expansion.len();
-    let engine = ExpansionEngine::new(config)
+    let snapshot = config
+        .validate_snapshot()
         .map_err(|error| BuildFailure::Engine(anyhow::Error::new(error)))?;
+    let engine = ExpansionEngine::from_validated(Arc::new(snapshot));
     Ok(BuiltConfig {
         engine,
         expansions,
@@ -320,8 +322,10 @@ impl ReloadableConfig {
         // contents.
         let fleet_signature = if fleet { standard_fleet_signature() } else { 0 };
         let (config, stamp) = load_for_mode(&path, fleet, &policy)?;
-        let engine = ExpansionEngine::new(config)
+        let snapshot = config
+            .validate_snapshot()
             .map_err(|error| anyhow::anyhow!("invalid configuration: {error}"))?;
+        let engine = ExpansionEngine::from_validated(Arc::new(snapshot));
         let watch_dirty = Arc::new(AtomicBool::new(false));
         let watcher = start_config_watcher(&path, fleet, Arc::clone(&watch_dirty));
         Ok(Self {

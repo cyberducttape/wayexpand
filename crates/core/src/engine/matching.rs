@@ -310,7 +310,7 @@ impl ExpansionEngine {
                         .is_some_and(|pattern| pattern.matches(app_id))
                 }),
                 AppFilter::TitleContains(title_filter) => {
-                    if self.config.organization.disable_title_matching {
+                    if self.runtime_policy.disable_title_matching {
                         false
                     } else {
                         window

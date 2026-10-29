@@ -5,13 +5,44 @@ impl Config {
     /// Parsing is not the only way callers can construct `Config`, so engine
     /// construction and other consumers can enforce the same limits here.
     pub fn validate(&self) -> Result<(), ConfigError> {
-        self.validate_with_snippets(None).map(drop)
+        self.validate_metadata_with_snippets(None).map(drop)
     }
 
-    pub(crate) fn validate_with_snippets(
+    /// Validate once and retain an immutable snapshot with the derived data
+    /// used by runtime consumers.
+    pub fn validate_snapshot(&self) -> Result<crate::ValidatedConfig, ConfigError> {
+        self.validate_snapshot_with_snippets(None)
+    }
+
+    /// As [`Self::validate_snapshot`], using an external static library for
+    /// template includes.
+    pub fn validate_snapshot_with_snippets(
         &self,
         snippets: Option<std::sync::Arc<crate::SnippetLibrary>>,
-    ) -> Result<ValidatedConfig, ConfigError> {
+    ) -> Result<crate::ValidatedConfig, ConfigError> {
+        let metadata = self.validate_metadata_with_snippets(snippets)?;
+        Ok(crate::ValidatedConfig {
+            config: Arc::new(self.clone()),
+            resolved_policy: self.organization.clone(),
+            normalized_ids: self
+                .expansion
+                .iter()
+                .map(|expansion| expansion.id.to_ascii_lowercase())
+                .collect(),
+            effective_triggers: metadata.effective_triggers,
+            app_filters: metadata.app_filters,
+            form_fields: metadata.form_fields,
+            template_variables: metadata.template_variables,
+            snippets: metadata.snippets,
+            undo_chord: metadata.undo_chord,
+            hotkeys: metadata.hotkeys,
+        })
+    }
+
+    fn validate_metadata_with_snippets(
+        &self,
+        snippets: Option<std::sync::Arc<crate::SnippetLibrary>>,
+    ) -> Result<ValidatedMetadata, ConfigError> {
         if self.expansion.len() > MAX_EXPANSIONS {
             return Err(ConfigError::TooManyExpansions {
                 count: self.expansion.len(),
@@ -130,12 +161,13 @@ impl Config {
         }
         // An externally supplied library replaces the config's own, so only
         // build the latter when it is actually used.
-        let template_context = self
-            .validation_template_context(snippets.unwrap_or_else(|| self.includable_snippets()));
+        let snippets = snippets.unwrap_or_else(|| self.includable_snippets());
+        let template_context = self.validation_template_context(Arc::clone(&snippets));
         let mut total_trigger_chars = 0usize;
         let mut expansion_ids = HashMap::with_capacity(self.expansion.len());
         let mut app_filters = Vec::with_capacity(self.expansion.len());
         let mut validated_form_fields = Vec::with_capacity(self.expansion.len());
+        let mut template_variables = Vec::with_capacity(self.expansion.len());
         for (index, expansion) in self.expansion.iter().enumerate() {
             if !is_uuid(&expansion.id) {
                 return Err(ConfigError::InvalidExpansionId { index });
@@ -272,6 +304,12 @@ impl Config {
             {
                 return Err(ConfigError::InvalidTemplate { index, source });
             }
+            template_variables.push(
+                crate::template_variables(&expansion.replacement)
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect(),
+            );
             let parsed_form_fields = if expansion.command.is_some() {
                 if crate::form_fields(&expansion.replacement).is_ok_and(|fields| !fields.is_empty())
                 {
@@ -373,10 +411,12 @@ impl Config {
             ));
         }
 
-        Ok(ValidatedConfig {
+        Ok(ValidatedMetadata {
             effective_triggers: enabled,
             app_filters,
             form_fields: validated_form_fields,
+            template_variables,
+            snippets,
             undo_chord,
             hotkeys: parsed_hotkeys,
         })

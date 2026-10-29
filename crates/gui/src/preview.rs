@@ -106,8 +106,12 @@ pub(crate) fn render_with_library_snippets(
         settings: settings.clone(),
         organization: organization.clone(),
     };
-    let mut engine = ExpansionEngine::new_with_snippets(config, library_snippets)
-        .map_err(|error| error.safe_summary())?;
+    let snapshot = Arc::new(
+        config
+            .validate_snapshot_with_snippets(library_snippets)
+            .map_err(|error| error.safe_summary())?,
+    );
+    let mut engine = ExpansionEngine::from_validated(snapshot);
     if !app.trim().is_empty() {
         engine.set_current_window(Some(WindowContext {
             app_id: Some(app.trim().to_owned()),
