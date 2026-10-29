@@ -14,6 +14,10 @@ use crate::status_publisher::{
 use crate::*;
 use wayexpand_core::CheckStatus;
 
+fn compute_effective_pause(user_paused: bool, profile_switch_pending: bool) -> bool {
+    user_paused || profile_switch_pending
+}
+
 fn input_method_injection_capabilities(
     mut text: InjectorCapabilities,
     key_pass_through: Option<InjectorCapabilities>,
@@ -48,15 +52,20 @@ impl Daemon {
             self.paused,
         );
         if let Some(requested_pause) = transition.pause_changed() {
+            let effective_pause =
+                compute_effective_pause(requested_pause, self.profile_switch_pending);
             process_event(
                 &mut self.config.engine,
-                InputEvent::PauseChanged(requested_pause),
+                InputEvent::PauseChanged(effective_pause),
                 None,
                 &self.policy,
                 self.active_backend,
             )?;
             self.paused = requested_pause;
-            info!(self.paused, "expansion processing policy changed");
+            info!(
+                self.paused,
+                effective_pause, "expansion processing policy changed"
+            );
         }
         if transition.reload_requested() {
             self.reload_profile_assignments();
@@ -654,6 +663,18 @@ impl Daemon {
             explanation.render_text()
         };
         let _ = request.reply.try_send(answer);
+    }
+}
+
+#[cfg(test)]
+mod profile_pause_tests {
+    use super::compute_effective_pause;
+
+    #[test]
+    fn user_resume_cannot_unpause_matching_during_profile_load() {
+        assert!(compute_effective_pause(false, true));
+        assert!(!compute_effective_pause(false, false));
+        assert!(compute_effective_pause(true, false));
     }
 }
 

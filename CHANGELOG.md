@@ -14,6 +14,8 @@ All notable changes to WayExpand are documented here.
 - Report configuration reloads as `loading` until the requested profile build
   completes, keeping that distinct from a rejected configuration in daemon
   status and GUI profile controls.
+- Keep automatic profile-switch pause active even if the user changes the
+  separate pause preference while a profile is still loading.
 - Add offline pack-catalog browsing to the GUI: search local catalogs by
   metadata, disclose signature identity and capabilities, and open candidates
   in the existing fingerprint-bound content and diff review before install.
