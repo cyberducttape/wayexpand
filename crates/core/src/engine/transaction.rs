@@ -23,6 +23,92 @@ pub enum TransactionOutcome {
     UnknownPartialFailure { source: InjectorError },
 }
 
+/// Ordered, content-free phases of one replacement attempt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransactionPhase {
+    Prepared,
+    Validated,
+    Applying,
+    Committed,
+    Failed,
+    Uncertain,
+}
+
+impl TransactionPhase {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Prepared => "prepared",
+            Self::Validated => "validated",
+            Self::Applying => "applying",
+            Self::Committed => "committed",
+            Self::Failed => "failed",
+            Self::Uncertain => "uncertain",
+        }
+    }
+}
+
+/// Outcome plus its validated lifecycle journal. The phases are deliberately
+/// separate from backend error text so callers can expose diagnostics without
+/// recording typed or replacement content.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransactionReport {
+    pub outcome: TransactionOutcome,
+    pub phases: Vec<TransactionPhase>,
+}
+
+struct TransactionJournal {
+    phases: Vec<TransactionPhase>,
+}
+
+impl TransactionJournal {
+    fn prepared() -> Self {
+        Self {
+            phases: vec![TransactionPhase::Prepared],
+        }
+    }
+
+    fn advance(&mut self, next: TransactionPhase) {
+        let current = *self.phases.last().expect("journal always starts prepared");
+        let valid = matches!(
+            (current, next),
+            (
+                TransactionPhase::Prepared,
+                TransactionPhase::Validated | TransactionPhase::Failed
+            ) | (
+                TransactionPhase::Validated,
+                TransactionPhase::Applying | TransactionPhase::Failed
+            ) | (
+                TransactionPhase::Applying,
+                TransactionPhase::Committed
+                    | TransactionPhase::Failed
+                    | TransactionPhase::Uncertain
+            )
+        );
+        assert!(
+            valid,
+            "invalid output transaction transition: {current:?} -> {next:?}"
+        );
+        self.phases.push(next);
+    }
+
+    fn finish(mut self, outcome: TransactionOutcome) -> TransactionReport {
+        let terminal = match outcome {
+            TransactionOutcome::Applied
+            | TransactionOutcome::AppliedWithCursorPositionFailure { .. } => {
+                TransactionPhase::Committed
+            }
+            TransactionOutcome::NotApplied { .. } => TransactionPhase::Failed,
+            TransactionOutcome::UnknownApplicationOutcome { .. }
+            | TransactionOutcome::UnknownPartialFailure { .. } => TransactionPhase::Uncertain,
+        };
+        self.advance(terminal);
+        TransactionReport {
+            outcome,
+            phases: self.phases,
+        }
+    }
+}
+
 impl TransactionOutcome {
     pub fn is_applied(&self) -> bool {
         matches!(
@@ -213,9 +299,20 @@ impl ExpansionEngine {
         injector: &mut I,
         result: &ExpansionResult,
     ) -> TransactionOutcome {
+        Self::apply_with_report(injector, result).outcome
+    }
+
+    /// Apply a replacement and retain its state transitions for diagnostics.
+    pub fn apply_with_report<I: TextInjector + ?Sized>(
+        injector: &mut I,
+        result: &ExpansionResult,
+    ) -> TransactionReport {
+        let mut journal = TransactionJournal::prepared();
         if let Err(source) = Self::preflight_output(injector, result) {
-            return TransactionOutcome::NotApplied { source };
+            return journal.finish(TransactionOutcome::NotApplied { source });
         }
+        journal.advance(TransactionPhase::Validated);
+        journal.advance(TransactionPhase::Applying);
         // Only a match that has to carry a terminating character through needs
         // new strings. The common case borrows the result directly rather than
         // copying the matched text and the whole replacement on every
@@ -223,7 +320,7 @@ impl ExpansionEngine {
         match result.reinsert_after {
             None => {
                 if let Err(source) = injector.replace(&result.matched_text, &result.insert) {
-                    return if injector.capabilities().atomic_replace
+                    let outcome = if injector.capabilities().atomic_replace
                         && !injector.replace_error_may_have_applied()
                     {
                         TransactionOutcome::NotApplied { source }
@@ -232,6 +329,7 @@ impl ExpansionEngine {
                     } else {
                         TransactionOutcome::UnknownPartialFailure { source }
                     };
+                    return journal.finish(outcome);
                 }
             }
             Some(character) => {
@@ -243,7 +341,7 @@ impl ExpansionEngine {
                 insert.push_str(&result.insert);
                 insert.push(character);
                 if let Err(source) = injector.replace(&erase, &insert) {
-                    return if injector.capabilities().atomic_replace
+                    let outcome = if injector.capabilities().atomic_replace
                         && !injector.replace_error_may_have_applied()
                     {
                         TransactionOutcome::NotApplied { source }
@@ -252,6 +350,7 @@ impl ExpansionEngine {
                     } else {
                         TransactionOutcome::UnknownPartialFailure { source }
                     };
+                    return journal.finish(outcome);
                 }
             }
         }
@@ -262,9 +361,68 @@ impl ExpansionEngine {
             .filter(|offset| *offset > 0)
         {
             if let Err(source) = injector.move_cursor_left(offset) {
-                return TransactionOutcome::AppliedWithCursorPositionFailure { source };
+                return journal
+                    .finish(TransactionOutcome::AppliedWithCursorPositionFailure { source });
             }
         }
-        TransactionOutcome::Applied
+        journal.finish(TransactionOutcome::Applied)
+    }
+}
+
+#[cfg(test)]
+mod journal_tests {
+    use super::*;
+
+    fn error() -> InjectorError {
+        InjectorError {
+            backend: "test",
+            message: "simulated".into(),
+            retryable: true,
+        }
+    }
+
+    #[test]
+    fn terminal_phases_distinguish_commit_failure_and_uncertainty() {
+        let mut committed = TransactionJournal::prepared();
+        committed.advance(TransactionPhase::Validated);
+        committed.advance(TransactionPhase::Applying);
+        assert_eq!(
+            committed.finish(TransactionOutcome::Applied).phases,
+            vec![
+                TransactionPhase::Prepared,
+                TransactionPhase::Validated,
+                TransactionPhase::Applying,
+                TransactionPhase::Committed,
+            ]
+        );
+
+        let mut failed = TransactionJournal::prepared();
+        failed.advance(TransactionPhase::Validated);
+        failed.advance(TransactionPhase::Applying);
+        assert_eq!(
+            failed
+                .finish(TransactionOutcome::NotApplied { source: error() })
+                .phases
+                .last(),
+            Some(&TransactionPhase::Failed)
+        );
+
+        let mut uncertain = TransactionJournal::prepared();
+        uncertain.advance(TransactionPhase::Validated);
+        uncertain.advance(TransactionPhase::Applying);
+        let report =
+            uncertain.finish(TransactionOutcome::UnknownPartialFailure { source: error() });
+        assert_eq!(report.phases.last(), Some(&TransactionPhase::Uncertain));
+        assert!(!report.phases.contains(&TransactionPhase::Committed));
+    }
+
+    #[test]
+    fn preflight_failure_cannot_enter_the_applying_phase() {
+        let report = TransactionJournal::prepared()
+            .finish(TransactionOutcome::NotApplied { source: error() });
+        assert_eq!(
+            report.phases,
+            vec![TransactionPhase::Prepared, TransactionPhase::Failed]
+        );
     }
 }

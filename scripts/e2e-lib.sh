@@ -65,6 +65,16 @@ sink_text_is() {
     [ "$(sink_field "$1" text)" = "$2" ]
 }
 
+sink_text_starts_with() {
+    jq -e --arg prefix "$2" '(.text | type == "string") and (.text | startswith($prefix))' \
+        "$case_dir/$1.json" >/dev/null 2>&1
+}
+
+sink_text_contains() {
+    jq -e --arg needle "$2" '(.text | type == "string") and (.text | contains($needle))' \
+        "$case_dir/$1.json" >/dev/null 2>&1
+}
+
 sink_cursor_is() {
     [ "$(sink_field "$1" cursor)" = "$2" ]
 }
@@ -306,6 +316,59 @@ EOF
     printf 'text_chars=%s cursor=%s' \
         "$(sink_field e2e-a text | wc -m | tr -d ' ')" \
         "$(sink_field e2e-a cursor)"
+}
+
+scenario_second_trigger_during_nonatomic_replacement() {
+    # KWin's EIS route currently negotiates keysym fallback here. Its paced
+    # per-character replacement is deliberately long enough for real client
+    # input to arrive mid-transaction. Capture is simulated over stdin, but
+    # both the expansion and the concurrent user text reach the real Wayland
+    # client through independent EIS sessions.
+    replacement=$(head -c 128 /dev/zero | tr '\000' A)
+    write_config <<EOF
+[[expansion]]
+trigger = ";long"
+replacement = "$replacement"
+[[expansion]]
+trigger = ";next"
+replacement = "SECOND-EXPANSION-MUST-NOT-RUN"
+EOF
+    start_sink e2e-a && start_daemon || return 2
+    status=$(daemon_status) || return 2
+    case "$status" in
+        *"inject_insertion_mode=libei keysym fallback"*) ;;
+        *)
+            printf 'route does not negotiate non-atomic libei keysym fallback'
+            return 2
+            ;;
+    esac
+
+    expand_in e2e-a "" ";long" || return 2
+    wait_until 50 sink_text_starts_with e2e-a AAAA || return 2
+    "$bin/wx-e2e-type" text ";next" >>"$case_dir/type.log" 2>&1 || return 2
+    # Let KWin dispatch the complete physical trigger before delivering its
+    # captured text to the daemon. It may already be interleaved with output;
+    # the final assertion below treats that as corruption.
+    sleep 0.1
+    daemon_sees ";next"
+
+    # Wait for the second expansion's distinctive marker so the known failure
+    # produces a concise, deterministic report instead of timing out while
+    # waiting for the expected first replacement length.
+    wait_until 150 sink_text_contains e2e-a SECOND-EXPANSION-MUST-NOT-RUN || {
+        printf 'no stale second expansion observed; final target state: '
+        describe e2e-a
+        return 1
+    }
+    observed=$(sink_field e2e-a text)
+    typed_a_count=$(printf '%s' "$observed" | tr -cd A | wc -c | tr -d ' ')
+    if [ "$typed_a_count" -ne 128 ] || ! printf '%s' "$observed" | grep -Fq ';next' ||
+        printf '%s' "$observed" | grep -Fq 'SECOND-EXPANSION-MUST-NOT-RUN'; then
+        printf 'overlapping input corrupted the replacement or was replayed; '
+        describe e2e-a
+        return 1
+    fi
+    describe e2e-a
 }
 
 scenario_input_method_expansion() {

@@ -43,8 +43,12 @@ complete right-to-left editing experience.
 
 ## Desktop coverage
 
-No compositor is currently certified by automated end-to-end tests. Before
-deploying desktop capture, test and record the exact compositor and version:
+No compositor is currently certified by automated end-to-end tests, and no
+route is currently eligible to satisfy the production release gate. The release
+workflow intentionally fails closed until a real-session route demonstrates
+verified sensitive-field handling, atomic replacement, and the required
+input/output contract. Before deploying desktop capture, test and record the
+exact compositor and version:
 
 The table below is generated from the certification target contract. Its
 paths are test targets, not a guarantee that the path is available or works on

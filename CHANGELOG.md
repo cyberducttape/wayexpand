@@ -4,6 +4,21 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add ordered, content-free transaction phases to recent expansion diagnostics:
+  `prepared`, `validated`, `applying`, then `committed`, `failed`, or
+  `uncertain`. Uncertain results remain terminal and are never automatically
+  replayed.
+- State explicitly in the support matrix that no route is currently eligible
+  for the production release gate; compatibility smoke evidence cannot satisfy
+  it.
+- Add an adversarial KWin scenario for typing a second trigger during a long
+  non-atomic libei replacement. It reproduces interleaved text and a stale
+  trigger expansion on the current evdev/libei route; this is failure evidence
+  and keeps that route blocked from production certification. The reproducer
+  is opt-in so the ordinary compatibility smoke suite can still validate its
+  passing scenarios. Preserve the negative run at
+  [kwin-overlap-reproduction-2026-10-28.json](docs/evidence/kwin-overlap-reproduction-2026-10-28.json);
+  it is explicitly marked uncertified and source-tree-dirty.
 - Bind IBus form completions to the unique input-context identity and enable
   forms only with IBus's surrounding-text verification. Document that this
   route remains non-atomic and uncertified; evdev/libei continues to refuse

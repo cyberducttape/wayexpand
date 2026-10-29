@@ -98,7 +98,12 @@ fi
 if [ "$e2e_input_source" = input-method ]; then
     run_scenarios "input-method-expansion input-method-password-field"
 else
+    # The known-failing overlap reproduction remains opt-in via
+    # `scripts/test-kwin-e2e.sh second-trigger-during-nonatomic-replacement`;
+    # its observed corruption is recorded as a production release blocker in
+    # docs/PRODUCTION_ACCEPTANCE_CHECKLIST.md.
     run_scenarios "expansion-replaces-trigger word-boundary-reinserts-delimiter cursor-placement
 multiline-replacement unreachable-character-is-refused app-filter-follows-focus
-command-expansion-completes focus-change-during-expansion target-closes-during-expansion config-reload daemon-restart output-latency"
+command-expansion-completes focus-change-during-expansion target-closes-during-expansion config-reload daemon-restart
+output-latency"
 fi

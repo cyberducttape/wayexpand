@@ -34,6 +34,13 @@ session evidence; unit tests alone do not satisfy them.
       `second-trigger-during-nonatomic-replacement`; verify the target text is
       not corrupted and no stale trigger is expanded after the first
       transaction. A sequential event test does not satisfy this gate.
+      Current private KWin reproduction on evdev/libei did corrupt the target:
+      a physical second trigger interleaved with the paced replacement and was
+      subsequently expanded from stale captured input. This is a confirmed
+      route blocker, not a passing certification result; see the current
+      [negative evidence report](evidence/kwin-overlap-reproduction-2026-10-28.json)
+      and retain the failure until the behavior is corrected or that route is
+      refused for automatic replacement.
 - [ ] Verify command completion never inserts into an unintended context in a
       real focus-switch test.
 - [ ] Verify fail-closed behavior in password and credential fields for each

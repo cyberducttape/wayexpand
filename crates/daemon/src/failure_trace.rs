@@ -13,7 +13,7 @@ use std::{
 
 use wayexpand_core::{
     InjectorCapabilities, InjectorError, KeyEventState, Modifiers, OutputCheckpoint, TextInjector,
-    TransactionOutcome,
+    TransactionOutcome, TransactionPhase,
 };
 
 const HISTORY_LIMIT: usize = 8;
@@ -29,6 +29,7 @@ pub(crate) struct FailureTrace {
     backend_selected: &'static str,
     erase_acknowledged: &'static str,
     insertion_attempted: bool,
+    transaction_phases: Vec<&'static str>,
     completion: &'static str,
 }
 
@@ -57,7 +58,7 @@ impl<'a> TracedInjector<'a> {
         }
     }
 
-    pub(crate) fn record_outcome(self, outcome: &TransactionOutcome) {
+    pub(crate) fn record_outcome(self, outcome: &TransactionOutcome, phases: &[TransactionPhase]) {
         let completion = match outcome {
             TransactionOutcome::Applied => "applied",
             TransactionOutcome::AppliedWithCursorPositionFailure { .. } => {
@@ -76,6 +77,7 @@ impl<'a> TracedInjector<'a> {
         } else {
             self.stages.erase
         };
+        let transaction_phases = phases.iter().map(|phase| phase.as_str()).collect();
         push(FailureTrace {
             at_unix: now_unix(),
             backend: self.stages.backend,
@@ -84,6 +86,7 @@ impl<'a> TracedInjector<'a> {
             backend_selected: "yes",
             erase_acknowledged,
             insertion_attempted: self.stages.insertion_attempted,
+            transaction_phases,
             completion,
         });
     }
@@ -107,6 +110,7 @@ pub(crate) fn record_blocked_expansion(backend: &str, reason: &'static str) {
         backend_selected: "not reached",
         erase_acknowledged: "not attempted",
         insertion_attempted: false,
+        transaction_phases: vec!["prepared", "failed"],
         completion: reason,
     });
 }
@@ -326,6 +330,7 @@ fn traces_json<'a>(traces: impl Iterator<Item = &'a FailureTrace>) -> String {
                 "backend_selected": trace.backend_selected,
                 "erase_acknowledged": trace.erase_acknowledged,
                 "insertion_attempted": trace.insertion_attempted,
+                "transaction_phases": trace.transaction_phases,
                 "completion": trace.completion,
             })
         })
@@ -345,6 +350,7 @@ pub(crate) fn saturate_for_test() {
             backend_selected: "yes",
             erase_acknowledged: "transaction acknowledged; substeps not exposed",
             insertion_attempted: true,
+            transaction_phases: vec!["prepared", "validated", "applying", "committed"],
             completion: "inserted; cursor placement failed",
         });
     }
@@ -383,6 +389,7 @@ mod tests {
                 backend_selected: "not reached",
                 erase_acknowledged: "not attempted",
                 insertion_attempted: false,
+                transaction_phases: vec!["prepared", "failed"],
                 completion: "blocked by organization policy",
             },
         );
@@ -397,6 +404,7 @@ mod tests {
                     backend_selected: "yes",
                     erase_acknowledged: "atomic replacement acknowledged",
                     insertion_attempted: true,
+                    transaction_phases: vec!["prepared", "validated", "applying", "committed"],
                     completion: "applied",
                 },
             );
@@ -413,15 +421,30 @@ mod tests {
     #[test]
     fn successful_output_is_in_outcomes_and_excluded_from_failure_history() {
         let mut injector = MockInjector;
-        TracedInjector::new(&mut injector).record_outcome(&TransactionOutcome::Applied);
+        let mut traced = TracedInjector::new(&mut injector);
+        let report = wayexpand_core::ExpansionEngine::apply_with_report(
+            &mut traced,
+            &wayexpand_core::ExpansionResult {
+                snippet_id: "test".into(),
+                trigger: ":x".into(),
+                matched_text: ":x".into(),
+                insert: "value".into(),
+                cursor_offset: None,
+                reinsert_after: None,
+                command_backed: false,
+                undoable: false,
+                folded_suffix_chars: 0,
+            },
+        );
+        traced.record_outcome(&report.outcome, &report.phases);
 
         let outcomes: serde_json::Value =
             serde_json::from_str(&recent_outcomes_json()).expect("outcomes should be JSON");
-        assert!(outcomes
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|trace| trace["completion"] == "applied"));
+        assert!(outcomes.as_array().unwrap().iter().any(|trace| {
+            trace["completion"] == "applied"
+                && trace["transaction_phases"]
+                    == serde_json::json!(["prepared", "validated", "applying", "committed"])
+        }));
         let failures: serde_json::Value =
             serde_json::from_str(&recent_json()).expect("failures should be JSON");
         assert!(failures

@@ -55,7 +55,8 @@ pub use engine::{
     CommandErrorKind, CommandMetrics, CompletionNotifier, ExpansionEngine, ExpansionError,
     ExpansionResult, ExplainCheck, Explanation, HotkeyError, HotkeyResult, InputEvent, InsertError,
     PendingExpansionDispatch, PendingExpansionResult, ProcessWaitFailure, ProcessWaitOperation,
-    RouteLimit, TransactionOutcome, WindowContext, MAX_WINDOW_INSTANCE_ID_BYTES,
+    RouteLimit, TransactionOutcome, TransactionPhase, TransactionReport, WindowContext,
+    MAX_WINDOW_INSTANCE_ID_BYTES,
 };
 pub use fleet::{FleetConfig, FleetError, Layer, MergeStats, Provenance};
 pub use keys::{KeyChord, KeyChordError, Modifiers};
