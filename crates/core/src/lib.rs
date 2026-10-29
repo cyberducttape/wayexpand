@@ -9,6 +9,7 @@ pub use limits::{CommandLimits, COMMAND_LIMITS, CONTROL_MAX_RESPONSE_BYTES};
 #[cfg(not(unix))]
 compile_error!("wayexpand-core currently requires a Unix target");
 
+mod autokey_import;
 mod backend;
 mod capabilities;
 mod config;
@@ -32,6 +33,10 @@ mod template;
 mod template_dynamic;
 mod usage;
 
+pub use autokey_import::{
+    import_autokey, AutoKeyImport, AutoKeyImportError, AutoKeyImportMode, AutoKeyImportReport,
+    AutoKeyImportWarning,
+};
 pub use backend::{
     discover_backends, keystroke_max_chars, set_keystroke_max_chars, window_update_channel,
     BackendKind, BackendState, BackendStatus, FocusCheck, FocusStamp, FocusWitness,

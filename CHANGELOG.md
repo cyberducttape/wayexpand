@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add a conservative AutoKey phrase importer for `.txt` files and JSON
+  sidecars. It preserves aliases, supported trigger modes, cursor markers, and
+  categories; reports unsupported modes, filters, macros, and matching rules
+  without executing imported content. See
+  [AutoKey migration guide](docs/MIGRATION_FROM_AUTOKEY.md).
 - Preserve current-source private KWin smoke evidence for commit
   `9311e1e5be3f`: insertion, focus, target-close, command, reload, restart, and
   refusal checks passed; 20 latency samples per size were recorded. The report

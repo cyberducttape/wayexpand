@@ -271,6 +271,11 @@ and status snapshots are not a substitute for the current contracts above.
 2. `wayexpand import espanso ~/.config/espanso` — import the match tree
 3. [TROUBLESHOOTING.md](TROUBLESHOOTING.md) — if issues
 
+### "I'm switching from AutoKey"
+1. [MIGRATION_FROM_AUTOKEY.md](MIGRATION_FROM_AUTOKEY.md) — supported phrase pairs
+2. `wayexpand import autokey ~/.config/autokey/data` — import static phrases
+3. [TROUBLESHOOTING.md](TROUBLESHOOTING.md) — if issues
+
 ### "I want to contribute code"
 1. [DEVELOPMENT.md](DEVELOPMENT.md) — setup
 2. [DEVELOPMENT.md](DEVELOPMENT.md#code-review-checklist) — standards

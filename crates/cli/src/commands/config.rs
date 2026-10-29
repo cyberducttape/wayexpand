@@ -590,10 +590,10 @@ pub(crate) fn schema_command(mut args: Args) -> Result<()> {
 
 pub(crate) fn import_command(mut args: Args) -> Result<()> {
     const USAGE: &str =
-        "usage: wayexpand import espanso <file-or-match-directory> [--strict] [--report-json]";
+        "usage: wayexpand import <espanso|autokey> <file-or-directory> [--strict] [--report-json]";
     let format = args.next().ok_or_else(|| usage_error(USAGE))?;
     let source = args.next().ok_or_else(|| usage_error(USAGE))?;
-    if format != "espanso" {
+    if format != "espanso" && format != "autokey" {
         usage_bail!("{USAGE}");
     }
     let mut strict = false;
@@ -605,36 +605,59 @@ pub(crate) fn import_command(mut args: Args) -> Result<()> {
             _ => usage_bail!("{USAGE}"),
         }
     }
-    let mode = if strict {
-        wayexpand_core::EspansoImportMode::Strict
-    } else {
-        wayexpand_core::EspansoImportMode::Permissive
-    };
-    let imported = wayexpand_core::import_espanso_with_mode(Path::new(&source), mode)?;
-    if report_json {
-        // Keep stderr a single JSON document so it can be redirected to a
-        // file and parsed; the human-readable report would corrupt it.
-        eprintln!("{}", serde_json::to_string(&imported.report)?);
-    } else {
-        eprintln!(
-            "Espanso migration: {} fully migrated, {} migrated with warnings, {} unsupported",
-            imported.report.fully_migrated,
-            imported.report.migrated_with_warnings,
-            imported.report.unsupported
-        );
-        for warning in &imported.report.warnings {
-            for detail in &warning.details {
-                eprintln!("warning: {}: {detail}", warning.trigger);
+    match format.as_str() {
+        "espanso" => {
+            let mode = if strict {
+                wayexpand_core::EspansoImportMode::Strict
+            } else {
+                wayexpand_core::EspansoImportMode::Permissive
+            };
+            let imported = wayexpand_core::import_espanso_with_mode(Path::new(&source), mode)?;
+            if report_json {
+                eprintln!("{}", serde_json::to_string(&imported.report)?);
+            } else {
+                eprintln!(
+                    "Espanso migration: {} fully migrated, {} migrated with warnings, {} unsupported",
+                    imported.report.fully_migrated,
+                    imported.report.migrated_with_warnings,
+                    imported.report.unsupported
+                );
+                for warning in &imported.report.warnings {
+                    for detail in &warning.details {
+                        eprintln!("warning: {}: {detail}", warning.trigger);
+                    }
+                }
+                for unsupported in &imported.report.unsupported_matches {
+                    eprintln!(
+                        "unsupported: {}: {}",
+                        unsupported.trigger, unsupported.reason
+                    );
+                }
             }
+            print!("{}", toml::to_string_pretty(&imported.config)?);
         }
-        for unsupported in &imported.report.unsupported_matches {
-            eprintln!(
-                "unsupported: {}: {}",
-                unsupported.trigger, unsupported.reason
-            );
+        "autokey" => {
+            let mode = if strict {
+                wayexpand_core::AutoKeyImportMode::Strict
+            } else {
+                wayexpand_core::AutoKeyImportMode::Permissive
+            };
+            let imported = wayexpand_core::import_autokey(Path::new(&source), mode)?;
+            if report_json {
+                eprintln!("{}", serde_json::to_string(&imported.report)?);
+            } else {
+                eprintln!(
+                    "AutoKey import: {} phrases imported, {} unsupported",
+                    imported.report.imported, imported.report.unsupported
+                );
+                for warning in &imported.report.warnings {
+                    eprintln!("unsupported: {}: {}", warning.entry, warning.reason);
+                }
+            }
+            print!("{}", toml::to_string_pretty(&imported.config)?);
         }
+        _ => unreachable!("format validated above"),
     }
-    print!("{}", toml::to_string_pretty(&imported.config)?);
     Ok(())
 }
 

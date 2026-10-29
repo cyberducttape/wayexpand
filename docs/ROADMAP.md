@@ -235,7 +235,8 @@ Still open:
       hotkey switching, profile-specific snippet layers, and per-profile
       rollback history. Exact per-application assignments load asynchronously
       on focus changes and pause matching until validation succeeds.
-- [ ] Broader imports (TextExpander, AutoKey, aText, CSV).
+- [ ] Broader imports (partial: static AutoKey phrase trees import with
+      unsupported behavior disclosed; TextExpander, aText, and CSV remain).
 - [x] Form snippets through IBus: completions are bound to the originating
       input context and require surrounding-text verification (non-atomic,
       uncertified).

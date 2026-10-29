@@ -193,6 +193,11 @@ forms are converted; shell/script and clipboard execution or access are not
 enabled implicitly. The GUI's import merges by default and previews conflicts
 before anything changes. See [Migrating from Espanso](docs/MIGRATION_FROM_ESPANSO.md).
 
+Static AutoKey phrases can be imported from their `.txt` and JSON sidecar
+tree. Scripts, hotkeys, filters, and dynamic macros are reported as
+unsupported and never run during import. See
+[Migrating from AutoKey](docs/MIGRATION_FROM_AUTOKEY.md).
+
 ## Configuration profiles
 
 Keep separate personal, work, or customer libraries and switch between them:

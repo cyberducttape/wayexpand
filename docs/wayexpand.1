@@ -96,6 +96,11 @@ converted; shell, script and clipboard access are not enabled implicitly.
 Strict mode discards matches with semantic warnings; report-json emits a
 machine-readable report on stderr.
 .TP
+.B import autokey FILE-OR-DIRECTORY [--strict] [--report-json]
+Import static AutoKey phrase files and their hidden JSON sidecars. Dynamic
+macros, scripts, hotkeys, filters and unsupported matching modes are reported
+and omitted; they are never executed. Strict mode rejects unsupported entries.
+.TP
 .B set-enabled TRIGGER on|off [CONFIG]
 Enable or disable an expansion and save the configuration atomically.
 .TP
