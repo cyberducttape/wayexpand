@@ -133,6 +133,35 @@ impl ActionExecutor {
             configure_pinned_executable(&mut cmd, file, &action_config.program);
         }
 
+        #[cfg(target_os = "linux")]
+        let sandbox_ruleset = if let Some(sandbox) = &action_config.sandbox {
+            let cwd = action_config
+                .cwd
+                .as_deref()
+                .or(self.config.default_cwd.as_deref());
+            Some(
+                crate::sandbox::prepare(sandbox, &action_config.program, cwd).map_err(
+                    |reason| ActionError::ActionBlocked {
+                        action_id: request.action_id.clone(),
+                        reason: format!("could not enforce action sandbox: {reason}"),
+                    },
+                )?,
+            )
+        } else {
+            None
+        };
+        #[cfg(not(target_os = "linux"))]
+        if action_config.sandbox.is_some() {
+            return Err(ActionError::ActionBlocked {
+                action_id: request.action_id.clone(),
+                reason: "per-action filesystem sandboxing requires Linux Landlock".to_string(),
+            });
+        }
+        #[cfg(target_os = "linux")]
+        if let Some(ruleset) = &sandbox_ruleset {
+            crate::sandbox::configure_command(&mut cmd, ruleset);
+        }
+
         for arg in &action_config.args {
             cmd.arg(arg);
         }
@@ -453,6 +482,101 @@ mod tests {
         assert!(matches!(result, Err(ActionError::ActionNotFound { .. })));
     }
 
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn landlock_profile_blocks_reads_outside_its_allowlist() {
+        let mut config = BrokerConfig::default();
+        config.actions.insert(
+            "restricted-cat".to_string(),
+            ActionConfig {
+                sandbox: Some(crate::config::ActionSandbox::default()),
+                program: "/usr/bin/cat".to_string(),
+                args: vec!["/etc/passwd".to_string()],
+                timeout_ms: 5000,
+                server_env: vec![],
+                client_forward_env: vec![],
+                allow_dangerous_env: false,
+                inherit_env: false,
+                cwd: None,
+                log_output: false,
+                enabled: true,
+                description: None,
+            },
+        );
+
+        let executor = ActionExecutor::new(&config).unwrap();
+        let result = executor
+            .execute(ActionRequest {
+                action_id: "restricted-cat".to_string(),
+                timeout_ms: 5000,
+                inherit_env: false,
+                env_vars: vec![],
+                stdout_capture: true,
+            })
+            .await;
+
+        assert!(
+            matches!(&result, Err(ActionError::ExitFailure { stderr, .. }) if stderr.contains("Permission denied")),
+            "unexpected sandbox result: {result:?}"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn landlock_profile_allows_writes_only_under_granted_directories() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-landlock-write-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let output = directory.join("allowed.txt");
+        let mut config = BrokerConfig::default();
+        config.actions.insert(
+            "restricted-touch".to_string(),
+            ActionConfig {
+                sandbox: Some(crate::config::ActionSandbox {
+                    read_paths: vec![],
+                    write_paths: vec![directory.to_string_lossy().into_owned()],
+                }),
+                program: "/usr/bin/touch".to_string(),
+                args: vec![output.to_string_lossy().into_owned()],
+                timeout_ms: 5000,
+                server_env: vec![],
+                client_forward_env: vec![],
+                allow_dangerous_env: false,
+                inherit_env: false,
+                cwd: None,
+                log_output: false,
+                enabled: true,
+                description: None,
+            },
+        );
+
+        let executor = ActionExecutor::new(&config).unwrap();
+        let result = executor
+            .execute(ActionRequest {
+                action_id: "restricted-touch".to_string(),
+                timeout_ms: 5000,
+                inherit_env: false,
+                env_vars: vec![],
+                stdout_capture: true,
+            })
+            .await;
+        assert!(
+            matches!(result, Ok(ActionResponse::Success(_))),
+            "{result:?}"
+        );
+        assert!(output.is_file());
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
     #[tokio::test]
     async fn executor_revalidates_the_program_immediately_before_launch() {
         use std::os::unix::fs::PermissionsExt;
@@ -475,6 +599,7 @@ mod tests {
         config.actions.insert(
             "action".to_string(),
             ActionConfig {
+                sandbox: None,
                 program: program.to_string_lossy().into_owned(),
                 args: vec![],
                 timeout_ms: 5000,
@@ -514,6 +639,7 @@ mod tests {
         config.actions.insert(
             "disabled".to_string(),
             ActionConfig {
+                sandbox: None,
                 program: "/bin/echo".to_string(),
                 args: vec![],
                 timeout_ms: 5000,
@@ -567,6 +693,7 @@ mod tests {
         config.actions.insert(
             "sleeper".to_string(),
             ActionConfig {
+                sandbox: None,
                 program: "/bin/sleep".to_string(),
                 args: vec!["60".to_string()],
                 timeout_ms: 200,
@@ -608,6 +735,7 @@ mod tests {
         config.actions.insert(
             "holds-output".to_string(),
             ActionConfig {
+                sandbox: None,
                 program: "/bin/sh".to_string(),
                 args: vec![
                     "-c".to_string(),
@@ -661,6 +789,7 @@ mod tests {
         config.actions.insert(
             "echo".to_string(),
             ActionConfig {
+                sandbox: None,
                 program: "/bin/echo".to_string(),
                 args: vec!["hi".to_string()],
                 timeout_ms: 500,
@@ -696,6 +825,7 @@ mod tests {
         config.actions.insert(
             "stream".to_string(),
             ActionConfig {
+                sandbox: None,
                 program: "/bin/sh".to_string(),
                 args: vec!["-c".to_string(), "while :; do printf x; done".to_string()],
                 timeout_ms: 30_000,
@@ -753,6 +883,7 @@ mod tests {
         config.actions.insert(
             "report-stdout".to_string(),
             ActionConfig {
+                sandbox: None,
                 program: "/bin/sh".to_string(),
                 args: vec![
                     "-c".to_string(),
@@ -794,6 +925,7 @@ mod tests {
         config.actions.insert(
             "true".to_string(),
             ActionConfig {
+                sandbox: None,
                 program: "/bin/true".to_string(),
                 args: vec![],
                 timeout_ms,
@@ -877,6 +1009,7 @@ mod tests {
         config.actions.insert(
             "print-env".to_string(),
             ActionConfig {
+                sandbox: None,
                 program: "/usr/bin/env".to_string(),
                 args: vec![],
                 timeout_ms: 1000,
@@ -920,6 +1053,7 @@ mod tests {
         config.actions.insert(
             "print-env".to_string(),
             ActionConfig {
+                sandbox: None,
                 program: "/usr/bin/env".to_string(),
                 args: vec![],
                 timeout_ms: 1000,
@@ -963,6 +1097,7 @@ mod tests {
         config.actions.insert(
             "noisy".to_string(),
             ActionConfig {
+                sandbox: None,
                 program: "/bin/sh".to_string(),
                 args: vec!["-c".to_string(), "yes x | head -c 20971520".to_string()],
                 timeout_ms: 2000,

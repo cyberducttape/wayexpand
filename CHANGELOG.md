@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add optional per-action Landlock filesystem profiles with canonicalized
+  read/write path grants. Sandboxed actions are refused if the kernel cannot
+  enforce their profile. Keep the packaged broker's network denial global;
+  per-action network/device allowlists and seccomp profiles remain open.
 - Return a date error when the local calendar date cannot be represented.
   Form initialization and CLI template creation propagate that failure instead
   of substituting the Unix epoch; add regressions for date-resolution failure.

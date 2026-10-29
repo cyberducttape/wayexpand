@@ -1,8 +1,8 @@
 # Action Broker Architecture
 
 **Version:** 1.3.3
-**Status:** Integrated named-action execution; the packaged service applies a no-network/read-only-home sandbox
-**Next:** Per-action OS sandbox profiles and broader operational tooling
+**Status:** Named-action execution with optional per-action Landlock filesystem policy; packaged service denies network access
+**Next:** Per-action network and device policy, seccomp profiles, and broader operational tooling
 
 ## Overview
 
@@ -10,8 +10,10 @@ The Action Broker separates named command execution from keyboard capture. A
 snippet may reference `action = "cluster-status"`; the daemon sends only that
 name over a protected Unix socket. The broker's executable, fixed arguments,
 working directory, timeout, output capture, and environment allowlist remain
-server-side policy. The broker is not itself an OS sandbox: network and
-filesystem isolation still require service-level hardening.
+server-side policy. The packaged service applies global systemd restrictions,
+and actions may additionally opt into child-only Landlock filesystem grants.
+Network restrictions remain global to the broker service; device isolation and
+per-action seccomp policy are not implemented.
 
 The standalone binary is part of normal workspace builds and release packages. Set
 `WAYEXPAND_ACTION_BROKER_SOCKET` for the daemon (or use the default socket under
@@ -28,8 +30,8 @@ The design aims to provide:
 The packaged 1.x broker is a local-action broker. Its systemd unit denies IP
 networking (`IPAddressDeny=any`) and permits only `AF_UNIX`; the example policy
 therefore contains no networked command such as `kubectl`. Networked actions
-require future per-action OS sandbox profiles and must not be enabled by
-weakening the whole broker service.
+remain unavailable until per-action network policy exists; do not enable them
+by weakening the whole broker service.
 
 The daemon's bounded command worker routes named actions through this socket;
 ordinary `program =` commands retain the existing restricted direct runner.
@@ -226,10 +228,35 @@ enabled = true
 ```
 
 The packaged 1.x service is intentionally local-only: `IPAddressDeny=any` and
-`RestrictAddressFamilies=AF_UNIX` prevent networked actions. Do not configure
+`RestrictAddressFamilies=AF_UNIX` prevent networked actions. The unit does not
+provide a per-action device allowlist. Do not configure
 `kubectl`, AWS, cloud, Vault, or other network-dependent programs in this
 catalog and do not weaken the whole service to make one action work. Such
 actions require a future per-action OS sandbox profile and a separate review.
+
+### Per-action filesystem sandbox
+
+Actions may opt into a child-only Landlock filesystem profile. The broker grants the
+program and standard runtime paths read/execute access, and the configured
+working directory read access. Every other application path is denied unless
+it appears in `read_paths` or `write_paths`:
+
+```toml
+[actions."local-report".sandbox]
+read_paths = ["/home/user/reports/input"]
+write_paths = ["/home/user/reports/output"]
+```
+
+Writable entries must be existing directories. The policy loader canonicalizes
+all entries and rejects filesystem root, special files, and relative paths.
+The action is refused if Landlock is unavailable or rules cannot be enforced.
+This is filesystem defense in depth; network remains disabled by the packaged
+service. Device isolation is not currently provided, either per action or by
+the packaged unit. Custom service launches must retain the global network
+controls. The broker trusts
+software running under its own UID, including the user who can edit the broker
+policy; neither Landlock nor authenticated IPC is a boundary against malicious
+same-UID software.
 
 ### Daemon routing configuration
 

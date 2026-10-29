@@ -104,9 +104,12 @@ Named actions provide a supported policy-controlled path for selected SRE
 commands that require capabilities unavailable to the daemon sandbox. The
 integrated Action Broker is a separate same-user process and policy boundary;
 it receives an explicit action name and enforces its executable, arguments,
-environment, cwd, timeout, output limit, and optional audit result. It is not an
-OS sandbox or a boundary against compromised software running as the same UID;
-network and filesystem isolation must be supplied by its systemd service policy.
+environment, cwd, timeout, output limit, and optional audit result. The packaged
+service denies IP networking. An action may also opt into Landlock read/write
+path grants, enforced in the child process and refused when Landlock is
+unavailable. Device isolation is not currently provided. Landlock is not a
+boundary against malicious software running as the same UID; network access
+remains global service policy rather than a per-action grant.
 See
 [`docs/ACTION_BROKER_ARCHITECTURE.md`](docs/ACTION_BROKER_ARCHITECTURE.md).
 

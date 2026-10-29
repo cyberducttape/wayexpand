@@ -65,6 +65,51 @@ pub(crate) fn validate_working_directory(label: &str, directory: &str) -> Result
     Ok(())
 }
 
+pub(crate) fn canonicalize_sandbox_path(
+    action_id: &str,
+    access: &str,
+    path: &str,
+) -> Result<String, String> {
+    let path = Path::new(path);
+    let resolved = fs::canonicalize(path).map_err(|error| {
+        format!(
+            "action '{}' sandbox path cannot be resolved: {}",
+            action_id, error
+        )
+    })?;
+    if resolved == Path::new("/") {
+        return Err(format!(
+            "action '{}' sandbox paths cannot grant the filesystem root",
+            action_id
+        ));
+    }
+    let metadata = fs::metadata(&resolved).map_err(|error| {
+        format!(
+            "action '{}' sandbox path cannot be inspected: {}",
+            action_id, error
+        )
+    })?;
+    if resolved.starts_with("/dev") {
+        return Err(format!(
+            "action '{}' sandbox profiles cannot grant device paths",
+            action_id
+        ));
+    }
+    if !metadata.is_file() && !metadata.is_dir() {
+        return Err(format!(
+            "action '{}' sandbox {} path must be a regular file or directory",
+            action_id, access
+        ));
+    }
+    if access == "write_paths" && metadata.is_file() {
+        return Err(format!(
+            "action '{}' sandbox write_paths entries must be directories",
+            action_id
+        ));
+    }
+    Ok(resolved.to_string_lossy().into_owned())
+}
+
 pub(crate) fn validate_audit_path(path: &str) -> Result<(), String> {
     let path = resolve_audit_path(path)?;
     let parent = path

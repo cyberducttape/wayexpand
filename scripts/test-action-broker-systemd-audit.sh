@@ -41,6 +41,16 @@ program = "/bin/printf"
 args = ["systemd-audit-pass"]
 timeout_ms = 2000
 enabled = true
+
+[actions."landlock-deny-read"]
+program = "/usr/bin/cat"
+args = ["/etc/passwd"]
+timeout_ms = 2000
+enabled = true
+
+[actions."landlock-deny-read".sandbox]
+read_paths = []
+write_paths = []
 EOF
 chmod 0600 "$config"
 
@@ -92,6 +102,16 @@ response = json.loads(client.makefile("rb").readline())
 client.close()
 assert response["Success"]["stdout"] == "systemd-audit-pass", response
 assert response["Success"]["exit_code"] == 0, response
+
+request["action_id"] = "landlock-deny-read"
+request["stdout_capture"] = True
+client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+client.connect(path)
+client.sendall((json.dumps(request) + "\n").encode())
+response = json.loads(client.makefile("rb").readline())
+client.close()
+failure = response["Error"]["ExitFailure"]
+assert "Permission denied" in failure["stderr"], response
 PY
 then
     cat "$state_dir/systemd-run.log" >&2 || true

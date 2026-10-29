@@ -64,6 +64,49 @@ pub struct ActionConfig {
     /// Optional description of what this action does.
     #[serde(default)]
     pub description: Option<String>,
+
+    /// Optional child-only Landlock filesystem policy. When present, the
+    /// action is refused unless the running kernel can enforce the profile.
+    #[serde(default)]
+    pub sandbox: Option<ActionSandbox>,
+}
+
+/// Per-action filesystem grants. Paths are canonicalized when the broker
+/// loads its policy. The action also receives read access to its executable,
+/// standard runtime directories, `/proc`, and its working directory.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActionSandbox {
+    /// Additional files or directories the action may read and execute.
+    #[serde(default)]
+    pub read_paths: Vec<String>,
+    /// Files or directories the action may modify or create entries beneath.
+    #[serde(default)]
+    pub write_paths: Vec<String>,
+}
+
+impl ActionSandbox {
+    fn validate(&self) -> Result<(), String> {
+        const MAX_PATHS_PER_ACCESS: usize = 64;
+        for (label, paths) in [
+            ("read_paths", &self.read_paths),
+            ("write_paths", &self.write_paths),
+        ] {
+            if paths.len() > MAX_PATHS_PER_ACCESS {
+                return Err(format!(
+                    "sandbox.{} exceeds {} paths",
+                    label, MAX_PATHS_PER_ACCESS
+                ));
+            }
+            if paths
+                .iter()
+                .any(|path| !std::path::Path::new(path).is_absolute())
+            {
+                return Err(format!("sandbox.{} paths must be absolute", label));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Upper bound for a configured action timeout (one hour). Larger values are
@@ -252,6 +295,18 @@ impl BrokerConfig {
                 validate_working_directory(&format!("action '{}' cwd", id), cwd)?;
             }
 
+            if let Some(sandbox) = &action.sandbox {
+                if !self.require_absolute_paths {
+                    return Err(format!(
+                        "action '{}': sandbox profiles require require_absolute_paths=true",
+                        id
+                    ));
+                }
+                sandbox
+                    .validate()
+                    .map_err(|error| format!("action '{}': {}", id, error))?;
+            }
+
             if self.require_absolute_paths {
                 validate_absolute_program(id, &action.program)?;
             }
@@ -294,6 +349,16 @@ impl BrokerConfig {
                 validate_working_directory(&format!("action '{}' cwd", id), &canonical)?;
                 *cwd = canonical;
             }
+            if let Some(sandbox) = &mut action.sandbox {
+                for (label, paths) in [
+                    ("read_paths", &mut sandbox.read_paths),
+                    ("write_paths", &mut sandbox.write_paths),
+                ] {
+                    for path in paths.iter_mut() {
+                        *path = crate::path_security::canonicalize_sandbox_path(id, label, path)?;
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -306,6 +371,7 @@ mod tests {
     #[test]
     fn action_config_validation() {
         let config = ActionConfig {
+            sandbox: None,
             program: "/usr/bin/kubectl".to_string(),
             args: vec!["get".to_string()],
             timeout_ms: 5000,
@@ -324,6 +390,7 @@ mod tests {
 
     fn config_with_timeout(timeout_ms: u64) -> ActionConfig {
         ActionConfig {
+            sandbox: None,
             program: "/bin/true".to_string(),
             args: vec![],
             timeout_ms,
@@ -362,6 +429,7 @@ mod tests {
     #[test]
     fn action_config_empty_program() {
         let config = ActionConfig {
+            sandbox: None,
             program: String::new(),
             args: vec![],
             timeout_ms: 5000,
@@ -380,6 +448,7 @@ mod tests {
     #[test]
     fn action_config_rejects_process_argument_and_environment_nuls() {
         let mut config = ActionConfig {
+            sandbox: None,
             program: "/usr/bin/echo".to_string(),
             args: vec!["ok\0bad".to_string()],
             timeout_ms: 5000,
@@ -405,6 +474,7 @@ mod tests {
     #[test]
     fn action_config_rejects_dangerous_environment_by_default() {
         let mut config = ActionConfig {
+            sandbox: None,
             program: "/usr/bin/echo".to_string(),
             args: vec![],
             timeout_ms: 5000,
@@ -487,6 +557,7 @@ program = "echo"
         config.actions.insert(
             "test".to_string(),
             ActionConfig {
+                sandbox: None,
                 program: "echo".to_string(), // Not absolute
                 args: vec![],
                 timeout_ms: 5000,
@@ -579,6 +650,48 @@ enabled = true
     }
 
     #[test]
+    fn action_config_parses_and_validates_a_landlock_profile() {
+        let root =
+            std::env::temp_dir().join(format!("wayexpand-sandbox-config-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let toml = format!(
+            "[actions.report]\nprogram = '/usr/bin/true'\n[actions.report.sandbox]\nread_paths = ['{}']\nwrite_paths = ['{}']\n",
+            root.display(),
+            root.display(),
+        );
+        let mut config = BrokerConfig::from_toml(&toml).unwrap();
+        config.validate_and_canonicalize().unwrap();
+        let sandbox = config
+            .get_action("report")
+            .unwrap()
+            .sandbox
+            .as_ref()
+            .unwrap();
+        assert_eq!(sandbox.read_paths, [root.to_string_lossy().as_ref()]);
+        assert_eq!(sandbox.write_paths, [root.to_string_lossy().as_ref()]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn sandbox_paths_must_be_absolute_and_cannot_grant_root() {
+        let relative = ActionSandbox {
+            read_paths: vec!["data".into()],
+            write_paths: vec![],
+        };
+        assert!(relative.validate().unwrap_err().contains("absolute"));
+        assert!(
+            crate::path_security::canonicalize_sandbox_path("test", "read_paths", "/")
+                .unwrap_err()
+                .contains("filesystem root")
+        );
+        assert!(
+            crate::path_security::canonicalize_sandbox_path("test", "read_paths", "/dev")
+                .unwrap_err()
+                .contains("device paths")
+        );
+    }
+
+    #[test]
     fn absolute_program_validation_requires_a_safe_executable() {
         use std::os::unix::fs::PermissionsExt;
 
@@ -594,6 +707,7 @@ enabled = true
             actions: HashMap::from([(
                 "self".to_string(),
                 ActionConfig {
+                    sandbox: None,
                     program: executable.to_string_lossy().into_owned(),
                     args: vec![],
                     timeout_ms: 1000,
@@ -624,6 +738,7 @@ enabled = true
             actions: HashMap::from([(
                 "missing".to_string(),
                 ActionConfig {
+                    sandbox: None,
                     program: "/definitely/missing/wayexpand-action".to_string(),
                     args: vec![],
                     timeout_ms: 1000,
@@ -645,6 +760,7 @@ enabled = true
             actions: HashMap::from([(
                 "directory".to_string(),
                 ActionConfig {
+                    sandbox: None,
                     program: std::env::current_exe()
                         .unwrap()
                         .parent()

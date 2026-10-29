@@ -246,6 +246,7 @@ fn broker_config_validation() {
     config.actions.insert(
         "valid".to_string(),
         ActionConfig {
+            sandbox: None,
             program: "/usr/bin/echo".to_string(),
             args: vec!["hello".to_string()],
             timeout_ms: 5000,
@@ -276,6 +277,7 @@ fn broker_config_rejects_relative_paths_when_required() {
     config.actions.insert(
         "relative".to_string(),
         ActionConfig {
+            sandbox: None,
             program: "echo".to_string(), // Not absolute
             args: vec![],
             timeout_ms: 5000,

@@ -27,6 +27,7 @@ sha2 = { workspace = true }
 wayexpand-process-supervisor = { path = "../process-supervisor" }
 rustix = { workspace = true, features = ["process", "fs"] }
 shellexpand = "3"
+landlock = "0.4.7"
 
 [[bin]]
 name = "wayexpand-action-broker"
