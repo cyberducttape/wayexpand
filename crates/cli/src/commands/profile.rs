@@ -218,8 +218,7 @@ fn update_app_profile_assignment(
         .map_err(|error| config_error(error.to_string()))?;
     let normalized_app = wayexpand_core::ProfileAssignments::normalize_application_id(app_id)
         .map_err(|error| config_error(error.to_string()))?;
-    if profile.is_some() {
-        let name = profile.unwrap();
+    if let Some(name) = profile {
         validate_profile_name(name)?;
         let profile_path = root.join(format!("{name}.toml"));
         let config = Config::load_versioned(&profile_path)
