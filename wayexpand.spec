@@ -13,8 +13,6 @@ BuildRequires:  rustc
 BuildRequires:  pkg-config
 BuildRequires:  wayland-devel
 BuildRequires:  libxkbcommon-devel
-Requires:       wayland-libs
-Requires:       libxkbcommon
 
 %description
 WayExpand is a local Wayland text expander with a graphical editor, CLI,

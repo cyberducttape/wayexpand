@@ -8,9 +8,12 @@ All notable changes to WayExpand are documented here.
   expansions from the compiled form; one-shot renders and previews share
   the same variable parser and evaluator. A full render no longer scans the
   template a second time for newlines that only previews use.
-- CI now installs the built `.deb` (Ubuntu 24.04, Debian 13) and `.rpm`
-  (Fedora) in clean containers, checks the installed binaries, reinstalls,
-  and removes them (`scripts/test-package-smoke.sh`).
+- CI now installs the built `.deb` (Ubuntu 26.04) and `.rpm` (Fedora) in
+  clean containers, checks the installed binaries, reinstalls, and removes
+  them (`scripts/test-package-smoke.sh`).
+- Fix the RPM spec requiring `wayland-libs`, which no Fedora package
+  provides; the package now relies on rpmbuild's generated library
+  dependencies.
 - Add pack lockfiles and catalog updates: `pack lock [--check]` records and
   verifies the exact version and content fingerprint of installed packs,
   `pack outdated` and `pack update` move packs to newer catalog versions

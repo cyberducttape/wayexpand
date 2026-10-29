@@ -190,8 +190,9 @@ docs/ACTION_BROKER_ARCHITECTURE.md.
 - [ ] Publish only artifacts that pass the vendored offline-build checks.
 - [ ] Track package availability and certification status separately.
 - [ ] Add release/upgrade smoke tests for supported distributions. CI's
-      `package-smoke` job installs the built `.deb` on Ubuntu 24.04 and
-      Debian 13 and the `.rpm` on Fedora, checks shared-library resolution,
+      `package-smoke` job installs the built `.deb` on Ubuntu 26.04 (the
+      build host's series; its glibc floor rules out 24.04 and Debian 13)
+      and the `.rpm` on Fedora, checks shared-library resolution,
       versions, user units and example validation, reinstalls, and removes
       the package. Upgrade from a previously published package remains open:
       no release has published packages yet.

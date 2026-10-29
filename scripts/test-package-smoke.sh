@@ -23,8 +23,8 @@ case "$package" in
     *.deb)
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -qq
-        install_package() { apt-get install -y -qq "$package"; }
-        reinstall_package() { apt-get install -y -qq --reinstall "$package"; }
+        install_package() { apt-get install -y -q "$package"; }
+        reinstall_package() { apt-get install -y -q --reinstall "$package"; }
         remove_package() { apt-get remove -y -qq wayexpand; }
         ;;
     *.rpm)

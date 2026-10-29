@@ -619,9 +619,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - image: ubuntu:24.04
-            package: deb
-          - image: debian:trixie
+          # The .deb is built on ubuntu-latest and requires its glibc, so it
+          # is smoke-tested on that series (the documented .deb target).
+          - image: ubuntu:26.04
             package: deb
           - image: fedora:latest
             package: rpm
