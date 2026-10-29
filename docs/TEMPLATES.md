@@ -130,8 +130,13 @@ trigger = ":quote"
 replacement = "> {{clipboard}}"
 ```
 
-The daemon reads the clipboard with `wl-paste` (from wl-clipboard) with a
-150 ms limit and never logs the contents. `prefetch` starts the read as soon
+The daemon reads the clipboard directly over the `ext-data-control-v1`
+protocol where the compositor offers it (KWin 6 does), and otherwise with
+`wl-paste` (from wl-clipboard), with a 150 ms limit, and never logs the
+contents. Each read opens its own short-lived connection and takes no
+keyboard focus. (wl-clipboard 2.2.1 and older cannot use `ext-data-control-v1`
+and open a small focus-taking window instead, which moves focus away from the
+window being typed into.) `prefetch` starts the read as soon
 as the typed text can only become such a trigger; the value is used once and
 erased after two seconds if the trigger is not completed. `fresh` skips that
 early read and reads at render time. `disabled` blocks the variable even when

@@ -26,6 +26,8 @@ wayexpand-backend-evdev = { path = "../backend-evdev" }
 wayexpand-backend-kwin-window = { path = "../backend-kwin-window" }
 wayexpand-backend-selection = { path = "../backend-selection" }
 notify.workspace = true
+wayland-client.workspace = true
+wayland-protocols = { workspace = true, features = ["client", "staging"] }
 
 [build-dependencies]
 wayexpand-build-info = { path = "../build-info" }

@@ -52,4 +52,5 @@ trap 'exit 1' INT TERM
 
 run_scenarios "expansion-replaces-trigger word-boundary-reinserts-delimiter cursor-placement
 multiline-replacement unreachable-character-is-refused app-filter-fails-closed
-command-expansion-completes config-reload daemon-restart"
+command-expansion-completes config-reload daemon-restart clipboard-variable
+clipboard-empty-fails-closed"

@@ -4494,6 +4494,8 @@ dependencies = [
  "wayexpand-backend-wlroots",
  "wayexpand-build-info",
  "wayexpand-core",
+ "wayland-client",
+ "wayland-protocols",
 ]
 
 [[package]]

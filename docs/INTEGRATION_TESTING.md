@@ -32,7 +32,8 @@ runs WayExpand against a real KWin without touching the desktop: it starts a
 private `kwin_wayland --virtual` with its own D-Bus session, runtime directory,
 home, and configuration, and stops every process it started (including the
 portal services KWin activates) when it finishes. It needs `kwin_wayland`,
-`dbus-run-session`, `gdbus`, and `jq`.
+`dbus-run-session`, `gdbus`, and `jq`; the `clipboard-*` scenarios also need
+`wl-copy` and `wl-paste` (wl-clipboard) and report `unverified` without them.
 
 Inside that session (`scripts/kwin-e2e-session.sh`, with the scenarios shared
 with the Sway harness in `scripts/e2e-lib.sh`):
@@ -71,7 +72,13 @@ so these cases cannot run there and are not part of the CI gate. On that
 session they are reported as unverified before daemon startup. Run them only
 under a KWin session configured with a virtual keyboard that exposes
 input-method-v2; passing still represents headless simulated-input evidence,
-not physical keyboard certification.
+not physical keyboard certification. The input-method lane also runs
+`form-returns-to-origin` (a form helper maps its own focus-taking window,
+answers and closes; the rendered form must replace the trigger in the origin
+window) and `form-focus-moved-fails-closed` (focus moves to another window
+while the form is open; the result must be typed nowhere). Forms open only on
+routes that verify the trigger at the cursor, so the libei lane cannot run
+them.
 
 | Scenario | Shows |
 |---|---|
@@ -87,6 +94,8 @@ not physical keyboard certification.
 | `target-closes-during-expansion` | The target window closing mid-expansion: nothing is typed into the window that gains focus, and the daemon survives |
 | `config-reload` | An edited configuration takes effect without a restart |
 | `daemon-restart` | A killed daemon reconnects to libei and the tracker and expands again |
+| `clipboard-variable` | `{{clipboard}}` types the private session's clipboard in place of the trigger. The daemon reads it over `ext-data-control-v1` without taking focus; wl-clipboard 2.2.1 cannot bind that protocol on KWin and maps a focus-taking window, which made the output guard refuse every clipboard expansion |
+| `clipboard-empty-fails-closed` | With an empty clipboard the trigger stays and nothing is erased |
 | `output-latency` | Times 20 verified small, medium, and large replacements and reports p50/p95/p99 by negotiated output mode and size; excludes capture and client paint and has no pass threshold |
 
 Each line of the summary is `pass`, `fail`, or `unverified` (the scenario
@@ -129,7 +138,8 @@ harness surfaced:
 `scripts/test-sway-e2e.sh [--keep] [SCENARIO...]` runs the same scenario
 library against a private headless Sway (`WLR_BACKENDS=headless`, software
 rendering, no input devices) with its own runtime directory, home and
-configuration, and no D-Bus session. It needs `sway`, `swaymsg` and `jq`. A
+configuration, and no D-Bus session. It needs `sway`, `swaymsg` and `jq`, plus
+wl-clipboard for the `clipboard-*` scenarios. A
 Sway unpacked outside the system library path (for example from
 `apt-get download sway libwlroots-0.19 ...` and `dpkg-deb -x`) works when
 `PATH` and `LD_LIBRARY_PATH` point at it.
@@ -146,8 +156,8 @@ Inside that session (`scripts/sway-e2e-session.sh`):
 It runs `expansion-replaces-trigger`, `word-boundary-reinserts-delimiter`,
 `cursor-placement`, `multiline-replacement`, `unreachable-character-is-refused`
 (the wlroots route refuses text outside its guarantee, such as `é`, before
-erasing), `command-expansion-completes`, `config-reload`, `daemon-restart`, and
-`app-filter-fails-closed`: without a tracker, an `app_filter` snippet does not
+erasing), `command-expansion-completes`, `config-reload`, `daemon-restart`, the
+two clipboard scenarios, and `app-filter-fails-closed`: without a tracker, an `app_filter` snippet does not
 expand even in its own app. The KWin focus scenarios do not apply: with
 untracked focus, WayExpand makes no promise when focus moves mid-expansion.
 

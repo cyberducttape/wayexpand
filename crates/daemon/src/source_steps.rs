@@ -430,13 +430,25 @@ impl Daemon {
                     // discard it, so its flush waits for the next line.
                     if let Some(backend) = self.injector.as_deref_mut() {
                         if !self.config.engine.has_deferred_reservations() {
-                            process_event(
+                            // The flush can apply an expansion too; a refused
+                            // one typed nothing and must not stop the daemon.
+                            if let Err(error) = process_event(
                                 &mut self.config.engine,
                                 InputEvent::EndOfInput,
                                 Some(backend),
                                 &self.policy,
                                 self.active_backend,
-                            )?;
+                            ) {
+                                if !error.expansion_rejected() {
+                                    return Err(error.into());
+                                }
+                                warn!(
+                                    error = %error,
+                                    trigger_chars = error.result.trigger.chars().count(),
+                                    insert_bytes = error.result.insert.len(),
+                                    "output backend rejected expansion; continuing"
+                                );
+                            }
                         }
                     }
                 } else {

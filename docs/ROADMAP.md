@@ -133,6 +133,12 @@ supported end state before broad adoption:
       completion versus an external file edit.
 - [ ] Form snippets and the clipboard variable need validation with real
       clients on each compositor (focus return after the form closes).
+      Headless KWin and Sway now run `clipboard-variable` and
+      `clipboard-empty-fails-closed`; KWin passes since the daemon reads the
+      clipboard over `ext-data-control-v1` (wl-clipboard 2.2.1 took focus on
+      every read). `form-returns-to-origin` and
+      `form-focus-moved-fails-closed` run on the KWin input-method lane, which
+      stays unverified until a session grants the daemon input-method-v2.
 - [ ] Run the certification matrix in remote-desktop sessions (RDP/VNC via
       the compositor's remote-desktop portal) and nested compositor sessions,
       and record whether each route is supported there.

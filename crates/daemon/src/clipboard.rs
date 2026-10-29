@@ -1,6 +1,8 @@
 //! `{{clipboard}}` support for the daemon.
 //!
-//! Reads the clipboard with `wl-paste` (wl-clipboard) through the same
+//! Reads the clipboard natively over `ext-data-control-v1` where the
+//! compositor offers it (see [`data_control`]), and otherwise with `wl-paste`
+//! (wl-clipboard) through the same
 //! bounded, shell-free command runner used for command-backed snippets: fixed
 //! arguments, a minimal environment that passes only the Wayland session
 //! variables, a short timeout, and the usual output cap. The clipboard is read
@@ -20,6 +22,8 @@ use std::time::{Duration, Instant};
 use wayexpand_core::{
     run_command, ClipboardPrefetch, ClipboardReader, CommandConfig, CommandEnvironment,
 };
+
+mod data_control;
 
 /// How long a prefetched value may wait for its render before it is erased.
 /// Typing the rest of a trigger takes well under this.
@@ -149,7 +153,13 @@ struct ReadJob {
 pub fn wl_paste_clipboard() -> (ClipboardReader, ClipboardPrefetch) {
     let command = wl_paste_command();
     prefetching_clipboard(
-        Arc::new(move || run_command(&command).ok()),
+        Arc::new(move || {
+            let deadline = Instant::now() + Duration::from_millis(CLIPBOARD_TIMEOUT_MS);
+            match data_control::read(deadline, wayexpand_core::limits::MAX_COMMAND_OUTPUT_BYTES) {
+                data_control::NativeRead::Done(text) => text,
+                data_control::NativeRead::Unsupported => run_command(&command).ok(),
+            }
+        }),
         PREFETCH_MAX_AGE,
     )
 }

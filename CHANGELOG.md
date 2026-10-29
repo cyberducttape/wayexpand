@@ -4,6 +4,16 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Read `{{clipboard}}` natively over `ext-data-control-v1` when the
+  compositor offers it, falling back to `wl-paste` elsewhere. On KWin 6,
+  wl-clipboard 2.2.1 cannot bind that protocol and maps a focus-taking window
+  for every read, so the output guard refused every clipboard expansion.
+- Fix the stdin capture source stopping the daemon when an expansion applied
+  during an end-of-input flush was refused (nothing was typed).
+- Add headless end-to-end scenarios for the clipboard variable (KWin and Sway)
+  and for form focus return and fail-closed form completion (KWin
+  input-method lane).
+
 - Harden broker action parameters: free-text values may not begin with `-`
   (option injection), and the interpreter refusal now also covers versioned
   names, exec wrappers (`env`, `xargs`, `busybox`, `sudo`, `timeout`, ...) and

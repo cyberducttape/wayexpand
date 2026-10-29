@@ -139,6 +139,9 @@ write_config() {
         if [ -n "${e2e_keystroke_max_chars:-}" ]; then
             printf 'keystroke_max_chars = %s\n' "$e2e_keystroke_max_chars"
         fi
+        if [ -n "${e2e_extra_settings:-}" ]; then
+            printf '%s\n' "$e2e_extra_settings"
+        fi
         cat
     } >"$WAYEXPAND_CONFIG.tmp"
     mv "$WAYEXPAND_CONFIG.tmp" "$WAYEXPAND_CONFIG"
@@ -204,6 +207,7 @@ begin_case() {
 
 end_case() {
     stop_daemon
+    unset WAYEXPAND_FORM_HELPER
     for pid in $sink_pids; do
         kill "$pid" 2>/dev/null || true
     done
@@ -650,6 +654,164 @@ EOF
     wait_until 30 sink_text_is e2e-a "Best regardsBest regards"
     result=$?
     describe e2e-a
+    return "$result"
+}
+
+# --- clipboard and forms -----------------------------------------------
+
+clipboard_config() {
+    e2e_extra_settings='allow_clipboard = true
+clipboard_mode = "fresh"'
+    write_config <<'EOF'
+[[expansion]]
+trigger = ";quote"
+replacement = "> {{clipboard}}"
+EOF
+    e2e_extra_settings=
+}
+
+session_clipboard_is() {
+    [ "$(wl-paste --no-newline 2>/dev/null)" = "$1" ]
+}
+
+scenario_clipboard_variable() {
+    # The daemon reads the private session's clipboard with wl-paste at
+    # render time and types it in place of the trigger.
+    command -v wl-copy >/dev/null 2>&1 || {
+        printf 'wl-copy is not installed'
+        return 2
+    }
+    clipboard_config
+    start_sink e2e-a && start_daemon || return 2
+    activate e2e-a || return 2
+    printf 'copied text' | wl-copy 2>>"$case_dir/clipboard.log" || {
+        printf 'wl-copy could not set the session clipboard'
+        return 2
+    }
+    wait_until 30 session_clipboard_is "copied text" || {
+        printf 'the session clipboard did not report the copied text'
+        return 2
+    }
+    activate e2e-a || return 2
+    expand_in e2e-a "" ";quote" || return 2
+    wait_until 50 sink_text_is e2e-a "> copied text"
+    result=$?
+    describe e2e-a
+    return "$result"
+}
+
+scenario_clipboard_empty_fails_closed() {
+    # With nothing on the clipboard the snippet must not expand: the trigger
+    # stays and nothing is erased or half-typed.
+    command -v wl-copy >/dev/null 2>&1 || {
+        printf 'wl-copy is not installed'
+        return 2
+    }
+    clipboard_config
+    start_sink e2e-a && start_daemon || return 2
+    wl-copy --clear 2>>"$case_dir/clipboard.log" || true
+    activate e2e-a || return 2
+    expand_in e2e-a "" ";quote" || return 2
+    sleep 1.5
+    sink_text_is e2e-a ";quote"
+    result=$?
+    describe e2e-a
+    return "$result"
+}
+
+# A form helper that behaves like the real dialog towards the compositor: it
+# maps its own toplevel, which takes focus from the origin window, then
+# answers and closes. While form-release exists in the case directory it
+# waits for that file to say "go" before closing, so a scenario can move
+# focus while the form is open.
+write_form_helper() {
+    helper="$case_dir/form-helper"
+    cat >"$helper" <<EOF
+#!/bin/sh
+"$bin/wx-e2e-sink" e2e-form "$case_dir/e2e-form.json" >>"$case_dir/e2e-form.log" 2>&1 &
+form_pid=\$!
+tries=50
+while [ "\$tries" -gt 0 ]; do
+    [ "\$(jq -r .focused "$case_dir/e2e-form.json" 2>/dev/null)" = true ] && break
+    sleep 0.1
+    tries=\$((tries - 1))
+done
+printf '%s\n' "\$tries" >"$case_dir/form-focus-tries"
+if [ -e "$case_dir/form-release" ]; then
+    tries=100
+    while [ "\$tries" -gt 0 ] && [ "\$(cat "$case_dir/form-release")" != go ]; do
+        sleep 0.1
+        tries=\$((tries - 1))
+    done
+fi
+kill "\$form_pid" 2>/dev/null
+wait "\$form_pid" 2>/dev/null
+printf '%s' '{"field:name":"Ada"}'
+EOF
+    chmod 700 "$helper"
+    export WAYEXPAND_FORM_HELPER="$helper"
+}
+
+form_helper_took_focus() {
+    [ -s "$case_dir/form-focus-tries" ] && [ "$(cat "$case_dir/form-focus-tries")" -gt 0 ]
+}
+
+form_config() {
+    write_config <<'EOF'
+[[expansion]]
+trigger = "frm"
+replacement = "Hello {{field:name|required}}"
+EOF
+}
+
+scenario_form_returns_to_origin() {
+    # Forms open only on routes that verify the trigger at the cursor, so
+    # this runs on the input-method route. The form window takes focus; when
+    # it closes the compositor returns focus to the origin toplevel, and the
+    # rendered form must replace the trigger there.
+    write_form_helper
+    form_config
+    start_sink e2e-a && start_daemon || return 2
+    wait_until 50 sink_text_input_active e2e-a || return 2
+    expand_in e2e-a "" "frm" || return 2
+    wait_until 100 sink_text_is e2e-a "Hello Ada"
+    result=$?
+    if ! form_helper_took_focus; then
+        printf 'form window never took focus; '
+        describe e2e-a
+        return 2
+    fi
+    describe e2e-a
+    return "$result"
+}
+
+scenario_form_focus_moved_fails_closed() {
+    # Focus goes to another window while the form is open. The completed
+    # form must not be typed into that window, nor into the origin later.
+    write_form_helper
+    printf wait >"$case_dir/form-release"
+    form_config
+    start_sink e2e-b && start_sink e2e-a && start_daemon || return 2
+    activate e2e-a || return 2
+    wait_until 50 sink_text_input_active e2e-a || return 2
+    expand_in e2e-a "" "frm" || return 2
+    if ! wait_until 80 form_helper_took_focus; then
+        printf go >"$case_dir/form-release"
+        printf 'form window never took focus; '
+        describe e2e-a
+        return 2
+    fi
+    if ! activate e2e-b; then
+        printf go >"$case_dir/form-release"
+        printf 'could not move focus to B'
+        return 2
+    fi
+    printf go >"$case_dir/form-release"
+    sleep 2
+    result=0
+    sink_text_contains e2e-a "Ada" && result=1
+    sink_text_contains e2e-b "Ada" && result=1
+    printf 'A: %s; B: %s' "$(describe e2e-a)" "$(describe e2e-b)"
     return "$result"
 }
 

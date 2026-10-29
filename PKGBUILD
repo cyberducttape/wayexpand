@@ -21,6 +21,7 @@ optdepends=(
     'ibus: for native GNOME IBus input method integration'
     'kwin: for isolated headless compositor certification'
     'jq: for the isolated certification harness'
+    'wl-clipboard: for the certification harness clipboard scenarios'
 )
 source=("https://github.com/cyberducttape/wayexpand/releases/download/v1.3.3/wayexpand-1.3.3.tar.gz")
 sha256sums=('6c240d77090e8c93c8137ae679aab13aaaaa6df80b48bec85cad6f459df19451')
