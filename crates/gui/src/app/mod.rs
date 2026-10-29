@@ -9,6 +9,7 @@ mod editor_preview;
 mod first_run;
 mod import;
 mod library;
+mod profile;
 mod runtime_events;
 mod saving;
 mod settings;

@@ -215,6 +215,12 @@ struct GuiApp {
     pending_control: usize,
     next_status_poll: Instant,
     pending_action: Option<PendingAction>,
+    profiles: Vec<ProfileEntry>,
+    active_profile: Option<String>,
+    profile_name_draft: String,
+    profile_loaded: bool,
+    profile_error: Option<String>,
+    profile_receiver: Option<mpsc::Receiver<(ProfileOperation, Result<String, String>)>>,
     import_open: bool,
     import_path: String,
     import_preview: Option<(Config, wayexpand_core::EspansoImportReport)>,
@@ -305,6 +311,19 @@ struct GuiApp {
     /// When to retry a save that found the configuration lock busy.
     save_retry_at: Option<Instant>,
     next_save_id: u64,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ProfileEntry {
+    pub(crate) name: String,
+    pub(crate) valid: bool,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum ProfileOperation {
+    List,
+    Switch(String),
+    Create(String),
 }
 
 enum SaveIntent {
@@ -460,6 +479,12 @@ impl GuiApp {
             pending_control: 0,
             next_status_poll: Instant::now() + Duration::from_secs(2),
             pending_action: None,
+            profiles: Vec::new(),
+            active_profile: None,
+            profile_name_draft: String::new(),
+            profile_loaded: false,
+            profile_error: None,
+            profile_receiver: None,
             import_open: false,
             import_path: String::new(),
             import_preview: None,

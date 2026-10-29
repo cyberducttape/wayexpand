@@ -35,6 +35,12 @@ impl GuiApp {
             PendingAction::Duplicate => self.duplicate_selected(),
             PendingAction::Delete => self.perform_delete_selected(),
             PendingAction::Reload => self.perform_reload(),
+            PendingAction::SwitchProfile(name) => {
+                self.start_profile_operation(crate::ProfileOperation::Switch(name));
+            }
+            PendingAction::CreateProfile(name) => {
+                self.start_profile_operation(crate::ProfileOperation::Create(name));
+            }
             PendingAction::Undo => self.undo(),
             PendingAction::Close => self.close_after_confirm = true,
         }
@@ -128,12 +134,18 @@ impl GuiApp {
                         self.strings.delete_button()
                     });
                     ui.add_space(4.0);
-                    let action = match self.pending_action {
+                    let action = match self.pending_action.as_ref() {
                         Some(PendingAction::Select(_)) => self.strings.unsaved_switching(),
                         Some(PendingAction::New) => self.strings.unsaved_creating(),
                         Some(PendingAction::Duplicate) => self.strings.unsaved_duplicating(),
                         Some(PendingAction::Delete) => self.strings.unsaved_deleting(),
                         Some(PendingAction::Reload) => self.strings.unsaved_reloading(),
+                        Some(PendingAction::SwitchProfile(_)) => {
+                            self.strings.unsaved_switching_profile()
+                        }
+                        Some(PendingAction::CreateProfile(_)) => {
+                            self.strings.unsaved_creating_profile()
+                        }
                         Some(PendingAction::Undo) => self.strings.unsaved_undoing(),
                         Some(PendingAction::Close) => self.strings.unsaved_closing(),
                         None => "continuing",
@@ -157,7 +169,7 @@ impl GuiApp {
                                 self.pending_action = None;
                             }
                         });
-                    } else if matches!(self.pending_action, Some(PendingAction::Delete)) {
+                    } else if matches!(self.pending_action.as_ref(), Some(PendingAction::Delete)) {
                         ui.label(self.strings.delete_confirm());
                         ui.add_space(6.0);
                         ui.horizontal(|ui| {

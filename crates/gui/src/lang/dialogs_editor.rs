@@ -1,6 +1,78 @@
 use super::{Language, Strings};
 
 impl Strings {
+    pub fn unsaved_switching_profile(&self) -> &'static str {
+        match self.lang {
+            Language::English => "switching profiles",
+            Language::Indonesian => "beralih profil",
+            Language::German => "Profil wechseln",
+        }
+    }
+
+    pub fn unsaved_creating_profile(&self) -> &'static str {
+        match self.lang {
+            Language::English => "creating a profile",
+            Language::Indonesian => "membuat profil",
+            Language::German => "Profil erstellen",
+        }
+    }
+
+    pub fn profiles(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Profiles",
+            Language::Indonesian => "Profil",
+            Language::German => "Profile",
+        }
+    }
+
+    pub fn no_profiles(&self) -> &'static str {
+        match self.lang {
+            Language::English => "No profiles yet",
+            Language::Indonesian => "Belum ada profil",
+            Language::German => "Noch keine Profile",
+        }
+    }
+
+    pub fn refresh_profiles(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Refresh list",
+            Language::Indonesian => "Muat ulang daftar",
+            Language::German => "Liste aktualisieren",
+        }
+    }
+
+    pub fn create_profile(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Create and switch",
+            Language::Indonesian => "Buat dan beralih",
+            Language::German => "Erstellen und wechseln",
+        }
+    }
+
+    pub fn profile_name_hint(&self) -> &'static str {
+        match self.lang {
+            Language::English => "e.g. work",
+            Language::Indonesian => "mis. kerja",
+            Language::German => "z. B. arbeit",
+        }
+    }
+
+    pub fn profile_loading(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Loading profiles…",
+            Language::Indonesian => "Memuat profil…",
+            Language::German => "Profile werden geladen…",
+        }
+    }
+
+    pub fn profile_invalid(&self) -> &'static str {
+        match self.lang {
+            Language::English => "invalid",
+            Language::Indonesian => "tidak valid",
+            Language::German => "ungültig",
+        }
+    }
+
     pub fn unsaved_title(&self) -> &'static str {
         match self.lang {
             Language::English => "Unsaved changes",

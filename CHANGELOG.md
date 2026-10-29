@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add an asynchronous profile menu to the GUI. It shows which profiles validate,
+  disables invalid profiles, supports creating and switching profiles, confirms
+  unsaved editor changes first, and reloads the active library after a switch.
 - Add a form-field builder to the snippet editor for required or optional text,
   dropdown, and date fields. It inserts markers at the replacement editor's
   current selection and validates names, defaults, choice counts, and defaults

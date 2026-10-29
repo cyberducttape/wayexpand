@@ -1,13 +1,15 @@
 use wayexpand_core::WindowContext;
 
 /// User action deferred while an unsaved draft confirmation dialog is open.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PendingAction {
     Select(usize),
     New,
     Duplicate,
     Delete,
     Reload,
+    SwitchProfile(String),
+    CreateProfile(String),
     Undo,
     Close,
 }

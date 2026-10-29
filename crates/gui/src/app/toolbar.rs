@@ -158,6 +158,77 @@ impl GuiApp {
         let more_actions = self.strings.more_actions();
         let actions_response = ui
             .menu_button(more_actions, |ui| {
+                ui.menu_button(self.strings.profiles(), |ui| {
+                    if !self.profile_loaded && self.profile_receiver.is_none() {
+                        self.start_profile_operation(ProfileOperation::List);
+                    }
+                    if let Some(active) = self.active_profile.as_deref() {
+                        ui.label(format!("{}: {active}", self.strings.profiles()));
+                    }
+                    if self.profile_receiver.is_some() {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label(self.strings.profile_loading());
+                        });
+                    }
+                    let profiles = self.profiles.clone();
+                    for profile in &profiles {
+                        let active = self.active_profile.as_deref() == Some(&profile.name);
+                        let label = if profile.valid {
+                            profile.name.clone()
+                        } else {
+                            format!("{} · {}", profile.name, self.strings.profile_invalid())
+                        };
+                        if ui
+                            .add_enabled(
+                                profile.valid && !active && self.profile_receiver.is_none(),
+                                egui::Button::new(if active {
+                                    format!("✓ {label}")
+                                } else {
+                                    label
+                                }),
+                            )
+                            .clicked()
+                        {
+                            self.request_action(PendingAction::SwitchProfile(profile.name.clone()));
+                            ui.close();
+                        }
+                    }
+                    if profiles.is_empty() && self.profile_loaded {
+                        ui.label(self.strings.no_profiles());
+                    }
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            TextEdit::singleline(&mut self.profile_name_draft)
+                                .hint_text(self.strings.profile_name_hint())
+                                .desired_width(120.0),
+                        );
+                        let name = self.profile_name_draft.trim().to_owned();
+                        if ui
+                            .add_enabled(
+                                !name.is_empty() && self.profile_receiver.is_none(),
+                                egui::Button::new(self.strings.create_profile()),
+                            )
+                            .clicked()
+                        {
+                            self.request_action(PendingAction::CreateProfile(name));
+                            ui.close();
+                        }
+                    });
+                    if self.profile_error.is_some() {
+                        ui.colored_label(
+                            palette.danger,
+                            self.profile_error.clone().unwrap_or_default(),
+                        );
+                    }
+                    if self.profile_receiver.is_none()
+                        && ui.button(self.strings.refresh_profiles()).clicked()
+                    {
+                        self.profile_loaded = false;
+                        self.start_profile_operation(ProfileOperation::List);
+                    }
+                });
                 if ui.button(self.strings.reload()).clicked() {
                     self.request_action(PendingAction::Reload);
                     ui.close();

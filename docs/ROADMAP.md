@@ -213,10 +213,12 @@ Still open:
       Runtime host restrictions remain a separate overlay. Template AST
       compilation and reuse during rendering, and end-to-end consistency tests
       across fleet/reload paths remain open.
-- [ ] Named full-config profiles now support CLI create/list/switch/remove,
-      checkpointing on switch and daemon reload. Still open: GUI/hotkey
-      switching, profile-specific snippet layers, per-application automatic
-      selection, and per-profile rollback history.
+- [ ] Named full-config profiles support CLI create/list/switch/remove,
+      checkpointing on switch and daemon reload. The GUI now lists validated
+      profiles and can create or switch them asynchronously, preserving its
+      unsaved-edit confirmation and reloading the open library. Still open:
+      hotkey switching, profile-specific snippet layers, per-application
+      automatic selection, and per-profile rollback history.
 - [ ] Broader imports (TextExpander, AutoKey, aText, CSV).
 - [x] Form snippets through IBus: completions are bound to the originating
       input context and require surrounding-text verification (non-atomic,
