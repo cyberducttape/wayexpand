@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add GUI rollback for installed signed/community packs. The review panel asks
+  for confirmation and separately requires consent before restoring commands
+  or hotkeys; rollback still rechecks signer and organization policy in the CLI.
 - After serialized evdev output, clear matcher context and discard captured
   events until 40 ms of input quiet. This prevents keystrokes accumulated
   during slow keysym fallback from being replayed as stale triggers. The

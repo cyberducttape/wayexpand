@@ -49,6 +49,50 @@ impl Strings {
         }
     }
 
+    pub fn pack_rollback_button(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Roll back installed pack…",
+            Language::Indonesian => "Pulihkan versi paket sebelumnya…",
+            Language::German => "Installiertes Paket zurückrollen…",
+        }
+    }
+
+    pub fn pack_rollback_confirm(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Confirm rollback",
+            Language::Indonesian => "Konfirmasi pemulihan",
+            Language::German => "Rollback bestätigen",
+        }
+    }
+
+    pub fn pack_rollback_allow_actions(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Allow restoring commands and hotkeys from the backup",
+            Language::Indonesian => "Izinkan pemulihan perintah dan tombol pintas dari cadangan",
+            Language::German => "Befehle und Tastenkürzel aus der Sicherung wiederherstellen",
+        }
+    }
+
+    pub fn pack_rollback_explanation(&self) -> &'static str {
+        match self.lang {
+            Language::English => "The CLI rechecks signatures and organization policy before restoring the previous version.",
+            Language::Indonesian => "CLI memeriksa ulang tanda tangan dan kebijakan organisasi sebelum memulihkan versi sebelumnya.",
+            Language::German => "Die CLI prüft Signaturen und Organisationsrichtlinien vor der Wiederherstellung erneut.",
+        }
+    }
+
+    pub fn pack_rollback_complete(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Previous pack version restored and daemon reload requested",
+            Language::Indonesian => {
+                "Versi paket sebelumnya dipulihkan dan pemuatan ulang daemon diminta"
+            }
+            Language::German => {
+                "Vorherige Paketversion wiederhergestellt und Neuladen des Daemons angefordert"
+            }
+        }
+    }
+
     pub fn pack_operation_running(&self) -> &'static str {
         match self.lang {
             Language::English => "Checking pack…",

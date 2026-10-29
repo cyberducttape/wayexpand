@@ -21,6 +21,9 @@ impl GuiApp {
                         allow_actions,
                         fingerprint,
                     } => install_pack(&source, *replace, *allow_actions, fingerprint),
+                    PackOperation::Rollback { id, allow_actions } => {
+                        rollback_pack(id, *allow_actions)
+                    }
                 };
                 let _ = sender.send((worker_operation, result));
             });
@@ -70,14 +73,23 @@ impl GuiApp {
                     install_output: None,
                 });
                 self.pack_action_consent = false;
+                self.pack_rollback_action_consent = false;
+                self.pack_rollback_confirmation = None;
                 self.pack_error = None;
             }
-            (PackOperation::Install { .. }, Ok(PackWorkerResult::Installed(output))) => {
+            (
+                operation @ (PackOperation::Install { .. } | PackOperation::Rollback { .. }),
+                Ok(PackWorkerResult::Installed(output)),
+            ) => {
                 if let Some(review) = self.pack_review.as_mut() {
                     review.install_output = Some(output);
                 }
+                self.pack_rollback_confirmation = None;
                 self.pack_error = None;
-                self.status = Status::success(self.strings.pack_install_complete());
+                self.status = Status::success(match operation {
+                    PackOperation::Rollback { .. } => self.strings.pack_rollback_complete(),
+                    _ => self.strings.pack_install_complete(),
+                });
                 self.refresh_diagnostics(true);
             }
             (_, Err(error)) => {
@@ -111,6 +123,8 @@ impl GuiApp {
                     if response.changed() {
                         self.pack_review = None;
                         self.pack_action_consent = false;
+                        self.pack_rollback_action_consent = false;
+                        self.pack_rollback_confirmation = None;
                         self.pack_error = None;
                     }
                 });
@@ -121,6 +135,8 @@ impl GuiApp {
                     {
                         self.pack_review = None;
                         self.pack_action_consent = false;
+                        self.pack_rollback_action_consent = false;
+                        self.pack_rollback_confirmation = None;
                         self.start_pack_operation(PackOperation::Review);
                     }
                     if self.pack_operation_receiver.is_some() {
@@ -260,6 +276,44 @@ impl GuiApp {
         });
         if let Some(output) = review.install_output.as_deref() {
             ui.colored_label(palette.success, self.strings.pack_install_result(output));
+        }
+
+        if review.installed {
+            let pack_id = json_string(manifest, "id");
+            let confirming = self.pack_rollback_confirmation.as_deref() == Some(&pack_id);
+            ui.checkbox(
+                &mut self.pack_rollback_action_consent,
+                self.strings.pack_rollback_allow_actions(),
+            );
+            let button_label = if confirming {
+                self.strings.pack_rollback_confirm()
+            } else {
+                self.strings.pack_rollback_button()
+            };
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .add_enabled(
+                        self.pack_operation_receiver.is_none(),
+                        egui::Button::new(button_label),
+                    )
+                    .clicked()
+                {
+                    if confirming {
+                        let allow_actions = self.pack_rollback_action_consent;
+                        self.start_pack_operation(PackOperation::Rollback {
+                            id: pack_id.clone(),
+                            allow_actions,
+                        });
+                    } else {
+                        self.pack_rollback_confirmation = Some(pack_id.clone());
+                    }
+                }
+                ui.label(
+                    RichText::new(self.strings.pack_rollback_explanation())
+                        .small()
+                        .color(palette.muted),
+                );
+            });
         }
     }
 
@@ -545,6 +599,17 @@ fn install_pack(
     }
     args.push("--expected-fingerprint");
     args.push(fingerprint);
+    let output = run_wayexpand(&args)?;
+    Ok(PackWorkerResult::Installed(
+        String::from_utf8_lossy(&output).trim().to_owned(),
+    ))
+}
+
+fn rollback_pack(id: &str, allow_actions: bool) -> Result<PackWorkerResult, String> {
+    let mut args = vec!["pack", "rollback", id];
+    if allow_actions {
+        args.push("--allow-actions");
+    }
     let output = run_wayexpand(&args)?;
     Ok(PackWorkerResult::Installed(
         String::from_utf8_lossy(&output).trim().to_owned(),

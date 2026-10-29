@@ -224,6 +224,8 @@ struct GuiApp {
     pack_dialog_open: bool,
     pack_candidate_path: String,
     pack_action_consent: bool,
+    pack_rollback_action_consent: bool,
+    pack_rollback_confirmation: Option<String>,
     pack_review: Option<PackReview>,
     pack_operation_receiver:
         Option<mpsc::Receiver<(PackOperation, Result<PackWorkerResult, String>)>>,
@@ -349,6 +351,10 @@ pub(crate) enum PackOperation {
         replace: bool,
         allow_actions: bool,
         fingerprint: String,
+    },
+    Rollback {
+        id: String,
+        allow_actions: bool,
     },
 }
 
@@ -525,6 +531,8 @@ impl GuiApp {
             pack_dialog_open: false,
             pack_candidate_path: String::new(),
             pack_action_consent: false,
+            pack_rollback_action_consent: false,
+            pack_rollback_confirmation: None,
             pack_review: None,
             pack_operation_receiver: None,
             pack_error: None,

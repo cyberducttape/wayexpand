@@ -98,6 +98,11 @@ displayed as untrusted content. If the GUI cannot display all of a pack or its
 diff within its review limits, installation is disabled; use `wayexpand pack
 inspect` in a terminal to examine it.
 
+For an installed pack, the same review panel offers a two-step rollback to its
+most recent backup. The GUI asks separately whether commands or hotkeys from
+that backup may be restored. The CLI repeats signature and organization-policy
+checks during rollback; it does not trust the earlier GUI review as authority.
+
 `pack import` still produces ordinary TOML on stdout and does not install or
 activate snippets. It strips commands and hotkeys. `pack install` keeps the
 validated pack structure intact; it refuses command and hotkey actions unless
