@@ -39,7 +39,8 @@ session evidence; unit tests alone do not satisfy them.
       output is active, records an uncertain outcome, and quarantines the input
       instead of replaying or continuing queued output. A delayed-event unit
       regression covers the reactor polling path, but its input source is
-      simulated.
+      simulated. The monitor treats every raw key event as activity, including
+      modifiers and lock keys ignored by matcher translation.
       This is containment only: any already delivered physical keys or
       synthetic characters may leave partial text, so the target-integrity
       gate still requires a passing real-session test or refusing automatic

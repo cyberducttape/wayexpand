@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Interrupt paced non-atomic output on any physical evdev key event, including
+  modifier and lock keys that do not produce matcher input. This narrows one
+  interleaving window; non-exclusive capture still cannot prevent already
+  delivered input or guarantee atomic replacement.
 - Add a conservative AutoKey phrase importer for `.txt` files and JSON
   sidecars. It preserves aliases, supported trigger modes, cursor markers, and
   categories; reports unsupported modes, filters, macros, and matching rules

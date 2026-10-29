@@ -355,8 +355,8 @@ impl Daemon {
             return;
         };
         match source.next_event_during_output(timeout) {
-            Ok(None) => {}
-            Ok(Some(_event)) => {
+            Ok(false) => {}
+            Ok(true) => {
                 self.interrupt_pending_non_atomic_output(
                     "physical input arrived during non-atomic replacement; current text may be partially changed",
                 );

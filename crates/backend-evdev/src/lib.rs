@@ -184,7 +184,7 @@ impl EvdevSource {
     /// without changing `self.pending`) if `timeout` elapses with nothing
     /// ready, so callers on the daemon's main loop can still service
     /// stop/pause/reload requests at a steady cadence even while idle.
-    fn poll_once(&mut self, timeout: Duration, with_wake: bool) -> Result<(), EvdevError> {
+    fn poll_once(&mut self, timeout: Duration, with_wake: bool) -> Result<bool, EvdevError> {
         if self.devices.is_empty() {
             return Err(EvdevError::AllDevicesLost);
         }
@@ -229,7 +229,7 @@ impl EvdevSource {
         }
         drop(fds);
         drop(borrowed);
-        self.drain_ready(&ready)?;
+        let key_activity = self.drain_ready(&ready)?;
         let had_lost_devices = !lost.is_empty();
         let lost_paths = lost
             .iter()
@@ -249,7 +249,7 @@ impl EvdevSource {
         if had_lost_devices {
             self.reset_keyboard_state_for_devices(&lost_paths)?;
         }
-        Ok(())
+        Ok(key_activity)
     }
 
     #[cfg(test)]
@@ -338,7 +338,8 @@ impl EvdevSource {
         }
     }
 
-    fn drain_ready(&mut self, ready_indices: &[usize]) -> Result<(), EvdevError> {
+    fn drain_ready(&mut self, ready_indices: &[usize]) -> Result<bool, EvdevError> {
+        let mut key_activity = false;
         for &index in ready_indices {
             let events = {
                 let device = &mut self.devices[index];
@@ -349,10 +350,11 @@ impl EvdevSource {
             };
             let path = self.devices[index].path().to_path_buf();
             for event in events {
+                key_activity |= matches!(event.destructure(), evdev::EventSummary::Key(..));
                 self.translate_for_device(&path, event);
             }
         }
-        Ok(())
+        Ok(key_activity)
     }
 
     /// Translates one raw evdev event into zero or more `InputEvent`s,
@@ -546,17 +548,21 @@ impl EvdevSource {
     }
 
     /// Poll already-open keyboard devices without sleeping or refreshing
-    /// discovery state. The daemon uses this while a non-atomic output
-    /// transaction is in progress so new physical input can interrupt a
-    /// paced replacement promptly.
+    /// discovery state. Reports every raw key event, including modifier and
+    /// lock-key events that do not become matcher input, so the daemon can
+    /// interrupt a non-atomic output transaction before such input changes
+    /// how the target application interprets synthetic keys.
     pub fn next_event_during_output(
         &mut self,
         timeout: Duration,
-    ) -> Result<Option<InputEvent>, InputSourceError> {
-        if let Some(event) = self.pending.pop_front() {
-            return Ok(Some(event));
+    ) -> Result<bool, InputSourceError> {
+        if self.pending.pop_front().is_some() {
+            // A translated pending event is necessarily backed by physical
+            // input and therefore interrupts an in-flight replacement.
+            return Ok(true);
         }
-        self.poll_once(timeout, true)
+        let key_activity = self
+            .poll_once(timeout, true)
             .map_err(|error| InputSourceError {
                 source: SOURCE_NAME,
                 retryable: error.is_retryable(),
@@ -569,7 +575,13 @@ impl EvdevSource {
                 message: EvdevError::AllDevicesLost.to_string(),
             });
         }
-        Ok(self.pending.pop_front())
+        if key_activity {
+            // Match the old monitor contract: consume one translated event
+            // because the caller uses this method only as an interruption
+            // signal; it must not later replay that event as matcher input.
+            self.pending.pop_front();
+        }
+        Ok(key_activity)
     }
 }
 
@@ -813,14 +825,40 @@ mod tests {
         };
         writer.write_all(b"event").unwrap();
 
-        assert!(matches!(
-            source.next_event_during_output(Duration::ZERO).unwrap(),
-            Some(InputEvent::Key(_))
-        ));
+        assert!(source.next_event_during_output(Duration::ZERO).unwrap());
         assert_eq!(
             source.pending.pop_front(),
             Some(InputEvent::Text("a".into()))
         );
+    }
+
+    #[test]
+    fn output_monitor_detects_modifier_activity_without_matcher_input() {
+        let path = PathBuf::from("/dev/input/test-keyboard");
+        let (reader, mut writer) = UnixStream::pair().unwrap();
+        reader.set_nonblocking(true).unwrap();
+        let events = Arc::new(Mutex::new(vec![evdev::InputEvent::new(
+            evdev::EventType::KEY.0,
+            42, // KEY_LEFTSHIFT
+            1,
+        )]));
+        let mut source = EvdevSource {
+            devices: vec![Box::new(TestKeyboard {
+                path: path.clone(),
+                reader,
+                events,
+            })],
+            state: test_state(),
+            pending: VecDeque::new(),
+            pressed: HashMap::from([(path, HashSet::new())]),
+            last_device_refresh: Instant::now(),
+            wake: None,
+        };
+        writer.write_all(b"event").unwrap();
+
+        assert!(source.next_event_during_output(Duration::ZERO).unwrap());
+        assert!(source.pending.is_empty());
+        assert!(source.keys_held());
     }
 
     /// A press on a resolvable key always yields a candidate hotkey chord
