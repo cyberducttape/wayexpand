@@ -1839,6 +1839,13 @@ fn every_panel_and_dialog_renders_for_supported_languages_and_settings_tabs() {
         output_last_refusal: Some(runtime::OutputRefusal::FocusChanged),
         output_uncertain_total: Some(1),
         evdev_quarantined_events_total: None,
+        usage_flush_max_duration_us: None,
+        usage_flush_failures_total: None,
+        usage_worker_failures_total: None,
+        usage_queue_rejected_total: None,
+        usage_events_recorded_total: None,
+        usage_events_persisted_total: None,
+        usage_events_dropped_total: None,
         recent_expansion_outcomes: Vec::new(),
     });
     app.import_open = true;

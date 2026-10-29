@@ -630,6 +630,66 @@ impl GuiApp {
                 capabilities.injection_latency_p95_us,
                 capabilities.injection_latency_p99_us,
             );
+            theme::section_header(ui, "", self.strings.usage_persistence());
+            theme::card(ui, palette, |ui| {
+                ui.columns(2, |columns| {
+                    dashboard_value(
+                        &mut columns[0],
+                        self.strings.usage_recorded(),
+                        &counter_value(capabilities.usage_events_recorded_total),
+                        palette.accent,
+                    );
+                    dashboard_value(
+                        &mut columns[1],
+                        self.strings.usage_persisted(),
+                        &counter_value(capabilities.usage_events_persisted_total),
+                        palette.accent,
+                    );
+                    let dropped = capabilities.usage_events_dropped_total;
+                    dashboard_value(
+                        &mut columns[0],
+                        self.strings.usage_dropped(),
+                        &counter_value(dropped),
+                        if dropped.is_some_and(|count| count > 0) {
+                            palette.danger
+                        } else {
+                            palette.success
+                        },
+                    );
+                    dashboard_value(
+                        &mut columns[1],
+                        self.strings.usage_queue_rejected(),
+                        &counter_value(capabilities.usage_queue_rejected_total),
+                        palette.muted,
+                    );
+                    dashboard_value(
+                        &mut columns[0],
+                        self.strings.usage_flush_failures(),
+                        &counter_value(capabilities.usage_flush_failures_total),
+                        palette.muted,
+                    );
+                    dashboard_value(
+                        &mut columns[1],
+                        self.strings.usage_worker_failures(),
+                        &counter_value(capabilities.usage_worker_failures_total),
+                        palette.muted,
+                    );
+                    dashboard_value(
+                        &mut columns[0],
+                        self.strings.usage_max_flush(),
+                        &capabilities.usage_flush_max_duration_us.map_or_else(
+                            || self.strings.no_samples().to_owned(),
+                            |duration| format!("{duration} µs"),
+                        ),
+                        palette.muted,
+                    );
+                });
+                ui.label(
+                    RichText::new(self.strings.usage_persistence_note())
+                        .small()
+                        .color(palette.muted),
+                );
+            });
         }
         ui.label(
             RichText::new(format!(
@@ -798,4 +858,8 @@ fn dashboard_value(ui: &mut egui::Ui, label: &str, value: &str, color: Color32) 
         );
         ui.add(egui::Label::new(RichText::new(value).strong().color(color)).wrap());
     });
+}
+
+fn counter_value(value: Option<u64>) -> String {
+    value.map_or_else(|| "unknown".to_owned(), |count| count.to_string())
 }

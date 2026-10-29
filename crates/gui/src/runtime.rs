@@ -125,6 +125,13 @@ pub(crate) struct DaemonCapabilities {
     pub output_last_refusal: Option<OutputRefusal>,
     pub output_uncertain_total: Option<u64>,
     pub evdev_quarantined_events_total: Option<u64>,
+    pub usage_flush_max_duration_us: Option<u64>,
+    pub usage_flush_failures_total: Option<u64>,
+    pub usage_worker_failures_total: Option<u64>,
+    pub usage_queue_rejected_total: Option<u64>,
+    pub usage_events_recorded_total: Option<u64>,
+    pub usage_events_persisted_total: Option<u64>,
+    pub usage_events_dropped_total: Option<u64>,
     pub recent_expansion_outcomes: Vec<ExpansionTrace>,
 }
 
@@ -271,6 +278,41 @@ impl DaemonCapabilities {
         capabilities.evdev_quarantined_events_total =
             status.u64_field("evdev_quarantined_events_total");
         found |= capabilities.evdev_quarantined_events_total.is_some();
+        for (key, slot) in [
+            (
+                "usage_flush_max_duration_us",
+                &mut capabilities.usage_flush_max_duration_us,
+            ),
+            (
+                "usage_flush_failures_total",
+                &mut capabilities.usage_flush_failures_total,
+            ),
+            (
+                "usage_worker_failures_total",
+                &mut capabilities.usage_worker_failures_total,
+            ),
+            (
+                "usage_queue_rejected_total",
+                &mut capabilities.usage_queue_rejected_total,
+            ),
+            (
+                "usage_events_recorded_total",
+                &mut capabilities.usage_events_recorded_total,
+            ),
+            (
+                "usage_events_persisted_total",
+                &mut capabilities.usage_events_persisted_total,
+            ),
+            (
+                "usage_events_dropped_total",
+                &mut capabilities.usage_events_dropped_total,
+            ),
+        ] {
+            if let Some(value) = status.u64_field(key) {
+                *slot = Some(value);
+                found = true;
+            }
+        }
         let recent_outcomes = status
             .field("recent_expansion_outcomes")
             .or_else(|| status.field("recent_expansion_failures"));
@@ -641,6 +683,21 @@ mod tests {
         assert_eq!(capabilities.injection_mode, Some("libei keysym fallback"));
         assert_eq!(capabilities.matcher_latency_p50_us, Some(12));
         assert_eq!(capabilities.injection_latency_p95_us, Some(3400));
+    }
+
+    #[test]
+    fn daemon_capability_parser_reads_usage_persistence_health() {
+        let capabilities = super::DaemonCapabilities::parse(
+            "status_schema=13\nusage_flush_max_duration_us=1200\nusage_flush_failures_total=2\nusage_worker_failures_total=1\nusage_queue_rejected_total=3\nusage_events_recorded_total=100\nusage_events_persisted_total=94\nusage_events_dropped_total=6\n",
+        )
+        .unwrap();
+        assert_eq!(capabilities.usage_flush_max_duration_us, Some(1200));
+        assert_eq!(capabilities.usage_flush_failures_total, Some(2));
+        assert_eq!(capabilities.usage_worker_failures_total, Some(1));
+        assert_eq!(capabilities.usage_queue_rejected_total, Some(3));
+        assert_eq!(capabilities.usage_events_recorded_total, Some(100));
+        assert_eq!(capabilities.usage_events_persisted_total, Some(94));
+        assert_eq!(capabilities.usage_events_dropped_total, Some(6));
     }
 
     #[test]

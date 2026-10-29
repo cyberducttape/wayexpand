@@ -9,6 +9,10 @@ All notable changes to WayExpand are documented here.
   blocked or best-effort insertion, incomplete focus tracking, and unverified
   sensitive-field protection. Runtime capability reports remain clearly
   distinct from compositor certification.
+- Expose usage-stat persistence health in GUI diagnostics: recorded and
+  persisted events, dropped events, queue rejections, writer failures, and
+  maximum flush time are shown separately, with the asynchronous best-effort
+  durability limit stated explicitly.
 - Run and preserve the isolated KWin 6.6.6 output/focus smoke report for
   `ca98ac77f411`. Twelve checks passed; the 257-character libei keysym fallback
   measured 3.15 s p95 inside the injector. The report remains partial because

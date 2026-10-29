@@ -425,6 +425,78 @@ impl Strings {
         }
     }
 
+    pub fn usage_persistence(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Usage statistics persistence",
+            Language::Indonesian => "Penyimpanan statistik penggunaan",
+            Language::German => "Speicherung der Nutzungsstatistik",
+        }
+    }
+
+    pub fn usage_recorded(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Events recorded",
+            Language::Indonesian => "Peristiwa tercatat",
+            Language::German => "Erfasste Ereignisse",
+        }
+    }
+
+    pub fn usage_persisted(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Events persisted",
+            Language::Indonesian => "Peristiwa tersimpan",
+            Language::German => "Gespeicherte Ereignisse",
+        }
+    }
+
+    pub fn usage_dropped(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Events dropped",
+            Language::Indonesian => "Peristiwa dibuang",
+            Language::German => "Verworfene Ereignisse",
+        }
+    }
+
+    pub fn usage_queue_rejected(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Queue rejections",
+            Language::Indonesian => "Penolakan antrean",
+            Language::German => "Abgewiesene Warteschlangenaufträge",
+        }
+    }
+
+    pub fn usage_flush_failures(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Flush failures",
+            Language::Indonesian => "Kegagalan flush",
+            Language::German => "Fehlgeschlagene Schreibvorgänge",
+        }
+    }
+
+    pub fn usage_worker_failures(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Worker failures",
+            Language::Indonesian => "Kegagalan worker",
+            Language::German => "Worker-Fehler",
+        }
+    }
+
+    pub fn usage_max_flush(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Longest flush",
+            Language::Indonesian => "Flush terlama",
+            Language::German => "Längster Schreibvorgang",
+        }
+    }
+
+    pub fn usage_persistence_note(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Statistics are written asynchronously. Recorded events are not a durability guarantee; shutdown, queue pressure, or worker failures can leave some events unpersisted.",
+            Language::Indonesian => "Statistik ditulis secara asinkron. Peristiwa tercatat tidak dijamin tersimpan; penghentian, antrean penuh, atau kegagalan worker dapat menyebabkan sebagian peristiwa tidak tersimpan.",
+            Language::German => "Statistiken werden asynchron geschrieben. Erfasste Ereignisse sind keine Dauerhaftigkeitsgarantie; beim Beenden, bei Warteschlangendruck oder Worker-Fehlern können Ereignisse ungespeichert bleiben.",
+        }
+    }
+
     pub fn sensitive_verification(&self) -> &'static str {
         match self.lang {
             Language::English => "Sensitive-field protection",
