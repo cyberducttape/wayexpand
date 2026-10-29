@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Reproduced the non-atomic KWin overlap failure on clean source commit
+  `ad8f169c4402`: concurrent input interleaved with output, four replacement
+  characters were lost, and the stale trigger expanded. Preserve the negative
+  report and keep this route's target-integrity gate open; stdin-simulated
+  capture does not test physical evdev interruption.
 - Document the end-to-end visual automation workflow in the GUI guide: static
   templates, reusable/date variables, form playground, file templates, and
   schema-validated broker actions, with links to profiles and signed offline
