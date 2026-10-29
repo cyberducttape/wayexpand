@@ -686,9 +686,19 @@ fn main() -> Result<()> {
         );
         return Ok(());
     }
-    let path = argument
-        .map(PathBuf::from)
-        .unwrap_or_else(default_config_path);
+    if matches!(argument.as_deref(), Some("--version" | "-V")) {
+        println!("wayexpand-ui {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+    // An unrecognized option is an error rather than a path: treating
+    // `--version` as a config file would create it in the working directory.
+    let path = match argument {
+        Some(option) if option.starts_with('-') => {
+            anyhow::bail!("unknown option {option}; see wayexpand-ui --help")
+        }
+        Some(path) => PathBuf::from(path),
+        None => default_config_path(),
+    };
     let mut app = App::load(path)?;
     app.start_status_worker();
     let mut stdout = io::stdout();

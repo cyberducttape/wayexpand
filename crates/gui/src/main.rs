@@ -672,11 +672,28 @@ pub(crate) fn app_icon() -> egui::IconData {
     .expect("bundled app icon is a valid PNG")
 }
 
+/// Resolve the optional CONFIG argument. An unrecognized option is an error
+/// rather than a path: treating `--version` as a config file would create it
+/// in the working directory on the first save.
+fn config_path_argument(argument: Option<String>) -> Result<PathBuf> {
+    match argument {
+        Some(option) if option.starts_with('-') => {
+            anyhow::bail!("unknown option {option}; see wayexpand-gui --help")
+        }
+        Some(path) => Ok(PathBuf::from(path)),
+        None => Ok(default_config_path()),
+    }
+}
+
 fn main() -> Result<()> {
     if matches!(env::args().nth(1).as_deref(), Some("--help" | "-h")) {
         println!(
             "Usage: wayexpand-gui [CONFIG]\n       wayexpand-gui --picker [CONFIG]\n       wayexpand-gui --form SPEC\n\nNative Wayland settings editor for WayExpand.\n\n--picker  Quick-insert window: search your snippets and press Enter to type\n          one into the app you were using. Bind it to a desktop shortcut.\n--form    Snippet form window; started by the daemon for snippets with fields."
         );
+        return Ok(());
+    }
+    if matches!(env::args().nth(1).as_deref(), Some("--version" | "-V")) {
+        println!("wayexpand-gui {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
     if env::args().nth(1).as_deref() == Some("--form") {
@@ -686,16 +703,10 @@ fn main() -> Result<()> {
         return form::run(&spec);
     }
     if env::args().nth(1).as_deref() == Some("--picker") {
-        let path = env::args()
-            .nth(2)
-            .map(PathBuf::from)
-            .unwrap_or_else(default_config_path);
+        let path = config_path_argument(env::args().nth(2))?;
         return picker::run(path);
     }
-    let path = env::args()
-        .nth(1)
-        .map(PathBuf::from)
-        .unwrap_or_else(default_config_path);
+    let path = config_path_argument(env::args().nth(1))?;
     let mut app = GuiApp::load(path)?;
     app.start_runtime()?;
     let saved_dark_mode = load_gui_prefs().dark_mode;

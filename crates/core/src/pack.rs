@@ -195,12 +195,7 @@ fn read_manifest(path: &Path) -> Result<PackManifest, PackError> {
             return Err(PackError::EmptyField(field));
         }
     }
-    if manifest.id.len() > 128
-        || !manifest
-            .id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-    {
+    if !is_valid_pack_id(&manifest.id) {
         return Err(PackError::InvalidId(manifest.id));
     }
     semver::Version::parse(&manifest.version)
@@ -229,6 +224,21 @@ fn read_manifest(path: &Path) -> Result<PackManifest, PackError> {
         }
     }
     Ok(manifest)
+}
+
+/// Whether `id` is safe as one local directory name: 1-128 ASCII letters,
+/// digits, '.', '_' or '-', starting with a letter or digit. The leading
+/// character rule rejects `.` and `..`, which would name the pack directory
+/// itself or its parent, and hidden entries such as installer lock files.
+pub fn is_valid_pack_id(id: &str) -> bool {
+    id.len() <= 128
+        && id
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_alphanumeric())
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
 fn valid_review_date(value: &str) -> bool {
@@ -1235,6 +1245,17 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(inspect_pack(&path), Err(PackError::InvalidId(_))));
+        for id in ["..", ".", ".hidden", "-flag"] {
+            fs::write(
+                path.join(MANIFEST_FILE),
+                manifest("1.0.0", id, "2026-10-27"),
+            )
+            .unwrap();
+            assert!(
+                matches!(inspect_pack(&path), Err(PackError::InvalidId(_))),
+                "{id:?} must not be accepted as a pack id"
+            );
+        }
 
         fs::write(
             path.join(MANIFEST_FILE),

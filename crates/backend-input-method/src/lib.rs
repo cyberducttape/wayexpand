@@ -97,8 +97,19 @@ fn poll_connection_with_wake(
     drop(fds);
     if woken {
         if let Some(wake) = wake {
+            // Eventfd requires reads of exactly eight bytes. Drain pipes
+            // through bounded reads so queued fallback wakes are coalesced
+            // without letting a continuous producer starve Wayland polling.
             let mut buffer = [0_u8; 8];
-            let _ = rustix::io::read(wake, &mut buffer);
+            for _ in 0..64 {
+                match rustix::io::read(wake, &mut buffer) {
+                    Ok(0) => break,
+                    Ok(_) => {}
+                    Err(rustix::io::Errno::INTR) => continue,
+                    Err(rustix::io::Errno::AGAIN) => break,
+                    Err(_) => break,
+                }
+            }
         }
     }
     Ok(Some((connection_flags, woken)))

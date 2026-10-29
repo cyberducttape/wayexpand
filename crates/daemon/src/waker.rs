@@ -81,8 +81,22 @@ impl Waker {
             tv_nsec: i64::from(timeout.subsec_nanos()),
         };
         if rustix::event::poll(&mut fds, Some(&timeout)).is_ok_and(|ready| ready > 0) {
-            let mut buffer = [0_u8; 8];
-            let _ = rustix::io::read(&*self.read_fd, &mut buffer);
+            drain_wake_fd(&self.read_fd);
+        }
+    }
+}
+
+/// Eventfd requires reads of exactly eight bytes. Drain pipes through several
+/// eight-byte reads so bursts work for either descriptor type.
+fn drain_wake_fd(fd: &OwnedFd) {
+    let mut buffer = [0_u8; 8];
+    for _ in 0..64 {
+        match rustix::io::read(fd, &mut buffer) {
+            Ok(0) => break,
+            Ok(_) => {}
+            Err(rustix::io::Errno::INTR) => continue,
+            Err(rustix::io::Errno::AGAIN) => break,
+            Err(_) => break,
         }
     }
 }
@@ -149,6 +163,47 @@ mod tests {
         let mut buffer = [0_u8; 8];
         rustix::io::read(&*fd, &mut buffer).unwrap();
         assert!(!readable(&fd));
+    }
+
+    #[test]
+    fn one_wait_drains_several_queued_pipe_wakes() {
+        let waker = Waker::new_with_eventfd(|| Err(std::io::Error::from(rustix::io::Errno::NOSYS)))
+            .unwrap();
+        for _ in 0..8 {
+            waker.wake();
+        }
+        waker.wait(std::time::Duration::ZERO);
+        assert!(!readable(&waker.fd()));
+    }
+
+    #[test]
+    fn pipe_wake_drain_is_bounded_and_a_later_wait_drains_the_rest() {
+        let waker = Waker::new_with_eventfd(|| Err(std::io::Error::from(rustix::io::Errno::NOSYS)))
+            .unwrap();
+        for _ in 0..80 {
+            waker.wake();
+        }
+        waker.wait(std::time::Duration::ZERO);
+        assert!(readable(&waker.fd()));
+        waker.wait(std::time::Duration::ZERO);
+        assert!(!readable(&waker.fd()));
+    }
+
+    #[test]
+    fn one_wait_drains_several_queued_eventfd_wakes() {
+        let waker = Waker::new_with_eventfd(|| {
+            rustix::event::eventfd(
+                0,
+                rustix::event::EventfdFlags::CLOEXEC | rustix::event::EventfdFlags::NONBLOCK,
+            )
+            .map_err(std::io::Error::from)
+        })
+        .unwrap();
+        for _ in 0..8 {
+            waker.wake();
+        }
+        waker.wait(std::time::Duration::ZERO);
+        assert!(!readable(&waker.fd()));
     }
 
     #[test]

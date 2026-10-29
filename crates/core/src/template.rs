@@ -365,19 +365,29 @@ fn parse_form_field(name: &str) -> Option<Result<FormField, TemplateError>> {
 /// without duplicates. An invalid marker is an error.
 pub fn form_fields(template: &str) -> Result<Vec<FormField>, TemplateError> {
     let mut fields: Vec<FormField> = Vec::new();
+    // Whether each field so far comes only from bare references.
+    let mut bare_only: Vec<bool> = Vec::new();
     for name in template_variables(template) {
         if let Some(field) = parse_form_field(name) {
             let field = field?;
-            match fields.iter().find(|existing| existing.key == field.key) {
-                None => fields.push(field),
-                // A bare marker reuses the first definition of a named field.
-                // Packs and templates commonly declare a default at the first
-                // occurrence and interpolate that same value later without
-                // repeating the default or validation rules.
-                Some(_) if is_bare_form_field_reference(name) => {}
+            let bare = is_bare_form_field_reference(name);
+            match fields.iter().position(|existing| existing.key == field.key) {
+                None => {
+                    fields.push(field);
+                    bare_only.push(bare);
+                }
+                // A bare marker reuses the definition of a named field,
+                // wherever that definition appears. Packs and templates
+                // commonly declare a default once and interpolate the same
+                // value elsewhere without repeating its rules.
+                Some(_) if bare => {}
+                Some(index) if bare_only[index] => {
+                    fields[index] = field;
+                    bare_only[index] = false;
+                }
                 // A repeated key is one input only when all of its rules and
                 // explicit defaults agree; otherwise the prompt is ambiguous.
-                Some(existing) if existing != &field => {
+                Some(index) if fields[index] != field => {
                     return Err(TemplateError::InvalidField);
                 }
                 Some(_) => {}
@@ -1447,6 +1457,25 @@ mod tests {
             }
         );
         assert!(fields[1].required);
+    }
+
+    #[test]
+    fn a_definition_after_bare_references_supplies_the_field_rules() {
+        let fields =
+            form_fields("Hi {{field:host}}, {{field:host=example.net|required}} {{field:host}}")
+                .unwrap();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(
+            fields[0].kind,
+            FormFieldKind::Text {
+                default: "example.net".into()
+            }
+        );
+        assert!(fields[0].required);
+        assert_eq!(
+            form_fields("{{field:host}} {{field:host=a}} {{field:host=b}}"),
+            Err(TemplateError::InvalidField)
+        );
     }
 
     #[test]

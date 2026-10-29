@@ -264,35 +264,46 @@ impl TextInjector for TracedInjector<'_> {
     }
 }
 
-fn history() -> &'static Mutex<VecDeque<FailureTrace>> {
-    static HISTORY: OnceLock<Mutex<VecDeque<FailureTrace>>> = OnceLock::new();
-    HISTORY.get_or_init(|| Mutex::new(VecDeque::with_capacity(HISTORY_LIMIT)))
+/// Failures and all outcomes are kept in separate rings so a run of
+/// successful expansions cannot evict the failures diagnostics report.
+#[derive(Default)]
+struct History {
+    failures: VecDeque<FailureTrace>,
+    outcomes: VecDeque<FailureTrace>,
+}
+
+fn history() -> &'static Mutex<History> {
+    static HISTORY: OnceLock<Mutex<History>> = OnceLock::new();
+    HISTORY.get_or_init(|| Mutex::new(History::default()))
+}
+
+fn push_bounded(ring: &mut VecDeque<FailureTrace>, limit: usize, trace: FailureTrace) {
+    if ring.len() == limit {
+        ring.pop_front();
+    }
+    ring.push_back(trace);
 }
 
 fn push(trace: FailureTrace) {
     let mut history = history()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if history.len() == HISTORY_LIMIT {
-        history.pop_front();
+    push_history(&mut history, trace);
+}
+
+fn push_history(history: &mut History, trace: FailureTrace) {
+    if trace.completion != "applied" {
+        push_bounded(&mut history.failures, HISTORY_LIMIT, trace.clone());
     }
-    history.push_back(trace);
+    push_bounded(&mut history.outcomes, OUTCOME_STATUS_LIMIT, trace);
 }
 
 pub(crate) fn recent_json() -> String {
     let history = history()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    traces_json(
-        history
-            .iter()
-            .filter(|trace| trace.completion != "applied")
-            .rev()
-            .take(FAILURE_STATUS_LIMIT)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev(),
-    )
+    let skip = history.failures.len().saturating_sub(FAILURE_STATUS_LIMIT);
+    traces_json(history.failures.iter().skip(skip))
 }
 
 /// Recent successful and blocked output transactions. Each record contains
@@ -301,15 +312,7 @@ pub(crate) fn recent_outcomes_json() -> String {
     let history = history()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    traces_json(
-        history
-            .iter()
-            .rev()
-            .take(OUTCOME_STATUS_LIMIT)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev(),
-    )
+    traces_json(history.outcomes.iter())
 }
 
 fn traces_json<'a>(traces: impl Iterator<Item = &'a FailureTrace>) -> String {
@@ -365,6 +368,46 @@ mod tests {
         fn insert(&mut self, _text: &str) -> Result<(), InjectorError> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn successful_outputs_do_not_evict_reported_failures() {
+        let mut history = History::default();
+        push_history(
+            &mut history,
+            FailureTrace {
+                at_unix: 1,
+                backend: "evict-check".into(),
+                trigger_recognized: "yes",
+                focus_admission: "not reached",
+                backend_selected: "not reached",
+                erase_acknowledged: "not attempted",
+                insertion_attempted: false,
+                completion: "blocked by organization policy",
+            },
+        );
+        for _ in 0..HISTORY_LIMIT * 2 {
+            push_history(
+                &mut history,
+                FailureTrace {
+                    at_unix: 2,
+                    backend: "mock-output".into(),
+                    trigger_recognized: "yes",
+                    focus_admission: "passed",
+                    backend_selected: "yes",
+                    erase_acknowledged: "atomic replacement acknowledged",
+                    insertion_attempted: true,
+                    completion: "applied",
+                },
+            );
+        }
+        assert_eq!(history.failures.len(), 1);
+        assert_eq!(history.failures[0].backend, "evict-check");
+        assert_eq!(history.outcomes.len(), OUTCOME_STATUS_LIMIT);
+        assert!(history
+            .outcomes
+            .iter()
+            .all(|trace| trace.completion == "applied"));
     }
 
     #[test]

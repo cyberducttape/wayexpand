@@ -23,6 +23,8 @@ All notable changes to WayExpand are documented here.
 - Keep the daemon reactor startable when a restricted kernel or sandbox
   reports `ENOSYS` for `eventfd`: fall back to a nonblocking close-on-exec pipe
   with the same wakeup contract, and preserve other `eventfd` failures.
+- Drain queued reactor wakes without issuing an invalid oversized read on
+  `eventfd`; eventfd and pipe wake bursts are both consumed promptly.
 - Add an organization-policy requirement for active external IME/preedit
   awareness, reported by diagnostics and enforced at backend startup when safe
   mode is enabled. Local dead-key/Compose support does not satisfy it; no
@@ -37,9 +39,19 @@ All notable changes to WayExpand are documented here.
   passed. Capture was simulated; overlap, Unicode insertion, suspend/resume,
   and physical capture remain untested. Record 20 latency samples per output
   size while keeping the route explicitly uncertified for production.
-- Reuse the first declared form-field rules when later bare markers reference
-  the same field, restoring imports for templates that interpolate one prompt
-  value in multiple places while retaining rejection of explicit conflicts.
+- Reuse a form field's declared rules wherever bare markers reference it,
+  before or after the declaration, restoring imports for templates that
+  interpolate one prompt value in multiple places while retaining rejection of
+  explicit conflicts.
+- Keep the daemon's recent failure traces separate from its recent outcomes;
+  eight successful expansions evicted every failure from `status` and
+  `doctor`.
+- Pack IDs must start with a letter or digit. `.` and `..` were accepted, so
+  `wayexpand pack remove ..` would recursively delete the parent of the local
+  pack directory.
+- `wayexpand-gui` and `wayexpand-ui` accept `--version` and reject unknown
+  options instead of opening them as configuration paths (`wayexpand-gui
+  --version` could create a file named `--version` in the working directory).
 - Make the doctor-certification contract test require the overlapping-trigger
   scenario to remain explicitly untested in the stdin-only harness.
 - Preserve a current-source private KWin smoke report with measured output

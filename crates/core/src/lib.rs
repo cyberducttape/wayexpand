@@ -65,8 +65,8 @@ pub use migration::{
     EspansoImportReport, EspansoImportWarning, EspansoUnsupportedMatch, MigrationError,
 };
 pub use pack::{
-    import_pack, inspect_pack, pack_digest, sign_pack, trusted_signers_file, verify_pack_signature,
-    PackError, PackInspection, PackManifest, PackReview, SIGNATURE_FILE,
+    import_pack, inspect_pack, is_valid_pack_id, pack_digest, sign_pack, trusted_signers_file,
+    verify_pack_signature, PackError, PackInspection, PackManifest, PackReview, SIGNATURE_FILE,
 };
 pub use paths::default_config_path;
 pub use policy::{

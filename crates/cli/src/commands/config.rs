@@ -658,13 +658,8 @@ fn installed_pack_root() -> Result<PathBuf> {
 }
 
 fn ensure_pack_id(id: &str) -> Result<()> {
-    if id.is_empty()
-        || id.len() > 128
-        || !id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-    {
-        bail!("invalid pack id; use only letters, digits, '.', '_' or '-' ");
+    if !wayexpand_core::is_valid_pack_id(id) {
+        bail!("invalid pack id; start with a letter or digit and use only letters, digits, '.', '_' or '-'");
     }
     Ok(())
 }
@@ -1708,6 +1703,19 @@ mod pack_policy_tests {
 mod pack_install_tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn pack_removal_rejects_ids_that_name_the_pack_directory_or_its_parent() {
+        // `remove_dir_all` on `<packs>/..` would delete the parent directory.
+        for id in ["..", ".", ".install-x.lock", ""] {
+            assert!(ensure_pack_id(id).is_err(), "{id:?} must be rejected");
+            assert!(
+                remove_installed_pack(id).is_err(),
+                "{id:?} must be rejected"
+            );
+        }
+        assert!(ensure_pack_id("sample.local").is_ok());
+    }
 
     fn temp_dir(label: &str) -> PathBuf {
         let nonce = SystemTime::now()

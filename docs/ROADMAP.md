@@ -218,11 +218,14 @@ Still open:
 - [ ] Profiles/workspaces (personal, work, support, per-customer) switchable
       at runtime by hotkey or selected automatically from the environment.
 - [ ] Broader imports (TextExpander, AutoKey, aText, CSV).
-- [ ] Form snippets through IBus (the route drops surrounding text when focus
-      moves to the form) and a GUI editor for form fields.
-- [ ] Richer forms: field validation, enums, defaults (including clipboard
-      defaults), conditional fields, a date picker, per-field history, and
-      submission into parameterized broker actions.
+- [x] Form snippets through IBus: completions are bound to the originating
+      input context and require surrounding-text verification (non-atomic,
+      uncertified).
+- [ ] A GUI editor for form fields.
+- [ ] Richer forms. Shipped: required fields, length limits, choice defaults
+      and date fields. Open: clipboard defaults, conditional fields, a date
+      picker, per-field history, and submission into parameterized broker
+      actions.
 - [ ] Signed team-pack registry: `wayexpand pack search`, `pack install`,
       `pack update`, `pack diff`, `pack rollback`, and `pack verify` against
       organization trust roots, private registries, and a GUI trust review

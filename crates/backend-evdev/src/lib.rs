@@ -564,10 +564,19 @@ impl InputSource for EvdevSource {
     }
 }
 
-/// Reset a non-blocking eventfd after it woke a poll.
+/// Drain a nonblocking eventfd or pipe after it woke a poll. Eventfd requires
+/// reads of exactly eight bytes, so pipe bursts are consumed in a loop too.
 fn drain_wake_fd(fd: BorrowedFd<'_>) {
     let mut buffer = [0_u8; 8];
-    let _ = rustix::io::read(fd, &mut buffer);
+    for _ in 0..64 {
+        match rustix::io::read(fd, &mut buffer) {
+            Ok(0) => break,
+            Ok(_) => {}
+            Err(rustix::io::Errno::INTR) => continue,
+            Err(rustix::io::Errno::AGAIN) => break,
+            Err(_) => break,
+        }
+    }
 }
 
 /// Poll the device descriptors and, when present, the final wake descriptor.
