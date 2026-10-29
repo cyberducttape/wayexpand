@@ -450,6 +450,8 @@ mod tests {
                 receiver: None,
                 status_publisher: StatusPublisher::default(),
                 focus_state: FocusState::new(None),
+                profile_assignments: wayexpand_core::ProfileAssignments::default(),
+                profile_switch_pending: false,
                 connection_state: "connected",
                 paused: false,
                 reconnect_delay: Duration::from_millis(250),
