@@ -215,15 +215,18 @@ Still open:
 - [x] Publish a canonical `route_id` in daemon status (schema 11); the GUI
       resolves route contracts from that ID instead of reconstructing routes
       from `source`/`backend`.
-- [ ] Complete the shared immutable `ValidatedConfig` pipeline. The snapshot
+- [x] Complete the shared immutable `ValidatedConfig` pipeline. The snapshot
       now retains the exact source config, resolved organization policy,
       normalized IDs, effective triggers, parsed app filters/form fields,
       template variable metadata, snippet library, and parsed hotkeys. The
       engine retains it and daemon reload builds the engine from the validated
       snapshot; GUI preview uses the same validator through engine creation.
-      Runtime host restrictions remain a separate overlay. Template AST
-      compilation and reuse during rendering, and end-to-end consistency tests
-      across fleet/reload paths remain open.
+      Runtime host restrictions remain a separate overlay. Validation now
+      compiles every replacement once and the engine renders the compiled
+      template; the compiled and streaming renderers share one variable
+      parser and evaluator, with a parity test. `tests/snapshot_consistency`
+      checks that the daemon's fleet merge, a saved-and-reloaded copy, and
+      direct engine construction expand a layered library identically.
 - [ ] Named full-config profiles support CLI create/list/switch/remove,
       checkpointing on switch and daemon reload. The GUI now lists validated
       profiles and can create or switch them asynchronously, preserving its

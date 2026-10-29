@@ -5606,6 +5606,47 @@ fn matched_forms_reuse_the_validated_field_definitions() {
     assert!(Arc::ptr_eq(&validated_fields, matched_fields));
 }
 
+#[test]
+fn expansions_render_from_templates_compiled_at_validation() {
+    let config = Config::parse(
+        r#"
+        [[expansion]]
+        trigger = ";hi"
+        replacement = "Hello {{username}}<{{cursor}}>"
+        [[expansion]]
+        trigger = ";cmd"
+        replacement = ""
+        [expansion.command]
+        program = "/bin/true"
+        "#,
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    let compiled = &engine.validated.compiled_templates;
+    assert!(
+        compiled[0].is_some(),
+        "a plain replacement is compiled once"
+    );
+    assert!(
+        compiled[1].is_none(),
+        "a command's replacement is not a template"
+    );
+    let expected = compiled[0]
+        .as_ref()
+        .unwrap()
+        .render_with_cursor(&engine.template_context())
+        .unwrap();
+
+    let results = engine.process(InputEvent::Text(";hi".into()));
+    assert_eq!(results.len(), 1);
+    assert_eq!(
+        (results[0].insert.clone(), results[0].cursor_offset),
+        expected
+    );
+    assert_eq!(results[0].cursor_offset, Some(1));
+    assert_eq!(engine.render_replacement(0).unwrap(), expected);
+}
+
 #[cfg(unix)]
 #[test]
 fn form_values_are_sent_to_the_named_broker_action_and_its_result_inserts() {

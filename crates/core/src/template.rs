@@ -576,6 +576,8 @@ fn literal_text(text: &str) -> std::borrow::Cow<'_, str> {
 /// Shared renderer. With `allow_cursor`, a `{{cursor}}` variable renders to
 /// nothing and its byte position in the output is returned; otherwise it is
 /// an unknown variable like any other.
+/// One-shot rendering streams over the source: compiling first would copy
+/// every literal once more for a template that is rendered only once.
 fn render(
     template: &str,
     context: &TemplateContext,
@@ -628,7 +630,9 @@ fn render_nested(
         }
         let inspected = &remaining_template[..inspect_len];
         let relative_start = inspected.find("{{");
-        let relative_newline = inspected.find('\n');
+        // Only a preview stops at a newline; a full render must not pay for
+        // a second pass over the template.
+        let relative_newline = preview.then(|| inspected.find('\n')).flatten();
 
         // A literal newline before any variable ends a preview immediately;
         // do not search or parse the potentially enormous tail that follows.
@@ -690,153 +694,20 @@ fn render_nested(
             continue;
         }
         let mut included_stopped = false;
-        let value = match name {
-            "date" | "time" | "datetime" | "local_date" | "local_time" | "local_datetime" => {
-                format_clock(name, context.unix_timestamp).ok_or_else(|| {
-                    TemplateError::DateArithmeticOverflow {
-                        name: name.to_owned(),
-                    }
-                })?
-            }
-            "username" => context.username.as_str().to_owned(),
-            "hostname" => context.hostname.as_str().to_owned(),
-            "unix_timestamp" => context.unix_timestamp.to_string(),
-            "newline" => "\n".to_owned(),
-            "tab" => "\t".to_owned(),
-            "clipboard" if preview => return Err(TemplateError::ClipboardDisabled),
-            "clipboard" => match &context.clipboard {
-                None => return Err(TemplateError::ClipboardDisabled),
-                Some(_) if context.validating => String::new(),
-                Some(reader) => (reader.0)().ok_or(TemplateError::ClipboardUnavailable)?,
-            },
-            other
-                if other.starts_with("field:")
-                    || other.starts_with("prompt:")
-                    || other.starts_with("choice:")
-                    || other.starts_with("datefield:") =>
-            {
-                let field = parse_form_field(other).expect("prefix checked")?;
-                match context.fields.get(&field.key) {
-                    Some(value) => {
-                        field
-                            .validate_value(value)
-                            .map_err(|_| TemplateError::InvalidField)?;
-                        value.clone()
-                    }
-                    None if context.validating => String::new(),
-                    None => return Err(TemplateError::FieldValueMissing),
-                }
-            }
-            other if other.starts_with("env:") => {
-                let name = other["env:".len()..].trim();
-                context
-                    .env
-                    .get(name)
-                    .cloned()
-                    .ok_or_else(|| TemplateError::EnvNotAllowed {
-                        name: name.to_owned(),
-                    })?
-            }
-            other if other.starts_with("snippet:") => {
-                let trigger = other["snippet:".len()..].trim();
-                let included = context
-                    .snippets
-                    .get(trigger)
-                    .ok_or(TemplateError::UnknownSnippet)?;
-                if depth >= MAX_INCLUDE_DEPTH {
-                    return Err(TemplateError::IncludeTooDeep);
-                }
-                if !preview && template_variables(included).contains(&"cursor") {
-                    return Err(TemplateError::CursorInInclude);
-                }
+        let value = match parse_variable(name)? {
+            Variable::Snippet(trigger) => {
                 let include_budget = if preview {
                     maximum_bytes.saturating_sub(rendered.len())
                 } else {
                     maximum_bytes
                 };
-                let (rendered, _, stopped) = render_nested(
-                    included,
-                    context,
-                    false,
-                    depth + 1,
-                    include_budget,
-                    preview,
-                    named,
-                )?;
+                let (rendered, stopped) =
+                    render_include(&trigger, context, depth, include_budget, preview, named)?;
                 included_stopped = stopped;
                 rendered
             }
-            "uuid" => crate::template_dynamic::uuid_v4()?,
-            other if other.starts_with("uuid:") => {
-                let label = other["uuid:".len()..].trim();
-                if label.is_empty() || label.chars().count() > 64 {
-                    return Err(TemplateError::InvalidUuidName);
-                }
-                match named.get(label) {
-                    Some(value) => value.clone(),
-                    None => {
-                        let value = crate::template_dynamic::uuid_v4()?;
-                        named.insert(label.to_owned(), value.clone());
-                        value
-                    }
-                }
-            }
-            other if other.starts_with("random:") => {
-                crate::template_dynamic::random_value(&other["random:".len()..])?
-            }
-            other if formatted_clock_spec(other).is_some() => {
-                let (base, offset, format) = formatted_clock_spec(other).expect("checked");
-                let overflow = || TemplateError::DateArithmeticOverflow {
-                    name: other.to_owned(),
-                };
-                let timestamp = context
-                    .unix_timestamp
-                    .checked_add_signed(offset)
-                    .ok_or_else(overflow)?;
-                let utc_offset = if base.starts_with("local_") {
-                    Some(local_utc_offset(timestamp).ok_or_else(overflow)?)
-                } else {
-                    None
-                };
-                crate::template_dynamic::format_date(
-                    format,
-                    i64::try_from(timestamp).map_err(|_| overflow())?,
-                    utc_offset,
-                )?
-            }
-            other => match parse_offset_variable(other) {
-                Some((base, offset)) => {
-                    let adjusted = context
-                        .unix_timestamp
-                        .checked_add_signed(offset)
-                        .ok_or_else(|| TemplateError::DateArithmeticOverflow {
-                            name: other.to_owned(),
-                        })?;
-                    if !matches!(
-                        base,
-                        "date"
-                            | "time"
-                            | "datetime"
-                            | "local_date"
-                            | "local_time"
-                            | "local_datetime"
-                    ) {
-                        return Err(TemplateError::UnknownVariable {
-                            name: other.to_owned(),
-                        });
-                    }
-                    format_clock(base, adjusted).ok_or_else(|| {
-                        TemplateError::DateArithmeticOverflow {
-                            name: other.to_owned(),
-                        }
-                    })?
-                }
-                None => {
-                    return Err(TemplateError::UnknownVariable {
-                        name: other.to_owned(),
-                    })
-                }
-            },
+            Variable::Clipboard if preview => return Err(TemplateError::ClipboardDisabled),
+            variable => evaluate(&variable, name, context, named)?,
         };
         let stopped = push_bounded(&mut rendered, &value, maximum_bytes, preview)?;
         if stopped || included_stopped {
@@ -845,6 +716,337 @@ fn render_nested(
         cursor = end + 2;
     }
     Ok((rendered, cursor_position, false))
+}
+
+/// Render an included snippet one level below `depth`.
+fn render_include(
+    trigger: &str,
+    context: &TemplateContext,
+    depth: usize,
+    budget: usize,
+    preview: bool,
+    named: &mut HashMap<String, String>,
+) -> Result<(String, bool), TemplateError> {
+    let included = context
+        .snippets
+        .get(trigger)
+        .ok_or(TemplateError::UnknownSnippet)?;
+    if depth >= MAX_INCLUDE_DEPTH {
+        return Err(TemplateError::IncludeTooDeep);
+    }
+    if !preview && template_variables(included).contains(&"cursor") {
+        return Err(TemplateError::CursorInInclude);
+    }
+    let (rendered, _, stopped) =
+        render_nested(included, context, false, depth + 1, budget, preview, named)?;
+    Ok((rendered, stopped))
+}
+
+/// One `{{...}}` variable, parsed. Parsing checks everything that does not
+/// depend on the render context, so a validated template never fails here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Variable {
+    Clock(String),
+    ClockOffset {
+        base: String,
+        offset: i64,
+    },
+    FormattedClock {
+        base: String,
+        offset: i64,
+        format: String,
+    },
+    Username,
+    Hostname,
+    UnixTimestamp,
+    Newline,
+    Tab,
+    Clipboard,
+    Cursor,
+    Field(FormField),
+    Env(String),
+    Snippet(String),
+    Uuid,
+    NamedUuid(String),
+    Random(String),
+}
+
+fn is_clock_base(name: &str) -> bool {
+    matches!(
+        name,
+        "date" | "time" | "datetime" | "local_date" | "local_time" | "local_datetime"
+    )
+}
+
+fn parse_variable(name: &str) -> Result<Variable, TemplateError> {
+    Ok(match name {
+        clock if is_clock_base(clock) => Variable::Clock(clock.to_owned()),
+        "username" => Variable::Username,
+        "hostname" => Variable::Hostname,
+        "unix_timestamp" => Variable::UnixTimestamp,
+        "newline" => Variable::Newline,
+        "tab" => Variable::Tab,
+        "clipboard" => Variable::Clipboard,
+        "cursor" => Variable::Cursor,
+        other
+            if other.starts_with("field:")
+                || other.starts_with("prompt:")
+                || other.starts_with("choice:")
+                || other.starts_with("datefield:") =>
+        {
+            Variable::Field(parse_form_field(other).expect("prefix checked")?)
+        }
+        other if other.starts_with("env:") => {
+            Variable::Env(other["env:".len()..].trim().to_owned())
+        }
+        other if other.starts_with("snippet:") => {
+            Variable::Snippet(other["snippet:".len()..].trim().to_owned())
+        }
+        "uuid" => Variable::Uuid,
+        other if other.starts_with("uuid:") => {
+            let label = other["uuid:".len()..].trim();
+            if label.is_empty() || label.chars().count() > 64 {
+                return Err(TemplateError::InvalidUuidName);
+            }
+            Variable::NamedUuid(label.to_owned())
+        }
+        other if other.starts_with("random:") => {
+            Variable::Random(other["random:".len()..].to_owned())
+        }
+        other if formatted_clock_spec(other).is_some() => {
+            let (base, offset, format) = formatted_clock_spec(other).expect("checked");
+            Variable::FormattedClock {
+                base: base.to_owned(),
+                offset,
+                format: format.to_owned(),
+            }
+        }
+        other => match parse_offset_variable(other) {
+            Some((base, offset)) if is_clock_base(base) => Variable::ClockOffset {
+                base: base.to_owned(),
+                offset,
+            },
+            _ => {
+                return Err(TemplateError::UnknownVariable {
+                    name: other.to_owned(),
+                })
+            }
+        },
+    })
+}
+
+/// The value of one variable. `name` is its source text, for errors.
+/// Includes and `{{cursor}}` depend on where they appear, so callers handle
+/// them; reaching them here means they are not allowed in this position.
+fn evaluate(
+    variable: &Variable,
+    name: &str,
+    context: &TemplateContext,
+    named: &mut HashMap<String, String>,
+) -> Result<String, TemplateError> {
+    let overflow = || TemplateError::DateArithmeticOverflow {
+        name: name.to_owned(),
+    };
+    Ok(match variable {
+        Variable::Clock(base) => format_clock(base, context.unix_timestamp).ok_or_else(overflow)?,
+        Variable::ClockOffset { base, offset } => {
+            let adjusted = context
+                .unix_timestamp
+                .checked_add_signed(*offset)
+                .ok_or_else(overflow)?;
+            format_clock(base, adjusted).ok_or_else(overflow)?
+        }
+        Variable::FormattedClock {
+            base,
+            offset,
+            format,
+        } => {
+            let timestamp = context
+                .unix_timestamp
+                .checked_add_signed(*offset)
+                .ok_or_else(overflow)?;
+            let utc_offset = if base.starts_with("local_") {
+                Some(local_utc_offset(timestamp).ok_or_else(overflow)?)
+            } else {
+                None
+            };
+            crate::template_dynamic::format_date(
+                format,
+                i64::try_from(timestamp).map_err(|_| overflow())?,
+                utc_offset,
+            )?
+        }
+        Variable::Username => context.username.as_str().to_owned(),
+        Variable::Hostname => context.hostname.as_str().to_owned(),
+        Variable::UnixTimestamp => context.unix_timestamp.to_string(),
+        Variable::Newline => "\n".to_owned(),
+        Variable::Tab => "\t".to_owned(),
+        Variable::Clipboard => match &context.clipboard {
+            None => return Err(TemplateError::ClipboardDisabled),
+            Some(_) if context.validating => String::new(),
+            Some(reader) => (reader.0)().ok_or(TemplateError::ClipboardUnavailable)?,
+        },
+        Variable::Field(field) => match context.fields.get(&field.key) {
+            Some(value) => {
+                field
+                    .validate_value(value)
+                    .map_err(|_| TemplateError::InvalidField)?;
+                value.clone()
+            }
+            None if context.validating => String::new(),
+            None => return Err(TemplateError::FieldValueMissing),
+        },
+        Variable::Env(variable) => {
+            context
+                .env
+                .get(variable)
+                .cloned()
+                .ok_or_else(|| TemplateError::EnvNotAllowed {
+                    name: variable.clone(),
+                })?
+        }
+        Variable::Uuid => crate::template_dynamic::uuid_v4()?,
+        Variable::NamedUuid(label) => match named.get(label) {
+            Some(value) => value.clone(),
+            None => {
+                let value = crate::template_dynamic::uuid_v4()?;
+                named.insert(label.clone(), value.clone());
+                value
+            }
+        },
+        Variable::Random(spec) => crate::template_dynamic::random_value(spec)?,
+        Variable::Cursor | Variable::Snippet(_) => {
+            return Err(TemplateError::UnknownVariable {
+                name: name.to_owned(),
+            })
+        }
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Segment {
+    Literal(String),
+    Variable {
+        name: String,
+        variable: Variable,
+    },
+    /// `{{cursor}}`, with its source offset for error reports.
+    Cursor {
+        offset: usize,
+    },
+}
+
+/// A template parsed once into literal text and variables. Rendering it
+/// gives exactly what [`render_template_with_cursor`] gives for the source
+/// text, without scanning or parsing it again; validation compiles each
+/// replacement and the engine renders the compiled form. Both share one
+/// variable parser and evaluator.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledTemplate {
+    segments: Vec<Segment>,
+    /// Total literal bytes, to size the output once.
+    literal_bytes: usize,
+}
+
+impl CompiledTemplate {
+    pub fn compile(template: &str) -> Result<Self, TemplateError> {
+        let mut segments = Vec::new();
+        let mut literal = String::new();
+        let mut cursor = 0;
+        while let Some(relative_start) = template[cursor..].find("{{") {
+            let start = cursor + relative_start;
+            literal.push_str(&literal_text(&template[cursor..start]));
+            if template[start..].starts_with(LITERAL_OPEN) {
+                literal.push_str("{{");
+                cursor = start + LITERAL_OPEN.len();
+                continue;
+            }
+            let variable_start = start + 2;
+            let Some(relative_end) = template[variable_start..].find("}}") else {
+                return Err(TemplateError::Unclosed { offset: start });
+            };
+            let end = variable_start + relative_end;
+            let name = template[variable_start..end].trim();
+            if name.is_empty() {
+                return Err(TemplateError::EmptyVariable { offset: start });
+            }
+            if !literal.is_empty() {
+                segments.push(Segment::Literal(std::mem::take(&mut literal)));
+            }
+            segments.push(match parse_variable(name)? {
+                Variable::Cursor => Segment::Cursor { offset: start },
+                variable => Segment::Variable {
+                    name: name.to_owned(),
+                    variable,
+                },
+            });
+            cursor = end + 2;
+        }
+        literal.push_str(&literal_text(&template[cursor..]));
+        if !literal.is_empty() {
+            segments.push(Segment::Literal(literal));
+        }
+        let literal_bytes = segments
+            .iter()
+            .map(|segment| match segment {
+                Segment::Literal(text) => text.len(),
+                _ => 0,
+            })
+            .sum();
+        Ok(Self {
+            segments,
+            literal_bytes,
+        })
+    }
+
+    /// Render with `{{cursor}}` support; see [`render_template_with_cursor`].
+    pub fn render_with_cursor(
+        &self,
+        context: &TemplateContext,
+    ) -> Result<(String, Option<usize>), TemplateError> {
+        let (rendered, position) = self.render(context, true, MAX_RENDERED_BYTES)?;
+        let cursor_offset = position.map(|position| rendered[position..].graphemes(true).count());
+        Ok((rendered, cursor_offset))
+    }
+
+    fn render(
+        &self,
+        context: &TemplateContext,
+        allow_cursor: bool,
+        maximum_bytes: usize,
+    ) -> Result<(String, Option<usize>), TemplateError> {
+        let mut rendered = String::with_capacity(self.literal_bytes.min(maximum_bytes));
+        let mut cursor_position = None;
+        let mut named = HashMap::new();
+        for segment in &self.segments {
+            let value = match segment {
+                Segment::Literal(text) => std::borrow::Cow::Borrowed(text.as_str()),
+                Segment::Cursor { offset } if allow_cursor => {
+                    if cursor_position.is_some() {
+                        return Err(TemplateError::MultipleCursors { offset: *offset });
+                    }
+                    cursor_position = Some(rendered.len());
+                    continue;
+                }
+                Segment::Cursor { .. } => {
+                    return Err(TemplateError::UnknownVariable {
+                        name: "cursor".to_owned(),
+                    })
+                }
+                Segment::Variable {
+                    variable: Variable::Snippet(trigger),
+                    ..
+                } => std::borrow::Cow::Owned(
+                    render_include(trigger, context, 0, maximum_bytes, false, &mut named)?.0,
+                ),
+                Segment::Variable { name, variable } => {
+                    std::borrow::Cow::Owned(evaluate(variable, name, context, &mut named)?)
+                }
+            };
+            push_bounded(&mut rendered, &value, maximum_bytes, false)?;
+        }
+        Ok((rendered, cursor_position))
+    }
 }
 
 /// A formatted clock variable, `date:FORMAT` or `local_date+1d:FORMAT`:
@@ -1144,6 +1346,114 @@ mod tests {
             render_template("first line\nsecond line", &context).unwrap(),
             "first line\nsecond line"
         );
+    }
+
+    #[test]
+    fn compiled_templates_render_what_the_streaming_renderer_renders() {
+        // Includes and previews still go through the streaming renderer; both
+        // share one variable parser and evaluator, and must agree.
+        let mut snippets = HashMap::new();
+        snippets.insert("sig".into(), "-- {{username}} @ {{hostname}}".into());
+        snippets.insert("outer".into(), "[{{snippet:sig}}]".into());
+        let mut env = BTreeMap::new();
+        env.insert("TEAM".to_owned(), "platform".to_owned());
+        let context = TemplateContext {
+            username: "ada".into(),
+            hostname: "workstation".into(),
+            unix_timestamp: 86_400 * 365,
+            env: Arc::new(env),
+            snippets: Arc::new(snippets),
+            ..TemplateContext::default()
+        };
+        for template in [
+            "plain text",
+            "",
+            "{{username}}{{hostname}}{{unix_timestamp}}",
+            "a{{tab}}b{{newline}}c",
+            "{{date}} {{time}} {{datetime}} {{date+1d}} {{time-2h}}",
+            "{{date:%Y/%m/%d}} {{datetime+1w:%H}}",
+            "literal {{{{ braces }}}} kept",
+            "}}}} alone and {{{{",
+            "team={{env:TEAM}}",
+            "{{snippet:outer}} after",
+            "  {{  username  }}  ",
+        ] {
+            let compiled = CompiledTemplate::compile(template).unwrap();
+            let rendered = compiled.render_with_cursor(&context).unwrap().0;
+            if !rendered.contains('\n') {
+                assert_eq!(
+                    render_template_preview(template, &context, usize::MAX).unwrap(),
+                    rendered,
+                    "{template}"
+                );
+            }
+            let streamed = render_nested(
+                template,
+                &context,
+                false,
+                0,
+                MAX_RENDERED_BYTES,
+                false,
+                &mut HashMap::new(),
+            )
+            .unwrap()
+            .0;
+            assert_eq!(
+                compiled
+                    .render(&context, false, MAX_RENDERED_BYTES)
+                    .unwrap()
+                    .0,
+                streamed,
+                "{template}"
+            );
+        }
+    }
+
+    #[test]
+    fn compiled_templates_reject_static_errors_and_keep_runtime_ones_for_render() {
+        for (template, expected) in [
+            ("{{nope}}", "unknown"),
+            ("{{", "unclosed"),
+            ("{{ }}", "empty"),
+            ("{{uuid:}}", "uuid"),
+            ("{{shoe+1d}}", "unknown"),
+        ] {
+            let error = CompiledTemplate::compile(template).unwrap_err();
+            let matched = match expected {
+                "unknown" => matches!(error, TemplateError::UnknownVariable { .. }),
+                "unclosed" => matches!(error, TemplateError::Unclosed { .. }),
+                "empty" => matches!(error, TemplateError::EmptyVariable { .. }),
+                _ => matches!(error, TemplateError::InvalidUuidName),
+            };
+            assert!(matched, "{template}: {error:?}");
+        }
+        // These depend on the render context, so they compile and fail at
+        // render time exactly as before.
+        let context = TemplateContext::default();
+        for template in ["{{env:UNSET}}", "{{snippet:missing}}", "{{clipboard}}"] {
+            let compiled = CompiledTemplate::compile(template).unwrap();
+            assert!(compiled.render_with_cursor(&context).is_err(), "{template}");
+        }
+        let cursor = CompiledTemplate::compile("a{{cursor}}b{{cursor}}").unwrap();
+        assert!(matches!(
+            cursor.render_with_cursor(&context),
+            Err(TemplateError::MultipleCursors { offset: 12 })
+        ));
+        assert!(matches!(
+            render_template("a{{cursor}}b", &context),
+            Err(TemplateError::UnknownVariable { .. })
+        ));
+        let one = CompiledTemplate::compile("<{{cursor}}>").unwrap();
+        assert_eq!(
+            one.render_with_cursor(&context).unwrap(),
+            ("<>".to_owned(), Some(1))
+        );
+        // A named UUID is one value within a render and fresh across renders.
+        let named = CompiledTemplate::compile("{{uuid:a}} {{uuid:a}}").unwrap();
+        let first = named.render_with_cursor(&context).unwrap().0;
+        let (left, right) = first.split_once(' ').unwrap();
+        assert_eq!(left, right);
+        assert_ne!(named.render_with_cursor(&context).unwrap().0, first);
     }
 
     #[test]

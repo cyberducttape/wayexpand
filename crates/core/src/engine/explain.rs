@@ -7,9 +7,7 @@
 use serde::Serialize;
 
 use super::{route_limit, ExpansionEngine, RouteLimit};
-use crate::{
-    render_template_with_cursor, AppFilter, InjectorCapabilities, MatchMode, ReplacementGuarantee,
-};
+use crate::{AppFilter, InjectorCapabilities, MatchMode, ReplacementGuarantee};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -309,8 +307,7 @@ impl ExpansionEngine {
                     );
                     return explanation_with_policy(self, explanation, expansion, backend);
                 }
-                match render_template_with_cursor(&expansion.replacement, &self.template_context())
-                {
+                match self.render_replacement(index) {
                     Ok((rendered, _)) => explanation.push(
                         "replacement",
                         CheckStatus::Pass,
@@ -422,9 +419,7 @@ impl ExpansionEngine {
         if expansion.command.is_some() || self.form_fields.get(index).is_some_and(Option::is_some) {
             return;
         }
-        let Ok((rendered, cursor_offset)) =
-            render_template_with_cursor(&expansion.replacement, &self.template_context())
-        else {
+        let Ok((rendered, cursor_offset)) = self.render_replacement(index) else {
             return;
         };
         let mode = capabilities.insertion_mode;

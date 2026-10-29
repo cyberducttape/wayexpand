@@ -4,8 +4,8 @@
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::{collections::HashMap, hint::black_box, sync::Arc};
 use wayexpand_core::{
-    limits::MAX_RENDERED_BYTES, render_template, render_template_preview, SnippetLibrary,
-    TemplateContext,
+    limits::MAX_RENDERED_BYTES, render_template, render_template_preview, CompiledTemplate,
+    SnippetLibrary, TemplateContext,
 };
 
 fn bench_template_render(c: &mut Criterion) {
@@ -21,6 +21,18 @@ fn bench_template_render(c: &mut Criterion) {
     typical_group.bench_function("builtins", |bench| {
         bench.iter(|| {
             black_box(render_template(black_box(template), black_box(&context)).unwrap());
+        });
+    });
+    // What the engine does per expansion: the template was compiled once
+    // during validation.
+    let compiled = CompiledTemplate::compile(template).unwrap();
+    typical_group.bench_function("builtins_precompiled", |bench| {
+        bench.iter(|| {
+            black_box(
+                black_box(&compiled)
+                    .render_with_cursor(black_box(&context))
+                    .unwrap(),
+            );
         });
     });
     typical_group.finish();

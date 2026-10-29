@@ -61,9 +61,9 @@ impl ExpansionEngine {
         if !self.app_filter_allows(config_index, expansion) {
             return Err(InsertError::NotForThisApp);
         }
-        let (insert, cursor_offset) =
-            crate::render_template_with_cursor(&expansion.replacement, &self.template_context())
-                .map_err(|_| InsertError::Unrenderable)?;
+        let (insert, cursor_offset) = self
+            .render_replacement(config_index)
+            .map_err(|_| InsertError::Unrenderable)?;
         let limit = self.config.organization.max_replacement_size;
         if limit > 0 && insert.len() > limit {
             return Err(InsertError::Unrenderable);

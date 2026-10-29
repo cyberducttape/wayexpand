@@ -405,6 +405,25 @@ impl ExpansionEngine {
         }
     }
 
+    /// Render expansion `index` from the template compiled at validation.
+    pub(crate) fn render_replacement(
+        &self,
+        index: usize,
+    ) -> Result<(String, Option<usize>), crate::TemplateError> {
+        match self
+            .validated
+            .compiled_templates
+            .get(index)
+            .and_then(Option::as_ref)
+        {
+            Some(compiled) => compiled.render_with_cursor(&self.template_context()),
+            None => crate::render_template_with_cursor(
+                &self.config.expansion[index].replacement,
+                &self.template_context(),
+            ),
+        }
+    }
+
     /// Register a wakeup for asynchronous expansion completions. Applies to
     /// workers that are already running as well as ones started later.
     pub fn set_completion_notifier(&mut self, notifier: Option<CompletionNotifier>) {

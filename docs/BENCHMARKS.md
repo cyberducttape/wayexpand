@@ -240,7 +240,9 @@ an end-to-end daemon reload latency guarantee.
 
 ## Template rendering
 
-The `template_render` benchmark covers built-in variable substitution,
+The `template_render` benchmark covers built-in variable substitution (both
+from source and from a template compiled once, which is what the engine does
+per expansion since validation compiles every replacement),
 eight-level static snippet inclusion (the supported include-depth limit),
 rendering a 1 MiB output (the current output limit), and a 512-byte preview of
 that same input. It is a core renderer benchmark; clipboard access, GUI work,
@@ -267,6 +269,12 @@ are Criterion estimates and 95% confidence intervals:
 | Eight-level static include | 521 ns | 495–559 ns |
 | Full 1 MiB render | 1.035 ms | 1.034–1.037 ms |
 | 512-byte preview from 1 MiB input | 316.88 µs | 313.48–319.76 µs |
+
+On 2026-10-28, on the same host, an interleaved A/B run measured the
+precompiled built-ins case at 3.75–3.91 µs against 4.22–4.27 µs for the
+previous per-expansion render from source. The 1 MiB full render is dominated
+by allocator page faults and varied between 0.78 and 1.49 ms on unchanged code
+in the same session, so compare it only across interleaved runs.
 
 This is a single-host baseline, not a p95/p99 event-latency measurement or a
 release target. In particular, the preview still scans the large source up to

@@ -1,6 +1,4 @@
-use crate::{
-    render_template_with_cursor, ClipboardReader, KeyChord, TemplateContext, TemplateError,
-};
+use crate::{ClipboardReader, KeyChord, TemplateContext, TemplateError};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -615,6 +613,10 @@ pub struct ValidatedConfig {
     pub(crate) form_fields: Vec<Option<Arc<Vec<crate::FormField>>>>,
     /// Variable names parsed once for each configured expansion.
     pub(crate) template_variables: Vec<Vec<String>>,
+    /// Each replacement compiled once during validation and rendered from
+    /// here; `None` for command-backed expansions, whose replacement is not
+    /// a template.
+    pub(crate) compiled_templates: Vec<Option<Arc<crate::CompiledTemplate>>>,
     pub(crate) snippets: Arc<crate::SnippetLibrary>,
     pub(crate) undo_chord: Option<KeyChord>,
     pub(crate) hotkeys: Vec<(KeyChord, usize)>,
@@ -625,6 +627,7 @@ pub(crate) struct ValidatedMetadata {
     pub(crate) app_filters: Vec<Vec<AppFilter>>,
     pub(crate) form_fields: Vec<Option<Arc<Vec<crate::FormField>>>>,
     pub(crate) template_variables: Vec<Vec<String>>,
+    pub(crate) compiled_templates: Vec<Option<Arc<crate::CompiledTemplate>>>,
     pub(crate) snippets: Arc<crate::SnippetLibrary>,
     pub(crate) undo_chord: Option<KeyChord>,
     pub(crate) hotkeys: Vec<(KeyChord, usize)>,

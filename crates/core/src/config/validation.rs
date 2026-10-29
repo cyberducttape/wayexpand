@@ -33,6 +33,7 @@ impl Config {
             app_filters: metadata.app_filters,
             form_fields: metadata.form_fields,
             template_variables: metadata.template_variables,
+            compiled_templates: metadata.compiled_templates,
             snippets: metadata.snippets,
             undo_chord: metadata.undo_chord,
             hotkeys: metadata.hotkeys,
@@ -168,6 +169,7 @@ impl Config {
         let mut app_filters = Vec::with_capacity(self.expansion.len());
         let mut validated_form_fields = Vec::with_capacity(self.expansion.len());
         let mut template_variables = Vec::with_capacity(self.expansion.len());
+        let mut compiled_templates = Vec::with_capacity(self.expansion.len());
         for (index, expansion) in self.expansion.iter().enumerate() {
             if !is_uuid(&expansion.id) {
                 return Err(ConfigError::InvalidExpansionId { index });
@@ -299,11 +301,17 @@ impl Config {
                         reason: "program must be an absolute path by organization policy",
                     });
                 }
-            } else if let Err(source) =
-                render_template_with_cursor(&expansion.replacement, &template_context)
-            {
-                return Err(ConfigError::InvalidTemplate { index, source });
             }
+            compiled_templates.push(if expansion.command.is_some() {
+                None
+            } else {
+                let compiled = crate::CompiledTemplate::compile(&expansion.replacement)
+                    .map_err(|source| ConfigError::InvalidTemplate { index, source })?;
+                compiled
+                    .render_with_cursor(&template_context)
+                    .map_err(|source| ConfigError::InvalidTemplate { index, source })?;
+                Some(Arc::new(compiled))
+            });
             template_variables.push(
                 crate::template_variables(&expansion.replacement)
                     .into_iter()
@@ -440,6 +448,7 @@ impl Config {
             app_filters,
             form_fields: validated_form_fields,
             template_variables,
+            compiled_templates,
             snippets,
             undo_chord,
             hotkeys: parsed_hotkeys,

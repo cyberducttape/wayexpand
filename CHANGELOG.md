@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Compile each replacement template once during validation and render
+  expansions from the compiled form; one-shot renders and previews share
+  the same variable parser and evaluator. A full render no longer scans the
+  template a second time for newlines that only previews use.
 - CI now installs the built `.deb` (Ubuntu 24.04, Debian 13) and `.rpm`
   (Fedora) in clean containers, checks the installed binaries, reinstalls,
   and removes them (`scripts/test-package-smoke.sh`).

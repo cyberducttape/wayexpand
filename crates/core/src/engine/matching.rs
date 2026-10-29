@@ -9,7 +9,7 @@ use unicode_general_category::{get_general_category, GeneralCategory};
 
 use super::{ExpansionEngine, MatchPlan};
 use crate::config::capitalize_first_letter;
-use crate::{render_template_with_cursor, AppFilter, ExpansionConfig, MatchMode};
+use crate::{AppFilter, ExpansionConfig, MatchMode};
 
 #[derive(Debug, Clone)]
 pub(super) struct GlobPattern {
@@ -238,9 +238,7 @@ impl ExpansionEngine {
         let (replacement_text, cursor_offset) = if expansion.command.is_some() || form.is_some() {
             (expansion.replacement.clone(), None)
         } else {
-            let (rendered, cursor_offset) =
-                render_template_with_cursor(&expansion.replacement, &self.template_context())
-                    .ok()?;
+            let (rendered, cursor_offset) = self.render_replacement(config_index).ok()?;
             (rendered, cursor_offset)
         };
         let start = self.buffer.len().saturating_sub(length);
