@@ -598,6 +598,15 @@ session was headless and keyboard capture was simulated through stdin, so this
 artifact supports the output and focus paths only. It does not certify a
 compositor route and does not satisfy any real-session acceptance gate.
 
+[`evidence/doctor-certify-949123d3011d.json`](evidence/doctor-certify-949123d3011d.json)
+preserves the current-source smoke run for commit `949123d3011d` on private
+headless KWin 6.6.6. Twelve checks passed and the latency matrix was measured;
+the report remains partial because physical capture, overlapping input,
+Unicode through the keysym fallback, and suspend/resume were not tested. The
+20 large-output samples measured p95 3,143,627 µs inside the injector. This is
+output/focus evidence only, not production certification or evidence about the
+user's active desktop.
+
 The workflow's backend column identifies the path a runner driver exercises;
 it does not mean that path is eligible for production certification. Both
 evdev paths lack sensitive-field awareness and atomic replacement. IBus
@@ -644,6 +653,11 @@ second physical trigger while a paced replacement is still running and checks
 for interleaved text corruption or a stale expansion. The private KWin driver
 uses stdin for capture, so it reports this case as `UNVERIFIED`; a passing
 result requires a real capture session that types during the in-flight output.
+The current-source negative reproduction is preserved in
+[`evidence/kwin-overlap-reproduction-949123d3011d.json`](evidence/kwin-overlap-reproduction-949123d3011d.json):
+the stdin-simulated route lost four replacement characters and expanded stale
+input. It does not exercise the daemon's evdev interruption monitor and cannot
+be counted as a pass for that containment path.
 
 ## Compatibility modes
 

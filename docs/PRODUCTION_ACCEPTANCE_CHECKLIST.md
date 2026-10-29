@@ -41,18 +41,21 @@ session evidence; unit tests alone do not satisfy them.
       synthetic characters may leave partial text, so the target-integrity
       gate still requires a passing real-session test or refusing automatic
       replacement on that route.
-      The [current-source negative KWin evidence](evidence/kwin-overlap-reproduction-3aac97291.json)
-      reproduces target corruption and stale-trigger expansion on clean commit
-      `3aac97291a4d`: only 124 of 128 replacement characters remained, and the
-      second trigger was interleaved and expanded. Capture was simulated over
-      stdin while the concurrent trigger was typed through an independent EIS
-      session. This reproduces the non-atomic output hazard but does not test
-      evdev's queue/quarantine path. The older
+      The [latest negative KWin evidence](evidence/kwin-overlap-reproduction-949123d3011d.json)
+      reproduces corruption on commit `949123d3011d`: only 124 of 128
+      replacement characters remained, the second trigger was interleaved,
+      and stale input expanded. Capture was simulated over stdin while the
+      concurrent trigger was typed through an independent EIS session, so
+      this does not test the new physical-evdev interruption path. The prior
+      [reproduction](evidence/kwin-overlap-reproduction-3aac97291.json) showed
+      the same failure. The current serialized evdev output clears matcher
+      context and discards queued events through a 40 ms quiet window; the new
+      input monitor attempts to stop further output at a backend checkpoint.
+      Neither mechanism can stop physical input already reaching the
+      application or undo partial text. The older
       [2026-10-29 report](evidence/kwin-overlap-reproduction-0803d915.json)
       and [2026-10-28 report](evidence/kwin-overlap-reproduction-2026-10-28.json)
-      also record failures. Current serialized evdev output clears matcher
-      context and discards queued events through a 40 ms quiet window; that
-      cannot stop physical input reaching the application during injection.
+      also record failures.
       Keep this gate open until the current route passes the live target-integrity
       scenario with physical capture or automatic replacement is refused on
       that route.
