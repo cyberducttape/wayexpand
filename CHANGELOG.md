@@ -5,9 +5,9 @@ All notable changes to WayExpand are documented here.
 ## [Unreleased]
 
 - Show the selected managed action's enum/text input contract in the snippet
-  editor and compare it with form fields by name. Missing or extra fields are
-  identified before use; unreadable broker policy is reported without
-  weakening broker-side validation or editing the privileged policy.
+  editor and compare it with form fields by name, including enum choices and
+  known text-length limits. Missing or extra fields are identified before use;
+  runtime values remain subject to broker validation.
 - Reproduced the non-atomic KWin overlap failure on clean source commit
   `ad8f169c4402`: concurrent input interleaved with output, four replacement
   characters were lost, and the stale trigger expanded. Preserve the negative

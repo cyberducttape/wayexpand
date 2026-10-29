@@ -242,15 +242,14 @@ pub(crate) struct BrokerParameterView {
     pub(crate) max_length: Option<usize>,
 }
 
+type BrokerParameterCache =
+    std::collections::HashMap<String, std::sync::Arc<[BrokerParameterView]>>;
+type BrokerParameterCacheState = Option<(std::time::Instant, BrokerParameterCache)>;
+
 pub(crate) fn broker_action_parameters(
     action_id: &str,
 ) -> Option<std::sync::Arc<[BrokerParameterView]>> {
-    static CACHE: std::sync::Mutex<
-        Option<(
-            std::time::Instant,
-            std::collections::HashMap<String, std::sync::Arc<[BrokerParameterView]>>,
-        )>,
-    > = std::sync::Mutex::new(None);
+    static CACHE: std::sync::Mutex<BrokerParameterCacheState> = std::sync::Mutex::new(None);
     let mut cache = CACHE
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -325,9 +324,7 @@ fn read_broker_action_ids(path: &std::path::Path) -> Vec<String> {
     ids
 }
 
-fn read_broker_action_parameters(
-    path: &std::path::Path,
-) -> std::collections::HashMap<String, std::sync::Arc<[BrokerParameterView]>> {
+fn read_broker_action_parameters(path: &std::path::Path) -> BrokerParameterCache {
     use std::io::Read;
     use std::os::unix::fs::OpenOptionsExt;
     let Ok(file) = std::fs::OpenOptions::new()

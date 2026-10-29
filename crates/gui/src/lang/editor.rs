@@ -425,6 +425,28 @@ impl Strings {
         }
     }
 
+    pub fn broker_schema_constraint_mismatch(&self, names: &str) -> String {
+        match self.lang {
+            Language::English => {
+                format!("Form input may exceed the broker constraints for: {names}")
+            }
+            Language::Indonesian => {
+                format!("Input formulir mungkin melampaui batasan broker untuk: {names}")
+            }
+            Language::German => format!(
+                "Formulareingaben können die Broker-Beschränkungen überschreiten für: {names}"
+            ),
+        }
+    }
+
+    pub fn broker_schema_runtime_validation(&self) -> &'static str {
+        match self.lang {
+            Language::English => "The broker checks every submitted value at runtime; this preview cannot guarantee user-entered text is accepted.",
+            Language::Indonesian => "Broker memeriksa setiap nilai saat dijalankan; pratinjau ini tidak dapat menjamin teks yang dimasukkan pengguna akan diterima.",
+            Language::German => "Der Broker prüft jeden übermittelten Wert zur Laufzeit. Diese Vorschau kann nicht garantieren, dass eingegebener Text akzeptiert wird.",
+        }
+    }
+
     pub fn execution_type(&self) -> &'static str {
         match self.lang {
             Language::English => "Execution type",

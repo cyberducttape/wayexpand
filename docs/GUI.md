@@ -128,11 +128,13 @@ template. For an approved operation, enable **Managed action**, choose a named
 Action Broker entry, and describe its required inputs with form fields. The
 broker validates those values against its enum/text schema and places them only
 in configured argument slots; values are never interpolated into a shell
-command. The editor displays the selected action's schema and checks that form
-field names match its parameters, identifying missing or extra fields before
-use. This is a read-only view of broker policy; the broker remains the
-authority and rejects invalid requests. Review the broker policy and action
-permissions before sharing that snippet.
+command. The editor displays the selected action's schema and checks form
+field names, dropdown choices, and known text-length limits against it. It
+identifies missing or extra fields and known constraint mismatches before use.
+User-entered values are still checked by the broker at runtime. This is a
+read-only view of broker policy; the broker remains the authority and rejects
+invalid requests. Review the broker policy and action permissions before
+sharing that snippet.
 
 Keep the preview distinction in mind: static templates and forms can be
 previewed without running commands. A managed action runs only when the snippet

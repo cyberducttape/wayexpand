@@ -138,10 +138,83 @@ impl GuiApp {
                                         .copied()
                                         .collect::<Vec<_>>();
                                     if missing.is_empty() && unexpected.is_empty() {
-                                        ui.colored_label(
-                                            palette.success,
-                                            self.strings.broker_schema_match(),
-                                        );
+                                        let incompatible = parameters
+                                            .as_deref()
+                                            .unwrap_or_default()
+                                            .iter()
+                                            .filter_map(|parameter| {
+                                                let field = fields
+                                                    .iter()
+                                                    .find(|field| field.key == parameter.name)?;
+                                                match (&parameter.kind[..], &field.kind) {
+                                                    (
+                                                        "enum",
+                                                        wayexpand_core::FormFieldKind::Choice {
+                                                            options,
+                                                            ..
+                                                        },
+                                                    ) if options.iter().all(|option| {
+                                                        parameter.values.contains(option)
+                                                    }) =>
+                                                    {
+                                                        None
+                                                    }
+                                                    ("enum", _) => Some(parameter.name.as_str()),
+                                                    (
+                                                        "text",
+                                                        wayexpand_core::FormFieldKind::Text {
+                                                            ..
+                                                        },
+                                                    ) if field.max_chars.is_some_and(|max| {
+                                                        max <= parameter.max_length.unwrap_or(0)
+                                                    }) =>
+                                                    {
+                                                        None
+                                                    }
+                                                    (
+                                                        "text",
+                                                        wayexpand_core::FormFieldKind::Date {
+                                                            ..
+                                                        },
+                                                    ) if parameter.max_length.unwrap_or(0)
+                                                        >= 10 =>
+                                                    {
+                                                        None
+                                                    }
+                                                    (
+                                                        "text",
+                                                        wayexpand_core::FormFieldKind::Choice {
+                                                            options,
+                                                            ..
+                                                        },
+                                                    ) if options.iter().all(|option| {
+                                                        !option.is_empty()
+                                                            && !option.starts_with('-')
+                                                            && option.chars().count()
+                                                                <= parameter.max_length.unwrap_or(0)
+                                                            && !option.chars().any(char::is_control)
+                                                    }) =>
+                                                    {
+                                                        None
+                                                    }
+                                                    ("text", _) => Some(parameter.name.as_str()),
+                                                    _ => Some(parameter.name.as_str()),
+                                                }
+                                            })
+                                            .collect::<Vec<_>>();
+                                        if incompatible.is_empty() {
+                                            ui.colored_label(
+                                                palette.success,
+                                                self.strings.broker_schema_match(),
+                                            );
+                                        } else {
+                                            ui.colored_label(
+                                                palette.warning,
+                                                self.strings.broker_schema_constraint_mismatch(
+                                                    &incompatible.join(", "),
+                                                ),
+                                            );
+                                        }
                                     } else {
                                         if !missing.is_empty() {
                                             ui.colored_label(
@@ -167,6 +240,15 @@ impl GuiApp {
                                     .small()
                                     .color(palette.muted),
                                 );
+                                if parameters.is_some() {
+                                    ui.label(
+                                        RichText::new(
+                                            self.strings.broker_schema_runtime_validation(),
+                                        )
+                                        .small()
+                                        .color(palette.muted),
+                                    );
+                                }
                             });
                         }
                     }
