@@ -46,11 +46,12 @@ availability claims, and no target is certified without reviewed evidence.
 ## Current evidence
 
 The repository contains current private KWin compatibility evidence in
-[`doctor-certify-7a5ee6b04f77.json`](evidence/doctor-certify-7a5ee6b04f77.json):
-eleven output/focus checks passed, while keyboard capture was simulated and
-Unicode insertion, suspend/resume, and overlapping triggers were not tested.
-This is not a production certification artifact. The generated tables above
-are authoritative: every listed desktop and route remains uncertified.
+[`doctor-certify-6638e14d2e.json`](evidence/doctor-certify-6638e14d2e.json):
+output/focus/lifecycle checks and 20 latency samples per size passed. Keyboard
+capture was simulated; Unicode insertion, suspend/resume, and overlapping
+triggers were not tested. This is not a production certification artifact.
+The generated tables above are authoritative: every listed desktop and route
+remains uncertified.
 Historical manual observations below do not establish current compatibility. See
 [CERTIFICATION.md](CERTIFICATION.md) for the evidence format and
 [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) for current route limitations.

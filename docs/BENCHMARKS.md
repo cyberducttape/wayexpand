@@ -341,3 +341,19 @@ with this run's sample settings. A 4,096-character decomposed-accent buffer
 measured 69.429 µs after the change; this remains on the Unicode normalization
 path and is not a paired before/after comparison. These microbenchmarks are
 host-specific and do not measure end-to-end keyboard-to-client latency.
+
+## Current headless KWin injector measurements: 2026-10-28
+
+The [preserved `doctor --certify` report](evidence/doctor-certify-6638e14d2e.json)
+records 20 verified libei keysym-fallback transactions in each size bucket on
+private headless KWin 6.6.6:
+
+| Replacement size | p50 | p95 | p99 |
+| --- | ---: | ---: | ---: |
+| Small | 12.541 ms | 12.581 ms | 12.586 ms |
+| Medium | 781.089 ms | 783.692 ms | 784.985 ms |
+| Large | 3,135.947 ms | 3,142.036 ms | 3,145.543 ms |
+
+These measurements time the injector transaction only. Capture was simulated
+through stdin, and the values exclude client paint latency. They are not an
+end-to-end SLO or production certification.

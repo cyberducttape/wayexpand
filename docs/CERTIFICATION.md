@@ -660,3 +660,20 @@ Workflow artifacts are evidence
 records only; the support matrix should not mark a compositor certified until a
 reviewed artifact reports `certified: true` for the relevant compositor,
 backend, layout, and client set.
+
+## Latest current-source compatibility report (2026-10-28)
+
+[`evidence/doctor-certify-6638e14d2e.json`](evidence/doctor-certify-6638e14d2e.json)
+records commit `6638e14d2ec3` on private headless KWin 6.6.6. The report passed
+trigger replacement, word-boundary delimiter, cursor placement, multiline
+replacement, focus switching, focus change during expansion, target closure,
+command completion, configuration reload, daemon restart, unsupported Unicode
+refusal, and tested-build identity. It measured 20 verified injector
+transactions in each replacement-size bucket: small p95 12,581 µs, medium p95
+783,692 µs, and large p95 3,142,036 µs.
+
+Capture was simulated through stdin. Unicode insertion, suspend/resume,
+physical keyboard capture, and a second trigger during non-atomic replacement
+were not tested. The measurements exclude capture and client paint latency.
+This report is partial compatibility evidence; it does not certify a compositor
+route or describe the user's active desktop.

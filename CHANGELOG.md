@@ -9,11 +9,14 @@ All notable changes to WayExpand are documented here.
   route remains non-atomic and uncertified; evdev/libei continues to refuse
   forms when it cannot verify the trigger at the cursor.
 - Preserve current-source private KWin 6.6.6 smoke evidence for commit
-  `7a5ee6b04f77`: eleven output, focus, reload, restart, and refusal checks
-  passed. Capture was simulated; Unicode insertion, overlap, suspend/resume,
-  and physical capture remain untested. Record 20 latency samples per size;
-  the 257-character keysym-fallback replacement has a measured p95 of about
-  3.14 seconds. The route remains uncertified for production.
+  `6638e14d2ec3`: output, focus, reload, restart, and refusal checks passed.
+  Capture was simulated; Unicode insertion, overlap, suspend/resume, and
+  physical capture remain untested. Record 20 latency samples per size; the
+  measured p95 is 12.581 ms for small, 783.692 ms for medium, and 3.142 s
+  for large keysym-fallback replacements. The route remains uncertified.
+- Record expected failed and unverified compositor scenarios instead of
+  aborting the private session, and wait for latency samples to reach the
+  status snapshot before evaluating the measurement.
 - Update the compositor certification matrix to point to the October 28
   compatibility report while retaining the production-uncertified status for
   every desktop route.
