@@ -359,6 +359,16 @@ impl GuiApp {
             )
             .wrap(),
         );
+        if self.settings_compatibility_mode != wayexpand_core::CompatibilityMode::Off {
+            egui::Frame::new()
+                .fill(theme::tint(palette.danger, 24))
+                .stroke(egui::Stroke::new(1.0, palette.danger))
+                .corner_radius(egui::CornerRadius::same(8))
+                .inner_margin(egui::Margin::symmetric(10, 7))
+                .show(ui, |ui| {
+                    ui.colored_label(palette.danger, self.strings.compatibility_mode_risk());
+                });
+        }
 
         if let Some(error) = self.settings_error.clone() {
             ui.add_space(8.0);

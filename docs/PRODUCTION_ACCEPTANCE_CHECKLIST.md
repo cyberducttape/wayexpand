@@ -34,19 +34,21 @@ session evidence; unit tests alone do not satisfy them.
       `second-trigger-during-nonatomic-replacement`; verify the target text is
       not corrupted and no stale trigger is expanded after the first
       transaction. A sequential event test does not satisfy this gate.
-      The [2026-10-29 negative KWin evidence](evidence/kwin-overlap-reproduction-0803d915.json)
+      The [current-source negative KWin evidence](evidence/kwin-overlap-reproduction-3aac97291.json)
       reproduces target corruption and stale-trigger expansion on clean commit
-      `0803d915fe57`, with stdin-simulated capture and a concurrent trigger
-      typed through an independent EIS session. The older
-      [2026-10-28 report](evidence/kwin-overlap-reproduction-2026-10-28.json)
-      also records a failure, but came from a dirty revision. Current serialized
-      evdev output clears matcher context and discards queued events through a
-      40 ms quiet window; a daemon regression covers this filtering behavior.
-      That change cannot stop physical input reaching the application during
-      injection, and neither report exercises the current evdev queue path.
-      Keep this gate open until the current route passes the live
-      target-integrity scenario with physical capture or is refused for
-      automatic replacement.
+      `3aac97291a4d`: only 124 of 128 replacement characters remained, and the
+      second trigger was interleaved and expanded. Capture was simulated over
+      stdin while the concurrent trigger was typed through an independent EIS
+      session. This reproduces the non-atomic output hazard but does not test
+      evdev's queue/quarantine path. The older
+      [2026-10-29 report](evidence/kwin-overlap-reproduction-0803d915.json)
+      and [2026-10-28 report](evidence/kwin-overlap-reproduction-2026-10-28.json)
+      also record failures. Current serialized evdev output clears matcher
+      context and discards queued events through a 40 ms quiet window; that
+      cannot stop physical input reaching the application during injection.
+      Keep this gate open until the current route passes the live target-integrity
+      scenario with physical capture or automatic replacement is refused on
+      that route.
 - [ ] Verify command completion never inserts into an unintended context in a
       real focus-switch test.
 - [ ] Verify fail-closed behavior in password and credential fields for each

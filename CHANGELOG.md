@@ -13,6 +13,10 @@ All notable changes to WayExpand are documented here.
   persisted events, dropped events, queue rejections, writer failures, and
   maximum flush time are shown separately, with the asynchronous best-effort
   durability limit stated explicitly.
+- Warn that opting in to keystroke compatibility can let concurrent physical
+  input interleave with non-atomic replacement; keep the risk visible in Engine
+  settings whenever that mode is enabled. Preserve a current-source KWin
+  negative overlap reproduction in the production acceptance checklist.
 - Run and preserve the isolated KWin 6.6.6 output/focus smoke report for
   `ca98ac77f411`. Twelve checks passed; the 257-character libei keysym fallback
   measured 3.15 s p95 inside the injector. The report remains partial because

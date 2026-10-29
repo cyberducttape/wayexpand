@@ -187,4 +187,12 @@ impl Strings {
             }
         }
     }
+
+    pub fn compatibility_mode_risk(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Risk of non-atomic replacement: physical typing can reach the application while WayExpand is erasing and inserting, so the two streams may interleave and corrupt nearby text. Evdev also cannot detect password fields. Keep this Off for strict safety; prefer a verified input-method route when text integrity matters.",
+            Language::German => "Risiko einer nicht atomaren Ersetzung: Physische Tasten können die Anwendung erreichen, während WayExpand löscht und einfügt. Beide Eingabeströme können sich überlagern und benachbarten Text beschädigen. Evdev erkennt außerdem keine Passwortfelder. Für strikte Sicherheit deaktiviert lassen; wenn Textintegrität wichtig ist, eine verifizierte Eingabemethoden-Route verwenden.",
+            Language::Indonesian => "Risiko penggantian non-atomik: ketikan fisik dapat mencapai aplikasi saat WayExpand menghapus dan menyisipkan teks. Kedua aliran input dapat bercampur dan merusak teks di sekitarnya. Evdev juga tidak dapat mendeteksi kolom kata sandi. Biarkan nonaktif untuk keselamatan ketat; gunakan rute metode input terverifikasi bila integritas teks penting.",
+        }
+    }
 }

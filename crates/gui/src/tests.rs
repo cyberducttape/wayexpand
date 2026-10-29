@@ -1491,6 +1491,47 @@ fn compatibility_consent_is_saved_and_withdrawn_from_the_settings_editor() {
 }
 
 #[test]
+fn enabling_keystroke_compatibility_shows_the_non_atomic_replacement_risk() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-compatibility-warning-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    app.settings_open = true;
+    app.settings_tab = SettingsTab::Engine;
+    app.settings_compatibility_mode = wayexpand_core::CompatibilityMode::TrackedFocus;
+
+    let ctx = egui::Context::default();
+    ctx.enable_accesskit();
+    let output = run_gui_test_frame(
+        &ctx,
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(720.0, 720.0),
+            )),
+            ..Default::default()
+        },
+        |ui| {
+            let palette = Palette::for_pack(app.colorpack, app.dark_mode);
+            app.render_settings_dialog(ui.ctx(), &palette);
+        },
+    );
+    let semantics = format!(
+        "{:?}",
+        output
+            .platform_output
+            .accesskit_update
+            .expect("settings should expose accessible content")
+            .nodes
+    );
+    assert!(semantics.contains("Risk of non-atomic replacement"));
+    assert!(semantics.contains("interleave and corrupt nearby text"));
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn a_non_numeric_buffer_limit_is_reported_without_touching_the_configuration() {
     let path =
         std::env::temp_dir().join(format!("wayexpand-gui-buffer-{}.toml", std::process::id()));
