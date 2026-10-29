@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- CI now installs the built `.deb` (Ubuntu 24.04, Debian 13) and `.rpm`
+  (Fedora) in clean containers, checks the installed binaries, reinstalls,
+  and removes them (`scripts/test-package-smoke.sh`).
 - Add pack lockfiles and catalog updates: `pack lock [--check]` records and
   verifies the exact version and content fingerprint of installed packs,
   `pack outdated` and `pack update` move packs to newer catalog versions
