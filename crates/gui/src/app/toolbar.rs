@@ -180,6 +180,18 @@ impl GuiApp {
                             }
                         }
                     }
+                    match runtime::status_field(&self.daemon_status, "config_state").as_deref() {
+                        Some("loading") => {
+                            ui.label(self.strings.profile_config_loading());
+                        }
+                        Some("reload-rejected") => {
+                            ui.colored_label(
+                                palette.danger,
+                                self.strings.profile_config_rejected(),
+                            );
+                        }
+                        _ => {}
+                    }
                     if self.profile_receiver.is_some() {
                         ui.horizontal(|ui| {
                             ui.spinner();

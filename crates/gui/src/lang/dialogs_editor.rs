@@ -129,6 +129,22 @@ impl Strings {
         }
     }
 
+    pub fn profile_config_loading(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Loading selected profile…",
+            Language::Indonesian => "Memuat profil terpilih…",
+            Language::German => "Ausgewähltes Profil wird geladen…",
+        }
+    }
+
+    pub fn profile_config_rejected(&self) -> &'static str {
+        match self.lang {
+            Language::English => "The selected configuration was rejected; the previous valid configuration is retained.",
+            Language::Indonesian => "Konfigurasi yang dipilih ditolak; konfigurasi valid sebelumnya tetap digunakan.",
+            Language::German => "Die ausgewählte Konfiguration wurde abgelehnt; die vorherige gültige Konfiguration bleibt aktiv.",
+        }
+    }
+
     pub fn unsaved_title(&self) -> &'static str {
         match self.lang {
             Language::English => "Unsaved changes",

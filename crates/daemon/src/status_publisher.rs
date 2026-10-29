@@ -15,7 +15,7 @@ pub(crate) struct StatusSnapshot {
     state: String,
     paused: bool,
     config_path: PathBuf,
-    config_healthy: bool,
+    config_state: String,
     metrics: CommandMetrics,
     latency: latency::Snapshot,
     capture_capabilities: InputSourceCapabilities,
@@ -34,7 +34,7 @@ impl StatusPublisher {
         backend_mode: &str,
         state: &str,
         config_path: &Path,
-        config_healthy: bool,
+        config_state: &str,
         metrics: CommandMetrics,
         capture_capabilities: InputSourceCapabilities,
         injection_capabilities: InjectorCapabilities,
@@ -49,7 +49,7 @@ impl StatusPublisher {
                 .pause_requested
                 .load(std::sync::atomic::Ordering::Acquire),
             config_path: config_path.to_path_buf(),
-            config_healthy,
+            config_state: config_state.to_owned(),
             metrics,
             latency: latency::snapshot(),
             capture_capabilities,
@@ -63,21 +63,23 @@ impl StatusPublisher {
         // Skipping here once left a capability-less "connected" status in
         // place after a reconnect. `ControlServer::set_status` already
         // ignores a body identical to the one being served.
-        control.set_status(status::daemon_status_body_with_runtime_capabilities(
-            &snapshot.source,
-            &snapshot.backend,
-            &snapshot.state,
-            snapshot.paused,
-            snapshot.config_path.as_path(),
-            snapshot.config_healthy,
-            &snapshot.backend_mode,
-            snapshot.metrics,
-            snapshot.latency,
-            snapshot.capture_capabilities,
-            snapshot.injection_capabilities,
-            snapshot.window_tracker_connected,
-            snapshot.window_identity_exact,
-        ));
+        control.set_status(
+            status::daemon_status_body_with_runtime_capabilities_and_config_state(
+                &snapshot.source,
+                &snapshot.backend,
+                &snapshot.state,
+                snapshot.paused,
+                snapshot.config_path.as_path(),
+                &snapshot.config_state,
+                &snapshot.backend_mode,
+                snapshot.metrics,
+                snapshot.latency,
+                snapshot.capture_capabilities,
+                snapshot.injection_capabilities,
+                snapshot.window_tracker_connected,
+                snapshot.window_identity_exact,
+            ),
+        );
         self.last = Some(snapshot);
     }
 }
@@ -112,6 +114,33 @@ pub(crate) fn set_daemon_status_with_metrics(
     state: &str,
     config_path: &Path,
     config_healthy: bool,
+    metrics: CommandMetrics,
+) {
+    set_daemon_status_with_config_state_and_metrics(
+        publisher,
+        control,
+        source,
+        backend,
+        state,
+        config_path,
+        if config_healthy {
+            "ok"
+        } else {
+            "reload-rejected"
+        },
+        metrics,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn set_daemon_status_with_config_state_and_metrics(
+    publisher: &mut StatusPublisher,
+    control: &control::ControlServer,
+    source: &str,
+    backend: &str,
+    state: &str,
+    config_path: &Path,
+    config_state: &str,
     metrics: CommandMetrics,
 ) {
     let connected = state == "connected";
@@ -154,7 +183,7 @@ pub(crate) fn set_daemon_status_with_metrics(
         &backend_mode,
         state,
         config_path,
-        config_healthy,
+        config_state,
         metrics,
         capture_capabilities,
         injection_capabilities,
@@ -162,7 +191,29 @@ pub(crate) fn set_daemon_status_with_metrics(
     );
 }
 
+pub(crate) fn set_daemon_status_with_config_state(
+    publisher: &mut StatusPublisher,
+    control: &control::ControlServer,
+    source: &str,
+    backend: &str,
+    state: &str,
+    config_path: &Path,
+    config_state: &str,
+) {
+    set_daemon_status_with_config_state_and_metrics(
+        publisher,
+        control,
+        source,
+        backend,
+        state,
+        config_path,
+        config_state,
+        CommandMetrics::default(),
+    );
+}
+
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 pub(crate) fn set_daemon_status_with_runtime_capabilities(
     publisher: &mut StatusPublisher,
     control: &control::ControlServer,
@@ -177,6 +228,41 @@ pub(crate) fn set_daemon_status_with_runtime_capabilities(
     injection_capabilities: InjectorCapabilities,
     window_tracker_connected: bool,
 ) {
+    set_daemon_status_with_runtime_capabilities_and_config_state(
+        publisher,
+        control,
+        source,
+        backend,
+        state,
+        config_path,
+        if config_healthy {
+            "ok"
+        } else {
+            "reload-rejected"
+        },
+        metrics,
+        backend_mode,
+        capture_capabilities,
+        injection_capabilities,
+        window_tracker_connected,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn set_daemon_status_with_runtime_capabilities_and_config_state(
+    publisher: &mut StatusPublisher,
+    control: &control::ControlServer,
+    source: &str,
+    backend: &str,
+    state: &str,
+    config_path: &Path,
+    config_state: &str,
+    metrics: CommandMetrics,
+    backend_mode: &str,
+    capture_capabilities: InputSourceCapabilities,
+    injection_capabilities: InjectorCapabilities,
+    window_tracker_connected: bool,
+) {
     publisher.publish(
         control,
         source,
@@ -184,7 +270,7 @@ pub(crate) fn set_daemon_status_with_runtime_capabilities(
         backend_mode,
         state,
         config_path,
-        config_healthy,
+        config_state,
         metrics,
         capture_capabilities,
         injection_capabilities,

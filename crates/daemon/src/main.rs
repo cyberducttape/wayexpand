@@ -47,9 +47,7 @@ use signal_hook::{
     iterator::Signals,
 };
 use source_steps::Step;
-use status_publisher::{
-    set_daemon_status, set_daemon_status_with_runtime_capabilities, StatusPublisher,
-};
+use status_publisher::{set_daemon_status, StatusPublisher};
 use std::{
     env,
     io::{self, BufRead},

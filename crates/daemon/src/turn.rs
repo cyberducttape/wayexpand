@@ -7,6 +7,10 @@ use std::ops::ControlFlow;
 use crate::control::InsertRequest;
 use crate::output_connect::{BackgroundConnect, ConnectRequest, ConnectResult};
 use crate::pending_output::{OutputJob, OutputOrigin};
+use crate::status_publisher::{
+    set_daemon_status_with_config_state,
+    set_daemon_status_with_runtime_capabilities_and_config_state,
+};
 use crate::*;
 use wayexpand_core::CheckStatus;
 
@@ -352,14 +356,14 @@ impl Daemon {
                 input_method.key_pass_through_capabilities(),
             );
         }
-        set_daemon_status_with_runtime_capabilities(
+        set_daemon_status_with_runtime_capabilities_and_config_state(
             &mut self.status_publisher,
             &self.control,
             self.active_source,
             self.active_backend,
             self.connection_state,
             self.config.path(),
-            self.config.healthy(),
+            self.config.status_state(),
             metrics,
             backend_mode,
             capture_capabilities,
@@ -438,14 +442,14 @@ impl Daemon {
                 self.output_retry_at = None;
                 self.output_retry_delay = Duration::from_millis(250);
                 self.connection_state = "connected";
-                set_daemon_status(
+                set_daemon_status_with_config_state(
                     &mut self.status_publisher,
                     &self.control,
                     self.active_source,
                     wayexpand_backend_selection::injection_status_label(self.backend_name),
                     self.connection_state,
                     self.config.path(),
-                    self.config.healthy(),
+                    self.config.status_state(),
                 );
                 crate::counters::note_output_reconnect();
                 info!(backend = self.backend_name, "output backend reconnected");
@@ -493,14 +497,14 @@ impl Daemon {
             self.active_backend,
         )?;
         self.connection_state = "reconnecting";
-        set_daemon_status(
+        set_daemon_status_with_config_state(
             &mut self.status_publisher,
             &self.control,
             self.active_source,
             self.active_backend,
             self.connection_state,
             self.config.path(),
-            self.config.healthy(),
+            self.config.status_state(),
         );
         self.output_retry_at = Some(Instant::now());
         self.output_retry_delay = Duration::from_millis(250);

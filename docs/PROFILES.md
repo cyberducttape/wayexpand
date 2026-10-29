@@ -37,6 +37,8 @@ When focus changes to an assigned application, matching pauses while its
 profile is loaded and validated. If loading fails, matching remains paused
 rather than silently using another application's snippets. Correct the profile
 or assignment, then run `wayexpand reload` (or restart the daemon) to retry.
+The GUI shows the runtime-selected profile and distinguishes an in-progress
+load from a completed validation failure.
 
 Application IDs vary by compositor and application packaging. The assignment
 matches the ID reported by the active window tracker; if the tracker cannot

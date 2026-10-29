@@ -6,6 +6,7 @@ use crate::input_loop::{
     attach_key_pass_through, check_input_method_policy, key_pass_through_failure,
 };
 use crate::output_connect::{BackgroundConnect, ConnectRequest};
+use crate::status_publisher::set_daemon_status_with_config_state;
 use crate::*;
 
 /// What the reactor loop does after an input step.
@@ -109,14 +110,14 @@ impl Daemon {
                     self.input_method = Some(source);
                     self.reconnect_delay = Duration::from_millis(250);
                     self.connection_state = "connected";
-                    set_daemon_status(
+                    set_daemon_status_with_config_state(
                         &mut self.status_publisher,
                         &self.control,
                         self.active_source,
                         self.active_backend,
                         self.connection_state,
-                        &self.path,
-                        self.config.healthy(),
+                        self.config.path(),
+                        self.config.status_state(),
                     );
                     crate::counters::note_input_reconnect();
                     info!("input-method source reconnected");
@@ -190,14 +191,14 @@ impl Daemon {
                             &self.policy,
                             self.active_backend,
                         )?;
-                        set_daemon_status(
+                        set_daemon_status_with_config_state(
                             &mut self.status_publisher,
                             &self.control,
                             self.active_source,
                             self.active_backend,
                             self.connection_state,
-                            &self.path,
-                            self.config.healthy(),
+                            self.config.path(),
+                            self.config.status_state(),
                         );
                     }
                     Err(error) => return Err(error.into()),
@@ -215,14 +216,14 @@ impl Daemon {
                     &self.policy,
                     self.active_backend,
                 )?;
-                set_daemon_status(
+                set_daemon_status_with_config_state(
                     &mut self.status_publisher,
                     &self.control,
                     self.active_source,
                     self.active_backend,
                     self.connection_state,
-                    &self.path,
-                    self.config.healthy(),
+                    self.config.path(),
+                    self.config.status_state(),
                 );
             }
             Err(error) => {
@@ -245,14 +246,14 @@ impl Daemon {
                     self.evdev = Some(source);
                     self.reconnect_delay = Duration::from_millis(250);
                     self.connection_state = "connected";
-                    set_daemon_status(
+                    set_daemon_status_with_config_state(
                         &mut self.status_publisher,
                         &self.control,
                         self.active_source,
                         self.active_backend,
                         self.connection_state,
-                        &self.path,
-                        self.config.healthy(),
+                        self.config.path(),
+                        self.config.status_state(),
                     );
                     crate::counters::note_input_reconnect();
                     info!("evdev source reconnected");
@@ -367,14 +368,14 @@ impl Daemon {
                     &self.policy,
                     self.active_backend,
                 );
-                set_daemon_status(
+                set_daemon_status_with_config_state(
                     &mut self.status_publisher,
                     &self.control,
                     self.active_source,
                     self.active_backend,
                     self.connection_state,
-                    &self.path,
-                    self.config.healthy(),
+                    self.config.path(),
+                    self.config.status_state(),
                 );
             }
             Err(error) => {
@@ -457,7 +458,7 @@ impl Daemon {
                                 self.active_backend,
                             );
                             self.connection_state = "reconnecting";
-                            set_daemon_status(
+                            set_daemon_status_with_config_state(
                                 &mut self.status_publisher,
                                 &self.control,
                                 self.active_source,
@@ -465,8 +466,8 @@ impl Daemon {
                                     self.backend_name,
                                 ),
                                 self.connection_state,
-                                &self.path,
-                                self.config.healthy(),
+                                self.config.path(),
+                                self.config.status_state(),
                             );
                             self.output_retry_at = Some(Instant::now());
                             self.output_retry_delay = Duration::from_millis(250);

@@ -11,6 +11,9 @@ All notable changes to WayExpand are documented here.
   application; unknown applications use the base library. The GUI Profiles menu
   now manages exact application assignments and shows the runtime-selected
   profile; daemon status reports the profile library currently in use.
+- Report configuration reloads as `loading` until the requested profile build
+  completes, keeping that distinct from a rejected configuration in daemon
+  status and GUI profile controls.
 - Add offline pack-catalog browsing to the GUI: search local catalogs by
   metadata, disclose signature identity and capabilities, and open candidates
   in the existing fingerprint-bound content and diff review before install.

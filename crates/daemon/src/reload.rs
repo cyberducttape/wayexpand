@@ -628,6 +628,24 @@ impl ReloadableConfig {
     pub fn healthy(&self) -> bool {
         self.healthy
     }
+
+    /// Operational state for status and user-facing diagnostics. A config
+    /// path switch is reported as loading until its current target finishes;
+    /// an invalid completed load remains distinctly rejected.
+    pub fn status_state(&self) -> &'static str {
+        if self.healthy {
+            "ok"
+        } else if self.rebuild_after_in_flight
+            || self
+                .in_flight
+                .as_ref()
+                .is_some_and(|load| load.path == self.path)
+        {
+            "loading"
+        } else {
+            "reload-rejected"
+        }
+    }
 }
 
 fn safe_reload_error(error: &anyhow::Error) -> String {
@@ -965,16 +983,25 @@ mod tests {
 
         config.switch_path(obsolete);
         config.switch_path(selected.clone());
+        assert_eq!(config.status_state(), "loading");
         config.finish_pending_reload();
 
         assert_eq!(config.path(), selected);
         assert!(config.healthy());
+        assert_eq!(config.status_state(), "ok");
         let result = config
             .engine
             .process(InputEvent::Text(":x".into()))
             .pop()
             .unwrap();
         assert_eq!(result.insert, "support");
+
+        let invalid = profiles.join("invalid.toml");
+        write_config(&invalid, "not valid = [toml");
+        config.switch_path(invalid);
+        assert_eq!(config.status_state(), "loading");
+        config.finish_pending_reload();
+        assert_eq!(config.status_state(), "reload-rejected");
         fs::remove_dir_all(directory).unwrap();
     }
 

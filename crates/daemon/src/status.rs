@@ -104,6 +104,43 @@ pub fn daemon_status_body_with_runtime_capabilities(
     window_tracker_connected: bool,
     window_identity_exact: bool,
 ) -> StatusBody {
+    daemon_status_body_with_runtime_capabilities_and_config_state(
+        source,
+        backend,
+        state,
+        paused,
+        config_path,
+        if config_healthy {
+            "ok"
+        } else {
+            "reload-rejected"
+        },
+        backend_mode,
+        metrics,
+        latency,
+        capture,
+        injection,
+        window_tracker_connected,
+        window_identity_exact,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn daemon_status_body_with_runtime_capabilities_and_config_state(
+    source: &str,
+    backend: &str,
+    state: &str,
+    paused: bool,
+    config_path: &Path,
+    config_state: &str,
+    backend_mode: &str,
+    metrics: CommandMetrics,
+    latency: LatencySnapshot,
+    capture: InputSourceCapabilities,
+    injection: InjectorCapabilities,
+    window_tracker_connected: bool,
+    window_identity_exact: bool,
+) -> StatusBody {
     let config_path = escape_status_value(&config_path.display().to_string());
     let matcher_latency = crate::latency::matcher_snapshot();
     let injection_latency_profiles = crate::latency::profiles_json();
@@ -134,7 +171,7 @@ pub fn daemon_status_body_with_runtime_capabilities(
         build_info::COMMIT,
         paused,
         config_path,
-        if config_healthy { "ok" } else { "reload-rejected" },
+        config_state,
         capture.sensitive_focus,
         capture.exclusive_capture,
         capture.reliable_key_state,
