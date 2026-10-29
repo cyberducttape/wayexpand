@@ -35,8 +35,11 @@ session evidence; unit tests alone do not satisfy them.
       not corrupted and no stale trigger is expanded after the first
       transaction. A sequential event test does not satisfy this gate.
       The daemon now attempts to cancel an in-flight non-atomic transaction
-      when evdev reports new physical input, records an uncertain outcome, and
-      quarantines the input instead of replaying or continuing queued output.
+      when evdev reports new physical input, polling every 2 ms while paced
+      output is active, records an uncertain outcome, and quarantines the input
+      instead of replaying or continuing queued output. A delayed-event unit
+      regression covers the reactor polling path, but its input source is
+      simulated.
       This is containment only: any already delivered physical keys or
       synthetic characters may leave partial text, so the target-integrity
       gate still requires a passing real-session test or refusing automatic
@@ -64,7 +67,9 @@ session evidence; unit tests alone do not satisfy them.
       also record failures.
       Keep this gate open until the current route passes the live target-integrity
       scenario with physical capture or automatic replacement is refused on
-      that route.
+      that route. The current-source private KWin smoke report
+      [9311e1e5be3f](evidence/doctor-certify-9311e1e5be3f.json) marks this
+      scenario `not-tested`; it does not close the gate.
 - [ ] Verify command completion never inserts into an unintended context in a
       real focus-switch test.
 - [ ] Verify fail-closed behavior in password and credential fields for each

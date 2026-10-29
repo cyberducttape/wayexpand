@@ -45,12 +45,16 @@ availability claims, and no target is certified without reviewed evidence.
 
 ## Current evidence
 
-The latest private KWin compatibility smoke evidence is
-[`doctor-certify-6f9d5d584af4.json`](evidence/doctor-certify-6f9d5d584af4.json):
-12 output, focus, lifecycle, refusal, and build-identity checks passed, with 20
-latency samples per size. Keyboard capture was simulated; Unicode insertion,
-suspend/resume, and overlapping triggers were not tested. This is not a
-production certification artifact.
+The latest current-source private KWin compatibility smoke evidence is
+[`doctor-certify-9311e1e5be3f.json`](evidence/doctor-certify-9311e1e5be3f.json),
+bound to clean source commit `9311e1e5be3f`. Insertion, focus switching,
+focus-change cancellation, target closure, command completion, reload,
+restart, and refusal checks passed. The libei keysym fallback measured 20
+samples per size: p95 was 12.663 ms (small), 784.051 ms (medium), and 3.139 s
+(large). Keyboard capture used stdin simulation; overlapping input, Unicode
+insertion, suspend/resume, password-field behavior, and long-running stability
+were not tested. This is partial compatibility evidence, not production
+certification.
 The latest clean-source concurrent-input failure is preserved separately in
 the [negative overlap report](evidence/kwin-overlap-reproduction-ad8f169c4402.json).
 It reproduces the prior corruption on commit `ad8f169c4402`, but uses simulated

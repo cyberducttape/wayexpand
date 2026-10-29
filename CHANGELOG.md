@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Preserve current-source private KWin smoke evidence for commit
+  `9311e1e5be3f`: insertion, focus, target-close, command, reload, restart, and
+  refusal checks passed; 20 latency samples per size were recorded. The report
+  is partial: capture was simulated and overlap, Unicode, suspend/resume, and
+  password-field behavior remain untested.
 - Add a dedicated keyboard-layout assessment to the compatibility dashboard.
   It distinguishes supported, unsupported, and unreported layout tracking,
   explains the risk of switching layouts on a limited route, and gives a
