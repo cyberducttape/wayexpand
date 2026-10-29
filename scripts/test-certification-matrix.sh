@@ -133,9 +133,9 @@ grep -F -- '.certified == true and .status == "certified"' "$workflow" >/dev/nul
 grep -F -- "backend_certification_block_reason='IBus lacks atomic replacement, exact window identity, and composition awareness'" "$project_dir/scripts/certify-compositor.sh" >/dev/null
 grep -F -- 'No declared compositor' "$project_dir/docs/CERTIFICATION.md" >/dev/null
 grep -F -- 'input-method-v2 is the current compatibility workflow candidate' "$project_dir/docs/CERTIFICATION.md" >/dev/null
-grep -F -- 'No production certification; the workflow does not yet require production evidence' "$project_dir/docs/CERTIFICATION.md" >/dev/null
+grep -F -- 'Not production eligible; release workflow requires production evidence for any target marked required' "$project_dir/docs/CERTIFICATION.md" >/dev/null
 grep -F -- 'CERTIFICATION_RUNNER_TOKEN' "$project_dir/docs/CERTIFICATION.md" >/dev/null
-grep -F -- 'the repository has no registered self-hosted runners' "$project_dir/docs/CERTIFICATION.md" >/dev/null
+grep -F -- 'Whether the repository currently has the required online runners' "$project_dir/docs/CERTIFICATION.md" >/dev/null
 
 release_workflow="$project_dir/.github/workflows/release.yml"
 grep -F -- 'uses: ./.github/workflows/certification.yml' "$release_workflow" >/dev/null

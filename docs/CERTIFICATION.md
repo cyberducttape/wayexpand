@@ -650,8 +650,8 @@ online compositor runners; those reports cannot satisfy the release gate.
 | --- | --- | --- |
 | KDE Plasma / KWin | IBus compatibility path is run when its labeled real-session runner is online | No eligible production route; input-method-v2 manager unavailable |
 | GNOME | IBus compatibility path is run when its labeled real-session runner is online | No eligible production route; IBus replacement is non-atomic and has no window tracker |
-| Sway | input-method-v2 is the current compatibility workflow candidate; evdev plus wlroots remains a declared fallback path | No production certification; the workflow does not yet require production evidence |
-| Hyprland | input-method-v2 is the current compatibility workflow candidate; evdev plus wlroots remains a declared fallback path | No production certification; the workflow does not yet require production evidence |
+| Sway | input-method-v2 is the current compatibility workflow candidate; evdev plus wlroots remains a declared fallback path | Not production eligible; release workflow requires production evidence for any target marked required |
+| Hyprland | input-method-v2 is the current compatibility workflow candidate; evdev plus wlroots remains a declared fallback path | Not production eligible; release workflow requires production evidence for any target marked required |
 
 The scenario contract still requires GTK and Qt clients, relevant password
 fields, and focus isolation on each desktop. Application-filter scenarios
@@ -721,10 +721,11 @@ an executable `WAYEXPAND_CERTIFICATION_DRIVER` and set
 `WAYEXPAND_CERTIFICATION_COMPOSITOR`, `WAYEXPAND_CERTIFICATION_VERSION`,
 `WAYEXPAND_CERTIFICATION_LAYOUT`, and `WAYEXPAND_CERTIFICATION_TARGET_APPS`.
 
-As of 2026-10-28, the repository has no registered self-hosted runners and no
-`CERTIFICATION_RUNNER_TOKEN` secret. Therefore, no automated real-session
-certification job can currently run. The test suite and hosted headless jobs
-remain useful but do not substitute for this evidence.
+Whether the repository currently has the required online runners and
+`CERTIFICATION_RUNNER_TOKEN` secret is an external Actions configuration fact;
+check the workflow preflight result before relying on a run. The test suite
+and hosted headless jobs remain useful but do not substitute for real-session
+evidence.
 
 Missing driver or session metadata fails the job; hosted CI is never treated as
 a substitute for a real compositor session. Runners certifying a keystroke
