@@ -1653,6 +1653,13 @@ fn diagnostics_accessibly_explains_keysym_fallback_and_separates_latency() {
         matcher_latency_p50_us: Some(4),
         matcher_latency_p95_us: Some(10),
         matcher_latency_p99_us: Some(16),
+        usage_events_recorded_total: Some(30),
+        usage_events_persisted_total: Some(28),
+        usage_events_dropped_total: Some(2),
+        usage_queue_rejected_total: Some(1),
+        usage_flush_failures_total: Some(1),
+        usage_worker_failures_total: Some(0),
+        usage_flush_max_duration_us: Some(500),
         ..Default::default()
     });
 
@@ -1684,6 +1691,14 @@ fn diagnostics_accessibly_explains_keysym_fallback_and_separates_latency() {
     assert!(semantics.contains("Keysym fallback is active"));
     assert!(semantics.contains("Matcher latency"));
     assert!(semantics.contains("Backend injection latency"));
+    assert!(semantics.contains("Usage statistics persistence"));
+    assert!(semantics.contains("Events recorded"));
+    assert!(semantics.contains("30"));
+    assert!(semantics.contains("Events persisted"));
+    assert!(semantics.contains("28"));
+    assert!(semantics.contains("Events dropped"));
+    assert!(semantics.contains("2"));
+    assert!(semantics.contains("not a durability guarantee"));
     assert!(semantics.contains("Route ID"));
     assert!(semantics.contains("kde-evdev-libei"));
     assert!(semantics.contains("700 µs"));
