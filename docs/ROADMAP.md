@@ -246,8 +246,10 @@ Still open:
 - [ ] Richer forms. Shipped: required fields, length limits, choice defaults
       and date fields. Open: clipboard defaults, conditional fields, a date
       picker, and per-field history. Required fields now drive named broker
-      actions with enum/text schemas and fixed argv slots; a GUI broker-policy
-      schema editor and richer field-to-parameter mapping remain open.
+      actions with enum/text schemas and fixed argv slots. The snippet editor
+      displays the selected action's schema and diagnoses missing/extra form
+      fields by name; the broker remains authoritative. A broker-policy editor
+      and richer field-to-parameter mapping remain open.
 - [ ] Signed team-pack registry: local `pack search` now discovers versioned
       packs in an offline Git checkout and discloses signer status, review
       metadata, capabilities, commands, and hotkeys. `pack diff`, staged

@@ -43,9 +43,9 @@ impl GuiApp {
                     }
                 });
                 if draft.command_action_mode {
+                    let action_ids = broker_action_ids();
                     ui.horizontal(|ui| {
                         ui.label(self.strings.action());
-                        let action_ids = broker_action_ids();
                         egui::ComboBox::from_id_salt("broker_action_id")
                             .selected_text(if draft.command_action.is_empty() {
                                 self.strings.select_or_type_action()
@@ -72,6 +72,104 @@ impl GuiApp {
                                 .desired_width(240.0),
                         );
                     });
+                    let action_id = draft.command_action.trim().to_owned();
+                    if !action_id.is_empty() {
+                        let configured = action_ids.iter().any(|id| id == &action_id);
+                        if !configured {
+                            ui.colored_label(
+                                palette.warning,
+                                self.strings.broker_action_unlisted(),
+                            );
+                        } else {
+                            let parameters = broker_action_parameters(&action_id);
+                            let fields =
+                                wayexpand_core::form_fields(&draft.replacement).unwrap_or_default();
+                            let field_names = fields
+                                .iter()
+                                .map(|field| field.key.as_str())
+                                .collect::<std::collections::BTreeSet<_>>();
+                            let parameter_names = parameters
+                                .as_deref()
+                                .unwrap_or_default()
+                                .iter()
+                                .map(|parameter| parameter.name.as_str())
+                                .collect::<std::collections::BTreeSet<_>>();
+                            ui.group(|ui| {
+                                ui.label(
+                                    RichText::new(self.strings.broker_action_contract()).strong(),
+                                );
+                                if let Some(parameters) = parameters.as_ref() {
+                                    if parameters.is_empty() {
+                                        ui.label(self.strings.broker_schema_no_parameters());
+                                    } else {
+                                        for parameter in parameters.iter() {
+                                            let contract = match parameter.kind.as_str() {
+                                                "enum" => format!(
+                                                    "{} · choice · {}",
+                                                    parameter.name,
+                                                    parameter.values.join(", ")
+                                                ),
+                                                "text" => format!(
+                                                    "{} · text · max {} characters",
+                                                    parameter.name,
+                                                    parameter.max_length.unwrap_or_default()
+                                                ),
+                                                _ => format!(
+                                                    "{} · unsupported schema type",
+                                                    parameter.name
+                                                ),
+                                            };
+                                            ui.label(contract);
+                                        }
+                                    }
+                                } else {
+                                    ui.colored_label(
+                                        palette.warning,
+                                        self.strings.broker_schema_unavailable(),
+                                    );
+                                }
+                                if parameters.is_some() {
+                                    let missing = parameter_names
+                                        .difference(&field_names)
+                                        .copied()
+                                        .collect::<Vec<_>>();
+                                    let unexpected = field_names
+                                        .difference(&parameter_names)
+                                        .copied()
+                                        .collect::<Vec<_>>();
+                                    if missing.is_empty() && unexpected.is_empty() {
+                                        ui.colored_label(
+                                            palette.success,
+                                            self.strings.broker_schema_match(),
+                                        );
+                                    } else {
+                                        if !missing.is_empty() {
+                                            ui.colored_label(
+                                                palette.warning,
+                                                self.strings
+                                                    .broker_schema_missing(&missing.join(", ")),
+                                            );
+                                        }
+                                        if !unexpected.is_empty() {
+                                            ui.colored_label(
+                                                palette.warning,
+                                                self.strings.broker_schema_unexpected(
+                                                    &unexpected.join(", "),
+                                                ),
+                                            );
+                                        }
+                                    }
+                                }
+                                ui.label(
+                                    RichText::new(
+                                        self.strings.broker_schema_no_shell_interpolation(),
+                                    )
+                                    .small()
+                                    .color(palette.muted),
+                                );
+                            });
+                        }
+                    }
                 } else {
                     ui.horizontal(|ui| {
                         ui.label(self.strings.program());

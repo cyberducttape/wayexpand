@@ -22,7 +22,7 @@ use anyhow::{Context, Result};
 use app::UndoEntry;
 use colorpack::{ColorPack, ColorScheme};
 use dialogs::{AppDetection, PendingAction};
-use editor::{broker_action_ids, Draft};
+use editor::{broker_action_ids, broker_action_parameters, Draft};
 use eframe::egui::{self, Color32, RichText, ScrollArea, TextEdit};
 use lang::{Language, Strings};
 use settings::{load_gui_prefs, save_gui_prefs};

@@ -231,6 +231,40 @@ pub(crate) fn broker_action_ids() -> std::sync::Arc<[String]> {
     ids
 }
 
+/// A read-only view of the broker's validated input contract. The editor
+/// uses this to explain whether a form can call the selected action; policy
+/// remains owned and validated by the broker.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct BrokerParameterView {
+    pub(crate) name: String,
+    pub(crate) kind: String,
+    pub(crate) values: Vec<String>,
+    pub(crate) max_length: Option<usize>,
+}
+
+pub(crate) fn broker_action_parameters(
+    action_id: &str,
+) -> Option<std::sync::Arc<[BrokerParameterView]>> {
+    static CACHE: std::sync::Mutex<
+        Option<(
+            std::time::Instant,
+            std::collections::HashMap<String, std::sync::Arc<[BrokerParameterView]>>,
+        )>,
+    > = std::sync::Mutex::new(None);
+    let mut cache = CACHE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some((read_at, actions)) = cache.as_ref() {
+        if read_at.elapsed() < BROKER_ACTIONS_REFRESH {
+            return actions.get(action_id).cloned();
+        }
+    }
+    let actions = read_broker_action_parameters(&broker_config_path());
+    let result = actions.get(action_id).cloned();
+    *cache = Some((std::time::Instant::now(), actions));
+    result
+}
+
 const BROKER_ACTIONS_REFRESH: std::time::Duration = std::time::Duration::from_secs(2);
 /// Far above any real broker policy; anything larger is not read.
 const MAX_BROKER_CONFIG_BYTES: u64 = 1024 * 1024;
@@ -289,6 +323,75 @@ fn read_broker_action_ids(path: &std::path::Path) -> Vec<String> {
         .collect::<Vec<_>>();
     ids.sort();
     ids
+}
+
+fn read_broker_action_parameters(
+    path: &std::path::Path,
+) -> std::collections::HashMap<String, std::sync::Arc<[BrokerParameterView]>> {
+    use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
+    let Ok(file) = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_CLOEXEC | libc::O_NONBLOCK)
+        .open(path)
+    else {
+        return std::collections::HashMap::new();
+    };
+    if !file
+        .metadata()
+        .is_ok_and(|metadata| metadata.is_file() && metadata.len() <= MAX_BROKER_CONFIG_BYTES)
+    {
+        return std::collections::HashMap::new();
+    }
+    let mut source = String::new();
+    if file
+        .take(MAX_BROKER_CONFIG_BYTES)
+        .read_to_string(&mut source)
+        .is_err()
+    {
+        return std::collections::HashMap::new();
+    }
+    let Ok(document) = source.parse::<toml_edit::DocumentMut>() else {
+        return std::collections::HashMap::new();
+    };
+    let Some(actions) = document.get("actions").and_then(toml_edit::Item::as_table) else {
+        return std::collections::HashMap::new();
+    };
+    actions
+        .iter()
+        .filter_map(|(id, action)| {
+            let parameters_item = action.get("parameters");
+            let parameters_table = match parameters_item {
+                Some(item) => item.as_table()?,
+                None => return Some((id.to_owned(), Vec::new().into())),
+            };
+            let parameters = parameters_table
+                .iter()
+                .map(|(name, parameter)| {
+                    let kind = parameter.get("type")?.as_str()?.to_owned();
+                    let values = match parameter.get("values") {
+                        Some(item) => item
+                            .as_array()?
+                            .iter()
+                            .map(|value| value.as_str().map(str::to_owned))
+                            .collect::<Option<Vec<_>>>()?,
+                        None => Vec::new(),
+                    };
+                    let max_length = match parameter.get("max_length") {
+                        Some(item) => Some(usize::try_from(item.as_integer()?).ok()?),
+                        None => None,
+                    };
+                    Some(BrokerParameterView {
+                        name: name.to_owned(),
+                        kind,
+                        values,
+                        max_length,
+                    })
+                })
+                .collect::<Option<Vec<_>>>()?;
+            Some((id.to_owned(), parameters.into()))
+        })
+        .collect()
 }
 
 /// `tokens` plus the trimmed `pending` entry, unless it is empty or already

@@ -347,6 +347,84 @@ impl Strings {
         }
     }
 
+    pub fn broker_action_unlisted(&self) -> &'static str {
+        match self.lang {
+            Language::English => {
+                "This action is not listed in the broker policy visible to this GUI."
+            }
+            Language::Indonesian => {
+                "Aksi ini tidak tercantum dalam kebijakan broker yang terlihat oleh GUI."
+            }
+            Language::German => {
+                "Diese Aktion ist nicht in der für die GUI sichtbaren Broker-Richtlinie aufgeführt."
+            }
+        }
+    }
+
+    pub fn broker_action_contract(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Approved action input contract",
+            Language::Indonesian => "Kontrak input aksi yang disetujui",
+            Language::German => "Eingabevertrag der freigegebenen Aktion",
+        }
+    }
+
+    pub fn broker_schema_unavailable(&self) -> &'static str {
+        match self.lang {
+            Language::English => "The broker schema could not be read completely; verify it with `wayexpand validate` before using this action.",
+            Language::Indonesian => "Skema broker tidak dapat dibaca seluruhnya; verifikasi dengan `wayexpand validate` sebelum menggunakan aksi ini.",
+            Language::German => "Das Broker-Schema konnte nicht vollständig gelesen werden. Prüfen Sie es mit `wayexpand validate`, bevor Sie diese Aktion verwenden.",
+        }
+    }
+
+    pub fn broker_schema_no_parameters(&self) -> &'static str {
+        match self.lang {
+            Language::English => "This action has no form parameters.",
+            Language::Indonesian => "Aksi ini tidak memiliki parameter formulir.",
+            Language::German => "Diese Aktion hat keine Formularparameter.",
+        }
+    }
+
+    pub fn broker_schema_match(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Form fields match the broker schema by name.",
+            Language::Indonesian => "Nama kolom formulir cocok dengan skema broker.",
+            Language::German => {
+                "Die Formularfelder stimmen anhand ihrer Namen mit dem Broker-Schema überein."
+            }
+        }
+    }
+
+    pub fn broker_schema_missing(&self, names: &str) -> String {
+        match self.lang {
+            Language::English => format!("Add form fields for: {names}"),
+            Language::Indonesian => format!("Tambahkan kolom formulir untuk: {names}"),
+            Language::German => format!("Formularfelder hinzufügen für: {names}"),
+        }
+    }
+
+    pub fn broker_schema_unexpected(&self, names: &str) -> String {
+        match self.lang {
+            Language::English => {
+                format!("Remove or rename fields not accepted by this action: {names}")
+            }
+            Language::Indonesian => {
+                format!("Hapus atau ganti nama kolom yang tidak diterima aksi ini: {names}")
+            }
+            Language::German => {
+                format!("Nicht akzeptierte Felder entfernen oder umbenennen: {names}")
+            }
+        }
+    }
+
+    pub fn broker_schema_no_shell_interpolation(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Values are broker-validated and placed only into fixed argv slots; no shell interpolation is used.",
+            Language::Indonesian => "Nilai divalidasi broker dan hanya ditempatkan pada slot argv tetap; tidak ada interpolasi shell.",
+            Language::German => "Werte werden vom Broker geprüft und nur in feste argv-Slots eingesetzt; es findet keine Shell-Interpolation statt.",
+        }
+    }
+
     pub fn execution_type(&self) -> &'static str {
         match self.lang {
             Language::English => "Execution type",
