@@ -25,6 +25,70 @@ impl Strings {
         }
     }
 
+    pub fn pack_catalog_title(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Browse a local signed-pack catalog",
+            Language::Indonesian => "Jelajahi katalog paket bertanda tangan lokal",
+            Language::German => "Lokalen Katalog signierter Pakete durchsuchen",
+        }
+    }
+
+    pub fn pack_catalog_query_hint(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Search name, ID, publisher, or capability",
+            Language::Indonesian => "Cari nama, ID, penerbit, atau kapabilitas",
+            Language::German => "Name, ID, Herausgeber oder Fähigkeit suchen",
+        }
+    }
+
+    pub fn pack_catalog_search(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Search offline catalog",
+            Language::Indonesian => "Cari katalog offline",
+            Language::German => "Offline-Katalog durchsuchen",
+        }
+    }
+
+    pub fn pack_catalog_review_candidate(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Review pack and diff",
+            Language::Indonesian => "Tinjau paket dan perbedaannya",
+            Language::German => "Paket und Diff prüfen",
+        }
+    }
+
+    pub fn pack_catalog_invalid_count(&self, count: usize) -> String {
+        match self.lang {
+            Language::English => format!("Skipped {count} invalid catalog entr(y/ies)."),
+            Language::Indonesian => format!("{count} entri katalog tidak valid dilewati."),
+            Language::German => format!("{count} ungültige Katalogeinträge übersprungen."),
+        }
+    }
+
+    pub fn pack_catalog_verified_signer(&self, signer: &str) -> String {
+        match self.lang {
+            Language::English => format!("Signature verified by {signer}"),
+            Language::Indonesian => format!("Tanda tangan diverifikasi oleh {signer}"),
+            Language::German => format!("Signatur verifiziert durch {signer}"),
+        }
+    }
+
+    pub fn pack_catalog_signer_file(&self, path: &str) -> String {
+        match self.lang {
+            Language::English => format!("Catalog signatures checked with: {path}"),
+            Language::Indonesian => format!("Tanda tangan katalog diperiksa dengan: {path}"),
+            Language::German => format!("Katalogsignaturen geprüft mit: {path}"),
+        }
+    }
+
+    pub fn pack_catalog_signature_reason(&self, reason: &str) -> String {
+        match self.lang {
+            Language::English => format!("Signature unverified: {reason}"),
+            Language::Indonesian => format!("Tanda tangan belum diverifikasi: {reason}"),
+            Language::German => format!("Signatur nicht verifiziert: {reason}"),
+        }
+    }
+
     pub fn pack_review_button(&self) -> &'static str {
         match self.lang {
             Language::English => "Review pack",

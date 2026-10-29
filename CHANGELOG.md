@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add offline pack-catalog browsing to the GUI: search local catalogs by
+  metadata, disclose signature identity and capabilities, and open candidates
+  in the existing fingerprint-bound content and diff review before install.
 - Make GUI pack installation and rollback review fail closed on incomplete or
   inconsistent CLI JSON: require every expansion, hotkey, command, policy, and
   signature field to be present and reconcile reported inventory counts
@@ -11,6 +14,9 @@ All notable changes to WayExpand are documented here.
 - Show the verified pack signer and trust-file source in the GUI review. Require
   signer identity and verification details in the response before enabling
   install or rollback.
+- Add offline pack-catalog browsing to the GUI: search local catalogs by
+  metadata, disclose the signer list and pack capabilities, and open a candidate
+  in the existing fingerprint-bound content and diff review before install.
 - Preserve a current-source private-KWin report for `8d6a0ffe0614`. Output,
   focus, reload, restart, and refusal scenarios passed; physical capture,
   Unicode, suspend/resume, password-field behavior, and overlapping physical

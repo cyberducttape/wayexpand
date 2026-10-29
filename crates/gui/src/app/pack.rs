@@ -16,6 +16,9 @@ impl GuiApp {
             .spawn(move || {
                 let result = match &worker_operation {
                     PackOperation::Review => review_pack(&source),
+                    PackOperation::SearchCatalog { catalog, query } => {
+                        search_pack_catalog(catalog, query)
+                    }
                     PackOperation::Install {
                         replace,
                         allow_actions,
@@ -58,6 +61,19 @@ impl GuiApp {
         };
         self.pack_operation_receiver = None;
         match (operation, result) {
+            (
+                PackOperation::SearchCatalog { .. },
+                Ok(PackWorkerResult::Catalog {
+                    packs,
+                    invalid_candidates,
+                    signers_file,
+                }),
+            ) => {
+                self.pack_catalog_results = packs;
+                self.pack_catalog_invalid_count = invalid_candidates;
+                self.pack_catalog_signers_file = Some(signers_file);
+                self.pack_error = None;
+            }
             (
                 PackOperation::Review,
                 Ok(PackWorkerResult::Review {
@@ -127,6 +143,8 @@ impl GuiApp {
             .min_size([520.0, 420.0])
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ctx, |ui| {
+                self.render_pack_catalog(ui, palette);
+                ui.separator();
                 ui.label(self.strings.pack_review_source());
                 ui.add_enabled_ui(self.pack_operation_receiver.is_none(), |ui| {
                     let response = ui.add(
@@ -167,6 +185,142 @@ impl GuiApp {
                 }
             });
         self.pack_dialog_open = open;
+    }
+
+    fn render_pack_catalog(&mut self, ui: &mut egui::Ui, palette: &Palette) {
+        theme::section_header(ui, "", self.strings.pack_catalog_title());
+        let catalog_changed = ui
+            .add_enabled_ui(self.pack_operation_receiver.is_none(), |ui| {
+                ui.add(
+                    TextEdit::singleline(&mut self.pack_catalog_path)
+                        .hint_text("~/src/team-packs")
+                        .desired_width(f32::INFINITY),
+                )
+                .changed()
+            })
+            .inner;
+        if catalog_changed {
+            self.pack_catalog_results.clear();
+            self.pack_catalog_invalid_count = 0;
+            self.pack_catalog_signers_file = None;
+        }
+        ui.horizontal(|ui| {
+            ui.add_enabled_ui(self.pack_operation_receiver.is_none(), |ui| {
+                ui.add(
+                    TextEdit::singleline(&mut self.pack_catalog_query)
+                        .hint_text(self.strings.pack_catalog_query_hint())
+                        .desired_width(180.0),
+                );
+            });
+            if ui
+                .add_enabled(
+                    self.pack_operation_receiver.is_none()
+                        && !self.pack_catalog_path.trim().is_empty(),
+                    egui::Button::new(self.strings.pack_catalog_search()),
+                )
+                .clicked()
+            {
+                self.pack_review = None;
+                self.pack_error = None;
+                self.pack_catalog_results.clear();
+                self.pack_catalog_signers_file = None;
+                self.start_pack_operation(PackOperation::SearchCatalog {
+                    catalog: expand_user_path(self.pack_catalog_path.trim()),
+                    query: self.pack_catalog_query.trim().to_owned(),
+                });
+            }
+            if self.pack_operation_receiver.is_some() {
+                ui.spinner();
+            }
+        });
+        if self.pack_catalog_invalid_count > 0 {
+            ui.colored_label(
+                palette.warning,
+                self.strings
+                    .pack_catalog_invalid_count(self.pack_catalog_invalid_count),
+            );
+        }
+        if let Some(signers_file) = self.pack_catalog_signers_file.as_deref() {
+            ui.label(
+                self.strings
+                    .pack_catalog_signer_file(&sanitize_display_text(signers_file)),
+            );
+        }
+        let packs = self.pack_catalog_results.clone();
+        let catalog = expand_user_path(self.pack_catalog_path.trim());
+        for pack in packs {
+            let title = format!(
+                "{} · {} · {}",
+                json_string(&pack, "name"),
+                json_string(&pack, "version"),
+                json_string(&pack["signature"], "state")
+            );
+            ui.collapsing(title, |ui| {
+                ui.label(format!(
+                    "{} · {} · {}",
+                    json_string(&pack, "id"),
+                    json_string(&pack, "publisher"),
+                    json_string(&pack, "description")
+                ));
+                let signature = &pack["signature"];
+                if signature["state"] == "verified" {
+                    ui.label(
+                        self.strings
+                            .pack_catalog_verified_signer(&json_string(signature, "signer")),
+                    );
+                } else if signature["state"] == "unverified" {
+                    ui.colored_label(
+                        palette.warning,
+                        self.strings
+                            .pack_catalog_signature_reason(&json_string(signature, "reason")),
+                    );
+                } else {
+                    ui.colored_label(palette.warning, self.strings.pack_unsigned_warning());
+                }
+                ui.label(self.strings.pack_capability_disclosure(&json_string_array(
+                    &pack["required_capabilities"],
+                )));
+                ui.label(self.strings.pack_action_counts(
+                    pack["commands"].as_u64().unwrap_or_default(),
+                    pack["hotkeys"].as_u64().unwrap_or_default(),
+                ));
+                let allowed_actions = json_string_array(&pack["allowed_actions"]);
+                if !allowed_actions.is_empty() {
+                    ui.label(self.strings.pack_broker_actions(&allowed_actions));
+                }
+                if let Some(record) = pack.get("review").filter(|value| value.is_object()) {
+                    ui.label(self.strings.pack_review_record(
+                        &json_string(record, "reviewed_by"),
+                        &json_string(record, "reviewed_at"),
+                        &json_string(record, "summary"),
+                    ));
+                } else {
+                    ui.colored_label(palette.warning, self.strings.pack_no_review_record());
+                }
+                if ui
+                    .add_enabled(
+                        self.pack_operation_receiver.is_none(),
+                        egui::Button::new(self.strings.pack_catalog_review_candidate()),
+                    )
+                    .clicked()
+                {
+                    match resolve_catalog_candidate(
+                        &catalog,
+                        pack["path"].as_str().unwrap_or_default(),
+                    ) {
+                        Ok(path) => {
+                            self.pack_candidate_path = path.display().to_string();
+                            self.pack_review = None;
+                            self.pack_action_consent = false;
+                            self.pack_rollback_action_consent = false;
+                            self.pack_rollback_confirmation = None;
+                            self.start_pack_operation(PackOperation::Review);
+                        }
+                        Err(error) => self.pack_error = Some(error),
+                    }
+                }
+            });
+        }
     }
 
     fn render_pack_review(&mut self, ui: &mut egui::Ui, palette: &Palette, review: &PackReview) {
@@ -812,6 +966,127 @@ fn render_command_review(ui: &mut egui::Ui, command: &serde_json::Value) {
     }
 }
 
+fn search_pack_catalog(catalog: &std::path::Path, query: &str) -> Result<PackWorkerResult, String> {
+    let output = std::process::Command::new(super::profile::wayexpand_cli())
+        .arg("pack")
+        .arg("search")
+        .arg(catalog)
+        .arg(query)
+        .arg("--json")
+        .output()
+        .map_err(|error| format!("Could not start WayExpand catalog search: {error}"))?;
+    if !output.status.success() {
+        let error = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        return Err(if error.is_empty() {
+            format!("WayExpand CLI exited with {}", output.status)
+        } else {
+            error
+        });
+    }
+    if output.stdout.len() > MAX_PACK_REVIEW_OUTPUT {
+        return Err("Catalog search output exceeds the GUI limit".into());
+    }
+    let response: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("Catalog search returned invalid JSON: {error}"))?;
+    let Some(packs) = response["packs"].as_array() else {
+        return Err("Catalog search response did not contain a pack list".into());
+    };
+    let Some(invalid_candidates) = response["invalid_candidates"].as_u64() else {
+        return Err("Catalog search response did not report invalid entries".into());
+    };
+    if packs
+        .iter()
+        .any(|pack| !catalog_candidate_is_complete(pack))
+    {
+        return Err("Catalog search returned an incomplete pack entry".into());
+    }
+    let Some(signers_file) = response["signers_file"].as_str() else {
+        return Err("Catalog search response did not identify its signer list".into());
+    };
+    Ok(PackWorkerResult::Catalog {
+        packs: packs.clone(),
+        invalid_candidates: usize::try_from(invalid_candidates).unwrap_or(usize::MAX),
+        signers_file: signers_file.to_owned(),
+    })
+}
+
+fn catalog_candidate_is_complete(pack: &serde_json::Value) -> bool {
+    ["id", "version", "name", "publisher", "description", "path"]
+        .iter()
+        .all(|key| pack.get(key).and_then(serde_json::Value::as_str).is_some())
+        && pack["required_capabilities"]
+            .as_array()
+            .is_some_and(|values| values.iter().all(serde_json::Value::is_string))
+        && pack["allowed_actions"]
+            .as_array()
+            .is_some_and(|values| values.iter().all(serde_json::Value::is_string))
+        && pack["commands"].as_u64().is_some()
+        && pack["hotkeys"].as_u64().is_some()
+        && match pack["signature"]["state"].as_str() {
+            Some("verified") => pack["signature"]["signer"].as_str().is_some(),
+            Some("unsigned") => true,
+            Some("unverified") => pack["signature"]["reason"].as_str().is_some(),
+            _ => false,
+        }
+}
+
+fn resolve_catalog_candidate(
+    catalog: &std::path::Path,
+    relative_pack_path: &str,
+) -> Result<std::path::PathBuf, String> {
+    use std::path::Component;
+
+    let relative = std::path::Path::new(relative_pack_path);
+    if relative.as_os_str().is_empty()
+        || relative.is_absolute()
+        || relative.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return Err("Catalog returned a pack path outside its root".into());
+    }
+    let metadata = std::fs::symlink_metadata(catalog)
+        .map_err(|error| format!("Could not inspect pack catalog: {error}"))?;
+    if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+        return Err("Pack catalog must be a real directory".into());
+    }
+    let root = std::fs::canonicalize(catalog)
+        .map_err(|error| format!("Could not resolve pack catalog: {error}"))?;
+    let nested_pack_root = catalog.join("packs");
+    let use_nested_pack_root = std::fs::symlink_metadata(&nested_pack_root).is_ok_and(|metadata| {
+        metadata.file_type().is_dir()
+            && !metadata.file_type().is_symlink()
+            && !catalog.join("wayexpand-pack.toml").exists()
+    });
+    let selected_root = if use_nested_pack_root {
+        let resolved = std::fs::canonicalize(&nested_pack_root)
+            .map_err(|error| format!("Could not resolve catalog packs directory: {error}"))?;
+        if !resolved.starts_with(&root) {
+            return Err("Catalog packs directory resolves outside its root".into());
+        }
+        nested_pack_root
+    } else {
+        catalog.to_path_buf()
+    };
+    let candidate = selected_root.join(relative);
+    let candidate_metadata = std::fs::symlink_metadata(&candidate)
+        .map_err(|error| format!("Could not inspect catalog pack: {error}"))?;
+    if !candidate_metadata.file_type().is_dir() || candidate_metadata.file_type().is_symlink() {
+        return Err("Catalog pack must be a real directory".into());
+    }
+    let candidate = std::fs::canonicalize(candidate)
+        .map_err(|error| format!("Could not resolve catalog pack: {error}"))?;
+    let selected_root = std::fs::canonicalize(selected_root)
+        .map_err(|error| format!("Could not resolve catalog pack root: {error}"))?;
+    if !candidate.starts_with(selected_root) {
+        return Err("Catalog pack resolves outside its root".into());
+    }
+    Ok(candidate)
+}
+
 fn review_pack(source: &std::path::Path) -> Result<PackWorkerResult, String> {
     let source = source.to_string_lossy();
     let output = run_wayexpand(&["pack", "inspect", source.as_ref(), "--json"])?;
@@ -960,7 +1235,10 @@ fn clip_chars(value: &str, maximum: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{pack_policy_allows, review_content_is_complete, rollback_review_is_complete};
+    use super::{
+        catalog_candidate_is_complete, pack_policy_allows, resolve_catalog_candidate,
+        review_content_is_complete, rollback_review_is_complete,
+    };
     use crate::PackReview;
 
     fn review() -> PackReview {
@@ -1114,6 +1392,46 @@ mod tests {
 
         candidate.details["signature"]["signer_file_source"] = serde_json::json!("unknown");
         assert!(!review_content_is_complete(&candidate));
+    }
+
+    #[test]
+    fn catalog_search_requires_disclosure_fields_before_display() {
+        let candidate = serde_json::json!({
+            "id": "ops-linux",
+            "version": "1.2.0",
+            "name": "Linux Operations",
+            "publisher": "Example Team",
+            "description": "Reviewed commands and replies",
+            "required_capabilities": ["forms"],
+            "allowed_actions": [],
+            "commands": 0,
+            "hotkeys": 0,
+            "signature": { "state": "verified", "signer": "packs@example.org" },
+            "path": "ops-linux"
+        });
+        assert!(catalog_candidate_is_complete(&candidate));
+        let mut missing = candidate;
+        missing.as_object_mut().unwrap().remove("signature");
+        assert!(!catalog_candidate_is_complete(&missing));
+    }
+
+    #[test]
+    fn catalog_candidate_resolution_stays_inside_the_local_catalog() {
+        let root = std::env::temp_dir().join(format!(
+            "wayexpand-gui-catalog-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let pack_root = root.join("packs");
+        let pack = pack_root.join("ops-linux");
+        std::fs::create_dir_all(&pack).unwrap();
+        let resolved = resolve_catalog_candidate(&root, "ops-linux").unwrap();
+        assert_eq!(resolved, std::fs::canonicalize(&pack).unwrap());
+        assert!(resolve_catalog_candidate(&root, "../outside").is_err());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

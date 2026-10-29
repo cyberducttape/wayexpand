@@ -81,8 +81,16 @@ must review and sign the selected content with their own trusted key.
 
 ### Review and install in the GUI
 
-Open **Review local packs…** from the GUI menu and select a checked-out pack
-directory. The review displays the publisher and review record, signature
+Open **Review local packs…** from the GUI menu, enter a checked-out catalog
+directory, and search by name, ID, publisher, or capability. The browser shows
+the signer list used for verification, signer identity when verified, review
+metadata, required capabilities, and executable action counts. Select a
+candidate to open its full review, then inspect the content and update diff
+before installing. A catalog remains local and works offline; clone or sync
+the repository through your organization’s existing Git workflow.
+
+You can also enter a checked-out pack directory directly. The review displays
+the publisher and review record, signature
 verification state, declared and detected capabilities, exact replacement
 text, command arguments and environment forwarding, hotkeys, and an update
 diff when that pack is already installed. Commands are described for review;
@@ -316,9 +324,10 @@ The workflow for an organization:
 ## Trust model and limits
 
 The `publisher` field is descriptive; the signature is the identity. Commands
-are still removed by `pack import`. There is no central update channel or GUI
-trust review; review candidate diffs and retain the signed source pack when
-recording what was approved.
+are still removed by `pack import`. There is no central hosted update channel;
+the GUI browses local catalogs but does not fetch remote registries. Review
+candidate diffs and retain the signed source pack when recording what was
+approved.
 
 Pack loading treats pack contents as hostile input. The manifest is limited to
 64 KiB; each snippet file to 1 MiB; the snippets directory to 1,024 entries;

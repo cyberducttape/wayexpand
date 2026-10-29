@@ -223,6 +223,11 @@ struct GuiApp {
     profile_receiver: Option<mpsc::Receiver<(ProfileOperation, Result<String, String>)>>,
     pack_dialog_open: bool,
     pack_candidate_path: String,
+    pack_catalog_path: String,
+    pack_catalog_query: String,
+    pack_catalog_results: Vec<serde_json::Value>,
+    pack_catalog_invalid_count: usize,
+    pack_catalog_signers_file: Option<String>,
     pack_action_consent: bool,
     pack_rollback_action_consent: bool,
     pack_rollback_confirmation: Option<String>,
@@ -350,6 +355,10 @@ pub(crate) struct PackReview {
 #[derive(Clone, Debug)]
 pub(crate) enum PackOperation {
     Review,
+    SearchCatalog {
+        catalog: std::path::PathBuf,
+        query: String,
+    },
     Install {
         replace: bool,
         allow_actions: bool,
@@ -364,6 +373,11 @@ pub(crate) enum PackOperation {
 
 #[derive(Clone, Debug)]
 pub(crate) enum PackWorkerResult {
+    Catalog {
+        packs: Vec<serde_json::Value>,
+        invalid_candidates: usize,
+        signers_file: String,
+    },
     Review {
         details: serde_json::Value,
         installed: bool,
@@ -537,6 +551,11 @@ impl GuiApp {
             profile_receiver: None,
             pack_dialog_open: false,
             pack_candidate_path: String::new(),
+            pack_catalog_path: String::new(),
+            pack_catalog_query: String::new(),
+            pack_catalog_results: Vec::new(),
+            pack_catalog_invalid_count: 0,
+            pack_catalog_signers_file: None,
             pack_action_consent: false,
             pack_rollback_action_consent: false,
             pack_rollback_confirmation: None,

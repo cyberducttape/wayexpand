@@ -259,8 +259,11 @@ Still open:
       lock`/`lock --check`, `pack outdated`,
       `pack update`, and `pack sync --lock` pin, verify, and update installed
       packs against a catalog by content fingerprint. Still open:
-      organization/private registry transport, GUI update review, and
-      centralized pack governance.
+      organization/private registry transport, installed-pack update
+      discovery/review in the GUI, and centralized pack governance. The GUI
+      can search checked-out catalogs offline, disclose signer identity and
+      capabilities, and send a candidate into the existing fingerprint-bound
+      content and diff review.
 - [ ] Repository-backed snippet libraries (`wayexpand library add <git url>`)
       building on Git sync: signed-commit verification, branch pinning,
       reviewed/approved updates, diff, rollback, and audit.
