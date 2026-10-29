@@ -27,6 +27,7 @@ pub(crate) struct RouteAssessment {
     pub insertion: AssessmentState,
     pub permissions: AssessmentState,
     pub focus: AssessmentState,
+    pub layout: AssessmentState,
 }
 
 /// Summarize the active route from daemon-reported state and capabilities.
@@ -120,11 +121,18 @@ pub(crate) fn assess_route(
         Some(_) | None => Unknown,
     };
 
+    let layout = match capabilities.and_then(|caps| caps.capture_layout_aware) {
+        Some(true) => Ready,
+        Some(false) => Warning,
+        None => Unknown,
+    };
+
     RouteAssessment {
         capture,
         insertion,
         permissions,
         focus,
+        layout,
     }
 }
 
@@ -474,6 +482,25 @@ mod tests {
         assert_eq!(ready.insertion, Ready);
         assert_eq!(ready.permissions, Ready);
         assert_eq!(ready.focus, Ready);
+        assert_eq!(ready.layout, Unknown);
+
+        capabilities.capture_layout_aware = Some(true);
+        let layout_aware = super::assess_route(
+            Some(true),
+            Some(RouteState::Connected),
+            Some(&capabilities),
+            "active route connected · input-method-v2 + input-method-v2",
+        );
+        assert_eq!(layout_aware.layout, Ready);
+        capabilities.capture_layout_aware = Some(false);
+        let layout_limited = super::assess_route(
+            Some(true),
+            Some(RouteState::Connected),
+            Some(&capabilities),
+            "active route connected · evdev + libei",
+        );
+        assert_eq!(layout_limited.layout, Warning);
+        capabilities.capture_layout_aware = None;
 
         capabilities.capture_exclusive = Some(false);
         let nonexclusive_capture = super::assess_route(

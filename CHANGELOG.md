@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add a dedicated keyboard-layout assessment to the compatibility dashboard.
+  It distinguishes supported, unsupported, and unreported layout tracking,
+  explains the risk of switching layouts on a limited route, and gives a
+  backend-specific recovery step. This does not claim active-layout
+  certification where the route reports only general layout awareness.
 - Preserve current-source private KWin 6.6.6 E2E evidence for commit
   `6ddbfa854baa`: 14 real-client output/focus scenarios passed. Capture used
   stdin simulation; keysym-fallback p95 was 12.613 ms (small), 782.203 ms

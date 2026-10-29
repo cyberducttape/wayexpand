@@ -2,6 +2,42 @@ use super::{Language, Strings};
 use crate::*;
 
 impl Strings {
+    pub fn keyboard_layout_label(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Keyboard layout",
+            Language::Indonesian => "Tata letak papan ketik",
+            Language::German => "Tastaturlayout",
+        }
+    }
+
+    pub fn layout_assessment_detail(&self, layout_aware: Option<bool>) -> String {
+        match (self.lang, layout_aware) {
+            (_, None) => match self.lang {
+                Language::English => "The active route has not reported keyboard-layout awareness.".into(),
+                Language::Indonesian => "Rute aktif belum melaporkan kesadaran tata letak papan ketik.".into(),
+                Language::German => "Die aktive Route meldet keine Informationen zur Tastaturlayout-Erkennung.".into(),
+            },
+            (_, Some(true)) => match self.lang {
+                Language::English => "The route reports layout awareness; active layout changes still depend on the compositor and backend.".into(),
+                Language::Indonesian => "Rute melaporkan dukungan tata letak; perubahan tata letak aktif tetap bergantung pada kompositor dan backend.".into(),
+                Language::German => "Die Route meldet Layout-Unterstützung; Änderungen hängen weiterhin von Compositor und Backend ab.".into(),
+            },
+            (_, Some(false)) => match self.lang {
+                Language::English => "The route cannot reliably track the active layout. Character matching or output may be wrong after a layout change.".into(),
+                Language::Indonesian => "Rute tidak dapat melacak tata letak aktif dengan andal. Pencocokan karakter atau keluaran dapat salah setelah perubahan tata letak.".into(),
+                Language::German => "Die Route kann das aktive Layout nicht zuverlässig verfolgen. Nach einem Layoutwechsel können Erkennung oder Ausgabe falsch sein.".into(),
+            },
+        }
+    }
+
+    pub fn next_step_layout(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Keep the configured keyboard layout unchanged while using this route, or choose a backend that tracks layout changes. Restart the daemon after changing layouts if this backend uses a startup snapshot.",
+            Language::Indonesian => "Jangan ubah tata letak papan ketik saat memakai rute ini, atau pilih backend yang melacak perubahan tata letak. Mulai ulang daemon setelah perubahan jika backend memakai snapshot saat mulai.",
+            Language::German => "Lassen Sie das Tastaturlayout bei dieser Route unverändert oder wählen Sie ein Backend mit Layout-Erkennung. Starten Sie den Daemon nach Änderungen neu, wenn das Backend einen Startzeitpunkt-Snapshot verwendet.",
+        }
+    }
+
     pub fn runtime_dashboard(&self) -> &'static str {
         match self.lang {
             Language::English => "Active session dashboard",

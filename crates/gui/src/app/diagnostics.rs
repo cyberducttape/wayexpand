@@ -295,6 +295,16 @@ impl GuiApp {
                 ),
                 &self.strings,
             );
+            render_assessment_row(
+                ui,
+                palette,
+                self.strings.keyboard_layout_label(),
+                assessment.layout,
+                &self.strings.layout_assessment_detail(
+                    capabilities.and_then(|caps| caps.capture_layout_aware),
+                ),
+                &self.strings,
+            );
         });
 
         let mut next_steps = Vec::new();
@@ -317,6 +327,9 @@ impl GuiApp {
         }
         if assessment.focus == diagnostics::AssessmentState::Warning {
             next_steps.push(self.strings.next_step_focus());
+        }
+        if assessment.layout == diagnostics::AssessmentState::Warning {
+            next_steps.push(self.strings.next_step_layout());
         }
         if capabilities.and_then(|caps| caps.capture_sensitive_focus) != Some(true) {
             next_steps.push(self.strings.next_step_sensitive_fields());
