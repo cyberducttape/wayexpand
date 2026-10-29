@@ -1,7 +1,7 @@
 # WayExpand Compositor Certification Matrix
 
 **Version:** 1.3.3
-**Last Updated:** 2026-10-28
+**Last Updated:** 2026-10-29
 **Status:** No compositor route is production-certified
 
 ## Overview
@@ -51,10 +51,10 @@ The latest private KWin compatibility smoke evidence is
 latency samples per size. Keyboard capture was simulated; Unicode insertion,
 suspend/resume, and overlapping triggers were not tested. This is not a
 production certification artifact.
-The latest current-source concurrent-input failure is preserved separately in
-the [negative overlap report](evidence/kwin-overlap-reproduction-6d18b08c1f06.json).
-It uses simulated stdin capture and therefore does not test the evdev
-interruption monitor.
+The latest clean-source concurrent-input failure is preserved separately in
+the [negative overlap report](evidence/kwin-overlap-reproduction-ad8f169c4402.json).
+It reproduces the prior corruption on commit `ad8f169c4402`, but uses simulated
+stdin capture and therefore does not test the evdev interruption monitor.
 The generated tables above are authoritative: every listed desktop and route
 remains uncertified.
 Historical manual observations below do not establish current compatibility. See
