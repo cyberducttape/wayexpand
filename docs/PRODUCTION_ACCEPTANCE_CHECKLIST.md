@@ -34,16 +34,19 @@ session evidence; unit tests alone do not satisfy them.
       `second-trigger-during-nonatomic-replacement`; verify the target text is
       not corrupted and no stale trigger is expanded after the first
       transaction. A sequential event test does not satisfy this gate.
-      The [negative KWin evidence](evidence/kwin-overlap-reproduction-2026-10-28.json)
-      records target corruption and stale-trigger expansion on an older dirty
-      revision with stdin-simulated capture. Current serialized evdev output
-      clears matcher context and discards queued events through a 40 ms quiet
-      window; a daemon regression covers this filtering behavior. That change
-      cannot stop physical input reaching the application during injection,
-      and the recorded compositor scenario has not been rerun against the
-      current source with physical capture. Keep this gate open until the
-      current route passes the live target-integrity scenario or is refused
-      for automatic replacement.
+      The [2026-10-29 negative KWin evidence](evidence/kwin-overlap-reproduction-0803d915.json)
+      reproduces target corruption and stale-trigger expansion on clean commit
+      `0803d915fe57`, with stdin-simulated capture and a concurrent trigger
+      typed through an independent EIS session. The older
+      [2026-10-28 report](evidence/kwin-overlap-reproduction-2026-10-28.json)
+      also records a failure, but came from a dirty revision. Current serialized
+      evdev output clears matcher context and discards queued events through a
+      40 ms quiet window; a daemon regression covers this filtering behavior.
+      That change cannot stop physical input reaching the application during
+      injection, and neither report exercises the current evdev queue path.
+      Keep this gate open until the current route passes the live
+      target-integrity scenario with physical capture or is refused for
+      automatic replacement.
 - [ ] Verify command completion never inserts into an unintended context in a
       real focus-switch test.
 - [ ] Verify fail-closed behavior in password and credential fields for each

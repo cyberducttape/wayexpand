@@ -76,6 +76,14 @@ keysym-fallback transactions per size measured injector p50/p95/p99 of
 These are injector-only measurements, not desktop latency or production
 certification.
 
+The opt-in overlap reproducer still fails on clean commit `0803d915fe57`:
+[`docs/evidence/kwin-overlap-reproduction-0803d915.json`](evidence/kwin-overlap-reproduction-0803d915.json)
+records 124 of 128 expected replacement characters, interleaved concurrent
+input, and a stale second expansion. That scenario simulates keyboard capture
+over stdin, so it does not test the evdev quarantine; it confirms that
+non-exclusive physical input can corrupt output while the backend is typing.
+This remains a release blocker for that route.
+
 The preceding current-source report at
 [`docs/evidence/doctor-certify-b78512554eb4.json`](evidence/doctor-certify-b78512554eb4.json)
 tested clean commit `b78512554eb4` on private headless KWin 6.6.6. It also

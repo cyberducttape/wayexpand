@@ -9,9 +9,13 @@ All notable changes to WayExpand are documented here.
   during slow keysym fallback from being replayed as stale triggers. The
   evdev route remains non-exclusive and cannot prevent physical input from
   interleaving in the target application.
-- Clarify the release gate: the recorded KWin overlap failure is historical
-  evidence from a dirty revision; rerun target-integrity certification against
-  the current build and physical capture before evaluating that route again.
+- Clarify the KWin overlap release gate: an older failure report came from a
+  dirty revision, while current clean-build evidence still requires a
+  physical-capture target-integrity run before this route can be reconsidered.
+- Preserve a fresh negative KWin overlap reproduction from clean commit
+  `0803d915fe57`: the target still corrupted under concurrent typing with
+  simulated capture. The result keeps evdev/libei blocked from production
+  certification and does not test the evdev post-output quarantine.
 - Record fresh private-KWin compatibility evidence for clean commit
   `fe4712d2a79e`: 12 output, focus, reload, restart, and refusal checks passed
   on KWin 6.6.6. The report preserves untested physical capture, Unicode,

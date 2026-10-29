@@ -51,6 +51,9 @@ The latest private KWin compatibility evidence is
 latency samples per size. Keyboard capture was simulated; Unicode insertion,
 suspend/resume, and overlapping triggers were not tested. This is not a
 production certification artifact.
+The current-source concurrent-input failure is preserved separately in the
+[negative overlap report](evidence/kwin-overlap-reproduction-0803d915.json);
+it uses simulated capture and therefore does not test the evdev queue guard.
 The generated tables above are authoritative: every listed desktop and route
 remains uncertified.
 Historical manual observations below do not establish current compatibility. See
