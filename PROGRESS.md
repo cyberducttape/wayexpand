@@ -2,6 +2,25 @@
 
 Updated: 2026-10-30
 
+## Fast-path refactor verification
+
+- Audited the proposed borrowed matcher construction, delimiter processing,
+  matcher telemetry, and reusable result-storage patterns. All four are
+  already implemented in the current source: `Matcher::try_new` accepts
+  `AsRef<str>`, delimiter events encode into a stack buffer and use the shared
+  text scanner, matcher samples use `try_lock` with a dropped-sample counter,
+  and immediate/deferred processing expose caller-owned reusable result APIs.
+- Existing core regressions cover equivalence between scalar/borrowed and
+  owned text processing, delimiter behavior, and result-vector capacity reuse.
+  No duplicate implementation was added.
+- Fresh verification: `RUST_TEST_THREADS=1 cargo test --release --workspace
+  --locked` passed with exit code 0; `cargo clippy --release --workspace
+  --all-targets --locked -- -D warnings`, `cargo fmt --all -- --check`, and
+  `git diff --check` passed.
+- These checks establish build/test correctness for the current snapshot, not
+  zero allocations or a measured latency improvement. The matcher allocation
+  and benchmark commands remain to be run for performance claims.
+
 ## Current-source private KWin certification run
 
 - Ran `cargo run --locked -p wayexpand --bin wayexpand -- doctor --certify
