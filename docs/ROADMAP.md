@@ -162,11 +162,16 @@ docs/ACTION_BROKER_ARCHITECTURE.md.
       filesystem policy; its contract is tested in CI.
 - [ ] Extend per-action isolation beyond the initial Landlock filesystem
       profiles. Packaged broker actions now run with Landlock read/write
-      grants; profiles fail closed when enforcement is unavailable. The
-      service keeps network disabled globally. Per-action TCP policy, device
-      allowlists (including global device isolation), and action-specific
-      seccomp syscall sets remain open; same-UID software and custom broker
-      launches remain outside the packaged unit's trust boundary.
+      grants; profiles fail closed when enforcement is unavailable. An
+      optional per-action seccomp rule now blocks IP/packet/netlink socket
+      creation and io_uring setup while allowing AF_UNIX; a child-process
+      regression verifies the filter through the ActionExecutor. The packaged
+      service still denies IP networking globally. Device allowlists (including
+      global device isolation), broader action-specific syscall sets, and
+      supported-host verification remain open. AF_UNIX descriptor passing and
+      same-UID software remain outside this filter's trust boundary; custom
+      broker launches still need service-level controls for stronger
+      containment.
 - [x] Optional execution audit logging has bounded rotation, privacy-preserving
       records, queue and persistence-failure reporting, and tests. Operational
       deployment and lifecycle certification remain release work.

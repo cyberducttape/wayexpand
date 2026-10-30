@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add an opt-in per-action broker sandbox rule that blocks IP-family socket
+  creation and `io_uring` while preserving local Unix sockets; the packaged
+  broker service continues to deny IP networking globally.
 - Normalize binary release archives with a fixed entry order, timestamp,
   ownership, and directory umask; `scripts/test-release.sh` verifies byte-for-
   byte archive reproducibility across differing caller umasks.

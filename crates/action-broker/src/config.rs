@@ -150,6 +150,12 @@ pub struct ActionSandbox {
     /// Files or directories the action may modify or create entries beneath.
     #[serde(default)]
     pub write_paths: Vec<String>,
+    /// Deny creation of IP, packet, and netlink sockets in this action.
+    /// AF_UNIX remains available for local IPC. The packaged broker service
+    /// already denies IP networking globally; this also applies when a
+    /// sandboxed broker is launched outside that systemd unit.
+    #[serde(default)]
+    pub deny_network: bool,
 }
 
 impl ActionSandbox {
@@ -1022,7 +1028,7 @@ enabled = true
             std::env::temp_dir().join(format!("wayexpand-sandbox-config-{}", std::process::id()));
         fs::create_dir_all(&root).unwrap();
         let toml = format!(
-            "[actions.report]\nprogram = '/usr/bin/true'\n[actions.report.sandbox]\nread_paths = ['{}']\nwrite_paths = ['{}']\n",
+            "[actions.report]\nprogram = '/usr/bin/true'\n[actions.report.sandbox]\nread_paths = ['{}']\nwrite_paths = ['{}']\ndeny_network = true\n",
             root.display(),
             root.display(),
         );
@@ -1036,7 +1042,14 @@ enabled = true
             .unwrap();
         assert_eq!(sandbox.read_paths, [root.to_string_lossy().as_ref()]);
         assert_eq!(sandbox.write_paths, [root.to_string_lossy().as_ref()]);
+        assert!(sandbox.deny_network);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn existing_sandbox_profiles_default_to_network_allowed() {
+        let sandbox: ActionSandbox = toml::from_str("read_paths = []\nwrite_paths = []").unwrap();
+        assert!(!sandbox.deny_network);
     }
 
     #[test]
@@ -1044,6 +1057,7 @@ enabled = true
         let relative = ActionSandbox {
             read_paths: vec!["data".into()],
             write_paths: vec![],
+            deny_network: false,
         };
         assert!(relative.validate().unwrap_err().contains("absolute"));
         assert!(

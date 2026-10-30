@@ -166,7 +166,15 @@ impl ActionExecutor {
         }
         #[cfg(target_os = "linux")]
         if let Some(ruleset) = &sandbox_ruleset {
-            crate::sandbox::configure_command(&mut cmd, ruleset);
+            let deny_network = action_config
+                .sandbox
+                .as_ref()
+                .is_some_and(|sandbox| sandbox.deny_network);
+            crate::sandbox::configure_command_with_network(&mut cmd, ruleset, deny_network)
+                .map_err(|reason| ActionError::ActionBlocked {
+                    action_id: request.action_id.clone(),
+                    reason: format!("could not configure action sandbox: {reason}"),
+                })?;
         }
 
         for arg in &arguments {
@@ -594,6 +602,75 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[tokio::test]
+    async fn action_network_policy_is_applied_by_the_executor_before_exec() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-network-policy-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let executable = directory.join("network-probe");
+        std::fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mut config = BrokerConfig::default();
+        config.actions.insert(
+            "network-probe".into(),
+            ActionConfig {
+                program: executable.to_string_lossy().into_owned(),
+                args: vec![
+                    "--exact".into(),
+                    "sandbox::tests::action_executor_network_probe_child".into(),
+                    "--ignored".into(),
+                    "--nocapture".into(),
+                ],
+                parameters: std::collections::HashMap::new(),
+                timeout_ms: 5000,
+                server_env: vec![],
+                client_forward_env: vec![],
+                allow_dangerous_env: false,
+                inherit_env: false,
+                cwd: None,
+                log_output: false,
+                enabled: true,
+                description: None,
+                sandbox: Some(crate::config::ActionSandbox {
+                    deny_network: true,
+                    ..Default::default()
+                }),
+            },
+        );
+        let executor = ActionExecutor::new(&config).unwrap();
+        let response = executor
+            .execute(ActionRequest {
+                action_id: "network-probe".into(),
+                timeout_ms: 5000,
+                inherit_env: false,
+                env_vars: vec![],
+                stdout_capture: true,
+                parameters: std::collections::BTreeMap::new(),
+            })
+            .await;
+        std::fs::remove_dir_all(&directory).unwrap();
+        let response = response.unwrap();
+        let output = response.output().expect("probe action should succeed");
+        assert_eq!(output.exit_code, 0, "{}", output.stderr);
+        assert!(
+            output
+                .stdout
+                .contains("action_executor_network_probe_child ... ok"),
+            "unexpected child test output: {}",
+            output.stdout
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
     async fn landlock_profile_allows_writes_only_under_granted_directories() {
         use std::os::unix::fs::PermissionsExt;
 
@@ -616,6 +693,7 @@ mod tests {
                 sandbox: Some(crate::config::ActionSandbox {
                     read_paths: vec![],
                     write_paths: vec![directory.to_string_lossy().into_owned()],
+                    deny_network: false,
                 }),
                 program: "/usr/bin/touch".to_string(),
                 args: vec![output.to_string_lossy().into_owned()],

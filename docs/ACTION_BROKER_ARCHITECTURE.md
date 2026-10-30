@@ -1,8 +1,8 @@
 # Action Broker Architecture
 
 **Version:** 1.3.3
-**Status:** Named-action execution with optional per-action Landlock filesystem policy; packaged service denies network access
-**Next:** Per-action network and device policy, seccomp profiles, and broader operational tooling
+**Status:** Named-action execution with optional per-action Landlock filesystem and IP-socket restrictions; packaged service denies network access
+**Next:** Device policy, broader per-action syscall profiles, and operational verification
 
 ## Overview
 
@@ -290,15 +290,21 @@ it appears in `read_paths` or `write_paths`:
 [actions."local-report".sandbox]
 read_paths = ["/home/user/reports/input"]
 write_paths = ["/home/user/reports/output"]
+deny_network = true
 ```
 
 Writable entries must be existing directories. The policy loader canonicalizes
 all entries and rejects filesystem root, special files, and relative paths.
 The action is refused if Landlock is unavailable or rules cannot be enforced.
-This is filesystem defense in depth; network remains disabled by the packaged
-service. Device isolation is not currently provided, either per action or by
-the packaged unit. Custom service launches must retain the global network
-controls. The broker trusts
+When `deny_network` is true, a child seccomp filter rejects creation of
+IPv4, IPv6, packet, and netlink sockets, and rejects `io_uring_setup`; local
+`AF_UNIX` sockets remain available. The child receives no pre-opened network
+socket from the broker. This is defense in depth, not complete network
+containment: a process able to receive a socket descriptor from another local
+service may use that descriptor. The packaged service independently denies IP
+networking for every action. Device isolation is not currently provided,
+either per action or by the packaged unit. Custom service launches should keep
+the service-level network controls. The broker trusts
 software running under its own UID, including the user who can edit the broker
 policy; neither Landlock nor authenticated IPC is a boundary against malicious
 same-UID software.

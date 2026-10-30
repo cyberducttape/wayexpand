@@ -100,9 +100,9 @@ Acceptance criteria:
 
 ### P2 — Complete per-action broker isolation
 
-**Status:** Filesystem isolation and executable identity pinning are
-implemented and unit-tested; network/device policy and supported-host
-verification remain open.
+**Status:** Filesystem isolation, executable identity pinning, and an optional
+seccomp rule against creating IP sockets are implemented and regression-tested.
+Device isolation and broader supported-host verification remain open.
 
 Acceptance criteria:
 
@@ -111,9 +111,11 @@ Acceptance criteria:
   executes.
 - Enforce each action's filesystem grants independently with Landlock, and
   fail closed when a requested sandbox cannot be enforced.
-- Define explicit per-action network and device access policy before claiming
-  those resources are isolated. The broker service's systemd restrictions do
-  not establish per-action isolation.
+- Keep the network claim precise: the per-action filter rejects IP/packet/
+  netlink socket creation and io_uring setup, while AF_UNIX remains available;
+  it cannot prevent a same-UID local service from passing a network descriptor.
+  The packaged systemd unit continues to deny IP networking globally.
+- Define and enforce device access policy before claiming device isolation.
 - Verify sandbox behavior and cancellation on supported kernels, and document
   that arbitrary malicious processes running under the broker's same UID are
   outside the IPC trust boundary.

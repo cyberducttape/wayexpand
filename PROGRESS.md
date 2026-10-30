@@ -62,8 +62,32 @@ Updated: 2026-10-30
   stdout/stderr deadlines, child cancellation, peer credential sizing, and
   concurrent socket ownership.
 - `cargo clippy --locked -p action-broker --all-targets -- -D warnings`
-  passed. This validates the tested Linux host paths; per-action network and
-  device isolation remain unspecified and are now explicit P2 plan items.
+  passed. This validates the tested Linux host paths; remaining per-action
+  isolation scope is tracked in the P2 plan item below.
+
+## Per-action broker IP-socket restriction
+
+- Added `sandbox.deny_network` for Linux action profiles. The child installs
+  a seccomp filter after `no_new_privs` and Landlock: IPv4, IPv6, packet, and
+  netlink socket creation plus `io_uring_setup` fail with `EPERM`; AF_UNIX
+  remains available. A native-architecture guard rejects ABI changes, and
+  unsupported architectures fail before spawning. The executor-level test
+  launches a child under the actual configured profile and verifies each
+  behavior.
+- Verification on x86_64: `cargo test --locked -p action-broker` passed 83
+  library tests (1 child-only ignored), 7 broker binary tests, and 10
+  integration tests; package Clippy with `-D warnings`, workspace `cargo
+  check --locked`, documentation contracts, and Markdown links passed.
+- The full `RUST_TEST_THREADS=1 cargo test --workspace --locked -q` run also
+  passed on this worktree with no failures. `cargo fmt --all -- --check` and
+  workspace compilation passed after the API change.
+- Cross-compilation with `cargo check --locked -p action-broker --tests
+  --target aarch64-unknown-linux-gnu` passed. This checks AArch64 code and test
+  compilation, not seccomp behavior on an AArch64 kernel.
+- This filter prevents network socket creation; it is not complete network
+  containment if a local AF_UNIX peer passes a network descriptor. The
+  packaged service retains its global network denial. Device isolation and
+  cross-architecture runtime verification remain open.
 
 ## Per-user installer transaction verification
 
