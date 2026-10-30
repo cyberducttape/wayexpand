@@ -53,10 +53,12 @@ with the Sway harness in `scripts/e2e-lib.sh`):
   exercised. The standard E2E suite omits the capability-gated Unicode probe;
   `doctor --certify` explicitly runs it. The doctor report also requires the
   word-boundary, cursor, multiline, command completion, reload, restart,
-  in-flight focus-change, and target-close scenarios to pass. A delayed result
-  must leave the original trigger intact and must not type into the newly
-  focused client. These checks remain isolated headless evidence, not a claim
-  that physical keyboard capture or an active desktop has been certified.
+  in-flight focus-change, target-close, and no-consent refusal scenarios to
+  pass. The refusal case verifies that the typed trigger remains untouched
+  when compatibility consent is off. A delayed result must leave the original
+  trigger intact and must not type into the newly focused client. These checks
+  remain isolated headless evidence, not a claim that physical keyboard
+  capture or an active desktop has been certified.
 
 The JSON report includes the WayExpand build version, commit, and Unix run
 timestamp so an archived result can be tied to the tested binary. Its scope

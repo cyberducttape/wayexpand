@@ -26,6 +26,7 @@ const SCENARIOS: &[&str] = &[
     "daemon-restart",
     "unreachable-character-is-refused",
     "output-latency",
+    "keystroke-route-refuses-without-consent",
 ];
 
 pub(crate) fn run(json: bool) -> Result<()> {
@@ -593,6 +594,15 @@ fn make_report_for_build(
             .unwrap_or("not-run"),
         "The test client verifies that unsupported output is refused before the trigger is erased.",
     ));
+    checks.push(check(
+        "keystroke-route-refuses-without-consent",
+        result
+            .outcomes
+            .get("keystroke-route-refuses-without-consent")
+            .copied()
+            .unwrap_or("not-run"),
+        "With compatibility consent off, the private client retains the typed trigger and the daemon reports refusal before any replacement output.",
+    ));
     let latency_was_run = result
         .outcomes
         .get("output-latency")
@@ -656,6 +666,7 @@ fn make_report_for_build(
         "configuration-reload",
         "daemon-restart",
         "unavailable-unicode-refusal",
+        "keystroke-route-refuses-without-consent",
         "tested-build-identity",
     ]
     .into_iter()
@@ -744,6 +755,7 @@ fn check(name: &str, status: &str, evidence: &str) -> serde_json::Value {
         "configuration-reload" => "Configuration reload",
         "daemon-restart" => "Daemon restart",
         "unavailable-unicode-refusal" => "Unavailable character refusal",
+        "keystroke-route-refuses-without-consent" => "Unconsented keystroke route refusal",
         "suspend-resume" => "Suspend/resume",
         "keyboard-capture" => "Keyboard capture",
         "tested-build-identity" => "Tested build identity",
@@ -1110,6 +1122,15 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .iter()
+                .find(|check| check["name"] == "keystroke-route-refuses-without-consent")
+                .unwrap()["status"],
+            "passed"
+        );
+        assert_eq!(
+            report["checks"]
+                .as_array()
+                .unwrap()
+                .iter()
                 .find(|check| check["name"] == "target-closes-during-expansion")
                 .unwrap()["status"],
             "passed"
@@ -1236,6 +1257,43 @@ mod tests {
                 .unwrap()
                 .iter()
                 .find(|check| check["name"] == "target-closes-during-expansion")
+                .unwrap()["status"],
+            "not-run"
+        );
+    }
+
+    #[test]
+    fn missing_unconsented_route_refusal_keeps_the_report_incomplete() {
+        let mut outcomes = all_completed_scenarios();
+        outcomes.remove("keystroke-route-refuses-without-consent");
+        let report = make_report_for_build(
+            HarnessResult {
+                status: "completed",
+                version: Some("6.6.6".into()),
+                tested_commit: Some("test-commit".into()),
+                source_tree_state: Some("clean".into()),
+                latency_profile: None,
+                latency_profiles: Vec::new(),
+                capture_source: Some("stdin".into()),
+                injection_backend: Some("libei".into()),
+                insertion_mode: Some("libei keysym fallback".into()),
+                backend_mode: Some("ei_keyboard keysym fallback (12ms key pacing)".into()),
+                sensitive_field_detection: Some(false),
+                outcomes,
+                reason: None,
+            },
+            "test-version",
+            "test-commit",
+        );
+
+        assert_eq!(report["overall"], "incomplete");
+        assert_eq!(report["certified"], false);
+        assert_eq!(
+            report["checks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|check| check["name"] == "keystroke-route-refuses-without-consent")
                 .unwrap()["status"],
             "not-run"
         );

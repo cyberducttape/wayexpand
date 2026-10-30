@@ -375,6 +375,49 @@ EOF
     describe e2e-a
 }
 
+scenario_keystroke_route_refuses_without_consent() {
+    previous_mode=$e2e_compatibility_mode
+    e2e_compatibility_mode=off
+    # Read by route_ready in the compositor session driver.
+    # shellcheck disable=SC2034
+    e2e_expect_blocked_route=1
+    write_config <<'EOF'
+[[expansion]]
+trigger = ";safe"
+replacement = "must not replace without consent"
+EOF
+    result=2
+    if start_sink e2e-a && start_daemon && expand_in e2e-a "" ";safe"; then
+        if wait_until 30 refusal_is_reported; then
+            status=$(daemon_status)
+            case "$status" in
+                *"output_uncertain_total=0"*"insertion_assurance=blocked"*"output_refused_total="[1-9]*"output_last_refusal=compatibility-mode-off"*)
+                    if sink_text_is e2e-a ";safe"; then
+                        result=0
+                    else
+                        result=1
+                    fi
+                    ;;
+                *) result=1 ;;
+            esac
+        else
+            result=1
+        fi
+    fi
+    e2e_compatibility_mode=$previous_mode
+    unset e2e_expect_blocked_route
+    describe e2e-a
+    return "$result"
+}
+
+refusal_is_reported() {
+    status=$(daemon_status) || return 1
+    case "$status" in
+        *"output_uncertain_total=0"*"output_refused_total="[1-9]*"output_last_refusal=compatibility-mode-off"*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 scenario_input_method_expansion() {
     write_config <<'EOF'
 [[expansion]]

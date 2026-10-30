@@ -31,6 +31,14 @@ activate() {
 }
 
 route_ready() {
+    if [ "${e2e_expect_blocked_route:-0}" = 1 ]; then
+        case "$1" in
+            *"source=stdin"*"backend=wlroots-virtual-keyboard"*"insertion_assurance=blocked"*)
+                return 0
+                ;;
+            *) return 1 ;;
+        esac
+    fi
     case "$1" in
         *"backend=wlroots-virtual-keyboard"*) ;;
         *) return 1 ;;
@@ -53,4 +61,4 @@ trap 'exit 1' INT TERM
 run_scenarios "expansion-replaces-trigger word-boundary-reinserts-delimiter cursor-placement
 multiline-replacement unreachable-character-is-refused app-filter-fails-closed
 command-expansion-completes config-reload daemon-restart clipboard-variable
-clipboard-empty-fails-closed"
+clipboard-empty-fails-closed keystroke-route-refuses-without-consent"

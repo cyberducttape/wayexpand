@@ -57,6 +57,7 @@ if ! jq -e '
     ([.checks[] | select(.name == "configuration-reload") | .status] == ["passed"]) and
     ([.checks[] | select(.name == "daemon-restart") | .status] == ["passed"]) and
     ([.checks[] | select(.name == "unavailable-unicode-refusal") | .status] == ["passed"]) and
+    ([.checks[] | select(.name == "keystroke-route-refuses-without-consent") | .status] == ["passed"]) and
     ([.checks[] | select(.name == "second-trigger-during-nonatomic-replacement") | .status] == ["not-tested"]) and
     ([.checks[] | select(.name == "tested-build-identity") | .status] == ["passed"]) and
     ([.checks[] | select(.name == "unicode-insertion") | .status] | length == 1 and

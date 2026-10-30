@@ -25,8 +25,9 @@ clients, and checks the text those clients actually receive through the
 production daemon and libei output backend. It checks a basic trigger, focus
 switching between test windows, word-boundary delimiters, cursor placement,
 multiline output, command completion, configuration reload, daemon restart,
-and safe refusal of an unavailable character. All these scenarios must pass
-for the report to say `partial`. When KWin offers the negotiated `ei_text`
+safe refusal of an unavailable character, and refusal of keystroke-route
+replacement when compatibility consent is off. All required scenarios must
+pass for the report to say `partial`. When KWin offers the negotiated `ei_text`
 route, it also inserts a replacement containing accented Latin and Japanese
 text and verifies the exact contents received by the test client. A keysym-only
 route reports Unicode insertion as not tested; it never infers Unicode support

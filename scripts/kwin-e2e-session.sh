@@ -56,6 +56,14 @@ route_ready() {
             *) return 1 ;;
         esac
     fi
+    if [ "${e2e_expect_blocked_route:-0}" = 1 ]; then
+        case "$1" in
+            *"source=stdin"*"backend=libei"*"window_tracker_connected=true"*)
+                return 0
+                ;;
+            *) return 1 ;;
+        esac
+    fi
     # Output is connected once the route reports its assurance, and focus
     # checks need the KWin tracker.
     case "$1" in
@@ -106,5 +114,5 @@ else
     run_scenarios "expansion-replaces-trigger word-boundary-reinserts-delimiter cursor-placement
 multiline-replacement unreachable-character-is-refused app-filter-follows-focus
 command-expansion-completes focus-change-during-expansion target-closes-during-expansion config-reload daemon-restart
-clipboard-variable clipboard-empty-fails-closed output-latency"
+clipboard-variable clipboard-empty-fails-closed output-latency keystroke-route-refuses-without-consent"
 fi
