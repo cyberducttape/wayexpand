@@ -465,6 +465,21 @@ Updated: 2026-10-30
   passed, 2 ignored; 206 daemon; 173 GUI; 128 CLI; all other suites passed),
   formatting, and `git diff --check`.
 
+## Non-atomic interruption health regression
+
+- Strengthened `observed_physical_input_cancels_output_and_drops_queued_work`
+  to assert that detected physical input during a simulated non-atomic
+  replacement increments the externally reported uncertain-transaction
+  counter. The existing assertions also verify that output stops after the
+  erase step and queued work is not sent.
+- Verification: the focused daemon regression passed with
+  `RUST_TEST_THREADS=1 cargo test --locked -p wayexpand-daemon
+  observed_physical_input_cancels_output_and_drops_queued_work`; formatting and
+  daemon Clippy with `-D warnings` passed.
+- This is automated containment evidence only. Real evdev interruption and
+  final target-document integrity still require an attended desktop test; the
+  P0 certification gate remains open.
+
 ## Completed in this work period
 
 - Generalized `Matcher::try_new` to accept `IntoIterator<Item = S>` where

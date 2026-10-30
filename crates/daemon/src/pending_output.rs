@@ -880,6 +880,7 @@ mod tests {
     #[test]
     fn observed_physical_input_cancels_output_and_drops_queued_work() {
         let mut harness = Harness::new(false);
+        let uncertain_before = output_health::snapshot().uncertain_total;
         harness
             .daemon
             .start_output(
@@ -917,6 +918,11 @@ mod tests {
             *harness.calls.lock().unwrap(),
             ["erase::a"],
             "cancellation checkpoint prevents further simulated output"
+        );
+        assert_eq!(
+            output_health::snapshot().uncertain_total,
+            uncertain_before + 1,
+            "an interrupted non-atomic replacement must be surfaced as uncertain"
         );
         assert!(harness.daemon.evdev_quiet_since.is_some());
     }
