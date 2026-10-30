@@ -1,0 +1,32 @@
+Isolated compositor-independent daemon soak
+Date: 2026-10-30
+Source: 750d44f8c3fe
+Source tree: clean
+Kernel: Linux 7.0.0-38-generic
+Capture: synthetic stdin feeder
+Output backend: none
+Duration: 180 seconds
+Warmup: 30 seconds
+Rounds: 295
+Controlled daemon restarts: 2
+
+Resource limits and observed values after warmup:
+
+| Metric | Baseline | Peak | Final | Allowed growth |
+| --- | ---: | ---: | ---: | ---: |
+| RSS | 20,144 KiB | 20,144 KiB | 20,000 KiB | 8,192 KiB |
+| Open file descriptors | 14 | 14 | 14 | 4 |
+| Threads | 15 | 15 | 15 | 2 |
+
+Control-path latency (295 rounds):
+
+| Operation | p50 | p95 |
+| --- | ---: | ---: |
+| Status | 15.451 ms | 22.585 ms |
+| Explain | 26.988 ms | 38.003 ms |
+| Restart (2 samples) | 614.384 ms | 696.084 ms |
+
+All configured resource bounds passed. The test used an isolated runtime and
+synthetic stdin input; it did not exercise a compositor, physical keyboard,
+output injection, suspend/resume, or a long-running desktop session. It does
+not satisfy the 72-hour desktop soak requirement.

@@ -33,6 +33,18 @@ Updated: 2026-10-30
   predates the current local changes, so current-source Sway E2E remains
   unverified here.
 
+## Current-source isolated daemon soak
+
+- Ran `SOAK_SECONDS=180` with control probes every loop and a controlled daemon
+  restart every 60 seconds from clean source commit `750d44f8c3fe`. All 295
+  rounds passed, including two restarts; the preserved measurements are in
+  [`docs/evidence/daemon-soak-750d44f8.txt`](docs/evidence/daemon-soak-750d44f8.txt).
+- RSS peaked at 20,144 KiB after warmup, with no FD or thread growth (14 FDs,
+  15 threads throughout sampled points). Status p95 was 22.585 ms; explain p95
+  was 38.003 ms. Two restart samples measured 614.384–696.084 ms.
+- This synthetic, output-disabled soak does not replace the 72-hour
+  compositor-session test.
+
 ## Current remote CI and dependency-update audit
 
 - GitHub `main` CI run [41020746599](https://github.com/cyberducttape/wayexpand/actions/runs/41020746599)
