@@ -78,6 +78,17 @@ pub struct PeerIdentity {
 }
 
 #[cfg(target_os = "linux")]
+fn validate_peer_credential_length(length: libc::socklen_t) -> Result<(), std::io::Error> {
+    if length as usize != std::mem::size_of::<libc::ucred>() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "unexpected peer credentials size",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
 fn peer_identity(stream: &UnixStream) -> Result<PeerIdentity, std::io::Error> {
     let fd = stream.as_raw_fd();
     let mut credentials = libc::ucred {
@@ -98,6 +109,7 @@ fn peer_identity(stream: &UnixStream) -> Result<PeerIdentity, std::io::Error> {
     if result != 0 {
         return Err(std::io::Error::last_os_error());
     }
+    validate_peer_credential_length(length)?;
     // SO_PEERCRED authenticates the Unix identity, not the calling process's
     // intent. Same-UID applications are inside the broker's trust boundary.
     if credentials.uid != rustix::process::geteuid().as_raw() {
@@ -522,6 +534,18 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
         dir.join(name)
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn peer_credentials_require_the_exact_kernel_structure_size() {
+        let expected = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+        assert!(validate_peer_credential_length(expected).is_ok());
+        for unexpected in [0, expected - 1, expected + 1] {
+            let error = validate_peer_credential_length(unexpected).unwrap_err();
+            assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+            assert_eq!(error.to_string(), "unexpected peer credentials size");
+        }
     }
 
     #[test]

@@ -237,13 +237,17 @@ impl ExpansionEngine {
                 .map(|(_, trigger)| trigger.clone())
                 .collect(),
         );
-        let matcher = Matcher::new(
+        // Snapshot validation caps effective triggers far below the matcher's
+        // representable index count. Keep the public constructor fallible for
+        // arbitrary callers; this internal boundary consumes validated data.
+        let matcher = Matcher::try_new(
             validated
                 .effective_triggers
                 .iter()
                 .cloned()
                 .map(|(_, trigger)| trigger),
-        );
+        )
+        .expect("validated effective-trigger limit fits matcher indices");
         let app_filters = validated.app_filters.clone();
         let form_fields = validated.form_fields.clone();
         let app_filter_globs = app_filters

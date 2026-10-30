@@ -74,7 +74,7 @@ fn main() {
         let base = CURRENT.load(Relaxed);
         PEAK.store(base, Relaxed);
         let start = Instant::now();
-        let matcher = Matcher::new(triggers);
+        let matcher = Matcher::try_new(triggers).expect("benchmark trigger set fits matcher");
         let elapsed = start.elapsed();
         let steady = CURRENT.load(Relaxed) - base;
         let peak = PEAK.load(Relaxed) - base;

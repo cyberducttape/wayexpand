@@ -1,6 +1,22 @@
 /// Sentinel for a node that ends no trigger.
 const NO_VALUE: u32 = u32::MAX;
 
+/// Failure to represent the supplied trigger collection in matcher indices.
+#[derive(Debug, thiserror::Error, Clone, Copy, PartialEq, Eq)]
+pub enum MatcherBuildError {
+    #[error("matcher has more than {maximum} triggers")]
+    TooManyTriggers { maximum: usize },
+}
+
+fn trigger_index(index: usize) -> Result<u32, MatcherBuildError> {
+    u32::try_from(index)
+        .ok()
+        .filter(|&index| index != NO_VALUE)
+        .ok_or(MatcherBuildError::TooManyTriggers {
+            maximum: NO_VALUE as usize,
+        })
+}
+
 /// Suffix and prefix tries over the configured triggers.
 ///
 /// Each trie is an arena: nodes refer to a contiguous, character-sorted run
@@ -16,7 +32,19 @@ pub struct Matcher {
 
 impl Default for Matcher {
     fn default() -> Self {
-        Self::new(std::iter::empty())
+        let empty = Trie {
+            nodes: vec![Node {
+                first_edge: 0,
+                edge_count: 0,
+                value: NO_VALUE,
+            }],
+            edges: Vec::new(),
+        };
+        Self {
+            root: empty.clone(),
+            forward: empty,
+            max_trigger_chars: 0,
+        }
     }
 }
 
@@ -108,7 +136,7 @@ impl Trie {
 }
 
 impl Matcher {
-    pub fn new<I>(triggers: I) -> Self
+    pub fn try_new<I>(triggers: I) -> Result<Self, MatcherBuildError>
     where
         I: IntoIterator<Item = String>,
     {
@@ -117,20 +145,15 @@ impl Matcher {
         let mut max_trigger_chars = 0;
         for (index, trigger) in triggers.into_iter().enumerate() {
             max_trigger_chars = max_trigger_chars.max(trigger.chars().count());
-            // Effective triggers are capped far below u32::MAX by config
-            // validation; refuse rather than wrap if a caller exceeds it.
-            let index = u32::try_from(index)
-                .ok()
-                .filter(|&index| index != NO_VALUE)
-                .expect("trigger count fits the matcher's u32 index");
+            let index = trigger_index(index)?;
             root.insert(trigger.chars().rev(), index);
             forward.insert(trigger.chars(), NO_VALUE);
         }
-        Self {
+        Ok(Self {
             root: root.freeze(),
             forward: forward.freeze(),
             max_trigger_chars,
-        }
+        })
     }
 
     /// Length of the longest trigger, in scalar values. `find_suffix` never
@@ -205,24 +228,36 @@ impl Matcher {
 
 #[cfg(test)]
 mod tests {
-    use super::Matcher;
+    use super::{trigger_index, Matcher, MatcherBuildError, NO_VALUE};
+
+    #[test]
+    fn trigger_index_rejects_the_reserved_sentinel_without_panicking() {
+        assert_eq!(trigger_index(0).unwrap(), 0);
+        assert_eq!(trigger_index(NO_VALUE as usize - 1).unwrap(), NO_VALUE - 1);
+        assert_eq!(
+            trigger_index(NO_VALUE as usize),
+            Err(MatcherBuildError::TooManyTriggers {
+                maximum: NO_VALUE as usize
+            })
+        );
+    }
 
     #[test]
     fn finds_only_a_suffix() {
-        let matcher = Matcher::new(["ab".into(), "xyz".into()]);
+        let matcher = Matcher::try_new(["ab".into(), "xyz".into()]).unwrap();
         assert_eq!(matcher.find_suffix("prefixab".chars().rev()), Some((0, 2)));
         assert_eq!(matcher.find_suffix("prefixx".chars().rev()), None);
     }
 
     #[test]
     fn matches_unicode_by_scalar_value() {
-        let matcher = Matcher::new(["🙂x".into()]);
+        let matcher = Matcher::try_new(["🙂x".into()]).unwrap();
         assert_eq!(matcher.find_suffix("a🙂x".chars().rev()), Some((0, 2)));
     }
 
     #[test]
     fn continuation_queries_walk_the_forward_trie() {
-        let matcher = Matcher::new([":a".into(), ":address".into()]);
+        let matcher = Matcher::try_new([":a".into(), ":address".into()]).unwrap();
 
         assert!(matcher.has_continuation(":a".chars()));
         assert!(matcher.can_continue(":a".chars(), 'd'));
@@ -237,7 +272,7 @@ mod tests {
 
     #[test]
     fn continuation_queries_accept_a_buffer_slice_without_allocating() {
-        let matcher = Matcher::new([":ab".into()]);
+        let matcher = Matcher::try_new([":ab".into()]).unwrap();
         let buffer: std::collections::VecDeque<char> = "xx:a".chars().collect();
 
         let start = buffer.len() - 2;
@@ -247,7 +282,7 @@ mod tests {
 
     #[test]
     fn prefers_the_longest_matching_suffix() {
-        let matcher = Matcher::new([":a".into(), ":address".into()]);
+        let matcher = Matcher::try_new([":a".into(), ":address".into()]).unwrap();
         assert_eq!(
             matcher.find_suffix("email :address".chars().rev()),
             Some((1, 8))
@@ -281,7 +316,7 @@ mod tests {
         .into_iter()
         .map(String::from)
         .collect();
-        let matcher = Matcher::new(triggers.clone());
+        let matcher = Matcher::try_new(triggers.clone()).unwrap();
         let alphabet: Vec<char> = ":abAxy日本語e\u{301}é🙂".chars().collect();
         // Every buffer up to length 4 over the alphabet.
         let mut buffers = vec![String::new()];

@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Validate the returned `SO_PEERCRED` structure length before reading its
+  fields, with regression coverage for truncated, oversized, and valid lengths.
+- Add fallible `Matcher::try_new` construction for arbitrary trigger iterators;
+  excessive trigger counts now return `MatcherBuildError` instead of panicking.
 - Keep the libei event converter and session on the dedicated thread that
   creates them, replacing the manually asserted `Send` implementation with a
   bounded request/reply injector handle. Compile-time regression coverage

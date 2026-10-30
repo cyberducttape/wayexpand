@@ -66,7 +66,7 @@ pub use engine::{
 };
 pub use fleet::{FleetConfig, FleetError, Layer, MergeStats, Provenance};
 pub use keys::{KeyChord, KeyChordError, Modifiers};
-pub use matcher::Matcher;
+pub use matcher::{Matcher, MatcherBuildError};
 pub use migration::{
     import_espanso, import_espanso_with_mode, EspansoImport, EspansoImportMode,
     EspansoImportReport, EspansoImportWarning, EspansoUnsupportedMatch, MigrationError,

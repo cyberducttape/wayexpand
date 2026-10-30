@@ -158,7 +158,7 @@ meaningful:
 | `matcher_construction_amplified/5000` | 114.9 ms | 69.7 ms | −39.3% |
 | `matcher_construction_amplified/10000` | 224.9 ms | 152.6 ms | −32.2% |
 
-Isolated matcher heap, counted by a global allocator around `Matcher::new`
+Isolated matcher heap, counted by a global allocator around `Matcher::try_new`
 only (10,000 snippets; "amplified" adds two aliases, case propagation, and a
 decomposable trigger; "unicode" uses CJK, Cyrillic, and accented Latin
 triggers with the same amplification):
@@ -170,7 +170,7 @@ triggers with the same amplification):
 | unicode | 90,000 | 101.7 MiB | 5.2 MiB | 37.1 MiB |
 
 The build peak is the temporary insertion structure, released before
-`Matcher::new` returns. Reproduce the heap figures with:
+`Matcher::try_new` returns. Reproduce the heap figures with:
 
 ```sh
 cargo run --locked --release -p wayexpand-core --example matcher_memory

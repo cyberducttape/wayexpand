@@ -24,6 +24,21 @@ Updated: 2026-10-29
   session and event converter are created, used, and destroyed on one dedicated
   owner thread; the injector exposes a bounded request/reply handle. Compile-
   time checks keep both session types `!Send`.
+- Check the exact `SO_PEERCRED` structure length before using kernel-returned
+  credential fields; tests exercise the expected, short, and oversized lengths.
+- Add public `Matcher::try_new` and `MatcherBuildError`, making arbitrary
+  trigger collections fail explicitly when their indices exceed the trie
+  representation. The validated engine path retains its documented limit
+  invariant.
+- `cargo test -p action-broker --lib
+  ipc::tests::peer_credentials_require_the_exact_kernel_structure_size
+  --locked`: passed.
+- `cargo test -p wayexpand-core matcher::tests --locked`: all 8 matcher tests
+  passed, including the reserved-index boundary regression.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`: passed
+  with the fallible matcher API and all downstream call sites.
+- `RUST_TEST_THREADS=1 cargo test --workspace --locked -q`: passed; all
+  executed workspace unit, integration, and documentation tests succeeded.
 - `cargo clippy --workspace --all-targets --locked -- -D warnings`: passed
   after the libei ownership change.
 - `RUST_TEST_THREADS=1 cargo test --workspace --locked -q`: passed after the

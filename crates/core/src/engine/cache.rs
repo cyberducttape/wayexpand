@@ -29,8 +29,8 @@ impl ClipboardTriggers {
             .max()
             .unwrap_or(0);
         Some(Self {
-            trie: Matcher::new(triggers),
-            others: Matcher::new(others),
+            trie: Matcher::try_new(triggers).ok()?,
+            others: Matcher::try_new(others).ok()?,
             first_chars,
             max_chars,
         })
