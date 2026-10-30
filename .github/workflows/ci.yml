@@ -383,14 +383,20 @@ jobs:
             if [ "$GITHUB_EVENT_NAME" = pull_request ] \
               && [ "${PR_AUTHOR:-}" = 'dependabot[bot]' ]; then
               bash scripts/check-commit-identity.sh --allow-dependabot "$base..HEAD"
+            elif [ "$GITHUB_EVENT_NAME" = push ]; then
+              # Merging a Dependabot PR in the web UI lands its commits and
+              # the owner's merge commit; both must carry GitHub's pinned
+              # web-flow signature.
+              bash scripts/check-commit-identity.sh --allow-dependabot --allow-web-merges "$base..HEAD"
             else
               bash scripts/check-commit-identity.sh "$base..HEAD"
             fi
           else
             # Dispatched and scheduled runs (releases, experimental builds)
             # have no push range. History predates this policy and includes
-            # dependency-bot commits, so check the commit being built.
-            bash scripts/check-commit-identity.sh 'HEAD^!'
+            # dependency-bot commits, so check the commit being built, which
+            # may be a signed web-UI merge.
+            bash scripts/check-commit-identity.sh --allow-dependabot --allow-web-merges 'HEAD^!'
           fi
       - name: Install metadata validators
         run: sudo apt-get update && sudo apt-get install -y appstream desktop-file-utils libwayland-dev libxkbcommon-dev pkg-config

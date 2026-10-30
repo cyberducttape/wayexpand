@@ -42,6 +42,26 @@ production certification job a normal PR requirement while no certified
 runner is available; the release workflow already requires certification for
 release artifacts and must continue to fail closed.
 
+## Commit identity
+
+`scripts/check-commit-identity.sh` runs in CI's `Documentation Validation`
+job. Every commit must be authored and committed as
+`Stephan Loesevitz <stephan.loesevitz@gmail.com>`, with two opt-in
+exceptions:
+
+- `--allow-dependabot`: the exact Dependabot identity, committed by GitHub.
+- `--allow-web-merges`: merge commits (two or more parents) made in the
+  GitHub web UI under the owner's `users.noreply.github.com` address,
+  committed by GitHub. Squash merges and web edits are not accepted.
+
+Both exceptions also require a good signature from GitHub's web-flow key.
+That key is committed at `.github/keys/github-web-flow.asc`, and its
+fingerprint is pinned in the script. Pull requests opened by Dependabot use
+`--allow-dependabot`. Pushes, dispatched runs and scheduled runs use both
+exceptions. If GitHub rotates the web-flow key, export the new key from
+<https://github.com/web-flow.gpg>, then update the file and the pinned
+fingerprint together.
+
 ## Release conditions
 
 - Keep the release workflow's required real-compositor certification gate.
