@@ -746,7 +746,26 @@ records only; the support matrix should not mark a compositor certified until a
 reviewed artifact reports `certified: true` for the relevant compositor,
 backend, layout, and client set.
 
-## Latest current-source compatibility report (2026-10-29)
+## Latest current-source compatibility report (2026-10-30)
+
+[`evidence/doctor-certify-6ef75d59633a.json`](evidence/doctor-certify-6ef75d59633a.json)
+records the clean build at commit `6ef75d59633a` on private headless KWin
+6.6.6. Twelve checks passed: simple trigger insertion, delimiter preservation,
+cursor placement, multiline output, focus switching, focus-change cancellation,
+target closure, command completion, configuration reload, daemon restart,
+unavailable-character refusal, and build identity. Twenty transactions in
+each size bucket measured libei keysym-fallback p50/p95/p99 of
+12,521/12,616/12,655 µs (small), 777,127/778,394/778,806 µs (medium), and
+3,119,823/3,125,136/3,125,546 µs (large).
+
+Capture was simulated through stdin. A second trigger during non-atomic
+replacement, Unicode insertion, suspend/resume, and physical keyboard capture
+were not tested. Password-field behavior and long-term stability also remain
+uncertified. Latency excludes input capture and client paint. This is partial
+compatibility evidence only; it does not certify a route or describe the active
+desktop.
+
+## Previous current-source compatibility report (2026-10-29)
 
 [`evidence/doctor-certify-dd8047c7c3e2.json`](evidence/doctor-certify-dd8047c7c3e2.json)
 records `wayexpand doctor --certify --json` for clean commit `dd8047c7c3e2`

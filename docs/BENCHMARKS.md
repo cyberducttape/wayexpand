@@ -420,3 +420,19 @@ measured values are injector-only:
 These measurements time the injector transaction only. Capture was simulated
 through stdin, and the values exclude client paint latency. They are not an
 end-to-end SLO or production certification.
+
+## Current-source headless KWin injector measurements: 2026-10-30
+
+The [preserved report](evidence/doctor-certify-6ef75d59633a.json) records 20
+verified libei keysym-fallback transactions per size on private headless KWin
+6.6.6, tested against clean commit `6ef75d59633a`:
+
+| Replacement size | p50 | p95 | p99 |
+| --- | ---: | ---: | ---: |
+| Small | 12.521 ms | 12.616 ms | 12.655 ms |
+| Medium | 777.127 ms | 778.394 ms | 778.806 ms |
+| Large | 3,119.823 ms | 3,125.136 ms | 3,125.546 ms |
+
+Capture was simulated through stdin. These timings cover injector transactions,
+not physical capture or client paint, and do not satisfy an end-to-end latency
+target or compositor certification.

@@ -2,6 +2,26 @@
 
 Updated: 2026-10-30
 
+## Current-source isolated KWin smoke report
+
+- Built the current checkout and ran `target/debug/wayexpand doctor
+  --certify --json`. The preserved report
+  [`docs/evidence/doctor-certify-6ef75d59633a.json`](docs/evidence/doctor-certify-6ef75d59633a.json)
+  verifies the CLI and daemon build identity at `6ef75d59633a`, reports 12
+  passed checks, and records an overall `partial` result on private KWin
+  6.6.6. Focus switching/cancellation, target closure, reload/restart, and
+  actual text in isolated clients were exercised.
+- The negotiated path was libei keysym fallback with stdin-simulated capture.
+  Twenty transactions per size measured p50/p95/p99 of 12,521/12,616/12,655
+  µs (small), 777,127/778,394/778,806 µs (medium), and
+  3,119,823/3,125,136/3,125,546 µs (large). These timings exclude physical
+  capture and client paint.
+- Physical keyboard capture, a second physical trigger during non-atomic
+  replacement, Unicode insertion, and suspend/resume were not tested; password
+  fields and long-term stability remain uncertified. The active desktop daemon
+  was not changed. This report is compatibility evidence and does not pass the
+  production certification gate.
+
 ## Zero-allocation input fast-path verification
 
 - Confirmed the requested fast-path patterns are already implemented:
