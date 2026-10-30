@@ -160,6 +160,10 @@ jobs:
           timeout --signal=TERM --kill-after=10s 90s /usr/bin/time -v \
             "$bench_binary" --bench matcher_construction_amplified/10000 \
             --sample-size 10 --warm-up-time 1 --measurement-time 2
+      - name: Verify warmed ASCII input allocates nothing
+        run: |
+          timeout --signal=TERM --kill-after=10s 90s \
+            cargo run --locked --release -p wayexpand-core --example input_path_allocations
       - name: CLI smoke test
         run: timeout --signal=TERM --kill-after=30s 15m bash scripts/test-release.sh
       - name: UI help output

@@ -58,7 +58,8 @@ Updated: 2026-10-29
   locked test suite passed after this change. A release-mode allocation probe
   measured zero allocations across 100,000 warmed deferred nonmatching
   ASCII events. This is a core-engine-only measurement and excludes backend
-  decoding, event queueing, and allocations when a match produces output.
+  decoding, event queueing, and allocations when a match produces output. The
+  probe is now part of the locked release CI job as a regression gate.
 
 - Made matcher latency recording nonblocking: capture operation duration
   before metrics synchronization, use `try_lock`, and count skipped samples

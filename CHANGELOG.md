@@ -23,7 +23,8 @@ All notable changes to WayExpand are documented here.
 - Add a warmed input-path allocation regression example. On this host, the
   deferred nonmatching ASCII engine path performed zero allocator requests
   over 100,000 events; the measurement excludes backend input decoding and
-  expansion-result construction.
+  expansion-result construction. Run the assertion in the locked release CI
+  job to catch regressions.
 - Preserve a clean-source KWin 6.6.6 smoke report for commit `60315df9bf4c`:
   insertion, focus, reload, restart, refusal, and build identity passed; the
   report remains partial because physical capture, sensitive-field behavior,
