@@ -181,23 +181,22 @@ Updated: 2026-10-30
 
 ## Current-source isolated KWin smoke report
 
-- Built the current checkout and ran `target/debug/wayexpand doctor
-  --certify --json`. The preserved report
-  [`docs/evidence/doctor-certify-6ef75d59633a.json`](docs/evidence/doctor-certify-6ef75d59633a.json)
-  verifies the CLI and daemon build identity at `6ef75d59633a`, reports 12
-  passed checks, and records an overall `partial` result on private KWin
-  6.6.6. Focus switching/cancellation, target closure, reload/restart, and
-  actual text in isolated clients were exercised.
+- Built commit `54ea2a6b` and ran `wayexpand doctor --certify --json` in its
+  isolated private KWin 6.6.6 session. The preserved report
+  [`docs/evidence/doctor-certify-54ea2a6bb7b4.json`](docs/evidence/doctor-certify-54ea2a6bb7b4.json)
+  confirms matching CLI/daemon identity and a clean tested source tree. Twelve
+  checks passed; focus change/cancellation, target closure, reload/restart,
+  actual client text, refusal before deletion, and build identity were covered.
 - The negotiated path was libei keysym fallback with stdin-simulated capture.
-  Twenty transactions per size measured p50/p95/p99 of 12,521/12,616/12,655
-  µs (small), 777,127/778,394/778,806 µs (medium), and
-  3,119,823/3,125,136/3,125,546 µs (large). These timings exclude physical
-  capture and client paint.
+  Twenty transactions per size measured p50/p95/p99 of 12,596/12,744/12,833
+  µs (small), 777,117/778,028/778,690 µs (medium), and
+  3,121,038/3,126,440/3,128,708 µs (large). These timings exclude physical
+  capture and client paint; 257-byte insertion p95 was about 3.13 seconds.
 - Physical keyboard capture, a second physical trigger during non-atomic
-  replacement, Unicode insertion, and suspend/resume were not tested; password
-  fields and long-term stability remain uncertified. The active desktop daemon
-  was not changed. This report is compatibility evidence and does not pass the
-  production certification gate.
+  replacement, Unicode insertion on keysym fallback, and suspend/resume were
+  not tested. Password-field handling and long-term stability remain
+  uncertified. The active desktop daemon was not changed. This report is
+  compatibility evidence and does not pass the production certification gate.
 
 ## Zero-allocation input fast-path verification
 
