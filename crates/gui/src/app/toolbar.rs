@@ -45,7 +45,7 @@ impl GuiApp {
                         color: Color32::from_black_alpha(if self.dark_mode { 60 } else { 18 }),
                     }),
             )
-            .show_inside(root, |ui| {
+            .show(root, |ui| {
                 // Identity on the left, status and actions on the right.
                 // Search lives at the top of the snippet list it filters.
                 ui.horizontal(|ui| {
@@ -445,9 +445,8 @@ impl GuiApp {
                 }
             })
             .response;
-        actions_response.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, more_actions)
-        });
+        actions_response
+            .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, more_actions));
         actions_response.on_hover_text(more_actions);
         if ui
             .add(
@@ -586,7 +585,7 @@ impl GuiApp {
                     (ui.available_width() - f32::from(margin.left + margin.right)).max(40.0);
                 ui.add(
                     TextEdit::singleline(&mut self.filter)
-                        .id(egui::Id::new(SEARCH_FIELD_SALT))
+                        .id(egui::Id::unique(SEARCH_FIELD_SALT))
                         .hint_text(self.strings.search_placeholder())
                         .margin(margin)
                         .desired_width(width),

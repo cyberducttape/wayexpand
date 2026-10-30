@@ -15,7 +15,10 @@ categories.workspace = true
 read-fonts = "0.46.0"
 anyhow.workspace = true
 libc.workspace = true
-eframe = { version = "0.34.1", default-features = false, features = ["accesskit", "wayland", "default_fonts", "glow"] }
+eframe = { version = "0.37.0", default-features = false, features = ["accesskit", "wayland", "default_fonts", "glow"] }
+# eframe does not forward egui's `monochrome_emoji_fonts`. Without it the
+# bundled fonts lack the interface's arrows and symbols (egui >= 0.37).
+egui = { version = "0.37.0", default-features = false, features = ["monochrome_emoji_fonts"] }
 serde.workspace = true
 serde_json.workspace = true
 toml_edit = { version = "0.25.15", features = ["serde"] }
@@ -33,6 +36,10 @@ tempfile = "3"
 
 [build-dependencies]
 wayexpand-build-info = { path = "../build-info" }
+
+[package.metadata.cargo-machete]
+# Declared only to enable egui's emoji fonts for eframe; see above.
+ignored = ["egui"]
 
 [[bench]]
 name = "gui_edit"

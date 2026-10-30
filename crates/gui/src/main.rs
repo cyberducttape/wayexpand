@@ -722,7 +722,7 @@ impl eframe::App for GuiApp {
             self.request_action(PendingAction::New);
         }
         if want_search {
-            ctx.memory_mut(|memory| memory.request_focus(egui::Id::new(SEARCH_FIELD_SALT)));
+            ctx.memory_mut(|memory| memory.request_focus(egui::Id::unique(SEARCH_FIELD_SALT)));
         }
         if want_escape {
             self.close_topmost_dialog();
@@ -749,7 +749,7 @@ impl eframe::App for GuiApp {
             // Dialog windows are in the Foreground order, so a Middle layer
             // covers every panel and stays below them.
             let backdrop =
-                egui::LayerId::new(egui::Order::Middle, egui::Id::new("dialog_backdrop"));
+                egui::LayerId::new(egui::Order::Middle, egui::Id::unique("dialog_backdrop"));
             ctx.memory_mut(|memory| memory.areas_mut().move_to_top(backdrop));
             ctx.layer_painter(backdrop).rect_filled(
                 ctx.content_rect(),

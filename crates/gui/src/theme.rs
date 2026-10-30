@@ -282,9 +282,8 @@ pub fn chip_scaled(
         .layout_no_wrap(text.to_owned(), font.clone(), Color32::TRANSPARENT);
     let size = Vec2::new(galley.size().x + 20.0 * scale, (28.0 * scale).max(28.0));
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
-    response.widget_info(|| {
-        egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, selected, text)
-    });
+    response
+        .widget_info(|| egui::WidgetInfo::selected(egui::Role::RadioButton, true, selected, text));
     if ui.is_rect_visible(rect) {
         let hovered = response.hovered();
         let (fg, bg) = if selected {
@@ -326,9 +325,8 @@ pub fn colorpack_card(
         Vec2::new(ui.available_width(), 62.0 * scale),
         Sense::click(),
     );
-    response.widget_info(|| {
-        egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, selected, name)
-    });
+    response
+        .widget_info(|| egui::WidgetInfo::selected(egui::Role::RadioButton, true, selected, name));
     if ui.is_rect_visible(rect) {
         let hovered = response.hovered();
         let background = if selected {
@@ -593,16 +591,11 @@ pub fn snippet_row_scaled(
     }
 
     response.widget_info(|| {
-        egui::WidgetInfo::selected(
-            egui::WidgetType::SelectableLabel,
-            true,
-            row.selected,
-            row.trigger,
-        )
+        egui::WidgetInfo::selected(egui::Role::Button, true, row.selected, row.trigger)
     });
     toggle_response.widget_info(|| {
         egui::WidgetInfo::selected(
-            egui::WidgetType::Checkbox,
+            egui::Role::CheckBox,
             true,
             row.enabled,
             format!("{} — {}", row.toggle_hint, row.trigger),
@@ -654,7 +647,7 @@ pub fn token_editor(
                     .on_hover_text(text.remove_hint);
                 response.widget_info(|| {
                     egui::WidgetInfo::labeled(
-                        egui::WidgetType::Button,
+                        egui::Role::Button,
                         true,
                         format!("{}: {token}", text.remove_hint),
                     )
@@ -743,7 +736,7 @@ mod tests {
         ctx.enable_accesskit();
         let palette = Palette::for_pack(ColorPack::Default, true);
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            egui::CentralPanel::default().show_inside(ui, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 snippet_row_scaled(
                     ui,
                     &palette,

@@ -39,7 +39,7 @@ impl GuiApp {
                 // default title-derived identity changed between 0.34 and
                 // 0.36, which made persisted/inspected dialog geometry
                 // disappear after a dependency downgrade.
-                .id(egui::Id::new(Some(title)))
+                .id(egui::Id::unique(Some(title)))
                 .order(egui::Order::Foreground)
                 .open(&mut open)
                 .collapsible(false)

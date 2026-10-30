@@ -104,7 +104,7 @@ impl GuiApp {
                     .fill(palette.surface)
                     .inner_margin(egui::Margin::symmetric(14, 14)),
             )
-            .show_inside(root, |ui| {
+            .show(root, |ui| {
                 ui.label(
                     RichText::new(if self.filter.is_empty() {
                         self.strings.your_library()

@@ -6,6 +6,7 @@
 //! private headless compositor, so it never touches the user's desktop.
 
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use eframe::egui;
 
@@ -16,6 +17,8 @@ pub(crate) struct ScreenshotCapture {
     path: PathBuf,
     frames: u32,
     requested: bool,
+    /// Filled by egui's one-shot screenshot callback.
+    captured: Arc<Mutex<Option<Arc<egui::ColorImage>>>>,
     /// `WAYEXPAND_GUI_SCREENSHOT_VIEW`: a screen to open before capturing
     /// (`light`, `settings`, `diagnostics`, `new`, `import`, `search`,
     /// `preview`).
@@ -32,6 +35,7 @@ impl ScreenshotCapture {
             path: PathBuf::from(path),
             frames: 0,
             requested: false,
+            captured: Arc::default(),
             view: std::env::var("WAYEXPAND_GUI_SCREENSHOT_VIEW")
                 .ok()
                 .filter(|view| !view.is_empty()),
@@ -48,15 +52,19 @@ impl ScreenshotCapture {
         self.frames += 1;
         ctx.request_repaint();
         if !self.requested && self.frames >= SETTLE_FRAMES {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
+            let captured = Arc::clone(&self.captured);
+            ctx.request_screenshot(move |image| {
+                *captured
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(image);
+            });
             self.requested = true;
         }
-        let image = ctx.input(|input| {
-            input.events.iter().find_map(|event| match event {
-                egui::Event::Screenshot { image, .. } => Some(image.clone()),
-                _ => None,
-            })
-        });
+        let image = self
+            .captured
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
         if let Some(image) = image {
             let [width, height] = image.size;
             let mut ppm = format!("P6\n{width} {height}\n255\n").into_bytes();
