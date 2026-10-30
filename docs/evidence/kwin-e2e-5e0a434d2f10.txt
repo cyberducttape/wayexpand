@@ -1,0 +1,39 @@
+Private headless KWin output and focus run
+Date: 2026-10-30
+Source: 5e0a434d2f10
+Source tree: clean
+Compositor: KWin 6.6.6
+Capture: stdin-simulated
+Injection: libei keysym fallback, 12 ms key pacing
+Sensitive-field signal: unavailable
+
+pass expansion-replaces-trigger
+pass word-boundary-reinserts-delimiter
+pass cursor-placement
+pass multiline-replacement
+pass unreachable-character-is-refused
+pass app-filter-follows-focus
+pass command-expansion-completes
+pass focus-change-during-expansion
+pass target-closes-during-expansion
+pass config-reload
+pass daemon-restart
+pass clipboard-variable
+pass clipboard-empty-fails-closed
+pass output-latency
+pass keystroke-route-refuses-without-consent
+
+Output latency, 20 completed transactions per size:
+
+| Size | p50 | p95 | p99 |
+| --- | ---: | ---: | ---: |
+| Small | 12.867 ms | 13.007 ms | 13.017 ms |
+| Medium | 778.679 ms | 782.196 ms | 784.590 ms |
+| Large | 3,134.438 ms | 3,141.377 ms | 3,145.236 ms |
+
+All 15 scenarios passed; zero failed or unverified. The harness uses real
+Wayland sink clients and the production output backend, but simulates keyboard
+capture over stdin. It does not test physical input delivery, overlap input,
+password-field behavior, runtime keyboard-layout changes, suspend/resume, or
+long-term stability. This is partial compatibility evidence, not production
+certification.

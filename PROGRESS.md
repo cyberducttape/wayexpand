@@ -17,6 +17,18 @@ Updated: 2026-10-30
   must apply the ruleset and verify that a failing required check blocks a
   merge; the documentation is not enforcement.
 
+## Current-source private KWin regression run
+
+- Re-ran `scripts/test-kwin-e2e.sh` from clean source commit `5e0a434d2f10`
+  on KWin 6.6.6. All 15 output, focus, lifecycle, and default-refusal
+  scenarios passed. The captured report is
+  [`docs/evidence/kwin-e2e-5e0a434d2f10.txt`](docs/evidence/kwin-e2e-5e0a434d2f10.txt).
+- The libei keysym fallback produced 20 measured transactions per size bucket:
+  p95 was 13.007 ms (small), 782.196 ms (medium), and 3.141 s (large).
+- The harness used stdin-simulated capture. It does not test physical input
+  during output, so it cannot close the overlap-corruption or production
+  certification gates.
+
 ## Current remote CI and dependency-update audit
 
 - GitHub `main` CI run [41020746599](https://github.com/cyberducttape/wayexpand/actions/runs/41020746599)
