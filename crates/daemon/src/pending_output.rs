@@ -400,12 +400,20 @@ impl Daemon {
         // starts over; output failures are recovered separately.
         self.reconnect_delay = Duration::from_millis(250);
         if let InputEvent::Key(chord) = event {
-            let undo = process_key_event(&mut self.config.engine, chord, true, &self.policy);
-            return self.start_output(
-                OutputOrigin::Typed,
-                undo.map(OutputJob::Undo).into_iter().collect(),
-                Vec::new(),
-            );
+            if let Some(undo) =
+                process_key_event(&mut self.config.engine, chord, true, &self.policy)
+            {
+                return self.start_output(
+                    OutputOrigin::Typed,
+                    vec![OutputJob::Undo(undo)],
+                    Vec::new(),
+                );
+            }
+            // Ordinary physical key presses are also delivered as Key events
+            // before their translated Text event. An empty output batch runs
+            // the post-output quarantine and would discard that Text event,
+            // preventing every typed trigger from reaching the matcher.
+            return Ok(());
         }
         let pending = self.config.engine.process_deferred(event);
         let results = dispatch_pending_results(
@@ -798,6 +806,40 @@ mod tests {
             "each queued trigger must produce exactly one output transaction"
         );
         assert!(harness.daemon.pending_output.is_none());
+    }
+
+    #[test]
+    fn ordinary_key_event_does_not_quarantine_its_following_text_event() {
+        let mut harness = Harness::new(false);
+        let ordinary_key = || {
+            InputEvent::Key(wayexpand_core::KeyChord {
+                modifiers: wayexpand_core::Modifiers::default(),
+                key: "A".into(),
+            })
+        };
+
+        for character in ".ssl".chars() {
+            harness.daemon.start_evdev_output(ordinary_key()).unwrap();
+            assert!(
+                harness.daemon.evdev_quiet_since.is_none(),
+                "a non-output key event must not start the post-output quiet window"
+            );
+            harness
+                .daemon
+                .start_evdev_output(InputEvent::Text(character.to_string()))
+                .unwrap();
+        }
+
+        assert!(
+            harness.daemon.pending_output.is_some(),
+            "the translated text events must still complete the trigger"
+        );
+        harness.open_gate();
+        harness.run_until_resolved();
+        assert_eq!(
+            *harness.calls.lock().unwrap(),
+            ["erase:.ssl", "insert:Apache rewrite configuration"]
+        );
     }
 
     #[test]

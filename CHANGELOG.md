@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Keep ordinary evdev key events from opening the post-output quarantine when
+  they produce no undo transaction. The old empty-batch path discarded each
+  following translated text event and prevented typed triggers from matching;
+  add an event-order regression covering a complete trigger.
 - Add `wayexpand library add/list/path/search/remove` for private, offline
   Git catalog checkouts. Source intake rejects unsafe transports, embedded
   credentials, symlinks, submodules, and non-file Git entries; adding a source
