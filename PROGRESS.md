@@ -2,6 +2,17 @@
 
 Updated: 2026-10-30
 
+## Workspace verification after lifecycle changes
+
+- `RUST_TEST_THREADS=1 cargo test --workspace --locked -q` passed all
+  executed workspace test targets. The core suite passed 465 tests (2 ignored),
+  the daemon 206, the GUI 173, and the CLI 128; four environment-dependent or
+  manual tests across the workspace were ignored. No test failed.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings` passed.
+  The workspace includes the new direct EIS cancellation/handshake tests and
+  the current source changes; this remains automated evidence, not a live
+  physical-input certification.
+
 ## Daemon fail-closed regression suite
 
 - `RUST_TEST_THREADS=1 cargo test --locked -p wayexpand-daemon` passed all
