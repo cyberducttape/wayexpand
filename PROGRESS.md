@@ -1,6 +1,6 @@
 # Production Readiness Progress
 
-Updated: 2026-10-29
+Updated: 2026-10-30
 
 ## Cancellable direct EIS socket startup
 
@@ -16,6 +16,16 @@ Updated: 2026-10-29
 - The live portal path and real compositor behavior are unchanged; no
   production certification or physical-input evidence is implied by these
   socket-level tests.
+- Pushed as part of `624f5fd6` to `origin/main`. CI run
+  [41018444819](https://github.com/cyberducttape/wayexpand/actions/runs/41018444819),
+  Fuzz [41018444870](https://github.com/cyberducttape/wayexpand/actions/runs/41018444870),
+  CodeQL [41018444375](https://github.com/cyberducttape/wayexpand/actions/runs/41018444375),
+  and Launchpad sync
+  [41018444904](https://github.com/cyberducttape/wayexpand/actions/runs/41018444904)
+  all completed successfully for this commit. CI included debug/release tests,
+  Clippy, package builds and install smoke tests, headless KWin/Sway E2E, and
+  the daemon soak. None of those jobs exercise physical keyboard capture in an
+  attended desktop session.
 
 ## Libei owner-loop failure handling
 
@@ -58,9 +68,10 @@ Updated: 2026-10-29
 - This does not establish zero allocations for XKB lookup or certify real
   desktop capture/insertion. No production compositor route is certified; the
   live KDE route still has the limitations recorded below.
-- Committed locally as `045dfdbb` (`Avoid owned strings for scalar input
-  events`). The working tree is clean. The active user service was not
-  deployed/restarted, and this commit has not been pushed.
+- Committed as `045dfdbb` (`Avoid owned strings for scalar input events`),
+  followed by the Unicode regression and progress updates; the complete series
+  was pushed to `origin/main` as `624f5fd6`. The active user service was not
+  deployed or restarted.
 - Updated the core's event-by-event Unicode trigger helper to emit
   `InputEvent::TextChar`, so canonical normalization and grapheme deletion
   cases exercise the same event shape as real scalar key input. Added a
@@ -115,14 +126,10 @@ Updated: 2026-10-29
 - The certification report contract, matrix, production-gate, driver, process
   cleanup, and Markdown-link checks all passed; the link checker validated 76
   Markdown files and 519 local links. The gate correctly continues to reject
-  production certification because no matrix route is eligible. GitHub Actions
-  for `60315df9` was cancelled when the evidence-only commit was pushed; no job
-  failure was reported. CI run `41003908901` for evidence commit `5b3eefe7`
-  completed successfully. CI run `41006119736` also completed successfully on
-  the earlier commit `2614bc53`, including the Rust test/lint, Debian/RPM
-  artifact, and Ubuntu 26.04/Fedora package-install smoke jobs. The local
-  commits after `2614bc53`, including `045dfdbb` and `4b4cd9c3`, have passed
-  local verification but have not been submitted to CI.
+  production certification because no matrix route is eligible. CI run
+  `41006119736` completed successfully on `2614bc53`. The current pushed
+  commit `624f5fd6` also passed CI, Fuzz, CodeQL, and Launchpad sync; see the
+  run records at the top of this file.
 - Added single-character engine entry points that encode into stack storage.
   IBus now avoids constructing a temporary `String` for decoded printable
   characters, and the GUI playground reuses immediate-result capacity while
