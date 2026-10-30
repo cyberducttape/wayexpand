@@ -28,8 +28,9 @@ Updated: 2026-10-29
   credential fields; tests exercise the expected, short, and oversized lengths.
 - Add public `Matcher::try_new` and `MatcherBuildError`, making arbitrary
   trigger collections fail explicitly when their indices exceed the trie
-  representation. The validated engine path retains its documented limit
-  invariant.
+  representation. Keep the former `new` constructor as a deprecated
+  compatibility wrapper; the validated engine path uses the fallible API and
+  retains its documented limit invariant.
 - `cargo test -p action-broker --lib
   ipc::tests::peer_credentials_require_the_exact_kernel_structure_size
   --locked`: passed.

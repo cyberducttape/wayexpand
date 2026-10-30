@@ -136,6 +136,19 @@ impl Trie {
 }
 
 impl Matcher {
+    /// Construct a matcher from trigger strings.
+    ///
+    /// Prefer [`Matcher::try_new`] when triggers are not already bounded by
+    /// configuration validation. This compatibility constructor is retained
+    /// for existing callers and panics if the trigger index space is exceeded.
+    #[deprecated(note = "use Matcher::try_new to handle unrepresentable trigger collections")]
+    pub fn new<I>(triggers: I) -> Self
+    where
+        I: IntoIterator<Item = String>,
+    {
+        Self::try_new(triggers).expect("trigger collection exceeds matcher index capacity")
+    }
+
     pub fn try_new<I>(triggers: I) -> Result<Self, MatcherBuildError>
     where
         I: IntoIterator<Item = String>,
