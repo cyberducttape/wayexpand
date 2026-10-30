@@ -86,7 +86,8 @@ Updated: 2026-10-29
   completed successfully. CI run `41006119736` is for the earlier commit
   `2614bc53`; it remains in progress with the Debian/RPM artifact job building
   the RPM. Thirty jobs have completed, and no failures have been reported.
-  The current local commit `045dfdbb` has not yet been submitted to CI.
+  The local commits `045dfdbb` and `4b4cd9c3` have not yet been submitted to
+  CI.
 - Added single-character engine entry points that encode into stack storage.
   IBus now avoids constructing a temporary `String` for decoded printable
   characters, and the GUI playground reuses immediate-result capacity while
