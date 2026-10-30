@@ -100,9 +100,10 @@ Acceptance criteria:
 
 ### P2 — Complete per-action broker isolation
 
-**Status:** Filesystem isolation, executable identity pinning, and an optional
-seccomp rule against creating IP sockets are implemented and regression-tested.
-Device isolation and broader supported-host verification remain open.
+**Status:** Filesystem isolation, executable identity pinning, optional network
+socket restrictions, and a restricted device-access profile are implemented
+and regression-tested. A private device namespace and broader supported-host
+verification remain open.
 
 Acceptance criteria:
 
@@ -115,7 +116,12 @@ Acceptance criteria:
   netlink socket creation and io_uring setup, while AF_UNIX remains available;
   it cannot prevent a same-UID local service from passing a network descriptor.
   The packaged systemd unit continues to deny IP networking globally.
-- Define and enforce device access policy before claiming device isolation.
+- Keep device claims precise: the opt-in profile excludes `/dev` from explicit
+  grants, denies `ioctl`, Unix-socket descriptor receipt, and device-node
+  creation, and rejects inherited output. It is not a device namespace and
+  does not classify device nodes nested inside granted directories.
+- Add systemd `PrivateDevices=yes` (or an equivalent per-action device
+  namespace) before claiming complete device isolation.
 - Verify sandbox behavior and cancellation on supported kernels, and document
   that arbitrary malicious processes running under the broker's same UID are
   outside the IPC trust boundary.

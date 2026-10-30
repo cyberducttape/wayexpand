@@ -1,4 +1,4 @@
-//! Per-action Landlock filesystem and optional seccomp network confinement.
+//! Per-action Landlock filesystem and optional seccomp confinement.
 //!
 //! Rulesets are prepared in the broker before spawn. The child pre-exec hook
 //! performs only `prctl` and `landlock_restrict_self`, then execs the pinned
@@ -119,19 +119,22 @@ pub(crate) fn prepare(
 }
 
 #[cfg(target_os = "linux")]
-pub(crate) fn configure_command_with_network(
+pub(crate) fn configure_command_with_restrictions(
     command: &mut std::process::Command,
     ruleset: &OwnedFd,
     deny_network: bool,
+    deny_devices: bool,
 ) -> Result<(), String> {
     let fd = ruleset.as_raw_fd();
-    let network_filter = deny_network.then(build_network_filter).transpose()?;
-    configure_command_with_network_filter(command, fd, network_filter);
+    let filter = (deny_network || deny_devices)
+        .then(|| build_action_filter(deny_network, deny_devices))
+        .transpose()?;
+    configure_command_with_filter(command, fd, filter);
     Ok(())
 }
 
 #[cfg(target_os = "linux")]
-fn configure_command_with_network_filter(
+fn configure_command_with_filter(
     command: &mut std::process::Command,
     fd: std::os::fd::RawFd,
     network_filter: Option<Vec<libc::sock_filter>>,
@@ -171,7 +174,10 @@ fn configure_command_with_network_filter(
 }
 
 #[cfg(target_os = "linux")]
-fn build_network_filter() -> Result<Vec<libc::sock_filter>, String> {
+fn build_action_filter(
+    deny_network: bool,
+    deny_devices: bool,
+) -> Result<Vec<libc::sock_filter>, String> {
     use libc::{sock_filter, BPF_ABS, BPF_JEQ, BPF_JMP, BPF_K, BPF_LD, BPF_RET, BPF_W};
 
     // Reject ABI switching before checking syscall numbers. This avoids a
@@ -182,7 +188,7 @@ fn build_network_filter() -> Result<Vec<libc::sock_filter>, String> {
         "riscv64" => 0xc000_00f3,
         architecture => {
             return Err(format!(
-                "per-action network filtering is unsupported on {architecture}"
+                "per-action seccomp filtering is unsupported on {architecture}"
             ));
         }
     };
@@ -229,28 +235,53 @@ fn build_network_filter() -> Result<Vec<libc::sock_filter>, String> {
         filter.push(statement(BPF_LD | BPF_W | BPF_ABS, SECCOMP_DATA_NR_OFFSET));
     }
 
-    // AF_UNIX remains available for local IPC. All other socket families,
-    // including IPv4/IPv6, packet, and netlink, fail with EPERM. The child is
-    // spawned with only stdio pipes/null and the pinned executable descriptor,
-    // so it receives no pre-opened network socket.
-    for syscall in [libc::SYS_socket, libc::SYS_socketpair] {
-        filter.push(jump(syscall as u32, 0, 4));
-        filter.push(statement(
-            BPF_LD | BPF_W | BPF_ABS,
-            SECCOMP_DATA_ARG0_OFFSET,
-        ));
-        filter.push(jump(AF_UNIX_VALUE, 1, 0));
+    if deny_network {
+        // AF_UNIX remains available for local IPC. All other socket families,
+        // including IPv4/IPv6, packet, and netlink, fail with EPERM.
+        for syscall in [libc::SYS_socket, libc::SYS_socketpair] {
+            filter.push(jump(syscall as u32, 0, 4));
+            filter.push(statement(
+                BPF_LD | BPF_W | BPF_ABS,
+                SECCOMP_DATA_ARG0_OFFSET,
+            ));
+            filter.push(jump(AF_UNIX_VALUE, 1, 0));
+            filter.push(deny());
+            filter.push(statement(BPF_LD | BPF_W | BPF_ABS, SECCOMP_DATA_NR_OFFSET));
+        }
+
+        // io_uring can create sockets through IORING_OP_SOCKET without calling
+        // socket(2), so deny creation of an io_uring instance in this profile.
+        filter.push(jump(libc::SYS_io_uring_setup as u32, 0, 1));
         filter.push(deny());
-        filter.push(statement(BPF_LD | BPF_W | BPF_ABS, SECCOMP_DATA_NR_OFFSET));
     }
 
-    // io_uring can create sockets through IORING_OP_SOCKET without calling
-    // socket(2), so deny creation of an io_uring instance in this profile.
-    filter.push(jump(libc::SYS_io_uring_setup as u32, 0, 1));
-    filter.push(deny());
+    if deny_devices {
+        // Landlock denies paths outside the explicit allowlist and denies
+        // IOCTL_DEV on newly opened descriptors where the kernel supports it.
+        // Seccomp also blocks ioctl for inherited/received descriptors and
+        // prevents receiving device descriptors over AF_UNIX. The action's
+        // stdio is non-device (pipes or /dev/null); log_output is rejected by
+        // config validation for this profile.
+        for syscall in [libc::SYS_ioctl, libc::SYS_recvmsg, libc::SYS_recvmmsg] {
+            filter.push(jump(syscall as u32, 0, 1));
+            filter.push(deny());
+        }
+        // Prevent creation of device nodes beneath a writable grant.
+        #[cfg(target_arch = "x86_64")]
+        for syscall in [libc::SYS_mknod, libc::SYS_mknodat] {
+            filter.push(jump(syscall as u32, 0, 1));
+            filter.push(deny());
+        }
+        #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+        for syscall in [libc::SYS_mknodat] {
+            filter.push(jump(syscall as u32, 0, 1));
+            filter.push(deny());
+        }
+    }
+
     filter.push(statement(BPF_RET | BPF_K, SECCOMP_RET_ALLOW));
     if filter.len() > u16::MAX as usize {
-        return Err("per-action network filter exceeds the kernel instruction limit".into());
+        return Err("per-action seccomp filter exceeds the kernel instruction limit".into());
     }
     Ok(filter)
 }
@@ -261,7 +292,7 @@ mod tests {
 
     #[test]
     fn filter_has_a_native_architecture_guard() {
-        let filter = build_network_filter().unwrap();
+        let filter = build_action_filter(true, false).unwrap();
         assert!(filter.len() >= 7);
         // First instruction loads seccomp_data.arch; the next comparison
         // branches to a kill action for an ABI mismatch.
@@ -272,7 +303,11 @@ mod tests {
 
     #[test]
     #[ignore = "invoked by ActionExecutor with a per-action sandbox"]
-    fn action_executor_network_probe_child() {
+    fn action_executor_restriction_probe_child() {
+        let device = std::ffi::CString::new("/dev/zero").unwrap();
+        let opened = unsafe { libc::open(device.as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC) };
+        assert_eq!(opened, -1, "device nodes must remain outside the allowlist");
+
         for family in [
             libc::AF_INET,
             libc::AF_INET6,
@@ -306,14 +341,39 @@ mod tests {
             std::io::Error::last_os_error().raw_os_error(),
             Some(libc::EPERM)
         );
+        let ioctl = unsafe {
+            libc::ioctl(
+                libc::STDOUT_FILENO,
+                libc::FIONREAD,
+                std::ptr::null_mut::<libc::c_int>(),
+            )
+        };
+        assert_eq!(ioctl, -1);
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::EPERM)
+        );
+        let received = unsafe {
+            libc::recvmsg(
+                libc::STDIN_FILENO,
+                std::ptr::null_mut::<libc::msghdr>(),
+                libc::MSG_DONTWAIT,
+            )
+        };
+        assert_eq!(received, -1);
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::EPERM)
+        );
     }
 }
 
 #[cfg(not(target_os = "linux"))]
-pub(crate) fn configure_command_with_network(
+pub(crate) fn configure_command_with_restrictions(
     _command: &mut std::process::Command,
     _ruleset: &(),
     _deny_network: bool,
+    _deny_devices: bool,
 ) -> Result<(), String> {
     Err("per-action filesystem sandboxing requires Linux Landlock".into())
 }

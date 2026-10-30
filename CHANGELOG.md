@@ -7,6 +7,9 @@ All notable changes to WayExpand are documented here.
 - Add an opt-in per-action broker sandbox rule that blocks IP-family socket
   creation and `io_uring` while preserving local Unix sockets; the packaged
   broker service continues to deny IP networking globally.
+- Add an opt-in restricted device-access profile that blocks device `ioctl`,
+  Unix-socket descriptor receipt, and device-node creation; refuse inherited
+  log output when enabled. This is not a private device namespace.
 - Normalize binary release archives with a fixed entry order, timestamp,
   ownership, and directory umask; `scripts/test-release.sh` verifies byte-for-
   byte archive reproducibility across differing caller umasks.

@@ -291,6 +291,7 @@ it appears in `read_paths` or `write_paths`:
 read_paths = ["/home/user/reports/input"]
 write_paths = ["/home/user/reports/output"]
 deny_network = true
+deny_devices = true
 ```
 
 Writable entries must be existing directories. The policy loader canonicalizes
@@ -302,9 +303,16 @@ IPv4, IPv6, packet, and netlink sockets, and rejects `io_uring_setup`; local
 socket from the broker. This is defense in depth, not complete network
 containment: a process able to receive a socket descriptor from another local
 service may use that descriptor. The packaged service independently denies IP
-networking for every action. Device isolation is not currently provided,
-either per action or by the packaged unit. Custom service launches should keep
-the service-level network controls. The broker trusts
+networking for every action. `deny_devices` blocks access to paths outside the
+Landlock allowlist (including `/dev`), `ioctl`, receipt of file descriptors via
+`recvmsg`/`recvmmsg`, and creation of device nodes. It rejects `log_output`
+because inherited broker output could be a terminal descriptor. This is a
+restricted device-access profile, not a complete device namespace: descriptors
+already inherited by the broker or device nodes inside explicitly granted
+directories are not independently classified by device type. The packaged
+service still does not use `PrivateDevices=yes`. Custom service launches should
+keep service-level network controls and must not treat per-action Landlock as a
+replacement for a device namespace. The broker trusts
 software running under its own UID, including the user who can edit the broker
 policy; neither Landlock nor authenticated IPC is a boundary against malicious
 same-UID software.

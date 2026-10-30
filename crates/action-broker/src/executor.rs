@@ -170,11 +170,20 @@ impl ActionExecutor {
                 .sandbox
                 .as_ref()
                 .is_some_and(|sandbox| sandbox.deny_network);
-            crate::sandbox::configure_command_with_network(&mut cmd, ruleset, deny_network)
-                .map_err(|reason| ActionError::ActionBlocked {
-                    action_id: request.action_id.clone(),
-                    reason: format!("could not configure action sandbox: {reason}"),
-                })?;
+            let deny_devices = action_config
+                .sandbox
+                .as_ref()
+                .is_some_and(|sandbox| sandbox.deny_devices);
+            crate::sandbox::configure_command_with_restrictions(
+                &mut cmd,
+                ruleset,
+                deny_network,
+                deny_devices,
+            )
+            .map_err(|reason| ActionError::ActionBlocked {
+                action_id: request.action_id.clone(),
+                reason: format!("could not configure action sandbox: {reason}"),
+            })?;
         }
 
         for arg in &arguments {
@@ -602,7 +611,7 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[tokio::test]
-    async fn action_network_policy_is_applied_by_the_executor_before_exec() {
+    async fn action_network_and_device_policies_are_applied_before_exec() {
         use std::os::unix::fs::PermissionsExt;
 
         let directory = std::env::temp_dir().join(format!(
@@ -625,7 +634,7 @@ mod tests {
                 program: executable.to_string_lossy().into_owned(),
                 args: vec![
                     "--exact".into(),
-                    "sandbox::tests::action_executor_network_probe_child".into(),
+                    "sandbox::tests::action_executor_restriction_probe_child".into(),
                     "--ignored".into(),
                     "--nocapture".into(),
                 ],
@@ -641,6 +650,7 @@ mod tests {
                 description: None,
                 sandbox: Some(crate::config::ActionSandbox {
                     deny_network: true,
+                    deny_devices: true,
                     ..Default::default()
                 }),
             },
@@ -663,7 +673,7 @@ mod tests {
         assert!(
             output
                 .stdout
-                .contains("action_executor_network_probe_child ... ok"),
+                .contains("action_executor_restriction_probe_child ... ok"),
             "unexpected child test output: {}",
             output.stdout
         );
@@ -694,6 +704,7 @@ mod tests {
                     read_paths: vec![],
                     write_paths: vec![directory.to_string_lossy().into_owned()],
                     deny_network: false,
+                    deny_devices: false,
                 }),
                 program: "/usr/bin/touch".to_string(),
                 args: vec![output.to_string_lossy().into_owned()],

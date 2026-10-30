@@ -156,6 +156,11 @@ pub struct ActionSandbox {
     /// sandboxed broker is launched outside that systemd unit.
     #[serde(default)]
     pub deny_network: bool,
+    /// Deny device access for this action. Device paths are excluded by the
+    /// Landlock allowlist; device ioctls and Unix-socket descriptor reception
+    /// are blocked by seccomp. This cannot be combined with inherited output.
+    #[serde(default)]
+    pub deny_devices: bool,
 }
 
 impl ActionSandbox {
@@ -200,6 +205,14 @@ impl ActionConfig {
     }
 
     pub fn validate(&self) -> Result<(), String> {
+        if self.log_output
+            && self
+                .sandbox
+                .as_ref()
+                .is_some_and(|sandbox| sandbox.deny_devices)
+        {
+            return Err("sandbox.deny_devices cannot be combined with log_output".into());
+        }
         if self.program.is_empty() || self.program.contains('\0') {
             return Err("program cannot be empty".to_string());
         }
@@ -1028,7 +1041,7 @@ enabled = true
             std::env::temp_dir().join(format!("wayexpand-sandbox-config-{}", std::process::id()));
         fs::create_dir_all(&root).unwrap();
         let toml = format!(
-            "[actions.report]\nprogram = '/usr/bin/true'\n[actions.report.sandbox]\nread_paths = ['{}']\nwrite_paths = ['{}']\ndeny_network = true\n",
+            "[actions.report]\nprogram = '/usr/bin/true'\n[actions.report.sandbox]\nread_paths = ['{}']\nwrite_paths = ['{}']\ndeny_network = true\ndeny_devices = true\n",
             root.display(),
             root.display(),
         );
@@ -1043,6 +1056,7 @@ enabled = true
         assert_eq!(sandbox.read_paths, [root.to_string_lossy().as_ref()]);
         assert_eq!(sandbox.write_paths, [root.to_string_lossy().as_ref()]);
         assert!(sandbox.deny_network);
+        assert!(sandbox.deny_devices);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1050,6 +1064,35 @@ enabled = true
     fn existing_sandbox_profiles_default_to_network_allowed() {
         let sandbox: ActionSandbox = toml::from_str("read_paths = []\nwrite_paths = []").unwrap();
         assert!(!sandbox.deny_network);
+        assert!(!sandbox.deny_devices);
+    }
+
+    #[test]
+    fn device_restriction_rejects_inherited_log_output() {
+        let mut action = ActionConfig {
+            parameters: std::collections::HashMap::new(),
+            sandbox: Some(ActionSandbox {
+                deny_devices: true,
+                ..Default::default()
+            }),
+            program: "/usr/bin/true".into(),
+            args: vec![],
+            timeout_ms: 1000,
+            server_env: vec![],
+            client_forward_env: vec![],
+            allow_dangerous_env: false,
+            inherit_env: false,
+            cwd: None,
+            log_output: true,
+            enabled: true,
+            description: None,
+        };
+        assert!(action
+            .validate()
+            .unwrap_err()
+            .contains("deny_devices cannot be combined with log_output"));
+        action.log_output = false;
+        assert!(action.validate().is_ok());
     }
 
     #[test]
@@ -1058,6 +1101,7 @@ enabled = true
             read_paths: vec!["data".into()],
             write_paths: vec![],
             deny_network: false,
+            deny_devices: false,
         };
         assert!(relative.validate().unwrap_err().contains("absolute"));
         assert!(

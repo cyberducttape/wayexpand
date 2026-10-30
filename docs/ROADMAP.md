@@ -166,11 +166,15 @@ docs/ACTION_BROKER_ARCHITECTURE.md.
       optional per-action seccomp rule now blocks IP/packet/netlink socket
       creation and io_uring setup while allowing AF_UNIX; a child-process
       regression verifies the filter through the ActionExecutor. The packaged
-      service still denies IP networking globally. Device allowlists (including
-      global device isolation), broader action-specific syscall sets, and
-      supported-host verification remain open. AF_UNIX descriptor passing and
-      same-UID software remain outside this filter's trust boundary; custom
-      broker launches still need service-level controls for stronger
+      service still denies IP networking globally. An opt-in device-access
+      profile blocks ioctl, Unix-socket descriptor receipt, device-node
+      creation, and rejects inherited log output; its child-process regression
+      runs through ActionExecutor. This is not a private device namespace, and
+      device nodes nested inside explicitly granted directories are not
+      classified by type. `PrivateDevices=yes` or equivalent, broader
+      action-specific syscall sets, and supported-host verification remain
+      open. Same-UID software remains outside the broker IPC trust boundary;
+      custom broker launches still need service-level controls for stronger
       containment.
 - [x] Optional execution audit logging has bounded rotation, privacy-preserving
       records, queue and persistence-failure reporting, and tests. Operational

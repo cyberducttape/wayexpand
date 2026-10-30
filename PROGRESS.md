@@ -89,6 +89,33 @@ Updated: 2026-10-30
   packaged service retains its global network denial. Device isolation and
   cross-architecture runtime verification remain open.
 
+## Restricted per-action device-access profile
+
+- Added opt-in `sandbox.deny_devices`. With the Landlock allowlist, the child
+  is denied `ioctl`, `recvmsg`/`recvmmsg` (preventing Unix-socket FD receipt),
+  and `mknod`/`mknodat`; `log_output` is rejected because it could inherit a
+  terminal descriptor. Existing sandbox profiles default this option off.
+- The executor-level probe exercises the combined network and device seccomp
+  policy after spawn, verifying IP-family socket denial, AF_UNIX socket
+  availability, `io_uring_setup`, `ioctl`, and `recvmsg` behavior. Config tests
+  cover TOML parsing, compatibility defaults, and the inherited-output rule.
+- This is a restricted device-access profile, not full device isolation:
+  there is no private device namespace, and a device node nested inside an
+  explicitly granted directory is not independently identified by type. The
+  systemd broker unit still needs `PrivateDevices=yes` (or an equivalent
+  per-action namespace) before WayExpand can claim complete device isolation.
+- Verification on x86_64: `cargo fmt --all -- --check`, all 84 broker library
+  tests (1 child-only ignored), 7 broker binary tests, 10 integration tests,
+  and broker Clippy with `-D warnings` passed. The executor regression verifies
+  `/dev/zero` cannot be opened and the configured syscall restrictions take
+  effect after exec.
+- `cargo check --locked --workspace` passed. AArch64 test cross-compilation
+  initially found that Linux AArch64 has no standalone `mknod` syscall; the
+  filter now uses `mknodat` on AArch64 and RISC-V, and both the x86_64 host and
+  AArch64 cross-check pass. Runtime behavior on AArch64 remains unverified.
+- Documentation contracts passed, and the Markdown checker validated 76 files
+  and 523 local links.
+
 ## Per-user installer transaction verification
 
 - `scripts/test-install-user.sh` passed against the current worktree. It built
