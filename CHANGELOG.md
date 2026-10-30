@@ -10,6 +10,9 @@ All notable changes to WayExpand are documented here.
 - Verify cancellation of an in-flight direct EIS connection drops its pending
   future promptly, in addition to covering pre-cancelled and completed socket
   attempts.
+- Exercise direct socket connection followed by an unresponsive EIS handshake;
+  session setup now has an explicit regression for enforcing the handshake
+  deadline on an accepted socket.
 - Validate the returned `SO_PEERCRED` structure length before reading its
   fields, with regression coverage for truncated, oversized, and valid lengths.
 - Add fallible `Matcher::try_new` construction for arbitrary trigger iterators;

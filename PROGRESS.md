@@ -2,6 +2,20 @@
 
 Updated: 2026-10-30
 
+## Direct EIS connection and handshake failure coverage
+
+- Extracted the stream-to-handshake step used by session startup and added an
+  integration-style test using a real Unix listener. The server accepts the
+  direct socket but sends no EIS handshake data; startup returns the expected
+  deadline error within one second, and the server thread is released and
+  joined.
+- Combined with the in-flight connection cancellation regression, this
+  covers pending connect cancellation and a stalled accepted EIS socket. It
+  does not emulate all owner-thread/device negotiation behavior or a live
+  compositor. Verification passed: all 44 libei backend tests, backend Clippy
+  with `-D warnings`, `cargo check --workspace --locked`, formatting, and
+  whitespace checks.
+
 ## Direct EIS in-flight cancellation regression
 
 - Factored the direct Unix-socket connection race into a generic future helper
@@ -441,8 +455,8 @@ Updated: 2026-10-30
    text integrity.
 4. Run the 72-hour desktop soak and published-package upgrade/rollback
    rehearsal after the real-session replacement gate passes.
-5. Add an end-to-end owner-thread startup test where a direct EIS socket
-   accepts the connection but the server stays silent through handshake. The
-   current tests verify pending direct-connect cancellation/drop and EIS
-   handshake deadline/cancellation separately; they do not exercise their
-   composition through session startup and bounded worker teardown.
+5. Extend the direct-socket test through owner-thread/device negotiation and
+   bounded worker teardown. Current coverage composes the direct connection
+   with the production handshake helper and proves the idle-handshake deadline,
+   while separate worker tests cover startup error joining; the complete
+   owner-thread failure path has not yet been exercised in one test.

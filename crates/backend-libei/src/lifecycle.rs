@@ -1,6 +1,18 @@
 //! EIS connection, handshake, and initial device negotiation.
 
+use std::os::unix::net::UnixStream;
+
 use super::*;
+
+fn establish_connection(
+    stream: UnixStream,
+    handshake_timeout: Duration,
+    cancellation: &ConnectCancellation,
+) -> Result<(reis::event::Connection, events::EventPump), LibeiError> {
+    stream.set_nonblocking(true)?;
+    let context = ei::Context::new(stream)?;
+    handshake_with_cancellation(&context, handshake_timeout, cancellation)
+}
 
 impl LibeiSession {
     /// Connect to EIS from the caller's dedicated session thread. The
@@ -36,10 +48,8 @@ impl LibeiSession {
         // Handshake and event polling use explicit deadlines. Keep later
         // protocol flushes from blocking indefinitely when an EIS server
         // stops consuming input; WouldBlock is classified as retryable.
-        stream.set_nonblocking(true)?;
-        let context = ei::Context::new(stream)?;
         let (connection, mut events) =
-            handshake_with_cancellation(&context, EIS_HANDSHAKE_TIMEOUT, &cancellation)?;
+            establish_connection(stream, EIS_HANDSHAKE_TIMEOUT, &cancellation)?;
 
         let device_deadline = Instant::now() + EIS_HANDSHAKE_TIMEOUT;
         let (device, mode, keyboard) = loop {
@@ -140,5 +150,51 @@ impl LibeiSession {
             fcitx5: fcitx5_direct_commit.then(fcitx5::Client::connect).flatten(),
             checkpoint: wayexpand_core::OutputCheckpoint::default(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        os::unix::net::UnixListener,
+        sync::mpsc,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    #[test]
+    fn connected_silent_eis_server_times_out_during_session_startup() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-eis-silent-startup-{}-{nonce}.sock",
+            std::process::id()
+        ));
+        let listener = UnixListener::bind(&path).unwrap();
+        let (release, released) = mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let _ = released.recv_timeout(Duration::from_secs(1));
+            drop(stream);
+        });
+
+        let cancellation = ConnectCancellation::default();
+        let stream = connection::connect_socket_with_cancellation(path.clone(), &cancellation)
+            .expect("the test server accepted the direct EIS socket");
+        let started = Instant::now();
+        let result = establish_connection(stream, Duration::from_millis(30), &cancellation);
+        let elapsed = started.elapsed();
+
+        let Err(error) = result else {
+            panic!("a silent EIS server must not complete session startup");
+        };
+        assert!(matches!(error, LibeiError::Handshake(_)));
+        assert!(error.to_string().contains("deadline expired"));
+        assert!(elapsed < Duration::from_secs(1), "startup took {elapsed:?}");
+        let _ = release.send(());
+        server.join().unwrap();
+        std::fs::remove_file(path).unwrap();
     }
 }
