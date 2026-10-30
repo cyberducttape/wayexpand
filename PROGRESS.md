@@ -26,6 +26,9 @@ Updated: 2026-10-29
   time checks keep both session types `!Send`.
 - `cargo clippy --workspace --all-targets --locked -- -D warnings`: passed
   after the libei ownership change.
+- `RUST_TEST_THREADS=1 cargo test --workspace --locked -q`: passed after the
+  libei ownership change; workspace unit, integration, and documentation tests
+  passed; environment/manual-session tests remained ignored.
 - CI run [40990700720](https://github.com/cyberducttape/wayexpand/actions/runs/40990700720)
   completed successfully for `f8c22209`; all jobs, including the repaired
   ShellCheck gate, passed.
@@ -137,6 +140,7 @@ Updated: 2026-10-29
    text integrity.
 4. Run the 72-hour desktop soak and published-package upgrade/rollback
    rehearsal after the real-session replacement gate passes.
-5. Remove the libei `EventPump` manual `Send` boundary by keeping EIS
-   conversion and event handling on one dedicated thread; the current
-   callback-free invariant is pinned and tested but remains compiler-unchecked.
+5. Add targeted lifecycle tests for a libei owner thread that exits during
+   startup, a failed operation reply, and bounded shutdown while the EIS
+   session is unresponsive; current tests enforce thread affinity but do not
+   emulate a compositor session.
