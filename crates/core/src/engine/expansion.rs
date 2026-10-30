@@ -493,7 +493,11 @@ impl ExpansionEngine {
             }
             InputEvent::Text(text) => self.process_text::<P>(&text),
             InputEvent::Delimiter(character) => {
-                self.process_event::<P>(InputEvent::Text(character.to_string()))
+                // Encode into a stack buffer and pass the borrowed text to
+                // the common scanner, avoiding a one-character String and a
+                // recursive event dispatch.
+                let mut encoded = [0; 4];
+                self.process_text::<P>(character.encode_utf8(&mut encoded))
             }
             InputEvent::Backspace => {
                 self.on_backspace();

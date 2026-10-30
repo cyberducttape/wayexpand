@@ -128,6 +128,7 @@ fn daemon_status_body_matches_documented_stable_contract() {
             "input_overflow_total",
             "input_reconnect_total",
             "insertion_assurance",
+            "matcher_latency_dropped_total",
             "matcher_latency_p50_us",
             "matcher_latency_p95_us",
             "matcher_latency_p99_us",
@@ -165,7 +166,7 @@ fn daemon_status_body_matches_documented_stable_contract() {
         "daemon status body fields no longer match docs/COMPATIBILITY.md's documented Stable contract"
     );
     assert!(body.starts_with(&format!(
-        "source=input-method\nbackend=input-method-v2\nroute_id=input-method-v2\nbackend_mode=unknown\nstatus_schema=13\ndaemon_commit={}\nstate=connected\npaused=false\n",
+        "source=input-method\nbackend=input-method-v2\nroute_id=input-method-v2\nbackend_mode=unknown\nstatus_schema=14\ndaemon_commit={}\nstate=connected\npaused=false\n",
         super::build_info::COMMIT
     )));
     for field in [
@@ -177,6 +178,7 @@ fn daemon_status_body_matches_documented_stable_contract() {
         "injection_latency_profiles",
         "matcher_latency_sample_count",
         "matcher_latency_window_count",
+        "matcher_latency_dropped_total",
         "matcher_latency_p50_us",
         "matcher_latency_p95_us",
         "matcher_latency_p99_us",

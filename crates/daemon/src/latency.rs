@@ -7,7 +7,10 @@
 
 use std::{
     collections::VecDeque,
-    sync::{Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex, OnceLock, TryLockError,
+    },
     time::{Duration, Instant},
 };
 use wayexpand_core::{ExpansionEngine, ExpansionResult, TextInjector, TransactionOutcome};
@@ -111,6 +114,15 @@ fn matcher_window() -> &'static Mutex<Window> {
     WINDOW.get_or_init(|| Mutex::new(Window::default()))
 }
 
+static MATCHER_DROPPED_SAMPLES: AtomicU64 = AtomicU64::new(0);
+
+/// Number of matcher timing samples skipped because a diagnostics reader held
+/// the rolling-window lock. Recording is best-effort so metrics never delay
+/// input processing.
+pub fn matcher_dropped_samples() -> u64 {
+    MATCHER_DROPPED_SAMPLES.load(Ordering::Relaxed)
+}
+
 fn profile_windows() -> &'static Mutex<ProfileWindows> {
     static WINDOWS: OnceLock<Mutex<ProfileWindows>> = OnceLock::new();
     WINDOWS.get_or_init(|| Mutex::new(ProfileWindows::default()))
@@ -155,10 +167,18 @@ pub fn apply(injector: &mut dyn TextInjector, result: &ExpansionResult) -> Trans
 pub fn measure_matcher<T>(operation: impl FnOnce() -> T) -> T {
     let started = Instant::now();
     let result = operation();
-    let mut state = matcher_window()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    state.record(started.elapsed().as_nanos().min(u64::MAX as u128) as u64);
+    let elapsed_ns = started.elapsed().as_nanos().min(u64::MAX as u128) as u64;
+    match matcher_window().try_lock() {
+        Ok(mut state) => state.record(elapsed_ns),
+        Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner().record(elapsed_ns),
+        Err(TryLockError::WouldBlock) => {
+            let _ = MATCHER_DROPPED_SAMPLES.fetch_update(
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+                |count| Some(count.saturating_add(1)),
+            );
+        }
+    }
     result
 }
 
@@ -289,6 +309,15 @@ mod tests {
             Err("injection failed")
         );
         assert!(snapshot().sample_count >= before + 2);
+    }
+
+    #[test]
+    fn matcher_measurement_skips_contended_window_without_blocking() {
+        let mut guard = matcher_window().lock().unwrap();
+        let dropped_before = matcher_dropped_samples();
+        assert_eq!(measure_matcher(|| 42), 42);
+        assert_eq!(matcher_dropped_samples(), dropped_before + 1);
+        guard.record(1_000);
     }
 
     #[test]

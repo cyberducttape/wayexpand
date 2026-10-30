@@ -27,6 +27,13 @@ All notable changes to WayExpand are documented here.
   when no recasing is needed. Uppercase and title-case transformations still
   allocate their transformed output; tests verify unchanged Cow values retain
   their original buffer.
+- Record matcher timing before metrics synchronization and skip a sample when
+  a diagnostics snapshot owns the window lock. Expose skipped samples in the
+  status contract (schema 14) so contention cannot stall input or silently
+  reduce the reported measurement count.
+- Process delimiter characters through the common borrowed-text scanner using
+  stack UTF-8 storage, avoiding a per-delimiter `String` allocation and
+  recursive event dispatch.
 - Bound Unicode backspace segmentation to a 64-scalar suffix on the common
   path, retaining a full-buffer correctness fallback when grapheme context
   crosses that window. Track the buffered UTF-8 length incrementally.

@@ -1084,6 +1084,31 @@ fn processes_each_character_in_a_chunk() {
 }
 
 #[test]
+fn delimiter_event_matches_the_borrowed_text_path() {
+    let config = Config::parse(
+        r#"[[expansion]]
+trigger = ":sig "
+replacement = "regards"
+match_mode = "word-boundary""#,
+    )
+    .unwrap();
+    let mut delimiter_engine = ExpansionEngine::new(config.clone()).unwrap();
+    let mut text_engine = ExpansionEngine::new(config).unwrap();
+
+    assert!(delimiter_engine
+        .process(InputEvent::Text(":sig".into()))
+        .is_empty());
+    assert!(text_engine
+        .process(InputEvent::Text(":sig".into()))
+        .is_empty());
+
+    let delimiter_results = delimiter_engine.process(InputEvent::Delimiter(' '));
+    let text_results = text_engine.process(InputEvent::Text(" ".into()));
+    assert_eq!(delimiter_results, text_results);
+    assert_eq!(delimiter_engine.buffer, text_engine.buffer);
+}
+
+#[test]
 fn expansion_results_are_bounded_per_text_event() {
     let config = Config::parse("[[expansion]]\ntrigger = \":x\"\nreplacement = \"ok\"").unwrap();
     let mut engine = ExpansionEngine::new(config).unwrap();

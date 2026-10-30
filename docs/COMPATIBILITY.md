@@ -516,7 +516,7 @@ side never counts as a match (`commit_matches` is then `false`).
   "backend": "input-method-v2",
   "route_id": "input-method-v2",
   "backend_mode": "unknown",
-  "status_schema": 13,
+  "status_schema": 14,
   "daemon_commit": "example-commit",
   "state": "connected",
   "paused": false,
@@ -563,6 +563,7 @@ side never counts as a match (`commit_matches` is then `false`).
   "injection_latency_profiles": {},
   "matcher_latency_sample_count": 0,
   "matcher_latency_window_count": 0,
+  "matcher_latency_dropped_total": 0,
   "matcher_latency_p50_us": 0,
   "matcher_latency_p95_us": 0,
   "matcher_latency_p99_us": 0,
@@ -608,7 +609,7 @@ side never counts as a match (`commit_matches` is then `false`).
 - `backend` (string): Active output backend (`"input-method-v2"`, `"wlroots-virtual-keyboard"`, `"libei"`, ...)
 - `route_id` (string): Canonical capture/injection route ID from the shared route catalog; `"stdin-test"` identifies the stdin harness, and `"unknown"` means the active pair has no catalog entry. Consumers should use this field instead of reconstructing route identity from `source` and `backend`.
 - `backend_mode` (string): Negotiated backend capability detail. Libei reports either `"ei_text (UTF-8 insertion)"` or `"ei_keyboard keysym fallback (12ms key pacing)"`; it is `"unknown"` before a backend has negotiated a mode or for backends without submodes.
-- `status_schema` (integer): Version of the daemon status contract. Certification requires a matching schema before treating runtime capabilities as current; missing or different values mean the daemon should be restarted/updated. Schema 11 adds canonical `route_id`; schema 12 adds usage-event recorded, persisted, and dropped counters; schema 13 adds precise `replacement_assurance`.
+- `status_schema` (integer): Version of the daemon status contract. Certification requires a matching schema before treating runtime capabilities as current; missing or different values mean the daemon should be restarted/updated. Schema 11 adds canonical `route_id`; schema 12 adds usage-event recorded, persisted, and dropped counters; schema 13 adds precise `replacement_assurance`; schema 14 adds the count of matcher-latency samples skipped to avoid blocking input on diagnostics contention.
 - `state` (string): Backend connection state (e.g. `"connected"`, `"reconnecting"`)
 - `paused` (bool): Whether expansion matching is currently disabled
 - `config` (string): Path to the active configuration file
@@ -635,8 +636,9 @@ side never counts as a match (`commit_matches` is then `false`).
 - `injection_latency_mean_us` (integer): Mean synchronous backend apply duration across the rolling latency window, in microseconds
 - `injection_latency_p50_us`, `injection_latency_p95_us`, `injection_latency_p99_us` (integers): Nearest-rank percentiles of synchronous backend apply duration, in microseconds
 - `injection_latency_profiles` (object): Non-empty rolling percentile profiles keyed by negotiated output mode (`ei_text`, `libei_keysym_fallback`, `input_method_v2`, `wlroots_virtual_keyboard`, or `other`) and replacement-size bucket (`small` ≤32, `medium` 33–256, `large` >256 Unicode scalar values). Each profile contains `sample_count`, `window_count`, and p50/p95/p99 microsecond values; empty profiles are omitted.
-- `matcher_latency_sample_count` (integer): Lifetime count of input events processed by the matcher
+- `matcher_latency_sample_count` (integer): Lifetime count of matcher timing samples recorded; contended samples are reported separately
 - `matcher_latency_window_count` (integer): Number of recent matcher samples used for percentiles (maximum 1,024)
+- `matcher_latency_dropped_total` (integer): Matcher timing samples skipped because a diagnostics snapshot held the recording lock; measurement is best-effort and never blocks input processing
 - `matcher_latency_p50_us`, `matcher_latency_p95_us`, `matcher_latency_p99_us` (integers): Nearest-rank matcher/preparation latency percentiles, excluding output injection, in microseconds
 - `usage_flush_max_duration_us` (integer): Maximum usage-statistics write duration since daemon start, in microseconds
 - `usage_flush_failures_total` (integer): Usage-statistics flush attempts that failed; queued events are retained for retry while the worker remains active

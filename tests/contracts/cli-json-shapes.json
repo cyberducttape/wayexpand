@@ -73,6 +73,7 @@
     "injection_latency_profiles",
     "matcher_latency_sample_count",
     "matcher_latency_window_count",
+    "matcher_latency_dropped_total",
     "matcher_latency_p50_us",
     "matcher_latency_p95_us",
     "matcher_latency_p99_us",

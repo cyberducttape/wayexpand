@@ -4,6 +4,27 @@ Updated: 2026-10-29
 
 ## Completed in this work period
 
+- Made matcher latency recording nonblocking: capture operation duration
+  before metrics synchronization, use `try_lock`, and count skipped samples
+  atomically. Added `matcher_latency_dropped_total` to daemon status and bumped
+  the status contract to schema 14. A lock-contention regression confirms
+  measurement returns without waiting and increments the dropped count.
+- Removed delimiter `String` construction and recursive event dispatch by
+  stack-encoding the scalar and passing borrowed UTF-8 to the shared scanner.
+  A regression compares results and retained matcher state with normal text
+  input.
+- `RUST_TEST_THREADS=1 cargo test -p wayexpand-core -p wayexpand-daemon
+  --locked`: passed; 459 core tests passed (2 ignored), and 206 daemon tests
+  passed, plus integration and documentation tests. The daemon status
+  contract test verifies the new field and schema.
+- The schema bump initially exposed stale schema-13 fixtures in GUI and CLI
+  contract tests. Updated current-status fixtures and the CLI status-shape
+  contract. `RUST_TEST_THREADS=1 cargo test --workspace --locked -q` then
+  passed across the workspace; 459 core, 206 daemon, 173 GUI, 128 CLI, and all
+  other crate suites passed (four tests ignored).
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`,
+  `cargo fmt --all -- --check`, and `git diff --check` passed.
+
 - Changed case propagation to accept `Cow<str>` and return the original
   borrowed/owned string for lower or mixed case, avoiding the unnecessary copy
   of already-rendered text. Upper/title transformations still create owned
