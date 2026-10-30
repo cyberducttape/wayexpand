@@ -968,6 +968,22 @@ pass with both default parallel scheduling and `RUST_TEST_THREADS=1`; the full
 
 ## Verification evidence
 
+- Fresh verification on local source `5ed43432d4f8` (2026-10-30):
+  `cargo test --locked -p wayexpand-core` passed (467 unit tests, 2 ignored;
+  documentation configuration and snapshot-consistency tests passed),
+  `cargo test --locked -p wayexpand-daemon latency::tests` passed (6 tests),
+  `cargo clippy --workspace --all-targets --locked -- -D warnings` passed,
+  and `cargo fmt --all -- --check` plus `git diff --check` passed. The code
+  already includes borrowed matcher inputs, stack-buffer delimiter handling,
+  nonblocking matcher telemetry with a dropped-sample counter, and reusable
+  caller-owned immediate/deferred result buffers; corresponding matcher,
+  delimiter, buffer-reuse, and telemetry contention tests are present. These
+  checks do not establish zero allocations for every event or change any
+  compositor certification gate.
+- The live GitHub Fuzz workflow `41038804679` is testing remote commit
+  `f6c338b42f40`, not this local commit; it was still in progress when checked.
+  Its result must not be attributed to the local source.
+
 - CI for `894cb6bb` initially failed only in `Script Validation`: ShellCheck
   could not follow the `certification-processes.sh` source in
   `kwin-certification-session.sh`. Added the missing source directive;
