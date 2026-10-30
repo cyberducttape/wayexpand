@@ -48,10 +48,9 @@ impl<T> CommandQueue<T> {
     }
 
     fn try_send(&self, item: T) -> Result<(), T> {
-        let mut items = self
-            .items
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(mut items) = self.lock_items() else {
+            return Err(item);
+        };
         if items.len() >= self.capacity {
             return Err(item);
         }
@@ -61,18 +60,41 @@ impl<T> CommandQueue<T> {
     }
 
     fn recv_timeout(&self, timeout: Duration) -> Option<T> {
-        let mut items = self
-            .items
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut items = self.lock_items()?;
         if let Some(item) = items.pop_front() {
             return Some(item);
         }
-        let (mut items, _) = self
-            .wake
-            .wait_timeout(items, timeout)
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut items = match self.wake.wait_timeout(items, timeout) {
+            Ok((items, _)) => items,
+            Err(poisoned) => {
+                let (items, _) = poisoned.into_inner();
+                self.recover_poisoned(items)?
+            }
+        };
         items.pop_front()
+    }
+
+    fn lock_items(&self) -> Option<std::sync::MutexGuard<'_, VecDeque<T>>> {
+        match self.items.lock() {
+            Ok(items) => Some(items),
+            Err(poisoned) => self.recover_poisoned(poisoned.into_inner()),
+        }
+    }
+
+    /// The queue's complete logical invariant is `len <= capacity`; FIFO and
+    /// storage validity are maintained by `VecDeque`, and no user code runs
+    /// while its mutex is held. Recover a poisoned lock only when its bound
+    /// still holds. If it does not, keep the mutex poisoned and fail queue
+    /// reads/writes closed instead of running jobs from inconsistent state.
+    fn recover_poisoned<'a>(
+        &self,
+        items: std::sync::MutexGuard<'a, VecDeque<T>>,
+    ) -> Option<std::sync::MutexGuard<'a, VecDeque<T>>> {
+        if items.len() > self.capacity {
+            return None;
+        }
+        self.items.clear_poison();
+        Some(items)
     }
 
     fn notify_all(&self) {
@@ -468,6 +490,41 @@ pub(super) struct AsyncHotkeyCompletion {
 mod tests {
     use super::CommandQueue;
     use std::{sync::Arc, thread, time::Duration};
+
+    #[test]
+    fn command_queue_recovers_a_poisoned_lock_only_when_its_bound_holds() {
+        let queue = Arc::new(CommandQueue::new(2));
+        let poisoned_queue = Arc::clone(&queue);
+        assert!(thread::spawn(move || {
+            let mut items = poisoned_queue.items.lock().unwrap();
+            items.push_back(1);
+            panic!("simulate a worker panic while holding the queue mutex");
+        })
+        .join()
+        .is_err());
+
+        assert_eq!(queue.try_send(2), Ok(()));
+        assert_eq!(queue.recv_timeout(Duration::ZERO), Some(1));
+        assert_eq!(queue.recv_timeout(Duration::ZERO), Some(2));
+        assert!(!queue.items.is_poisoned());
+    }
+
+    #[test]
+    fn command_queue_fails_closed_if_a_poisoned_queue_exceeds_its_bound() {
+        let queue = Arc::new(CommandQueue::new(1));
+        let poisoned_queue = Arc::clone(&queue);
+        assert!(thread::spawn(move || {
+            let mut items = poisoned_queue.items.lock().unwrap();
+            items.extend([1, 2]);
+            panic!("simulate an invalid queue state");
+        })
+        .join()
+        .is_err());
+
+        assert_eq!(queue.try_send(3), Err(3));
+        assert_eq!(queue.recv_timeout(Duration::ZERO), None);
+        assert!(queue.items.is_poisoned());
+    }
 
     #[test]
     fn command_queue_supports_multiple_consumers_without_a_receiver_lock() {

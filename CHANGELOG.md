@@ -12,6 +12,9 @@ All notable changes to WayExpand are documented here.
 - Preserve a machine-readable private KWin 6.6.6 smoke report with exact
   binary hashes and measured keysym-fallback latency. The report remains
   explicitly partial and non-certifying.
+- Validate the command worker queue's capacity invariant before recovering a
+  poisoned mutex. An over-capacity poisoned queue now refuses reads and writes
+  instead of dispatching jobs from inconsistent state.
 - Keep the libei event converter and session on the dedicated thread that
   creates them, replacing the manually asserted `Send` implementation with a
   bounded request/reply injector handle. Compile-time regression coverage

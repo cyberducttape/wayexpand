@@ -46,6 +46,13 @@ Updated: 2026-10-29
   Twelve output/focus checks passed and backend latency was measured; four
   scenarios were not tested. The report correctly says `certified: false`.
   This does not satisfy physical-capture or production-certification gates.
+- Hardened command queue poison recovery: it checks the bounded-length
+  invariant before clearing poison and refuses queue operations when that
+  invariant is broken. Regression tests cover valid recovery and fail-closed
+  behavior for an intentionally over-capacity poisoned queue.
+- `cargo test -p wayexpand-core engine::async_runtime::tests --locked`: all 3
+  queue tests passed; `cargo clippy -p wayexpand-core --all-targets --locked
+  -- -D warnings`: passed.
 - `cargo clippy --workspace --all-targets --locked -- -D warnings`: passed
   after the libei ownership change.
 - `RUST_TEST_THREADS=1 cargo test --workspace --locked -q`: passed after the
