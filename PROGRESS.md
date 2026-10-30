@@ -17,9 +17,30 @@ Updated: 2026-10-30
   --locked` passed with exit code 0; `cargo clippy --release --workspace
   --all-targets --locked -- -D warnings`, `cargo fmt --all -- --check`, and
   `git diff --check` passed.
-- These checks establish build/test correctness for the current snapshot, not
-  zero allocations or a measured latency improvement. The matcher allocation
-  and benchmark commands remain to be run for performance claims.
+- Those checks establish correctness for the current snapshot. Follow-up
+  allocation and benchmark measurements are recorded below.
+
+## Fast-path allocation and benchmark follow-up
+
+- Re-ran the release allocator probe: zero allocations across 100,000 warmed
+  deferred nonmatching ASCII events. The isolated matcher memory probe built
+  10,000-snippet libraries in 15.18 ms (plain), 93.00 ms (80,000 amplified
+  triggers), and 129.93 ms (90,000 Unicode triggers); measured steady heap was
+  2.1, 7.6, and 9.6 MiB respectively. This is isolated matcher construction,
+  not process RSS or full config reload.
+- Improved `matcher_latency` benchmark validity: it now feeds scalar events
+  using `process_text_char_into` and a reused result vector, removing temporary
+  per-character strings from the timed harness. Because this changes the
+  workload, historical matcher latency numbers are not directly comparable.
+- Repeated short matcher runs reported 5.45–6.77 µs at 100 snippets,
+  4.22–4.67 µs at 1,000, and 4.35–4.37 µs at 10,000. The source-render
+  template case measured 8.16 µs, while precompiled rendering measured
+  3.82 µs; the latter aligns with the prior interleaved measurement. Full
+  matcher and template results, host details, and limits are in
+  [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
+- These are short, host-specific benchmark results with run-to-run spread.
+  They establish measurements, not end-to-end latency targets or a release
+  performance guarantee. No matcher rewrite was justified by this evidence.
 
 ## Current-source private KWin certification run
 

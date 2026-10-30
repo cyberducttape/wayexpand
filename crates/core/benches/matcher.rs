@@ -47,6 +47,7 @@ fn bench_matcher(c: &mut Criterion) {
         let mut engine = ExpansionEngine::new(config_with_expansions(count))
             .expect("benchmark engine should initialize");
         let trigger = format!(":snippet{:05}", count - 1);
+        let mut results = Vec::with_capacity(1);
 
         group.bench_with_input(
             BenchmarkId::from_parameter(count),
@@ -54,9 +55,11 @@ fn bench_matcher(c: &mut Criterion) {
             |bench, trigger| {
                 bench.iter(|| {
                     for character in trigger.chars() {
-                        black_box(engine.process(InputEvent::Text(character.to_string())));
+                        engine.process_text_char_into(character, &mut results);
+                        black_box(&results);
                     }
-                    black_box(engine.process(InputEvent::EndOfInput));
+                    engine.process_into(InputEvent::EndOfInput, &mut results);
+                    black_box(&results);
                 });
             },
         );

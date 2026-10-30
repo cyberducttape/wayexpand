@@ -27,6 +27,36 @@ These are machine-specific reference values, not a release performance
 guarantee. Compare like-for-like hardware and toolchain when investigating a
 regression; Criterion's full reports are written to `target/criterion`.
 
+### Scalar/reusable-result harness: 2026-10-30
+
+The matcher latency case now feeds each trigger scalar through
+`process_text_char_into` and reuses its result vector. This avoids measuring a
+temporary `String` per typed scalar and lets result capacity be reused. An
+empty returned `Vec` in the previous harness did not itself allocate heap
+memory; actual match-result construction remains part of the timed event. The
+benchmark measures the initialized core engine and emitted expansion result,
+not backend decoding or insertion. This workload change means the numbers
+below must not be compared directly with the 2026-10-01 baseline.
+
+On the same AMD Ryzen 7 7735U / Linux 7.0.0-38-generic / Rust 1.96.0 host,
+two short runs (10 samples, 1 s warmup, 2 s measurement) produced these
+matcher estimates:
+
+| Snippets | Run 1 | Run 2 |
+| ---: | ---: | ---: |
+| 100 | 5.45 µs | 6.77 µs |
+| 1,000 | 4.22 µs | 4.67 µs |
+| 10,000 | 4.37 µs | 4.35 µs |
+
+The run-to-run spread at smaller library sizes is a reason to treat these as
+directional measurements, not an SLO. The matcher benchmark's remaining
+workloads measured 70 ns for buffered ASCII type/backspace, 50.6 µs for the
+long NFD buffer case, and 73.4 µs for a grapheme spanning the full buffer.
+Amplified matcher construction measured 30.3 / 68.2 / 165.4 ms at 1,000 /
+5,000 / 10,000 snippets; parse, validation, and build measured 54.0 / 271.9 ms
+at 1,000 / 10,000 snippets. Criterion warned that the 10-sample target was
+extended for several construction cases.
+
 ## Input-path allocation probe
 
 The isolated allocation probe warms the bounded engine buffer and caller-owned
@@ -321,6 +351,19 @@ This is a single-host baseline, not a p95/p99 event-latency measurement or a
 release target. In particular, the preview still scans the large source up to
 its first output limit; its result allocation is bounded, but its runtime is
 not constant in the preview byte budget alone.
+
+### Recheck: 2026-10-30
+
+On the same host and toolchain, using 10 samples, 1 s warmup, and 2 s
+measurement, estimates were 8.16 µs for built-ins rendered from source,
+3.82 µs for the precompiled built-in path, 465 ns for eight-level includes,
+953 µs for a full 1 MiB render, and 305 µs for the bounded 512-byte preview.
+The precompiled estimate is consistent with the 2026-10-28 interleaved
+3.75–3.91 µs run. The source-render estimate was substantially higher than
+the earlier interleaved 4.22–4.27 µs result; this path recompiles the template
+and is not the engine's steady-state path. Repeat an interleaved run before
+attributing that difference to a code regression. These short measurements
+include visible outliers and are directional only.
 
 An exploratory before/after run on the AMD Ryzen 7 7735U / Rust 1.96.0 host
 measured the 10,000-snippet stable check at 348.30 ms (95% interval
