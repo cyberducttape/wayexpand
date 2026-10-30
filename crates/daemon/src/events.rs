@@ -18,11 +18,34 @@ pub(crate) fn evdev_release_is_safe<E: std::fmt::Display>(release: Result<(), E>
 pub(crate) fn process_event(
     engine: &mut ExpansionEngine,
     event: InputEvent,
-    mut injector: Option<&mut dyn TextInjector>,
+    injector: Option<&mut dyn TextInjector>,
     policy: &wayexpand_core::OrganizationPolicy,
     active_backend: &str,
 ) -> std::result::Result<(), Box<EventError>> {
+    let mut pending_results = Vec::new();
+    process_event_with_pending_buffer(
+        engine,
+        event,
+        injector,
+        policy,
+        active_backend,
+        &mut pending_results,
+    )
+}
+
+/// Process an event while reusing caller-owned storage for deferred match
+/// results. The vector is drained before dispatch returns, retaining its
+/// capacity without allowing jobs to borrow from it.
+pub(crate) fn process_event_with_pending_buffer(
+    engine: &mut ExpansionEngine,
+    event: InputEvent,
+    mut injector: Option<&mut dyn TextInjector>,
+    policy: &wayexpand_core::OrganizationPolicy,
+    active_backend: &str,
+    pending_results: &mut Vec<wayexpand_core::PendingExpansionResult>,
+) -> std::result::Result<(), Box<EventError>> {
     if let InputEvent::Key(chord) = event {
+        pending_results.clear();
         // Undo is a transaction too: do not consume the undo record until
         // there is an injector and the replacement has been applied. This
         // preserves retryability across backend reconnects and failures.
@@ -35,8 +58,14 @@ pub(crate) fn process_event(
         return Ok(());
     }
     // Check policy before executing deferred commands.
-    let pending = latency::measure_matcher(|| engine.process_deferred(event));
-    apply_pending_results(engine, pending, injector, policy, active_backend)
+    latency::measure_matcher(|| engine.process_deferred_into(event, pending_results));
+    apply_pending_results_with_pending_buffer(
+        engine,
+        pending_results,
+        injector,
+        policy,
+        active_backend,
+    )
 }
 
 /// Match a key event and queue its hotkey actions. Returns the undo
@@ -116,16 +145,15 @@ pub(crate) fn finish_undo(
     Ok(())
 }
 
-/// Apply deferred expansion results after policy pre-approval.
-/// Checks policy before executing commands, preventing irreversible side effects.
-pub(crate) fn apply_pending_results(
+pub(crate) fn apply_pending_results_with_pending_buffer(
     engine: &mut ExpansionEngine,
-    pending: Vec<wayexpand_core::PendingExpansionResult>,
+    pending: &mut Vec<wayexpand_core::PendingExpansionResult>,
     injector: Option<&mut dyn TextInjector>,
     policy: &wayexpand_core::OrganizationPolicy,
     active_backend: &str,
 ) -> std::result::Result<(), Box<EventError>> {
-    let results = dispatch_pending_results(engine, pending, policy, active_backend);
+    let results =
+        dispatch_pending_results_with_pending_buffer(engine, pending, policy, active_backend);
     apply_results(engine, results, injector, policy, active_backend)
 }
 
@@ -134,14 +162,25 @@ pub(crate) fn apply_pending_results(
 /// Keeping this stage separate lets evdev perform its physical key-release and
 /// input-quiet checks before injection, while still guaranteeing that command
 /// expansions are dispatched through the bounded asynchronous worker.
+#[cfg(test)]
 pub(crate) fn dispatch_pending_results(
     engine: &mut ExpansionEngine,
     pending: Vec<wayexpand_core::PendingExpansionResult>,
     policy: &wayexpand_core::OrganizationPolicy,
     active_backend: &str,
 ) -> Vec<ExpansionResult> {
+    let mut pending = pending;
+    dispatch_pending_results_with_pending_buffer(engine, &mut pending, policy, active_backend)
+}
+
+pub(crate) fn dispatch_pending_results_with_pending_buffer(
+    engine: &mut ExpansionEngine,
+    pending: &mut Vec<wayexpand_core::PendingExpansionResult>,
+    policy: &wayexpand_core::OrganizationPolicy,
+    active_backend: &str,
+) -> Vec<ExpansionResult> {
     let mut results = Vec::new();
-    for pending_result in pending {
+    for pending_result in pending.drain(..) {
         let has_command = pending_result.command.is_some();
 
         if let Some(command) = &pending_result.command {
@@ -334,6 +373,7 @@ pub(crate) fn absorb_evdev_delimiter(results: &mut [ExpansionResult], character:
 /// Match a non-key evdev event, gate its results on the physical key state,
 /// and inject them. Failures are returned, not propagated past the caller,
 /// which must restore its injector before classifying them for recovery.
+#[cfg(test)]
 pub(crate) fn apply_deferred_evdev_event(
     engine: &mut ExpansionEngine,
     event: InputEvent,
@@ -342,8 +382,34 @@ pub(crate) fn apply_deferred_evdev_event(
     policy: &wayexpand_core::OrganizationPolicy,
     active_backend: &str,
 ) -> std::result::Result<(), Box<EventError>> {
-    let pending = engine.process_deferred(event);
-    let results = dispatch_pending_results(engine, pending, policy, active_backend);
+    let mut pending_results = Vec::new();
+    apply_deferred_evdev_event_with_pending_buffer(
+        engine,
+        event,
+        backend,
+        evdev,
+        policy,
+        active_backend,
+        &mut pending_results,
+    )
+}
+
+pub(crate) fn apply_deferred_evdev_event_with_pending_buffer(
+    engine: &mut ExpansionEngine,
+    event: InputEvent,
+    backend: &mut dyn TextInjector,
+    evdev: &mut Option<EvdevSource>,
+    policy: &wayexpand_core::OrganizationPolicy,
+    active_backend: &str,
+    pending_results: &mut Vec<wayexpand_core::PendingExpansionResult>,
+) -> std::result::Result<(), Box<EventError>> {
+    engine.process_deferred_into(event, pending_results);
+    let results = dispatch_pending_results_with_pending_buffer(
+        engine,
+        pending_results,
+        policy,
+        active_backend,
+    );
     if results.is_empty() {
         return Ok(());
     }
@@ -356,7 +422,13 @@ pub(crate) fn apply_deferred_evdev_event(
         policy,
         active_backend,
     )?;
-    replay_evdev_follow_up(engine, gating.follow_up, policy, active_backend)
+    replay_evdev_follow_up_with_pending_buffer(
+        engine,
+        gating.follow_up,
+        policy,
+        active_backend,
+        pending_results,
+    )
 }
 
 /// Replay input captured during evdev gating through the matcher. The focused
@@ -369,8 +441,32 @@ pub(crate) fn replay_evdev_follow_up(
     policy: &wayexpand_core::OrganizationPolicy,
     active_backend: &str,
 ) -> std::result::Result<(), Box<EventError>> {
+    let mut pending_results = Vec::new();
+    replay_evdev_follow_up_with_pending_buffer(
+        engine,
+        follow_up,
+        policy,
+        active_backend,
+        &mut pending_results,
+    )
+}
+
+pub(crate) fn replay_evdev_follow_up_with_pending_buffer(
+    engine: &mut ExpansionEngine,
+    follow_up: Vec<InputEvent>,
+    policy: &wayexpand_core::OrganizationPolicy,
+    active_backend: &str,
+    pending_results: &mut Vec<wayexpand_core::PendingExpansionResult>,
+) -> std::result::Result<(), Box<EventError>> {
     for event in follow_up {
-        process_event(engine, event, None, policy, active_backend)?;
+        process_event_with_pending_buffer(
+            engine,
+            event,
+            None,
+            policy,
+            active_backend,
+            pending_results,
+        )?;
     }
     Ok(())
 }

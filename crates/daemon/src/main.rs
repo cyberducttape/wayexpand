@@ -29,8 +29,9 @@ use anyhow::Result;
 use args::parse_args;
 use control::{ControlServer, FocusSnapshot};
 use events::{
-    apply_deferred_evdev_event, apply_evdev_gating, apply_results, process_event,
-    replay_evdev_follow_up, restore_abandoned_results, EvdevGatingOutcome,
+    apply_deferred_evdev_event_with_pending_buffer, apply_evdev_gating, apply_results,
+    process_event, process_event_with_pending_buffer, replay_evdev_follow_up,
+    restore_abandoned_results, EvdevGatingOutcome,
 };
 use focus::{drain_pending_window_events, focus_token, publish_focus_snapshot, FocusState};
 use input_loop::{
@@ -181,6 +182,9 @@ struct Daemon {
     /// A transaction in flight on the serialized output worker; see
     /// `pending_output`.
     pending_output: Option<pending_output::PendingOutput>,
+    /// Reused storage for match results; dispatch drains it before any later
+    /// event can clear or overwrite the completed records.
+    pending_results: Vec<wayexpand_core::PendingExpansionResult>,
     /// Evdev is non-exclusive: keystrokes captured during a slow replacement
     /// must not be replayed into the matcher as fresh input afterward.
     evdev_quiet_since: Option<Instant>,
@@ -547,6 +551,7 @@ fn main() -> Result<()> {
         output_worker,
         retiring_output_workers: Vec::new(),
         pending_output: None,
+        pending_results: Vec::new(),
         evdev_quiet_since: None,
         stdin_closed,
         logged_queue_rejections,

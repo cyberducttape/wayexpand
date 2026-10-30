@@ -1084,6 +1084,58 @@ fn processes_each_character_in_a_chunk() {
 }
 
 #[test]
+fn reusable_text_results_match_owned_processing_and_keep_capacity() {
+    let config =
+        Config::parse("[[expansion]]\ntrigger = \":x\"\nreplacement = \"expanded\"").unwrap();
+    let mut reusable_engine = ExpansionEngine::new(config.clone()).unwrap();
+    let mut owned_engine = ExpansionEngine::new(config).unwrap();
+    let mut reusable = Vec::with_capacity(4);
+    let allocation = reusable.as_ptr();
+
+    reusable_engine.process_text_into(":x", &mut reusable);
+    let owned = owned_engine.process(InputEvent::Text(":x".into()));
+    assert_eq!(reusable, owned);
+    assert_eq!(reusable.len(), 1);
+    assert_eq!(reusable.as_ptr(), allocation);
+
+    reusable_engine.process_text_into("ordinary text", &mut reusable);
+    assert!(reusable.is_empty());
+    assert_eq!(reusable.capacity(), 4);
+    assert_eq!(reusable.as_ptr(), allocation);
+
+    reusable_engine.process_text_into(":x", &mut reusable);
+    assert_eq!(reusable, owned);
+    assert_eq!(reusable.as_ptr(), allocation);
+}
+
+#[test]
+fn reusable_deferred_results_are_cleared_and_reused() {
+    let config =
+        Config::parse("[[expansion]]\ntrigger = \":x\"\nreplacement = \"expanded\"").unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    let mut pending = Vec::with_capacity(2);
+    let allocation = pending.as_ptr();
+
+    engine.process_deferred_into(InputEvent::Text(":x".into()), &mut pending);
+    assert_eq!(pending.len(), 1);
+    let first = pending[0].clone();
+    assert_eq!(pending.as_ptr(), allocation);
+
+    engine.process_deferred_into(
+        InputEvent::Key(KeyChord::parse("Ctrl+K").unwrap()),
+        &mut pending,
+    );
+    assert!(pending.is_empty());
+    assert_eq!(pending.capacity(), 2);
+    assert_eq!(pending.as_ptr(), allocation);
+
+    engine.process_deferred_into(InputEvent::Text(":x".into()), &mut pending);
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].matched_text, first.matched_text);
+    assert_eq!(pending.as_ptr(), allocation);
+}
+
+#[test]
 fn delimiter_event_matches_the_borrowed_text_path() {
     let config = Config::parse(
         r#"[[expansion]]

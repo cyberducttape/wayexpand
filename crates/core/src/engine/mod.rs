@@ -244,8 +244,7 @@ impl ExpansionEngine {
             validated
                 .effective_triggers
                 .iter()
-                .cloned()
-                .map(|(_, trigger)| trigger),
+                .map(|(_, trigger)| trigger.as_str()),
         )
         .expect("validated effective-trigger limit fits matcher indices");
         let app_filters = validated.app_filters.clone();

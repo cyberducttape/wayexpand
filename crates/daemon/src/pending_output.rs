@@ -19,7 +19,8 @@ use std::collections::VecDeque;
 use wayexpand_core::InjectorError;
 
 use crate::events::{
-    dispatch_pending_results, expansion_allowed, finish_expansion, finish_undo, process_key_event,
+    dispatch_pending_results_with_pending_buffer, expansion_allowed, finish_expansion, finish_undo,
+    process_key_event,
 };
 use crate::output_loop::SubmittedTransaction;
 use crate::source_steps::Step;
@@ -415,10 +416,12 @@ impl Daemon {
             // preventing every typed trigger from reaching the matcher.
             return Ok(());
         }
-        let pending = self.config.engine.process_deferred(event);
-        let results = dispatch_pending_results(
+        self.config
+            .engine
+            .process_deferred_into(event, &mut self.pending_results);
+        let results = dispatch_pending_results_with_pending_buffer(
             &mut self.config.engine,
-            pending,
+            &mut self.pending_results,
             &self.policy,
             self.active_backend,
         );
@@ -603,6 +606,7 @@ mod tests {
                 output_worker: Some(worker),
                 retiring_output_workers: Vec::new(),
                 pending_output: None,
+                pending_results: Vec::new(),
                 evdev_quiet_since: None,
                 stdin_closed: false,
                 logged_queue_rejections: 0,

@@ -11,6 +11,11 @@ All notable changes to WayExpand are documented here.
   `Matcher::new` API as deprecated for source compatibility.
 - Let `Matcher::try_new` consume borrowed `AsRef<str>` trigger items, avoiding
   trigger-string clones when callers already hold validated strings.
+- Build the engine matcher directly from validated trigger slices and expose
+  reusable `process_into`, `process_text_into`, and `process_deferred_into`
+  APIs. The daemon retains a pending-result buffer across input events, drains
+  owned dispatch records before reuse, and tests capacity retention and result
+  equivalence with the allocating API.
 - Preserve a machine-readable private KWin 6.6.6 smoke report with exact
   binary hashes and measured keysym-fallback latency. The report remains
   explicitly partial and non-certifying.

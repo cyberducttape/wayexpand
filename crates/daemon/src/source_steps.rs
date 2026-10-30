@@ -150,12 +150,13 @@ impl Daemon {
                 )?;
                 self.update_profile_for_focus()?;
                 let result = match self.input_method.as_mut() {
-                    Some(source) => process_event(
+                    Some(source) => process_event_with_pending_buffer(
                         &mut self.config.engine,
                         event,
                         Some(source),
                         &self.policy,
                         self.active_backend,
+                        &mut self.pending_results,
                     ),
                     None => {
                         return Err(anyhow::anyhow!(
@@ -184,12 +185,13 @@ impl Daemon {
                         );
                         self.input_method = None;
                         self.connection_state = "reconnecting";
-                        process_event(
+                        process_event_with_pending_buffer(
                             &mut self.config.engine,
                             InputEvent::FocusChanged { sensitive: true },
                             None,
                             &self.policy,
                             self.active_backend,
+                            &mut self.pending_results,
                         )?;
                         set_daemon_status_with_config_state(
                             &mut self.status_publisher,
@@ -209,12 +211,13 @@ impl Daemon {
                 warn!(%error, "input-method connection lost; reconnecting");
                 self.input_method = None;
                 self.connection_state = "reconnecting";
-                process_event(
+                process_event_with_pending_buffer(
                     &mut self.config.engine,
                     InputEvent::FocusChanged { sensitive: true },
                     None,
                     &self.policy,
                     self.active_backend,
+                    &mut self.pending_results,
                 )?;
                 set_daemon_status_with_config_state(
                     &mut self.status_publisher,
@@ -308,35 +311,38 @@ impl Daemon {
                     // needed if the matcher actually produced text that
                     // will modify the focused application.
                     let result = if matches!(event, InputEvent::Key(_)) {
-                        process_event(
+                        process_event_with_pending_buffer(
                             &mut self.config.engine,
                             event,
                             Some(backend.as_mut()),
                             &self.policy,
                             self.active_backend,
+                            &mut self.pending_results,
                         )
                     } else {
                         // The outcome is a value: the injector is restored
                         // below and failures reach the recovery match, never
                         // an early return out of the event loop.
-                        apply_deferred_evdev_event(
+                        apply_deferred_evdev_event_with_pending_buffer(
                             &mut self.config.engine,
                             event,
                             backend.as_mut(),
                             &mut self.evdev,
                             &self.policy,
                             self.active_backend,
+                            &mut self.pending_results,
                         )
                     };
                     self.injector = Some(backend);
                     result
                 } else {
-                    process_event(
+                    process_event_with_pending_buffer(
                         &mut self.config.engine,
                         event,
                         None,
                         &self.policy,
                         self.active_backend,
+                        &mut self.pending_results,
                     )
                 };
                 match result {
@@ -361,12 +367,13 @@ impl Daemon {
                 warn!(%error, "evdev connection lost; reconnecting");
                 self.evdev = None;
                 self.connection_state = "reconnecting";
-                let _ = process_event(
+                let _ = process_event_with_pending_buffer(
                     &mut self.config.engine,
                     InputEvent::EndOfInput,
                     None,
                     &self.policy,
                     self.active_backend,
+                    &mut self.pending_results,
                 );
                 set_daemon_status_with_config_state(
                     &mut self.status_publisher,
@@ -409,22 +416,24 @@ impl Daemon {
                     for character in line.chars() {
                         let event = InputEvent::Text(character.to_string());
                         let (result, backend) = if let Some(mut backend) = self.injector.take() {
-                            let result = process_event(
+                            let result = process_event_with_pending_buffer(
                                 &mut self.config.engine,
                                 event,
                                 Some(backend.as_mut()),
                                 &self.policy,
                                 self.active_backend,
+                                &mut self.pending_results,
                             );
                             (result, Some(backend))
                         } else {
                             (
-                                process_event(
+                                process_event_with_pending_buffer(
                                     &mut self.config.engine,
                                     event,
                                     None,
                                     &self.policy,
                                     self.active_backend,
+                                    &mut self.pending_results,
                                 ),
                                 None,
                             )
@@ -450,12 +459,13 @@ impl Daemon {
                                 "output session failed; current expansion is not replayed"
                             );
                             self.retire_output_injector();
-                            let _ = process_event(
+                            let _ = process_event_with_pending_buffer(
                                 &mut self.config.engine,
                                 InputEvent::EndOfInput,
                                 None,
                                 &self.policy,
                                 self.active_backend,
+                                &mut self.pending_results,
                             );
                             self.connection_state = "reconnecting";
                             set_daemon_status_with_config_state(
@@ -480,12 +490,13 @@ impl Daemon {
                         if !self.config.engine.has_deferred_reservations() {
                             // The flush can apply an expansion too; a refused
                             // one typed nothing and must not stop the daemon.
-                            if let Err(error) = process_event(
+                            if let Err(error) = process_event_with_pending_buffer(
                                 &mut self.config.engine,
                                 InputEvent::EndOfInput,
                                 Some(backend),
                                 &self.policy,
                                 self.active_backend,
+                                &mut self.pending_results,
                             ) {
                                 if !error.expansion_rejected() {
                                     return Err(error.into());
@@ -500,19 +511,21 @@ impl Daemon {
                         }
                     }
                 } else {
-                    process_event(
+                    process_event_with_pending_buffer(
                         &mut self.config.engine,
                         InputEvent::Text(line),
                         None,
                         &self.policy,
                         self.active_backend,
+                        &mut self.pending_results,
                     )?;
-                    process_event(
+                    process_event_with_pending_buffer(
                         &mut self.config.engine,
                         InputEvent::EndOfInput,
                         None,
                         &self.policy,
                         self.active_backend,
+                        &mut self.pending_results,
                     )?;
                 }
             }

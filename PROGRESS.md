@@ -13,6 +13,29 @@ Updated: 2026-10-29
   all remaining workspace suites passed. Workspace Clippy with `-D warnings`,
   formatting, and diff checks passed.
 
+- Added caller-owned reusable result APIs to `ExpansionEngine` and wired the
+  daemon's deferred text paths through a retained pending-result vector. The
+  dispatcher drains fully owned results before the vector is reused; regression
+  tests compare behavior and verify capacity retention. Matcher construction
+  now borrows validated trigger slices, avoiding intermediate trigger clones.
+- D verification: `cargo fmt --all -- --check`,
+  `cargo clippy --workspace --all-targets --locked -- -D warnings`, and
+  `RUST_TEST_THREADS=1 cargo test --workspace --locked` passed. The full
+  workspace includes 462 core tests (2 ignored), 206 daemon tests, and all
+  other unit, integration, and documentation suites.
+- Requested release benchmarks completed: matcher lookups measured 4.34–4.83
+  µs across 100–10,000 snippets; the 10,000-entry amplified construction case
+  measured 175.9 ms in Criterion. The allocation example measured 9.05 ms and
+  2.1 MiB steady / 9.4 MiB peak for 10,000 plain triggers, 54.14 ms and
+  7.6 MiB / 28.9 MiB for 80,000 amplified triggers, and 81.54 ms and
+  9.6 MiB / 41.5 MiB for 90,000 Unicode triggers. Template render benchmarks
+  also completed (builtins 4.67 µs; precompiled builtins 3.82 µs; depth-8
+  include 485 ns; 1 MiB render 980 µs; bounded preview 345 µs).
+  Criterion comparisons are host-local and should not be treated as portable
+  release guarantees. The allocation example measures trie construction after
+  source trigger strings are prepared; it does not measure per-keystroke
+  allocations.
+
 - Made matcher latency recording nonblocking: capture operation duration
   before metrics synchronization, use `try_lock`, and count skipped samples
   atomically. Added `matcher_latency_dropped_total` to daemon status and bumped

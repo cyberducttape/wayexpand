@@ -26,17 +26,42 @@ impl ExpansionEngine {
     /// separated from matching policy, transaction handling, and command
     /// runtime ownership as those implementations continue to be extracted.
     pub fn process(&mut self, event: InputEvent) -> Vec<ExpansionResult> {
-        let results = self.process_internal(event);
-        debug_assert!(self.buffer.len() <= self.max_buffer_chars);
+        let mut results = Vec::new();
+        self.process_into(event, &mut results);
         results
+    }
+
+    /// Process an event into caller-owned storage, clearing previous results
+    /// while retaining the vector's allocation for reuse.
+    pub fn process_into(&mut self, event: InputEvent, results: &mut Vec<ExpansionResult>) {
+        self.process_internal_into(event, results);
+        debug_assert!(self.buffer.len() <= self.max_buffer_chars);
+    }
+
+    /// Process borrowed text as one text event into reusable result storage.
+    /// Matching still advances once per Unicode scalar value.
+    pub fn process_text_into(&mut self, text: &str, results: &mut Vec<ExpansionResult>) {
+        self.process_text_event_into::<ImmediateProcessor>(text, results);
+        debug_assert!(self.buffer.len() <= self.max_buffer_chars);
     }
 
     /// Process input while reserving command-backed matches for caller policy
     /// approval and later dispatch.
     pub fn process_deferred(&mut self, event: InputEvent) -> Vec<PendingExpansionResult> {
-        let results = self.process_deferred_internal(event);
-        debug_assert!(self.buffer.len() <= self.max_buffer_chars);
+        let mut results = Vec::new();
+        self.process_deferred_into(event, &mut results);
         results
+    }
+
+    /// Process an event into reusable pending-result storage. Results own
+    /// their dispatch data and can safely outlive this call or a later reload.
+    pub fn process_deferred_into(
+        &mut self,
+        event: InputEvent,
+        results: &mut Vec<PendingExpansionResult>,
+    ) {
+        self.process_deferred_internal_into(event, results);
+        debug_assert!(self.buffer.len() <= self.max_buffer_chars);
     }
 
     /// Clear matcher history when the preceding document text is already
@@ -467,41 +492,44 @@ fn same_focus_target(
 }
 
 impl ExpansionEngine {
-    /// Process an event stream. A text event may contain multiple Unicode
-    /// scalar values; matching is performed after each one.
-    pub(super) fn process_internal(&mut self, event: InputEvent) -> Vec<ExpansionResult> {
-        self.process_event::<ImmediateProcessor>(event)
-    }
-
-    /// Process input and return pending expansion results for deferred execution.
-    /// Commands are NOT executed; caller must check policy and complete results
-    /// with `dispatch_pending_with_policy()` to preserve engine state.
-    pub(super) fn process_deferred_internal(
+    pub(super) fn process_internal_into(
         &mut self,
         event: InputEvent,
-    ) -> Vec<PendingExpansionResult> {
-        self.process_event::<DeferredProcessor>(event)
+        results: &mut Vec<ExpansionResult>,
+    ) {
+        self.process_event_into::<ImmediateProcessor>(event, results);
     }
 
-    fn process_event<P: MatchProcessor>(&mut self, event: InputEvent) -> Vec<P::Output> {
+    pub(super) fn process_deferred_internal_into(
+        &mut self,
+        event: InputEvent,
+        results: &mut Vec<PendingExpansionResult>,
+    ) {
+        self.process_event_into::<DeferredProcessor>(event, results);
+    }
+
+    fn process_event_into<P: MatchProcessor>(
+        &mut self,
+        event: InputEvent,
+        results: &mut Vec<P::Output>,
+    ) {
+        results.clear();
         P::before_event(self);
         self.invalidate_undo_unless_undo_chord(&event);
         match event {
             InputEvent::Key(_) => {
                 self.note_key_event();
-                Vec::new()
             }
-            InputEvent::Text(text) => self.process_text::<P>(&text),
+            InputEvent::Text(text) => self.process_text_contents::<P>(&text, results),
             InputEvent::Delimiter(character) => {
                 // Encode into a stack buffer and pass the borrowed text to
                 // the common scanner, avoiding a one-character String and a
                 // recursive event dispatch.
                 let mut encoded = [0; 4];
-                self.process_text::<P>(character.encode_utf8(&mut encoded))
+                self.process_text_contents::<P>(character.encode_utf8(&mut encoded), results)
             }
             InputEvent::Backspace => {
                 self.on_backspace();
-                Vec::new()
             }
             InputEvent::EndOfInput => {
                 self.bump_generation();
@@ -514,39 +542,47 @@ impl ExpansionEngine {
                             )
                         });
                 self.clear_buffer();
-                result
-                    .map(|output| P::finish_end_of_input(self, output))
-                    .into_iter()
-                    .collect()
+                if let Some(output) = result {
+                    results.push(P::finish_end_of_input(self, output));
+                }
             }
             InputEvent::Reset => {
                 self.on_reset();
-                Vec::new()
             }
             InputEvent::FocusChanged { sensitive } => {
                 self.on_focus_changed(sensitive);
-                Vec::new()
             }
             InputEvent::CompositionChanged { active } => {
                 self.on_composition_changed(active);
-                Vec::new()
             }
             InputEvent::PauseChanged(paused) => {
                 self.on_pause_changed(paused);
-                Vec::new()
             }
             InputEvent::WindowChanged(window) => {
                 self.on_window_changed(window);
-                Vec::new()
             }
         }
     }
 
-    fn process_text<P: MatchProcessor>(&mut self, text: &str) -> Vec<P::Output> {
-        let mut results = Vec::new();
+    fn process_text_event_into<P: MatchProcessor>(
+        &mut self,
+        text: &str,
+        results: &mut Vec<P::Output>,
+    ) {
+        results.clear();
+        P::before_event(self);
+        self.last_expansion = None;
+        self.process_text_contents::<P>(text, results);
+    }
+
+    fn process_text_contents<P: MatchProcessor>(
+        &mut self,
+        text: &str,
+        results: &mut Vec<P::Output>,
+    ) {
         let mut result_bytes = 0usize;
         if !self.is_capture_enabled() {
-            return results;
+            return;
         }
         for (index, character) in text.chars().enumerate() {
             if index > 0 {
@@ -555,7 +591,7 @@ impl ExpansionEngine {
             // A later scalar in the same text event invalidates undo for
             // earlier matches, with policy-specific metadata handled here.
             if !results.is_empty() {
-                P::invalidate_outputs(self, &mut results);
+                P::invalidate_outputs(self, results);
             }
             self.bump_generation();
             if let Some((config_index, length)) = self.match_completed_by(character) {
@@ -601,7 +637,6 @@ impl ExpansionEngine {
                 }
             }
         }
-        results
     }
 
     /// Stop matching for the rest of an event that exceeded its result
