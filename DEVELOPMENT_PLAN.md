@@ -177,12 +177,12 @@ Acceptance criteria:
 
 **Status:** Open.
 
-Partial evidence: a release-mode allocation probe in
+Partial evidence: the release-mode allocation probe in
 [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) measures zero allocations across
-100,000 warmed, nonmatching ASCII `TextChar` events in the deferred core event
-path. It excludes XKB/backend decoding, queueing, output, and match-result
-construction, so it does not satisfy the end-to-end latency or large-library
-profiling gates.
+100,000 warmed nonmatching ASCII scalar events in each of the immediate and
+deferred core paths. It excludes XKB/backend decoding, queueing, output, and
+match-result construction, so it does not satisfy the end-to-end latency or
+large-library profiling gates.
 
 The 2026-10-30 GUI benchmark run measured trigger-conflict lookup at about
 28 ns and draft edit plus preview at about 15 µs across 100 to 10,000 snippets.

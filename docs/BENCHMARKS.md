@@ -61,8 +61,8 @@ extended for several construction cases.
 
 The isolated allocation probe warms the bounded engine buffer and caller-owned
 result vector, then counts allocator requests while processing 100,000
-nonmatching ASCII `InputEvent::TextChar` events through the deferred event API.
-It asserts that the warmed core event path performs no heap allocation:
+nonmatching ASCII scalar events through each of the immediate and deferred
+event APIs. It asserts zero warmed-path heap allocations for both:
 
 ```sh
 cargo run --locked --release -p wayexpand-core --example input_path_allocations

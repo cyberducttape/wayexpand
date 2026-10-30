@@ -1,4 +1,4 @@
-//! Count allocations in the warmed deferred ASCII input path.
+//! Count allocations in warmed immediate and deferred ASCII input paths.
 //!
 //! ```sh
 //! cargo run --locked --release -p wayexpand-core --example input_path_allocations
@@ -6,7 +6,9 @@
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::Relaxed};
-use wayexpand_core::{Config, ExpansionEngine, InputEvent, PendingExpansionResult};
+use wayexpand_core::{
+    Config, ExpansionEngine, ExpansionResult, InputEvent, PendingExpansionResult,
+};
 
 struct Counting;
 static TRACK: AtomicBool = AtomicBool::new(false);
@@ -49,13 +51,43 @@ fn main() {
     const WARMUP_EVENTS: usize = 4_096;
     const MEASURED_EVENTS: usize = 100_000;
 
-    let config = Config::parse(
-        r#"[[expansion]]
+    let config = || {
+        Config::parse(
+            r#"[[expansion]]
 trigger = ":never"
 replacement = "unused""#,
-    )
-    .expect("measurement configuration should validate");
-    let mut engine = ExpansionEngine::new(config).expect("measurement engine should build");
+        )
+        .expect("measurement configuration should validate")
+    };
+
+    let mut immediate_engine =
+        ExpansionEngine::new(config()).expect("immediate measurement engine should build");
+    let mut immediate: Vec<ExpansionResult> = Vec::new();
+    for _ in 0..WARMUP_EVENTS {
+        immediate_engine.process_text_char_into('x', &mut immediate);
+    }
+    immediate_engine.process_into(InputEvent::Reset, &mut immediate);
+
+    ALLOCATIONS.store(0, Relaxed);
+    TRACK.store(true, Relaxed);
+    for _ in 0..MEASURED_EVENTS {
+        immediate_engine.process_text_char_into('x', &mut immediate);
+    }
+    TRACK.store(false, Relaxed);
+
+    let immediate_allocations = ALLOCATIONS.load(Relaxed);
+    std::hint::black_box(&immediate_engine);
+    println!(
+        "warmed immediate ASCII input: {immediate_allocations} allocations across {MEASURED_EVENTS} events ({:.6} allocations/event)",
+        immediate_allocations as f64 / MEASURED_EVENTS as f64
+    );
+    assert_eq!(
+        immediate_allocations, 0,
+        "the warmed nonmatching immediate path allocated"
+    );
+
+    let mut engine =
+        ExpansionEngine::new(config()).expect("deferred measurement engine should build");
     let mut pending: Vec<PendingExpansionResult> = Vec::new();
 
     // Grow and settle the bounded input ring before measuring, then reset the

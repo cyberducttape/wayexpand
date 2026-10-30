@@ -22,8 +22,9 @@ Updated: 2026-10-30
 
 ## Fast-path allocation and benchmark follow-up
 
-- Re-ran the release allocator probe: zero allocations across 100,000 warmed
-  deferred nonmatching ASCII events. The isolated matcher memory probe built
+- Expanded and re-ran the release allocator probe: zero allocations across
+  100,000 warmed nonmatching ASCII events in each of the immediate and
+  deferred core paths. The isolated matcher memory probe built
   10,000-snippet libraries in 15.18 ms (plain), 93.00 ms (80,000 amplified
   triggers), and 129.93 ms (90,000 Unicode triggers); measured steady heap was
   2.1, 7.6, and 9.6 MiB respectively. This is isolated matcher construction,
