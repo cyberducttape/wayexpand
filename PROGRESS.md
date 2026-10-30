@@ -513,7 +513,11 @@ Updated: 2026-10-30
   status still connected. It verifies the transaction stops after the erase
   phase and increments the uncertainty counter.
 - Verification: all 13 `pending_output::tests` passed; formatting, daemon
-  Clippy with `-D warnings`, and `git diff --check` passed. This is synthetic
+  Clippy with `-D warnings`, and `git diff --check` passed. A fresh
+  `RUST_TEST_THREADS=1 cargo test --workspace --locked -q` then passed across
+  the workspace (core 465 passed / 2 ignored, daemon 207, CLI 129, GUI 173,
+  and all other unit, integration, and documentation tests passed), followed
+  by workspace Clippy with `-D warnings` and formatting. This is synthetic
   containment evidence and does not replace real evdev plus target-client
   certification.
 
