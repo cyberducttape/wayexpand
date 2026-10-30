@@ -129,8 +129,12 @@ independent compiler reproducibility, package-manager install/upgrade, actual
 service behavior, or published artifact signing/provenance on supported
 release hosts. Re-ran `scripts/test-install-release.sh`,
 `scripts/test-install-user.sh`, and `scripts/test-release.sh` on the current
-checkout; all passed. No container runtime is available in this environment
-to execute the Debian/RPM package-manager install smoke containers. The
+checkout; all passed. This environment has no local container runtime for
+package smoke tests. The GitHub main run for `f6c338b42f40` passed the
+`Package Install Smoke (ubuntu:26.04)` and `Package Install Smoke
+(fedora:latest)` jobs, along with native aarch64 and Debian/RPM artifact jobs.
+That run predates the current 46-commit local delta and must be rerun after
+those commits reach CI. The
 package smoke script now also refuses to run on a host without a Docker or
 Podman marker, even when its explicit opt-in is set; a regression covers this
 guard before any package-manager operation.

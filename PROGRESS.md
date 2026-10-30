@@ -2,6 +2,26 @@
 
 Updated: 2026-10-30
 
+## Current remote CI and dependency-update audit
+
+- GitHub `main` CI run [41020746599](https://github.com/cyberducttape/wayexpand/actions/runs/41020746599)
+  passed on remote commit `f6c338b42f40`, including Rust tests, native aarch64,
+  Debian/RPM artifacts, and package install/reinstall/remove smoke tests on
+  Ubuntu 26.04 and Fedora latest. This remote commit predates the current local
+  branch by 46 commits; it is not evidence for those unpushed changes.
+- Four open Dependabot PR runs (tokio, rustix, notify, and read-fonts) passed
+  Rust, build, security, and package jobs; each failed only at
+  `Documentation Validation / Verify commit identity policy`. The local fix
+  is commit `ebe78f22` and `bash scripts/test-commit-identity.sh` passes here.
+  The fix is absent from remote `main`, so the PR workflow cannot use it yet.
+- The open `eframe 0.37.0` PR has additional real failures in workspace tests,
+  clean builds, aarch64, Debian packaging, GUI concurrency stress, and Rust
+  1.92 MSRV. Do not accept that update as a routine dependency bump; it needs
+  a separate API/MSRV migration.
+- GitHub reports zero online self-hosted runners. No current CI or runner
+  evidence closes the real compositor certification gate. No remote branch,
+  PR, or workflow was changed during this audit.
+
 ## Independent full-workspace release verification
 
 - Re-ran `RUST_TEST_THREADS=1 cargo test --release --workspace --locked` on
