@@ -9,12 +9,18 @@ Updated: 2026-10-29
   regression injects an operation error, verifies the exact error is replied
   to the caller, then confirms a following request still receives a successful
   reply and the owner loop shuts down cleanly.
-- `cargo test -p wayexpand-backend-libei --locked` passed all 38 tests;
-  `cargo clippy -p wayexpand-backend-libei --all-targets --locked -- -D
-  warnings`, formatting, and `git diff --check` passed.
+- Extracted the readiness handoff so tests cover a reported startup
+  cancellation and an owner thread that exits before reporting readiness;
+  both errors return after the ended thread is joined. `cargo test -p
+  wayexpand-backend-libei --locked -- --test-threads=8` passed all 39 tests.
+  Backend Clippy with `-D warnings`, formatting, and diff checks passed.
+- The daemon regression `shutdown_does_not_join_a_worker_stuck_in_backend_teardown`
+  passed, confirming the outer output actor returns promptly when a backend
+  shutdown blocks.
 - This verifies request/reply behavior after an operation failure. It does not
-  prove bounded shutdown when the EIS call itself hangs, or startup behavior
-  under a non-responsive compositor; those remain lifecycle test gaps.
+  prove bounded startup when the EIS connection itself never reports
+  readiness, or recovery from a non-responsive live compositor; those remain
+  lifecycle test gaps.
 
 ## Latest verified change: scalar input event fast path
 

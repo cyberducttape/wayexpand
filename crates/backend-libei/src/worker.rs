@@ -71,24 +71,13 @@ impl LibeiInjector {
             )
             .map_err(LibeiError::Connect)?;
 
-        match ready_receiver.recv() {
-            Ok(Ok((capabilities, status_detail))) => Ok(Self {
-                sender: Some(sender),
-                worker: Some(worker),
-                capabilities,
-                status_detail,
-            }),
-            Ok(Err(error)) => {
-                let _ = worker.join();
-                Err(error)
-            }
-            Err(_) => {
-                let _ = worker.join();
-                Err(LibeiError::Connect(io::Error::other(
-                    "libei session thread ended before reporting readiness",
-                )))
-            }
-        }
+        let ((capabilities, status_detail), worker) = await_session_ready(ready_receiver, worker)?;
+        Ok(Self {
+            sender: Some(sender),
+            worker: Some(worker),
+            capabilities,
+            status_detail,
+        })
     }
 
     fn call(&self, request: impl FnOnce(Reply) -> SessionCommand) -> Result<(), InjectorError> {
@@ -102,6 +91,25 @@ impl LibeiInjector {
         response
             .recv()
             .unwrap_or_else(|_| Err(worker_unavailable()))
+    }
+}
+
+fn await_session_ready<T>(
+    ready_receiver: Receiver<Result<T, LibeiError>>,
+    worker: JoinHandle<()>,
+) -> Result<(T, JoinHandle<()>), LibeiError> {
+    match ready_receiver.recv() {
+        Ok(Ok(ready)) => Ok((ready, worker)),
+        Ok(Err(error)) => {
+            let _ = worker.join();
+            Err(error)
+        }
+        Err(_) => {
+            let _ = worker.join();
+            Err(LibeiError::Connect(io::Error::other(
+                "libei session thread ended before reporting readiness",
+            )))
+        }
     }
 }
 
@@ -296,6 +304,26 @@ mod tests {
         Arc,
     };
     use std::time::Duration;
+
+    #[test]
+    fn owner_thread_failure_during_startup_is_returned_and_joined() {
+        let (ready_sender, ready_receiver) =
+            mpsc::sync_channel::<Result<(InjectorCapabilities, &'static str), LibeiError>>(1);
+        let worker = thread::spawn(move || {
+            let _ = ready_sender.send(Err(LibeiError::Cancelled));
+        });
+        let error = await_session_ready(ready_receiver, worker).unwrap_err();
+        assert!(matches!(error, LibeiError::Cancelled));
+
+        // A panic or early return drops the readiness sender. The caller must
+        // get a startup error and reap the already-ended owner thread.
+        let (ready_sender, ready_receiver) = mpsc::sync_channel::<Result<(), LibeiError>>(1);
+        let worker = thread::spawn(move || drop(ready_sender));
+        let error = await_session_ready(ready_receiver, worker).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("ended before reporting readiness"));
+    }
 
     struct FailingSession {
         fail_next_insert: bool,
