@@ -141,6 +141,7 @@ Then see [SECURITY.md](../SECURITY.md)
 | [DEVELOPMENT.md](DEVELOPMENT.md) | Contributors | Building, testing, contributing |
 | [PACKAGING.md](PACKAGING.md) | Package maintainers | Building for distros |
 | [RELEASING.md](RELEASING.md) | Maintainers | Release process |
+| [REPOSITORY_GOVERNANCE.md](REPOSITORY_GOVERNANCE.md) | Repository administrators | Main-branch rules and release-check enforcement |
 | [INTEGRATION_TESTING.md](INTEGRATION_TESTING.md) | Contributors/QA | Testing procedures |
 | [PRODUCTION_ACCEPTANCE_CHECKLIST.md](PRODUCTION_ACCEPTANCE_CHECKLIST.md) | Release/SRE teams | Evidence gates for production deployment |
 | [LIBRARY_SYNC.md](LIBRARY_SYNC.md) | All users | Optional Git sync of the snippet library |

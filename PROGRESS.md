@@ -2,6 +2,21 @@
 
 Updated: 2026-10-30
 
+## Main-branch governance gap
+
+- GitHub returned `404 Branch not protected` for the public repository's
+  default branch. Open issues are empty; five Dependabot pull requests remain
+  open. The production release workflow already gates tagged artifacts on
+  compositor certification, but that does not prevent an unchecked merge to
+  `main`.
+- Added [`docs/REPOSITORY_GOVERNANCE.md`](docs/REPOSITORY_GOVERNANCE.md) with
+  the observed state, exact required CI job contexts, branch ruleset criteria,
+  release-gate distinction, and verification commands. The production
+  acceptance checklist now tracks applying and testing the ruleset as open.
+- GitHub repository settings were not changed. A repository administrator
+  must apply the ruleset and verify that a failing required check blocks a
+  merge; the documentation is not enforcement.
+
 ## Current remote CI and dependency-update audit
 
 - GitHub `main` CI run [41020746599](https://github.com/cyberducttape/wayexpand/actions/runs/41020746599)
