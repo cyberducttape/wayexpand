@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Normalize binary release archives with a fixed entry order, timestamp,
+  ownership, and directory umask; `scripts/test-release.sh` verifies byte-for-
+  byte archive reproducibility across differing caller umasks.
 - Connect to explicit `LIBEI_SOCKET` endpoints with Tokio's nonblocking Unix
   socket API, honoring connection cancellation and a five-second deadline
   instead of blocking the EIS owner thread in `connect(2)`.

@@ -44,12 +44,35 @@ case "$build_triple" in
 esac
 package_output="$test_root/packages"
 mkdir -m 0700 "$package_output"
-(cd "$project_dir" && \
+(cd "$project_dir" && umask 077 && \
     CARGO_TARGET_DIR="$target_dir" \
     WAYEXPAND_RELEASE_OUTPUT_DIR="$package_output" \
+    SOURCE_DATE_EPOCH=0 \
         scripts/package-release-binaries.sh test "$release_arch")
 archive="$package_output/wayexpand-test-linux-$release_arch.tar.gz"
 checksum="$archive.sha256"
+repeat_output="$test_root/packages-repeat"
+mkdir -m 0700 "$repeat_output"
+(cd "$project_dir" && umask 002 && \
+    CARGO_TARGET_DIR="$target_dir" \
+    WAYEXPAND_RELEASE_OUTPUT_DIR="$repeat_output" \
+    SOURCE_DATE_EPOCH=0 \
+        scripts/package-release-binaries.sh test "$release_arch")
+repeat_archive="$repeat_output/wayexpand-test-linux-$release_arch.tar.gz"
+cmp "$archive" "$repeat_archive"
+invalid_epoch_output="$test_root/packages-invalid-epoch"
+mkdir -m 0700 "$invalid_epoch_output"
+if (
+    cd "$project_dir"
+    CARGO_TARGET_DIR="$target_dir" \
+    WAYEXPAND_RELEASE_OUTPUT_DIR="$invalid_epoch_output" \
+    SOURCE_DATE_EPOCH=not-a-timestamp \
+        scripts/package-release-binaries.sh test "$release_arch"
+); then
+    printf '%s\n' 'release packager accepted an invalid SOURCE_DATE_EPOCH' >&2
+    exit 1
+fi
+[ ! -e "$invalid_epoch_output/wayexpand-test-linux-$release_arch" ]
 (
     cd "$package_output"
     sha256sum -c "$(basename -- "$checksum")"

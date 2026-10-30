@@ -134,6 +134,13 @@ fi
 - SHA256 checksum: `wayexpand-<version>-linux-x86_64.tar.gz.sha256`
 - Cargo dependency inventory: `wayexpand-<version>-linux-x86_64.cargo-metadata.json`
 
+The binary archive packager fixes file ordering, ownership, permissions, and
+timestamps; `SOURCE_DATE_EPOCH` controls the normalized timestamp and defaults
+to `0`. `scripts/test-release.sh` packages the same built payload under two
+different caller umasks and compares the resulting archives byte-for-byte.
+This checks deterministic archive assembly on one host; it does not prove that
+independent compiler/toolchain environments produce identical binaries.
+
 **Source archives** (for distributions and offline builds):
 - `wayexpand-<version>.tar.gz` (clean source with Cargo.lock; no vendored source config or `vendor/`)
   - Recommended for AUR, Copr, and distributions that build from source

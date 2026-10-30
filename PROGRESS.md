@@ -2,6 +2,17 @@
 
 Updated: 2026-10-30
 
+## Deterministic binary release archive assembly
+
+- Updated `scripts/package-release-binaries.sh` to normalize staging umask,
+  archive path order, mtime (`SOURCE_DATE_EPOCH`, default `0`), and numeric
+  ownership before gzip. Invalid timestamp values are rejected.
+- Extended `scripts/test-release.sh` to build the same release payload under
+  umasks `077` and `002` and compare the resulting tarballs byte-for-byte.
+  The complete release smoke test passed: archive equality, checksum, payload
+  inspection, and packaged CLI checks all succeeded. This proves deterministic
+  archive assembly on the same host, not independent compiler reproducibility.
+
 ## Owner-thread startup cancellation integration test
 
 - Added a regression that invokes the production `LibeiInjector` startup path

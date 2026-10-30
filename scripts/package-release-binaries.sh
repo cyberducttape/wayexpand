@@ -1,5 +1,6 @@
 #!/bin/bash
 set -euo pipefail
+umask 022
 
 if [ "$#" -ne 2 ]; then
     printf '%s\n' "usage: $0 <version> <architecture>" >&2
@@ -11,6 +12,13 @@ architecture=$2
 project_dir=$(pwd -P)
 output_dir=${WAYEXPAND_RELEASE_OUTPUT_DIR:-$project_dir}
 mkdir -p "$output_dir"
+source_date_epoch=${SOURCE_DATE_EPOCH:-0}
+case "$source_date_epoch" in
+    ''|*[!0-9]*)
+        printf '%s\n' "invalid SOURCE_DATE_EPOCH: $source_date_epoch" >&2
+        exit 2
+        ;;
+esac
 case "$architecture" in
     x86_64|aarch64) ;;
     *) printf '%s\n' "unsupported release architecture: $architecture" >&2; exit 2 ;;
@@ -85,7 +93,10 @@ cp -R "$project_dir/docs/." "$root/docs/"
 rm -rf "$root/docs/archive"
 test ! -e "$root/docs/archive"
 
-tar -czf "$archive" -C "$output_dir" "$root_name"
+(cd "$output_dir" && \
+    tar --sort=name --mtime="@${source_date_epoch}" \
+        --owner=0 --group=0 --numeric-owner -cf - "$root_name") \
+    | gzip -n >"$archive"
 if tar -tzf "$archive" | grep -E '(^|/)\.git(/|$)|(^|/)docs/archive(/|$)' >/dev/null; then
     printf '%s\n' "release archive contains excluded repository content" >&2
     exit 1

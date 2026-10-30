@@ -82,9 +82,11 @@ staged installation, validation preflight, rollback after filesystem, signal,
 service restart, and service enable failures, immutable payload checks, and
 custom XDG roots. The local x86_64 release archive smoke test also builds the
 binary archive, verifies its checksum and required payload, and exercises the
-packaged CLI. These do not validate arm64 runtime behavior, package-manager
-install/upgrade, actual service behavior, or published artifact
-signing/provenance on supported release hosts.
+packaged CLI. Binary archive assembly is byte-identical across differing
+caller umasks on this host. These do not validate arm64 runtime behavior,
+independent compiler reproducibility, package-manager install/upgrade, actual
+service behavior, or published artifact signing/provenance on supported
+release hosts.
 
 Acceptance criteria:
 
