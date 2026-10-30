@@ -2,6 +2,22 @@
 
 Updated: 2026-10-30
 
+## Independent full-workspace release verification
+
+- Re-ran `RUST_TEST_THREADS=1 cargo test --release --workspace --locked` on
+  the current checkout. The command completed with exit code 0; every executed
+  unit, integration, and documentation test passed. Environment-dependent and
+  manual-display tests remained ignored by their existing annotations.
+- `cargo clippy --release --workspace --all-targets --locked -- -D warnings`
+  passed, and the release allocation probe reported zero allocations across
+  100,000 warmed ASCII events for each immediate and deferred core path.
+- The source-level safety review confirmed that non-atomic output watches for
+  physical evdev activity, cancels further simulated output, marks the
+  transaction uncertain, and never replays it. This is containment only: the
+  documented private-KWin overlap reproduction still demonstrates partial
+  text corruption, so production replacement integrity remains an open P0
+  gate pending an atomic route or attended physical-capture evidence.
+
 ## Live session and external CI audit
 
 - Read-only checks in the active KDE Wayland session found the installed
