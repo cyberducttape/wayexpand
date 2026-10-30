@@ -170,6 +170,7 @@ fn content_type_is_sensitive(
 pub enum KeyAction {
     Delete,
     Commit(&'static str),
+    Character(char),
     Text(String),
     Ignore,
     Unsupported,

@@ -1189,6 +1189,51 @@ match_mode = "word-boundary""#,
 }
 
 #[test]
+fn scalar_text_event_matches_owned_text_without_a_temporary_string() {
+    let config = Config::parse(
+        r#"[[expansion]]
+trigger = ":x"
+replacement = "expanded""#,
+    )
+    .unwrap();
+    let mut scalar_engine = ExpansionEngine::new(config.clone()).unwrap();
+    let mut owned_engine = ExpansionEngine::new(config.clone()).unwrap();
+
+    let scalar_prefix = scalar_engine.process(InputEvent::TextChar(':'));
+    let owned_prefix = owned_engine.process(InputEvent::Text(":".into()));
+    assert_eq!(scalar_prefix, owned_prefix);
+    assert_eq!(scalar_engine.buffer, owned_engine.buffer);
+
+    let scalar_result = scalar_engine.process(InputEvent::TextChar('x'));
+    let owned_result = owned_engine.process(InputEvent::Text("x".into()));
+    assert_eq!(scalar_result, owned_result);
+    assert_eq!(scalar_result.len(), 1);
+    assert_eq!(scalar_engine.buffer, owned_engine.buffer);
+
+    let mut scalar_deferred = ExpansionEngine::new(config.clone()).unwrap();
+    let mut owned_deferred = ExpansionEngine::new(config).unwrap();
+    let mut scalar_pending = Vec::new();
+    let mut owned_pending = Vec::new();
+    scalar_deferred.process_deferred_into(InputEvent::TextChar(':'), &mut scalar_pending);
+    owned_deferred.process_deferred_into(InputEvent::Text(":".into()), &mut owned_pending);
+    assert!(scalar_pending.is_empty() && owned_pending.is_empty());
+    scalar_deferred.process_deferred_into(InputEvent::TextChar('x'), &mut scalar_pending);
+    owned_deferred.process_deferred_into(InputEvent::Text("x".into()), &mut owned_pending);
+    assert_eq!(scalar_pending.len(), 1);
+    assert_eq!(owned_pending.len(), 1);
+    assert_eq!(scalar_pending[0].trigger, owned_pending[0].trigger);
+    assert_eq!(
+        scalar_pending[0].matched_text,
+        owned_pending[0].matched_text
+    );
+    assert_eq!(
+        scalar_pending[0].template_text,
+        owned_pending[0].template_text
+    );
+    assert_eq!(scalar_pending[0].generation, owned_pending[0].generation);
+}
+
+#[test]
 fn expansion_results_are_bounded_per_text_event() {
     let config = Config::parse("[[expansion]]\ntrigger = \":x\"\nreplacement = \"ok\"").unwrap();
     let mut engine = ExpansionEngine::new(config).unwrap();

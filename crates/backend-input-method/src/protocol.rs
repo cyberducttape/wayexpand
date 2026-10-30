@@ -204,11 +204,15 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for StateData {
                     .map_or(Some(KeyAction::Unsupported), |keyboard_state| {
                         key_action_and_update(keyboard_state, key, key_state)
                     });
-                let fallback_text = action.as_ref().and_then(|action| match action {
-                    KeyAction::Text(text) => Some(text.as_str()),
-                    KeyAction::Commit(text) => Some(*text),
+                let mut character_text = [0; 4];
+                let fallback_text = match action.as_ref() {
+                    Some(KeyAction::Text(text)) => Some(text.as_str()),
+                    Some(KeyAction::Commit(text)) => Some(*text),
+                    Some(KeyAction::Character(character)) => {
+                        Some(&*character.encode_utf8(&mut character_text))
+                    }
                     _ => None,
-                });
+                };
                 let safe_compose_modifier = raw_keysym.is_some_and(|keysym| {
                     matches!(keysym, xkeysym::key::Shift_L | xkeysym::key::Shift_R)
                 });
@@ -251,7 +255,12 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for StateData {
                             forward_commit(state, connection, &fallback);
                             state.queue_event(InputEvent::Text(fallback));
                         }
-                        if matches!(action, Some(KeyAction::Text(_) | KeyAction::Commit(_))) {
+                        if matches!(
+                            action,
+                            Some(
+                                KeyAction::Character(_) | KeyAction::Text(_) | KeyAction::Commit(_)
+                            )
+                        ) {
                             return;
                         }
                     }
@@ -307,6 +316,13 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for StateData {
                         finish_local_composition(state);
                         forward_commit(state, connection, &text);
                         state.queue_event(InputEvent::Text(text));
+                    }
+                    Some(KeyAction::Character(character)) => {
+                        finish_local_composition(state);
+                        let mut encoded = [0; 4];
+                        let text = character.encode_utf8(&mut encoded);
+                        forward_commit(state, connection, text);
+                        state.queue_event(InputEvent::TextChar(character));
                     }
                     Some(KeyAction::Ignore) => {}
                     Some(KeyAction::Unsupported) => {

@@ -489,6 +489,7 @@ impl EvdevSource {
             // Commit carries "\n"/"\t" for the app, which already received
             // the real key natively; the matcher only needs the boundary.
             Some(KeyAction::Commit(text)) => text.chars().next().map(InputEvent::Delimiter),
+            Some(KeyAction::Character(character)) => Some(InputEvent::TextChar(character)),
             Some(KeyAction::Text(text)) => Some(InputEvent::Text(text)),
             Some(KeyAction::Ignore) | None => None,
             Some(KeyAction::Unsupported) => Some(InputEvent::Reset),
@@ -934,10 +935,7 @@ mod tests {
             source.pending.pop_front(),
             Some(InputEvent::Key(_))
         ));
-        assert_eq!(
-            source.pending.pop_front(),
-            Some(InputEvent::Text("a".into()))
-        );
+        assert_eq!(source.pending.pop_front(), Some(InputEvent::TextChar('a')));
 
         drop(writer);
         source.poll_once(Duration::from_secs(1), false).unwrap();
@@ -975,10 +973,7 @@ mod tests {
         writer.write_all(b"event").unwrap();
 
         assert!(source.next_event_during_output(Duration::ZERO).unwrap());
-        assert_eq!(
-            source.pending.pop_front(),
-            Some(InputEvent::Text("a".into()))
-        );
+        assert_eq!(source.pending.pop_front(), Some(InputEvent::TextChar('a')));
     }
 
     #[test]
@@ -1108,9 +1103,9 @@ mod tests {
         assert!(!source
             .pending
             .iter()
-            .any(|event| matches!(event, InputEvent::Text(_))));
+            .any(|event| matches!(event, InputEvent::TextChar(_) | InputEvent::Text(_))));
         source.drain_ready(&[1]).unwrap();
-        assert!(source.pending.contains(&InputEvent::Text("a".into())));
+        assert!(source.pending.contains(&InputEvent::TextChar('a')));
     }
 
     /// A press on a resolvable key always yields a candidate hotkey chord
@@ -1142,10 +1137,10 @@ mod tests {
     }
 
     #[test]
-    fn printable_key_becomes_text_event() {
+    fn printable_key_becomes_scalar_character_event() {
         let mut state = test_state();
         // KEY_A = 30 in linux/input-event-codes.h.
-        assert_eq!(press(&mut state, 30), Some(InputEvent::Text("a".into())));
+        assert_eq!(press(&mut state, 30), Some(InputEvent::TextChar('a')));
     }
 
     #[test]
@@ -1179,10 +1174,7 @@ mod tests {
             wake: None,
         };
         source.translate(event);
-        assert_eq!(
-            source.pending.pop_front(),
-            Some(InputEvent::Text("a".into()))
-        );
+        assert_eq!(source.pending.pop_front(), Some(InputEvent::TextChar('a')));
         assert_eq!(source.pending.pop_front(), None);
     }
 
@@ -1417,10 +1409,7 @@ mod tests {
             source.pending.pop_front(),
             Some(InputEvent::Key(_))
         ));
-        assert_eq!(
-            source.pending.pop_front(),
-            Some(InputEvent::Text("a".into()))
-        );
+        assert_eq!(source.pending.pop_front(), Some(InputEvent::TextChar('a')));
     }
 
     #[test]

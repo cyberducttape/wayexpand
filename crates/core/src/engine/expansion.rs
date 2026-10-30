@@ -550,6 +550,10 @@ impl ExpansionEngine {
             InputEvent::Key(_) => {
                 self.note_key_event();
             }
+            InputEvent::TextChar(character) => {
+                let mut encoded = [0; 4];
+                self.process_text_contents::<P>(character.encode_utf8(&mut encoded), results)
+            }
             InputEvent::Text(text) => self.process_text_contents::<P>(&text, results),
             InputEvent::Delimiter(character) => {
                 // Encode into a stack buffer and pass the borrowed text to

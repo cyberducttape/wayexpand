@@ -61,14 +61,14 @@ replacement = "unused""#,
     // Grow and settle the bounded input ring before measuring, then reset the
     // matcher while retaining its allocated storage.
     for _ in 0..WARMUP_EVENTS {
-        engine.process_deferred_char_into('x', &mut pending);
+        engine.process_deferred_into(InputEvent::TextChar('x'), &mut pending);
     }
     engine.process_deferred_into(InputEvent::Reset, &mut pending);
 
     ALLOCATIONS.store(0, Relaxed);
     TRACK.store(true, Relaxed);
     for _ in 0..MEASURED_EVENTS {
-        engine.process_deferred_char_into('x', &mut pending);
+        engine.process_deferred_into(InputEvent::TextChar('x'), &mut pending);
     }
     TRACK.store(false, Relaxed);
 

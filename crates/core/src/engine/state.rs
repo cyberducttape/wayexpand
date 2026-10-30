@@ -5,14 +5,21 @@ use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputEvent {
+    /// One committed Unicode scalar. Physical key routes use this to avoid
+    /// allocating an owned string for ordinary printable keys.
+    TextChar(char),
     Text(String),
     Key(KeyChord),
     Backspace,
     EndOfInput,
     Delimiter(char),
     Reset,
-    FocusChanged { sensitive: bool },
-    CompositionChanged { active: bool },
+    FocusChanged {
+        sensitive: bool,
+    },
+    CompositionChanged {
+        active: bool,
+    },
     PauseChanged(bool),
     WindowChanged(Option<WindowContext>),
 }

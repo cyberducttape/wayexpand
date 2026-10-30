@@ -31,18 +31,20 @@ regression; Criterion's full reports are written to `target/criterion`.
 
 The isolated allocation probe warms the bounded engine buffer and caller-owned
 result vector, then counts allocator requests while processing 100,000
-nonmatching ASCII characters through the deferred character API. It asserts
-that the warmed matcher path performs no heap allocation:
+nonmatching ASCII `InputEvent::TextChar` events through the deferred event API.
+It asserts that the warmed core event path performs no heap allocation:
 
 ```sh
 cargo run --locked --release -p wayexpand-core --example input_path_allocations
 ```
 
-This measures the core engine entry point after input has already been decoded
-to `char`. It does not include backend protocol parsing, event queueing,
-configuration reloads, output transactions, matching triggers, or allocation
-when a result is actually produced. Use it as a narrow regression check, not
-as an end-to-end daemon allocation claim.
+This measures core event dispatch after input has already been decoded to
+`char`. It does not include XKB lookup, backend protocol parsing, event
+queueing, configuration reloads, output transactions, matching triggers, or
+allocation when a result is actually produced. The ordinary single-scalar
+XKB path now forwards a `TextChar`; multi-scalar text and composed commits
+retain the owned string event. Use the probe as a narrow core regression
+check, not as an end-to-end daemon allocation claim.
 
 ## Current-source KWin smoke report (2026-10-27)
 

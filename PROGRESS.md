@@ -2,6 +2,30 @@
 
 Updated: 2026-10-29
 
+## Latest verified change: scalar input event fast path
+
+- Added `InputEvent::TextChar(char)` and routed ordinary single-scalar XKB
+  actions from the evdev and input-method backends through the core without
+  constructing a temporary owned `String`. Multi-scalar text and composed
+  commits retain the owned text path. Input-method local composition still
+  receives the UTF-8 commit before the scalar event is queued for matching.
+- Added immediate/deferred parity coverage, exercised the variant in fuzz
+  input generation and the allocation probe, and updated benchmark and
+  development-plan scope notes. The probe measures the warmed core event path;
+  it excludes XKB lookup and the rest of the backend/daemon pipeline.
+- Verification on this working tree: `cargo fmt --all -- --check`,
+  `cargo clippy --workspace --all-targets --locked -- -D warnings`, and
+  `RUST_TEST_THREADS=1 cargo test --workspace --locked -q` passed. Core had
+  464 passing tests and 2 ignored; daemon had 206 passing tests; GUI had 173;
+  evdev had 21 passing and 1 ignored; the remaining workspace suites also
+  passed. The release allocation probe reported zero allocations across
+  100,000 warmed nonmatching ASCII `TextChar` events.
+- This does not establish zero allocations for XKB lookup or certify real
+  desktop capture/insertion. No production compositor route is certified; the
+  live KDE route still has the limitations recorded below.
+- Pending: commit this verified change. Do not deploy/restart the active user
+  service or push without the required authorization.
+
 ## Completed in this work period
 
 - Generalized `Matcher::try_new` to accept `IntoIterator<Item = S>` where

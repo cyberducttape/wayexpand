@@ -87,9 +87,8 @@ pub fn key_action_and_update(
 /// transition.
 pub fn key_action(keyboard_state: &State, key: u32) -> Option<KeyAction> {
     let keycode = key.checked_add(8)?;
-    let raw_keysym = keyboard_state
-        .key_get_one_sym(keycode)
-        .map(|keysym| keysym.raw());
+    let symbol = keyboard_state.key_get_one_sym(keycode);
+    let raw_keysym = symbol.as_ref().map(|keysym| keysym.raw());
     let modifiers = active_modifiers(keyboard_state);
     match raw_keysym {
         None => Some(KeyAction::Unsupported),
@@ -110,11 +109,17 @@ pub fn key_action(keyboard_state: &State, key: u32) -> Option<KeyAction> {
             }))
         }
         Some(raw_keysym) if raw_keysym == xkeysym::key::Escape => Some(KeyAction::Unsupported),
-        Some(_) => keyboard_state
-            .key_get_utf8(keycode)
-            .filter(|text| !text.is_empty())
-            .and_then(|text| String::from_utf8(text).ok())
-            .map(KeyAction::Text)
+        Some(_) => symbol
+            .as_ref()
+            .and_then(|keysym| keysym.key_char())
+            .map(KeyAction::Character)
+            .or_else(|| {
+                keyboard_state
+                    .key_get_utf8(keycode)
+                    .filter(|text| !text.is_empty())
+                    .and_then(|text| String::from_utf8(text).ok())
+                    .map(KeyAction::Text)
+            })
             .or(Some(KeyAction::Unsupported)),
     }
 }

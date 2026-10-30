@@ -414,7 +414,7 @@ impl Daemon {
                 self.update_profile_for_focus()?;
                 if self.injector.is_some() {
                     for character in line.chars() {
-                        let event = InputEvent::Text(character.to_string());
+                        let event = InputEvent::TextChar(character);
                         let (result, backend) = if let Some(mut backend) = self.injector.take() {
                             let result = process_event_with_pending_buffer(
                                 &mut self.config.engine,

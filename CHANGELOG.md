@@ -20,6 +20,10 @@ All notable changes to WayExpand are documented here.
   matching. IBus now sends decoded characters directly to the deferred engine
   path instead of allocating a one-character `String`; the GUI playground
   reuses its immediate-result vector while replaying text.
+- Carry ordinary single-scalar XKB text actions through `InputEvent::TextChar`
+  for evdev and input-method routes, avoiding a temporary owned text string
+  before matching. Multi-scalar text and composed commits retain the owned
+  string path. The core event probe now measures this variant directly.
 - Add a warmed input-path allocation regression example. On this host, the
   deferred nonmatching ASCII engine path performed zero allocator requests
   over 100,000 events; the measurement excludes backend input decoding and

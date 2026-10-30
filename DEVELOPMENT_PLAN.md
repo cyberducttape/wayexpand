@@ -93,9 +93,10 @@ Acceptance criteria:
 
 Partial evidence: a release-mode allocation probe in
 [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) measures zero allocations across
-100,000 warmed, nonmatching ASCII events in the deferred core engine. It
-excludes backend decoding, queueing, output, and match-result construction, so
-it does not satisfy the end-to-end latency or large-library profiling gates.
+100,000 warmed, nonmatching ASCII `TextChar` events in the deferred core event
+path. It excludes XKB/backend decoding, queueing, output, and match-result
+construction, so it does not satisfy the end-to-end latency or large-library
+profiling gates.
 
 Acceptance criteria:
 

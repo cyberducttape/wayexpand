@@ -147,6 +147,7 @@ fn apply(engine: &mut ExpansionEngine, model: &mut Model, event: InputEvent) {
     );
     if model.capture_enabled() {
         match &event {
+            InputEvent::TextChar(character) => model.typed.push(*character),
             InputEvent::Text(text) => model.typed.push_str(text),
             InputEvent::Delimiter(character) => model.typed.push(*character),
             InputEvent::Backspace => {
@@ -250,15 +251,11 @@ pub fn check_engine_sequence(data: &[u8]) {
                 // A whole trigger, typed one keystroke per event.
                 for character in WORDS[usize::from(arg) % WORDS.len()].chars() {
                     model.undo_available = false;
-                    apply(
-                        &mut engine,
-                        &mut model,
-                        InputEvent::Text(character.to_string()),
-                    );
+                    apply(&mut engine, &mut model, InputEvent::TextChar(character));
                 }
                 continue;
             }
-            _ => InputEvent::Text(ALPHABET[usize::from(arg) % ALPHABET.len()].to_string()),
+            _ => InputEvent::TextChar(ALPHABET[usize::from(arg) % ALPHABET.len()]),
         };
         apply(&mut engine, &mut model, event);
     }

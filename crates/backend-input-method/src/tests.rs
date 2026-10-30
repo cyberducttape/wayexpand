@@ -386,7 +386,7 @@ fn xkb_state_transition_applies_modifiers_before_next_key() {
     ));
     assert!(matches!(
         key_action_and_update(&mut state, 30, wl_keyboard::KeyState::Pressed),
-        Some(KeyAction::Text(text)) if text == "A"
+        Some(KeyAction::Character('A'))
     ));
     assert!(key_action_and_update(&mut state, 30, wl_keyboard::KeyState::Released).is_none());
     assert!(key_action_and_update(&mut state, 42, wl_keyboard::KeyState::Released).is_none());
@@ -483,7 +483,7 @@ fn caps_lock_and_shift_remain_text_producing_modifiers() {
     ));
     assert!(matches!(
         key_action_and_update(&mut shifted, 30, wl_keyboard::KeyState::Pressed),
-        Some(KeyAction::Text(text)) if text == "A"
+        Some(KeyAction::Character('A'))
     ));
 
     let mut caps = default_state();
@@ -493,7 +493,7 @@ fn caps_lock_and_shift_remain_text_producing_modifiers() {
     ));
     assert!(matches!(
         key_action_and_update(&mut caps, 30, wl_keyboard::KeyState::Pressed),
-        Some(KeyAction::Text(text)) if text == "A"
+        Some(KeyAction::Character('A'))
     ));
 }
 
@@ -504,9 +504,9 @@ fn altgr_text_is_not_treated_as_shortcut_alt_when_layout_supports_it() {
     };
     let _ = key_action_and_update(&mut state, 100, wl_keyboard::KeyState::Pressed);
     let action = key_action_and_update(&mut state, 16, wl_keyboard::KeyState::Pressed);
-    if let Some(KeyAction::Text(text)) = action {
+    if let Some(KeyAction::Character(character)) = action {
         // On systems with complete xkeyboard-config, AltGr+Q produces @
-        assert_eq!(text, "@");
+        assert_eq!(character, '@');
     } else {
         // Some minimal CI images lack complete xkeyboard-config data or
         // map right Alt differently. The required invariant is that AltGr
