@@ -2,6 +2,22 @@
 
 Updated: 2026-10-30
 
+## Zero-allocation input fast-path verification
+
+- Confirmed the requested fast-path patterns are already implemented:
+  `Matcher::try_new` accepts borrowed and owned strings; delimiter events use
+  a stack UTF-8 buffer and share the text scanner; matcher telemetry records
+  with `try_lock` and counts samples dropped under contention; and the daemon
+  reuses caller-owned pending-result storage.
+- Fresh verification: `cargo test --locked -p wayexpand-core` passed (465
+  passed, 2 ignored, plus documentation and snapshot integration tests).
+  Focused matcher-construction, delimiter-parity, and daemon telemetry
+  contention tests passed. `cargo fmt --all -- --check` and `git diff --check`
+  passed.
+- The release allocation probe reported zero allocations across 100,000
+  warmed nonmatching ASCII deferred-input events. This measures the warmed
+  core event path only, not XKB lookup or full daemon/backend processing.
+
 ## Cancellable direct EIS socket startup
 
 - Replaced the blocking `UnixStream::connect` used by explicit `LIBEI_SOCKET`
@@ -369,6 +385,9 @@ Updated: 2026-10-30
 
 - No compositor/backend route is production-certified. The current matrix has
   no production-required eligible target.
+- The GitHub Actions runner inventory returned zero online self-hosted
+  certification runners on 2026-10-30, so the production compositor workflow
+  cannot execute a real-session target in the current repository setup.
 - Physical evdev capture during long non-atomic output, focus races, partial
   insertion, password-field behavior, runtime layout changes, and suspend /
   reconnect still require attended real-session evidence.
@@ -390,7 +409,9 @@ Updated: 2026-10-30
    text integrity.
 4. Run the 72-hour desktop soak and published-package upgrade/rollback
    rehearsal after the real-session replacement gate passes.
-5. Add targeted lifecycle tests for a libei owner thread that exits during
-   startup, a failed operation reply, and bounded shutdown while the EIS
-   session is unresponsive; current tests enforce thread affinity but do not
-   emulate a compositor session.
+5. Extend libei fault tests to cover cancellation while a direct EIS socket
+   connection is pending and a connected EIS server that stops responding.
+   Current tests cover pre-cancelled sockets, successful/missing socket paths,
+   portal-future cancellation, startup failure, operation-error replies, and
+   bounded outer-worker teardown; they do not emulate a stalled live EIS
+   session.
