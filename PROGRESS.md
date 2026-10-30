@@ -52,6 +52,12 @@ Updated: 2026-10-30
 - These are code-level regressions only. The private KWin smoke run still
   cannot test physical keyboard interruption during output; attended desktop
   target-text evidence remains a P0 acceptance requirement.
+- On current source `54ea2a6b`, reran two core preflight/journal tests and five
+  daemon interruption cases: physical input cancels non-atomic output without
+  replay, focus changes stop partial output and queued batches, and timeout is
+  recorded as uncertain. All seven passed. The production gate script also
+  returned its expected blocked status because no route is production-required
+  and certified; the private KWin JSON remains partial compatibility evidence.
 
 ## Action Broker security regression suite
 
