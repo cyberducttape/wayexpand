@@ -2,6 +2,35 @@
 
 Updated: 2026-10-30
 
+## Matcher and event-path optimization review
+
+- The proposed borrowed matcher constructor is already implemented:
+  `Matcher::try_new<I, S>` accepts any `S: AsRef<str>` and stores only trie
+  indexes and edges. Regression coverage builds from borrowed `String` values
+  and borrowed string slices.
+- Delimiters already use stack-backed UTF-8 encoding and the common text
+  scanner, with no recursive event dispatch. The engine also exposes reusable
+  immediate and deferred result-vector APIs; owned results do not borrow from
+  the reusable vectors.
+- Matcher telemetry captures elapsed time before recording, uses `try_lock`
+  on the input path, and exports a dropped-sample counter. Its regression test
+  exercises lock contention and the counter.
+- Fresh verification: `RUST_TEST_THREADS=1 cargo test --workspace --locked`
+  and `cargo clippy --workspace --all-targets --locked -- -D warnings` both
+  passed. `cargo fmt --all -- --check` passed.
+- Criterion matcher and template-render benches completed. Representative
+  results versus the stored local baseline: matcher lookup was 4.28 µs (100
+  triggers, no significant change), 4.42 µs (1,000, improved ~5%), and 4.55
+  µs (10,000, improved ~3%). Amplified construction of 1,000 / 5,000 / 10,000
+  triggers measured 29.8 / 66.2 / 162.2 ms, each improved versus baseline.
+  Template built-ins measured 4.26 µs (improved ~7%); precompiled built-ins
+  3.76 µs (within noise); 1 MiB full render 0.943 ms (within noise); bounded
+  preview 0.304 ms (improved ~8%). The 4,096-character NFD type/backspace
+  case measured 53.0 µs (~2% slower), and some Unicode near-miss cases showed
+  small regressions. These are host-specific Criterion comparisons, not
+  end-to-end input latency or allocation-count measurements; investigate the
+  Unicode deltas before claiming a general performance improvement.
+
 ## Deterministic binary release archive assembly
 
 - Updated `scripts/package-release-binaries.sh` to normalize staging umask,
