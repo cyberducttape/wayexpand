@@ -303,7 +303,34 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
         Arc,
     };
-    use std::time::Duration;
+    use std::{
+        ffi::OsString,
+        os::unix::net::UnixListener,
+        time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    };
+
+    struct EnvVarGuard {
+        name: &'static str,
+        previous: Option<OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(name: &'static str, value: &std::ffi::OsStr) -> Self {
+            let previous = std::env::var_os(name);
+            std::env::set_var(name, value);
+            Self { name, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(value) = self.previous.take() {
+                std::env::set_var(self.name, value);
+            } else {
+                std::env::remove_var(self.name);
+            }
+        }
+    }
 
     #[test]
     fn owner_thread_failure_during_startup_is_returned_and_joined() {
@@ -323,6 +350,51 @@ mod tests {
         assert!(error
             .to_string()
             .contains("ended before reporting readiness"));
+    }
+
+    #[test]
+    fn direct_socket_handshake_cancellation_returns_and_joins_the_owner_thread() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-eis-owner-cancel-{}-{nonce}.sock",
+            std::process::id()
+        ));
+        let listener = UnixListener::bind(&path).unwrap();
+        let _socket_path = EnvVarGuard::set("LIBEI_SOCKET", path.as_os_str());
+        let (accepted_sender, accepted_receiver) = mpsc::sync_channel(1);
+        let (release_sender, release_receiver) = mpsc::channel();
+        let server = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            accepted_sender.send(()).unwrap();
+            let _ = release_receiver.recv_timeout(Duration::from_secs(2));
+            drop(stream);
+        });
+
+        let cancellation = ConnectCancellation::default();
+        let worker_cancellation = cancellation.clone();
+        let canceller = thread::spawn(move || {
+            accepted_receiver
+                .recv_timeout(Duration::from_secs(1))
+                .expect("the owner thread should connect to the test EIS socket");
+            worker_cancellation.cancel();
+        });
+        let started = Instant::now();
+        let result =
+            LibeiInjector::connect_with_cancellation(LibeiOptions::default(), cancellation);
+        let elapsed = started.elapsed();
+
+        assert!(matches!(result, Err(LibeiError::Cancelled)));
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "owner thread startup cancellation took {elapsed:?}"
+        );
+        canceller.join().unwrap();
+        release_sender.send(()).unwrap();
+        server.join().unwrap();
+        std::fs::remove_file(path).unwrap();
     }
 
     struct FailingSession {

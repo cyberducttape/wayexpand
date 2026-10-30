@@ -2,6 +2,20 @@
 
 Updated: 2026-10-30
 
+## Owner-thread startup cancellation integration test
+
+- Added a regression that invokes the production `LibeiInjector` startup path
+  against a temporary Unix EIS socket. The test server accepts the connection
+  and stays silent; cancellation is issued only after accept. The caller
+  receives `Cancelled` within one second, and the owner thread returns through
+  the readiness channel and is joined. The test restores `LIBEI_SOCKET` after
+  completion and passed alongside the backend suite with eight test threads.
+- Verification: `cargo test --locked -p wayexpand-backend-libei --
+  --test-threads=8` passed all 45 tests; backend Clippy with `-D warnings` and
+  `cargo check --workspace --locked` passed. This validates startup
+  cancellation against a local silent server, not portal/compositor failure or
+  the 72-hour desktop lifecycle gate.
+
 ## Workspace verification after lifecycle changes
 
 - `RUST_TEST_THREADS=1 cargo test --workspace --locked -q` passed all
@@ -506,8 +520,8 @@ Updated: 2026-10-30
    text integrity.
 4. Run the 72-hour desktop soak and published-package upgrade/rollback
    rehearsal after the real-session replacement gate passes.
-5. Extend the direct-socket test through owner-thread/device negotiation and
-   bounded worker teardown. Current coverage composes the direct connection
-   with the production handshake helper and proves the idle-handshake deadline,
-   while separate worker tests cover startup error joining; the complete
-   owner-thread failure path has not yet been exercised in one test.
+5. Provision an authorized compositor-labelled runner and reviewed driver for
+   the production certification workflow. Current code-level and private KWin
+   checks cannot establish physical capture integrity, password-field
+   behavior, layout switching, or long-term recovery; the live runner inventory
+   is empty and the production gate correctly fails closed.

@@ -13,6 +13,9 @@ All notable changes to WayExpand are documented here.
 - Exercise direct socket connection followed by an unresponsive EIS handshake;
   session setup now has an explicit regression for enforcing the handshake
   deadline on an accepted socket.
+- Exercise cancellation through `LibeiInjector::connect_with_cancellation`
+  while its owner thread is blocked in EIS handshake startup; verify the caller
+  gets the cancellation result promptly and the owner thread is joined.
 - Validate the returned `SO_PEERCRED` structure length before reading its
   fields, with regression coverage for truncated, oversized, and valid lengths.
 - Add fallible `Matcher::try_new` construction for arbitrary trigger iterators;
