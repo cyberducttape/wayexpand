@@ -98,6 +98,26 @@ Acceptance criteria:
   separate in release metadata. Do not publish a production release until P0
   gates pass.
 
+### P2 — Complete per-action broker isolation
+
+**Status:** Filesystem isolation and executable identity pinning are
+implemented and unit-tested; network/device policy and supported-host
+verification remain open.
+
+Acceptance criteria:
+
+- Validate the configured executable, open and pin its inode, and launch that
+  pinned object; replacing the pathname after validation must not change what
+  executes.
+- Enforce each action's filesystem grants independently with Landlock, and
+  fail closed when a requested sandbox cannot be enforced.
+- Define explicit per-action network and device access policy before claiming
+  those resources are isolated. The broker service's systemd restrictions do
+  not establish per-action isolation.
+- Verify sandbox behavior and cancellation on supported kernels, and document
+  that arbitrary malicious processes running under the broker's same UID are
+  outside the IPC trust boundary.
+
 ### P2 — Close measured performance and internationalization gaps
 
 **Status:** Open.

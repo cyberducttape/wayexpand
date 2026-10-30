@@ -53,6 +53,18 @@ Updated: 2026-10-30
   cannot test physical keyboard interruption during output; attended desktop
   target-text evidence remains a P0 acceptance requirement.
 
+## Action Broker security regression suite
+
+- On commit `e956cbb8`, `cargo test --locked -p action-broker` passed all 80
+  library tests, 7 broker binary tests, and 10 integration tests. Coverage
+  includes launching the pinned executable inode after pathname replacement,
+  Landlock read/write denial, required-audit failure handling, continuous
+  stdout/stderr deadlines, child cancellation, peer credential sizing, and
+  concurrent socket ownership.
+- `cargo clippy --locked -p action-broker --all-targets -- -D warnings`
+  passed. This validates the tested Linux host paths; per-action network and
+  device isolation remain unspecified and are now explicit P2 plan items.
+
 ## Per-user installer transaction verification
 
 - `scripts/test-install-user.sh` passed against the current worktree. It built
