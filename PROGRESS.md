@@ -8,7 +8,7 @@ Updated: 2026-10-30
   passed on remote commit `f6c338b42f40`, including Rust tests, native aarch64,
   Debian/RPM artifacts, and package install/reinstall/remove smoke tests on
   Ubuntu 26.04 and Fedora latest. This remote commit predates the current local
-  branch by 46 commits; it is not evidence for those unpushed changes.
+  changes; it is not evidence for those unpushed changes.
 - Four open Dependabot PR runs (tokio, rustix, notify, and read-fonts) passed
   Rust, build, security, and package jobs; each failed only at
   `Documentation Validation / Verify commit identity policy`. The local fix
