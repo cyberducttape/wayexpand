@@ -149,14 +149,16 @@ impl Matcher {
         Self::try_new(triggers).expect("trigger collection exceeds matcher index capacity")
     }
 
-    pub fn try_new<I>(triggers: I) -> Result<Self, MatcherBuildError>
+    pub fn try_new<I, S>(triggers: I) -> Result<Self, MatcherBuildError>
     where
-        I: IntoIterator<Item = String>,
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
     {
         let mut root = TrieBuilder::new();
         let mut forward = TrieBuilder::new();
         let mut max_trigger_chars = 0;
         for (index, trigger) in triggers.into_iter().enumerate() {
+            let trigger = trigger.as_ref();
             max_trigger_chars = max_trigger_chars.max(trigger.chars().count());
             let index = trigger_index(index)?;
             root.insert(trigger.chars().rev(), index);
@@ -257,20 +259,20 @@ mod tests {
 
     #[test]
     fn finds_only_a_suffix() {
-        let matcher = Matcher::try_new(["ab".into(), "xyz".into()]).unwrap();
+        let matcher = Matcher::try_new(["ab", "xyz"]).unwrap();
         assert_eq!(matcher.find_suffix("prefixab".chars().rev()), Some((0, 2)));
         assert_eq!(matcher.find_suffix("prefixx".chars().rev()), None);
     }
 
     #[test]
     fn matches_unicode_by_scalar_value() {
-        let matcher = Matcher::try_new(["🙂x".into()]).unwrap();
+        let matcher = Matcher::try_new(["🙂x"]).unwrap();
         assert_eq!(matcher.find_suffix("a🙂x".chars().rev()), Some((0, 2)));
     }
 
     #[test]
     fn continuation_queries_walk_the_forward_trie() {
-        let matcher = Matcher::try_new([":a".into(), ":address".into()]).unwrap();
+        let matcher = Matcher::try_new([":a", ":address"]).unwrap();
 
         assert!(matcher.has_continuation(":a".chars()));
         assert!(matcher.can_continue(":a".chars(), 'd'));
@@ -285,7 +287,7 @@ mod tests {
 
     #[test]
     fn continuation_queries_accept_a_buffer_slice_without_allocating() {
-        let matcher = Matcher::try_new([":ab".into()]).unwrap();
+        let matcher = Matcher::try_new([":ab"]).unwrap();
         let buffer: std::collections::VecDeque<char> = "xx:a".chars().collect();
 
         let start = buffer.len() - 2;
@@ -295,12 +297,35 @@ mod tests {
 
     #[test]
     fn prefers_the_longest_matching_suffix() {
-        let matcher = Matcher::try_new([":a".into(), ":address".into()]).unwrap();
+        let matcher = Matcher::try_new([":a", ":address"]).unwrap();
         assert_eq!(
             matcher.find_suffix("email :address".chars().rev()),
             Some((1, 8))
         );
         assert_eq!(matcher.find_suffix("email :a".chars().rev()), Some((0, 2)));
+    }
+
+    #[test]
+    fn construction_accepts_borrowed_and_owned_trigger_items() {
+        let strings = [String::from(":alpha"), String::from(":beta")];
+        let borrowed_strings = Matcher::try_new(strings.iter()).unwrap();
+        assert_eq!(
+            borrowed_strings.find_suffix("text :alpha".chars().rev()),
+            Some((0, 6))
+        );
+
+        let borrowed_slices = Matcher::try_new([":gamma", ":delta"]).unwrap();
+        assert_eq!(
+            borrowed_slices.find_suffix(":delta".chars().rev()),
+            Some((1, 6))
+        );
+
+        let owned = vec![String::from(":epsilon")];
+        let owned_items = Matcher::try_new(owned).unwrap();
+        assert_eq!(
+            owned_items.find_suffix(":epsilon".chars().rev()),
+            Some((0, 8))
+        );
     }
 
     #[test]

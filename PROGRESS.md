@@ -4,6 +4,15 @@ Updated: 2026-10-29
 
 ## Completed in this work period
 
+- Generalized `Matcher::try_new` to accept `IntoIterator<Item = S>` where
+  `S: AsRef<str>`. The builder borrows each item only while inserting its
+  characters, and still supports owned `String` iterators. Added coverage for
+  `&String`, `&str`, and owned `String`; all 9 matcher tests passed.
+- After the API change, `RUST_TEST_THREADS=1 cargo test --workspace --locked
+  -q` passed: 460 core tests (2 ignored), 206 daemon, 173 GUI, 128 CLI, and
+  all remaining workspace suites passed. Workspace Clippy with `-D warnings`,
+  formatting, and diff checks passed.
+
 - Made matcher latency recording nonblocking: capture operation duration
   before metrics synchronization, use `try_lock`, and count skipped samples
   atomically. Added `matcher_latency_dropped_total` to daemon status and bumped
