@@ -149,6 +149,54 @@ mod tests {
         assert_eq!(proportional.last().map(String::as_str), Some("symbols"));
     }
 
+    /// Every symbol the GUI draws must come from the bundled fonts, except
+    /// the arrows and status marks that the `wayexpand-system-symbols`
+    /// fallback group supplies. egui 0.37 moved its emoji and symbol fonts
+    /// behind `monochrome_emoji_fonts`, which silently turned arrows such as
+    /// `⏵` into missing-glyph boxes.
+    #[test]
+    fn bundled_fonts_cover_every_symbol_in_the_interface() {
+        const SYSTEM_FALLBACK_SYMBOLS: &str = "↑→↓⊘◌●✓";
+        fn collect(directory: &Path, symbols: &mut std::collections::BTreeSet<char>) {
+            for entry in std::fs::read_dir(directory).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    collect(&path, symbols);
+                } else if path.extension().is_some_and(|extension| extension == "rs") {
+                    symbols.extend(std::fs::read_to_string(&path).unwrap().chars().filter(
+                        |character| {
+                            !character.is_ascii()
+                                && !character.is_alphanumeric()
+                                && !character.is_whitespace()
+                        },
+                    ));
+                }
+            }
+        }
+        let mut symbols = std::collections::BTreeSet::new();
+        collect(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+            &mut symbols,
+        );
+        assert!(symbols.contains(&'⏵'), "source scan found no symbols");
+
+        let context = egui::Context::default();
+        context.set_fonts(FontDefinitions::default());
+        let mut output = context.run_ui(egui::RawInput::default(), |_| {});
+        output.textures_delta.clear();
+        let missing: Vec<String> = context.fonts_mut(|fonts| {
+            symbols
+                .iter()
+                .filter(|&&symbol| {
+                    !SYSTEM_FALLBACK_SYMBOLS.contains(symbol)
+                        && !fonts.has_glyph(&egui::FontId::proportional(14.0), symbol)
+                })
+                .map(|symbol| format!("{symbol} (U+{:04X})", u32::from(*symbol)))
+                .collect()
+        });
+        assert!(missing.is_empty(), "bundled fonts lack: {missing:?}");
+    }
+
     #[test]
     fn invalid_and_missing_fonts_are_skipped() {
         assert!(read_fonts::FontRef::from_index(b"not a font", 0).is_err());
@@ -160,7 +208,7 @@ mod tests {
         let context = egui::Context::default();
         install(&context);
         let mut output = context.run_ui(egui::RawInput::default(), |ui| {
-            egui::CentralPanel::default().show_inside(ui, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 ui.label("→ ✓ ● ◌ ⊘ 郵件 受信箱");
             });
         });

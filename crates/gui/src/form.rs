@@ -139,7 +139,7 @@ impl FormApp {
                     .fill(palette.background)
                     .inner_margin(egui::Margin::symmetric(18, 14)),
             )
-            .show_inside(root, |ui| {
+            .show(root, |ui| {
                 ui.label(
                     RichText::new(format!("Fill in {}", self.spec.title))
                         .strong()

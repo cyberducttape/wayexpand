@@ -4404,6 +4404,7 @@ dependencies = [
  "anyhow",
  "criterion",
  "eframe",
+ "egui",
  "libc",
  "read-fonts 0.46.0",
  "serde",

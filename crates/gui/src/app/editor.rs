@@ -270,7 +270,7 @@ impl GuiApp {
         // excluded so moving the mouse does not invalidate the preview.
         let playground_has_text_focus = root
             .ctx()
-            .memory(|memory| memory.has_focus(egui::Id::new("try_live_field")));
+            .memory(|memory| memory.has_focus(egui::Id::unique("try_live_field")));
         let editor_input = root.ctx().input(|input| {
             input.events.iter().any(|event| {
                 matches!(event, egui::Event::PointerButton { pressed: true, .. })
@@ -294,7 +294,7 @@ impl GuiApp {
                     .fill(palette.background)
                     .inner_margin(egui::Margin::symmetric(22, 18)),
             )
-            .show_inside(root, |ui| {
+            .show(root, |ui| {
                 if self.onboarding_visible && !self.new_draft {
                     self.render_first_run(ui, palette);
                     return;
@@ -506,7 +506,7 @@ impl GuiApp {
                     ui.add(
                         TextEdit::multiline(&mut draft.replacement)
                             .margin(theme::FIELD_MARGIN)
-                            .id(egui::Id::new(REPLACEMENT_EDITOR_SALT))
+                            .id(egui::Id::unique(REPLACEMENT_EDITOR_SALT))
                             .font(egui::TextStyle::Monospace)
                             .desired_rows(7)
                             .desired_width(field_width),
@@ -980,7 +980,7 @@ impl GuiApp {
                     .inner_margin(egui::Margin::symmetric(22, 10))
                     .stroke(egui::Stroke::NONE),
             )
-            .show_inside(root, |ui| self.render_try_live(ui, palette));
+            .show(root, |ui| self.render_try_live(ui, palette));
     }
 
     /// "Matcher preview": exercise core matching and template rendering in
@@ -1062,7 +1062,7 @@ impl GuiApp {
                             .color(palette.warning),
                     );
                 }
-                let id = egui::Id::new("try_live_field");
+                let id = egui::Id::unique("try_live_field");
                 let output = TextEdit::multiline(&mut self.playground.text)
                     .id(id)
                     .margin(theme::FIELD_MARGIN)
@@ -1081,7 +1081,7 @@ impl GuiApp {
                     let text = self.playground.text.clone();
                     let caret_at_end = output
                         .cursor_range
-                        .is_none_or(|range| range.primary.index == text.chars().count());
+                        .is_none_or(|range| range.primary.index.0 == text.chars().count());
                     let candidate = self
                         .playground
                         .needs_engine()
@@ -1165,7 +1165,7 @@ impl GuiApp {
                     .inner_margin(egui::Margin::symmetric(22, 10))
                     .stroke(egui::Stroke::NONE),
             )
-            .show_inside(root, |ui| {
+            .show(root, |ui| {
                 ui.horizontal(|ui| {
                     let dirty = self.draft_is_dirty();
                     if ui
@@ -1430,14 +1430,14 @@ pub(crate) fn insert_into_replacement_editor(
     replacement: &mut String,
     text: &str,
 ) {
-    let id = egui::Id::new(REPLACEMENT_EDITOR_SALT);
+    let id = egui::Id::unique(REPLACEMENT_EDITOR_SALT);
     let mut state = egui::text_edit::TextEditState::load(ctx, id);
     let selection = state
         .as_ref()
         .and_then(|state| state.cursor.char_range())
         .map(|range| {
             let range = range.as_sorted_char_range();
-            range.start..range.end
+            range.start.0..range.end.0
         });
     let caret = insert_at_char_range(replacement, selection, text);
     if let Some(state) = state.as_mut() {

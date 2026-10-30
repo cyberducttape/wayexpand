@@ -386,7 +386,7 @@ fn matcher_playground_gui_applies_one_rewrite_per_typed_trigger() {
 
     let ctx = egui::Context::default();
     let screen_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 760.0));
-    ctx.memory_mut(|memory| memory.request_focus(egui::Id::new("try_live_field")));
+    ctx.memory_mut(|memory| memory.request_focus(egui::Id::unique("try_live_field")));
     let render = |app: &mut GuiApp, events: Vec<egui::Event>| {
         let input = egui::RawInput {
             screen_rect: Some(screen_rect),
@@ -417,7 +417,7 @@ fn matcher_playground_gui_applies_one_rewrite_per_typed_trigger() {
         }],
     );
     assert!(app.playground.needs_engine());
-    ctx.memory_mut(|memory| memory.request_focus(egui::Id::new("try_live_field")));
+    ctx.memory_mut(|memory| memory.request_focus(egui::Id::unique("try_live_field")));
     render(&mut app, vec![egui::Event::Text("!".into())]);
 
     assert_eq!(app.playground.text, "Expanded :inner!");
@@ -447,7 +447,7 @@ fn matcher_playground_paste_expands_once_when_output_contains_another_trigger() 
 
     let ctx = egui::Context::default();
     let screen_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 760.0));
-    ctx.memory_mut(|memory| memory.request_focus(egui::Id::new("try_live_field")));
+    ctx.memory_mut(|memory| memory.request_focus(egui::Id::unique("try_live_field")));
     let input = egui::RawInput {
         screen_rect: Some(screen_rect),
         events: vec![egui::Event::Paste(":go".into())],
@@ -1504,23 +1504,29 @@ fn enabling_keystroke_compatibility_shows_the_non_atomic_replacement_risk() {
 
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
-    let output = run_gui_test_frame(
-        &ctx,
-        egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(720.0, 720.0),
-            )),
-            ..Default::default()
-        },
-        |ui| {
-            let palette = Palette::for_pack(app.colorpack, app.dark_mode);
-            app.render_settings_dialog(ui.ctx(), &palette);
-        },
-    );
+    // A window's first frame is an invisible sizing pass, which egui does
+    // not expose to AccessKit; inspect the frame after it.
+    let mut output = None;
+    for _ in 0..2 {
+        output = Some(run_gui_test_frame(
+            &ctx,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(720.0, 720.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                let palette = Palette::for_pack(app.colorpack, app.dark_mode);
+                app.render_settings_dialog(ui.ctx(), &palette);
+            },
+        ));
+    }
     let semantics = format!(
         "{:?}",
         output
+            .expect("two frames ran")
             .platform_output
             .accesskit_update
             .expect("settings should expose accessible content")
@@ -1663,7 +1669,7 @@ fn diagnostics_dialog_stays_inside_a_small_window() {
         });
     }
     let window = ctx
-        .memory(|memory| memory.area_rect(egui::Id::new(Some(app.strings.diagnostics_title()))))
+        .memory(|memory| memory.area_rect(egui::Id::unique(Some(app.strings.diagnostics_title()))))
         .expect("diagnostics window was laid out");
     assert!(
         screen.expand(1.0).contains_rect(window),
@@ -2186,13 +2192,17 @@ fn raw_input_setup_command_is_hidden_until_explicit_acknowledgement() {
     app.evdev_setup_open = true;
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
+    // A window's first frame is an invisible sizing pass, which egui does
+    // not expose to AccessKit; inspect the frame after it.
     let render = |app: &mut GuiApp| {
-        let output = run_gui_test_frame(&ctx, egui::RawInput::default(), |ui| {
+        let mut draw = |ui: &mut egui::Ui| {
             app.render_evdev_setup(
                 &ui.ctx().clone(),
                 &Palette::for_pack(app.colorpack, app.dark_mode),
             );
-        });
+        };
+        run_gui_test_frame(&ctx, egui::RawInput::default(), &mut draw);
+        let output = run_gui_test_frame(&ctx, egui::RawInput::default(), &mut draw);
         format!(
             "{:?}",
             output.platform_output.accesskit_update.unwrap().nodes
