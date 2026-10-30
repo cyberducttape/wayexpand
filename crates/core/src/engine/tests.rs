@@ -4727,7 +4727,7 @@ fn typed_results(trigger: &str, typed: &str) -> Vec<ExpansionResult> {
     let mut engine = ExpansionEngine::new(config).unwrap();
     let mut results = Vec::new();
     for character in typed.chars() {
-        results.extend(engine.process(InputEvent::Text(character.to_string())));
+        results.extend(engine.process(InputEvent::TextChar(character)));
     }
     results
 }
@@ -4788,6 +4788,43 @@ fn backspace_removes_the_same_grapheme_from_the_matcher_buffer() {
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].trigger.as_ref(), ":x");
     assert_eq!(results[0].insert, "right");
+}
+
+#[test]
+fn scalar_events_preserve_combining_graphemes_and_backspace_behavior() {
+    let config = Config::parse(
+        "[[expansion]]\ntrigger = \":café\"\nreplacement = \"matched\"\n\
+         [[expansion]]\ntrigger = \"e:x\"\nreplacement = \"wrong\"\n\
+         [[expansion]]\ntrigger = \":x\"\nreplacement = \"after-backspace\"\n",
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+
+    let mut normalized_match = Vec::new();
+    for character in ":cafe\u{301}".chars() {
+        normalized_match.extend(engine.process(InputEvent::TextChar(character)));
+    }
+    assert_eq!(normalized_match.len(), 1);
+    assert_eq!(normalized_match[0].trigger.as_ref(), ":café");
+    assert_eq!(normalized_match[0].matched_text, ":cafe\u{301}");
+
+    // A backspace after scalar-by-scalar committed input removes the full
+    // decomposed grapheme, keeping the matcher buffer aligned with the client.
+    engine.process(InputEvent::Reset);
+    for character in "e\u{301}".chars() {
+        engine.process(InputEvent::TextChar(character));
+    }
+    engine.process(InputEvent::Backspace);
+    for character in ":x".chars() {
+        let results = engine.process(InputEvent::TextChar(character));
+        if character == 'x' {
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0].trigger.as_ref(), ":x");
+            assert_eq!(results[0].insert, "after-backspace");
+        } else {
+            assert!(results.is_empty());
+        }
+    }
 }
 
 #[test]

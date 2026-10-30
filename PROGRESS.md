@@ -26,6 +26,14 @@ Updated: 2026-10-29
 - Committed locally as `045dfdbb` (`Avoid owned strings for scalar input
   events`). The working tree is clean. The active user service was not
   deployed/restarted, and this commit has not been pushed.
+- Updated the core's event-by-event Unicode trigger helper to emit
+  `InputEvent::TextChar`, so canonical normalization and grapheme deletion
+  cases exercise the same event shape as real scalar key input. Added a
+  focused regression for decomposed-accent matching and backspace after
+  scalar-by-scalar input. Reverification passed: workspace Clippy,
+  `RUST_TEST_THREADS=1 cargo test --workspace --locked -q` (465 core tests
+  passed, 2 ignored; 206 daemon; 173 GUI; 128 CLI; all other suites passed),
+  formatting, and `git diff --check`.
 
 ## Completed in this work period
 
