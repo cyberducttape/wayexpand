@@ -2,6 +2,17 @@
 
 Updated: 2026-10-30
 
+## Daemon fail-closed regression suite
+
+- `RUST_TEST_THREADS=1 cargo test --locked -p wayexpand-daemon` passed all
+  206 tests. Coverage includes refusal before unverified erasure, focus-change
+  refusal both before and during output, stop-on-interruption without replay,
+  uncertain-output preservation across reconnect, stale command-result
+  rejection, and status/health reporting.
+- These are code-level regressions only. The private KWin smoke run still
+  cannot test physical keyboard interruption during output; attended desktop
+  target-text evidence remains a P0 acceptance requirement.
+
 ## Per-user installer transaction verification
 
 - `scripts/test-install-user.sh` passed against the current worktree. It built
@@ -459,6 +470,10 @@ Updated: 2026-10-30
 - The GitHub Actions runner inventory returned zero online self-hosted
   certification runners on 2026-10-30, so the production compositor workflow
   cannot execute a real-session target in the current repository setup.
+- Rechecked the release guard: `scripts/check-production-certification.sh
+  true tests/certification/compositor-matrix.json` exits 1 with the expected
+  no-eligible-route message; the current live Actions runner inventory is
+  still empty. Compatibility CI cannot satisfy this gate.
 - Physical evdev capture during long non-atomic output, focus races, partial
   insertion, password-field behavior, runtime layout changes, and suspend /
   reconnect still require attended real-session evidence.
