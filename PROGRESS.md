@@ -2,6 +2,20 @@
 
 Updated: 2026-10-29
 
+## Libei owner-loop failure handling
+
+- Added a private session-operation boundary so the thread-affine command loop
+  can be exercised without moving real libei objects across threads. A worker
+  regression injects an operation error, verifies the exact error is replied
+  to the caller, then confirms a following request still receives a successful
+  reply and the owner loop shuts down cleanly.
+- `cargo test -p wayexpand-backend-libei --locked` passed all 38 tests;
+  `cargo clippy -p wayexpand-backend-libei --all-targets --locked -- -D
+  warnings`, formatting, and `git diff --check` passed.
+- This verifies request/reply behavior after an operation failure. It does not
+  prove bounded shutdown when the EIS call itself hangs, or startup behavior
+  under a non-responsive compositor; those remain lifecycle test gaps.
+
 ## Latest verified change: scalar input event fast path
 
 - Added `InputEvent::TextChar(char)` and routed ordinary single-scalar XKB

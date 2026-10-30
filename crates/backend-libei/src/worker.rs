@@ -185,7 +185,75 @@ impl Drop for LibeiInjector {
     }
 }
 
-fn session_loop(session: &mut LibeiSession, receiver: Receiver<SessionCommand>) {
+trait SessionOperations {
+    fn set_output_checkpoint(&mut self, checkpoint: OutputCheckpoint);
+    fn preflight_text(&mut self, text: &str) -> Result<(), InjectorError>;
+    fn erase(&mut self, trigger: &str) -> Result<(), InjectorError>;
+    fn insert(&mut self, text: &str) -> Result<(), InjectorError>;
+    fn replace(&mut self, trigger: &str, text: &str) -> Result<(), InjectorError>;
+    fn move_cursor_left(&mut self, count: usize) -> Result<(), InjectorError>;
+    fn inject_key(&mut self, keycode: u32) -> Result<(), InjectorError>;
+    fn inject_key_with_modifiers(
+        &mut self,
+        keycode: u32,
+        modifiers: Modifiers,
+    ) -> Result<(), InjectorError>;
+    fn inject_key_event(
+        &mut self,
+        keycode: u32,
+        modifiers: Modifiers,
+        state: KeyEventState,
+    ) -> Result<(), InjectorError>;
+}
+
+impl SessionOperations for LibeiSession {
+    fn set_output_checkpoint(&mut self, checkpoint: OutputCheckpoint) {
+        LibeiSession::set_output_checkpoint(self, checkpoint);
+    }
+
+    fn preflight_text(&mut self, text: &str) -> Result<(), InjectorError> {
+        LibeiSession::preflight_text(self, text)
+    }
+
+    fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {
+        LibeiSession::erase(self, trigger)
+    }
+
+    fn insert(&mut self, text: &str) -> Result<(), InjectorError> {
+        LibeiSession::insert(self, text)
+    }
+
+    fn replace(&mut self, trigger: &str, text: &str) -> Result<(), InjectorError> {
+        LibeiSession::replace(self, trigger, text)
+    }
+
+    fn move_cursor_left(&mut self, count: usize) -> Result<(), InjectorError> {
+        LibeiSession::move_cursor_left(self, count)
+    }
+
+    fn inject_key(&mut self, keycode: u32) -> Result<(), InjectorError> {
+        LibeiSession::inject_key(self, keycode)
+    }
+
+    fn inject_key_with_modifiers(
+        &mut self,
+        keycode: u32,
+        modifiers: Modifiers,
+    ) -> Result<(), InjectorError> {
+        LibeiSession::inject_key_with_modifiers(self, keycode, modifiers)
+    }
+
+    fn inject_key_event(
+        &mut self,
+        keycode: u32,
+        modifiers: Modifiers,
+        state: KeyEventState,
+    ) -> Result<(), InjectorError> {
+        LibeiSession::inject_key_event(self, keycode, modifiers, state)
+    }
+}
+
+fn session_loop(session: &mut impl SessionOperations, receiver: Receiver<SessionCommand>) {
     while let Ok(command) = receiver.recv() {
         let (reply, result) = match command {
             SessionCommand::Checkpoint(checkpoint) => {
@@ -217,5 +285,104 @@ fn worker_unavailable() -> InjectorError {
         backend: BACKEND_NAME,
         message: "the thread-affine libei session is unavailable".into(),
         retryable: true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    use std::time::Duration;
+
+    struct FailingSession {
+        fail_next_insert: bool,
+        insert_calls: Arc<AtomicUsize>,
+    }
+
+    impl SessionOperations for FailingSession {
+        fn set_output_checkpoint(&mut self, _: OutputCheckpoint) {}
+
+        fn preflight_text(&mut self, _: &str) -> Result<(), InjectorError> {
+            Ok(())
+        }
+
+        fn erase(&mut self, _: &str) -> Result<(), InjectorError> {
+            Ok(())
+        }
+
+        fn insert(&mut self, _: &str) -> Result<(), InjectorError> {
+            self.insert_calls.fetch_add(1, Ordering::Relaxed);
+            if std::mem::take(&mut self.fail_next_insert) {
+                Err(InjectorError {
+                    backend: BACKEND_NAME,
+                    message: "injected EIS operation failure".into(),
+                    retryable: true,
+                })
+            } else {
+                Ok(())
+            }
+        }
+
+        fn replace(&mut self, _: &str, _: &str) -> Result<(), InjectorError> {
+            Ok(())
+        }
+
+        fn move_cursor_left(&mut self, _: usize) -> Result<(), InjectorError> {
+            Ok(())
+        }
+
+        fn inject_key(&mut self, _: u32) -> Result<(), InjectorError> {
+            Ok(())
+        }
+
+        fn inject_key_with_modifiers(&mut self, _: u32, _: Modifiers) -> Result<(), InjectorError> {
+            Ok(())
+        }
+
+        fn inject_key_event(
+            &mut self,
+            _: u32,
+            _: Modifiers,
+            _: KeyEventState,
+        ) -> Result<(), InjectorError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn failed_session_operation_is_replied_and_does_not_kill_the_owner_loop() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let insert_calls = Arc::new(AtomicUsize::new(0));
+        let mut session = FailingSession {
+            fail_next_insert: true,
+            insert_calls: Arc::clone(&insert_calls),
+        };
+        let worker = thread::spawn(move || session_loop(&mut session, receiver));
+
+        let (reply, result) = mpsc::sync_channel(1);
+        sender
+            .send(SessionCommand::Insert("first".into(), reply))
+            .unwrap();
+        let error = result
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(error.message, "injected EIS operation failure");
+
+        let (reply, result) = mpsc::sync_channel(1);
+        sender
+            .send(SessionCommand::Insert("second".into(), reply))
+            .unwrap();
+        result
+            .recv_timeout(Duration::from_secs(1))
+            .expect("owner loop should reply after a prior operation failed")
+            .unwrap();
+        assert_eq!(insert_calls.load(Ordering::Relaxed), 2);
+
+        sender.send(SessionCommand::Shutdown).unwrap();
+        worker.join().expect("owner loop should shut down cleanly");
     }
 }
