@@ -45,4 +45,4 @@ and sensitive-field acknowledgement.
 - [Backend behavior](../BACKENDS.md)
 - [Support matrix](../SUPPORT_MATRIX.md)
 - [Security and threat model](../../SECURITY.md)
-- [Historical decision record](../archive/2026-09/P0_3_DECISION_REQUIRED.md)
+- [Historical decision record](https://github.com/cyberducttape/wayexpand/blob/f0df8d9159837b868156542b9cba0f305d5fb9f0/docs/archive/2026-09/P0_3_DECISION_REQUIRED.md) (Git history)

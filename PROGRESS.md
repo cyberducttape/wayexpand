@@ -2,6 +2,28 @@
 
 Updated: 2026-10-30
 
+## Dependency updates, CI identity gate, and documentation sprint
+
+- Main CI failed at `Documentation Validation` after Dependabot PRs #31, #34
+  and #35 were merged in the web UI: the push-range identity check rejected
+  the bot commits and the owner's web merge commits. Commit `e86ad188`
+  accepts both only with GitHub's pinned web-flow signature; its CI run
+  passed. Branch protection is still not enabled (see
+  [`docs/REPOSITORY_GOVERNANCE.md`](docs/REPOSITORY_GOVERNANCE.md)).
+- PR #33 (eframe 0.37) failed to compile. Commit `fa4b52e7` ported the GUI,
+  restored the bundled symbol fonts egui 0.37 moved behind a feature, and was
+  merged as `f0df8d91`. PR #32 (notify 8.2.1) was rebased by Dependabot after
+  a lockfile conflict and is the only open pull request.
+- `wayexpand doctor | head` panicked with exit 101; commit `2427f55c` makes a
+  closed stdout exit 1.
+- Documentation sprint: removed `docs/archive/` and 12 unreferenced,
+  superseded evidence reports (all `certified: false`); corrected the
+  contributing guide's MSRV (1.92, not 1.95) and project layout; added the
+  missing `profile` and pack commands to the man page and `wayexpand help`;
+  completed the configuration-limits table; replaced unsupported performance
+  expectations in troubleshooting with measured values and live metrics;
+  brought the German README up to date.
+
 ## Current-source nightly fuzz run
 
 - Ran every target in `docs/FUZZING.md` for 60 seconds on clean source commit

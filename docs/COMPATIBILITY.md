@@ -76,6 +76,10 @@ All WayExpand commands use standardized exit codes, enabling reliable automation
 
 **Stability:** 🔒 **Stable** — guaranteed stable across 1.x
 
+If the reader of standard output closes it early (for example
+`wayexpand doctor | head`), the command stops quietly with exit code 1 rather
+than panicking.
+
 **Usage example (CI/monitoring):**
 ```bash
 #!/bin/bash

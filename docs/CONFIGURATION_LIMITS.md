@@ -10,15 +10,18 @@ page and the associated tests together.
 | Configuration file | 16 MiB |
 | Expansion entries | 10,000 |
 | Hotkey entries | 1,024 |
+| Hotkey description length | 256 Unicode scalar values |
 | Aggregate enabled trigger data | 256 KiB |
 | Trigger length | 128 Unicode scalar values |
 | Aliases per expansion | 32 (each follows the trigger length limit) |
+| Effective triggers (after case and Unicode-normalization variants) | 100,000 triggers, 1,000,000 scalar values |
 | Replacement size | 1 MiB |
 | Description length | 512 Unicode scalar values |
 | Tags per expansion | 32 |
 | Tag length | 64 Unicode scalar values |
 | App filters per expansion | 32 |
 | App-filter length | 256 Unicode scalar values |
+| Template `env:` allowlist | 32 names |
 | Category length | 64 Unicode scalar values |
 | Command arguments | 32 |
 | Command program length | 256 Unicode scalar values |
@@ -29,6 +32,19 @@ page and the associated tests together.
 | Command timeout | 1–5,000 ms |
 | Command output | 1 MiB |
 | Command cache duration | 0–60,000 ms |
+
+Rendering and packs have their own bounds:
+
+| Resource | Limit |
+|---|---:|
+| Rendered template output | 1 MiB |
+| Form helper output | 2 MiB |
+| One submitted form value | 64 KiB |
+| Expansion results from one input event | 1,024 results, 4 MiB |
+| Pack manifest | 64 KiB |
+| Pack snippet files | 1,024 files, 1 MiB each, 16 MiB per pack |
+
+The values are defined in `crates/core/src/limits.rs`.
 
 Invalid values are rejected before a configuration becomes active. Runtime
 command execution is additionally bounded by the configured timeout and runs

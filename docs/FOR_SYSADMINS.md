@@ -11,8 +11,11 @@ This guide covers deploying, managing, and supporting WayExpand in team and ente
 ### Individual User (Self-Service)
 
 **Publication status:** there are no compositor-certified release packages:
-the v1.3.3 release has no assets. The Ubuntu PPA does publish an experimental
-daily package for Ubuntu 26.04 (Resolute), amd64; Launchpad reported build
+the v1.3.3 release is source only. Uncertified *Experimental build …*
+prereleases on the [releases page](https://github.com/cyberducttape/wayexpand/releases)
+carry x86_64 and aarch64 archives, an amd64 `.deb`, and an x86_64 `.rpm`
+(the latest is `1.3.3-exp.20261014.g06c14359de59`). The Ubuntu PPA also
+publishes an experimental daily package for Ubuntu 26.04 (Resolute), amd64; Launchpad reported build
 `1.3.3-0~202610270213~ubuntu26.04.1` successful on 2026-10-27 ([build
 result](https://launchpad.net/~cyberducttape/+archive/ubuntu/ppa/+build/33875568)).
 That build is not desktop certification and is not a managed-fleet release.
@@ -33,9 +36,9 @@ cd wayexpand
 
 **Packaging Status:**
 - 🧪 Ubuntu: experimental daily PPA package published for Resolute amd64; successful build, not compositor-certified
-- ⏳ Debian: packaging maintained; no release asset or APT repository currently published
+- 🧪 Debian/Ubuntu: experimental `.deb` on GitHub prereleases; no APT repository besides the PPA
 - 📦 Arch: PKGBUILD prepared (not yet official AUR submission)
-- ⏳ Fedora: RPM spec/build maintained; no release asset or Copr repository currently published
+- 🧪 Fedora: experimental `.rpm` on GitHub prereleases; no Copr repository
 - 🔧 Others: local source builds are available with Rust 1.92+
 
 **Admin overhead:** Minimal. Users manage their own configs.
@@ -686,5 +689,5 @@ audit system for compliance or credential-release workflows.
 
 ---
 
-**Last updated:** 2026-10-05
+**Last updated:** 2026-10-30
 **Scope:** WayExpand 1.x; snippets are examples and must be reviewed for the target environment before use

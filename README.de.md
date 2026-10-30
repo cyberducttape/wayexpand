@@ -42,26 +42,43 @@ produktiven Einsatz `wayexpand doctor` und die
 
 ### Experimentelle Pakete
 
-Das PPA veröffentlicht derzeit keine WayExpand-Pakete. Unzertifizierte
-Builds erscheinen als GitHub-Vorabversionen *Experimental build …* auf der
-[Release-Seite](https://github.com/cyberducttape/wayexpand/releases), mit
-Archiven für x86_64 und aarch64, einem `.deb` und einem `.rpm` (jeweils mit
-`.sha256`-Prüfsumme). Sie benötigen keine Rust-Toolchain:
+Unzertifizierte Builds erscheinen als GitHub-Vorabversionen *Experimental
+build …* auf der
+[Release-Seite](https://github.com/cyberducttape/wayexpand/releases). Sie
+bestehen die vollständige CI, aber keine Zertifizierung auf einem echten
+Desktop. Jede enthält Archive für x86_64 und aarch64, ein `.deb` und ein
+`.rpm` (jeweils mit `.sha256`-Prüfsumme und Build-Provenienz) und benötigt
+keine Rust-Toolchain:
 
 ```bash
 sha256sum --check wayexpand-*-linux-x86_64.tar.gz.sha256
 tar -xzf wayexpand-*-linux-x86_64.tar.gz
 ./wayexpand-*-linux-x86_64/scripts/install-release.sh
 # oder: sudo apt install ./wayexpand_*_amd64.deb
+# oder: sudo dnf install ./wayexpand-*.x86_64.rpm
 wayexpand doctor
 wayexpand-gui
 ```
+
+Unter Ubuntu 26.04 (Resolute) gibt es außerdem ein experimentelles tägliches
+Paket im [WayExpand-PPA](https://launchpad.net/~cyberducttape/+archive/ubuntu/ppa):
+
+```bash
+sudo add-apt-repository ppa:cyberducttape/ppa
+sudo apt update
+sudo apt install wayexpand
+```
+
+Es ist nicht für einen Compositor zertifiziert; den aktuellen Paketstand
+zeigt die PPA-Seite.
 
 Auf Tastenanschlag-Wegen (evdev) bleiben getippte Erweiterungen aus, bis Sie
 sie mit `compatibility_mode` erlauben; `wayexpand doctor` erklärt, was der
 aktive Weg garantiert.
 
 ### Aus Quellen
+
+Benötigt Rust 1.92 oder neuer:
 
 ```bash
 git clone https://github.com/cyberducttape/wayexpand
@@ -142,6 +159,36 @@ wayexpand status
 `test` und `preview` injizieren keinen Text in andere Anwendungen. Bei
 befehlsgestützten Snippets kann `test` das konfigurierte Programm ausführen;
 prüfen Sie `program` und `args` vor der Verwendung.
+
+## Von Espanso oder AutoKey umsteigen
+
+```bash
+wayexpand import espanso ~/.config/espanso > imported.toml
+wayexpand import autokey ~/.config/autokey/data > imported.toml
+```
+
+`--strict` lehnt Einträge ab, deren Verhalten nicht erhalten werden kann;
+`--report-json` schreibt einen maschinenlesbaren Bericht nach stderr.
+Unterstützte dynamische Variablen und einfache Formulare werden übernommen.
+Shell-Befehle, Skripte und Zwischenablagezugriff werden nie stillschweigend
+aktiviert und beim Import nie ausgeführt. Details:
+[Migrating from Espanso](docs/MIGRATION_FROM_ESPANSO.md) und
+[Migrating from AutoKey](docs/MIGRATION_FROM_AUTOKEY.md).
+
+## Konfigurationsprofile
+
+Getrennte Bibliotheken, etwa privat und beruflich:
+
+```bash
+wayexpand profile create personal
+wayexpand profile create work
+wayexpand profile switch personal
+wayexpand profile assign-app org.kde.konsole work
+```
+
+Ein Wechsel sichert Änderungen im bisherigen Profil, validiert das neue,
+ersetzt die aktive Konfiguration atomar und lädt den Dienst neu. Siehe den
+[Profil-Leitfaden](docs/PROFILES.md).
 
 ## Konfigurationsdateien erzeugen
 

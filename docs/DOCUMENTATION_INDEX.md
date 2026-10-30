@@ -95,6 +95,7 @@ Then see [SECURITY.md](../SECURITY.md)
 | [OPERATIONS.md](OPERATIONS.md) | All users | Daemon management, tested systemd lifecycle, logs, config reload; desktop functionality inherits backend certification |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Users with issues | Fix common problems |
 | [PERFORMANCE_TUNING.md](PERFORMANCE_TUNING.md) | Large-library users | Matcher limits and tuning |
+| [BENCHMARKS.md](BENCHMARKS.md) | Large-library users and contributors | Measured matcher, memory, and injection latency, with reproduction commands |
 | [FOR_SYSADMINS.md](FOR_SYSADMINS.md) | System admins | Deployment, monitoring, 30+ examples |
 | [ACTION_BROKER_ARCHITECTURE.md](ACTION_BROKER_ARCHITECTURE.md) | SREs and security architects | Named-action policy, service lifecycle, audit sink, and same-UID trust boundary |
 
@@ -105,6 +106,7 @@ Then see [SECURITY.md](../SECURITY.md)
 | [CONFIGURATION_LIMITS.md](CONFIGURATION_LIMITS.md) | All users | Resource and safety boundaries |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | Advanced users | Exact CLI/JSON/config contracts |
 | [PACKS.md](PACKS.md) | Advanced users | Local packs, Git catalogs, and command-safety rules |
+| [PROFILES.md](PROFILES.md) | All users | Separate personal/work libraries and per-application profile assignment |
 | [GUI.md](GUI.md) | GUI users | Interface, themes, languages, fonts, and performance |
 
 ### Enterprise & Security
@@ -133,6 +135,8 @@ Then see [SECURITY.md](../SECURITY.md)
 | [EVDEV_ACCESS_DESIGN.md](EVDEV_ACCESS_DESIGN.md) | Security-conscious administrators | Raw-input permission model and tighter-access investigation |
 | [CERTIFICATION_MATRIX.md](CERTIFICATION_MATRIX.md) | System integrators | Desktop/protocol combinations |
 | [CERTIFICATION.md](CERTIFICATION.md) | QA and system integrators | Machine-readable certification and compositor test requirements |
+| [certification/evidence/README.md](certification/evidence/README.md) | QA and system integrators | Raw compositor smoke-run results |
+| [evidence/kwin-keysym-pacing-2026-10-27.md](evidence/kwin-keysym-pacing-2026-10-27.md) | Contributors | Exploratory libei keysym-pacing measurements (not certification) |
 
 ### Development & Contribution
 
@@ -157,19 +161,12 @@ Then see [SECURITY.md](../SECURITY.md)
 | [RELEASE_PROMOTION.md](RELEASE_PROMOTION.md) | Release maintainers | Release and package promotion checks |
 | [ROADMAP.md](ROADMAP.md) | Contributors and maintainers | Open work and production blockers |
 
-### Historical Design and Audit Records
+### Historical Records
 
-These documents remain available as historical context. Their planning language
-and status snapshots are not a substitute for the current contracts above.
-
-| Document | Purpose |
-|----------|---------|
-| [V13_CRITICAL_REGRESSIONS.md](archive/2026-09/V13_CRITICAL_REGRESSIONS.md) | Historical v1.3 regression findings and fixes |
-| [JOURNEY_TO_V13.md](archive/2026-09/JOURNEY_TO_V13.md) | Historical v1.2/v1.3 implementation narrative |
-| [P1_ARCHITECTURE_ROADMAP.md](archive/2026-09/P1_ARCHITECTURE_ROADMAP.md) | Historical P1 architecture roadmap |
-| [ROADMAP_P2_IMPROVEMENTS.md](archive/2026-09/ROADMAP_P2_IMPROVEMENTS.md) | Historical P2 audit follow-up roadmap |
-| [P0_3_DECISION_REQUIRED.md](archive/2026-09/P0_3_DECISION_REQUIRED.md) | Superseded evdev decision draft |
-| [AUDIT_FINDINGS.md](archive/2026-09/AUDIT_FINDINGS.md) | Historical audit findings and priorities |
+Superseded plans, audits, and release checklists were removed from the tree on
+2026-10-30. They remain in Git history; the last snapshot is at
+[`f0df8d91:docs/archive`](https://github.com/cyberducttape/wayexpand/tree/f0df8d9159837b868156542b9cba0f305d5fb9f0/docs/archive).
+Release history is in [CHANGELOG.md](../CHANGELOG.md).
 
 ---
 
@@ -312,18 +309,6 @@ and status snapshots are not a substitute for the current contracts above.
 
 **Want to contribute**
 → [DEVELOPMENT.md](DEVELOPMENT.md)
-
----
-
-## Archived Documentation
-
-Historical documentation is available in [archive/](archive/):
-- Implementation roadmaps
-- Planning documents
-- Alternative documentation structures (wiki)
-- Historical window tracking guides
-
-For current guidance, see the live documentation above. Archived docs are for reference only.
 
 ---
 

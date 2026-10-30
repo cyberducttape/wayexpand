@@ -129,8 +129,7 @@ fi
 - `wayexpand-<version>-linux-x86_64.tar.gz` containing prebuilt binaries,
   systemd units, the desktop entry, application icon, example configuration,
   current operational documentation, license, security policy, and installation
-  scripts. Historical material under `docs/archive/` remains in Git but is not
-  shipped in this end-user archive.
+  scripts. Only current documentation is shipped.
 - SHA256 checksum: `wayexpand-<version>-linux-x86_64.tar.gz.sha256`
 - Cargo dependency inventory: `wayexpand-<version>-linux-x86_64.cargo-metadata.json`
 

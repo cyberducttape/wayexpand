@@ -1,0 +1,104 @@
+{
+  "name": "main protection",
+  "target": "branch",
+  "enforcement": "active",
+  "bypass_actors": [],
+  "conditions": {
+    "ref_name": {
+      "include": [
+        "~DEFAULT_BRANCH"
+      ],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "deletion"
+    },
+    {
+      "type": "non_fast_forward"
+    },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 0,
+        "dismiss_stale_reviews_on_push": false,
+        "require_code_owner_review": false,
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": true,
+        "allowed_merge_methods": [
+          "merge"
+        ]
+      }
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          {
+            "context": "Version Consistency Check",
+            "integration_id": 15368
+          },
+          {
+            "context": "Native aarch64 build",
+            "integration_id": 15368
+          },
+          {
+            "context": "GitHub Actions Validation",
+            "integration_id": 15368
+          },
+          {
+            "context": "Security Audit",
+            "integration_id": 15368
+          },
+          {
+            "context": "Rust Tests & Linting",
+            "integration_id": 15368
+          },
+          {
+            "context": "Integration & System Tests",
+            "integration_id": 15368
+          },
+          {
+            "context": "Documentation Validation",
+            "integration_id": 15368
+          },
+          {
+            "context": "Script Validation",
+            "integration_id": 15368
+          },
+          {
+            "context": "Systemd Unit Validation",
+            "integration_id": 15368
+          },
+          {
+            "context": "Headless KWin Output and Focus E2E",
+            "integration_id": 15368
+          },
+          {
+            "context": "Headless Sway Output E2E",
+            "integration_id": 15368
+          },
+          {
+            "context": "MSRV (Rust 1.92)",
+            "integration_id": 15368
+          },
+          {
+            "context": "Debian and RPM Package Artifacts",
+            "integration_id": 15368
+          },
+          {
+            "context": "Package Install Smoke (ubuntu:26.04)",
+            "integration_id": 15368
+          },
+          {
+            "context": "Package Install Smoke (fedora:latest)",
+            "integration_id": 15368
+          }
+        ]
+      }
+    }
+  ]
+}

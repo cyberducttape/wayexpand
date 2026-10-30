@@ -140,17 +140,6 @@ def main() -> int:
         if name not in gui_doc:
             errors.append(f"GUI documentation does not mention color pack {name!r}")
 
-    image = ROOT / "docs/archive/images/gui-empty-library-pre-settings-consolidation.png"
-    if not image.is_file():
-        errors.append("archived GUI screenshot is missing")
-    else:
-        gui_doc = (ROOT / "docs/GUI.md").read_text(encoding="utf-8")
-        if "Historical GUI screenshot" not in gui_doc or image.relative_to(ROOT / "docs").as_posix() not in gui_doc:
-            errors.append("GUI documentation must label the archived screenshot as historical")
-        for document in (ROOT / "README.md", ROOT / "docs/GETTING_STARTED.md"):
-            if "gui-empty-library" in document.read_text(encoding="utf-8"):
-                errors.append(f"{document.relative_to(ROOT)} presents the historical screenshot as current")
-
     # Window-tracker availability is security-sensitive: app_filter must fail
     # closed where there is no shipped tracker. Keep the certification prose
     # consistent with the machine-readable matrix used by certify.

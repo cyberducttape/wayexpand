@@ -1,8 +1,9 @@
 # WayExpand Roadmap
 
-> This is the forward-looking roadmap. Completed work and historical release
-> planning are archived in [docs/archive/2026-09/PROFESSIONAL_ROADMAP.md](archive/2026-09/PROFESSIONAL_ROADMAP.md);
-> current behavior is defined by the support and compatibility documents.
+> This is the forward-looking roadmap. Completed work is recorded in
+> [CHANGELOG.md](../CHANGELOG.md); the superseded September 2026 plan remains in
+> [Git history](https://github.com/cyberducttape/wayexpand/blob/f0df8d9159837b868156542b9cba0f305d5fb9f0/docs/archive/2026-09/PROFESSIONAL_ROADMAP.md). Current behavior is
+> defined by the support and compatibility documents.
 
 As of v1.3.3, the core engine, configuration format, and CLI/JSON contracts
 are stable. Desktop backend support remains experimental until the
@@ -234,7 +235,7 @@ Still open:
       Runtime host restrictions remain a separate overlay. Validation now
       compiles every replacement once and the engine renders the compiled
       template; the compiled and streaming renderers share one variable
-      parser and evaluator, with a parity test. `tests/snapshot_consistency`
+      parser and evaluator, with a parity test. `crates/core/tests/snapshot_consistency.rs`
       checks that the daemon's fleet merge, a saved-and-reloaded copy, and
       direct engine construction expand a layered library identically.
 - [x] Named full-config profiles support CLI create/list/switch/remove,

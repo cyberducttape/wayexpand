@@ -502,14 +502,15 @@ Potential color packs for future releases:
 - [ ] **Custom user themes** — User-defined color configurations
 - [ ] **Time-based auto-switching** — Dark at night, light during day
 
-## Historical GUI screenshot
+## Screenshots
 
-The archived image below predates the Settings-window consolidation and does
-not represent the current toolbar or first-run screen. It is retained only as
-visual history; a fresh screenshot will be added after the current GUI can be
-captured reliably in the release environment.
+The first-run screen and the editor with the Matcher preview, both in the
+Retro 80s Neon color pack. `scripts/gui-screenshot.sh` renders the same
+screens from a debug build inside a private headless KWin.
 
-![Historical WayExpand GUI before Settings consolidation](archive/images/gui-empty-library-pre-settings-consolidation.png)
+![WayExpand's first-run screen with three steps: Turn on WayExpand, Add your first snippet, Try it](images/wayexpand-first-run.png)
+
+![WayExpand's editor with the Matcher preview expanding a support reply](images/wayexpand-editor-try-it-live.png)
 
 The Appearance tab of the current Settings window previews each of the eight
 color packs with a live swatch.

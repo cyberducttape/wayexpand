@@ -242,12 +242,12 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "Convert supported Espanso matches or AutoKey phrases to TOML",
             ),
             (
-                "pack search|install|outdated|update|lock|sync|list|inspect|path|remove|import|verify|sign ...",
+                "pack search|inspect|diff|install|outdated|update|lock|sync|list|path|remove|rollback|import|verify|sign ...",
                 "Discover, review, and manage offline versioned snippet packs",
             ),
             (
-                "profile list|create|switch|remove ...",
-                "Switch between validated personal/work configuration profiles",
+                "profile list|create|switch|remove|assign-app|unassign-app ...",
+                "Switch validated configuration profiles, or assign them to apps",
             ),
             (
                 "library add|list|path|search|remove ...",

@@ -7,7 +7,7 @@ certification gate.
 ## Observed GitHub configuration
 
 On 2026-10-30, the GitHub branch-protection API returned `Branch not
-protected` for `main`. The current `main` CI run passed, but without an enforced
+protected` for `main`, and the only repository ruleset (`pro`) was disabled. The current `main` CI run passed, but without an enforced
 ruleset a contributor with write access can still merge or push changes while
 required checks are failing or have not run. No online self-hosted
 certification runners were registered at the time of the check.
@@ -33,8 +33,25 @@ settings:
   Smoke (ubuntu:26.04)`, and `Package Install Smoke (fedora:latest)`.
 - Require the branch to be up to date before merging, so checks cover the
   actual merge base.
+- Allow merge commits only. The commit-identity check below accepts GitHub's
+  signed web-UI merge commits but not squash or rebase merges, whose commits
+  GitHub would author under the noreply address.
 - Require conversation resolution, block force pushes and branch deletion,
   and apply the rules to administrators.
+
+[`.github/rulesets/main-protection.json`](../.github/rulesets/main-protection.json)
+encodes these settings, with the status checks pinned to the GitHub Actions
+app and no approving review required (the repository has one maintainer).
+Apply it once:
+
+```sh
+gh api -X POST repos/cyberducttape/wayexpand/rulesets \
+  --input .github/rulesets/main-protection.json
+```
+
+After it is active, direct pushes to `main` are rejected; every change goes
+through a pull request. Leave the disabled `pro` ruleset off: its `update`
+rule would block all pushes.
 
 The check names are job contexts reported by the current CI workflow. Review
 the list after changing workflow job names. Do not make the self-hosted
@@ -76,7 +93,8 @@ fingerprint together.
 The current settings can be rechecked with:
 
 ```sh
-gh api repos/cyberducttape/wayexpand/branches/main/protection
+gh api repos/cyberducttape/wayexpand/rulesets
+gh api repos/cyberducttape/wayexpand/rules/branches/main
 gh api repos/cyberducttape/wayexpand/actions/runners
 ```
 

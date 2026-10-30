@@ -323,12 +323,19 @@ systemctl --user restart wayexpand-input-method.service
 
 ### Slow matches with many snippets
 
-**Expected:** Should be <1ms per trigger with 10,000 snippets
+Matching itself measured about 3 µs per input event at 10,000 snippets
+([BENCHMARKS.md](BENCHMARKS.md)). Visible delays usually come from output
+pacing (the libei keysym fallback types about one character per 12 ms) or
+from command-backed snippets.
 
 **If experiencing slowness:**
-1. Check snippet count: `wayexpand validate --json | grep expansion_count`
-2. Run benchmark: `wayexpand doctor --benchmark` (if available)
-3. Check for slow commands: `grep -E '^\[\[expansion' ~/.config/wayexpand/*.toml | grep -A5 program`
+1. Check snippet count: `wayexpand validate --json` (`expansion_count`)
+2. Compare matcher and injection latency: `wayexpand status --json`
+   (`matcher_latency_p95_us`, `injection_latency_p95_us`, and
+   `injection_latency_profiles` by output mode and size)
+3. Check the output mode: `wayexpand doctor` reports whether text is
+   inserted directly or typed key by key
+4. Check for slow commands: `grep -E '^\[\[expansion' ~/.config/wayexpand/*.toml | grep -A5 program`
 
 **Optimize:**
 - Remove unused snippets
@@ -337,7 +344,10 @@ systemctl --user restart wayexpand-input-method.service
 
 ### Daemon memory usage
 
-**Expected:** ~50 MB baseline + 1-5 MB per 1,000 snippets
+The daemon reports its own resident memory in `wayexpand status --json`
+(`memory_rss_kib` and `memory_high_water_kib`). The 10,000-snippet benchmark
+process peaked at 125,304 KiB (about 122 MiB) RSS, including the benchmark harness; see
+[BENCHMARKS.md](BENCHMARKS.md).
 
 **Check current usage:**
 ```sh

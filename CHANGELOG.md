@@ -4,6 +4,21 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Exit with code 1 instead of panicking (exit 101) when the reader closes the
+  CLI's standard output, as in `wayexpand doctor | head`.
+- Port the GUI to egui/eframe 0.37. Enable egui's `monochrome_emoji_fonts`,
+  which eframe does not forward, so interface arrows and symbols keep
+  rendering; a test now requires the bundled fonts to cover every symbol the
+  GUI uses, apart from those deliberately drawn from system symbol fonts.
+- Accept Dependabot commits and GitHub web-UI merge commits on `main` only
+  when they carry GitHub's pinned web-flow signature; the key is committed
+  under `.github/keys/`. Dependabot commits on pull requests now need the same
+  signature.
+- Remove `docs/archive/` and superseded, unreferenced `doctor --certify`
+  evidence reports; they remain in Git history. Refresh the contributing
+  guide, man page, `wayexpand help`, configuration limits, troubleshooting
+  performance guidance, the German README, and the documentation index.
+
 - Add an opt-in per-action broker sandbox rule that blocks IP-family socket
   creation and `io_uring` while preserving local Unix sockets; the packaged
   broker service continues to deny IP networking globally.

@@ -1,4 +1,4 @@
-.TH WAYEXPAND 1 "September 2026" "WayExpand 1.3.3" "User Commands"
+.TH WAYEXPAND 1 "October 2026" "WayExpand 1.3.3" "User Commands"
 .SH NAME
 wayexpand \- validate and manage WayExpand text-expansion configuration
 .SH SYNOPSIS
@@ -149,27 +149,64 @@ Parse and validate a configuration file without starting the daemon. With
 Triggers likely to fire by accident or to shadow each other are reported;
 --deny-risks makes them a configuration error.
 .TP
+.B profile list|create NAME|switch NAME|remove NAME [CONFIG]
+Manage named, validated configuration profiles stored in the configuration
+directory's \fBprofiles/\fR directory. Switching saves edits to the outgoing
+profile, validates the selected one, replaces the active configuration
+atomically, and asks the daemon to reload.
+.TP
+.B profile assign-app APP-ID PROFILE [CONFIG] | profile unassign-app APP-ID [CONFIG]
+Use a profile automatically while an application with this exact normalized
+app ID is focused. Matching pauses while the profile loads, and stays off if
+it does not validate. Requires a window tracker (currently KDE Plasma).
+.TP
 .B backup [CONFIG] [DESTINATION]
 Create a private, non-overwriting configuration backup.
 .TP
-.B pack install DIRECTORY [--replace] [--allow-actions] [--signers FILE]
+.B pack search CATALOG [QUERY] [--json] [--signers FILE]
+Find versioned packs in a local catalog directory, such as a checkout added
+with \fBlibrary add\fR. Each result discloses its signer status, review
+metadata, capabilities, commands, and hotkeys. Nothing is installed.
+.TP
+.B pack install DIRECTORY [--replace [--allow-downgrade]] [--allow-actions] [--expected-fingerprint SHA256] [--signers FILE]
 Install a validated local pack under the XDG data directory. Installation
 works offline and does not require an account. Command and hotkey actions are
 refused unless explicitly enabled. Replacing a pack keeps a local backup;
-lower versions additionally require \fB--allow-downgrade\fR.
+lower versions additionally require \fB--allow-downgrade\fR. The expected
+fingerprint, as shown by \fBpack inspect\fR, binds the installation to the
+reviewed content.
+.TP
+.B pack diff INSTALLED-ID CANDIDATE-DIRECTORY
+Show what would change if an installed pack were replaced by a candidate.
+.TP
+.B pack lock [--check [--json]] [--lock FILE]
+Record the installed packs' exact versions and content fingerprints in
+\fBpacks.lock\fR, or with \fB--check\fR report missing, extra, other-version,
+or locally edited packs.
+.TP
+.B pack outdated CATALOG [--json] [--signers FILE] | pack update CATALOG ID [--allow-actions] [--expected-fingerprint SHA256] [--signers FILE]
+List installed packs that have newer versions in a catalog, or move one pack
+to its newest version through the same review and trust checks as
+\fBpack install\fR.
+.TP
+.B pack sync CATALOG [--lock FILE] [--allow-actions] [--signers FILE]
+Install exactly the versions and fingerprints a lockfile pins. Every entry is
+found, verified, and admitted before the first one is installed; packs not in
+the lockfile are reported and left installed.
 .TP
 .B pack list [--json] | pack path ID | pack remove ID
 List, locate, or remove locally installed packs. Installed TOML files can be
 edited directly; run \fBwayexpand validate --fleet\fR after edits.
 .TP
-.B pack rollback ID [--allow-actions] [--expected-fingerprint SHA256] [--signers FILE]
+.B pack rollback-review ID --json [--signers FILE] | pack rollback ID [--allow-actions] [--expected-fingerprint SHA256] [--signers FILE]
 Restore the latest validated backup of an installed pack. Review the backup
 first; the expected fingerprint binds the restore to the reviewed content.
 Commands and hotkeys are refused unless explicitly enabled, and current
 organization policy and signature requirements apply.
 .TP
-.B pack inspect|import|verify DIRECTORY [--signers FILE] | pack sign DIRECTORY --key FILE
+.B pack inspect DIRECTORY-OR-ID [--json] [--signers FILE] | pack import|verify DIRECTORY [--signers FILE] | pack sign DIRECTORY --key FILE
 Inspect, verify, or import a local snippet pack, or sign one with an SSH key.
+Inspection shows the content fingerprint used by \fB--expected-fingerprint\fR.
 Import prints the converted TOML with command actions disabled. When
 organization policy requires signed packs, only signers in its
 \fBpack_signers_file\fR are accepted and \fB--signers\fR is refused.

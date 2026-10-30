@@ -16,12 +16,13 @@ Every change should preserve the project's operational guarantees:
 
 ### Prerequisites
 
-- Rust 1.95+ (install via [rustup](https://rustup.rs/)). 1.95 is the minimum
-  supported version (`rust-version` in `Cargo.toml`, checked by a CI lane);
+- Rust 1.92+ (install via [rustup](https://rustup.rs/)). 1.92 is the minimum
+  supported version (`rust-version` in `Cargo.toml`, checked by CI's MSRV job);
   `rust-toolchain.toml` pins 1.96.0 for development and release builds, and
-  rustup installs it automatically. Code must still build with 1.95.
-- Standard tools: `git`, `make`, `pkg-config`
-- Wayland dev libraries (usually pre-installed on Wayland systems)
+  rustup installs it automatically. Code must still build with 1.92.
+- Standard tools: `git`, `pkg-config`, `shellcheck`
+- Development headers: `libwayland-dev` and `libxkbcommon-dev` on
+  Debian/Ubuntu (`wayland-devel` and `libxkbcommon-devel` on Fedora)
 
 ### Setup and Testing
 
@@ -56,14 +57,12 @@ shellcheck scripts/*.sh
 
 2. **Update CHANGELOG.md** — Add entries under `[Unreleased]` if your PR adds features or fixes bugs
 
-3. **Write a clear commit message**:
-   ```
-   [type]: Brief description (present tense)
-   
-   Longer explanation of the change and why it's needed.
-   
-   Types: feat, fix, docs, test, refactor, perf, chore
-   ```
+3. **Write a clear commit message**: an imperative subject line without a
+   type prefix (for example, `Fail closed when evdev output monitor is
+   absent`), then a body explaining what changed and why. CI also enforces
+   the commit-identity policy described in
+   [`docs/REPOSITORY_GOVERNANCE.md`](docs/REPOSITORY_GOVERNANCE.md); pull
+   requests are merged with merge commits, not squash or rebase merges.
 
 4. **Reference issues** — Link related issues in your PR description
 
@@ -78,20 +77,38 @@ Detailed development policy and workflows are in [`docs/DEVELOPMENT.md`](docs/DE
 
 ### Project Structure
 
-- **`crates/core`** — Expansion engine (platform-independent)
-- **`crates/daemon`** — Service coordinating input/output backends
-- **`crates/cli`** — Command-line interface
-- **`crates/gui`** — Native egui-based GUI editor  
-- **`crates/backend-*`** — Wayland protocol implementations
+Package names differ from directory names: `crates/cli` is the `wayexpand`
+package; the others are `wayexpand-<directory>`, except `action-broker`.
+
+- **`crates/core`** — Expansion engine, configuration, templates, and packs
+  (no backend dependencies)
+- **`crates/daemon`** — Event loop, control socket, reload, and output
+  transactions
+- **`crates/cli`** — `wayexpand` command-line interface; commands live in
+  `src/commands/`
+- **`crates/gui`** — Native egui editor (`wayexpand-gui`); screens live in
+  `src/app/`
+- **`crates/ui`** — Terminal settings app (`wayexpand-ui`)
+- **`crates/backend-*`** — Capture, injection, and window-tracking backends;
+  `backend-selection` chooses among them
+- **`crates/action-broker`**, **`broker-protocol`**, **`broker-client`** —
+  Separately sandboxed execution of named command actions
+- **`crates/process-supervisor`**, **`build-info`**, **`e2e`** — Process-group
+  lifecycle, version stamping, and headless KWin/Sway test helpers
 - **`vendor/`** — Generated, ignored dependency source for reproducible
   offline Debian/Launchpad builds. Normal development resolves from crates.io;
   see the offline-build instructions in `docs/DEVELOPMENT.md`.
 
 ### Common Tasks
 
-**Add a new CLI command:** Add logic to `crates/cli/src/main.rs` and tests to `crates/core/src/engine.rs`
+**Add a new CLI command:** Add the command under `crates/cli/src/commands/`,
+dispatch it from `crates/cli/src/main.rs`, list it in `wayexpand help` and
+`docs/wayexpand.1`, and add tests in `crates/cli/src/tests.rs`. Exit codes and
+JSON output are a contract (`docs/COMPATIBILITY.md`).
 
-**Fix a GUI bug:** Edit `crates/gui/src/main.rs`, test with `cargo run -p wayexpand-gui`
+**Fix a GUI bug:** Find the screen under `crates/gui/src/app/`, add a headless
+test in `crates/gui/src/tests.rs`, and check the result with
+`cargo run -p wayexpand-gui` or `scripts/gui-screenshot.sh`.
 
 **Add a feature:** Write tests first, then implementation, then documentation
 
