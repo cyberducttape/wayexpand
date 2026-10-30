@@ -134,6 +134,10 @@ Updated: 2026-10-30
 
 ## Zero-allocation input fast-path verification
 
+- Re-ran the release allocator probe against commit `f6ed0267`: 100,000
+  warmed, nonmatching deferred `TextChar` events produced zero heap
+  allocations. This remains a core-path measurement; it does not include
+  backend decoding, queueing, or expansion-result construction.
 - Confirmed the requested fast-path patterns are already implemented:
   `Matcher::try_new` accepts borrowed and owned strings; delimiter events use
   a stack UTF-8 buffer and share the text scanner; matcher telemetry records
