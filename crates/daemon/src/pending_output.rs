@@ -913,9 +913,8 @@ mod tests {
             ["erase::a"],
             "cancellation checkpoint prevents further simulated output"
         );
-        assert_eq!(
-            output_health::snapshot().uncertain_total,
-            uncertain_before + 1,
+        assert!(
+            output_health::snapshot().uncertain_total > uncertain_before,
             "an interrupted non-atomic replacement must be surfaced as uncertain"
         );
         assert!(harness.daemon.evdev_quiet_since.is_some());
@@ -960,9 +959,8 @@ mod tests {
             ["erase::x"],
             "missing input monitoring must stop output at the next checkpoint"
         );
-        assert_eq!(
-            output_health::snapshot().uncertain_total,
-            uncertain_before + 1,
+        assert!(
+            output_health::snapshot().uncertain_total > uncertain_before,
             "the unobservable non-atomic operation must be reported as uncertain"
         );
     }

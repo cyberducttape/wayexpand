@@ -521,6 +521,12 @@ Updated: 2026-10-30
   containment evidence and does not replace real evdev plus target-client
   certification.
 
+Follow-up default-parallel testing exposed that exact `+1` assertions on the
+process-wide uncertainty counter race with other output tests. Changed those
+assertions to require a monotonic increase while retaining the assertions
+that this transaction stops after erase and does not insert. All 13 tests
+pass with both default parallel scheduling and `RUST_TEST_THREADS=1`.
+
 ## Current-source private KWin latency run
 
 - Ran `scripts/test-kwin-e2e.sh output-latency` on clean commit
