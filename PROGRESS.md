@@ -45,6 +45,10 @@ Updated: 2026-10-30
   refusal both before and during output, stop-on-interruption without replay,
   uncertain-output preservation across reconnect, stale command-result
   rejection, and status/health reporting.
+- Re-ran the complete daemon suite on commit `0df037d0`: 206 passed, zero
+  failed. A read-only active-session diagnostic reported evdev + libei keysym
+  fallback, non-atomic best-effort replacement, and no sensitive-field signal;
+  this is compatibility evidence only, not production certification.
 - These are code-level regressions only. The private KWin smoke run still
   cannot test physical keyboard interruption during output; attended desktop
   target-text evidence remains a P0 acceptance requirement.
