@@ -980,6 +980,12 @@ pass with both default parallel scheduling and `RUST_TEST_THREADS=1`; the full
   delimiter, buffer-reuse, and telemetry contention tests are present. These
   checks do not establish zero allocations for every event or change any
   compositor certification gate.
+- `cargo run --locked --release -p wayexpand-core --example
+  input_path_allocations` on the same source passed its assertions: the warmed
+  immediate and deferred ASCII nonmatching paths each performed 0 allocations
+  across 100,000 decoded scalar events. This narrowly covers core event
+  processing with retained result buffers; it excludes backend decoding,
+  matching hits, and desktop output.
 - The live GitHub Fuzz workflow `41038804679` is testing remote commit
   `f6c338b42f40`, not this local commit; it was still in progress when checked.
   Its result must not be attributed to the local source.
