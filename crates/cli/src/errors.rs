@@ -71,6 +71,31 @@ pub(crate) fn normalize_error(error: Error) -> Error {
     }
 }
 
+/// Make `wayexpand doctor | head` end with the documented I/O exit code
+/// instead of a panic (exit 101). Rust ignores SIGPIPE, so `println!` panics
+/// once the reader closes stdout. Restoring SIGPIPE is not an option: the
+/// CLI relies on EPIPE when a git child closes its stdin early.
+pub(crate) fn exit_quietly_when_stdout_closes() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let payload = info.payload();
+        let message = payload
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| payload.downcast_ref::<&str>().copied());
+        if message.is_some_and(is_closed_stdout_panic) {
+            std::process::exit(1);
+        }
+        default_hook(info);
+    }));
+}
+
+fn is_closed_stdout_panic(message: &str) -> bool {
+    // The errno suffix is locale-independent, unlike the strerror text.
+    message.starts_with("failed printing to stdout")
+        && message.ends_with(&format!("(os error {})", libc::EPIPE))
+}
+
 impl std::fmt::Display for CliError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.message.fmt(formatter)
@@ -78,3 +103,22 @@ impl std::fmt::Display for CliError {
 }
 
 impl std::error::Error for CliError {}
+
+#[cfg(test)]
+mod tests {
+    use super::is_closed_stdout_panic;
+
+    #[test]
+    fn only_a_closed_stdout_is_treated_as_a_quiet_exit() {
+        assert!(is_closed_stdout_panic(
+            "failed printing to stdout: Broken pipe (os error 32)"
+        ));
+        assert!(!is_closed_stdout_panic(
+            "failed printing to stdout: No space left on device (os error 28)"
+        ));
+        assert!(!is_closed_stdout_panic(
+            "failed printing to stderr: Broken pipe (os error 32)"
+        ));
+        assert!(!is_closed_stdout_panic("index out of bounds"));
+    }
+}

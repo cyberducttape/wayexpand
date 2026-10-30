@@ -33,7 +33,8 @@ use doctor::policy::{load_policy, print_capabilities_diagnostics, print_policy_d
 use doctor::status::status_as_json;
 use doctor::support::support_bundle;
 use errors::{
-    config_error, config_load_error, daemon_error, exit_code_for, normalize_error, usage_error,
+    config_error, config_load_error, daemon_error, exit_code_for, exit_quietly_when_stdout_closes,
+    normalize_error, usage_error,
 };
 #[cfg(test)]
 use setup::recommended_setup_backend;
@@ -80,6 +81,7 @@ macro_rules! usage_bail {
 pub(crate) use usage_bail;
 
 fn main() {
+    exit_quietly_when_stdout_closes();
     if let Err(error) = run().map_err(normalize_error) {
         eprintln!("Error: {error:?}");
         std::process::exit(exit_code_for(&error));
