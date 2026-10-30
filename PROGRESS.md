@@ -4,6 +4,32 @@ Updated: 2026-10-29
 
 ## Completed in this work period
 
+- Changed case propagation to accept `Cow<str>` and return the original
+  borrowed/owned string for lower or mixed case, avoiding the unnecessary copy
+  of already-rendered text. Upper/title transformations still create owned
+  output. Pointer-identity regression tests cover both Cow variants.
+- `RUST_TEST_THREADS=1 cargo test -p wayexpand-core --locked -q`: 458 passed,
+  0 failed, 2 ignored, plus core integration and documentation tests.
+- `cargo clippy -p wayexpand-core --all-targets --locked -- -D warnings` and
+  the focused case-propagation tests passed. Workspace Clippy, formatting,
+  and `git diff --check` passed.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings` passed.
+- `cargo bench -p wayexpand-core --locked` completed. Representative results
+  on this host: matcher latency 5.1–10.8 µs for 100–10,000 snippets;
+  4,096-scalar combining-cluster type/backspace 115–130 µs; Unicode near-miss
+  matching 4.2–5.7 µs; matcher construction 36 ms / 87 ms / 361 ms for
+  1,000 / 5,000 / 10,000 snippets; reload parse/validate/build 80 ms and
+  384 ms for 1,000 and 10,000 snippets. These are a single host run, not a
+  before/after comparison, and do not measure full-path allocation counts.
+- Criterion flagged the existing pathological `unicode_cluster_spans_buffer`
+  case at 129–297 µs as slower than its stored baseline (reported +94% to
+  +333%). It exercises a 4,096-scalar grapheme fallback and is unrelated to
+  the Cow case-propagation edit. Treat this as a benchmark regression to
+  reproduce and investigate separately; the shared host showed substantial
+  outliers. Cow pointer-identity tests establish that unchanged borrowed and
+  owned values retain their buffers, but full input-event allocation
+  instrumentation remains outstanding.
+
 - Removed the case-classification `Vec<char>` allocation and multiple scans;
   alphabetic case flags are now collected in one pass.
 - Changed Unicode backspace to segment a bounded 64-scalar suffix and fall

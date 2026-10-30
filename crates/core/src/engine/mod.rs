@@ -571,7 +571,11 @@ impl ExpansionEngine {
 
             // Apply case propagation
             let final_output = if self.config.expansion[completion.config_index].propagate_case {
-                matching::apply_case_style(&completion.result.matched_text, &validated_output)
+                matching::apply_case_style(
+                    &completion.result.matched_text,
+                    std::borrow::Cow::Owned(validated_output),
+                )
+                .into_owned()
             } else {
                 validated_output
             };
@@ -652,7 +656,8 @@ impl ExpansionEngine {
         }
 
         let insert = if pending.propagate_case {
-            matching::apply_case_style(&pending.matched_text, &output)
+            matching::apply_case_style(&pending.matched_text, std::borrow::Cow::Owned(output))
+                .into_owned()
         } else {
             output
         };
@@ -996,12 +1001,14 @@ impl ExpansionEngine {
     /// the trigger and matched text move straight into the result instead of
     /// being copied out of a plan that is dropped on the next line.
     fn commit_expansion(&mut self, plan: MatchPlan, insert: String) -> ExpansionResult {
-        let mut final_insert = insert;
-
-        // Apply case propagation if configured (applies to all expansion types)
-        if plan.propagate_case {
-            final_insert = matching::apply_case_style(&plan.matched_text, &final_insert);
-        }
+        // Cow keeps this already-owned rendered String in place for the
+        // common lower/mixed-case paths; transformed casing creates new text.
+        let final_insert = if plan.propagate_case {
+            matching::apply_case_style(&plan.matched_text, std::borrow::Cow::Owned(insert))
+                .into_owned()
+        } else {
+            insert
+        };
 
         let reinsert_after = plan.terminating_char.filter(|_| self.reinsert_terminators);
 

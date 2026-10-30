@@ -3,7 +3,7 @@
 //! Handles pattern matching against the input buffer, match plan generation,
 //! and policy application for deciding whether and how to execute expansions.
 
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
 
 use unicode_general_category::{get_general_category, GeneralCategory};
 
@@ -116,11 +116,11 @@ pub(super) fn continues_word_after(preceding: Option<char>, character: char) -> 
 
 /// Recases a rendered replacement to match the casing pattern of the typed
 /// trigger when `propagate_case` is enabled.
-pub(super) fn apply_case_style(typed: &str, text: &str) -> String {
+pub(super) fn apply_case_style<'a>(typed: &str, text: Cow<'a, str>) -> Cow<'a, str> {
     match CaseStyle::classify(typed) {
-        CaseStyle::Lower | CaseStyle::Mixed => text.to_owned(),
-        CaseStyle::Upper => text.to_uppercase(),
-        CaseStyle::Title => capitalize_first_letter(text),
+        CaseStyle::Lower | CaseStyle::Mixed => text,
+        CaseStyle::Upper => Cow::Owned(text.to_uppercase()),
+        CaseStyle::Title => Cow::Owned(capitalize_first_letter(&text)),
     }
 }
 
@@ -179,6 +179,7 @@ impl CaseStyle {
 #[cfg(test)]
 mod case_style_tests {
     use super::{apply_case_style, CaseStyle};
+    use std::borrow::Cow;
 
     #[test]
     fn classifies_simple_case_shapes() {
@@ -192,8 +193,34 @@ mod case_style_tests {
     fn leaves_mixed_case_names_unclassified() {
         for trigger in ["iPhone", "GitHub", "PowerShell", "eBay", "LaTeX"] {
             assert_eq!(CaseStyle::classify(trigger), CaseStyle::Mixed, "{trigger}");
-            assert_eq!(apply_case_style(trigger, "replacement"), "replacement");
+            assert_eq!(
+                apply_case_style(trigger, Cow::Borrowed("replacement")),
+                "replacement"
+            );
         }
+    }
+
+    #[test]
+    fn unchanged_case_preserves_borrowed_and_owned_replacements() {
+        let borrowed = String::from("replacement");
+        let borrowed_ptr = borrowed.as_ptr();
+        let result = apply_case_style(":sig", Cow::Borrowed(&borrowed));
+        assert!(
+            matches!(result, Cow::Borrowed(value) if std::ptr::eq(value.as_ptr(), borrowed_ptr))
+        );
+
+        let owned = String::from("replacement");
+        let owned_ptr = owned.as_ptr();
+        let result = apply_case_style(":sig", Cow::Owned(owned));
+        assert!(matches!(result, Cow::Owned(value) if std::ptr::eq(value.as_ptr(), owned_ptr)));
+    }
+
+    #[test]
+    fn recasing_owns_only_the_transformed_replacement() {
+        let uppercase = apply_case_style(":SIG", Cow::Borrowed("regards"));
+        assert!(matches!(uppercase, Cow::Owned(value) if value == "REGARDS"));
+        let title = apply_case_style(":Sig", Cow::Borrowed("regards"));
+        assert!(matches!(title, Cow::Owned(value) if value == "Regards"));
     }
 }
 

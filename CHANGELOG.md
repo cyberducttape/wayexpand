@@ -23,6 +23,10 @@ All notable changes to WayExpand are documented here.
 - Remove the temporary `Vec<char>` allocation and repeated scans from
   case-propagation classification; lowercase, uppercase, title, and mixed-case
   shapes are now tracked in one pass.
+- Preserve borrowed or already-owned replacement text through case propagation
+  when no recasing is needed. Uppercase and title-case transformations still
+  allocate their transformed output; tests verify unchanged Cow values retain
+  their original buffer.
 - Bound Unicode backspace segmentation to a 64-scalar suffix on the common
   path, retaining a full-buffer correctness fallback when grapheme context
   crosses that window. Track the buffered UTF-8 length incrementally.
