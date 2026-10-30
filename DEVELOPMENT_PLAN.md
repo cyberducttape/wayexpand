@@ -167,6 +167,14 @@ path. It excludes XKB/backend decoding, queueing, output, and match-result
 construction, so it does not satisfy the end-to-end latency or large-library
 profiling gates.
 
+The 2026-10-30 GUI benchmark run measured trigger-conflict lookup at about
+28 ns and draft edit plus preview at about 15 µs across 100 to 10,000 snippets.
+The full validated save pipeline ranged from 3.19 ms at 100 snippets to 375 ms
+at 10,000; it runs on the GUI's bounded background worker. Results and host
+metadata are recorded in `docs/BENCHMARKS.md`. This is a short host-specific
+Criterion run, not event-to-insertion or supported-hardware acceptance
+evidence.
+
 Acceptance criteria:
 
 - Publish p50/p95/p99 event-to-insertion latency for each approved route and

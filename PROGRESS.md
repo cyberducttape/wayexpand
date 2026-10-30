@@ -38,6 +38,18 @@ Updated: 2026-10-30
   [`docs/evidence/kwin-input-method-unavailable-0136588a.json`](docs/evidence/kwin-input-method-unavailable-0136588a.json);
   it does not establish availability on other KWin configurations.
 
+## GUI large-library benchmark
+
+- Ran `cargo bench --locked -p wayexpand-gui --bench gui_edit --
+  --sample-size 10 --warm-up-time 1 --measurement-time 2` on the current
+  source. Conflict lookup stayed near 28 ns and draft edit plus preview near
+  15 µs from 100 through 10,000 snippets. Full save increased from 3.19 ms to
+  375 ms; it runs on the bounded GUI background worker. Hardware, toolchain,
+  full results, and limits are recorded in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
+- The benchmark completed successfully. Criterion warned that the full-save
+  samples exceeded the requested two-second measurement target and extended
+  sampling; these figures are directional, not release latency SLO evidence.
+
 ## Certification evidence identity and reproducibility
 
 - The scenario evidence collector emits schema 4 with the running kernel

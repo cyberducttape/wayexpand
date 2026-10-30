@@ -233,6 +233,28 @@ revision-checked atomic write):
 cargo bench --locked -p wayexpand-gui --bench gui_edit
 ```
 
+### Reference run: 2026-10-30
+
+Measured on an AMD Ryzen 7 7735U, Linux 7.0.0-38-generic, rustc 1.96.0,
+using Criterion with 10 samples, a 1 s warmup, and a 2 s target measurement
+time. Full-save cases exceeded the target time per sample, so Criterion
+extended those measurements. This short run is directional, not release SLO
+evidence.
+
+| Snippets | Trigger-conflict lookup | Draft edit + preview | Full validated save pipeline |
+| ---: | ---: | ---: | ---: |
+| 100 | 27.8 ns | 14.7 µs | 3.19 ms |
+| 1,000 | 28.3 ns | 15.0 µs | 30.3 ms |
+| 5,000 | 28.1 ns | 15.1 µs | 175.9 ms |
+| 10,000 | 27.8 ns | 15.0 µs | 375.4 ms |
+
+Trigger-conflict lookup and preview stayed effectively flat with library size
+in this run. Full save grows substantially, reaching about 375 ms at the
+maximum size. The application performs validation, serialization, merge, and
+persistence on its bounded background runtime worker, so this is save
+completion latency rather than a measured UI-thread stall. Recheck on
+supported release hardware with longer sampling before setting a save SLO.
+
 ## Configuration reload and engine build
 
 The `config_reload` group in `config_edit` measures one secure validated file
