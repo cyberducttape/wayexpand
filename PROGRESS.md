@@ -2,6 +2,26 @@
 
 Updated: 2026-10-30
 
+## Current-source private KWin certification run
+
+- Ran `cargo run --locked -p wayexpand --bin wayexpand -- doctor --certify
+  --json` from clean commit `c94a4f634bfb`. Preserved the machine-readable
+  report at
+  [`docs/evidence/doctor-certify-c94a4f634bfb.json`](docs/evidence/doctor-certify-c94a4f634bfb.json).
+- The private KWin 6.6.6 run passed simple replacement, word-boundary
+  delimiter, cursor placement, multiline output, focus switching, focus-change
+  cancellation, target closure, command completion, reload, daemon restart,
+  and unsupported-character refusal. Build identity matched the source commit.
+- The negotiated route was libei keysym fallback at 12 ms key pacing. Injector
+  p95 was 15.1 ms for small, 783 ms for medium, and 3.14 s for large
+  replacements, with 20 samples per size. These measurements exclude physical
+  capture and client paint latency.
+- The result is explicitly partial and `certified: false`. Unicode insertion
+  was not tested on this keysym-only route. Physical keyboard capture,
+  second-trigger overlap, password-field behavior, suspend/resume, and long
+  soak remain untested. This adds current-source output/focus evidence but does
+  not satisfy the P0 release gate.
+
 ## Certification evidence identity and reproducibility
 
 - The scenario evidence collector emits schema 4 with the running kernel

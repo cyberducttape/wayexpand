@@ -11,6 +11,15 @@ milestone is complete only when its acceptance evidence is recorded in
 
 **Status:** Open. No route is production-certified.
 
+Current partial evidence: `doctor --certify` ran from clean commit
+`c94a4f634bfb` in a private KWin 6.6.6 session. The preserved report at
+[`docs/evidence/doctor-certify-c94a4f634bfb.json`](docs/evidence/doctor-certify-c94a4f634bfb.json)
+records passing replacement, focus, reload, restart, and refusal checks, plus
+20 injector latency samples for each size bucket. It explicitly leaves
+physical capture, overlap input, password fields, suspend/resume, and long soak
+untested, and reports `certified: false`. This is current-source output-path
+evidence only; the release gate remains open.
+
 The evidence collector now records the kernel release and SHA-256 of the
 tested CLI, and requires a complete application/toolkit version map before
 certifying a scenario matrix. It also reads `daemon_control_schema`
