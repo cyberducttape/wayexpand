@@ -539,6 +539,17 @@ pass with both default parallel scheduling and `RUST_TEST_THREADS=1`; the full
   client paint latency, concurrent typing integrity, or an alternative pacing
   interval.
 
+## GUI preview security documentation correction
+
+- Corrected `SECURITY.md`, which still claimed GUI command previews never used
+  the daemon sandbox. The implementation and operations guide show that direct
+  previews use a transient systemd unit with the capture service directives
+  when available; local advanced previews run with desktop-user privileges,
+  safe mode blocks those when no service sandbox exists, and previews are not
+  included in the Action Broker audit.
+- Verification: documentation contracts, local Markdown links, and
+  `git diff --check` passed.
+
 ## Completed in this work period
 
 - Generalized `Matcher::try_new` to accept `IntoIterator<Item = S>` where

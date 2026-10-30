@@ -113,10 +113,16 @@ remains global service policy rather than a per-action grant.
 See
 [`docs/ACTION_BROKER_ARCHITECTURE.md`](docs/ACTION_BROKER_ARCHITECTURE.md).
 
-**Note:** The `wayexpand-gui` preview feature does NOT run commands under the
-daemon's systemd sandbox restrictions. For testing command behavior under actual
-daemon constraints, either manually trigger the expansion during typing or check
-the daemon's `journalctl --user` output for error details.
+**GUI command previews:** With a reachable systemd user manager, direct
+previews run in a transient user unit with the capture service's sandbox
+directives, a minimal environment, and the command timeout. Named actions run
+through the Action Broker. Without a systemd user manager, the GUI offers
+**Run locally (advanced)**, which executes directly with the desktop user's
+privileges; organization safe mode blocks this direct preview when the service
+sandbox is unavailable. Direct previews are not included in the broker audit.
+These modes are shown in the editor. The sandbox is only as strong as the host
+allows, and it does not protect against malicious software running as the same
+user. For details, see [`docs/OPERATIONS.md`](docs/OPERATIONS.md#command-backed-snippets).
 
 The input-method source fails closed when it cannot safely pass through a
 non-text key, preserve shortcut modifiers, or determine a UTF-8-safe Backspace
