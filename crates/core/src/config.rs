@@ -605,6 +605,10 @@ pub(crate) type EffectiveTriggers = Vec<(usize, String)>;
 #[derive(Clone)]
 pub struct ValidatedConfig {
     pub(crate) config: Arc<Config>,
+    /// Shared immutable identifiers and command data retained by match plans
+    /// and output transactions. These Arcs are created with the validated
+    /// generation and let in-flight work outlive a configuration reload.
+    pub(crate) compiled_expansions: Vec<CompiledExpansionMetadata>,
     pub(crate) resolved_policy: OrganizationPolicy,
     pub(crate) normalized_ids: Vec<String>,
     pub(crate) effective_triggers: EffectiveTriggers,
@@ -620,6 +624,14 @@ pub struct ValidatedConfig {
     pub(crate) snippets: Arc<crate::SnippetLibrary>,
     pub(crate) undo_chord: Option<KeyChord>,
     pub(crate) hotkeys: Vec<(KeyChord, usize)>,
+}
+
+#[derive(Clone)]
+pub(crate) struct CompiledExpansionMetadata {
+    pub(crate) id: Arc<str>,
+    pub(crate) trigger: Arc<str>,
+    pub(crate) replacement: Arc<str>,
+    pub(crate) command: Option<Arc<CommandConfig>>,
 }
 
 pub(crate) struct ValidatedMetadata {

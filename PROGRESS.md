@@ -14,6 +14,12 @@ Updated: 2026-10-29
   active device-slot identities, and capped translation at 128 raw events per
   turn while retaining unprocessed events for subsequent turns. Added a
   300-event regression proving bounded slices preserve all translated events.
+- Added per-generation shared snippet identity and command metadata to
+  `ValidatedConfig`. Match plans, pending results, and output transactions
+  retain IDs, triggers, and command configs through `Arc`; form templates also
+  remain shared until rendering. Regression tests assert pointer identity with
+  the validated snapshot and verify command/form matching does not copy
+  unused replacement text.
 - CI run [40990700720](https://github.com/cyberducttape/wayexpand/actions/runs/40990700720)
   completed successfully for `f8c22209`; all jobs, including the repaired
   ShellCheck gate, passed.
@@ -50,7 +56,7 @@ Updated: 2026-10-29
   `894cb6bb`. The current CI run confirms workspace Clippy passes.
 - `cargo fmt --all -- --check`: passed.
 - `RUST_TEST_THREADS=1 cargo test -p wayexpand-core --locked`:
-  451 passed, 0 failed, 2 ignored; the documentation configuration tests and
+  452 passed, 0 failed, 2 ignored; the documentation configuration tests and
   snapshot consistency test also passed.
 - `RUST_TEST_THREADS=1 cargo test -p wayexpand-backend-evdev --locked`:
   21 passed, 0 failed, including bounded-slice, event-retention, and
@@ -58,6 +64,16 @@ Updated: 2026-10-29
 - `cargo clippy -p wayexpand-core -p wayexpand-backend-evdev --all-targets
   --locked -- -D warnings`: passed.
 - `cargo check -p wayexpand-core --benches --locked`: passed.
+- `cargo check --workspace --locked`: passed after introducing shared
+  validated expansion metadata.
+- `cargo test -p wayexpand-daemon --locked --no-run`: passed, compiling the
+  daemon tests against the shared command metadata contract.
+- `RUST_TEST_THREADS=1 cargo test -p wayexpand-core -p wayexpand-daemon
+  --locked`: 452 core tests passed, 2 ignored; 2 documentation configuration
+  tests and 1 snapshot consistency test passed; all 205 daemon tests passed.
+- `cargo test --workspace --locked --no-run`: passed after carrying shared
+  result strings and form templates through the async output path.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`: passed.
 - Criterion worst-case grapheme benchmark (4,096 combining scalars):
   65.7–68.9 µs over 10 samples. This is a scenario measurement, not a
   comparison against the pre-change implementation.
@@ -115,3 +131,6 @@ Updated: 2026-10-29
    text integrity.
 4. Run the 72-hour desktop soak and published-package upgrade/rollback
    rehearsal after the real-session replacement gate passes.
+5. Remove the libei `EventPump` manual `Send` boundary by keeping EIS
+   conversion and event handling on one dedicated thread; the current
+   callback-free invariant is pinned and tested but remains compiler-unchecked.

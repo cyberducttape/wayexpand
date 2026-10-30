@@ -68,6 +68,32 @@ fn engine_uses_the_parsed_filters_and_chords_from_validation() {
     );
 }
 
+#[test]
+fn match_plans_share_identity_and_command_metadata_from_validated_snapshot() {
+    let config = Config::parse(
+        r#"
+        [[expansion]]
+        trigger = ":cmd"
+        replacement = "unused command placeholder"
+        [expansion.command]
+        program = "/bin/true"
+        timeout_ms = 100
+        "#,
+    )
+    .unwrap();
+    let engine = ExpansionEngine::new(config).unwrap();
+    let plan = engine.take_match_plan(0, 4, None).unwrap();
+    let compiled = &engine.validated.compiled_expansions[0];
+
+    assert!(Arc::ptr_eq(&plan.snippet_id, &compiled.id));
+    assert!(Arc::ptr_eq(&plan.trigger_config, &compiled.trigger));
+    assert!(Arc::ptr_eq(
+        plan.command.as_ref().unwrap(),
+        compiled.command.as_ref().unwrap()
+    ));
+    assert!(plan.replacement_text.is_empty());
+}
+
 fn dispatch_and_wait(
     engine: &mut ExpansionEngine,
     pending: PendingExpansionResult,
@@ -144,14 +170,20 @@ fn the_immediate_and_deferred_processors_agree_on_what_matches() {
         let immediate_matches: Vec<(String, String, Option<char>)> = immediate
             .process(InputEvent::Text(input.into()))
             .into_iter()
-            .map(|result| (result.trigger, result.matched_text, result.reinsert_after))
+            .map(|result| {
+                (
+                    result.trigger.to_string(),
+                    result.matched_text,
+                    result.reinsert_after,
+                )
+            })
             .collect();
         let deferred_matches: Vec<(String, String, Option<char>)> = deferred
             .process_deferred(InputEvent::Text(input.into()))
             .into_iter()
             .map(|pending| {
                 (
-                    pending.trigger.clone(),
+                    pending.trigger.to_string(),
                     pending.matched_text.clone(),
                     pending.reinsert_after,
                 )
@@ -1048,7 +1080,7 @@ fn processes_each_character_in_a_chunk() {
     let mut engine = engine();
     let results = engine.process(InputEvent::Text("prefix :hello suffix".into()));
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].trigger, ":hello");
+    assert_eq!(results[0].trigger.as_ref(), ":hello");
 }
 
 #[test]
@@ -1310,7 +1342,7 @@ impl crate::TextInjector for CapabilityInjector {
 #[test]
 fn apply_preflights_backend_capabilities_before_destructive_output() {
     let result = ExpansionResult {
-        snippet_id: String::new(),
+        snippet_id: Arc::from(""),
         trigger: ":x".into(),
         matched_text: ":x".into(),
         insert: "x".repeat(251),
@@ -1341,7 +1373,7 @@ fn apply_preflights_backend_capabilities_before_destructive_output() {
 #[test]
 fn apply_reports_backend_text_preflight_refusal_as_not_applied() {
     let result = ExpansionResult {
-        snippet_id: String::new(),
+        snippet_id: Arc::from(""),
         trigger: ":x".into(),
         matched_text: ":x".into(),
         insert: "refuse".into(),
@@ -1371,7 +1403,7 @@ fn apply_reports_backend_text_preflight_refusal_as_not_applied() {
 fn apply_preflight_counts_reinserted_delimiter_as_one_character() {
     // A multi-byte delimiter is still one character toward the limit.
     let result = ExpansionResult {
-        snippet_id: String::new(),
+        snippet_id: Arc::from(""),
         trigger: ":x".into(),
         matched_text: ":x".into(),
         insert: "x".repeat(249),
@@ -1397,7 +1429,7 @@ fn apply_preflight_counts_reinserted_delimiter_as_one_character() {
 #[test]
 fn apply_allows_zero_cursor_offset_without_cursor_support() {
     let result = ExpansionResult {
-        snippet_id: String::new(),
+        snippet_id: Arc::from(""),
         trigger: ":x".into(),
         matched_text: ":x".into(),
         insert: "x".into(),
@@ -1421,7 +1453,7 @@ fn apply_allows_zero_cursor_offset_without_cursor_support() {
 #[test]
 fn apply_rejects_unrepresentable_unicode_before_output() {
     let result = ExpansionResult {
-        snippet_id: String::new(),
+        snippet_id: Arc::from(""),
         trigger: ":x".into(),
         matched_text: ":x".into(),
         insert: "café".into(),
@@ -1450,7 +1482,7 @@ fn apply_rejects_unrepresentable_unicode_before_output() {
 #[test]
 fn apply_erases_before_inserting() {
     let result = ExpansionResult {
-        snippet_id: String::new(),
+        snippet_id: Arc::from(""),
         trigger: ":x".into(),
         matched_text: ":x".into(),
         insert: "value".into(),
@@ -1503,7 +1535,7 @@ impl crate::TextInjector for FailingNonAtomicInjector {
 
 fn failure_injection_result() -> ExpansionResult {
     ExpansionResult {
-        snippet_id: String::new(),
+        snippet_id: Arc::from(""),
         trigger: ":x".into(),
         matched_text: ":x".into(),
         insert: "replacement".into(),
@@ -1689,7 +1721,7 @@ impl crate::TextInjector for AtomicInjector {
 #[test]
 fn apply_uses_atomic_backend_operation_when_available() {
     let result = ExpansionResult {
-        snippet_id: String::new(),
+        snippet_id: Arc::from(""),
         trigger: ":x".into(),
         matched_text: ":x".into(),
         insert: "value".into(),
@@ -1707,7 +1739,7 @@ fn apply_uses_atomic_backend_operation_when_available() {
 #[test]
 fn apply_replaces_typed_trigger_and_commits_terminator() {
     let result = ExpansionResult {
-        snippet_id: String::new(),
+        snippet_id: Arc::from(""),
         trigger: ":sig".into(),
         matched_text: ":SIG".into(),
         insert: "Best regards,".into(),
@@ -1760,7 +1792,7 @@ impl crate::TextInjector for CursorFailingInjector {
 #[test]
 fn cursor_failure_is_reported_after_replacement_is_applied() {
     let result = ExpansionResult {
-        snippet_id: String::new(),
+        snippet_id: Arc::from(""),
         trigger: ":x".into(),
         matched_text: ":x".into(),
         insert: "value".into(),
@@ -2063,7 +2095,7 @@ fn propagate_case_tracks_unicode_matched_text_for_deletion() {
     let mut engine = ExpansionEngine::new(config).unwrap();
     let result = engine.process(InputEvent::Text("SS".into())).pop().unwrap();
 
-    assert_eq!(result.trigger, "ß");
+    assert_eq!(result.trigger.as_ref(), "ß");
     assert_eq!(result.matched_text, "SS");
     assert_eq!(result.insert, "GRÜSSE");
 
@@ -2563,7 +2595,7 @@ fn word_boundary_triggers_reinsert_terminating_character() {
         .process(InputEvent::Text(":sig ".into()))
         .pop()
         .unwrap();
-    assert_eq!(result.trigger, ":sig");
+    assert_eq!(result.trigger.as_ref(), ":sig");
     assert_eq!(result.insert, "signature");
     assert_eq!(result.reinsert_after, Some(' '));
 }
@@ -2601,9 +2633,9 @@ fn delayed_triggers_preserve_the_character_that_completed_them() {
     // Typing `:a:b` should produce matches for `:a` (broken by `:`) and `:b`.
     let results = engine.process(InputEvent::Text(":a:b".into()));
     assert_eq!(results.len(), 2);
-    assert_eq!(results[0].trigger, ":a");
+    assert_eq!(results[0].trigger.as_ref(), ":a");
     assert_eq!(results[0].reinsert_after, Some(':'));
-    assert_eq!(results[1].trigger, ":b");
+    assert_eq!(results[1].trigger.as_ref(), ":b");
     assert_eq!(results[1].reinsert_after, None);
 }
 
@@ -2995,7 +3027,7 @@ fn trigger_deletion_failure_must_not_double_insert() {
     let result = engine.process(InputEvent::Text(":test ".into()));
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].matched_text, ":test");
-    assert_eq!(result[0].trigger, ":test");
+    assert_eq!(result[0].trigger.as_ref(), ":test");
     assert_eq!(result[0].insert, "success");
     assert_eq!(result[0].reinsert_after, None);
     // Backend MUST:
@@ -3042,15 +3074,15 @@ fn rapid_successive_triggers_dont_corrupt_state() {
     // Type: ":a :b :c"
     let r1 = engine.process(InputEvent::Text(":a ".into()));
     assert_eq!(r1.len(), 1);
-    assert_eq!(r1[0].trigger, ":a");
+    assert_eq!(r1[0].trigger.as_ref(), ":a");
 
     let r2 = engine.process(InputEvent::Text(":b ".into()));
     assert_eq!(r2.len(), 1);
-    assert_eq!(r2[0].trigger, ":b");
+    assert_eq!(r2[0].trigger.as_ref(), ":b");
 
     let r3 = engine.process(InputEvent::Text(":c".into()));
     assert_eq!(r3.len(), 1);
-    assert_eq!(r3[0].trigger, ":c");
+    assert_eq!(r3[0].trigger.as_ref(), ":c");
 
     // Each expansion should be independent - no cross-contamination
     assert_eq!(r1[0].matched_text, ":a");
@@ -4182,8 +4214,8 @@ fn queued_async_command_that_becomes_stale_is_discarded_before_spawn() {
 
     for index in 0..ASYNC_COMMAND_WORKER_COUNT {
         let result = ExpansionResult {
-            snippet_id: String::new(),
-            trigger: format!(":job{index}"),
+            snippet_id: Arc::from(""),
+            trigger: format!(":job{index}").into(),
             matched_text: format!(":job{index}"),
             insert: String::new(),
             cursor_offset: None,
@@ -4200,7 +4232,7 @@ fn queued_async_command_that_becomes_stale_is_discarded_before_spawn() {
                 config_index: index,
                 generation: engine.input_generation,
                 additional_max_size: 0,
-                command: engine.config.expansion[index].command.clone().unwrap(),
+                command: Arc::new(engine.config.expansion[index].command.clone().unwrap()),
                 result,
             })
             .is_ok());
@@ -4218,7 +4250,7 @@ fn queued_async_command_that_becomes_stale_is_discarded_before_spawn() {
     }
 
     let stale_result = ExpansionResult {
-        snippet_id: String::new(),
+        snippet_id: Arc::from(""),
         trigger: ":stale".into(),
         matched_text: ":stale".into(),
         insert: String::new(),
@@ -4236,10 +4268,12 @@ fn queued_async_command_that_becomes_stale_is_discarded_before_spawn() {
             config_index: ASYNC_COMMAND_WORKER_COUNT,
             generation: engine.input_generation,
             additional_max_size: 0,
-            command: engine.config.expansion[ASYNC_COMMAND_WORKER_COUNT]
-                .command
-                .clone()
-                .unwrap(),
+            command: Arc::new(
+                engine.config.expansion[ASYNC_COMMAND_WORKER_COUNT]
+                    .command
+                    .clone()
+                    .unwrap(),
+            ),
             result: stale_result,
         })
         .is_ok());
@@ -4602,7 +4636,7 @@ fn backspace_removes_the_same_grapheme_from_the_matcher_buffer() {
     let results = engine.process(InputEvent::Text(":x".into()));
 
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].trigger, ":x");
+    assert_eq!(results[0].trigger.as_ref(), ":x");
     assert_eq!(results[0].insert, "right");
 }
 
@@ -5616,6 +5650,7 @@ action = "pod-list"
 #[test]
 fn matched_forms_reuse_the_validated_field_definitions() {
     let mut engine = ExpansionEngine::new(Config::parse(FORM_CONFIG).unwrap()).unwrap();
+    let validated_template = Arc::clone(&engine.validated.compiled_expansions[0].replacement);
     let validated_fields = engine.form_fields[0]
         .as_ref()
         .expect("the validated snippet contains form fields")
@@ -5624,6 +5659,11 @@ fn matched_forms_reuse_the_validated_field_definitions() {
 
     let pending = engine.process_deferred(InputEvent::Text(":tk".into()));
     assert_eq!(pending.len(), 1);
+    assert!(pending[0].template_text.is_empty());
+    assert!(Arc::ptr_eq(
+        pending[0].form_template.as_ref().unwrap(),
+        &validated_template
+    ));
     let matched_fields = pending[0]
         .form
         .as_ref()
@@ -6224,11 +6264,11 @@ fn adjacent_static_triggers_do_not_repeat_while_output_is_pending() {
 
     let first = engine.process_deferred(InputEvent::Text(".ssl".into()));
     assert_eq!(first.len(), 1);
-    assert_eq!(first[0].trigger, ".ssl");
+    assert_eq!(first[0].trigger.as_ref(), ".ssl");
 
     let second = engine.process_deferred(InputEvent::Text(".clarity".into()));
     assert_eq!(second.len(), 1);
-    assert_eq!(second[0].trigger, ".clarity");
+    assert_eq!(second[0].trigger.as_ref(), ".clarity");
 
     // The output worker has not released the pending reservation yet.
     // Typing the space must not schedule `.clarity` again.
@@ -6269,7 +6309,7 @@ fn failed_command_trigger_is_not_matched_again_by_following_input() {
     assert_eq!(
         after
             .iter()
-            .map(|result| result.trigger.as_str())
+            .map(|result| result.trigger.as_ref())
             .collect::<Vec<_>>(),
         [";zq"]
     );

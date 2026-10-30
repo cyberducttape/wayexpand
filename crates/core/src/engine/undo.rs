@@ -2,6 +2,7 @@
 
 use super::{ExpansionEngine, ExpansionResult};
 use crate::KeyChord;
+use std::sync::Arc;
 
 impl ExpansionEngine {
     /// Prepare the result that would undo the most recent expansion without
@@ -13,8 +14,8 @@ impl ExpansionEngine {
         }
         let (restore_text, erase_text) = self.last_expansion.as_ref()?;
         Some(ExpansionResult {
-            snippet_id: String::new(),
-            trigger: String::new(),
+            snippet_id: Arc::from(""),
+            trigger: Arc::from(""),
             matched_text: erase_text.clone(),
             insert: restore_text.clone(),
             cursor_offset: None,

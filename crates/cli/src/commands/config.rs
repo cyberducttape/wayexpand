@@ -195,7 +195,7 @@ pub(crate) fn preview_command(mut args: Args) -> Result<()> {
                     "{}",
                     serde_json::json!({
                         "matched": true,
-                        "trigger": result.trigger,
+                        "trigger": result.trigger.as_ref(),
                         "replacement": result.insert,
                         "cursor_offset": result.cursor_offset,
                     })

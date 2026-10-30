@@ -435,7 +435,7 @@ mod tests {
 
     fn expansion(matched: &str) -> ExpansionResult {
         ExpansionResult {
-            snippet_id: String::new(),
+            snippet_id: String::new().into(),
             trigger: matched.into(),
             matched_text: matched.into(),
             insert: "replacement".into(),

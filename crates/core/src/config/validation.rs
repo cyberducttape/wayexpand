@@ -21,8 +21,20 @@ impl Config {
         snippets: Option<std::sync::Arc<crate::SnippetLibrary>>,
     ) -> Result<crate::ValidatedConfig, ConfigError> {
         let metadata = self.validate_metadata_with_snippets(snippets)?;
+        let config = Arc::new(self.clone());
+        let compiled_expansions = config
+            .expansion
+            .iter()
+            .map(|expansion| super::CompiledExpansionMetadata {
+                id: Arc::from(expansion.id.as_str()),
+                trigger: Arc::from(expansion.trigger.as_str()),
+                replacement: Arc::from(expansion.replacement.as_str()),
+                command: expansion.command.clone().map(Arc::new),
+            })
+            .collect();
         Ok(crate::ValidatedConfig {
-            config: Arc::new(self.clone()),
+            config,
+            compiled_expansions,
             resolved_policy: self.organization.clone(),
             normalized_ids: self
                 .expansion

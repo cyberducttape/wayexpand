@@ -33,8 +33,8 @@ pub(super) struct NormalizedWindowContext {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExpansionResult {
-    pub snippet_id: String,
-    pub trigger: String,
+    pub snippet_id: Arc<str>,
+    pub trigger: Arc<str>,
     pub matched_text: String,
     pub insert: String,
     pub cursor_offset: Option<usize>,
@@ -65,8 +65,8 @@ impl ExpansionResult {
 
 #[derive(Debug, Clone)]
 pub struct PendingExpansionResult {
-    pub(super) snippet_id: String,
-    pub trigger: String,
+    pub(super) snippet_id: Arc<str>,
+    pub trigger: Arc<str>,
     pub matched_text: String,
     pub template_text: String,
     pub cursor_offset: Option<usize>,
@@ -81,7 +81,8 @@ pub struct PendingExpansionResult {
     pub(super) cache_ms: u64,
     pub(super) cached_output: Option<String>,
     pub(super) undoable: bool,
-    pub command: Option<CommandConfig>,
+    pub command: Option<Arc<CommandConfig>>,
+    pub(super) form_template: Option<Arc<str>>,
     pub(super) form: Option<Arc<Vec<crate::FormField>>>,
 }
 
@@ -93,15 +94,16 @@ pub enum PendingExpansionDispatch {
 
 #[derive(Debug, Clone)]
 pub struct MatchPlan {
-    pub snippet_id: String,
+    pub snippet_id: Arc<str>,
     pub matched_text: String,
     pub terminating_char: Option<char>,
     pub cursor_offset: Option<usize>,
     pub generation: u64,
-    pub trigger_config: String,
+    pub trigger_config: Arc<str>,
     pub replacement_text: String,
     pub command: Option<Arc<CommandConfig>>,
     pub propagate_case: bool,
+    pub form_template: Option<Arc<str>>,
     pub form: Option<Arc<Vec<crate::FormField>>>,
 }
 

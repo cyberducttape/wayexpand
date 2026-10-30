@@ -479,7 +479,7 @@ fn evdev_follow_up_is_replayed_in_order_to_the_matcher() {
 fn evdev_delimiter_is_absorbed_only_by_the_final_result() {
     let mut results = vec![
         ExpansionResult {
-            snippet_id: String::new(),
+            snippet_id: String::new().into(),
             trigger: ":a".into(),
             matched_text: ":a".into(),
             insert: "alpha".into(),
@@ -490,7 +490,7 @@ fn evdev_delimiter_is_absorbed_only_by_the_final_result() {
             folded_suffix_chars: 0,
         },
         ExpansionResult {
-            snippet_id: String::new(),
+            snippet_id: String::new().into(),
             trigger: ":b".into(),
             matched_text: ":b".into(),
             insert: "beta".into(),
@@ -533,13 +533,13 @@ fn evdev_retryable_injection_failure_is_returned_for_recovery() {
     // which retires the route and reconnects instead of exiting.
     assert!(error.retryable());
     assert!(!error.expansion_rejected());
-    assert_eq!(error.result.trigger, ":a");
+    assert_eq!(error.result.trigger.as_ref(), ":a");
 }
 
 #[test]
 fn evdev_absorbed_delimiters_keep_the_cursor_marker_position() {
     let mut results = vec![ExpansionResult {
-        snippet_id: String::new(),
+        snippet_id: String::new().into(),
         trigger: ":x".into(),
         matched_text: ":x".into(),
         insert: "AB".into(),
@@ -1170,7 +1170,7 @@ fn lost_non_atomic_session_reconnects_and_preserves_ambiguous_result() {
     )
     .unwrap_err();
     assert!(error.retryable());
-    assert_eq!(error.result.trigger, ":x");
+    assert_eq!(error.result.trigger.as_ref(), ":x");
     assert_eq!(error.result.insert, "ok");
 }
 

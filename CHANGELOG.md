@@ -13,6 +13,11 @@ All notable changes to WayExpand are documented here.
 - Reuse evdev event-batch storage, identify held-key state by the active device
   slot instead of cloning its path per batch, and translate at most 128 raw
   events per scheduling slice without dropping the rest of a batch.
+- Compile shared snippet IDs, triggers, and command metadata into each
+  validated configuration generation. Match plans, pending results, and
+  deferred output transactions retain those immutable values by `Arc`; form
+  templates also remain shared until rendering. Command and form matches no
+  longer copy unused replacement text.
 - Keep ordinary evdev key events from opening the post-output quarantine when
   they produce no undo transaction. The old empty-batch path discarded each
   following translated text event and prevented typed triggers from matching;

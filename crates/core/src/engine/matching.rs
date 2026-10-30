@@ -241,9 +241,15 @@ impl ExpansionEngine {
             return None;
         }
         let expansion = &self.config.expansion[config_index];
+        let compiled = &self.validated.compiled_expansions[config_index];
         let form = self.form_fields.get(config_index).cloned().flatten();
+        let form_template = (form.is_some() && expansion.command.is_none())
+            .then(|| Arc::clone(&compiled.replacement));
         let (replacement_text, cursor_offset) = if expansion.command.is_some() || form.is_some() {
-            (expansion.replacement.clone(), None)
+            // Command or form rendering supplies the replacement later;
+            // retaining the configured source here would copy an unused
+            // string. Form sources are retained by Arc below.
+            (String::new(), None)
         } else {
             let (rendered, cursor_offset) = self.render_replacement(config_index).ok()?;
             (rendered, cursor_offset)
@@ -251,18 +257,16 @@ impl ExpansionEngine {
         let start = self.buffer.len().saturating_sub(length);
         let matched_text: String = self.buffer.iter().skip(start).collect();
         Some(MatchPlan {
-            snippet_id: expansion.id.clone(),
+            snippet_id: Arc::clone(&compiled.id),
             matched_text,
             terminating_char,
             cursor_offset,
             generation: self.input_generation,
-            trigger_config: expansion.trigger.clone(),
+            trigger_config: Arc::clone(&compiled.trigger),
             replacement_text,
-            command: expansion
-                .command
-                .as_ref()
-                .map(|command| Arc::new(command.clone())),
+            command: compiled.command.clone(),
             propagate_case: expansion.propagate_case,
+            form_template,
             form,
         })
     }

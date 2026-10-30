@@ -785,11 +785,11 @@ impl ExpansionEngine {
         let job = AsyncCommandJob::Form {
             config_index: pending.config_index,
             additional_max_size,
-            template: pending.template_text,
+            template: pending.form_template.unwrap_or_else(|| Arc::from("")),
             fields,
             command: pending.command.clone(),
             context: self.template_context(),
-            title: pending.trigger.clone(),
+            title: pending.trigger.to_string(),
             origin,
             result: ExpansionResult {
                 snippet_id: pending.snippet_id,
@@ -1065,13 +1065,13 @@ impl ExpansionEngine {
             // Binding the command here rather than testing `is_some()` and
             // unwrapping below keeps the queueing path free of a panic that
             // only a future edit could ever trigger.
-            if let Some(command) = expansion.command.as_ref() {
+            if let Some(command) = plan.command.clone() {
                 let reinsert_after = plan.terminating_char.filter(|_| self.reinsert_terminators);
                 let job = AsyncCommandJob::Expansion {
                     config_index,
                     generation: self.input_generation,
                     additional_max_size: 0,
-                    command: command.clone(),
+                    command,
                     result: ExpansionResult {
                         snippet_id: plan.snippet_id,
                         trigger: plan.trigger_config,
@@ -1123,13 +1123,17 @@ impl ExpansionEngine {
         terminating_char: Option<char>,
     ) -> Option<PendingExpansionResult> {
         // Generate match plan with full context
-        let plan = self.take_match_plan(config_index, length, terminating_char)?;
+        let mut plan = self.take_match_plan(config_index, length, terminating_char)?;
 
         // Policy is checked by the caller before deferred completion.
 
         // Static templates were rendered once while creating the plan. For a
         // command-backed match this field is unused until command completion.
-        let template_text = plan.replacement_text.clone();
+        let template_text = if plan.command.is_some() || plan.form.is_some() {
+            String::new()
+        } else {
+            std::mem::take(&mut plan.replacement_text)
+        };
 
         // Consume buffer
         self.consume_matched_text();
@@ -1163,7 +1167,8 @@ impl ExpansionEngine {
                     .map(|entry| entry.value.clone())
             }),
             undoable: true,
-            command: plan.command.as_ref().map(|c| (**c).clone()),
+            command: plan.command.clone(),
+            form_template: plan.form_template,
             form: plan.form,
         })
     }

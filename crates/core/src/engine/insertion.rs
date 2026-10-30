@@ -1,6 +1,7 @@
 //! Explicit snippet insertion used by the quick picker and control API.
 
 use super::{ExpansionEngine, ExpansionResult};
+use std::sync::Arc;
 
 /// Why a snippet chosen by trigger was not inserted. Each case is a deliberate
 /// refusal that mirrors the rules for typed expansion, not a transient failure.
@@ -69,8 +70,8 @@ impl ExpansionEngine {
             return Err(InsertError::Unrenderable);
         }
         Ok(ExpansionResult {
-            snippet_id: expansion.id.clone(),
-            trigger: expansion.trigger.clone(),
+            snippet_id: Arc::clone(&self.validated.compiled_expansions[config_index].id),
+            trigger: Arc::clone(&self.validated.compiled_expansions[config_index].trigger),
             matched_text: String::new(),
             insert,
             cursor_offset,

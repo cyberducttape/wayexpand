@@ -61,7 +61,7 @@ impl ExpansionEngine {
         self.usage_events.push_back((
             sequence,
             crate::UsageEvent {
-                snippet_id: result.snippet_id.clone(),
+                snippet_id: result.snippet_id.to_string(),
                 typed_chars: result.matched_text.chars().count(),
                 inserted_chars: result.insert.chars().count(),
                 unix_timestamp: std::time::SystemTime::now()

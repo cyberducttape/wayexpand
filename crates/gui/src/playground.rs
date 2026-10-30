@@ -138,7 +138,7 @@ impl Playground {
                         .chars()
                         .count()
                         .saturating_sub(result.matched_text.chars().count());
-                    self.last_trigger = Some(result.trigger.clone());
+                    self.last_trigger = Some(result.trigger.to_string());
                     engine.commit_applied_expansion(&result);
                 }
             }

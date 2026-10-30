@@ -786,8 +786,8 @@ mod tests {
 
     fn test_transaction() -> ExpansionResult {
         ExpansionResult {
-            snippet_id: String::new(),
-            trigger: String::new(),
+            snippet_id: String::new().into(),
+            trigger: String::new().into(),
             matched_text: String::new(),
             insert: "replacement".into(),
             cursor_offset: None,
@@ -1044,8 +1044,8 @@ mod tests {
         .unwrap();
         let submitter = worker.submitter().unwrap();
         let result = ExpansionResult {
-            snippet_id: String::new(),
-            trigger: String::new(),
+            snippet_id: String::new().into(),
+            trigger: String::new().into(),
             matched_text: String::new(),
             insert: "x".repeat(200),
             cursor_offset: None,
@@ -1088,7 +1088,7 @@ mod tests {
         .unwrap();
         let submitter = worker.submitter().unwrap();
         let result = ExpansionResult {
-            snippet_id: String::new(),
+            snippet_id: String::new().into(),
             trigger: ":t".into(),
             matched_text: ":t".into(),
             insert: "x".repeat(200),
@@ -1150,7 +1150,7 @@ mod tests {
         let (_injector, failures, worker) = spawn_async_injector(Box::new(guarded), None).unwrap();
         let submitter = worker.submitter().unwrap();
         let first = ExpansionResult {
-            snippet_id: String::new(),
+            snippet_id: String::new().into(),
             trigger: ":x".into(),
             matched_text: ":x".into(),
             insert: "replacement".into(),
@@ -1262,7 +1262,7 @@ mod tests {
     #[test]
     fn deadline_counts_every_keystroke_the_transaction_sends() {
         let mut result = ExpansionResult {
-            snippet_id: String::new(),
+            snippet_id: String::new().into(),
             trigger: ";sig".into(),
             matched_text: ";sig".into(),
             insert: "héllo".into(),
