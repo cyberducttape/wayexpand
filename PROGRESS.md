@@ -26,6 +26,15 @@ Updated: 2026-10-29
 
 ## Verification evidence
 
+- CI for `894cb6bb` initially failed only in `Script Validation`: ShellCheck
+  could not follow the `certification-processes.sh` source in
+  `kwin-certification-session.sh`. Added the missing source directive;
+  `shellcheck scripts/*.sh` now passes locally. The same CI run's Rust tests,
+  debug/release Clippy, headless Sway E2E, unit validation, and security audit
+  jobs passed.
+- An earlier CI run for `27e83eac` also failed debug Clippy on two needless
+  borrows in `crates/cli/src/commands/library.rs`; both were removed in
+  `894cb6bb`. The current CI run confirms workspace Clippy passes.
 - `cargo fmt --all -- --check`: passed.
 - `git diff --check`: passed.
 - `RUST_TEST_THREADS=1 cargo test -p wayexpand-daemon --locked`: 205 passed,

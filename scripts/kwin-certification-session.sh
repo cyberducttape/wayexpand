@@ -21,6 +21,7 @@ set -u
 
 # shellcheck source=scripts/e2e-lib.sh
 . "$(dirname -- "$0")/e2e-lib.sh"
+# shellcheck source=scripts/certification-processes.sh
 . "$(dirname -- "$0")/certification-processes.sh"
 
 export LIBEI_SOCKET="$XDG_RUNTIME_DIR/eis.sock"
