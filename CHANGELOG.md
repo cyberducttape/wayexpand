@@ -16,6 +16,10 @@ All notable changes to WayExpand are documented here.
   APIs. The daemon retains a pending-result buffer across input events, drains
   owned dispatch records before reuse, and tests capacity retention and result
   equivalence with the allocating API.
+- Add single-character processing entry points for deferred and immediate
+  matching. IBus now sends decoded characters directly to the deferred engine
+  path instead of allocating a one-character `String`; the GUI playground
+  reuses its immediate-result vector while replaying text.
 - Preserve a clean-source KWin 6.6.6 smoke report for commit `60315df9bf4c`:
   insertion, focus, reload, restart, refusal, and build identity passed; the
   report remains partial because physical capture, sensitive-field behavior,

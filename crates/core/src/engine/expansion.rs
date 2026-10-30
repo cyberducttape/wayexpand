@@ -45,6 +45,13 @@ impl ExpansionEngine {
         debug_assert!(self.buffer.len() <= self.max_buffer_chars);
     }
 
+    /// Process one already-decoded character without constructing a temporary
+    /// `String`, retaining the caller's immediate-result buffer.
+    pub fn process_text_char_into(&mut self, character: char, results: &mut Vec<ExpansionResult>) {
+        let mut encoded = [0; 4];
+        self.process_text_into(character.encode_utf8(&mut encoded), results);
+    }
+
     /// Process input while reserving command-backed matches for caller policy
     /// approval and later dispatch.
     pub fn process_deferred(&mut self, event: InputEvent) -> Vec<PendingExpansionResult> {
@@ -62,6 +69,29 @@ impl ExpansionEngine {
     ) {
         self.process_deferred_internal_into(event, results);
         debug_assert!(self.buffer.len() <= self.max_buffer_chars);
+    }
+
+    /// Process one decoded character through deferred matching without an
+    /// intermediate event `String`. Deferred results remain fully owned.
+    pub fn process_deferred_char_into(
+        &mut self,
+        character: char,
+        results: &mut Vec<PendingExpansionResult>,
+    ) {
+        let mut encoded = [0; 4];
+        self.process_text_event_into::<DeferredProcessor>(
+            character.encode_utf8(&mut encoded),
+            results,
+        );
+        debug_assert!(self.buffer.len() <= self.max_buffer_chars);
+    }
+
+    /// Convenience wrapper for callers that process a single decoded
+    /// character and do not retain result storage between events.
+    pub fn process_deferred_char(&mut self, character: char) -> Vec<PendingExpansionResult> {
+        let mut results = Vec::new();
+        self.process_deferred_char_into(character, &mut results);
+        results
     }
 
     /// Clear matcher history when the preceding document text is already

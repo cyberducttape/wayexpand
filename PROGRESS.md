@@ -48,7 +48,16 @@ Updated: 2026-10-29
   cleanup, and Markdown-link checks all passed; the link checker validated 76
   Markdown files and 519 local links. The gate correctly continues to reject
   production certification because no matrix route is eligible. GitHub Actions
-  for `60315df9` remains queued; remote CI evidence is pending.
+  for `60315df9` was cancelled when the evidence-only commit was pushed; no job
+  failure was reported. CI for the evidence commit `5b3eefe7` is in progress.
+- Added single-character engine entry points that encode into stack storage.
+  IBus now avoids constructing a temporary `String` for decoded printable
+  characters, and the GUI playground reuses immediate-result capacity while
+  replaying characters. A core regression compares deferred character events
+  with equivalent text events. Workspace formatting, Clippy, and the full
+  locked test suite passed after this change; no per-keystroke allocation
+  counter has yet been added, so this records the removed conversion rather
+  than a measured zero-allocation claim.
 
 - Made matcher latency recording nonblocking: capture operation duration
   before metrics synchronization, use `try_lock`, and count skipped samples

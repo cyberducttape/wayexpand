@@ -1136,6 +1136,34 @@ fn reusable_deferred_results_are_cleared_and_reused() {
 }
 
 #[test]
+fn deferred_character_processing_matches_single_character_text_events() {
+    let config = Config::parse(
+        r#"[[expansion]]
+trigger = ":x"
+replacement = "expanded""#,
+    )
+    .unwrap();
+    let mut char_engine = ExpansionEngine::new(config.clone()).unwrap();
+    let mut text_engine = ExpansionEngine::new(config).unwrap();
+    let mut reusable = Vec::with_capacity(2);
+    let allocation = reusable.as_ptr();
+
+    char_engine.process_deferred_char_into(':', &mut reusable);
+    let mut first = text_engine.process_deferred(InputEvent::Text(":".into()));
+    assert_eq!(reusable.len(), first.len());
+    assert!(reusable.is_empty());
+    assert_eq!(reusable.as_ptr(), allocation);
+
+    char_engine.process_deferred_char_into('x', &mut reusable);
+    first = text_engine.process_deferred(InputEvent::Text("x".into()));
+    assert_eq!(reusable.len(), first.len());
+    assert_eq!(reusable.len(), 1);
+    assert_eq!(reusable[0].matched_text, ":x");
+    assert_eq!(reusable[0].trigger, first[0].trigger);
+    assert_eq!(reusable.as_ptr(), allocation);
+}
+
+#[test]
 fn delimiter_event_matches_the_borrowed_text_path() {
     let config = Config::parse(
         r#"[[expansion]]

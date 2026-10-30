@@ -125,10 +125,12 @@ impl Playground {
         let mut text = self.seen.clone();
         let mut caret = None;
         let mut rewritten = false;
+        let mut results = Vec::new();
         for character in appended.chars() {
             text.push(character);
             caret = None;
-            for result in engine.process(InputEvent::Text(character.to_string())) {
+            engine.process_text_char_into(character, &mut results);
+            for result in results.drain(..) {
                 if let Some(moved) = apply(&mut text, &result) {
                     rewritten = true;
                     caret = moved;

@@ -457,13 +457,16 @@ impl IbusEngineAdapter {
         let delimiter =
             character.is_whitespace() || !character.is_alphanumeric() && character != '_';
         let event = if delimiter {
-            InputEvent::Delimiter(character)
+            Some(InputEvent::Delimiter(character))
         } else {
-            InputEvent::Text(character.to_string())
+            None
         };
         // Deferred execution: policy check BEFORE command execution
         // This prevents side effects from occurring before approval.
-        let pending = self.engine.process_deferred(event);
+        let pending = match event {
+            Some(event) => self.engine.process_deferred(event),
+            None => self.engine.process_deferred_char(character),
+        };
         let mut actions = Vec::new();
         let mut policy_blocked = false;
         for pending_result in pending {
