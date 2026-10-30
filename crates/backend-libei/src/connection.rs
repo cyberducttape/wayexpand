@@ -2,7 +2,42 @@ use super::{
     read_portal_token_if_enabled, store_portal_token_if_enabled, ConnectCancellation, LibeiError,
     LibeiOptions,
 };
-use std::{future::Future, os::unix::net::UnixStream, sync::OnceLock, time::Duration};
+use std::{
+    future::Future, os::unix::net::UnixStream, path::PathBuf, sync::OnceLock, time::Duration,
+};
+
+const EIS_SOCKET_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Connect to an explicitly configured EIS socket without blocking the owner
+/// thread in a synchronous `connect(2)`. Test and embedded routes use this
+/// path instead of the desktop portal, so they must observe the same
+/// cancellation and deadline contract.
+pub(super) fn connect_socket_with_cancellation(
+    path: PathBuf,
+    cancellation: &ConnectCancellation,
+) -> Result<UnixStream, LibeiError> {
+    if cancellation.is_cancelled() {
+        return Err(LibeiError::Cancelled);
+    }
+    portal_runtime()?.block_on(race_cancellation(
+        async move {
+            let stream = tokio::time::timeout(
+                EIS_SOCKET_CONNECT_TIMEOUT,
+                tokio::net::UnixStream::connect(path),
+            )
+            .await
+            .map_err(|_| {
+                LibeiError::Connect(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "EIS socket connection exceeded its deadline",
+                ))
+            })?
+            .map_err(LibeiError::Connect)?;
+            stream.into_std().map_err(LibeiError::Connect)
+        },
+        cancellation,
+    ))
+}
 
 /// One Tokio runtime for every portal session in the process.
 ///
@@ -180,6 +215,7 @@ pub(super) fn connect_portal(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use std::time::Duration;
 
     #[test]
@@ -211,5 +247,54 @@ mod tests {
         cancel_thread.join().unwrap();
         assert!(matches!(result, Err(super::LibeiError::Cancelled)));
         assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn direct_socket_connect_observes_preexisting_cancellation() {
+        let cancellation = super::ConnectCancellation::default();
+        cancellation.cancel();
+        let started = std::time::Instant::now();
+        let error = connect_socket_with_cancellation(
+            PathBuf::from("/path/that/must/not/be/connected"),
+            &cancellation,
+        )
+        .unwrap_err();
+        assert!(matches!(error, LibeiError::Cancelled));
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn direct_socket_connect_reports_missing_socket() {
+        let error = connect_socket_with_cancellation(
+            PathBuf::from("/dev/null/wayexpand-no-eis-socket"),
+            &ConnectCancellation::default(),
+        )
+        .unwrap_err();
+        assert!(matches!(error, LibeiError::Connect(_)));
+    }
+
+    #[test]
+    fn direct_socket_connect_returns_a_standard_unix_stream() {
+        use std::os::unix::net::UnixListener;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "wayexpand-eis-connect-{}-{nonce}.sock",
+            std::process::id()
+        ));
+        let listener = UnixListener::bind(&path).unwrap();
+        let accept = std::thread::spawn(move || listener.accept().unwrap().0);
+
+        let stream =
+            connect_socket_with_cancellation(path.clone(), &ConnectCancellation::default())
+                .unwrap();
+        assert!(stream.peer_addr().is_ok());
+        let accepted = accept.join().unwrap();
+        assert!(accepted.peer_addr().is_ok());
+        std::fs::remove_file(path).unwrap();
     }
 }

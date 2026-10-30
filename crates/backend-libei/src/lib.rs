@@ -41,7 +41,6 @@
 
 use reis::{ei, enumflags2::BitFlags, event::DeviceCapability};
 use std::{
-    os::unix::net::UnixStream,
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},

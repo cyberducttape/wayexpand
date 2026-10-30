@@ -2,6 +2,21 @@
 
 Updated: 2026-10-29
 
+## Cancellable direct EIS socket startup
+
+- Replaced the blocking `UnixStream::connect` used by explicit `LIBEI_SOCKET`
+  routes with Tokio's asynchronous Unix socket connection. It now observes
+  the shared cancellation token and a five-second deadline before handing the
+  connected stream to the existing nonblocking EIS handshake.
+- Added coverage for preexisting cancellation, missing socket errors, and a
+  successful connection converted back to a standard Unix stream. The
+  `wayexpand-backend-libei` suite passed all 42 tests with 8 test threads;
+  its warnings-as-errors Clippy check and the daemon's bounded-shutdown
+  regression passed. Formatting and whitespace checks passed.
+- The live portal path and real compositor behavior are unchanged; no
+  production certification or physical-input evidence is implied by these
+  socket-level tests.
+
 ## Libei owner-loop failure handling
 
 - Added a private session-operation boundary so the thread-affine command loop

@@ -22,7 +22,10 @@ impl LibeiSession {
             } else {
                 socket
             };
-            (UnixStream::connect(socket)?, None)
+            (
+                super::connection::connect_socket_with_cancellation(socket, &cancellation)?,
+                None,
+            )
         } else {
             connect_portal(options, &cancellation)?
         };
