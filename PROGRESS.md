@@ -50,6 +50,24 @@ Updated: 2026-10-30
   samples exceeded the requested two-second measurement target and extended
   sampling; these figures are directional, not release latency SLO evidence.
 
+## End-to-end default-deny insertion check
+
+- Added `keystroke-route-refuses-without-consent` to the private KWin and Sway
+  E2E suites and to `doctor --certify`. With compatibility consent off, it
+  requires the connected non-atomic route to report `blocked`, records a
+  compatibility-mode refusal, leaves `;safe` unchanged in the actual Wayland
+  sink, and records zero uncertain output. The doctor report stays incomplete
+  if this check is missing.
+- The focused private KWin scenario passed on commit `b2037049`. The full
+  `scripts/test-doctor-certify.sh target/debug/wayexpand` contract also passed
+  on that clean commit, including the new check. All 17 focused CLI
+  certification unit tests passed; CLI Clippy, workspace formatting,
+  ShellCheck, shell syntax, documentation contracts, Markdown links, and
+  whitespace checks passed.
+- This verifies the default-deny behavior against an isolated client. It does
+  not verify physical keyboard capture, the evdev interruption monitor, or
+  eliminate the documented corruption when compatibility consent is enabled.
+
 ## Certification evidence identity and reproducibility
 
 - The scenario evidence collector emits schema 4 with the running kernel

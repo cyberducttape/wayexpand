@@ -61,6 +61,14 @@ Acceptance criteria:
 
 **Status:** Partially implemented; real-session acceptance remains open.
 
+The default-deny condition now has an end-to-end regression in the private
+KWin and Sway harnesses and is a required `doctor --certify` report check. On
+KWin, the isolated test client retained the trigger while the daemon reported
+`compatibility-mode-off`, with zero uncertain output. The full doctor report
+contract passed on clean commit `b2037049`. This validates opt-out refusal;
+it does not establish integrity when a user explicitly enables compatibility
+mode or verify the physical evdev monitor.
+
 Acceptance criteria:
 
 - A route with neither atomic replacement nor a reliable target-text check
