@@ -127,7 +127,10 @@ packaged CLI. Binary archive assembly is byte-identical across differing
 caller umasks on this host. These do not validate arm64 runtime behavior,
 independent compiler reproducibility, package-manager install/upgrade, actual
 service behavior, or published artifact signing/provenance on supported
-release hosts.
+release hosts. Re-ran `scripts/test-install-release.sh`,
+`scripts/test-install-user.sh`, and `scripts/test-release.sh` on the current
+checkout; all passed. No container runtime is available in this environment
+to execute the Debian/RPM package-manager install smoke containers.
 
 Acceptance criteria:
 

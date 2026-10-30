@@ -23,7 +23,7 @@ Updated: 2026-10-30
   negative, and spoofed-identity tests pass locally. The `eframe 0.37.0` PR
   also has actual workspace/API and Rust 1.92 compatibility failures and
   requires a deliberate GUI migration before it can be accepted.
-- The local branch is 40 commits ahead of `origin/main`. Per the release
+- The local branch is 42 commits ahead of `origin/main`. Per the release
   mission, these fixes and diagnostics have not been pushed; remote PR checks
   cannot reflect them until an authorized push updates the base workflow.
 - Ran `scripts/test-kwin-e2e.sh` on clean source commit `0acd0ed87ce6` in its
@@ -34,6 +34,25 @@ Updated: 2026-10-30
   and indexed by [`docs/CERTIFICATION_MATRIX.md`](docs/CERTIFICATION_MATRIX.md).
   Capture remained stdin-simulated, so this does not close the real-capture
   P0 gate.
+
+## Current-source release installation checks
+
+- `scripts/test-install-release.sh` passed, including invalid option/config
+  preflight, atomic activation, rollback after injected failures, and safe
+  uninstall. Its fixture redirects `HOME`, XDG paths, runtime directory, and
+  the session bus into temporary storage.
+- `scripts/test-install-user.sh` passed against the current checkout. It
+  built release binaries and exercised custom XDG roots, spaces/systemd path
+  escaping, configuration preservation, immutable payload checks, version
+  switching, invalid-config upgrade refusal, and uninstall protections.
+- `scripts/test-release.sh` passed: deterministic source archive generation,
+  repeatable binary archive assembly, checksum verification, invalid
+  `SOURCE_DATE_EPOCH` rejection, required payload checks, and packaged CLI/UI
+  smoke tests.
+- These are local x86_64 source/archive checks. No container runtime is
+  available here, so actual Debian/RPM package-manager install/reinstall/remove
+  tests on supported distribution images remain unverified. The active
+  desktop installation was not changed.
 
 ## Fast-path refactor verification
 
