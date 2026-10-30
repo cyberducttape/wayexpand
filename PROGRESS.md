@@ -49,7 +49,10 @@ Updated: 2026-10-29
   Markdown files and 519 local links. The gate correctly continues to reject
   production certification because no matrix route is eligible. GitHub Actions
   for `60315df9` was cancelled when the evidence-only commit was pushed; no job
-  failure was reported. CI for the evidence commit `5b3eefe7` is in progress.
+  failure was reported. CI run `41003908901` for evidence commit `5b3eefe7`
+  completed successfully. CI run `41006119736` for `2614bc53` is still running;
+  27 jobs have completed successfully and no failures have been reported. Its
+  release test job has not yet reached the warmed-allocation gate.
 - Added single-character engine entry points that encode into stack storage.
   IBus now avoids constructing a temporary `String` for decoded printable
   characters, and the GUI playground reuses immediate-result capacity while
@@ -81,6 +84,26 @@ Updated: 2026-10-29
   other crate suites passed (four tests ignored).
 - `cargo clippy --workspace --all-targets --locked -- -D warnings`,
   `cargo fmt --all -- --check`, and `git diff --check` passed.
+- A read-only `wayexpand doctor --json` against the active KDE Wayland session
+  found that the installed daemon is commit `27e83eace764` with status schema
+  13, while this checkout is `2614bc530f1c` with schema 14. Doctor reports the
+  runtime as unhealthy and production readiness unavailable. The connected
+  route uses evdev capture plus libei keysym fallback; it reports no atomic
+  replacement, Unicode guarantee, sensitive-field detection, or layout
+  awareness. `wayexpand-evdev.service` is active from the versioned install at
+  `~/.local/lib/wayexpand/current` and runs `--source=evdev --backend=libei
+  --allow-evdev-sensitive-fields`; the installed CLI and daemon both identify
+  as commit `27e83eace764`. The stdin test harness is inactive. The daemon was
+  left running and unchanged; updating/restarting a live desktop service is a
+  deployment action requiring authorization.
+- Fresh verification on source commit `2614bc53`: `cargo fmt --all -- --check`,
+  `cargo clippy --workspace --all-targets --locked -- -D warnings`, and
+  `RUST_TEST_THREADS=1 cargo test --workspace --locked -q` all passed. The
+  release allocation probe measured zero allocations across 100,000 warmed
+  deferred ASCII events. These checks do not certify physical capture or the
+  installed older daemon.
+- `bash scripts/test-production-certification-gate.sh` passed, confirming that
+  release publication remains blocked while no compositor route is eligible.
 - After the signal-restoration changes, the final `RUST_TEST_THREADS=1 cargo
   test --workspace --locked -q` run passed: 459 core tests (2 ignored), 206
   daemon tests, 173 GUI tests, 128 CLI tests, and all other workspace suites
