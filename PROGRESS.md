@@ -23,8 +23,8 @@ Updated: 2026-10-30
   negative, and spoofed-identity tests pass locally. The `eframe 0.37.0` PR
   also has actual workspace/API and Rust 1.92 compatibility failures and
   requires a deliberate GUI migration before it can be accepted.
-- The local branch is 42 commits ahead of `origin/main`. Per the release
-  mission, these fixes and diagnostics have not been pushed; remote PR checks
+- The local branch is ahead of `origin/main`. Per the release mission, these
+  fixes and diagnostics have not been pushed; remote PR checks
   cannot reflect them until an authorized push updates the base workflow.
 - Ran `scripts/test-kwin-e2e.sh` on clean source commit `0acd0ed87ce6` in its
   isolated private KWin 6.6.6 session. All 15 output, focus, lifecycle, and
@@ -55,8 +55,8 @@ Updated: 2026-10-30
   desktop installation was not changed.
 - Hardened the package smoke test guard: package install/reinstall/remove now
   requires both its explicit disposable-test opt-in and a Docker/Podman
-  runtime marker. Added a host-side regression that mocks UID 0 and verifies
-  the opt-in alone is refused before package-manager commands. The guard test,
+  runtime marker. Added a host-side regression that verifies the opt-in alone
+  is refused before package-manager commands. The guard test,
   ShellCheck, shell syntax, and CI workflow actionlint all passed. GitHub's
   documented container-job example checks for `/.dockerenv`, matching the
   marker used by this workflow.
