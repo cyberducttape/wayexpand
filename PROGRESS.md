@@ -68,6 +68,19 @@ Updated: 2026-10-30
   not verify physical keyboard capture, the evdev interruption monitor, or
   eliminate the documented corruption when compatibility consent is enabled.
 
+## Per-action device namespace feasibility
+
+- Confirmed the systemd contract in the official
+  [`systemd.exec(5)` documentation](https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html#PrivateDevices=):
+  `PrivateDevices=` was added in v239 and implicitly enables `PrivateUsers=`
+  for a user-manager service, requiring unprivileged user namespaces.
+- Tested a transient user unit on this systemd 259 environment. It failed
+  before `ExecStart` with `218/CAPABILITIES`; `unshare -Ur true` also failed
+  with `Operation not permitted`. This container cannot validate the private
+  device namespace. The packaged broker remains unchanged; enabling the
+  directive based on syntax validation alone would risk making the service
+  fail at startup on restricted hosts.
+
 ## Certification evidence identity and reproducibility
 
 - The scenario evidence collector emits schema 4 with the running kernel

@@ -310,8 +310,12 @@ because inherited broker output could be a terminal descriptor. This is a
 restricted device-access profile, not a complete device namespace: descriptors
 already inherited by the broker or device nodes inside explicitly granted
 directories are not independently classified by device type. The packaged
-service still does not use `PrivateDevices=yes`. Custom service launches should
-keep service-level network controls and must not treat per-action Landlock as a
+service still does not use `PrivateDevices=yes`. systemd added this setting in
+version 239, but a per-user manager also requires working unprivileged user
+namespaces. Validate the setting by starting a transient user unit on each
+supported distribution before making it mandatory; a unit-file syntax check
+cannot prove the namespace can be created. Custom service launches should keep
+service-level network controls and must not treat per-action Landlock as a
 replacement for a device namespace. The broker trusts
 software running under its own UID, including the user who can edit the broker
 policy; neither Landlock nor authenticated IPC is a boundary against malicious

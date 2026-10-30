@@ -140,6 +140,15 @@ socket restrictions, and a restricted device-access profile are implemented
 and regression-tested. A private device namespace and broader supported-host
 verification remain open.
 
+The official [`systemd.exec(5)` documentation](https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html#PrivateDevices=)
+states that `PrivateDevices=` was added in systemd 239 and, in per-user
+managers, implicitly enables `PrivateUsers=` and therefore requires working
+unprivileged user namespaces. On this system (systemd 259), a transient
+user-service probe failed with `218/CAPABILITIES`, and `unshare -Ur` was denied.
+This environment cannot validate the setting. Do not add it unconditionally;
+test it on supported non-containerized user managers and make setup fail
+clearly or fall back to the documented restricted profile when unavailable.
+
 Acceptance criteria:
 
 - Validate the configured executable, open and pin its inode, and launch that
