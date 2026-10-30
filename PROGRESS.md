@@ -40,6 +40,12 @@ Updated: 2026-10-29
   with the fallible matcher API and all downstream call sites.
 - `RUST_TEST_THREADS=1 cargo test --workspace --locked -q`: passed; all
   executed workspace unit, integration, and documentation tests succeeded.
+- Ran `wayexpand doctor --certify --json` against private headless KWin 6.6.6
+  at commit `30e4557c1a96`. The clean-build report is preserved at
+  [`docs/certification/evidence/kwin-6.6.6-private-30e4557c.json`](docs/certification/evidence/kwin-6.6.6-private-30e4557c.json).
+  Twelve output/focus checks passed and backend latency was measured; four
+  scenarios were not tested. The report correctly says `certified: false`.
+  This does not satisfy physical-capture or production-certification gates.
 - `cargo clippy --workspace --all-targets --locked -- -D warnings`: passed
   after the libei ownership change.
 - `RUST_TEST_THREADS=1 cargo test --workspace --locked -q`: passed after the

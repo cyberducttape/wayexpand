@@ -9,6 +9,9 @@ All notable changes to WayExpand are documented here.
 - Add fallible `Matcher::try_new` construction for arbitrary trigger iterators;
   excessive trigger counts return `MatcherBuildError`. Preserve the legacy
   `Matcher::new` API as deprecated for source compatibility.
+- Preserve a machine-readable private KWin 6.6.6 smoke report with exact
+  binary hashes and measured keysym-fallback latency. The report remains
+  explicitly partial and non-certifying.
 - Keep the libei event converter and session on the dedicated thread that
   creates them, replacing the manually asserted `Send` implementation with a
   bounded request/reply injector handle. Compile-time regression coverage
