@@ -34,6 +34,9 @@ All notable changes to WayExpand are documented here.
 - Process delimiter characters through the common borrowed-text scanner using
   stack UTF-8 storage, avoiding a per-delimiter `String` allocation and
   recursive event dispatch.
+- Restore the process-wide signal disposition after evdev and libei
+  signal-interruption tests. The tests verify the original handler and
+  portable signal flags are back in place after completion.
 - Bound Unicode backspace segmentation to a 64-scalar suffix on the common
   path, retaining a full-buffer correctness fallback when grapheme context
   crosses that window. Track the buffered UTF-8 length incrementally.

@@ -24,6 +24,18 @@ Updated: 2026-10-29
   other crate suites passed (four tests ignored).
 - `cargo clippy --workspace --all-targets --locked -- -D warnings`,
   `cargo fmt --all -- --check`, and `git diff --check` passed.
+- After the signal-restoration changes, the final `RUST_TEST_THREADS=1 cargo
+  test --workspace --locked -q` run passed: 459 core tests (2 ignored), 206
+  daemon tests, 173 GUI tests, 128 CLI tests, and all other workspace suites
+  passed. Workspace Clippy, formatting, and whitespace checks passed again.
+- Fixed process-global signal handler leakage in both the evdev poll and
+  libei handshake interruption tests. Scoped guards restore the captured
+  action even during unwinding; assertions verify the restored handler and
+  public flags while tolerating Linux's private `SA_RESTORER` bit. Both
+  focused signal tests pass. Reviewed the libei connection lifecycle: setup
+  observes cancellation between bounded operations, and the daemon regression
+  confirms an abandoned attempt drops a late injector instead of installing
+  it.
 
 - Changed case propagation to accept `Cow<str>` and return the original
   borrowed/owned string for lower or mixed case, avoiding the unnecessary copy

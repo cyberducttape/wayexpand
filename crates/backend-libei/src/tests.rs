@@ -4,6 +4,21 @@ use std::{
     time::Duration,
 };
 
+struct SignalActionGuard {
+    signal: libc::c_int,
+    previous: libc::sigaction,
+}
+
+impl Drop for SignalActionGuard {
+    fn drop(&mut self) {
+        // SAFETY: `previous` was returned by sigaction for this signal before
+        // the test installed its temporary handler.
+        unsafe {
+            libc::sigaction(self.signal, &self.previous, std::ptr::null_mut());
+        }
+    }
+}
+
 #[test]
 fn checkpointed_sequence_stops_before_the_next_action() {
     let mut checks = 0;
@@ -79,15 +94,19 @@ fn a_signal_does_not_cut_the_handshake_deadline_short() {
     // SAFETY: installs a handler that only bumps an atomic, without
     // SA_RESTART, so the signal interrupts poll exactly as the daemon's
     // SIGINT/SIGTERM handler does.
+    let mut previous: libc::sigaction = unsafe { std::mem::zeroed() };
     unsafe {
         let mut action: libc::sigaction = std::mem::zeroed();
         action.sa_sigaction = count as extern "C" fn(libc::c_int) as usize;
         libc::sigemptyset(&mut action.sa_mask);
-        assert_eq!(
-            libc::sigaction(libc::SIGUSR2, &action, std::ptr::null_mut()),
-            0
-        );
+        assert_eq!(libc::sigaction(libc::SIGUSR2, &action, &mut previous), 0);
     }
+    let previous_handler = previous.sa_sigaction;
+    let previous_flags = previous.sa_flags;
+    let signal_guard = SignalActionGuard {
+        signal: libc::SIGUSR2,
+        previous,
+    };
     // SAFETY: pthread_self has no preconditions.
     let target = unsafe { libc::pthread_self() };
     let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -111,6 +130,27 @@ fn a_signal_does_not_cut_the_handshake_deadline_short() {
     assert!(
         elapsed >= Duration::from_millis(290),
         "the handshake gave up after {elapsed:?} of its 300 ms"
+    );
+    drop(signal_guard);
+
+    let mut restored: libc::sigaction = unsafe { std::mem::zeroed() };
+    // SAFETY: a null new-action pointer queries the current disposition.
+    assert_eq!(
+        unsafe { libc::sigaction(libc::SIGUSR2, std::ptr::null(), &mut restored) },
+        0
+    );
+    assert_eq!(restored.sa_sigaction, previous_handler);
+    // Linux may add its private SA_RESTORER bit when returning the action.
+    let public_flags = libc::SA_SIGINFO
+        | libc::SA_RESTART
+        | libc::SA_NODEFER
+        | libc::SA_RESETHAND
+        | libc::SA_ONSTACK
+        | libc::SA_NOCLDSTOP
+        | libc::SA_NOCLDWAIT;
+    assert_eq!(
+        restored.sa_flags & public_flags,
+        previous_flags & public_flags
     );
 }
 
