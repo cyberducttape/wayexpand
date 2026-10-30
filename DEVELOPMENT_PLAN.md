@@ -77,6 +77,12 @@ Acceptance criteria:
 
 **Status:** Open; release publication is correctly gated by certification.
 
+Partial evidence: the hermetic per-user installer test covers staged
+installation, validation preflight, post-switch rollback, SIGTERM rollback,
+immutable payload checks, and custom XDG roots. Package-manager upgrade and
+rollback, installed-service behavior, and artifact signing/provenance remain
+unverified on supported release hosts.
+
 Acceptance criteria:
 
 - Build locked, reproducible artifacts for supported architectures and package

@@ -2,6 +2,19 @@
 
 Updated: 2026-10-30
 
+## Per-user installer transaction verification
+
+- `scripts/test-install-user.sh` passed against the current worktree. It built
+  the release payload and exercised temporary-home installs, preflight option
+  and config validation, atomic `current` switching, rollback on a post-switch
+  filesystem failure and SIGTERM, immutable payload integrity, a second build
+  identity, preserved user config, custom XDG state/config roots, and paths
+  containing spaces/systemd specifiers. The test uses a temporary home and
+  isolated runtime bus; it did not enable or restart the active desktop service.
+- This is installer-script evidence. Package-manager upgrade/rollback and
+  uninstall behavior on supported distributions, signed artifact provenance,
+  and a real user-service upgrade rehearsal remain open release criteria.
+
 ## Direct EIS connection and handshake failure coverage
 
 - Extracted the stream-to-handshake step used by session startup and added an
