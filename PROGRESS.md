@@ -28,6 +28,10 @@ Updated: 2026-10-30
 - The harness used stdin-simulated capture. It does not test physical input
   during output, so it cannot close the overlap-corruption or production
   certification gates.
+- The corresponding local `scripts/test-sway-e2e.sh` could not start because
+  `sway` is not installed in this environment. The previous GitHub Sway run
+  predates the current local changes, so current-source Sway E2E remains
+  unverified here.
 
 ## Current remote CI and dependency-update audit
 
