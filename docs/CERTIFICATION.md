@@ -64,30 +64,28 @@ input and already-committed text. Active IME/preedit composition is
 intentionally out of scope and is reported as `unsupported-by-design`; a
 certification never implies otherwise.
 
-The current-source private KWin smoke run at
+The latest current-source isolated KWin smoke run is preserved in
+[`docs/evidence/doctor-certify-60315df9bf4c.json`](evidence/doctor-certify-60315df9bf4c.json).
+It tested commit `60315df9bf4c` on KWin 6.6.6. Twelve insertion, focus,
+reload, restart, refusal, and build-identity checks passed. The negotiated
+route was libei keysym fallback; capture was simulated over stdin. The
+second-trigger overlap, Unicode insertion, suspend/resume, and physical
+keyboard capture were not tested. Twenty injector transactions per size
+measured p50/p95/p99 of 12.571/12.712/12.750 ms (small),
+777.592/778.047/778.497 ms (medium), and
+3,121.796/3,126.553/3,127.312 ms (large). These measurements exclude physical
+capture and client paint latency. This is partial compatibility evidence, not
+production certification; password-field behavior and concurrent physical
+input integrity remain unverified.
+
+The preceding current-source KWin smoke run at
 [`docs/evidence/kwin-e2e-6ddbfa854baa.txt`](evidence/kwin-e2e-6ddbfa854baa.txt)
 tested commit `6ddbfa854baa` on KWin 6.6.6. Fourteen real-client scenarios
-passed, including text replacement, delimiters, cursor placement, multiline
-output, focus changes, command completion, reload, restart, clipboard behavior,
-and output latency. The production libei output backend and KWin focus tracker
-were exercised; capture was simulated through stdin. The route negotiated
-libei keysym fallback, with sensitive-field detection unavailable. Twenty
-measurements per size gave injector p50/p95/p99 of 12.570/12.613/12.617 ms
-(small), 781.012/782.203/782.649 ms (medium), and
-3,133.147/3,139.824/3,140.812 ms (large). These exclude physical input capture
-and client paint latency. This is partial compatibility evidence, not
-production certification; physical capture, password-field behavior,
-suspend/resume, and concurrent physical-input integrity remain unverified.
-
-The latest current-source isolated KWin smoke run is preserved in
-[`docs/evidence/doctor-certify-ce6bcb5b019f.json`](evidence/doctor-certify-ce6bcb5b019f.json).
-It tested commit `ce6bcb5b019f` on KWin 6.6.6 and passed 12 output, focus,
-reload, restart, refusal, and build-identity checks. The negotiated route was
-libei keysym fallback with stdin-simulated capture; the second-trigger overlap,
-Unicode insertion, suspend/resume, and physical keyboard capture were not
-tested. Twenty injector transactions per size measured p95 of 12.599 ms
-(small), 785.510 ms (medium), and 3,137.942 ms (large). These are isolated
-injector measurements, not end-to-end latency or production certification.
+passed. The production libei output backend and KWin focus tracker were
+exercised; capture was simulated through stdin. That run also used libei
+keysym fallback, with sensitive-field detection unavailable. Its measurements
+and unverified cases remain useful historical evidence, but it has been
+superseded by the build-identity-checked report above.
 
 The preceding current-source smoke report at
 [`docs/evidence/doctor-certify-6f9d5d584af4.json`](evidence/doctor-certify-6f9d5d584af4.json)

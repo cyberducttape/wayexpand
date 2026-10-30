@@ -16,6 +16,10 @@ All notable changes to WayExpand are documented here.
   APIs. The daemon retains a pending-result buffer across input events, drains
   owned dispatch records before reuse, and tests capacity retention and result
   equivalence with the allocating API.
+- Preserve a clean-source KWin 6.6.6 smoke report for commit `60315df9bf4c`:
+  insertion, focus, reload, restart, refusal, and build identity passed; the
+  report remains partial because physical capture, sensitive-field behavior,
+  overlap, Unicode insertion, and suspend/resume were not tested.
 - Preserve a machine-readable private KWin 6.6.6 smoke report with exact
   binary hashes and measured keysym-fallback latency. The report remains
   explicitly partial and non-certifying.

@@ -35,6 +35,20 @@ Updated: 2026-10-29
   release guarantees. The allocation example measures trie construction after
   source trigger strings are prepared; it does not measure per-keystroke
   allocations.
+- Ran the source-built `wayexpand doctor --certify --json` against private
+  KWin 6.6.6 and preserved the clean-build report at
+  [`docs/evidence/doctor-certify-60315df9bf4c.json`](docs/evidence/doctor-certify-60315df9bf4c.json).
+  Twelve insertion, focus, reload, restart, refusal, and build-identity checks
+  passed. Capture was simulated over stdin; overlap, Unicode output on the
+  negotiated keysym fallback, suspend/resume, and physical keyboard capture
+  remain untested. This is partial compatibility evidence and does not close
+  P0. Injector p95 was 12.712 ms small, 778.047 ms medium, and 3,126.553 ms
+  large, excluding capture and client paint.
+- The certification report contract, matrix, production-gate, driver, process
+  cleanup, and Markdown-link checks all passed; the link checker validated 76
+  Markdown files and 519 local links. The gate correctly continues to reject
+  production certification because no matrix route is eligible. GitHub Actions
+  for `60315df9` remains queued; remote CI evidence is pending.
 
 - Made matcher latency recording nonblocking: capture operation duration
   before metrics synchronization, use `try_lock`, and count skipped samples
