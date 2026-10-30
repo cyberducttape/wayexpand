@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "certified": false,
+  "evidence_scope": "private-session route availability probe",
+  "date": "2026-10-30",
+  "tested_commit": "0136588a3eda",
+  "source_tree_state": "clean",
+  "session": {
+    "compositor": "KWin",
+    "compositor_version": "6.6.6",
+    "desktop": "private headless Wayland session"
+  },
+  "requested_route": "input-method-v2",
+  "result": "unverified",
+  "scenarios": {
+    "input-method-expansion": "unverified",
+    "input-method-password-field": "unverified",
+    "form-returns-to-origin": "unverified",
+    "form-focus-moved-fails-closed": "unverified"
+  },
+  "reason": "The private compositor did not expose an input-method-v2 manager and seat; the daemon reported 'input-method-v2 manager and seat probe failed'.",
+  "limitations": [
+    "No insertion or password-field behavior was exercised.",
+    "This private-session result does not establish whether an input-method-v2 route is available in another KWin setup."
+  ]
+}

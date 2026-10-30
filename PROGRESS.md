@@ -18,9 +18,25 @@ Updated: 2026-10-30
   capture and client paint latency.
 - The result is explicitly partial and `certified: false`. Unicode insertion
   was not tested on this keysym-only route. Physical keyboard capture,
-  second-trigger overlap, password-field behavior, suspend/resume, and long
-  soak remain untested. This adds current-source output/focus evidence but does
-  not satisfy the P0 release gate.
+  password-field behavior, suspend/resume, and long soak remain untested. This
+  adds current-source output/focus evidence but does not satisfy the P0 release
+  gate.
+- Re-ran `scripts/test-kwin-e2e.sh --keep
+  second-trigger-during-nonatomic-replacement` against clean commit
+  `0136588a3eda`. It failed as expected: 124/128 replacement characters
+  remained, concurrent input corrupted the output, and the stale second
+  trigger expanded. The report is
+  [`docs/evidence/kwin-overlap-reproduction-0136588a.json`](docs/evidence/kwin-overlap-reproduction-0136588a.json).
+  Since this harness simulates capture over stdin, this reproduces the
+  non-atomic output race but does not test the physical evdev interruption
+  monitor. The monitor cannot make an already non-exclusive route atomic.
+- Attempted the private KWin input-method-v2 route with
+  `scripts/test-kwin-e2e.sh --source=input-method --keep`. All four dedicated
+  insertion/password/form scenarios were unverified because KWin 6.6.6 did not
+  expose an input-method-v2 manager/seat in this session. The availability
+  result is
+  [`docs/evidence/kwin-input-method-unavailable-0136588a.json`](docs/evidence/kwin-input-method-unavailable-0136588a.json);
+  it does not establish availability on other KWin configurations.
 
 ## Certification evidence identity and reproducibility
 

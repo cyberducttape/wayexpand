@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "certified": false,
+  "evidence_scope": "negative compatibility reproduction only",
+  "date": "2026-10-30",
+  "tested_commit": "0136588a3eda",
+  "source_tree_state": "clean",
+  "session": {
+    "compositor": "KWin",
+    "compositor_version": "6.6.6",
+    "client": "WayExpand wx-e2e-sink test client",
+    "keyboard_layout": "private headless session default; not independently varied"
+  },
+  "route": {
+    "capture": "stdin-simulated",
+    "injection": "libei keysym fallback (12 ms key pacing)",
+    "replacement_assurance": "focus-tracked-best-effort",
+    "compatibility_mode": "tracked-focus",
+    "sensitive_field_signal": false,
+    "output_uncertain_total": 0
+  },
+  "scenario": "second-trigger-during-nonatomic-replacement",
+  "result": "fail",
+  "observed": {
+    "first_expansion_chars_expected": 128,
+    "first_expansion_chars_observed": 124,
+    "concurrent_trigger": ";next",
+    "concurrent_input_corrupted_replacement": true,
+    "stale_second_trigger_was_expanded": true,
+    "final_text_chars": 157,
+    "final_cursor": 157,
+    "client_key_events": 330
+  },
+  "interpretation": "Concurrent input delivered through an independent EIS session corrupted the paced replacement; the stale second trigger expanded. The target-integrity criterion fails for this non-exclusive route when concurrent input is not observed by the capture source.",
+  "limitations": [
+    "The private KWin session exercised a real Wayland client and libei output, but capture was simulated over stdin.",
+    "This does not exercise the daemon's physical evdev interruption monitor.",
+    "The zero uncertain-output counter is expected for the simulated capture path and is not evidence that physical input was monitored.",
+    "This is negative compatibility evidence, not production certification."
+  ]
+}

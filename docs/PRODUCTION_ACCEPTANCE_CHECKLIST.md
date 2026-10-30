@@ -60,7 +60,15 @@ session evidence; unit tests alone do not satisfy them.
       The daemon's uncertain-output counter remained zero because capture was
       simulated over stdin while the concurrent trigger was typed through an
       independent EIS session. This does not test the physical-evdev
-      interruption path. The prior
+      interruption path. The current-source reproduction against clean commit
+      `0136588a3eda` is
+      [preserved here](evidence/kwin-overlap-reproduction-0136588a.json): again,
+      124 of 128 replacement characters remained and the stale second trigger
+      expanded. The private KWin input-method-v2 probe on the same commit
+      [could not find a manager/seat](evidence/kwin-input-method-unavailable-0136588a.json),
+      so its four insertion, password-field, and form scenarios were
+      unverified. This does not establish that input-method-v2 is unavailable
+      in other KWin configurations. The prior
       [ad8f169c4402 reproduction](evidence/kwin-overlap-reproduction-ad8f169c4402.json)
       also reproduced corruption: 124 of 128 characters remained. Earlier
       reports from

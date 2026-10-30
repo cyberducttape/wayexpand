@@ -20,6 +20,16 @@ physical capture, overlap input, password fields, suspend/resume, and long soak
 untested, and reports `certified: false`. This is current-source output-path
 evidence only; the release gate remains open.
 
+On the same source commit, the opt-in private KWin overlap scenario reproduced
+corruption: 124 of 128 replacement characters remained and the stale second
+trigger expanded ([failure report](docs/evidence/kwin-overlap-reproduction-0136588a.json)).
+Capture was simulated over stdin, so this confirms the non-atomic output race
+but does not test the physical-input monitor. A separate private KWin
+input-method-v2 attempt could not find a manager/seat; all four route-specific
+scenarios remained unverified ([availability report](docs/evidence/kwin-input-method-unavailable-0136588a.json)).
+The supported production route still needs an actual compositor setup that
+offers the required protocol and the required physical-capture evidence.
+
 The evidence collector now records the kernel release and SHA-256 of the
 tested CLI, and requires a complete application/toolkit version map before
 certifying a scenario matrix. It also reads `daemon_control_schema`
