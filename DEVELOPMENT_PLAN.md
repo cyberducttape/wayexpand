@@ -121,7 +121,10 @@ Acceptance criteria:
   creation, and rejects inherited output. It is not a device namespace and
   does not classify device nodes nested inside granted directories.
 - Add systemd `PrivateDevices=yes` (or an equivalent per-action device
-  namespace) before claiming complete device isolation.
+  namespace) before claiming complete device isolation. First establish the
+  minimum supported systemd version and user-namespace requirements, then
+  verify startup and ordinary broker IPC on each supported user manager. Do
+  not make the directive mandatory based only on `systemd-analyze verify`.
 - Verify sandbox behavior and cancellation on supported kernels, and document
   that arbitrary malicious processes running under the broker's same UID are
   outside the IPC trust boundary.

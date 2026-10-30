@@ -122,6 +122,26 @@ Updated: 2026-10-30
 - Documentation contracts passed, and the Markdown checker validated 76 files
   and 523 local links.
 
+## systemd private-device feasibility check
+
+- Reviewed versioned systemd execution docs: systemd 249 says
+  `PrivateDevices=` is unsupported in per-user service managers, systemd 253
+  permits it for user services when `PrivateUsers=` is enabled, and current
+  docs describe implicitly enabling `PrivateUsers=` for that case. Sources:
+  [systemd 249 `systemd.exec`](https://www.freedesktop.org/software/systemd/man/249/systemd.exec.html),
+  [systemd 253 `systemd.exec`](https://www.freedesktop.org/software/systemd/man/253/systemd.exec.html),
+  [current `systemd.exec`](https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html).
+- Tested both `PrivateDevices=yes` alone and with `PrivateUsers=yes` using
+  transient user units on local systemd 259. Both failed before exec with
+  status `218/CAPABILITIES`; the user-manager journal reported
+  `Failed to drop capabilities: Operation not permitted`. This environment
+  cannot validate the device namespace, so it does not justify enabling the
+  directive unconditionally in the shipped user unit.
+- No unit directive was added. The per-action restricted device profile
+  remains defense in depth; complete device isolation needs a successful
+  runtime test on an eligible supported host and a documented
+  systemd/user-namespace minimum.
+
 ## Per-user installer transaction verification
 
 - `scripts/test-install-user.sh` passed against the current worktree. It built
