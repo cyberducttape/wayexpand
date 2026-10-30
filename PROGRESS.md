@@ -501,6 +501,22 @@ Updated: 2026-10-30
 - This fixes the observed CI policy failure. The correction has not been pushed
   or rerun on GitHub Actions.
 
+## Fail closed when the evdev interruption monitor is missing
+
+- `watches_non_atomic_output_for_input()` previously skipped its monitor when
+  evdev mode was enabled, the evdev source was absent, and connection status
+  still said `connected`. The monitor's missing-source path already knows to
+  cancel and mark output uncertain, but the old predicate could bypass it.
+  Pending non-atomic evdev output now always requires the monitor; a missing
+  source cancels at the next output checkpoint.
+- Added a regression with the source and test monitor absent but connection
+  status still connected. It verifies the transaction stops after the erase
+  phase and increments the uncertainty counter.
+- Verification: all 13 `pending_output::tests` passed; formatting, daemon
+  Clippy with `-D warnings`, and `git diff --check` passed. This is synthetic
+  containment evidence and does not replace real evdev plus target-client
+  certification.
+
 ## Completed in this work period
 
 - Generalized `Matcher::try_new` to accept `IntoIterator<Item = S>` where

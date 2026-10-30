@@ -304,13 +304,7 @@ impl Daemon {
     /// input while output is pending and stop the paced stream at its next
     /// backend checkpoint. The transaction remains uncertain; never replay it.
     fn watches_non_atomic_output_for_input(&self) -> bool {
-        #[cfg(test)]
-        let test_event_pending = self.evdev_output_test_events.is_some();
-        #[cfg(not(test))]
-        let test_event_pending = false;
-
         self.evdev_mode
-            && (self.evdev.is_some() || self.connection_state != "connected" || test_event_pending)
             && self
                 .injector
                 .as_ref()
@@ -925,6 +919,52 @@ mod tests {
             "an interrupted non-atomic replacement must be surfaced as uncertain"
         );
         assert!(harness.daemon.evdev_quiet_since.is_some());
+    }
+
+    #[test]
+    fn missing_evdev_monitor_aborts_non_atomic_output_even_if_status_says_connected() {
+        let mut harness = Harness::new(false);
+        // Exercise the production fallback branch rather than the injected
+        // physical-input test channel. A stale "connected" status must never
+        // make a non-atomic transaction run without an input monitor.
+        harness.daemon.evdev_output_test_events = None;
+        let uncertain_before = output_health::snapshot().uncertain_total;
+        harness
+            .daemon
+            .start_output(
+                OutputOrigin::Command,
+                vec![OutputJob::Expansion(result(":x", "replacement"))],
+                Vec::new(),
+            )
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !harness.waiting.load(Ordering::Acquire) {
+            assert!(Instant::now() < deadline, "transaction did not start");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+
+        harness.daemon.service_pending_output().unwrap();
+        assert!(
+            harness
+                .daemon
+                .pending_output
+                .as_ref()
+                .unwrap()
+                .physical_input_interrupted
+        );
+        harness.open_gate();
+        harness.run_until_resolved();
+
+        assert_eq!(
+            *harness.calls.lock().unwrap(),
+            ["erase::x"],
+            "missing input monitoring must stop output at the next checkpoint"
+        );
+        assert_eq!(
+            output_health::snapshot().uncertain_total,
+            uncertain_before + 1,
+            "the unobservable non-atomic operation must be reported as uncertain"
+        );
     }
 
     #[test]
