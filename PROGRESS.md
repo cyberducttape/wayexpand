@@ -441,9 +441,8 @@ Updated: 2026-10-30
    text integrity.
 4. Run the 72-hour desktop soak and published-package upgrade/rollback
    rehearsal after the real-session replacement gate passes.
-5. Extend libei fault tests to cover cancellation while a direct EIS socket
-   connection is pending and a connected EIS server that stops responding.
-   Current tests cover pre-cancelled sockets, successful/missing socket paths,
-   portal-future cancellation, startup failure, operation-error replies, and
-   bounded outer-worker teardown; they do not emulate a stalled live EIS
-   session.
+5. Add an end-to-end owner-thread startup test where a direct EIS socket
+   accepts the connection but the server stays silent through handshake. The
+   current tests verify pending direct-connect cancellation/drop and EIS
+   handshake deadline/cancellation separately; they do not exercise their
+   composition through session startup and bounded worker teardown.
