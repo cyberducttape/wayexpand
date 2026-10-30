@@ -80,8 +80,10 @@ Acceptance criteria:
 Partial evidence: hermetic per-user and release-archive installer tests cover
 staged installation, validation preflight, rollback after filesystem, signal,
 service restart, and service enable failures, immutable payload checks, and
-custom XDG roots. They use temporary homes and stubs; they do not validate
-package-manager install/upgrade, actual service behavior, or artifact
+custom XDG roots. The local x86_64 release archive smoke test also builds the
+binary archive, verifies its checksum and required payload, and exercises the
+packaged CLI. These do not validate arm64 runtime behavior, package-manager
+install/upgrade, actual service behavior, or published artifact
 signing/provenance on supported release hosts.
 
 Acceptance criteria:

@@ -63,6 +63,18 @@ Updated: 2026-10-30
   layout, not a published signed archive or package-manager install/upgrade on
   a supported distribution.
 
+## Release binary archive smoke test
+
+- `scripts/test-release.sh` passed on the current x86_64 host. It built the
+  release binaries, produced the distributable tarball and SHA-256 file,
+  verified the checksum, checked required packaged helpers/assets and file
+  modes, exercised packaged CLI commands, and ran the isolated Wayland harness
+  far enough to validate its adjacent helper lookup. The script also passed
+  its fresh-config smoke check.
+- This validates the x86_64 release archive build path locally. It does not
+  validate arm64 execution on this host, published signatures/attestations,
+  distro package-manager upgrades, or production compositor certification.
+
 ## Direct EIS connection and handshake failure coverage
 
 - Extracted the stream-to-handshake step used by session startup and added an
