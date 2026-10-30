@@ -525,7 +525,8 @@ Follow-up default-parallel testing exposed that exact `+1` assertions on the
 process-wide uncertainty counter race with other output tests. Changed those
 assertions to require a monotonic increase while retaining the assertions
 that this transaction stops after erase and does not insert. All 13 tests
-pass with both default parallel scheduling and `RUST_TEST_THREADS=1`.
+pass with both default parallel scheduling and `RUST_TEST_THREADS=1`; the full
+207-test daemon suite also passed with default parallel scheduling.
 
 ## Current-source private KWin latency run
 
