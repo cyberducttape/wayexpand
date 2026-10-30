@@ -8,7 +8,9 @@ use super::{ExpansionEngine, ExpansionResult, InputEvent, PendingExpansionResult
 use super::{MAX_RESULTS_PER_EVENT, MAX_RESULT_BYTES_PER_EVENT};
 use crate::MatchMode;
 use unicode_normalization::UnicodeNormalization;
-use unicode_segmentation::UnicodeSegmentation;
+use unicode_segmentation::{GraphemeCursor, UnicodeSegmentation};
+
+const GRAPHEME_CHUNK_CHARS: usize = 64;
 
 struct MatchSuffix {
     index: usize,
@@ -193,17 +195,68 @@ impl ExpansionEngine {
             {
                 1
             }
-            _ => {
-                let buffered: String = self.buffer.iter().collect();
-                buffered
-                    .graphemes(true)
-                    .next_back()
-                    .map_or(0, |grapheme| grapheme.chars().count())
-            }
+            _ => self.trailing_grapheme_scalar_count(),
         };
         for _ in 0..scalar_count {
             self.pop_buffered_back();
         }
+    }
+
+    /// Find the scalar count of the final extended grapheme cluster from a
+    /// bounded suffix. Fall back to the complete retained buffer only when the
+    /// grapheme cursor needs earlier context or the cluster crosses the suffix
+    /// boundary. This keeps ordinary Unicode backspaces independent of input
+    /// history length without guessing at RI, Indic, or emoji boundaries.
+    fn trailing_grapheme_scalar_count(&self) -> usize {
+        let len = self.buffer.len();
+        if len == 0 {
+            return 0;
+        }
+
+        let chunk_start = len.saturating_sub(GRAPHEME_CHUNK_CHARS);
+        let chunk_start_byte = self.buffered_bytes - self.buffer_range_byte_len(chunk_start, len);
+        let chunk = self.buffer_range_string(chunk_start, len);
+        let mut cursor = GraphemeCursor::new(self.buffered_bytes, self.buffered_bytes, true);
+        if let Ok(Some(boundary)) = cursor.prev_boundary(&chunk, chunk_start_byte) {
+            if boundary >= chunk_start_byte {
+                return self.buffered_scalars_after_byte(boundary);
+            }
+        }
+        // Any request for context or a preceding chunk means the suffix alone
+        // is insufficient. This uncommon path favors exact deletion over a
+        // guessed scalar or grapheme boundary.
+        let buffered: String = self.buffer.iter().collect();
+        buffered
+            .graphemes(true)
+            .next_back()
+            .map_or(0, |grapheme| grapheme.chars().count())
+    }
+
+    fn buffer_range_string(&self, start: usize, end: usize) -> String {
+        let mut text = String::with_capacity(self.buffer_range_byte_len(start, end));
+        for index in start..end {
+            text.push(self.buffer[index]);
+        }
+        text
+    }
+
+    fn buffer_range_byte_len(&self, start: usize, end: usize) -> usize {
+        (start..end)
+            .map(|index| self.buffer[index].len_utf8())
+            .sum()
+    }
+
+    fn buffered_scalars_after_byte(&self, byte_offset: usize) -> usize {
+        let mut bytes = self.buffered_bytes;
+        let mut scalars = 0;
+        for character in self.buffer.iter().rev() {
+            if bytes <= byte_offset {
+                break;
+            }
+            bytes -= character.len_utf8();
+            scalars += 1;
+        }
+        scalars
     }
 
     fn on_reset(&mut self) {

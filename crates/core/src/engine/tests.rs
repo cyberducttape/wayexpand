@@ -4607,6 +4607,31 @@ fn backspace_removes_the_same_grapheme_from_the_matcher_buffer() {
 }
 
 #[test]
+fn backspace_walks_beyond_the_unicode_suffix_window_without_losing_context() {
+    let mut engine =
+        ExpansionEngine::new(Config::parse("[settings]\nmax_buffer_chars = 4096\n").unwrap())
+            .unwrap();
+    let combining_cluster = format!("a{}", "\u{301}".repeat(130));
+    engine.process(InputEvent::Text(combining_cluster));
+    engine.process(InputEvent::Backspace);
+    assert!(
+        engine.buffer.is_empty(),
+        "the whole combining cluster is one grapheme"
+    );
+
+    // Regional-indicator pairing depends on the parity of the entire run.
+    // A suffix-only segmenter would pair the wrong final symbols if the run
+    // starts before its bounded initial window.
+    let flags = "🇦".repeat(130);
+    engine.process(InputEvent::Text(flags.clone()));
+    engine.process(InputEvent::Backspace);
+    assert_eq!(
+        engine.buffer.iter().collect::<String>(),
+        flags[..flags.len() - 8]
+    );
+}
+
+#[test]
 fn mixed_normalization_mapping_is_preserved_for_word_boundary_deletion() {
     let config = Config::parse(
         "[[expansion]]\ntrigger = \"élève\"\nreplacement = \"student\"\n\

@@ -138,30 +138,37 @@ enum CaseStyle {
 
 impl CaseStyle {
     fn classify(value: &str) -> Self {
-        let letters: Vec<char> = value
-            .chars()
-            .filter(|character| character.is_alphabetic())
-            .collect();
-        let Some(first) = letters.first().copied() else {
+        let mut first = None;
+        let mut letter_count = 0usize;
+        let mut all_lowercase = true;
+        let mut all_uppercase = true;
+        let mut remaining_lowercase = true;
+        for character in value.chars().filter(|character| character.is_alphabetic()) {
+            if first.is_none() {
+                first = Some(character);
+            } else {
+                remaining_lowercase &= character.is_lowercase();
+            }
+            letter_count += 1;
+            all_lowercase &= character.is_lowercase();
+            all_uppercase &= character.is_uppercase();
+        }
+        let Some(first) = first else {
             return Self::Mixed;
         };
-        if letters.iter().all(|character| character.is_lowercase()) {
+        if all_lowercase {
             return Self::Lower;
         }
-        if letters.iter().all(|character| character.is_uppercase()) {
+        if all_uppercase {
             // Preserve the historic one-letter behavior: `:A` is treated as
             // a capitalized trigger rather than an all-caps word.
-            return if letters.len() == 1 {
+            return if letter_count == 1 {
                 Self::Title
             } else {
                 Self::Upper
             };
         }
-        if first.is_uppercase()
-            && letters[1..]
-                .iter()
-                .all(|character| character.is_lowercase())
-        {
+        if first.is_uppercase() && remaining_lowercase {
             Self::Title
         } else {
             Self::Mixed

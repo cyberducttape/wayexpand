@@ -4,6 +4,19 @@ Updated: 2026-10-29
 
 ## Completed in this work period
 
+- Removed the case-classification `Vec<char>` allocation and multiple scans;
+  alphabetic case flags are now collected in one pass.
+- Changed Unicode backspace to segment a bounded 64-scalar suffix and fall
+  back to the full retained history only if the cursor needs more context.
+  UTF-8 byte length is maintained as the buffer changes, and a regression
+  covers a grapheme spanning the suffix plus long regional-indicator parity.
+- Reused evdev event-vector capacity, replaced per-batch path copies with
+  active device-slot identities, and capped translation at 128 raw events per
+  turn while retaining unprocessed events for subsequent turns. Added a
+  300-event regression proving bounded slices preserve all translated events.
+- CI run [40990700720](https://github.com/cyberducttape/wayexpand/actions/runs/40990700720)
+  completed successfully for `f8c22209`; all jobs, including the repaired
+  ShellCheck gate, passed.
 - Fixed the serialized evdev path so an ordinary `Key` event with no undo
   transaction does not start an empty output batch. That batch had opened the
   40 ms post-output quarantine and discarded the translated `Text` event that
@@ -36,6 +49,18 @@ Updated: 2026-10-29
   borrows in `crates/cli/src/commands/library.rs`; both were removed in
   `894cb6bb`. The current CI run confirms workspace Clippy passes.
 - `cargo fmt --all -- --check`: passed.
+- `RUST_TEST_THREADS=1 cargo test -p wayexpand-core --locked`:
+  451 passed, 0 failed, 2 ignored; the documentation configuration tests and
+  snapshot consistency test also passed.
+- `RUST_TEST_THREADS=1 cargo test -p wayexpand-backend-evdev --locked`:
+  21 passed, 0 failed, including bounded-slice, event-retention, and
+  cross-device activity regressions.
+- `cargo clippy -p wayexpand-core -p wayexpand-backend-evdev --all-targets
+  --locked -- -D warnings`: passed.
+- `cargo check -p wayexpand-core --benches --locked`: passed.
+- Criterion worst-case grapheme benchmark (4,096 combining scalars):
+  65.7–68.9 µs over 10 samples. This is a scenario measurement, not a
+  comparison against the pre-change implementation.
 - `git diff --check`: passed.
 - `RUST_TEST_THREADS=1 cargo test -p wayexpand-daemon --locked`: 205 passed,
   0 failed. This includes the new event-order regression.

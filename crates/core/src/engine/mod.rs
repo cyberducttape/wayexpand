@@ -86,6 +86,10 @@ pub struct ExpansionEngine {
     matcher: Matcher,
     matcher_indices: Vec<usize>,
     buffer: VecDeque<char>,
+    /// UTF-8 length of `buffer`, maintained with the character deque so
+    /// grapheme backspace can address bounded suffix chunks without rescanning
+    /// or materializing the complete history.
+    buffered_bytes: usize,
     /// Number of non-ASCII scalars in `buffer`. An all-ASCII buffer is
     /// necessarily NFC, so matching can skip rescanning it on every input.
     non_ascii_buffer_chars: usize,
@@ -270,6 +274,7 @@ impl ExpansionEngine {
             matcher,
             matcher_indices,
             buffer: VecDeque::new(),
+            buffered_bytes: 0,
             non_ascii_buffer_chars: 0,
             max_buffer_chars,
             buffer_truncated: false,
@@ -947,6 +952,7 @@ impl ExpansionEngine {
     /// bound and its word-boundary truncation metadata.
     fn push_buffered(&mut self, character: char) {
         self.restored_reservation_chars = 0;
+        self.buffered_bytes = self.buffered_bytes.saturating_add(character.len_utf8());
         if !character.is_ascii() {
             self.non_ascii_buffer_chars += 1;
         }
@@ -959,6 +965,7 @@ impl ExpansionEngine {
             if !evicted.is_ascii() {
                 self.non_ascii_buffer_chars -= 1;
             }
+            self.buffered_bytes -= evicted.len_utf8();
             self.buffer_truncated = true;
         }
     }
@@ -971,6 +978,7 @@ impl ExpansionEngine {
         if !removed.is_ascii() {
             self.non_ascii_buffer_chars -= 1;
         }
+        self.buffered_bytes -= removed.len_utf8();
     }
 
     /// Unified commit: apply all post-execution logic to create final ExpansionResult.
@@ -1203,6 +1211,7 @@ impl ExpansionEngine {
     /// is no longer relevant to word-boundary checks.
     fn clear_buffer(&mut self) {
         self.buffer.clear();
+        self.buffered_bytes = 0;
         self.restored_reservation_chars = 0;
         self.non_ascii_buffer_chars = 0;
         self.buffer_truncated = false;

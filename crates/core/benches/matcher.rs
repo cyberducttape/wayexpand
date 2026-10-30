@@ -84,6 +84,23 @@ fn bench_long_buffer_keystroke(c: &mut Criterion) {
             });
         });
     }
+    // Keep a pathological, buffer-sized grapheme in the fixture. The
+    // GraphemeCursor must correctly walk beyond its first suffix chunk while
+    // retaining bounded chunk memory instead of assembling a full String.
+    let config = Config::parse("[settings]\nmax_buffer_chars = 4096\n").unwrap();
+    let oversized_cluster = "\u{301}".repeat(4096);
+    group.bench_function("unicode_cluster_spans_buffer", |bench| {
+        bench.iter_batched(
+            || {
+                let mut engine = ExpansionEngine::new(config.clone())
+                    .expect("benchmark engine should initialize");
+                engine.process(InputEvent::Text(oversized_cluster.clone()));
+                engine
+            },
+            |mut engine| black_box(engine.process(InputEvent::Backspace)),
+            BatchSize::SmallInput,
+        );
+    });
     group.finish();
 }
 

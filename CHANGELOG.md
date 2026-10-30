@@ -4,6 +4,15 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Remove the temporary `Vec<char>` allocation and repeated scans from
+  case-propagation classification; lowercase, uppercase, title, and mixed-case
+  shapes are now tracked in one pass.
+- Bound Unicode backspace segmentation to a 64-scalar suffix on the common
+  path, retaining a full-buffer correctness fallback when grapheme context
+  crosses that window. Track the buffered UTF-8 length incrementally.
+- Reuse evdev event-batch storage, identify held-key state by the active device
+  slot instead of cloning its path per batch, and translate at most 128 raw
+  events per scheduling slice without dropping the rest of a batch.
 - Keep ordinary evdev key events from opening the post-output quarantine when
   they produce no undo transaction. The old empty-batch path discarded each
   following translated text event and prevented typed triggers from matching;

@@ -48,9 +48,8 @@ pub fn readable_keyboard_available() -> bool {
 }
 
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashSet, VecDeque},
     os::fd::{AsFd, BorrowedFd, OwnedFd},
-    path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -70,6 +69,10 @@ const DEFAULT_QUIET_PERIOD: Duration = Duration::from_millis(8);
 // but a 30-second window is too surprising for a compatibility fallback.
 const DEVICE_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 const MAX_PENDING_EVENTS: usize = 4096;
+/// Bound the raw-event translation work performed during one input turn. The
+/// kernel ring buffer and device adapter retain any remaining events for the
+/// next turn; no event batch is silently truncated.
+const MAX_RAW_EVENTS_PER_SLICE: usize = 128;
 
 static INPUT_QUEUE_OVERFLOWS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -120,14 +123,22 @@ pub struct EvdevSource {
     devices: Vec<Box<dyn device::KeyboardDeviceAccess>>,
     state: State,
     pending: VecDeque<InputEvent>,
+    /// Reused storage for one device's raw batch. The cursor lets a large
+    /// batch be translated over multiple scheduling slices without copying
+    /// event records into a fresh Vec on every poll.
+    raw_events: Vec<evdev::InputEvent>,
+    raw_event_cursor: usize,
+    raw_event_device: Option<usize>,
+    pending_lost_devices: Vec<usize>,
     /// Evdev keycodes currently held down. Capture is non-exclusive, so the
     /// application receives these presses too, and a match necessarily fires
     /// while the trigger's last key is still down. Injecting that same
     /// keycode then collides with the physical one -- see
     /// `wait_for_key_release`.
-    /// Keycodes held on each device. Keycodes are only unique within one
-    /// evdev device; two keyboards may legitimately hold the same keycode.
-    pressed: HashMap<PathBuf, HashSet<u32>>,
+    /// Keycodes held on each active device slot. Device identity is its
+    /// current integer slot, so input batches do not clone device paths.
+    /// Slots are changed only after buffered events have been consumed.
+    pressed: Vec<HashSet<u32>>,
     last_device_refresh: Instant,
     /// Optional non-blocking eventfd that ends an idle wait early; see
     /// [`EvdevSource::set_wake_fd`].
@@ -159,14 +170,15 @@ impl EvdevSource {
             .into_iter()
             .map(|keyboard| Box::new(keyboard) as Box<dyn device::KeyboardDeviceAccess>)
             .collect();
-        let pressed = devices
-            .iter()
-            .map(|keyboard| (keyboard.path().to_path_buf(), HashSet::new()))
-            .collect();
+        let pressed = (0..devices.len()).map(|_| HashSet::new()).collect();
         Ok(Self {
             devices,
             state: State::new(keymap),
             pending: VecDeque::new(),
+            raw_events: Vec::new(),
+            raw_event_cursor: 0,
+            raw_event_device: None,
+            pending_lost_devices: Vec::new(),
             pressed,
             last_device_refresh: Instant::now(),
             wake: None,
@@ -185,6 +197,20 @@ impl EvdevSource {
     /// ready, so callers on the daemon's main loop can still service
     /// stop/pause/reload requests at a steady cadence even while idle.
     fn poll_once(&mut self, timeout: Duration, with_wake: bool) -> Result<bool, EvdevError> {
+        if self.devices.is_empty() {
+            return Err(EvdevError::AllDevicesLost);
+        }
+        // Finish a retained device batch before polling again or changing
+        // device slots. This bounds translation work per turn without
+        // dropping events from the kernel's already-drained batch.
+        if self.has_buffered_raw_events() {
+            let (key_activity, _) = self.process_buffered_raw_events(MAX_RAW_EVENTS_PER_SLICE);
+            if !self.has_buffered_raw_events() {
+                self.apply_pending_lost_devices()?;
+            }
+            return Ok(key_activity);
+        }
+        self.apply_pending_lost_devices()?;
         if self.devices.is_empty() {
             return Err(EvdevError::AllDevicesLost);
         }
@@ -229,25 +255,10 @@ impl EvdevSource {
         }
         drop(fds);
         drop(borrowed);
+        self.pending_lost_devices.extend(lost);
         let key_activity = self.drain_ready(&ready)?;
-        let had_lost_devices = !lost.is_empty();
-        let lost_paths = lost
-            .iter()
-            .filter_map(|&index| {
-                self.devices
-                    .get(index)
-                    .map(|device| device.path().to_path_buf())
-            })
-            .collect::<Vec<_>>();
-        for index in lost.into_iter().rev() {
-            tracing::warn!(
-                path = %self.devices[index].path().display(),
-                "keyboard device disconnected"
-            );
-            self.devices.remove(index);
-        }
-        if had_lost_devices {
-            self.reset_keyboard_state_for_devices(&lost_paths)?;
+        if !self.has_buffered_raw_events() {
+            self.apply_pending_lost_devices()?;
         }
         Ok(key_activity)
     }
@@ -266,10 +277,12 @@ impl EvdevSource {
 
     fn reset_keyboard_state_for_devices(
         &mut self,
-        lost_paths: &[PathBuf],
+        lost_devices: &[usize],
     ) -> Result<(), EvdevError> {
-        for path in lost_paths {
-            self.pressed.remove(path);
+        for &index in lost_devices {
+            if let Some(pressed) = self.pressed.get_mut(index) {
+                pressed.clear();
+            }
         }
         // XKB state is kept global for cross-device modifier/chord handling.
         // Rebuild it after a disconnect because the release events for that
@@ -285,7 +298,7 @@ impl EvdevSource {
         // next shortcut is interpreted with two different keyboard states.
         let mut held_keys = self
             .pressed
-            .values()
+            .iter()
             .flat_map(|keys| keys.iter().copied())
             .collect::<Vec<_>>();
         held_keys.sort_unstable();
@@ -296,7 +309,7 @@ impl EvdevSource {
         }
         self.queue_event(InputEvent::Reset);
         tracing::warn!(
-            count = lost_paths.len(),
+            count = lost_devices.len(),
             "resetting evdev keyboard state after device disconnect"
         );
         Ok(())
@@ -331,30 +344,99 @@ impl EvdevSource {
                 continue;
             }
             tracing::info!(path = %keyboard.path().display(), "keyboard device connected");
-            self.pressed
-                .entry(keyboard.path().to_path_buf())
-                .or_default();
             self.devices.push(Box::new(keyboard));
+            self.pressed.push(HashSet::new());
         }
     }
 
     fn drain_ready(&mut self, ready_indices: &[usize]) -> Result<bool, EvdevError> {
         let mut key_activity = false;
-        for &index in ready_indices {
-            let events = {
-                let device = &mut self.devices[index];
-                device.fetch_events().map_err(|error| EvdevError::Read {
-                    path: device.path().display().to_string(),
-                    message: error.to_string(),
-                })?
+        let mut remaining = MAX_RAW_EVENTS_PER_SLICE;
+        for (ready_position, &index) in ready_indices.iter().enumerate() {
+            if remaining == 0 {
+                // More ready descriptors remain unread. The output monitor
+                // must conservatively interrupt rather than miss a physical
+                // key that is still waiting on another device.
+                key_activity = true;
+                break;
+            }
+            let read_result = {
+                let (devices, raw_events) = (&mut self.devices, &mut self.raw_events);
+                devices[index].fetch_events(raw_events)
             };
-            let path = self.devices[index].path().to_path_buf();
-            for event in events {
-                key_activity |= matches!(event.destructure(), evdev::EventSummary::Key(..));
-                self.translate_for_device(&path, event);
+            if let Err(error) = read_result {
+                return Err(EvdevError::Read {
+                    path: self.devices[index].path().display().to_string(),
+                    message: error.to_string(),
+                });
+            }
+            self.raw_event_cursor = 0;
+            self.raw_event_device = Some(index);
+            let (activity, processed) = self.process_buffered_raw_events(remaining);
+            key_activity |= activity;
+            remaining -= processed;
+            if self.has_buffered_raw_events() {
+                // The retained remainder has not yet been inspected for key
+                // activity. Treat it as an interruption until the next
+                // bounded slice classifies it.
+                key_activity = true;
+                break;
+            }
+            if remaining == 0 {
+                if ready_position + 1 < ready_indices.len() {
+                    key_activity = true;
+                }
+                break;
             }
         }
         Ok(key_activity)
+    }
+
+    fn has_buffered_raw_events(&self) -> bool {
+        self.raw_event_cursor < self.raw_events.len()
+    }
+
+    fn process_buffered_raw_events(&mut self, limit: usize) -> (bool, usize) {
+        let Some(device_index) = self.raw_event_device else {
+            return (false, 0);
+        };
+        let start = self.raw_event_cursor;
+        let end = start.saturating_add(limit).min(self.raw_events.len());
+        let mut key_activity = false;
+        while self.raw_event_cursor < end {
+            let event = self.raw_events[self.raw_event_cursor];
+            self.raw_event_cursor += 1;
+            key_activity |= matches!(event.destructure(), evdev::EventSummary::Key(..));
+            self.translate_for_device(device_index, event);
+        }
+        if self.raw_event_cursor == self.raw_events.len() {
+            self.raw_events.clear();
+            self.raw_event_cursor = 0;
+            self.raw_event_device = None;
+        }
+        (key_activity, end - start)
+    }
+
+    fn apply_pending_lost_devices(&mut self) -> Result<(), EvdevError> {
+        if self.pending_lost_devices.is_empty() {
+            return Ok(());
+        }
+        self.pending_lost_devices.sort_unstable();
+        self.pending_lost_devices.dedup();
+        let lost = std::mem::take(&mut self.pending_lost_devices);
+        for &index in lost.iter().rev() {
+            if let Some(device) = self.devices.get(index) {
+                tracing::warn!(path = %device.path().display(), "keyboard device disconnected");
+            }
+        }
+        self.reset_keyboard_state_for_devices(&lost)?;
+        for index in lost.into_iter().rev() {
+            if index < self.devices.len() {
+                self.devices.remove(index);
+                self.pressed.remove(index);
+            }
+        }
+        Ok(())
     }
 
     /// Translates one raw evdev event into zero or more `InputEvent`s,
@@ -363,10 +445,10 @@ impl EvdevSource {
     /// `backend-input-method` reports both from the same key press).
     #[cfg(test)]
     fn translate(&mut self, event: evdev::InputEvent) {
-        self.translate_for_device(Path::new("__test__"), event);
+        self.translate_for_device(0, event);
     }
 
-    fn translate_for_device(&mut self, device_path: &Path, event: evdev::InputEvent) {
+    fn translate_for_device(&mut self, device_index: usize, event: evdev::InputEvent) {
         let evdev::EventSummary::Key(_, key_code, value) = event.destructure() else {
             return;
         };
@@ -381,17 +463,15 @@ impl EvdevSource {
             1 => KeyState::Pressed,
             _ => return,
         };
+        if self.pressed.len() <= device_index {
+            self.pressed.resize_with(device_index + 1, HashSet::new);
+        }
         match key_state {
             KeyState::Pressed => {
-                self.pressed
-                    .entry(device_path.to_path_buf())
-                    .or_default()
-                    .insert(keycode);
+                self.pressed[device_index].insert(keycode);
             }
             _ => {
-                if let Some(pressed) = self.pressed.get_mut(device_path) {
-                    pressed.remove(&keycode);
-                }
+                self.pressed[device_index].remove(&keycode);
             }
         }
         if key_state == KeyState::Pressed {
@@ -420,7 +500,7 @@ impl EvdevSource {
 
     /// Whether any key is physically held right now.
     pub fn keys_held(&self) -> bool {
-        self.pressed.values().any(|keys| !keys.is_empty())
+        self.pressed.iter().any(|keys| !keys.is_empty())
     }
 
     pub fn has_pending_events(&self) -> bool {
@@ -527,7 +607,10 @@ impl EvdevSource {
         // from latency-sensitive polling. Existing descriptors remain active;
         // this periodic pass is only the fallback for keyboards added after
         // startup. Release and quiet-period safety waits never refresh.
-        if self.last_device_refresh.elapsed() >= DEVICE_REFRESH_INTERVAL {
+        if !self.has_buffered_raw_events()
+            && self.pending_lost_devices.is_empty()
+            && self.last_device_refresh.elapsed() >= DEVICE_REFRESH_INTERVAL
+        {
             self.refresh_devices();
             self.last_device_refresh = Instant::now();
         }
@@ -561,13 +644,26 @@ impl EvdevSource {
             // input and therefore interrupts an in-flight replacement.
             return Ok(true);
         }
-        let key_activity = self
+        if self.has_buffered_raw_events() {
+            let (key_activity, _) = self.process_buffered_raw_events(MAX_RAW_EVENTS_PER_SLICE);
+            if key_activity {
+                self.pending.pop_front();
+                return Ok(true);
+            }
+            return Ok(self.raw_events[self.raw_event_cursor..]
+                .iter()
+                .any(|event| matches!(event.destructure(), evdev::EventSummary::Key(..))));
+        }
+        let mut key_activity = self
             .poll_once(timeout, true)
             .map_err(|error| InputSourceError {
                 source: SOURCE_NAME,
                 retryable: error.is_retryable(),
                 message: error.to_string(),
             })?;
+        key_activity |= self.raw_events[self.raw_event_cursor..]
+            .iter()
+            .any(|event| matches!(event.destructure(), evdev::EventSummary::Key(..)));
         if self.devices.is_empty() {
             return Err(InputSourceError {
                 source: SOURCE_NAME,
@@ -663,6 +759,7 @@ mod tests {
         io::{Read, Write},
         os::fd::BorrowedFd,
         os::unix::net::UnixStream,
+        path::{Path, PathBuf},
         sync::{Arc, Mutex},
     };
 
@@ -681,15 +778,17 @@ mod tests {
             self.reader.as_fd()
         }
 
-        fn fetch_events(&mut self) -> std::io::Result<Vec<evdev::InputEvent>> {
+        fn fetch_events(&mut self, output: &mut Vec<evdev::InputEvent>) -> std::io::Result<()> {
             let mut buffer = [0_u8; 64];
             let _ = self.reader.read(&mut buffer)?;
-            Ok(std::mem::take(
+            output.clear();
+            output.extend(std::mem::take(
                 &mut *self
                     .events
                     .lock()
                     .unwrap_or_else(|error| error.into_inner()),
-            ))
+            ));
+            Ok(())
         }
     }
 
@@ -773,7 +872,11 @@ mod tests {
             })],
             state: test_state(),
             pending: VecDeque::new(),
-            pressed: HashMap::from([(path.clone(), HashSet::new())]),
+            raw_events: Vec::new(),
+            raw_event_cursor: 0,
+            raw_event_device: None,
+            pending_lost_devices: Vec::new(),
+            pressed: vec![HashSet::new()],
             last_device_refresh: Instant::now(),
             wake: None,
         };
@@ -819,7 +922,11 @@ mod tests {
             })],
             state: test_state(),
             pending: VecDeque::new(),
-            pressed: HashMap::from([(path, HashSet::new())]),
+            raw_events: Vec::new(),
+            raw_event_cursor: 0,
+            raw_event_device: None,
+            pending_lost_devices: Vec::new(),
+            pressed: vec![HashSet::new()],
             last_device_refresh: Instant::now(),
             wake: None,
         };
@@ -850,7 +957,11 @@ mod tests {
             })],
             state: test_state(),
             pending: VecDeque::new(),
-            pressed: HashMap::from([(path, HashSet::new())]),
+            raw_events: Vec::new(),
+            raw_event_cursor: 0,
+            raw_event_device: None,
+            pending_lost_devices: Vec::new(),
+            pressed: vec![HashSet::new()],
             last_device_refresh: Instant::now(),
             wake: None,
         };
@@ -859,6 +970,105 @@ mod tests {
         assert!(source.next_event_during_output(Duration::ZERO).unwrap());
         assert!(source.pending.is_empty());
         assert!(source.keys_held());
+    }
+
+    #[test]
+    fn oversized_device_batches_are_translated_in_bounded_slices_without_loss() {
+        let path = PathBuf::from("/dev/input/test-keyboard");
+        let (reader, mut writer) = UnixStream::pair().unwrap();
+        reader.set_nonblocking(true).unwrap();
+        let events = Arc::new(Mutex::new(
+            (0..300)
+                .map(|index| {
+                    evdev::InputEvent::new(
+                        evdev::EventType::KEY.0,
+                        30,
+                        if index % 2 == 0 { 1 } else { 0 },
+                    )
+                })
+                .collect(),
+        ));
+        let mut source = EvdevSource {
+            devices: vec![Box::new(TestKeyboard {
+                path,
+                reader,
+                events,
+            })],
+            state: test_state(),
+            pending: VecDeque::new(),
+            raw_events: Vec::new(),
+            raw_event_cursor: 0,
+            raw_event_device: None,
+            pending_lost_devices: Vec::new(),
+            pressed: vec![HashSet::new()],
+            last_device_refresh: Instant::now(),
+            wake: None,
+        };
+        writer.write_all(b"events").unwrap();
+
+        source.poll_once(Duration::ZERO, false).unwrap();
+        assert_eq!(source.raw_event_cursor, MAX_RAW_EVENTS_PER_SLICE);
+        let capacity_after_read = source.raw_events.capacity();
+        let mut translated = source.pending.drain(..).count();
+
+        while source.has_buffered_raw_events() {
+            source.poll_once(Duration::ZERO, false).unwrap();
+            translated += source.pending.drain(..).count();
+        }
+
+        assert_eq!(translated, 300, "every raw event must be translated");
+        assert_eq!(source.raw_events.capacity(), capacity_after_read);
+    }
+
+    #[test]
+    fn event_slice_budget_does_not_hide_input_waiting_on_another_device() {
+        let (reader_a, mut writer_a) = UnixStream::pair().unwrap();
+        let (reader_b, mut writer_b) = UnixStream::pair().unwrap();
+        reader_a.set_nonblocking(true).unwrap();
+        reader_b.set_nonblocking(true).unwrap();
+        let noise = Arc::new(Mutex::new(
+            (0..MAX_RAW_EVENTS_PER_SLICE)
+                .map(|_| evdev::InputEvent::new(evdev::EventType::SYNCHRONIZATION.0, 0, 0))
+                .collect(),
+        ));
+        let key = Arc::new(Mutex::new(vec![evdev::InputEvent::new(
+            evdev::EventType::KEY.0,
+            30,
+            1,
+        )]));
+        let mut source = EvdevSource {
+            devices: vec![
+                Box::new(TestKeyboard {
+                    path: PathBuf::from("/dev/input/test-a"),
+                    reader: reader_a,
+                    events: noise,
+                }),
+                Box::new(TestKeyboard {
+                    path: PathBuf::from("/dev/input/test-b"),
+                    reader: reader_b,
+                    events: key,
+                }),
+            ],
+            state: test_state(),
+            pending: VecDeque::new(),
+            raw_events: Vec::new(),
+            raw_event_cursor: 0,
+            raw_event_device: None,
+            pending_lost_devices: Vec::new(),
+            pressed: vec![HashSet::new(), HashSet::new()],
+            last_device_refresh: Instant::now(),
+            wake: None,
+        };
+        writer_a.write_all(b"noise").unwrap();
+        writer_b.write_all(b"key").unwrap();
+
+        assert!(source.drain_ready(&[0, 1]).unwrap());
+        assert!(!source
+            .pending
+            .iter()
+            .any(|event| matches!(event, InputEvent::Text(_))));
+        source.drain_ready(&[1]).unwrap();
+        assert!(source.pending.contains(&InputEvent::Text("a".into())));
     }
 
     /// A press on a resolvable key always yields a candidate hotkey chord
@@ -872,7 +1082,11 @@ mod tests {
             devices: Vec::new(),
             state: std::mem::replace(state, test_state()),
             pending: VecDeque::new(),
-            pressed: HashMap::new(),
+            raw_events: Vec::new(),
+            raw_event_cursor: 0,
+            raw_event_device: None,
+            pending_lost_devices: Vec::new(),
+            pressed: Vec::new(),
             last_device_refresh: Instant::now(),
             wake: None,
         };
@@ -914,7 +1128,11 @@ mod tests {
             devices: Vec::new(),
             state: std::mem::replace(&mut state, test_state()),
             pending: VecDeque::new(),
-            pressed: HashMap::new(),
+            raw_events: Vec::new(),
+            raw_event_cursor: 0,
+            raw_event_device: None,
+            pending_lost_devices: Vec::new(),
+            pressed: Vec::new(),
             last_device_refresh: Instant::now(),
             wake: None,
         };
@@ -934,7 +1152,11 @@ mod tests {
             devices: Vec::new(),
             state: std::mem::replace(&mut state, test_state()),
             pending: VecDeque::new(),
-            pressed: HashMap::new(),
+            raw_events: Vec::new(),
+            raw_event_cursor: 0,
+            raw_event_device: None,
+            pending_lost_devices: Vec::new(),
+            pressed: Vec::new(),
             last_device_refresh: Instant::now(),
             wake: None,
         };
@@ -949,7 +1171,11 @@ mod tests {
             devices: Vec::new(),
             state: std::mem::replace(&mut state, test_state()),
             pending: VecDeque::new(),
-            pressed: HashMap::new(),
+            raw_events: Vec::new(),
+            raw_event_cursor: 0,
+            raw_event_device: None,
+            pending_lost_devices: Vec::new(),
+            pressed: Vec::new(),
             last_device_refresh: Instant::now(),
             wake: None,
         };
@@ -977,12 +1203,16 @@ mod tests {
             devices: Vec::new(),
             state: test_state(),
             pending: VecDeque::new(),
-            pressed: HashMap::new(),
+            raw_events: Vec::new(),
+            raw_event_cursor: 0,
+            raw_event_device: None,
+            pending_lost_devices: Vec::new(),
+            pressed: Vec::new(),
             last_device_refresh: Instant::now(),
             wake: None,
         };
-        let keyboard_a = Path::new("/dev/input/event-a");
-        let keyboard_b = Path::new("/dev/input/event-b");
+        let keyboard_a = 0;
+        let keyboard_b = 1;
         let press_a = evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 1);
         let press_b = evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 1);
         let release_a = evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 0);
@@ -994,15 +1224,15 @@ mod tests {
         assert!(source.keys_held(), "keyboard B still holds keycode 30");
         assert_eq!(source.pressed[keyboard_b], HashSet::from([30]));
         source
-            .reset_keyboard_state_for_devices(&[keyboard_a.to_path_buf()])
+            .reset_keyboard_state_for_devices(&[keyboard_a])
             .unwrap();
         assert!(source.keys_held(), "disconnecting A must not clear B");
     }
 
     #[test]
     fn surviving_keyboard_modifiers_are_replayed_after_disconnect() {
-        let keyboard_a = Path::new("/dev/input/event-a");
-        let keyboard_b = Path::new("/dev/input/event-b");
+        let keyboard_a = 0;
+        let keyboard_b = 1;
         // Linux evdev keycodes: Left Ctrl, Left Shift, Left Alt, Right Alt.
         let modifiers = [
             (29, Some(&["Control", "Ctrl"][..])),
@@ -1021,7 +1251,11 @@ mod tests {
                 devices: Vec::new(),
                 state: test_state(),
                 pending: VecDeque::new(),
-                pressed: HashMap::new(),
+                raw_events: Vec::new(),
+                raw_event_cursor: 0,
+                raw_event_device: None,
+                pending_lost_devices: Vec::new(),
+                pressed: Vec::new(),
                 last_device_refresh: Instant::now(),
                 wake: None,
             };
@@ -1037,7 +1271,7 @@ mod tests {
             );
             source.pending.clear();
             source
-                .reset_keyboard_state_for_devices(&[keyboard_a.to_path_buf()])
+                .reset_keyboard_state_for_devices(&[keyboard_a])
                 .unwrap();
 
             assert!(
@@ -1079,7 +1313,11 @@ mod tests {
             devices: Vec::new(),
             state: test_state(),
             pending: VecDeque::from([InputEvent::Text("a".into())]),
-            pressed: HashMap::new(),
+            raw_events: Vec::new(),
+            raw_event_cursor: 0,
+            raw_event_device: None,
+            pending_lost_devices: Vec::new(),
+            pressed: Vec::new(),
             last_device_refresh: Instant::now(),
             wake: None,
         };
@@ -1096,7 +1334,11 @@ mod tests {
             devices: Vec::new(),
             state: std::mem::replace(&mut state, test_state()),
             pending: VecDeque::new(),
-            pressed: HashMap::new(),
+            raw_events: Vec::new(),
+            raw_event_cursor: 0,
+            raw_event_device: None,
+            pending_lost_devices: Vec::new(),
+            pressed: Vec::new(),
             last_device_refresh: Instant::now(),
             wake: None,
         };
@@ -1112,7 +1354,11 @@ mod tests {
             devices: Vec::new(),
             state: test_state(),
             pending: VecDeque::new(),
-            pressed: HashMap::new(),
+            raw_events: Vec::new(),
+            raw_event_cursor: 0,
+            raw_event_device: None,
+            pending_lost_devices: Vec::new(),
+            pressed: Vec::new(),
             last_device_refresh: Instant::now(),
             wake: None,
         };
@@ -1141,7 +1387,11 @@ mod tests {
             devices: Vec::new(),
             state: test_state(),
             pending: VecDeque::new(),
-            pressed: HashMap::from([(PathBuf::from("__test__"), HashSet::from([30]))]),
+            raw_events: Vec::new(),
+            raw_event_cursor: 0,
+            raw_event_device: None,
+            pending_lost_devices: Vec::new(),
+            pressed: vec![HashSet::from([30])],
             last_device_refresh: Instant::now(),
             wake: None,
         };
@@ -1155,7 +1405,11 @@ mod tests {
             devices: Vec::new(),
             state: test_state(),
             pending: VecDeque::new(),
-            pressed: HashMap::new(),
+            raw_events: Vec::new(),
+            raw_event_cursor: 0,
+            raw_event_device: None,
+            pending_lost_devices: Vec::new(),
+            pressed: Vec::new(),
             last_device_refresh: Instant::now(),
             wake: None,
         };
@@ -1171,7 +1425,11 @@ mod tests {
             devices: Vec::new(),
             state: test_state(),
             pending: VecDeque::new(),
-            pressed: HashMap::new(),
+            raw_events: Vec::new(),
+            raw_event_cursor: 0,
+            raw_event_device: None,
+            pending_lost_devices: Vec::new(),
+            pressed: Vec::new(),
             last_device_refresh: Instant::now(),
             wake: None,
         };
