@@ -30,6 +30,12 @@ scenarios remained unverified ([availability report](docs/evidence/kwin-input-me
 The supported production route still needs an actual compositor setup that
 offers the required protocol and the required physical-capture evidence.
 
+The active KDE desktop was also checked read-only on 2026-10-30. Its installed
+daemon is an older evdev + libei keysym fallback route with best-effort,
+non-atomic replacement and no password-field signal; the current doctor exits
+unhealthy. It is useful live status evidence, but does not satisfy certification
+or justify changing the installed service. Details are in `PROGRESS.md`.
+
 The evidence collector now records the kernel release and SHA-256 of the
 tested CLI, and requires a complete application/toolkit version map before
 certifying a scenario matrix. It also reads `daemon_control_schema`

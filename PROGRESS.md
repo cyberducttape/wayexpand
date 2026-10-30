@@ -2,6 +2,31 @@
 
 Updated: 2026-10-30
 
+## Live session and external CI audit
+
+- Read-only checks in the active KDE Wayland session found the installed
+  daemon at `27e83eace764`, while the locally built doctor identifies as
+  `0a77cbb887d4` and this source checkout has advanced further. The connected
+  route is explicit-consent evdev capture with libei keysym fallback at 12 ms
+  pacing. Status reports focus-tracked best-effort replacement, no atomic
+  replacement, no sensitive-field signal, no layout awareness, and no full
+  Unicode guarantee. `wayexpand doctor --json` exits 1 and reports no safe
+  automatic setup. No service or desktop state was changed.
+- The status endpoint showed 21 persisted expansion events and no recent
+  failures. That is observational runtime telemetry, not evidence of correct
+  final text or safe behavior in password fields. Production certification
+  remains blocked.
+- GitHub currently reports no open issues and zero registered self-hosted
+  runners. Five open Dependabot PRs have failing CI: four only fail the
+  commit-identity check because the remote base workflow predates local commit
+  `ebe78f22` (the exact Dependabot tuple exception); that script's positive,
+  negative, and spoofed-identity tests pass locally. The `eframe 0.37.0` PR
+  also has actual workspace/API and Rust 1.92 compatibility failures and
+  requires a deliberate GUI migration before it can be accepted.
+- The local branch is 40 commits ahead of `origin/main`. Per the release
+  mission, these fixes and diagnostics have not been pushed; remote PR checks
+  cannot reflect them until an authorized push updates the base workflow.
+
 ## Fast-path refactor verification
 
 - Audited the proposed borrowed matcher construction, delimiter processing,
