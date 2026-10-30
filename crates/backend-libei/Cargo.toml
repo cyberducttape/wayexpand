@@ -16,10 +16,7 @@ ashpd = { version = "0.13", features = ["remote_desktop", "screencast"] }
 async-io.workspace = true
 futures-lite.workspace = true
 libc.workspace = true
-# Pinned exactly: `unsafe impl Send for EventPump` (src/events.rs) depends on
-# the fields of reis's EiEventConverter. Re-check that SAFETY comment before
-# changing this version.
-reis = "=0.7.1"
+reis = "0.7.1"
 thiserror.workspace = true
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "time"] }
 rustix = { version = "1", features = ["event", "process"] }

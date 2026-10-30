@@ -2,17 +2,10 @@
 
 use super::*;
 
-impl LibeiInjector {
-    /// Connect to a direct EIS socket from `LIBEI_SOCKET`, or use the XDG
-    /// RemoteDesktop portal when that variable is absent.
-    ///
-    /// Portal use is deliberately explicit because it may display a consent
-    /// dialog and grants desktop input-control capability for the session.
-    pub fn connect(options: LibeiOptions) -> Result<Self, LibeiError> {
-        Self::connect_with_cancellation(options, ConnectCancellation::default())
-    }
-
-    pub fn connect_with_cancellation(
+impl LibeiSession {
+    /// Connect to EIS from the caller's dedicated session thread. The
+    /// resulting session must stay on that thread for its entire lifetime.
+    pub(super) fn connect_with_cancellation(
         options: LibeiOptions,
         cancellation: ConnectCancellation,
     ) -> Result<Self, LibeiError> {

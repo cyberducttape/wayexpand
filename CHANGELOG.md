@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Keep the libei event converter and session on the dedicated thread that
+  creates them, replacing the manually asserted `Send` implementation with a
+  bounded request/reply injector handle. Compile-time regression coverage
+  verifies that both owner-thread types remain `!Send`.
 - Remove the temporary `Vec<char>` allocation and repeated scans from
   case-propagation classification; lowercase, uppercase, title, and mixed-case
   shapes are now tracked in one pass.

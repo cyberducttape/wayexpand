@@ -20,6 +20,12 @@ Updated: 2026-10-29
   remain shared until rendering. Regression tests assert pointer identity with
   the validated snapshot and verify command/form matching does not copy
   unused replacement text.
+- Removed the manual `unsafe impl Send` for the libei event pump. The libei
+  session and event converter are created, used, and destroyed on one dedicated
+  owner thread; the injector exposes a bounded request/reply handle. Compile-
+  time checks keep both session types `!Send`.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`: passed
+  after the libei ownership change.
 - CI run [40990700720](https://github.com/cyberducttape/wayexpand/actions/runs/40990700720)
   completed successfully for `f8c22209`; all jobs, including the repaired
   ShellCheck gate, passed.

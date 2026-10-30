@@ -50,7 +50,7 @@ use std::{
     time::{Duration, Instant},
 };
 use thiserror::Error;
-use wayexpand_core::{InjectorCapabilities, InjectorError, KeyEventState, Modifiers, TextInjector};
+use wayexpand_core::{InjectorCapabilities, InjectorError, KeyEventState, Modifiers};
 #[cfg(test)]
 use xkbcommon_rs::{Context, Keymap as XkbKeymap};
 
@@ -62,6 +62,7 @@ mod keymap;
 mod lifecycle;
 mod portal_token;
 mod unicode;
+mod worker;
 
 use connection::{connect_portal, PortalKeepalive};
 use events::{handshake_with_cancellation, EventPump};
@@ -77,6 +78,7 @@ use portal_token::{
 };
 use portal_token::{read_portal_token_if_enabled, store_portal_token_if_enabled};
 use unicode::{erase_grapheme_count, split_text_chunks, validate_text};
+pub use worker::LibeiInjector;
 
 const BACKEND_NAME: &str = "libei";
 const KEY_BACKSPACE: u32 = 14;
@@ -192,7 +194,7 @@ impl LibeiError {
     }
 }
 
-pub struct LibeiInjector {
+struct LibeiSession {
     connection: reis::event::Connection,
     /// Kept after the handshake so server notifications (modifier/layout
     /// changes, device pause/removal) are seen before anything is typed.
@@ -274,7 +276,7 @@ impl TextMode {
     }
 }
 
-impl LibeiInjector {
+impl LibeiSession {
     /// Apply everything the server reported since the last call, then make
     /// sure the keyboard state still matches what we would type against.
     /// Called before any text-producing request: a layout switch, Caps Lock,

@@ -2,8 +2,8 @@
 
 use super::*;
 
-impl TextInjector for LibeiInjector {
-    fn shutdown(mut self: Box<Self>) {
+impl LibeiSession {
+    pub(super) fn shutdown(mut self) {
         // Close the portal session after the EIS connection is dropped, so
         // the portal never sees a live client on a closed session.
         let portal = self._portal.take();
@@ -13,11 +13,7 @@ impl TextInjector for LibeiInjector {
         }
     }
 
-    fn name(&self) -> &'static str {
-        BACKEND_NAME
-    }
-
-    fn capabilities(&self) -> InjectorCapabilities {
+    pub(super) fn capabilities(&self) -> InjectorCapabilities {
         let keysym_fallback = matches!(self.mode, TextMode::Keysym(_));
         let direct_commit = self.fcitx5.is_some();
         InjectorCapabilities {
@@ -51,7 +47,7 @@ impl TextInjector for LibeiInjector {
         }
     }
 
-    fn status_detail(&self) -> &'static str {
+    pub(super) fn status_detail(&self) -> &'static str {
         match (&self.mode, self.fcitx5.is_some()) {
             (TextMode::Text(_), true) => "ei_text (UTF-8 insertion) + Fcitx5 direct commit",
             (TextMode::Keysym(_), true) => {
@@ -61,11 +57,11 @@ impl TextInjector for LibeiInjector {
         }
     }
 
-    fn set_output_checkpoint(&mut self, checkpoint: wayexpand_core::OutputCheckpoint) {
+    pub(super) fn set_output_checkpoint(&mut self, checkpoint: wayexpand_core::OutputCheckpoint) {
         self.checkpoint = checkpoint;
     }
 
-    fn preflight_text(&mut self, text: &str) -> Result<(), InjectorError> {
+    pub(super) fn preflight_text(&mut self, text: &str) -> Result<(), InjectorError> {
         // Refresh modifiers/layout before the transaction is classified. If
         // the active group is unknown, refuse here so the trigger remains
         // untouched and the engine reports a clean not-applied outcome.
@@ -81,7 +77,7 @@ impl TextInjector for LibeiInjector {
             })
     }
 
-    fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {
+    pub(super) fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {
         self.sync_server_state()
             .and_then(|()| self.send_backspaces(erase_grapheme_count(trigger)))
             .map_err(|error| InjectorError {
@@ -91,7 +87,7 @@ impl TextInjector for LibeiInjector {
             })
     }
 
-    fn insert(&mut self, text: &str) -> Result<(), InjectorError> {
+    pub(super) fn insert(&mut self, text: &str) -> Result<(), InjectorError> {
         self.sync_server_state()
             .and_then(|()| self.send_text(text))
             .map_err(|error| InjectorError {
@@ -101,7 +97,7 @@ impl TextInjector for LibeiInjector {
             })
     }
 
-    fn replace(&mut self, trigger: &str, text: &str) -> Result<(), InjectorError> {
+    pub(super) fn replace(&mut self, trigger: &str, text: &str) -> Result<(), InjectorError> {
         // Synchronize before any replacement attempt. In keysym mode this
         // refreshes the layout used by the fallback; the Fcitx5 path itself
         // uses the focused input context rather than this keymap.
@@ -179,7 +175,7 @@ impl TextInjector for LibeiInjector {
         })
     }
 
-    fn move_cursor_left(&mut self, count: usize) -> Result<(), InjectorError> {
+    pub(super) fn move_cursor_left(&mut self, count: usize) -> Result<(), InjectorError> {
         // Cursor keys follow the typed text; they must not reach a window
         // that took focus while the text was being typed.
         self.checkpoint
@@ -194,7 +190,7 @@ impl TextInjector for LibeiInjector {
             })
     }
 
-    fn inject_key(&mut self, keycode: u32) -> Result<(), InjectorError> {
+    pub(super) fn inject_key(&mut self, keycode: u32) -> Result<(), InjectorError> {
         self.send_key_with_modifiers(keycode, Modifiers::default())
             .map_err(|error| InjectorError {
                 backend: BACKEND_NAME,
@@ -203,7 +199,7 @@ impl TextInjector for LibeiInjector {
             })
     }
 
-    fn inject_key_with_modifiers(
+    pub(super) fn inject_key_with_modifiers(
         &mut self,
         keycode: u32,
         modifiers: Modifiers,
@@ -216,7 +212,7 @@ impl TextInjector for LibeiInjector {
             })
     }
 
-    fn inject_key_event(
+    pub(super) fn inject_key_event(
         &mut self,
         keycode: u32,
         _modifiers: Modifiers,

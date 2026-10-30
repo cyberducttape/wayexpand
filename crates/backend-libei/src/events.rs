@@ -11,21 +11,6 @@ pub(super) struct EventPump {
     converter: reis::event::EiEventConverter,
 }
 
-// SAFETY: `EiEventConverter` is `!Send` only because it can store
-// `Box<dyn FnOnce(u64)>` request-completion callbacks, which are added solely
-// through `EiEventConverter::add_callback_handler`. This crate never calls
-// that method and `converter` is private to `EventPump`, so the callback map
-// is always empty; every other field is built from `Arc`/`Mutex`-backed reis
-// objects that the injector already moves between threads. The pump is used
-// by one thread at a time through `&mut LibeiInjector` (no `Sync` is claimed).
-//
-// This rests on reis internals, so reis is pinned to an exact version and
-// `send_invariant` (below) checks what can be checked: that this crate never
-// registers a callback, that the converter's other field types are `Send`,
-// and that the converter is still `!Send` (once reis makes it `Send`, delete
-// this impl). Re-read `EiEventConverter`'s fields on every reis upgrade.
-unsafe impl Send for EventPump {}
-
 impl EventPump {
     pub(super) fn next_with_cancellation(
         &mut self,
@@ -261,6 +246,8 @@ pub(super) fn handshake_with_cancellation(
 
 #[cfg(test)]
 mod send_invariant {
+    use super::EventPump;
+    use crate::LibeiSession;
     use std::marker::PhantomData;
 
     /// `Probe::<T>::IS_SEND` is the inherent `true` when `T: Send`, and
@@ -275,63 +262,19 @@ mod send_invariant {
     }
 
     #[test]
-    fn this_crate_never_registers_a_converter_callback() {
-        // A call, not a mention; spelled in two halves so this test does not
-        // match itself.
-        let method = [".add_callback", "_handler("].concat();
-        let sources = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut checked = 0;
-        for entry in std::fs::read_dir(&sources).unwrap() {
-            let path = entry.unwrap().path();
-            if path.extension().is_some_and(|extension| extension == "rs") {
-                let source = std::fs::read_to_string(&path).unwrap();
-                assert!(
-                    !source.contains(&method),
-                    "{} registers a callback",
-                    path.display()
-                );
-                checked += 1;
-            }
-        }
-        assert!(checked >= 3, "found only {checked} source files");
-    }
-
-    #[test]
-    fn the_converters_other_fields_are_send() {
-        // The field types of reis 0.7.1's `EiEventConverter`, apart from the
-        // callback map.
-        const { assert!(Probe::<reis::ei::Seat>::IS_SEND) };
-        const { assert!(Probe::<reis::ei::Device>::IS_SEND) };
-        const { assert!(Probe::<reis::ei::Callback>::IS_SEND) };
-        const { assert!(Probe::<reis::Object>::IS_SEND) };
-        const { assert!(Probe::<reis::event::Seat>::IS_SEND) };
-        const { assert!(Probe::<reis::event::Device>::IS_SEND) };
-        const { assert!(Probe::<reis::event::EiEvent>::IS_SEND) };
-        const { assert!(Probe::<reis::event::Connection>::IS_SEND) };
-        const { assert!(Probe::<reis::ei::Context>::IS_SEND) };
-    }
-
-    #[test]
-    fn the_converter_still_needs_the_manual_impl() {
+    fn the_event_pump_and_session_remain_thread_affine() {
+        const { assert!(Probe::<String>::IS_SEND) };
         const {
             assert!(
-                !Probe::<reis::event::EiEventConverter>::IS_SEND,
-                "reis made EiEventConverter Send; remove `unsafe impl Send for EventPump`"
+                !Probe::<EventPump>::IS_SEND,
+                "EventPump must stay on the thread that owns its EIS session"
             )
         };
-    }
-
-    #[test]
-    fn the_unsafe_contract_requires_an_exact_reis_pin() {
-        let manifest = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"),
-        )
-        .unwrap();
-        assert!(
-            manifest
-                .lines()
-                .any(|line| line.trim() == "reis = \"=0.7.1\""),
-            "review the EventPump Send invariant before changing the pinned reis version"
-        );
+        const {
+            assert!(
+                !Probe::<LibeiSession>::IS_SEND,
+                "LibeiSession must stay on its EIS owner thread"
+            )
+        };
     }
 }
