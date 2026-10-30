@@ -55,9 +55,10 @@ Updated: 2026-10-29
   characters, and the GUI playground reuses immediate-result capacity while
   replaying characters. A core regression compares deferred character events
   with equivalent text events. Workspace formatting, Clippy, and the full
-  locked test suite passed after this change; no per-keystroke allocation
-  counter has yet been added, so this records the removed conversion rather
-  than a measured zero-allocation claim.
+  locked test suite passed after this change. A release-mode allocation probe
+  measured zero allocations across 100,000 warmed deferred nonmatching
+  ASCII events. This is a core-engine-only measurement and excludes backend
+  decoding, event queueing, and allocations when a match produces output.
 
 - Made matcher latency recording nonblocking: capture operation duration
   before metrics synchronization, use `try_lock`, and count skipped samples

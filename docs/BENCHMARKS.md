@@ -27,6 +27,23 @@ These are machine-specific reference values, not a release performance
 guarantee. Compare like-for-like hardware and toolchain when investigating a
 regression; Criterion's full reports are written to `target/criterion`.
 
+## Input-path allocation probe
+
+The isolated allocation probe warms the bounded engine buffer and caller-owned
+result vector, then counts allocator requests while processing 100,000
+nonmatching ASCII characters through the deferred character API. It asserts
+that the warmed matcher path performs no heap allocation:
+
+```sh
+cargo run --locked --release -p wayexpand-core --example input_path_allocations
+```
+
+This measures the core engine entry point after input has already been decoded
+to `char`. It does not include backend protocol parsing, event queueing,
+configuration reloads, output transactions, matching triggers, or allocation
+when a result is actually produced. Use it as a narrow regression check, not
+as an end-to-end daemon allocation claim.
+
 ## Current-source KWin smoke report (2026-10-27)
 
 The [preserved `doctor --certify` report](evidence/doctor-certify-dfec5c525.json)

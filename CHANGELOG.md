@@ -20,6 +20,10 @@ All notable changes to WayExpand are documented here.
   matching. IBus now sends decoded characters directly to the deferred engine
   path instead of allocating a one-character `String`; the GUI playground
   reuses its immediate-result vector while replaying text.
+- Add a warmed input-path allocation regression example. On this host, the
+  deferred nonmatching ASCII engine path performed zero allocator requests
+  over 100,000 events; the measurement excludes backend input decoding and
+  expansion-result construction.
 - Preserve a clean-source KWin 6.6.6 smoke report for commit `60315df9bf4c`:
   insertion, focus, reload, restart, refusal, and build identity passed; the
   report remains partial because physical capture, sensitive-field behavior,
