@@ -6,7 +6,7 @@ test_root=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-certification-test.XXXXXX")
 trap 'rm -rf "$test_root"' EXIT INT TERM
 command -v jq >/dev/null 2>&1
 matrix="$project_dir/tests/certification/compositor-matrix.json"
-status_schema=$(jq -er '.schema_version | select(type == "number" and . > 0)' \
+status_schema=$(jq -er '.daemon_control_schema | select(type == "number" and . > 0)' \
     "$project_dir/tests/contracts/status-json.json")
 set_status_schema() {
     sed "s/\\\$status_schema/$status_schema/g" "$1" >"$1.tmp"
@@ -464,5 +464,30 @@ jq -e '
     (.certification_limitations | contains("not atomically")) and
     (.certification_limitations | contains("application filters are unavailable"))
 ' "$gnome_json" >/dev/null
+
+# A real-shaped input-method status uses the daemon control schema, not the
+# JSON status-output contract version.
+sway_cli="$test_root/sway-certification-cli"
+cat >"$sway_cli" <<EOF
+#!/bin/sh
+case "\${1-} \${2-}" in
+    "doctor --json") printf '%s\\n' '{"healthy":true,"desktop":"Sway/wlroots","wayexpand_commit":"test-commit"}' ;;
+    "status --json") printf '%s\\n' '{"response":"running","status_schema":$status_schema,"daemon_commit":"test-commit","source":"input-method","backend":"input-method-v2","capture_sensitive_focus":true,"capture_key_passthrough":true,"capture_local_compose_aware":true,"capture_layout_aware":true,"inject_atomic_replace":true,"inject_full_unicode":true,"inject_key_passthrough":true}' ;;
+esac
+EOF
+chmod 0755 "$sway_cli"
+set_status_schema "$sway_cli"
+sway_json="$test_root/sway-certification.json"
+XDG_CURRENT_DESKTOP='Sway/wlroots' PATH="$project_dir/target/debug:$PATH" \
+    "$project_dir/scripts/certify-compositor.sh" --format json \
+    --compositor sway --version 1.10 --backend input-method-v2 \
+    --layout "$layout_profiles" --target-apps "$target_apps" \
+    --client-versions "$client_versions" --cli "$sway_cli" \
+    --results "$results" --output "$sway_json"
+jq -e '
+    .schema == 4 and .certified == true and .status_probe_valid == true and
+    .production_eligible == true and .certification_scope == "compatibility" and
+    .backend_probe_valid == true and .backend_certification_eligible == true
+' "$sway_json" >/dev/null
 
 printf '%s\n' 'certification contract test passed'

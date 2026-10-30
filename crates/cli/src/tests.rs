@@ -642,6 +642,12 @@ fn status_json_matches_documented_stable_contract() {
     let contract: serde_json::Value =
         serde_json::from_str(include_str!("../../../tests/contracts/status-json.json"))
             .expect("status contract fixture must be valid JSON");
+    assert_eq!(contract["schema_version"], 10);
+    assert_eq!(contract["daemon_control_schema"], CONTROL_STATUS_SCHEMA);
+    assert_ne!(
+        contract["schema_version"],
+        contract["daemon_control_schema"]
+    );
     let documented_fields = contract["fields"]
         .as_object()
         .expect("status contract fields must be an object")

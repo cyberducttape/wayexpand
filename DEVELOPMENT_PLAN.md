@@ -12,11 +12,12 @@ milestone is complete only when its acceptance evidence is recorded in
 **Status:** Open. No route is production-certified.
 
 The evidence collector now records the kernel release and SHA-256 of the
-tested CLI, and requires a complete application/toolkit version map before it
-can mark any scenario matrix certified. This closes the report-metadata part
-of the gate; the map and driver results remain runner-provided evidence that
-must be checked against the actual session, and no real-session route has yet
-passed the required matrix.
+tested CLI, and requires a complete application/toolkit version map before
+certifying a scenario matrix. It also reads `daemon_control_schema`
+independently from the CLI JSON `schema_version`; the previous script compared
+those unrelated versions and rejected every real daemon status as stale. The
+version map and driver results remain runner-provided evidence to check
+against the actual session, and no real-session route has passed the matrix.
 
 Acceptance criteria:
 

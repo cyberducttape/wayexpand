@@ -11,9 +11,9 @@ command -v jq >/dev/null 2>&1 || {
     printf '%s\n' 'error: jq is required to validate the certification matrix' >&2
     exit 2
 }
-status_schema=$(jq -er '.schema_version | select(type == "number" and . > 0)' \
+status_schema=$(jq -er '.daemon_control_schema | select(type == "number" and . > 0)' \
     "$project_dir/tests/contracts/status-json.json") || {
-    printf '%s\n' 'error: status protocol contract has no valid schema_version' >&2
+    printf '%s\n' 'error: status contract has no valid daemon_control_schema' >&2
     exit 2
 }
 compositor=
