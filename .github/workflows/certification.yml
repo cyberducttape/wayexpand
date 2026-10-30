@@ -155,6 +155,19 @@ jobs:
           test -n "${WAYEXPAND_CERTIFICATION_VERSION:?WAYEXPAND_CERTIFICATION_VERSION is not configured on this runner}"
           test -n "${WAYEXPAND_CERTIFICATION_LAYOUT:?WAYEXPAND_CERTIFICATION_LAYOUT is not configured on this runner}"
           test -n "${WAYEXPAND_CERTIFICATION_TARGET_APPS:?WAYEXPAND_CERTIFICATION_TARGET_APPS is not configured on this runner}"
+          test -n "${WAYEXPAND_CERTIFICATION_CLIENT_VERSIONS:?WAYEXPAND_CERTIFICATION_CLIENT_VERSIONS must map every target app to its exact application and toolkit versions}"
+          printf '%s' "$WAYEXPAND_CERTIFICATION_CLIENT_VERSIONS" | jq -e \
+            --arg apps "$WAYEXPAND_CERTIFICATION_TARGET_APPS" '
+              ($apps | split(",")) as $ids |
+              type == "object" and (keys | sort) == ($ids | sort) and
+              all(.[]; type == "object" and
+                (.application_version | type == "string" and length > 0) and
+                (.toolkit_name | type == "string" and length > 0) and
+                (.toolkit_version | type == "string" and length > 0))
+            ' >/dev/null || {
+              echo 'Certification client version map must exactly cover target apps and include application_version, toolkit_name, and toolkit_version.' >&2
+              exit 1
+            }
       - name: Run every matrix scenario
         id: driver
         continue-on-error: true
@@ -191,6 +204,7 @@ jobs:
             --backend "$BACKEND" \
             --layout "$WAYEXPAND_CERTIFICATION_LAYOUT" \
             --target-apps "$WAYEXPAND_CERTIFICATION_TARGET_APPS" \
+            --client-versions "$WAYEXPAND_CERTIFICATION_CLIENT_VERSIONS" \
             --cli "$GITHUB_WORKSPACE/target/debug/wayexpand" \
             --results "$RUNNER_TEMP/wayexpand-certification/results.txt" \
             --output "$RUNNER_TEMP/wayexpand-certification/$COMPOSITOR.json"

@@ -11,6 +11,13 @@ milestone is complete only when its acceptance evidence is recorded in
 
 **Status:** Open. No route is production-certified.
 
+The evidence collector now records the kernel release and SHA-256 of the
+tested CLI, and requires a complete application/toolkit version map before it
+can mark any scenario matrix certified. This closes the report-metadata part
+of the gate; the map and driver results remain runner-provided evidence that
+must be checked against the actual session, and no real-session route has yet
+passed the required matrix.
+
 Acceptance criteria:
 
 - Select at least one compositor/backend route that can provide the required

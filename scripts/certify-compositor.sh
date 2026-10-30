@@ -21,6 +21,7 @@ compositor_version=
 backend=
 keyboard_layout=
 target_apps=
+client_versions=
 output="certification-$(date -u +%Y%m%dT%H%M%SZ).md"
 format=markdown
 results_file=
@@ -32,12 +33,14 @@ while [ "$#" -gt 0 ]; do
         --backend) backend=${2:?missing value for --backend}; shift 2 ;;
         --layout) keyboard_layout=${2:?missing value for --layout}; shift 2 ;;
         --target-apps) target_apps=${2:?missing value for --target-apps}; shift 2 ;;
+        --client-versions) client_versions=${2:?missing value for --client-versions}; shift 2 ;;
         --output) output=${2:?missing value for --output}; shift 2 ;;
         --format) format=${2:?missing value for --format}; shift 2 ;;
         --results) results_file=${2:?missing value for --results}; shift 2 ;;
         --cli) cli=${2:?missing value for --cli}; shift 2 ;;
         --help|-h)
-            printf '%s\n' "usage: $0 --compositor NAME --version VERSION --backend BACKEND --layout LAYOUT --target-apps APPS [--cli PATH] [--format markdown|json] [--output FILE] [--results FILE]"
+            printf '%s\n' "usage: $0 --compositor NAME --version VERSION --backend BACKEND --layout LAYOUT --target-apps APPS --client-versions JSON [--cli PATH] [--format markdown|json] [--output FILE] [--results FILE]"
+            printf '%s\n' 'client versions: JSON object keyed by every target app, each with application_version, toolkit_name, and toolkit_version strings'
             printf '%s\n' "results format: one SCENARIO|LAYOUT|CLIENT=pass|fail|unsupported-by-design|UNVERIFIED entry per line"
             exit 0
             ;;
@@ -119,6 +122,36 @@ command -v "$cli" >/dev/null 2>&1 || {
     printf '%s\n' "error: certification CLI is not executable: $cli" >&2
     exit 2
 }
+cli_executable=$(command -v "$cli")
+command -v sha256sum >/dev/null 2>&1 || {
+    printf '%s\n' 'error: sha256sum is required to identify the tested CLI binary' >&2
+    exit 2
+}
+cli_binary_sha256=$(sha256sum -- "$cli_executable" | awk 'NR == 1 { print $1 }')
+case "$cli_binary_sha256" in
+    *[!0-9a-f]*|'')
+        printf '%s\n' 'error: could not calculate the tested CLI binary SHA-256' >&2
+        exit 2
+        ;;
+esac
+kernel_release=$(uname -r)
+
+client_versions_json=null
+client_versions_valid=0
+if [ -n "$client_versions" ]; then
+    target_apps_json=$(printf '%s' "$target_apps" | jq -Rsc 'split(",") | map(select(length > 0))')
+    if printf '%s' "$client_versions" | jq -e --argjson apps "$target_apps_json" '
+        type == "object" and
+        ((keys | sort) == ($apps | sort)) and
+        all(.[]; type == "object" and
+            (.application_version | type == "string" and length > 0) and
+            (.toolkit_name | type == "string" and length > 0) and
+            (.toolkit_version | type == "string" and length > 0))
+    ' >/dev/null 2>&1; then
+        client_versions_json=$(printf '%s' "$client_versions" | jq -c .)
+        client_versions_valid=1
+    fi
+fi
 
 scenarios=$(jq -r '.required_scenarios[]' "$matrix" | tr '\n' ' ')
 [ -n "$scenarios" ] || {
@@ -337,7 +370,7 @@ jq -Rsc '
 certified=false
 [ "$complete" -eq 1 ] && [ "$doctor_probe_valid" -eq 1 ] \
     && [ "$desktop_probe_valid" -eq 1 ] && [ "$backend_probe_valid" -eq 1 ] \
-    && [ "$backend_certification_eligible" = true ] \
+    && [ "$backend_certification_eligible" = true ] && [ "$client_versions_valid" -eq 1 ] \
     && { [ "$status_required" = false ] || [ "$status_probe_valid" -eq 1 ]; } && certified=true
 certification_scope=compatibility
 if [ "$production_certification_required" = true ] && [ "$production_eligible" = true ]; then
@@ -365,6 +398,8 @@ if [ "$format" = json ]; then
         --arg wayexpand_commit "$wayexpand_commit" \
         --arg compositor "$compositor" \
         --arg compositor_version "$compositor_version" \
+        --arg kernel_release "$kernel_release" \
+        --arg cli_binary_sha256 "$cli_binary_sha256" \
         --arg expected_desktop "$expected_desktop" \
         --arg detected_desktop "$detected_desktop" \
         --arg backend "$backend" \
@@ -373,6 +408,8 @@ if [ "$format" = json ]; then
         --arg session "${XDG_SESSION_TYPE:-unknown}" \
         --arg recorded_at_utc "$date_utc" \
         --argjson target_apps "$target_apps_json" \
+        --argjson client_versions "$client_versions_json" \
+        --argjson client_versions_valid "$client_versions_valid" \
         --argjson required_client_markers "$required_client_markers_json" \
         --argjson target_policy "$target_policy_json" \
         --argjson required_layout_profiles "$required_layout_profiles_json" \
@@ -394,17 +431,21 @@ if [ "$format" = json ]; then
         --arg production_eligible "$production_eligible" \
         --arg production_certification_required "$production_certification_required" \
         --arg certification_scope "$certification_scope" \
-        '{schema: 3, certified: $certified,
+        '{schema: 4, certified: $certified,
           wayexpand_version: $wayexpand_version, wayexpand_commit: $wayexpand_commit,
           compositor: $compositor,
           expected_desktop: $expected_desktop,
           detected_desktop: $detected_desktop,
           status: $certification_status,
           certification_scope: $certification_scope,
+          kernel_release: $kernel_release,
+          cli_binary_sha256: $cli_binary_sha256,
           production_eligible: ($production_eligible == "true"),
           production_certification_required: ($production_certification_required == "true"),
           compositor_version: $compositor_version, backend: $backend,
           keyboard_layout: $keyboard_layout, target_apps: $target_apps,
+          client_versions: $client_versions,
+          client_versions_valid: ($client_versions_valid == 1),
           required_client_markers: $required_client_markers,
           required_layout_profiles: $required_layout_profiles,
           out_of_scope_capabilities: $out_of_scope_capabilities,
@@ -427,6 +468,8 @@ else
     printf '%s\n' "- wayexpand_version: \`$wayexpand_version\`"
     printf '%s\n' "- wayexpand_commit: \`$wayexpand_commit\`"
     printf '%s\n' "- compositor_version: $compositor_version"
+    printf '%s\n' "- kernel_release: $kernel_release"
+    printf '%s\n' "- cli_binary_sha256: $cli_binary_sha256"
     printf '%s\n' "- expected_desktop: $expected_desktop"
     printf '%s\n' "- detected_desktop: $detected_desktop"
     printf '%s\n' "- backend: $backend"
@@ -443,6 +486,12 @@ else
         '.targets[] | select(.id == $compositor) | "- application_filter: `" + .application_filter + "`\n- window_tracker: `" + .window_tracker + "`"' "$matrix")
     printf '%s\n' "$target_policy"
     printf '%s\n' "- target_apps: $target_apps"
+    printf '%s\n' '- client_versions:'
+    if [ "$client_versions_valid" -eq 1 ]; then
+        printf '%s' "$client_versions_json" | jq -r 'to_entries[] | "  - " + .key + ": " + .value.application_version + " (" + .value.toolkit_name + " " + .value.toolkit_version + ")"'
+    else
+        printf '%s\n' '  - UNVERIFIED (missing, malformed, or incomplete client/toolkit version map)'
+    fi
     printf '%s\n' '- compositor: `'"$compositor"'`'
     printf '%s\n' '- recorded_at_utc: `'"$date_utc"'`'
     printf '%s\n' '- desktop: `'"${XDG_CURRENT_DESKTOP:-unknown}"'`'
@@ -471,7 +520,11 @@ if [ "$certified" != true ]; then
     elif [ "$doctor_probe_valid" -eq 0 ]; then
         printf '%s\n' "certification remains incomplete: doctor evidence is invalid or does not identify the requested compositor" >&2
     else
-        printf '%s\n' "certification remains incomplete: provide pass results for every in-scope scenario; out-of-scope capabilities are listed separately in the report" >&2
+        if [ "$client_versions_valid" -ne 1 ]; then
+            printf '%s\n' 'certification remains incomplete: provide exact application and toolkit versions for every target client' >&2
+        else
+            printf '%s\n' "certification remains incomplete: provide pass results for every in-scope scenario; out-of-scope capabilities are listed separately in the report" >&2
+        fi
     fi
     exit 1
 fi

@@ -265,11 +265,12 @@ scripts/certify-compositor.sh --format json --compositor kde \
   --version 6.6.2 --backend input-method-v2 \
   --layout us,de,fr,altgr,multi-layout-switching \
   --target-apps gtk4-demo,qt6-demo,browser-firefox,terminal-konsole,password-field,electron-vscode,text-editor-gedit \
+  --client-versions "$WAYEXPAND_CERTIFICATION_CLIENT_VERSIONS" \
   --results kde-results.txt --output kde-certification.json
 ```
 
 That record is distinct from the CLI preflight: it includes the exact session
-metadata and one result for every scenario × layout × client cell. Schema 3
+metadata and one result for every scenario × layout × client cell. Schema 4
 separates `certified` from `certification_scope`: a compatibility run can pass
 every scenario and report `certified: true` with scope `compatibility`, but
 only scope `production` can satisfy the release gate. Production scope also
@@ -281,9 +282,26 @@ exact match between the requested compositor and the desktop identity
 returned by `doctor --json`. Daemon-backed paths additionally require a status
 snapshot with `response: "running"`, the current status schema, and the
 matching source/backend pair; IBus uses the doctor IBus-installation probe
-because it is not the daemon control socket path. `status` reports scenario
-completeness (`certified`, `incomplete`, or `failed`); `certification_scope`
-reports compatibility or production evidence.
+because it is not the daemon control socket path. It also records the running
+kernel release and SHA-256 of the exact CLI executable used for the probes.
+Certification requires `WAYEXPAND_CERTIFICATION_CLIENT_VERSIONS` to be a JSON
+object keyed by every `--target-apps` identifier. Each value must include
+nonempty `application_version`, `toolkit_name`, and `toolkit_version` strings;
+missing or incomplete version data leaves the report uncertified. An entry
+looks like this (the full map must contain every target application):
+
+```json
+{
+  "gtk4-demo": {
+    "application_version": "4.16.12",
+    "toolkit_name": "GTK",
+    "toolkit_version": "4.16.12"
+  }
+}
+```
+
+`status` reports scenario completeness (`certified`, `incomplete`, or `failed`);
+`certification_scope` reports compatibility or production evidence.
 
 Raw evdev capture is a compatibility fallback and is never eligible for a
 production certification: it has no sensitive-field signal and cannot provide
@@ -322,9 +340,11 @@ certification is incomplete or failed. Automation must inspect
 pass is not a production pass. The JSON artifact remains available for upload
 and review after a nonzero exit.
 
-The compositor evidence collector emits schema version 2, where each entry in
-`scenarios` is an individual scenario × layout × client result. Scenario-only
-schema-1 artifacts do not prove this expanded matrix.
+The compositor evidence collector emits schema version 4, where each entry in
+`scenarios` is an individual scenario × layout × client result. It records the
+kernel release, CLI binary SHA-256, and exact client/toolkit version map.
+Reports without complete client/toolkit version metadata cannot be certified.
+Scenario-only schema-1 artifacts do not prove this expanded matrix.
 The artifact also carries `out_of_scope_capabilities`; these are explicit
 product boundaries, not untested passing scenarios. The committed-text
 composition scenarios exercise expansion after the user completes composition.
@@ -727,7 +747,11 @@ discover online runners and their labels. Register a real-session runner with
 production-required targets without one fail preflight. Each runner must provide
 an executable `WAYEXPAND_CERTIFICATION_DRIVER` and set
 `WAYEXPAND_CERTIFICATION_COMPOSITOR`, `WAYEXPAND_CERTIFICATION_VERSION`,
-`WAYEXPAND_CERTIFICATION_LAYOUT`, and `WAYEXPAND_CERTIFICATION_TARGET_APPS`.
+`WAYEXPAND_CERTIFICATION_LAYOUT`, `WAYEXPAND_CERTIFICATION_TARGET_APPS`, and
+`WAYEXPAND_CERTIFICATION_CLIENT_VERSIONS`. The last variable is a JSON map
+from every target application ID to its exact application and UI toolkit
+version, as described above; the workflow rejects missing metadata and the
+collector includes it in the machine-readable artifact.
 
 Whether the repository currently has the required online runners and
 `CERTIFICATION_RUNNER_TOKEN` secret is an external Actions configuration fact;

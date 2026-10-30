@@ -2,6 +2,29 @@
 
 Updated: 2026-10-30
 
+## Certification evidence identity and reproducibility
+
+- The scenario evidence collector now emits schema 4 with the running kernel
+  release and SHA-256 of the exact WayExpand CLI used for doctor/status probes.
+  A report cannot set `certified: true` without a complete version map for
+  every target application, including application version and toolkit name
+  and version. The certification workflow validates this metadata before
+  running the full scenario matrix and passes it into the report.
+- Regression coverage verifies the hash shape, kernel field, exact client
+  metadata, rejection of absent/incomplete maps, and the existing fail-closed
+  route/scenario checks.
+- Verification passed: `scripts/test-certification.sh`,
+  `scripts/test-certification-driver.sh`,
+  `scripts/test-certification-matrix.sh`,
+  `scripts/test-certification-report.sh`, `shellcheck scripts/*.sh`, workflow
+  YAML parsing, the workflow's version-map jq validation, and `git diff
+  --check`. `actionlint` is unavailable in this environment; the workflow was
+  parsed as YAML but not checked with actionlint.
+- The production release gate still fails closed because no route is
+  production-certified. This change strengthens report provenance; it does
+  not create real-session certification evidence. The Actions API currently
+  reports zero registered self-hosted runners for this repository.
+
 ## Matcher and event-path optimization review
 
 - The proposed borrowed matcher constructor is already implemented:

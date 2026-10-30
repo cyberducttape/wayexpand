@@ -16,6 +16,13 @@ set_status_schema() {
 scenarios=$(jq -r '.required_scenarios[]' "$matrix" | tr '\n' ' ')
 layout_profiles=us,de,fr,altgr,multi-layout-switching
 target_apps=gtk4-demo,qt6-demo,browser-firefox,terminal-konsole,password-field,electron-vscode,text-editor-gedit
+client_versions=$(jq -cn --arg apps "$target_apps" '
+    ($apps | split(",")) | map({key: ., value: {
+        application_version: "test-app-1.0",
+        toolkit_name: "test-toolkit",
+        toolkit_version: "test-toolkit-1.0"
+    }}) | from_entries
+')
 
 results="$test_root/results.txt"
 output="$test_root/certification.md"
@@ -55,6 +62,7 @@ run_certification() {
         "$project_dir/scripts/certify-compositor.sh" \
         --compositor kde --version 6.6.2 --backend ibus --layout us,de,fr,altgr,multi-layout-switching \
         --target-apps "$target_apps" \
+        --client-versions "$client_versions" \
         --cli "$certification_cli" "$@"
 }
 
@@ -72,7 +80,7 @@ if run_certification --format json --results "$results" --output "$json_output";
     exit 1
 fi
 jq -e --argjson expected_cases "$expected_cases" '
-    .schema == 3 and .certified == false and .status == "incomplete" and
+    .schema == 4 and .certified == false and .status == "incomplete" and
     .certification_scope == "compatibility" and .production_eligible == false and
     .production_certification_required == false and
     .backend_certification_eligible == false and
@@ -87,6 +95,11 @@ jq -e --argjson expected_cases "$expected_cases" '
     .status_probe_valid == true and
     .status_required == false and .backend_probe_valid == true and
     .target_apps == ["gtk4-demo", "qt6-demo", "browser-firefox", "terminal-konsole", "password-field", "electron-vscode", "text-editor-gedit"] and
+    .client_versions["gtk4-demo"].application_version == "test-app-1.0" and
+    .client_versions["gtk4-demo"].toolkit_name == "test-toolkit" and
+    .client_versions_valid == true and
+    (.kernel_release | type == "string" and length > 0) and
+    (.cli_binary_sha256 | test("^[0-9a-f]{64}$")) and
     ([.scenarios[] | select(.result == "pass")] | length == $expected_cases)
 ' "$json_output" >/dev/null
 
@@ -325,7 +338,7 @@ if run_certification --format json --results "$missing" --output "$missing_json"
     printf '%s\n' 'JSON certification accepted an incomplete results file' >&2
     exit 1
 fi
-jq -e --argjson cases "$expected_cases" '.schema == 3 and .certified == false and .status == "incomplete" and .certification_scope == "compatibility" and ([.out_of_scope_capabilities[] | select(.id == "active-ime-preedit" and .status == "unsupported-by-design")] | length == 1) and ([.scenarios[] | select(.result == "UNVERIFIED")] | length == 1) and (.scenarios | length == $cases)' "$missing_json" >/dev/null
+jq -e --argjson cases "$expected_cases" '.schema == 4 and .certified == false and .status == "incomplete" and .certification_scope == "compatibility" and ([.out_of_scope_capabilities[] | select(.id == "active-ime-preedit" and .status == "unsupported-by-design")] | length == 1) and ([.scenarios[] | select(.result == "UNVERIFIED")] | length == 1) and (.scenarios | length == $cases)' "$missing_json" >/dev/null
 
 failed="$test_root/failed.txt"
 sed '1s/=pass$/=fail/' "$results" >"$failed"
@@ -411,14 +424,37 @@ esac
 EOF
 chmod 0755 "$gnome_cli"
 set_status_schema "$gnome_cli"
+missing_versions_json="$test_root/missing-client-versions.json"
+if XDG_CURRENT_DESKTOP=GNOME PATH="$project_dir/target/debug:$PATH" \
+    "$project_dir/scripts/certify-compositor.sh" \
+    --compositor gnome --version 49.0 --backend ibus --layout "$layout_profiles" \
+    --target-apps "$target_apps" --cli "$gnome_cli" --format json \
+    --results "$results" --output "$missing_versions_json" >/dev/null; then
+    printf '%s\n' 'certification accepted missing client and toolkit versions' >&2
+    exit 1
+fi
+jq -e '.certified == false and .client_versions == null and .client_versions_valid == false and .status == "incomplete"' \
+    "$missing_versions_json" >/dev/null
+malformed_versions_json="$test_root/malformed-client-versions.json"
+if XDG_CURRENT_DESKTOP=GNOME PATH="$project_dir/target/debug:$PATH" \
+    "$project_dir/scripts/certify-compositor.sh" \
+    --compositor gnome --version 49.0 --backend ibus --layout "$layout_profiles" \
+    --target-apps "$target_apps" --client-versions '{}' --cli "$gnome_cli" --format json \
+    --results "$results" --output "$malformed_versions_json" >/dev/null; then
+    printf '%s\n' 'certification accepted an incomplete client version map' >&2
+    exit 1
+fi
+jq -e '.certified == false and .client_versions == null and .client_versions_valid == false' \
+    "$malformed_versions_json" >/dev/null
 gnome_json="$test_root/gnome-certification.json"
 XDG_CURRENT_DESKTOP=GNOME PATH="$project_dir/target/debug:$PATH" \
     "$project_dir/scripts/certify-compositor.sh" \
     --compositor gnome --version 49.0 --backend ibus --layout "$layout_profiles" \
-    --target-apps "$target_apps" --cli "$gnome_cli" --format json \
+    --target-apps "$target_apps" --client-versions "$client_versions" \
+    --cli "$gnome_cli" --format json \
     --results "$results" --output "$gnome_json"
 jq -e '
-    .schema == 3 and .certified == true and .status == "certified" and
+    .schema == 4 and .certified == true and .status == "certified" and
     .certification_scope == "compatibility" and
     .production_eligible == false and
     .production_certification_required == false and
