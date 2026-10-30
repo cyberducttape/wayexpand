@@ -23,8 +23,9 @@ Updated: 2026-10-29
 - This does not establish zero allocations for XKB lookup or certify real
   desktop capture/insertion. No production compositor route is certified; the
   live KDE route still has the limitations recorded below.
-- Pending: commit this verified change. Do not deploy/restart the active user
-  service or push without the required authorization.
+- Committed locally as `045dfdbb` (`Avoid owned strings for scalar input
+  events`). The working tree is clean. The active user service was not
+  deployed/restarted, and this commit has not been pushed.
 
 ## Completed in this work period
 
@@ -74,9 +75,10 @@ Updated: 2026-10-29
   production certification because no matrix route is eligible. GitHub Actions
   for `60315df9` was cancelled when the evidence-only commit was pushed; no job
   failure was reported. CI run `41003908901` for evidence commit `5b3eefe7`
-  completed successfully. CI run `41006119736` for `2614bc53` is still running;
-  27 jobs have completed successfully and no failures have been reported. Its
-  release test job has not yet reached the warmed-allocation gate.
+  completed successfully. CI run `41006119736` is for the earlier commit
+  `2614bc53`; it remains in progress with the Debian/RPM artifact job building
+  the RPM. Thirty jobs have completed, and no failures have been reported.
+  The current local commit `045dfdbb` has not yet been submitted to CI.
 - Added single-character engine entry points that encode into stack storage.
   IBus now avoids constructing a temporary `String` for decoded printable
   characters, and the GUI playground reuses immediate-result capacity while
