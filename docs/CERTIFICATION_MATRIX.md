@@ -45,6 +45,15 @@ availability claims, and no target is certified without reviewed evidence.
 
 ## Current evidence
 
+The latest full private KWin output/focus suite is the
+[captured report](evidence/kwin-e2e-0acd0ed87ce6.txt), run on clean source
+commit `0acd0ed87ce6` against KWin 6.6.6. All 15 scenarios passed, including
+trigger replacement, focus tracking/cancellation, reload/restart, default
+refusal without compatibility consent, and 20 injector latency samples per
+size. Capture was stdin-simulated; this is current-source compatibility
+evidence and does not certify physical capture, password fields, concurrent
+input during a replacement, suspend/resume, or long-term stability.
+
 The latest current-source private KWin compatibility smoke evidence is
 [`doctor-certify-9311e1e5be3f.json`](evidence/doctor-certify-9311e1e5be3f.json),
 bound to clean source commit `9311e1e5be3f`. Insertion, focus switching,

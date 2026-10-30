@@ -26,6 +26,14 @@ Updated: 2026-10-30
 - The local branch is 40 commits ahead of `origin/main`. Per the release
   mission, these fixes and diagnostics have not been pushed; remote PR checks
   cannot reflect them until an authorized push updates the base workflow.
+- Ran `scripts/test-kwin-e2e.sh` on clean source commit `0acd0ed87ce6` in its
+  isolated private KWin 6.6.6 session. All 15 output, focus, lifecycle, and
+  default-deny scenarios passed. With the 12 ms keysym fallback, p95 was
+  12.985 ms (small), 783.759 ms (medium), and 3.142 s (large). The report is
+  preserved in [`docs/evidence/kwin-e2e-0acd0ed87ce6.txt`](docs/evidence/kwin-e2e-0acd0ed87ce6.txt)
+  and indexed by [`docs/CERTIFICATION_MATRIX.md`](docs/CERTIFICATION_MATRIX.md).
+  Capture remained stdin-simulated, so this does not close the real-capture
+  P0 gate.
 
 ## Fast-path refactor verification
 
