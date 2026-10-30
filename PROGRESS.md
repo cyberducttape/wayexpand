@@ -521,6 +521,17 @@ Updated: 2026-10-30
   containment evidence and does not replace real evdev plus target-client
   certification.
 
+## Current-source private KWin latency run
+
+- Ran `scripts/test-kwin-e2e.sh output-latency` on clean commit
+  `0a77cbb887d4`. The isolated KWin 6.6.6 scenario passed 60 insertions (20
+  each at 1, 64, and 257 characters) and verified the final sink text.
+- Measured p95 injector latency was 12.997 ms, 782.969 ms, and 3,142.759 ms
+  respectively. The source and caveats are recorded in `docs/BENCHMARKS.md`.
+  This run used stdin-simulated capture; it does not verify physical input,
+  client paint latency, concurrent typing integrity, or an alternative pacing
+  interval.
+
 ## Completed in this work period
 
 - Generalized `Matcher::try_new` to accept `IntoIterator<Item = S>` where

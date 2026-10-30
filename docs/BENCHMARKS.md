@@ -458,3 +458,20 @@ verified libei keysym-fallback transactions per size on private headless KWin
 Capture was simulated through stdin. These timings cover injector transactions,
 not physical capture or client paint, and do not satisfy an end-to-end latency
 target or compositor certification.
+
+The isolated `output-latency` scenario was rerun on clean source commit
+`0a77cbb887d4`. Twenty transactions per bucket all produced the expected
+client text (6,440 inserted characters; the sink's serialized text also
+contains its terminating newline):
+
+| Replacement size | p50 | p95 | p99 |
+| --- | ---: | ---: | ---: |
+| Small (1 character) | 12.817 ms | 12.997 ms | 13.019 ms |
+| Medium (64 characters) | 780.354 ms | 782.969 ms | 782.999 ms |
+| Large (257 characters) | 3,135.929 ms | 3,142.759 ms | 3,142.831 ms |
+
+This scenario ran under private, headless KWin 6.6.6 with stdin-simulated
+capture and the production 12 ms keysym pacing. It verifies final sink text for
+this workload, but excludes physical capture, client paint latency, other
+applications, and input arriving during the transaction. It is not desktop
+certification or evidence to lower the default pacing interval.
