@@ -77,11 +77,12 @@ Acceptance criteria:
 
 **Status:** Open; release publication is correctly gated by certification.
 
-Partial evidence: the hermetic per-user installer test covers staged
-installation, validation preflight, post-switch rollback, SIGTERM rollback,
-immutable payload checks, and custom XDG roots. Package-manager upgrade and
-rollback, installed-service behavior, and artifact signing/provenance remain
-unverified on supported release hosts.
+Partial evidence: hermetic per-user and release-archive installer tests cover
+staged installation, validation preflight, rollback after filesystem, signal,
+service restart, and service enable failures, immutable payload checks, and
+custom XDG roots. They use temporary homes and stubs; they do not validate
+package-manager install/upgrade, actual service behavior, or artifact
+signing/provenance on supported release hosts.
 
 Acceptance criteria:
 

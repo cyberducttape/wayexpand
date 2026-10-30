@@ -15,6 +15,18 @@ Updated: 2026-10-30
   uninstall behavior on supported distributions, signed artifact provenance,
   and a real user-service upgrade rehearsal remain open release criteria.
 
+## Release archive installer verification
+
+- `scripts/test-install-release.sh` passed. Its hermetic archive fixture
+  exercised install and uninstall paths, option validation, evdev-consent
+  gating, atomic rollback after service restart/enable failures, corrected
+  same-version payload handling, XDG service drop-ins, and user configuration
+  preservation. `systemctl` and process checks were stubbed; no host service or
+  package manager was changed.
+- This validates the release archive installer script against a synthetic
+  layout, not a published signed archive or package-manager install/upgrade on
+  a supported distribution.
+
 ## Direct EIS connection and handshake failure coverage
 
 - Extracted the stream-to-handshake step used by session startup and added an
