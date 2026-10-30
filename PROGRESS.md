@@ -83,11 +83,11 @@ Updated: 2026-10-29
   production certification because no matrix route is eligible. GitHub Actions
   for `60315df9` was cancelled when the evidence-only commit was pushed; no job
   failure was reported. CI run `41003908901` for evidence commit `5b3eefe7`
-  completed successfully. CI run `41006119736` is for the earlier commit
-  `2614bc53`; it remains in progress with the Debian/RPM artifact job building
-  the RPM. Thirty jobs have completed, and no failures have been reported.
-  The local commits `045dfdbb` and `4b4cd9c3` have not yet been submitted to
-  CI.
+  completed successfully. CI run `41006119736` also completed successfully on
+  the earlier commit `2614bc53`, including the Rust test/lint, Debian/RPM
+  artifact, and Ubuntu 26.04/Fedora package-install smoke jobs. The local
+  commits after `2614bc53`, including `045dfdbb` and `4b4cd9c3`, have passed
+  local verification but have not been submitted to CI.
 - Added single-character engine entry points that encode into stack storage.
   IBus now avoids constructing a temporary `String` for decoded printable
   characters, and the GUI playground reuses immediate-result capacity while
