@@ -7,6 +7,9 @@ All notable changes to WayExpand are documented here.
 - Connect to explicit `LIBEI_SOCKET` endpoints with Tokio's nonblocking Unix
   socket API, honoring connection cancellation and a five-second deadline
   instead of blocking the EIS owner thread in `connect(2)`.
+- Verify cancellation of an in-flight direct EIS connection drops its pending
+  future promptly, in addition to covering pre-cancelled and completed socket
+  attempts.
 - Validate the returned `SO_PEERCRED` structure length before reading its
   fields, with regression coverage for truncated, oversized, and valid lengths.
 - Add fallible `Matcher::try_new` construction for arbitrary trigger iterators;

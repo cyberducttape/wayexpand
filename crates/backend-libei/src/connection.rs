@@ -19,24 +19,35 @@ pub(super) fn connect_socket_with_cancellation(
     if cancellation.is_cancelled() {
         return Err(LibeiError::Cancelled);
     }
-    portal_runtime()?.block_on(race_cancellation(
-        async move {
-            let stream = tokio::time::timeout(
-                EIS_SOCKET_CONNECT_TIMEOUT,
-                tokio::net::UnixStream::connect(path),
-            )
-            .await
-            .map_err(|_| {
-                LibeiError::Connect(std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    "EIS socket connection exceeded its deadline",
-                ))
-            })?
-            .map_err(LibeiError::Connect)?;
-            stream.into_std().map_err(LibeiError::Connect)
+    let stream = portal_runtime()?.block_on(connect_stream_with_cancellation(
+        tokio::net::UnixStream::connect(path),
+        cancellation,
+    ))?;
+    stream.into_std().map_err(LibeiError::Connect)
+}
+
+async fn connect_stream_with_cancellation<F>(
+    connect: F,
+    cancellation: &ConnectCancellation,
+) -> Result<tokio::net::UnixStream, LibeiError>
+where
+    F: Future<Output = std::io::Result<tokio::net::UnixStream>>,
+{
+    race_cancellation(
+        async {
+            tokio::time::timeout(EIS_SOCKET_CONNECT_TIMEOUT, connect)
+                .await
+                .map_err(|_| {
+                    LibeiError::Connect(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "EIS socket connection exceeded its deadline",
+                    ))
+                })?
+                .map_err(LibeiError::Connect)
         },
         cancellation,
-    ))
+    )
+    .await
 }
 
 /// One Tokio runtime for every portal session in the process.
@@ -260,6 +271,51 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(error, LibeiError::Cancelled));
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn direct_socket_connect_cancels_and_drops_a_pending_attempt() {
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
+
+        struct DropSignal(Arc<AtomicBool>);
+
+        impl Drop for DropSignal {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::Release);
+            }
+        }
+
+        let cancellation = super::ConnectCancellation::default();
+        let worker_cancellation = cancellation.clone();
+        let cancel_thread = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            worker_cancellation.cancel();
+        });
+        let dropped = Arc::new(AtomicBool::new(false));
+        let connect_dropped = Arc::clone(&dropped);
+        let pending_connect = async move {
+            let _drop_signal = DropSignal(connect_dropped);
+            std::future::pending::<std::io::Result<tokio::net::UnixStream>>().await
+        };
+        let started = std::time::Instant::now();
+        let result =
+            super::portal_runtime()
+                .unwrap()
+                .block_on(super::connect_stream_with_cancellation(
+                    pending_connect,
+                    &cancellation,
+                ));
+        cancel_thread.join().unwrap();
+
+        assert!(matches!(result, Err(LibeiError::Cancelled)));
+        assert!(
+            dropped.load(Ordering::Acquire),
+            "pending connect future survived cancellation"
+        );
         assert!(started.elapsed() < Duration::from_secs(1));
     }
 

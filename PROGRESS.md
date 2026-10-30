@@ -2,6 +2,18 @@
 
 Updated: 2026-10-30
 
+## Direct EIS in-flight cancellation regression
+
+- Factored the direct Unix-socket connection race into a generic future helper
+  used by the production path. Added a deterministic pending-future test that
+  cancels during connection, verifies the attempt future is dropped, and
+  enforces a one-second upper bound. This covers the in-flight case without
+  depending on nondeterministic Unix listen-backlog saturation.
+- `cargo test --locked -p wayexpand-backend-libei` passed all 43 tests;
+  focused connection tests and `cargo clippy --locked -p
+  wayexpand-backend-libei --all-targets -- -D warnings` passed. This tests the
+  cancellation race contract; it does not emulate a stalled live compositor.
+
 ## Current-source isolated KWin smoke report
 
 - Built the current checkout and ran `target/debug/wayexpand doctor
