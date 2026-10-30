@@ -2,6 +2,22 @@
 
 Updated: 2026-10-30
 
+## Current-source nightly fuzz run
+
+- Ran every target in `docs/FUZZING.md` for 60 seconds on clean source commit
+  `750d44f8c3fe`: `matcher` (48,172 executions), `config_parse` (836,481),
+  `broker_frame` (3,616,061), `espanso_import` (390,078), `pack_import`
+  (149,922), `app_filter` (538,411), `ibus_keys` (642,720), and
+  `engine_sequence` (46,249). All eight exited successfully with no crash or
+  sanitizer finding (6,268,094 executions total).
+- Fuzz builds refreshed `fuzz/Cargo.lock` to include
+  `wayexpand-process-supervisor`, now a transitive dependency of the core
+  library. Retained this reproducibility update. Cargo nightly also emitted
+  non-fatal redundant `homepage` metadata warnings.
+- The ignored `fuzz/corpus/` directories now contain locally generated
+  coverage corpus data; no crash artifacts were produced. The 60-second runs
+  do not replace the scheduled 20-minute fuzz jobs.
+
 ## Main-branch governance gap
 
 - GitHub returned `404 Branch not protected` for the public repository's
