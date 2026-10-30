@@ -48,11 +48,16 @@ Updated: 2026-10-29
   This does not satisfy physical-capture or production-certification gates.
 - Hardened command queue poison recovery: it checks the bounded-length
   invariant before clearing poison and refuses queue operations when that
-  invariant is broken. Regression tests cover valid recovery and fail-closed
-  behavior for an intentionally over-capacity poisoned queue.
+  invariant is broken. This state is reported as worker unavailability rather
+  than queue saturation. Regression tests cover valid recovery, ordinary
+  saturation, and fail-closed behavior for an intentionally over-capacity
+  poisoned queue.
 - `cargo test -p wayexpand-core engine::async_runtime::tests --locked`: all 3
-  queue tests passed; `cargo clippy -p wayexpand-core --all-targets --locked
-  -- -D warnings`: passed.
+  queue tests passed; after distinguishing saturation from unavailable-state
+  failures, all 4 queue tests passed. `RUST_TEST_THREADS=1 cargo test
+  -p wayexpand-core --locked -q`: 456 passed, 0 failed, 2 ignored, plus all
+  core integration/documentation tests; `cargo clippy -p wayexpand-core
+  --all-targets --locked -- -D warnings`: passed.
 - `cargo clippy --workspace --all-targets --locked -- -D warnings`: passed
   after the libei ownership change.
 - `RUST_TEST_THREADS=1 cargo test --workspace --locked -q`: passed after the

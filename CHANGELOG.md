@@ -14,7 +14,8 @@ All notable changes to WayExpand are documented here.
   explicitly partial and non-certifying.
 - Validate the command worker queue's capacity invariant before recovering a
   poisoned mutex. An over-capacity poisoned queue now refuses reads and writes
-  instead of dispatching jobs from inconsistent state.
+  instead of dispatching jobs from inconsistent state; diagnostics distinguish
+  this unavailable queue from ordinary backpressure.
 - Keep the libei event converter and session on the dedicated thread that
   creates them, replacing the manually asserted `Send` implementation with a
   bounded request/reply injector handle. Compile-time regression coverage

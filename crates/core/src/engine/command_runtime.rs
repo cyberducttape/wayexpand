@@ -60,6 +60,7 @@ impl CommandMetricsState {
 pub(super) enum QueueSendError {
     Full,
     Disconnected,
+    Unavailable,
 }
 
 /// Execute one configured command with bounded output, timeout enforcement,

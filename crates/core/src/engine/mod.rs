@@ -747,7 +747,9 @@ impl ExpansionEngine {
             self.restore_deferred_match(&matched_text);
             return Err(match error {
                 QueueSendError::Full => CommandError::QueueFull,
-                QueueSendError::Disconnected => CommandError::WorkerUnavailable,
+                QueueSendError::Disconnected | QueueSendError::Unavailable => {
+                    CommandError::WorkerUnavailable
+                }
             });
         }
         Ok(PendingExpansionDispatch::Queued)
@@ -811,7 +813,9 @@ impl ExpansionEngine {
             self.restore_deferred_match(&matched_text);
             return Err(match error {
                 QueueSendError::Full => CommandError::QueueFull,
-                QueueSendError::Disconnected => CommandError::WorkerUnavailable,
+                QueueSendError::Disconnected | QueueSendError::Unavailable => {
+                    CommandError::WorkerUnavailable
+                }
             });
         }
         self.form_active = true;
@@ -1091,7 +1095,9 @@ impl ExpansionEngine {
                 if let Err(error) = runtime.try_send_command(job) {
                     self.remember_command_failure(match error {
                         QueueSendError::Full => CommandErrorKind::QueueFull,
-                        QueueSendError::Disconnected => CommandErrorKind::WorkerUnavailable,
+                        QueueSendError::Disconnected | QueueSendError::Unavailable => {
+                            CommandErrorKind::WorkerUnavailable
+                        }
                     });
                     return None;
                 }

@@ -38,6 +38,12 @@ pub(super) struct CommandQueue<T> {
     capacity: usize,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum CommandQueueSendError<T> {
+    Full(T),
+    Unavailable(T),
+}
+
 impl<T> CommandQueue<T> {
     pub(super) fn new(capacity: usize) -> Self {
         Self {
@@ -47,12 +53,12 @@ impl<T> CommandQueue<T> {
         }
     }
 
-    fn try_send(&self, item: T) -> Result<(), T> {
+    fn try_send(&self, item: T) -> Result<(), CommandQueueSendError<T>> {
         let Some(mut items) = self.lock_items() else {
-            return Err(item);
+            return Err(CommandQueueSendError::Unavailable(item));
         };
         if items.len() >= self.capacity {
-            return Err(item);
+            return Err(CommandQueueSendError::Full(item));
         }
         items.push_back(item);
         self.wake.notify_one();
@@ -402,7 +408,7 @@ impl AsyncCommandRuntime {
             .fetch_add(1, Ordering::Relaxed);
         match self.command_sender.try_send(job) {
             Ok(()) => Ok(()),
-            Err(_) => {
+            Err(CommandQueueSendError::Full(_)) => {
                 self.expansion_metrics
                     .queue_depth
                     .fetch_sub(1, Ordering::Relaxed);
@@ -410,6 +416,15 @@ impl AsyncCommandRuntime {
                     .queue_rejected_total
                     .fetch_add(1, Ordering::Relaxed);
                 Err(super::QueueSendError::Full)
+            }
+            Err(CommandQueueSendError::Unavailable(_)) => {
+                self.expansion_metrics
+                    .queue_depth
+                    .fetch_sub(1, Ordering::Relaxed);
+                self.expansion_metrics
+                    .queue_rejected_total
+                    .fetch_add(1, Ordering::Relaxed);
+                Err(super::QueueSendError::Unavailable)
             }
         }
     }
@@ -488,7 +503,7 @@ pub(super) struct AsyncHotkeyCompletion {
 
 #[cfg(test)]
 mod tests {
-    use super::CommandQueue;
+    use super::{CommandQueue, CommandQueueSendError};
     use std::{sync::Arc, thread, time::Duration};
 
     #[test]
@@ -521,9 +536,19 @@ mod tests {
         .join()
         .is_err());
 
-        assert_eq!(queue.try_send(3), Err(3));
+        assert_eq!(
+            queue.try_send(3),
+            Err(CommandQueueSendError::Unavailable(3))
+        );
         assert_eq!(queue.recv_timeout(Duration::ZERO), None);
         assert!(queue.items.is_poisoned());
+    }
+
+    #[test]
+    fn command_queue_distinguishes_saturation_from_unavailable_state() {
+        let queue = CommandQueue::new(1);
+        assert_eq!(queue.try_send(1), Ok(()));
+        assert_eq!(queue.try_send(2), Err(CommandQueueSendError::Full(2)));
     }
 
     #[test]
