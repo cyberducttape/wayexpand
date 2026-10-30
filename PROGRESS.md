@@ -53,6 +53,13 @@ Updated: 2026-10-30
   available here, so actual Debian/RPM package-manager install/reinstall/remove
   tests on supported distribution images remain unverified. The active
   desktop installation was not changed.
+- Hardened the package smoke test guard: package install/reinstall/remove now
+  requires both its explicit disposable-test opt-in and a Docker/Podman
+  runtime marker. Added a host-side regression that mocks UID 0 and verifies
+  the opt-in alone is refused before package-manager commands. The guard test,
+  ShellCheck, shell syntax, and CI workflow actionlint all passed. GitHub's
+  documented container-job example checks for `/.dockerenv`, matching the
+  marker used by this workflow.
 
 ## Fast-path refactor verification
 

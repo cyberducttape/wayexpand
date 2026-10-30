@@ -2,9 +2,11 @@
 # Install a built WayExpand .deb or .rpm into a disposable system, check the
 # installed binaries, reinstall it, and remove it again.
 #
-# It installs and removes system packages, so it refuses to run unless
-# WAYEXPAND_PACKAGE_SMOKE_DISPOSABLE=1 says the system is a throwaway
-# container (CI's package-smoke job). It must run as root there.
+# It installs and removes system packages, so it requires both an explicit
+# WAYEXPAND_PACKAGE_SMOKE_DISPOSABLE=1 opt-in and a Docker/Podman container
+# marker. The marker prevents the opt-in alone from enabling package changes
+# on a host; it is a guard against mistakes, not a security boundary against
+# root. It must run as root inside the disposable CI container.
 set -eu
 
 package=${1:?usage: test-package-smoke.sh <wayexpand .deb or .rpm>}
@@ -12,6 +14,10 @@ expected_version=${2:-}
 
 if [ "${WAYEXPAND_PACKAGE_SMOKE_DISPOSABLE:-}" != 1 ]; then
     printf '%s\n' 'error: run only in a disposable container (set WAYEXPAND_PACKAGE_SMOKE_DISPOSABLE=1)' >&2
+    exit 2
+fi
+if [ ! -e /.dockerenv ] && [ ! -e /run/.containerenv ]; then
+    printf '%s\n' 'error: package smoke test requires a detected Docker or Podman container' >&2
     exit 2
 fi
 if [ "$(id -u)" -ne 0 ]; then
