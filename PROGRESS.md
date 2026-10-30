@@ -480,6 +480,27 @@ Updated: 2026-10-30
   final target-document integrity still require an attended desktop test; the
   P0 certification gate remains open.
 
+## Dependabot commit identity CI failure
+
+- Investigated failed CI run
+  [41029636518](https://github.com/cyberducttape/wayexpand/actions/runs/41029636518).
+  Its Rust tests, Clippy, aarch64 build, package smoke tests, and other jobs
+  passed; documentation validation failed because the commit identity checker
+  rejected Dependabot's standard author and GitHub committer identities.
+- Added an explicit `--allow-dependabot` checker mode for the exact observed
+  author/committer tuple. CI uses it only when the event is a pull request whose
+  GitHub-reported author is `dependabot[bot]`; pushes and other PRs remain under
+  the original strict owner identity policy. Expanded the isolated script test
+  to cover two accepted Dependabot commits, rejection without opt-in, rejection
+  of a spoofed bot email, owner identity, and missing refs.
+- Verification passed: `bash scripts/test-commit-identity.sh`, the identity
+  check on this commit, ShellCheck on both changed scripts, the Launchpad
+  workflow safety contract, formatting, and `git diff --check`. The updated CI
+  workflow also passed `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.11
+  .github/workflows/ci.yml`.
+- This fixes the observed CI policy failure. The correction has not been pushed
+  or rerun on GitHub Actions.
+
 ## Completed in this work period
 
 - Generalized `Matcher::try_new` to accept `IntoIterator<Item = S>` where

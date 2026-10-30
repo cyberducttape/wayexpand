@@ -365,6 +365,8 @@ jobs:
             exit 1
           fi
       - name: Verify commit identity policy
+        env:
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
           if [ "$GITHUB_EVENT_NAME" = push ]; then
             base='${{ github.event.before }}'
@@ -376,7 +378,12 @@ jobs:
           if [ -n "$base" ] \
             && [ "$base" != 0000000000000000000000000000000000000000 ] \
             && git cat-file -e "$base^{commit}" 2>/dev/null; then
-            bash scripts/check-commit-identity.sh "$base..HEAD"
+            if [ "$GITHUB_EVENT_NAME" = pull_request ] \
+              && [ "${PR_AUTHOR:-}" = 'dependabot[bot]' ]; then
+              bash scripts/check-commit-identity.sh --allow-dependabot "$base..HEAD"
+            else
+              bash scripts/check-commit-identity.sh "$base..HEAD"
+            fi
           else
             # Dispatched and scheduled runs (releases, experimental builds)
             # have no push range. History predates this policy and includes
