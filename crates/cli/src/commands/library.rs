@@ -176,7 +176,7 @@ fn add_repository_at(
         .to_str()
         .ok_or_else(|| config_error("library path is not UTF-8"))?;
     clone.push(stage_text);
-    let output = sync::git_library_output(&root, &clone)?;
+    let output = sync::git_library_output(root, &clone)?;
     if !output.status.success() {
         bail!(
             "could not clone library source: {}",
@@ -214,7 +214,7 @@ fn add_repository_at(
     fs::rename(&stage, &target)
         .map_err(|error| config_error(format!("could not activate library source: {error}")))?;
     drop(cleanup);
-    sync_directory(&root)?;
+    sync_directory(root)?;
     Ok((target, revision, selected_branch, pack_count))
 }
 

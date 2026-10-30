@@ -20,6 +20,9 @@ Updated: 2026-10-29
   no open issues.
 - Created `DEVELOPMENT_PLAN.md` with ordered P0/P1/P2 milestones and objective
   acceptance evidence.
+- Completed the full locked workspace test run. Fixed two workspace Clippy
+  errors in the offline library checkout path by removing redundant borrows;
+  the affected CLI suite passed again after that correction.
 
 ## Verification evidence
 
@@ -29,6 +32,15 @@ Updated: 2026-10-29
   0 failed. This includes the new event-order regression.
 - `cargo clippy -p wayexpand-daemon --all-targets --locked -- -D warnings`:
   passed.
+- `RUST_TEST_THREADS=1 cargo test --workspace --locked`: passed with exit code
+  0. All executed unit, integration, and documentation tests passed; two
+  environment-dependent compositor/systemd tests and two manual display tests
+  were ignored.
+- `RUST_TEST_THREADS=1 cargo test -p wayexpand --locked` after the Clippy fix:
+  128 passed, 0 failed.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`: passed
+  after removing needless borrows in `crates/cli/src/commands/library.rs`.
+- `cargo fmt --all -- --check`: passed after the CLI cleanup.
 - `scripts/check-production-certification.sh true tests/certification/compositor-matrix.json`:
   failed closed as expected because there are zero production-required routes.
   The compatibility-mode invocation passed and explicitly remained
@@ -41,8 +53,8 @@ Updated: 2026-10-29
 - `wayexpand explain .ty --json`: enabled and predicted to expand.
 - `wayexpand explain .test --json`: no snippet uses that trigger in the
   active configuration.
-- The full workspace test suite was not completed in the earlier interrupted
-  run. No claim is made that all workspace suites pass in this work period.
+- This automated evidence does not satisfy the real-desktop certification or
+  long-soak acceptance criteria below.
 
 ## Open release blockers
 
@@ -64,5 +76,8 @@ Updated: 2026-10-29
    until it passes or automatic replacement is refused before erasure.
 2. Establish one protocol-capable, production-eligible compositor route and
    obtain its required runner and reviewed evidence.
-3. Run the full locked workspace test and Clippy lanes, then distribution
-   upgrade tests after the desktop release gate is unblocked.
+3. Obtain attended real-session evidence for one release-target compositor;
+   automated workspace checks cannot establish physical capture and target
+   text integrity.
+4. Run the 72-hour desktop soak and published-package upgrade/rollback
+   rehearsal after the real-session replacement gate passes.
