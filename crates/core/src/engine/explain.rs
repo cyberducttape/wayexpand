@@ -262,7 +262,12 @@ impl ExpansionEngine {
                 if variables.iter().any(|name| name.starts_with("snippet:")) {
                     explanation.push("variables", CheckStatus::Info, "includes other snippets");
                 }
-                if let Some(fields) = self.form_fields.get(index).and_then(Option::as_ref) {
+                if let Some(fields) = self
+                    .validated
+                    .form_fields
+                    .get(index)
+                    .and_then(Option::as_ref)
+                {
                     let labels: Vec<&str> =
                         fields.iter().map(|field| field.label.as_str()).collect();
                     let exact_target_identity = self
@@ -350,7 +355,7 @@ impl ExpansionEngine {
         };
         let app = window.app_id.as_deref().unwrap_or("(unknown app ID)");
         let title_disabled = self.runtime_policy.disable_title_matching
-            && self.app_filters[index]
+            && self.validated.app_filters[index]
                 .iter()
                 .any(|filter| matches!(filter, AppFilter::TitleContains(_)));
         if self.app_filter_allows(index, expansion) {
@@ -417,7 +422,13 @@ impl ExpansionEngine {
         else {
             return;
         };
-        if expansion.command.is_some() || self.form_fields.get(index).is_some_and(Option::is_some) {
+        if expansion.command.is_some()
+            || self
+                .validated
+                .form_fields
+                .get(index)
+                .is_some_and(Option::is_some)
+        {
             return;
         }
         let Ok((rendered, cursor_offset)) = self.render_replacement(index) else {

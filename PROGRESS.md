@@ -2,6 +2,26 @@
 
 Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-31 UTC)
 
+## Validated configuration snapshot reuse: 2026-10-31
+
+- `ExpansionEngine` now reads parsed app filters, form fields, hotkeys, undo
+  chord, and effective-trigger indexes directly from its retained immutable
+  `ValidatedConfig`. It no longer deep-clones these metadata collections into
+  engine-local copies during construction. Added/updated coverage verifies the
+  engine uses the validated filters, chords, form definitions, and trigger
+  metadata.
+- `cargo test --locked -p wayexpand-core`: 469 passed, 0 failed, 2 ignored;
+  core Clippy with warnings denied passed. Full serial workspace tests passed
+  across all test binaries (only tests marked ignored remained ignored), and
+  workspace Clippy with warnings denied, formatting, and `git diff --check`
+  passed.
+- A same-host Criterion comparison for amplified 10,000-snippet engine
+  construction measured 455 ms before and 505 ms after, with overlapping
+  intervals and no statistically detected change (`p = 0.09`). This supports
+  no latency claim; the intended benefit is lower duplicated engine metadata
+  and a single authoritative immutable source. Real desktop certification
+  remains open.
+
 ## Hotplug during replacement certification coverage
 
 - Added a distinct `keyboard-hotplug-during-nonatomic-replacement` required

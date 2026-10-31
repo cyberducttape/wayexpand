@@ -78,14 +78,9 @@ pub struct ExpansionEngine {
     /// Runtime-only restrictions supplied by the host (for example command
     /// worker availability) are kept outside the immutable source snapshot.
     runtime_policy: crate::OrganizationPolicy,
-    /// Case-folded app filters are immutable for the lifetime of an engine;
-    /// avoid allocating them on every candidate match.
-    app_filters: Vec<Vec<AppFilter>>,
-    form_fields: Vec<Option<Arc<Vec<crate::FormField>>>>,
     /// Compiled app-id globs corresponding positionally to `app_filters`.
     app_filter_globs: Vec<Vec<Option<GlobPattern>>>,
     matcher: Matcher,
-    matcher_indices: Vec<usize>,
     /// Reused temporary storage for NFC normalization and raw-offset mapping
     /// of decomposed input suffixes.
     match_scratch: MatchScratch,
@@ -116,10 +111,8 @@ pub struct ExpansionEngine {
     /// broker actions use their own IPC boundary and are not blocked by this.
     direct_commands_disabled: bool,
     command_cache: Vec<Option<CommandCacheEntry>>,
-    hotkeys: Vec<(KeyChord, usize)>,
     current_window: Option<WindowContext>,
     normalized_window: Option<NormalizedWindowContext>,
-    undo_chord: Option<KeyChord>,
     /// The most recent successful expansion, kept only until the very next
     /// event of any other kind (see `process`): `(text to type back,
     /// exact text to erase)`. Not set for a result with a `{{cursor}}`
@@ -218,11 +211,6 @@ impl ExpansionEngine {
         // replacement. Validation builds these from `effective_triggers()`
         // and rejects collisions across exactly these variants, so its
         // result is reused here instead of being recomputed.
-        let matcher_indices = validated
-            .effective_triggers
-            .iter()
-            .map(|(index, _)| *index)
-            .collect();
         let (clipboard, others): (Vec<_>, Vec<_>) =
             validated.effective_triggers.iter().partition(|(index, _)| {
                 let expansion = &config.expansion[*index];
@@ -251,9 +239,8 @@ impl ExpansionEngine {
                 .map(|(_, trigger)| trigger.as_str()),
         )
         .expect("validated effective-trigger limit fits matcher indices");
-        let app_filters = validated.app_filters.clone();
-        let form_fields = validated.form_fields.clone();
-        let app_filter_globs = app_filters
+        let app_filter_globs = validated
+            .app_filters
             .iter()
             .map(|filters| {
                 filters
@@ -269,17 +256,12 @@ impl ExpansionEngine {
             config.template_context_with_snippets(None, Arc::clone(&validated.snippets));
         let max_buffer_chars = config.settings.max_buffer_chars;
         let command_cache = vec![None; config.expansion.len()];
-        let undo_chord = validated.undo_chord.clone();
-        let hotkeys = validated.hotkeys.clone();
         Self {
             config,
             validated: Arc::clone(&validated),
             runtime_policy: validated.resolved_policy.clone(),
-            app_filters,
-            form_fields,
             app_filter_globs,
             matcher,
-            matcher_indices,
             match_scratch: MatchScratch::default(),
             buffer: VecDeque::new(),
             buffered_bytes: 0,
@@ -291,10 +273,8 @@ impl ExpansionEngine {
             composition_active: false,
             direct_commands_disabled: false,
             command_cache,
-            hotkeys,
             current_window: None,
             normalized_window: None,
-            undo_chord,
             last_expansion: None,
             deferred_matches: Vec::new(),
             restored_reservation_chars: 0,

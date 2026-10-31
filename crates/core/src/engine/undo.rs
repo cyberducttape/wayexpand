@@ -9,7 +9,7 @@ impl ExpansionEngine {
     /// consuming its undo record. Call [`Self::commit_undo`] only after the
     /// result has been injected successfully.
     pub fn prepare_undo(&self, chord: &KeyChord) -> Option<ExpansionResult> {
-        if !self.is_capture_enabled() || !self.undo_chord.as_ref()?.matches(chord) {
+        if !self.is_capture_enabled() || !self.validated.undo_chord.as_ref()?.matches(chord) {
             return None;
         }
         let (restore_text, erase_text) = self.last_expansion.as_ref()?;

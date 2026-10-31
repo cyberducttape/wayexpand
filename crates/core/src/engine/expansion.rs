@@ -399,7 +399,11 @@ impl ExpansionEngine {
         let suffix = self
             .find_match_suffix()
             .filter(|suffix| !self.suffix_is_restored_reservation(suffix.raw_length))?;
-        let config_index = self.matcher_indices.get(suffix.index).copied()?;
+        let config_index = self
+            .validated
+            .effective_triggers
+            .get(suffix.index)
+            .map(|(index, _)| *index)?;
         // The configured trigger is the lowercase form. With propagate_case
         // the pending suffix may instead be `:A` or `:AB`, so continuation is
         // checked against the text the user actually typed -- that is the
@@ -447,7 +451,12 @@ impl ExpansionEngine {
         let Some(suffix) = self.find_match_suffix() else {
             return SettledMatch::Continue;
         };
-        let Some(config_index) = self.matcher_indices.get(suffix.index).copied() else {
+        let Some(config_index) = self
+            .validated
+            .effective_triggers
+            .get(suffix.index)
+            .map(|(index, _)| *index)
+        else {
             return SettledMatch::Stale;
         };
         let has_continuation = if suffix.uses_normalized_scratch {
@@ -637,14 +646,18 @@ impl ExpansionEngine {
             }
             InputEvent::EndOfInput => {
                 self.bump_generation();
-                let result =
-                    self.find_match_suffix()
-                        .filter(|suffix| !self.suffix_is_restored_reservation(suffix.raw_length))
-                        .and_then(|suffix| {
-                            self.matcher_indices.get(suffix.index).copied().and_then(
-                                |config_index| P::take(self, config_index, suffix.raw_length, None),
-                            )
-                        });
+                let result = self
+                    .find_match_suffix()
+                    .filter(|suffix| !self.suffix_is_restored_reservation(suffix.raw_length))
+                    .and_then(|suffix| {
+                        self.validated
+                            .effective_triggers
+                            .get(suffix.index)
+                            .map(|(index, _)| *index)
+                            .and_then(|config_index| {
+                                P::take(self, config_index, suffix.raw_length, None)
+                            })
+                    });
                 self.clear_buffer();
                 if let Some(output) = result {
                     results.push(P::finish_end_of_input(self, output));

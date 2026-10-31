@@ -55,15 +55,15 @@ fn engine_uses_the_parsed_filters_and_chords_from_validation() {
     let engine = ExpansionEngine::new(config).unwrap();
 
     assert_eq!(
-        engine.app_filters[0],
+        engine.validated.app_filters[0],
         [
             AppFilter::AppIdExact("org.example.editor".into()),
             AppFilter::AppIdGlob("*writer*".into()),
         ]
     );
-    assert_eq!(engine.undo_chord, KeyChord::parse("Ctrl+Z").ok());
+    assert_eq!(engine.validated.undo_chord, KeyChord::parse("Ctrl+Z").ok());
     assert_eq!(
-        engine.hotkeys,
+        engine.validated.hotkeys,
         [(KeyChord::parse("Ctrl+Alt+M").unwrap(), 0)]
     );
 }
@@ -5908,7 +5908,7 @@ action = "pod-list"
 fn matched_forms_reuse_the_validated_field_definitions() {
     let mut engine = ExpansionEngine::new(Config::parse(FORM_CONFIG).unwrap()).unwrap();
     let validated_template = Arc::clone(&engine.validated.compiled_expansions[0].replacement);
-    let validated_fields = engine.form_fields[0]
+    let validated_fields = engine.validated.form_fields[0]
         .as_ref()
         .expect("the validated snippet contains form fields")
         .clone();

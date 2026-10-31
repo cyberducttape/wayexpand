@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Reuse the immutable validated configuration snapshot for engine filters,
+  forms, hotkeys, undo settings, and trigger indexes instead of keeping
+  duplicate metadata copies in each engine.
 - Check `/dev/input` topology notifications before translating each retained
   evdev batch slice, so keyboard hotplug cannot wait behind a raw-event backlog
   while non-atomic replacement output continues. Add a dedicated required

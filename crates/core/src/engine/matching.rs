@@ -269,7 +269,12 @@ impl ExpansionEngine {
         }
         let expansion = &self.config.expansion[config_index];
         let compiled = &self.validated.compiled_expansions[config_index];
-        let form = self.form_fields.get(config_index).cloned().flatten();
+        let form = self
+            .validated
+            .form_fields
+            .get(config_index)
+            .cloned()
+            .flatten();
         let form_template = (form.is_some() && expansion.command.is_none())
             .then(|| Arc::clone(&compiled.replacement));
         let (replacement_text, cursor_offset) = if expansion.command.is_some() || form.is_some() {
@@ -332,7 +337,7 @@ impl ExpansionEngine {
         let Some(window) = &self.normalized_window else {
             return false;
         };
-        self.app_filters[config_index]
+        self.validated.app_filters[config_index]
             .iter()
             .enumerate()
             .any(|(filter_index, filter)| match filter {

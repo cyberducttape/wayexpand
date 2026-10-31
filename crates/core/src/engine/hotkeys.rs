@@ -43,7 +43,8 @@ impl ExpansionEngine {
         if !self.is_capture_enabled() {
             return Vec::new();
         }
-        self.hotkeys
+        self.validated
+            .hotkeys
             .iter()
             .filter(|(configured, _)| configured.matches(chord))
             .filter_map(|(_, index)| {
