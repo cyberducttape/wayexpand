@@ -161,11 +161,16 @@ keep the configuration ownership and mode protections enabled.
 
 WayExpand starts direct commands in a separate process group and kills that
 group after completion or timeout as best-effort cleanup for ordinary
-descendants. This is not a containment boundary. A deliberately written,
-trusted command can fork, call `setsid()`, detach from the process group, and
-outlive WayExpand's direct-command cleanup. The direct model is therefore for
-local trusted helpers only; service/cgroup-level containment belongs in the
- separate Action Broker service.
+descendants. The supervisor observes child exit without reaping the group
+leader first, then signals the group before reaping it; it also reports
+non-`ESRCH` cleanup failures. This is not a containment boundary. A deliberately
+written command can fork, call `setsid()`, detach from the process group, and
+outlive that command's timeout. The Action Broker applies its own per-action
+process-group deadline, but its systemd service cgroup only provides a final
+cleanup boundary when the broker service stops; WayExpand does not currently
+place each action in a separate cgroup. Treat command definitions as trusted
+local executable content, and do not use process-group cleanup as isolation
+for hostile commands.
 
 **Command-backed expansions and systemd sandbox:** Commands run under the
 daemon's systemd-enforced sandbox (see `systemd/wayexpand.service` for details).

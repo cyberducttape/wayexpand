@@ -614,7 +614,9 @@ locally (advanced)** and applies no sandbox.
 - **Matcher:** Scales linearly with snippet count (trie-based, bounded at 10,000 snippets)
 - **Reload:** Parses and validates full config before swap (safe but may stall on very large configs)
 - **Commands:** Bounded to 5-second timeout and 1 MiB output for trusted
-  helpers; direct commands are not a service/cgroup containment boundary
+  helpers; process groups do not contain descendants that call `setsid()`, and
+  the broker service cgroup cleans up only when that service stops, not at each
+  action timeout
 - **Network:** No dependencies, all local
 
 ### Monitoring

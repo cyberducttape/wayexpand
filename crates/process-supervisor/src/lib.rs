@@ -223,7 +223,7 @@ fn open_pidfd(pid: u32) -> Option<OwnedFd> {
 mod tests {
     use super::*;
     use std::{
-        io::BufRead,
+        io::{BufRead, Read},
         process::{Command, Stdio},
         sync::Mutex,
         thread,
@@ -257,6 +257,14 @@ mod tests {
         assert_eq!(kill_failures_total(), before + 2);
     }
 
+    #[test]
+    fn permission_failure_is_counted_without_claiming_cleanup_succeeded() {
+        let _guard = KILL_FAILURE_COUNTER_TEST_LOCK.lock().unwrap();
+        let before = kill_failures_total();
+        record_kill_failure(42, &io::Error::from_raw_os_error(libc::EPERM));
+        assert_eq!(kill_failures_total(), before + 1);
+    }
+
     fn wait_until_exited(supervisor: &mut ChildSupervisor) {
         for _ in 0..1000 {
             if supervisor
@@ -287,6 +295,25 @@ mod tests {
         supervisor.kill_group();
         let status = supervisor.reap().expect("reap after group cleanup");
         assert!(status.success());
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn exited_child_before_supervisor_initialization_is_still_observable_and_reaped() {
+        let mut command = Command::new("true");
+        configure_process_group(&mut command);
+        let child = command.spawn().expect("spawn short-lived child");
+        let pid = child.id();
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        while !process_is_gone_or_zombie(pid) && std::time::Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(1));
+        }
+
+        let mut supervisor = ChildSupervisor::new(child);
+        assert!(supervisor
+            .has_exited()
+            .expect("observe child that exited before supervisor setup"));
+        assert!(supervisor.reap().expect("reap observed child").success());
     }
 
     #[test]
@@ -359,5 +386,105 @@ mod tests {
         let before = kill_failures_total();
         supervisor.kill_group();
         assert_eq!(kill_failures_total(), before);
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn reap_kills_descendants_that_ignore_sigterm() {
+        let mut command = Command::new("sh");
+        command
+            .args([
+                "-c",
+                "sh -c 'trap \"\" TERM; echo $$; exec sleep 30' & wait",
+            ])
+            .stdout(Stdio::piped());
+        configure_process_group(&mut command);
+        let child = command.spawn().expect("spawn test child");
+        let mut supervisor = ChildSupervisor::new(child);
+        let mut stdout =
+            std::io::BufReader::new(supervisor.take_stdout().expect("capture child PID"));
+        let mut child_pid = String::new();
+        stdout.read_line(&mut child_pid).expect("read child PID");
+        let child_pid = child_pid.trim().parse::<u32>().expect("valid child PID");
+
+        // The descendant has installed its ignored disposition before it
+        // prints its PID. Prove SIGTERM alone will not stop it.
+        assert_eq!(
+            unsafe { libc::kill(child_pid as libc::pid_t, libc::SIGTERM) },
+            0
+        );
+        thread::sleep(Duration::from_millis(20));
+        assert!(!process_is_gone_or_zombie(child_pid));
+
+        let status = supervisor.reap().expect("kill and reap process group");
+        assert!(!status.success());
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        while !process_is_gone_or_zombie(child_pid) && std::time::Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(process_is_gone_or_zombie(child_pid));
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn group_cleanup_closes_pipes_inherited_by_descendants() {
+        let mut command = Command::new("sh");
+        command
+            .args(["-c", "sleep 30 & echo ready; wait"])
+            .stdout(Stdio::piped());
+        configure_process_group(&mut command);
+        let child = command.spawn().expect("spawn test child");
+        let mut supervisor = ChildSupervisor::new(child);
+        let mut stdout =
+            std::io::BufReader::new(supervisor.take_stdout().expect("capture child stdout"));
+        let mut ready = String::new();
+        stdout
+            .read_line(&mut ready)
+            .expect("wait for descendant startup");
+        assert_eq!(ready.trim(), "ready");
+
+        let _ = supervisor.reap().expect("kill and reap process group");
+        let mut remaining = String::new();
+        stdout
+            .read_to_string(&mut remaining)
+            .expect("drain pipe after group cleanup");
+        assert!(remaining.is_empty(), "descendant kept stdout open");
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn process_group_cleanup_does_not_claim_to_contain_new_sessions() {
+        let mut command = Command::new("sh");
+        command
+            .args(["-c", "setsid sh -c 'echo $$; exec sleep 30' & wait"])
+            .stdout(Stdio::piped());
+        configure_process_group(&mut command);
+        let child = command.spawn().expect("spawn test child");
+        let mut supervisor = ChildSupervisor::new(child);
+        let mut stdout =
+            std::io::BufReader::new(supervisor.take_stdout().expect("capture escaped PID"));
+        let mut escaped_pid = String::new();
+        stdout
+            .read_line(&mut escaped_pid)
+            .expect("read escaped PID");
+        let escaped_pid = escaped_pid.trim().parse::<u32>().expect("valid PID");
+
+        let _ = supervisor.reap().expect("clean original process group");
+        assert!(
+            !process_is_gone_or_zombie(escaped_pid),
+            "new-session process unexpectedly appeared contained by the original group"
+        );
+
+        // Escaping the group is a documented limitation. Clean up this test
+        // process explicitly so the regression test never leaks a child.
+        assert_eq!(
+            unsafe { libc::kill(escaped_pid as libc::pid_t, libc::SIGKILL) },
+            0
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        while !process_is_gone_or_zombie(escaped_pid) && std::time::Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(process_is_gone_or_zombie(escaped_pid));
     }
 }

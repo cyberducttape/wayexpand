@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Added process-supervisor regression coverage for child exit before supervisor
+  setup, descendants ignoring SIGTERM, inherited output pipes, and the known
+  `setsid()` escape from process-group cleanup. Documented that broker service
+  cgroups clean up escaped processes on service stop but do not provide a
+  per-action cgroup boundary.
+
 - Make aggregate and per-route output latency recording nonblocking, matching
   the matcher recorder. Status readers also use nonblocking snapshots with
   last-known caches, so a metrics lock cannot stall the reactor. Expose skipped

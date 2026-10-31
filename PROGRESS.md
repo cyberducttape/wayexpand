@@ -2,6 +2,23 @@
 
 Updated: 2026-10-30
 
+## Process supervisor lifecycle audit: 2026-10-30
+
+- Added Linux regression tests for an already-exited child at supervisor
+  initialization, group cleanup of a descendant that ignores SIGTERM, and
+  inherited stdout closure after group cleanup. Added a controlled test proving
+  that `setsid()` descendants escape process-group cleanup, then kills the
+  escaped test process explicitly to avoid leaking it.
+- Exercised and verified the EPERM cleanup-failure accounting path. This is a
+  deterministic classification test, not a privileged cross-UID `kill(2)` test.
+- Clarified the operational boundary: the broker's service cgroup is a final
+  cleanup boundary on service stop, not a per-action cgroup for action timeout.
+- `cargo test --locked -p wayexpand-process-supervisor -- --test-threads=1`:
+  10 tests passed. Afterward, `RUST_TEST_THREADS=1 cargo test --workspace
+  --locked --quiet`, workspace Clippy with `-D warnings`, formatting,
+  documentation links (54 files, 483 local links), documentation contracts,
+  and `git diff --check` all passed.
+
 ## Dependency updates, CI identity gate, and documentation sprint
 
 - Main CI failed at `Documentation Validation` after Dependabot PRs #31, #34
