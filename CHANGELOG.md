@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Zeroize captured command stdout on timeout, cancellation, output-limit,
+  incomplete-output, process-I/O, nonzero-exit, and invalid-UTF-8 failures.
+  The bounded stdout read buffer is now wiped on every exit, and trailing
+  line endings are overwritten before the successful output allocation is
+  transferred to its caller.
 - Allow up to four independent Action Broker polkit authorizations instead of
   holding a global lock while a user prompt is open. Limit each PID/start-time
   peer to one pending prompt, cap prompts at 30 seconds, and apply an

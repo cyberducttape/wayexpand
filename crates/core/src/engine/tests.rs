@@ -3572,7 +3572,10 @@ fn cancelling_a_running_command_returns_without_waiting_for_timeout() {
     let command = CommandConfig {
         action: None,
         program: "/bin/sh".to_string(),
-        args: vec!["-c".to_string(), "sleep 60".to_string()],
+        args: vec![
+            "-c".to_string(),
+            "printf 'synthetic-cancel-secret'; sleep 60".to_string(),
+        ],
         timeout_ms: 60_000,
         cache_ms: 0,
         environment: CommandEnvironment::Minimal,
@@ -3600,8 +3603,11 @@ fn continuously_readable_stdout_still_observes_the_command_deadline() {
     let command = CommandConfig {
         action: None,
         program: "/bin/sh".to_string(),
-        args: vec!["-c".to_string(), "yes x".to_string()],
-        timeout_ms: 1,
+        args: vec![
+            "-c".to_string(),
+            "printf 'synthetic-timeout-secret'; while :; do printf x; sleep 0.01; done".to_string(),
+        ],
+        timeout_ms: 50,
         cache_ms: 0,
         environment: CommandEnvironment::Minimal,
         pass_env: vec![],
@@ -3731,7 +3737,7 @@ fn child_process_is_cleaned_up_when_output_exceeds_limit() {
     let pid_file = temp_dir.join(format!("child-cleanup-test-{}.pid", std::process::id()));
 
     let shell_command = format!(
-        r#"{{ echo "pid: $$" > '{}'; head -c 1048577 /dev/zero | tr '\0' x; sleep 60; }}"#,
+        r#"{{ echo "pid: $$" > '{}'; printf 'synthetic-oversize-secret'; head -c 1048577 /dev/zero | tr '\0' x; sleep 60; }}"#,
         pid_file.display()
     );
 

@@ -25,7 +25,7 @@ use super::{
     CommandEnvironment, CommandError, ProcessWaitFailure, ProcessWaitOperation,
     MAX_COMMAND_OUTPUT_BYTES, MINIMAL_COMMAND_PATH,
 };
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 /// Atomic counters shared by the expansion and hotkey workers. Keeping this
 /// state with the runtime module makes queue accounting independent of the
@@ -279,7 +279,9 @@ pub(super) fn run_command_unix(
     set_nonblocking_stdout(&stdout)?;
     set_nonblocking_stderr(&stderr)?;
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-    let mut bytes = Vec::new();
+    // Command output may contain secrets even when the command ultimately
+    // fails. Zeroizing owns every accumulated byte across all early returns.
+    let mut bytes = Zeroizing::new(Vec::new());
     let mut stdout_eof = false;
     let mut stderr_eof = false;
 
@@ -352,18 +354,33 @@ pub(super) fn run_command_unix(
     if !stdout_eof {
         return Err(CommandError::IncompleteOutput);
     }
-    let output = String::from_utf8(bytes).map_err(|_| CommandError::InvalidUtf8)?;
-    Ok(trim_trailing_newlines(output))
+    command_output_text(bytes)
 }
 
-/// Drops trailing CR/LF in place. Command output is bounded at one megabyte,
-/// and copying all of it into a second allocation to remove a trailing newline
-/// is the kind of waste that only shows up under a command run on every
-/// expansion.
-fn trim_trailing_newlines(mut output: String) -> String {
-    let trimmed = output.trim_end_matches(['\r', '\n']).len();
-    output.truncate(trimmed);
-    output
+/// Trims line endings while the bytes are still in their zeroizing owner,
+/// validates UTF-8 without consuming that owner, then transfers the same
+/// allocation into the successful result. Error paths retain RAII wiping.
+fn command_output_text(mut bytes: Zeroizing<Vec<u8>>) -> Result<String, CommandError> {
+    while matches!(bytes.last(), Some(b'\r' | b'\n')) {
+        let last = bytes.len() - 1;
+        bytes[last].zeroize();
+        bytes.truncate(last);
+    }
+    if std::str::from_utf8(&bytes).is_err() {
+        return Err(CommandError::InvalidUtf8);
+    }
+
+    let bytes = std::mem::take(&mut *bytes);
+    match String::from_utf8(bytes) {
+        Ok(output) => Ok(output),
+        Err(error) => {
+            // The preceding validation makes this unreachable absent a
+            // programming error, but keep even this defensive path private.
+            let mut invalid = Zeroizing::new(error.into_bytes());
+            invalid.zeroize();
+            Err(CommandError::InvalidUtf8)
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -471,11 +488,13 @@ fn poll_fds(
 #[cfg(unix)]
 fn read_available_stdout(
     stdout: &mut ChildStdout,
-    bytes: &mut Vec<u8>,
+    bytes: &mut Zeroizing<Vec<u8>>,
     deadline: Option<Instant>,
     shutdown: Option<&AtomicBool>,
 ) -> Result<bool, CommandError> {
-    let mut buffer = [0_u8; 8192];
+    // The stack buffer can temporarily contain the same sensitive output as
+    // the accumulator, so wipe it on every return path as well.
+    let mut buffer = Zeroizing::new([0_u8; 8192]);
     for _ in 0..STDOUT_READS_PER_DRAIN {
         if shutdown.is_some_and(|flag| flag.load(Ordering::Acquire)) {
             return Err(CommandError::StaleInput);
@@ -483,7 +502,7 @@ fn read_available_stdout(
         if deadline.is_some_and(|limit| Instant::now() >= limit) {
             return Err(CommandError::Timeout);
         }
-        match stdout.read(&mut buffer) {
+        match stdout.read(&mut buffer[..]) {
             Ok(0) => return Ok(true),
             Ok(count) => {
                 bytes.extend_from_slice(&buffer[..count]);
@@ -893,6 +912,21 @@ mod tests {
         assert_eq!(error, CommandError::NonZeroExit { code: Some(23) });
         assert!(!error.to_string().contains("synthetic-secret-from-stderr"));
         assert!(!format!("{error:?}").contains("synthetic-secret-from-stderr"));
+    }
+
+    #[test]
+    fn command_output_rejects_invalid_utf8_without_exposing_payload() {
+        let bytes = Zeroizing::new(b"synthetic-command-secret\xff".to_vec());
+        let error = command_output_text(bytes).unwrap_err();
+        assert_eq!(error, CommandError::InvalidUtf8);
+        assert!(!error.to_string().contains("synthetic-command-secret"));
+        assert!(!format!("{error:?}").contains("synthetic-command-secret"));
+    }
+
+    #[test]
+    fn command_output_trims_newlines_before_transferring_the_buffer() {
+        let bytes = Zeroizing::new(b"sensitive output\r\n".to_vec());
+        assert_eq!(command_output_text(bytes).unwrap(), "sensitive output");
     }
 
     #[test]

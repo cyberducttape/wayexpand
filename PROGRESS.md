@@ -2,6 +2,22 @@
 
 Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-31 UTC)
 
+## Command stdout secret cleanup: 2026-10-31
+
+- Captured stdout now stays in `Zeroizing<Vec<u8>>` through process completion.
+  Every early-return path, including cancellation, timeout, output overflow,
+  nonzero exit, incomplete output, and invalid UTF-8, wipes retained bytes.
+- The per-read 8 KiB stdout stack buffer is zeroized on every return. Trailing
+  CR/LF bytes are overwritten before trimming; successful UTF-8 conversion
+  transfers the same allocation to the caller without an extra copy.
+- Added invalid-UTF-8 and newline handling tests, and extended the existing
+  cancellation, deadline, and output-overflow subprocess tests with sentinel
+  output to exercise those failure paths.
+- Verification: focused invalid-output, cancellation, timeout, and overflow
+  tests passed. The full core suite passed (487 unit tests, 2 ignored; 2
+  documentation-config integration tests; 1 snapshot-consistency test), and
+  Clippy with warnings denied, formatting, and `git diff --check` passed.
+
 ## Action Broker polkit prompt admission: 2026-10-31
 
 - Replaced the global authorization mutex with a bounded gate: up to four
