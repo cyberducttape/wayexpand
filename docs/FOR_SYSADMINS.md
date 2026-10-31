@@ -21,6 +21,11 @@ result](https://launchpad.net/~cyberducttape/+archive/ubuntu/ppa/+build/33875568
 That build is not desktop certification and is not a managed-fleet release.
 Check the PPA for current publication state before installing.
 
+Launchpad's later attempt (`33891053`) failed on an older source snapshot that
+selected egui/eframe 0.37, requiring Rust 1.95 on a Rust 1.93.1 builder. The
+current vendored source branch now uses egui/eframe 0.35 and passes the local
+Rust 1.92 package build; a new remote Launchpad result is still pending.
+
 For local evaluation, users can build from source with Rust 1.92+:
 
 ```bash

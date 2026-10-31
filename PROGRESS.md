@@ -2,6 +2,24 @@
 
 Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-31 UTC)
 
+## Launchpad Rust-version build failure: 2026-10-31
+
+- Investigated Launchpad build `33891053` from its full build log. It failed
+  because the build used egui/eframe 0.37, which requires Rust 1.95, while the
+  Resolute builder provided rustc 1.93.1. The error was not caused by the
+  current transient-text changes.
+- The repository already had the fix in commit `9c75e568`: pin the GUI and
+  lockfile to egui/eframe 0.35 and run explicit Rust 1.92 MSRV CI. The current
+  Launchpad `launchpad-vendored` branch now embeds source revision `3de0954a`
+  and its lockfile contains egui/eframe 0.35. This confirms the failed job
+  built an older source snapshot.
+- Verification on the current source: `bash
+  scripts/test-launchpad-sync-workflow.sh` passed;
+  `cargo +1.92.0 check --workspace --locked` passed; and the exact release
+  package build command from `debian/rules` passed for all seven selected
+  packages. No new Launchpad build was requested, so the next remote package
+  result remains unverified.
+
 ## Transient expansion transaction text: 2026-10-31
 
 - Added `SensitiveText`, backed by `Zeroizing<String>`, with independent

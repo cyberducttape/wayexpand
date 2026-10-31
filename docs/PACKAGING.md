@@ -23,6 +23,14 @@ reported build `1.3.3-0~202610270213~ubuntu26.04.1` as successfully built on
 This daily package is not compositor-certified; certified releases remain
 gated on compositor certification.
 
+The next recorded attempt, build
+[`33891053`](https://launchpad.net/~cyberducttape/+archive/ubuntu/ppa/+build/33891053),
+failed because its source snapshot selected egui/eframe 0.37, which requires
+Rust 1.95, while the builder had Rust 1.93.1. The current vendored branch has
+since been synchronized to source revision `3de0954a` with egui/eframe 0.35;
+the workspace check and Debian release build pass under Rust 1.92 locally.
+A new Launchpad build has not yet confirmed the repaired source remotely.
+
 | Distro | Package | Status | Maintainer |
 |--------|---------|--------|------------|
 | Arch Linux | `wayexpand` | Build locally | Packaging preview; not submitted to AUR |
