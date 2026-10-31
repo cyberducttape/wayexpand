@@ -2,6 +2,25 @@
 
 Updated: 2026-10-30
 
+## Wayland compatibility dashboard overview: 2026-10-30
+
+- Added a concise overview at the top of GUI diagnostics with detected
+  compositor, active capture and injection route, capture readiness, Unicode
+  insertion report, replacement assurance, external IME composition, focus
+  visibility, sensitive-field capability, compositor permission health,
+  matcher/output p99, and recent failed expansion count.
+- Capability labels distinguish route-reported support, route-reported limits,
+  unsupported-on-route, and unreported evidence. Empty latency windows display
+  as no samples rather than `0 µs`; failure count is shown only when the daemon
+  actually supplied its recent-outcome field. A prominent note distinguishes
+  live reports from application tests and production certification.
+- Added accessible UI regression coverage for reported support, unsupported
+  IME composition, fallback diagnostics, metrics, and recent failure counts;
+  added coverage that absent capability/latency data remains unreported.
+- `cargo test --locked -p wayexpand-gui`: 175 passed.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`,
+  `cargo fmt --all -- --check`, and `git diff --check`: passed.
+
 ## Performance verification: 2026-10-30
 
 - Confirmed the daemon owns and reuses pending/ready vectors on its normal

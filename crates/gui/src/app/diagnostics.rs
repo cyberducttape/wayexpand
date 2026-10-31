@@ -68,6 +68,7 @@ impl GuiApp {
             .as_ref()
             .and_then(|capabilities| capabilities.replacement_assurance)
             .map(|assurance| self.strings.replacement_pill(assurance).to_owned());
+        self.render_session_overview(ui, palette, active_route_id);
         ui.collapsing("Ranked input routes", |ui| {
             ui.label(
                 RichText::new(
@@ -817,6 +818,200 @@ impl GuiApp {
         }
     }
 
+    fn render_session_overview(
+        &self,
+        ui: &mut egui::Ui,
+        palette: &Palette,
+        route_id: Option<&str>,
+    ) {
+        let capabilities = self.daemon_capabilities.as_ref();
+        let assessment = diagnostics::assess_route(
+            self.daemon_reachable,
+            self.route_state,
+            capabilities,
+            &self.permission_health,
+        );
+        let failures = capabilities
+            .filter(|caps| caps.recent_expansion_outcomes_reported)
+            .map(|caps| {
+                caps.recent_expansion_outcomes
+                    .iter()
+                    .filter(|trace| trace.completion != "applied")
+                    .count()
+            });
+
+        theme::card(ui, palette, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new(&self.compositor_info).strong());
+                if let Some(route_id) = route_id {
+                    theme::pill(
+                        ui,
+                        format!("{} · {route_id}", self.strings.active_route()),
+                        palette.accent,
+                        theme::tint(palette.accent, 34),
+                    );
+                }
+            });
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new(format!("{}:", self.strings.capture_route())).small());
+                ui.label(
+                    RichText::new(
+                        compact_status_value(&self.daemon_status, "source").unwrap_or("unknown"),
+                    )
+                    .small()
+                    .strong(),
+                );
+                ui.label(RichText::new(format!("{}:", self.strings.injection_backend())).small());
+                ui.label(
+                    RichText::new(
+                        capabilities
+                            .and_then(|caps| caps.injection_mode)
+                            .or_else(|| compact_status_value(&self.daemon_status, "backend"))
+                            .unwrap_or("unknown"),
+                    )
+                    .small()
+                    .strong(),
+                );
+            });
+            ui.label(
+                RichText::new(self.strings.session_evidence_note())
+                    .small()
+                    .color(palette.warning),
+            );
+            ui.add_space(6.0);
+
+            ui.columns(2, |columns| {
+                overview_value(
+                    &mut columns[0],
+                    self.strings.capture_availability_label(),
+                    self.strings.assessment_state(assessment.capture),
+                    assessment_color(assessment.capture, palette),
+                );
+
+                let unicode = reported_capability(
+                    capabilities.and_then(|caps| caps.inject_full_unicode),
+                    &self.strings,
+                    CapabilityKind::Unicode,
+                    palette,
+                );
+                overview_value(
+                    &mut columns[1],
+                    self.strings.unicode_insertion(),
+                    unicode.0,
+                    unicode.1,
+                );
+
+                let replacement = capabilities
+                    .and_then(|caps| caps.replacement_assurance)
+                    .map(|assurance| self.strings.replacement_pill(assurance))
+                    .unwrap_or_else(|| self.strings.not_reported());
+                let replacement_color = match capabilities
+                    .and_then(|caps| caps.replacement_assurance)
+                {
+                    Some(runtime::ReplacementAssurance::Verified) => palette.success,
+                    Some(runtime::ReplacementAssurance::FocusTrackedBestEffort) => palette.warning,
+                    Some(
+                        runtime::ReplacementAssurance::Unverified
+                        | runtime::ReplacementAssurance::Blocked,
+                    ) => palette.danger,
+                    Some(runtime::ReplacementAssurance::Unavailable) | None => palette.muted,
+                };
+                overview_value(
+                    &mut columns[0],
+                    self.strings.replacement_assurance_label(),
+                    replacement,
+                    replacement_color,
+                );
+
+                let composition = reported_capability(
+                    capabilities.and_then(|caps| caps.capture_composition_aware),
+                    &self.strings,
+                    CapabilityKind::Composition,
+                    palette,
+                );
+                overview_value(
+                    &mut columns[1],
+                    self.strings.external_ime_composition(),
+                    composition.0,
+                    composition.1,
+                );
+
+                overview_value(
+                    &mut columns[0],
+                    self.strings.focus_visibility_label(),
+                    self.strings.assessment_state(assessment.focus),
+                    assessment_color(assessment.focus, palette),
+                );
+
+                let sensitive = reported_capability(
+                    capabilities.and_then(|caps| caps.capture_sensitive_focus),
+                    &self.strings,
+                    CapabilityKind::Protection,
+                    palette,
+                );
+                overview_value(
+                    &mut columns[1],
+                    self.strings.sensitive_verification(),
+                    sensitive.0,
+                    sensitive.1,
+                );
+            });
+
+            let permission_color = assessment_color(assessment.permissions, palette);
+            overview_value(
+                ui,
+                self.strings.compositor_permissions_label(),
+                &self.permission_health,
+                permission_color,
+            );
+
+            ui.separator();
+            ui.columns(3, |columns| {
+                overview_value(
+                    &mut columns[0],
+                    self.strings.matcher_latency_p99(),
+                    &capabilities
+                        .and_then(|caps| caps.matcher_latency_p99_us)
+                        .filter(|value| *value > 0)
+                        .map_or_else(
+                            || self.strings.no_samples().to_owned(),
+                            |us| format!("{us} µs"),
+                        ),
+                    palette.accent,
+                );
+                overview_value(
+                    &mut columns[1],
+                    self.strings.output_latency_p99(),
+                    &capabilities
+                        .and_then(|caps| caps.injection_latency_p99_us)
+                        .filter(|value| *value > 0)
+                        .map_or_else(
+                            || self.strings.no_samples().to_owned(),
+                            |us| format!("{us} µs"),
+                        ),
+                    palette.accent,
+                );
+                let failed_value = failures.map_or_else(
+                    || self.strings.not_reported().to_owned(),
+                    |count| count.to_string(),
+                );
+                overview_value(
+                    &mut columns[2],
+                    self.strings.recent_failures(),
+                    &failed_value,
+                    if failures.is_some_and(|count| count > 0) {
+                        palette.warning
+                    } else if failures.is_some() {
+                        palette.success
+                    } else {
+                        palette.muted
+                    },
+                );
+            });
+        });
+    }
+
     pub(crate) fn render_capability_row(
         &self,
         ui: &mut egui::Ui,
@@ -908,4 +1103,53 @@ fn dashboard_value(ui: &mut egui::Ui, label: &str, value: &str, color: Color32) 
 
 fn counter_value(value: Option<u64>) -> String {
     value.map_or_else(|| "unknown".to_owned(), |count| count.to_string())
+}
+
+#[derive(Clone, Copy)]
+enum CapabilityKind {
+    Unicode,
+    Composition,
+    Protection,
+}
+
+fn reported_capability(
+    value: Option<bool>,
+    strings: &Strings,
+    kind: CapabilityKind,
+    palette: &Palette,
+) -> (&'static str, Color32) {
+    match value {
+        Some(true) => (strings.reported_supported(), palette.success),
+        Some(false)
+            if matches!(
+                kind,
+                CapabilityKind::Composition | CapabilityKind::Protection
+            ) =>
+        {
+            (strings.unsupported_on_route(), palette.warning)
+        }
+        Some(false) => (strings.reported_limited(), palette.warning),
+        None => (strings.not_reported(), palette.muted),
+    }
+}
+
+fn overview_value(ui: &mut egui::Ui, label: &str, value: &str, color: Color32) {
+    ui.vertical(|ui| {
+        ui.label(
+            RichText::new(label)
+                .small()
+                .color(ui.visuals().weak_text_color()),
+        );
+        ui.add(egui::Label::new(RichText::new(value).strong().color(color)).wrap());
+        ui.add_space(5.0);
+    });
+}
+
+fn assessment_color(state: diagnostics::AssessmentState, palette: &Palette) -> Color32 {
+    match state {
+        diagnostics::AssessmentState::Ready => palette.success,
+        diagnostics::AssessmentState::Warning => palette.warning,
+        diagnostics::AssessmentState::Blocked => palette.danger,
+        diagnostics::AssessmentState::Unknown => palette.muted,
+    }
 }

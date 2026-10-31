@@ -40,9 +40,97 @@ impl Strings {
 
     pub fn runtime_dashboard(&self) -> &'static str {
         match self.lang {
-            Language::English => "Active session dashboard",
-            Language::Indonesian => "Dasbor sesi aktif",
-            Language::German => "Aktive Sitzungsübersicht",
+            Language::English => "Wayland compatibility & reliability",
+            Language::Indonesian => "Kompatibilitas & keandalan Wayland",
+            Language::German => "Wayland-Kompatibilität und Zuverlässigkeit",
+        }
+    }
+
+    pub fn session_evidence_note(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Live session reports, not application tests or production certification. Latency covers matching and backend injection; it excludes keyboard capture and client paint.",
+            Language::Indonesian => "Laporan sesi langsung, bukan pengujian aplikasi atau sertifikasi produksi. Latensi mencakup pencocokan dan injeksi backend, bukan tangkapan papan ketik atau tampilan aplikasi.",
+            Language::German => "Live-Sitzungsmeldungen, keine Anwendungstests oder Produktionszertifizierung. Die Latenz umfasst Matcher und Backend-Injektion, nicht Tastaturerfassung oder Anwendungsdarstellung.",
+        }
+    }
+
+    pub fn unicode_insertion(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Unicode insertion",
+            Language::Indonesian => "Penyisipan Unicode",
+            Language::German => "Unicode-Ausgabe",
+        }
+    }
+
+    pub fn replacement_assurance_label(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Replacement assurance",
+            Language::Indonesian => "Jaminan penggantian",
+            Language::German => "Ersetzungssicherheit",
+        }
+    }
+
+    pub fn external_ime_composition(&self) -> &'static str {
+        match self.lang {
+            Language::English => "External IME composition",
+            Language::Indonesian => "Komposisi IME eksternal",
+            Language::German => "Externe IME-Komposition",
+        }
+    }
+
+    pub fn matcher_latency_p99(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Matcher p99",
+            Language::Indonesian => "Pencocokan p99",
+            Language::German => "Matcher p99",
+        }
+    }
+
+    pub fn output_latency_p99(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Output p99",
+            Language::Indonesian => "Keluaran p99",
+            Language::German => "Ausgabe p99",
+        }
+    }
+
+    pub fn recent_failures(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Recent failed expansions",
+            Language::Indonesian => "Ekspansi gagal terbaru",
+            Language::German => "Letzte fehlgeschlagene Expansionen",
+        }
+    }
+
+    pub fn reported_supported(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Route reports supported",
+            Language::Indonesian => "Rute melaporkan didukung",
+            Language::German => "Route meldet Unterstützung",
+        }
+    }
+
+    pub fn reported_limited(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Route reports limited",
+            Language::Indonesian => "Rute melaporkan keterbatasan",
+            Language::German => "Route meldet Einschränkungen",
+        }
+    }
+
+    pub fn unsupported_on_route(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Unsupported on this route",
+            Language::Indonesian => "Tidak didukung pada rute ini",
+            Language::German => "Auf dieser Route nicht unterstützt",
+        }
+    }
+
+    pub fn not_reported(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Not reported",
+            Language::Indonesian => "Tidak dilaporkan",
+            Language::German => "Nicht gemeldet",
         }
     }
 

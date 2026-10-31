@@ -1692,6 +1692,15 @@ fn diagnostics_accessibly_explains_keysym_fallback_and_separates_latency() {
     app.daemon_capabilities = Some(runtime::DaemonCapabilities {
         injection_mode: Some("libei keysym fallback"),
         replacement_assurance: Some(runtime::ReplacementAssurance::FocusTrackedBestEffort),
+        inject_full_unicode: Some(true),
+        capture_composition_aware: Some(false),
+        capture_sensitive_focus: Some(false),
+        capture_exclusive: Some(true),
+        recent_expansion_outcomes_reported: true,
+        recent_expansion_outcomes: vec![runtime::ExpansionTrace {
+            completion: "partial failure".into(),
+            ..Default::default()
+        }],
         output_uncertain_total: Some(1),
         injection_latency_mean_us: Some(420_000),
         injection_latency_p50_us: Some(400),
@@ -1737,6 +1746,19 @@ fn diagnostics_accessibly_explains_keysym_fallback_and_separates_latency() {
             .nodes
     );
     assert!(semantics.contains("libei keysym fallback"));
+    assert!(semantics.contains("Wayland compatibility & reliability"));
+    assert!(semantics.contains("Live session reports, not application tests"));
+    assert!(semantics.contains("Unicode insertion"));
+    assert!(semantics.contains("Route reports supported"));
+    assert!(semantics.contains("External IME composition"));
+    assert!(semantics.contains("Unsupported on this route"));
+    assert!(semantics.contains("Matcher p99"));
+    assert!(semantics.contains("Output p99"));
+    assert!(semantics.contains("Recent failed expansions"));
+    assert!(semantics.contains("Capture availability"));
+    assert!(semantics.contains("Focus visibility"));
+    assert!(semantics.contains("Sensitive-field protection"));
+    assert!(semantics.contains("Compositor permissions"));
     assert!(semantics.contains("Keysym fallback is active"));
     assert!(semantics.contains("Partial output · 1"));
     assert!(semantics.contains("Matcher latency"));
@@ -1755,6 +1777,50 @@ fn diagnostics_accessibly_explains_keysym_fallback_and_separates_latency() {
     assert!(semantics.contains("10 µs"));
     assert!(semantics.contains("3 captured input events were ignored"));
     assert!(semantics.contains("type it again after output settles"));
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn diagnostics_overview_does_not_invent_missing_capability_or_latency_evidence() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-diagnostics-unknown-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    app.daemon_reachable = Some(true);
+    app.daemon_status = "source=evdev · backend=libei".into();
+    app.permission_health = "unknown".into();
+    app.daemon_capabilities = Some(runtime::DaemonCapabilities::default());
+
+    let ctx = egui::Context::default();
+    ctx.enable_accesskit();
+    let output = run_gui_test_frame(
+        &ctx,
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(640.0, 600.0),
+            )),
+            ..Default::default()
+        },
+        |ui| {
+            let palette = Palette::for_pack(app.colorpack, app.dark_mode);
+            app.render_diagnostics_body(ui, &palette);
+        },
+    );
+    let semantics = format!(
+        "{:?}",
+        output
+            .platform_output
+            .accesskit_update
+            .expect("overview should expose accessible content")
+            .nodes
+    );
+    assert!(semantics.contains("Not reported"));
+    assert!(semantics.contains("no samples yet"));
+    assert!(!semantics.contains("0 µs"));
+    assert!(semantics.contains("Live session reports, not application tests"));
     fs::remove_file(path).unwrap();
 }
 
@@ -1912,6 +1978,7 @@ fn every_panel_and_dialog_renders_for_supported_languages_and_settings_tabs() {
         usage_events_persisted_total: None,
         usage_events_dropped_total: None,
         recent_expansion_outcomes: Vec::new(),
+        recent_expansion_outcomes_reported: false,
     });
     app.import_open = true;
     app.settings_open = true;

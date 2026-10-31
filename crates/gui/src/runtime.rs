@@ -133,6 +133,7 @@ pub(crate) struct DaemonCapabilities {
     pub usage_events_persisted_total: Option<u64>,
     pub usage_events_dropped_total: Option<u64>,
     pub recent_expansion_outcomes: Vec<ExpansionTrace>,
+    pub recent_expansion_outcomes_reported: bool,
 }
 
 #[derive(Clone, Debug, Default, serde::Deserialize, PartialEq, Eq)]
@@ -316,6 +317,7 @@ impl DaemonCapabilities {
         let recent_outcomes = status
             .field("recent_expansion_outcomes")
             .or_else(|| status.field("recent_expansion_failures"));
+        capabilities.recent_expansion_outcomes_reported = recent_outcomes.is_some();
         capabilities.recent_expansion_outcomes = recent_outcomes
             .and_then(|value| serde_json::from_str(value).ok())
             .unwrap_or_default();
@@ -717,6 +719,7 @@ mod tests {
         );
         assert_eq!(capabilities.output_uncertain_total, Some(1));
         assert_eq!(capabilities.evdev_quarantined_events_total, Some(7));
+        assert!(!capabilities.recent_expansion_outcomes_reported);
 
         let blocked = super::DaemonCapabilities::parse(
             "status_schema=15\nreplacement_assurance=blocked\nfocus_assurance=unconfirmed\noutput_last_refusal=none\n",
@@ -736,6 +739,7 @@ recent_expansion_outcomes=[{"at_unix":1,"backend":"input-method-v2","trigger_rec
         .unwrap();
         assert_eq!(traced.recent_expansion_outcomes.len(), 1);
         assert_eq!(traced.recent_expansion_outcomes[0].completion, "applied");
+        assert!(traced.recent_expansion_outcomes_reported);
     }
 
     #[test]

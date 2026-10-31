@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Added a first-screen Wayland compatibility and reliability overview to GUI
+  diagnostics, including the active compositor and route, reported capture,
+  Unicode, replacement, focus, permission, and IME capabilities, p99 latency,
+  and recent failure count. Missing evidence stays explicitly unknown, and
+  runtime reports are clearly distinguished from application tests and
+  production certification.
+
 - Isolated the evdev SIGUSR1 polling regression test in its own subprocess so
   the temporary process-wide signal disposition cannot interfere with other
   parallel unit tests. Confirmed production scalar input paths use the
