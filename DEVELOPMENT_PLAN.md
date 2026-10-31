@@ -11,6 +11,16 @@ milestone is complete only when its acceptance evidence is recorded in
 
 **Status:** Open. No route is production-certified.
 
+The latest exact-head smoke report is
+[`docs/evidence/doctor-certify-e54af849.json`](docs/evidence/doctor-certify-e54af849.json),
+run on clean commit `e54af8492ef4` in private KWin 6.6.6. Output, focus,
+reload/restart, and safe-refusal checks passed; the keysym fallback measured
+20 transactions per size (p95 12.715 ms small, 780.415 ms medium, 3.126 s
+large). Capture was stdin-simulated. Physical capture, overlap and hotplug
+during replacement, Unicode insertion, password fields, and suspend/resume
+remain untested. The report is partial compatibility evidence, not
+certification.
+
 An earlier `doctor --certify` report ran from clean commit
 `48a39fb3f63b` on private headless KWin 6.6.6. The preserved report at
 [`docs/evidence/doctor-certify-48a39fb3.json`](docs/evidence/doctor-certify-48a39fb3.json)

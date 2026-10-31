@@ -45,6 +45,17 @@ availability claims, and no target is certified without reviewed evidence.
 
 ## Current evidence
 
+The latest exact-head structured smoke report is
+[`doctor-certify-e54af849.json`](evidence/doctor-certify-e54af849.json), bound
+to clean commit `e54af8492ef4` on private KWin 6.6.6. Output, focus,
+configuration reload, restart, unsupported-Unicode refusal, and the default
+keystroke-route refusal passed. Twenty libei keysym-fallback injector samples
+per size measured p95 12.715 ms (small), 780.415 ms (medium), and 3.126 s
+(large). Capture was stdin-simulated; physical capture, overlap and hotplug
+during output, Unicode insertion, password fields, and suspend/resume remain
+untested. The report is partial compatibility evidence and does not certify a
+route.
+
 The latest focused private KWin real-client run is preserved in
 [`kwin-real-client-fc063a4054ab.summary.json`](evidence/kwin-real-client-fc063a4054ab.summary.json)
 with its raw store at

@@ -2,6 +2,23 @@
 
 Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-31 UTC)
 
+## Exact-head KWin output smoke: 2026-10-31
+
+- Rebuilt and ran `scripts/test-doctor-certify.sh` on clean commit
+  `e54af8492ef4`; its isolated KWin 6.6.6 report contract passed. Preserved
+  the report at
+  [`docs/evidence/doctor-certify-e54af849.json`](docs/evidence/doctor-certify-e54af849.json).
+- Simple replacement, word-boundary delimiter, cursor placement, multiline
+  output, focus switching and cancellation, target closure, command completion,
+  configuration reload, daemon restart, refusal of unsupported Unicode, and
+  refusal of an unconsented keystroke route passed. Build identity matched.
+  The libei keysym fallback measured 20 injector transactions per size: p95
+  12.715 ms (small), 780.415 ms (medium), and 3.126 s (large).
+- Capture was stdin-simulated. Physical input, overlap during non-atomic
+  replacement, keyboard hotplug during output, Unicode insertion, password
+  fields, and suspend/resume remain untested. The report correctly says
+  `overall: partial` and `certified: false`; this does not close the P0 gate.
+
 ## Validated configuration snapshot reuse: 2026-10-31
 
 - `ExpansionEngine` now reads parsed app filters, form fields, hotkeys, undo
