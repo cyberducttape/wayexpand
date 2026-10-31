@@ -410,15 +410,15 @@ impl ExpansionEngine {
     pub(crate) fn render_replacement(
         &self,
         index: usize,
-    ) -> Result<(String, Option<usize>), crate::TemplateError> {
+    ) -> Result<(SensitiveText, Option<usize>), crate::TemplateError> {
         match self
             .validated
             .compiled_templates
             .get(index)
             .and_then(Option::as_ref)
         {
-            Some(compiled) => compiled.render_with_cursor(&self.template_context()),
-            None => crate::render_template_with_cursor(
+            Some(compiled) => compiled.render_sensitive_with_cursor(&self.template_context()),
+            None => crate::template::render_template_with_cursor_sensitive(
                 &self.config.expansion[index].replacement,
                 &self.template_context(),
             ),

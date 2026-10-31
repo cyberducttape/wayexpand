@@ -73,7 +73,7 @@ impl ExpansionEngine {
             snippet_id: Arc::clone(&self.validated.compiled_expansions[config_index].id),
             trigger: Arc::clone(&self.validated.compiled_expansions[config_index].trigger),
             matched_text: String::new().into(),
-            insert: insert.into(),
+            insert,
             cursor_offset,
             reinsert_after: None,
             command_backed: false,

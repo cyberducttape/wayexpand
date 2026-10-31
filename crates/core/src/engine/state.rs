@@ -19,12 +19,22 @@ impl SensitiveText {
         self.0.as_str()
     }
 
+    /// Move the protected allocation into an ordinary string for a public API
+    /// that explicitly returns rendered text to its caller.
+    pub fn into_string(mut self) -> String {
+        std::mem::take(&mut *self.0)
+    }
+
     pub fn into_zeroizing(self) -> Zeroizing<String> {
         self.0
     }
 
     pub fn push(&mut self, character: char) {
         self.0.push(character);
+    }
+
+    pub fn push_str(&mut self, value: &str) {
+        self.0.push_str(value);
     }
 
     pub fn pop(&mut self) -> Option<char> {

@@ -339,7 +339,7 @@ impl Config {
                 let compiled = crate::CompiledTemplate::compile(&expansion.replacement)
                     .map_err(|source| ConfigError::InvalidTemplate { index, source })?;
                 compiled
-                    .render_with_cursor(&template_context)
+                    .render_sensitive_with_cursor(&template_context)
                     .map_err(|source| ConfigError::InvalidTemplate { index, source })?;
                 Some(Arc::new(compiled))
             });

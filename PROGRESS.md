@@ -18,6 +18,23 @@ Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-3
   documentation-config integration tests; 1 snapshot-consistency test), and
   Clippy with warnings denied, formatting, and `git diff --check` passed.
 
+## Template rendering secret cleanup: 2026-10-31
+
+- Streamed and compiled template renderers now assemble into `SensitiveText`;
+  errors and nested-include failures therefore zeroize partial output.
+- Clipboard and generated variable values use protected owned storage.
+  Environment, form, username, and hostname values are appended by borrowing,
+  avoiding per-render plaintext clones. Named UUID cache values also use
+  protected storage.
+- Engine matching, insertion, and explanation paths keep rendered values in
+  `SensitiveText`. Public rendering APIs move the final allocation into their
+  documented `String` result without making an extra copy.
+- Added regressions checking clipboard allocation adoption, redacted temporary
+  values, and cleanup behavior when a later variable causes rendering to fail.
+- Verification: the full core suite passed (489 unit tests, 2 ignored; 2
+  documentation-config integration tests; 1 snapshot-consistency test).
+  Clippy with warnings denied, formatting, and `git diff --check` passed.
+
 ## Action Broker polkit prompt admission: 2026-10-31
 
 - Replaced the global authorization mutex with a bounded gate: up to four

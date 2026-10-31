@@ -302,7 +302,7 @@ impl ExpansionEngine {
             // Command or form rendering supplies the replacement later;
             // retaining the configured source here would copy an unused
             // string. Form sources are retained by Arc below.
-            (String::new(), None)
+            (SensitiveText::default(), None)
         } else {
             let (rendered, cursor_offset) = self.render_replacement(config_index).ok()?;
             (rendered, cursor_offset)
@@ -316,7 +316,7 @@ impl ExpansionEngine {
             cursor_offset,
             generation: self.input_generation,
             trigger_config: Arc::clone(&compiled.trigger),
-            replacement_text: replacement_text.into(),
+            replacement_text,
             command: compiled.command.clone(),
             propagate_case: expansion.propagate_case,
             form_template,

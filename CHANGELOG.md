@@ -9,6 +9,9 @@ All notable changes to WayExpand are documented here.
   The bounded stdout read buffer is now wiped on every exit, and trailing
   line endings are overwritten before the successful output allocation is
   transferred to its caller.
+- Keep template output and owned variable values in zeroizing text storage
+  through nested includes, preview/render failures, and diagnostic checks.
+  Environment and form values are borrowed during rendering instead of copied.
 - Allow up to four independent Action Broker polkit authorizations instead of
   holding a global lock while a user prompt is open. Limit each PID/start-time
   peer to one pending prompt, cap prompts at 30 seconds, and apply an

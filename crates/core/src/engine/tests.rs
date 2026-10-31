@@ -6256,7 +6256,11 @@ fn expansions_render_from_templates_compiled_at_validation() {
         expected
     );
     assert_eq!(results[0].cursor_offset, Some(1));
-    assert_eq!(engine.render_replacement(0).unwrap(), expected);
+    let (rendered, cursor_offset) = engine.render_replacement(0).unwrap();
+    assert_eq!(
+        (rendered.as_str(), cursor_offset),
+        (expected.0.as_str(), expected.1)
+    );
 }
 
 #[cfg(unix)]

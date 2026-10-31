@@ -1,3 +1,4 @@
+use crate::SensitiveText;
 use std::{
     collections::{BTreeMap, HashMap},
     env,
@@ -514,7 +515,7 @@ impl TemplateError {
 /// Render built-in variables without invoking a shell or external process.
 /// Unknown variables are errors so a typo can never silently reach an editor.
 pub fn render_template(template: &str, context: &TemplateContext) -> Result<String, TemplateError> {
-    render(template, context, false, MAX_RENDERED_BYTES).map(|(rendered, _)| rendered)
+    render(template, context, false, MAX_RENDERED_BYTES).map(|(rendered, _)| rendered.into_string())
 }
 
 /// Render a deliberately bounded preview. This is for interactive UIs only:
@@ -534,7 +535,7 @@ pub fn render_template_preview(
         true,
         &mut HashMap::new(),
     )
-    .map(|(rendered, _, _)| rendered)
+    .map(|(rendered, _, _)| rendered.into_string())
 }
 
 /// Every `{{...}}` variable name in a template, in order. Unclosed markers
@@ -583,7 +584,7 @@ fn render(
     context: &TemplateContext,
     allow_cursor: bool,
     maximum_bytes: usize,
-) -> Result<(String, Option<usize>), TemplateError> {
+) -> Result<(SensitiveText, Option<usize>), TemplateError> {
     render_nested(
         template,
         context,
@@ -605,11 +606,11 @@ fn render_nested(
     preview: bool,
     // `{{uuid:NAME}}` values, shared with included snippets so one name is
     // one value throughout a render.
-    named: &mut HashMap<String, String>,
-) -> Result<(String, Option<usize>, bool), TemplateError> {
+    named: &mut HashMap<String, SensitiveText>,
+) -> Result<(SensitiveText, Option<usize>, bool), TemplateError> {
     // Preview callers may pass an arbitrarily large valid template. Do not
     // reserve its full size before the output limit has a chance to reject it.
-    let mut rendered = String::with_capacity(template.len().min(maximum_bytes));
+    let mut rendered = SensitiveText::new(String::with_capacity(template.len().min(maximum_bytes)));
     let mut cursor_position = None;
     let mut cursor = 0;
     while cursor < template.len() {
@@ -704,12 +705,12 @@ fn render_nested(
                 let (rendered, stopped) =
                     render_include(&trigger, context, depth, include_budget, preview, named)?;
                 included_stopped = stopped;
-                rendered
+                RenderValue::Owned(rendered)
             }
             Variable::Clipboard if preview => return Err(TemplateError::ClipboardDisabled),
             variable => evaluate(&variable, name, context, named)?,
         };
-        let stopped = push_bounded(&mut rendered, &value, maximum_bytes, preview)?;
+        let stopped = push_bounded(&mut rendered, value.as_str(), maximum_bytes, preview)?;
         if stopped || included_stopped {
             return Ok((rendered, cursor_position, true));
         }
@@ -725,8 +726,8 @@ fn render_include(
     depth: usize,
     budget: usize,
     preview: bool,
-    named: &mut HashMap<String, String>,
-) -> Result<(String, bool), TemplateError> {
+    named: &mut HashMap<String, SensitiveText>,
+) -> Result<(SensitiveText, bool), TemplateError> {
     let included = context
         .snippets
         .get(trigger)
@@ -838,23 +839,25 @@ fn parse_variable(name: &str) -> Result<Variable, TemplateError> {
 /// The value of one variable. `name` is its source text, for errors.
 /// Includes and `{{cursor}}` depend on where they appear, so callers handle
 /// them; reaching them here means they are not allowed in this position.
-fn evaluate(
+fn evaluate<'a>(
     variable: &Variable,
     name: &str,
-    context: &TemplateContext,
-    named: &mut HashMap<String, String>,
-) -> Result<String, TemplateError> {
+    context: &'a TemplateContext,
+    named: &mut HashMap<String, SensitiveText>,
+) -> Result<RenderValue<'a>, TemplateError> {
     let overflow = || TemplateError::DateArithmeticOverflow {
         name: name.to_owned(),
     };
     Ok(match variable {
-        Variable::Clock(base) => format_clock(base, context.unix_timestamp).ok_or_else(overflow)?,
+        Variable::Clock(base) => {
+            RenderValue::owned(format_clock(base, context.unix_timestamp).ok_or_else(overflow)?)
+        }
         Variable::ClockOffset { base, offset } => {
             let adjusted = context
                 .unix_timestamp
                 .checked_add_signed(*offset)
                 .ok_or_else(overflow)?;
-            format_clock(base, adjusted).ok_or_else(overflow)?
+            RenderValue::owned(format_clock(base, adjusted).ok_or_else(overflow)?)
         }
         Variable::FormattedClock {
             base,
@@ -870,57 +873,75 @@ fn evaluate(
             } else {
                 None
             };
-            crate::template_dynamic::format_date(
+            RenderValue::owned(crate::template_dynamic::format_date(
                 format,
                 i64::try_from(timestamp).map_err(|_| overflow())?,
                 utc_offset,
-            )?
+            )?)
         }
-        Variable::Username => context.username.as_str().to_owned(),
-        Variable::Hostname => context.hostname.as_str().to_owned(),
-        Variable::UnixTimestamp => context.unix_timestamp.to_string(),
-        Variable::Newline => "\n".to_owned(),
-        Variable::Tab => "\t".to_owned(),
+        Variable::Username => RenderValue::Borrowed(context.username.as_str()),
+        Variable::Hostname => RenderValue::Borrowed(context.hostname.as_str()),
+        Variable::UnixTimestamp => RenderValue::owned(context.unix_timestamp.to_string()),
+        Variable::Newline => RenderValue::Borrowed("\n"),
+        Variable::Tab => RenderValue::Borrowed("\t"),
         Variable::Clipboard => match &context.clipboard {
             None => return Err(TemplateError::ClipboardDisabled),
-            Some(_) if context.validating => String::new(),
-            Some(reader) => (reader.0)().ok_or(TemplateError::ClipboardUnavailable)?,
+            Some(_) if context.validating => RenderValue::Borrowed(""),
+            Some(reader) => {
+                RenderValue::owned((reader.0)().ok_or(TemplateError::ClipboardUnavailable)?)
+            }
         },
         Variable::Field(field) => match context.fields.get(&field.key) {
             Some(value) => {
                 field
                     .validate_value(value)
                     .map_err(|_| TemplateError::InvalidField)?;
-                value.clone()
+                RenderValue::Borrowed(value)
             }
-            None if context.validating => String::new(),
+            None if context.validating => RenderValue::Borrowed(""),
             None => return Err(TemplateError::FieldValueMissing),
         },
         Variable::Env(variable) => {
-            context
-                .env
-                .get(variable)
-                .cloned()
-                .ok_or_else(|| TemplateError::EnvNotAllowed {
+            RenderValue::Borrowed(context.env.get(variable).map(String::as_str).ok_or_else(
+                || TemplateError::EnvNotAllowed {
                     name: variable.clone(),
-                })?
+                },
+            )?)
         }
-        Variable::Uuid => crate::template_dynamic::uuid_v4()?,
+        Variable::Uuid => RenderValue::owned(crate::template_dynamic::uuid_v4()?),
         Variable::NamedUuid(label) => match named.get(label) {
-            Some(value) => value.clone(),
+            Some(value) => RenderValue::Owned(value.clone()),
             None => {
-                let value = crate::template_dynamic::uuid_v4()?;
+                let value = SensitiveText::from(crate::template_dynamic::uuid_v4()?);
                 named.insert(label.clone(), value.clone());
-                value
+                RenderValue::Owned(value)
             }
         },
-        Variable::Random(spec) => crate::template_dynamic::random_value(spec)?,
+        Variable::Random(spec) => RenderValue::owned(crate::template_dynamic::random_value(spec)?),
         Variable::Cursor | Variable::Snippet(_) => {
             return Err(TemplateError::UnknownVariable {
                 name: name.to_owned(),
             })
         }
     })
+}
+
+enum RenderValue<'a> {
+    Borrowed(&'a str),
+    Owned(SensitiveText),
+}
+
+impl<'a> RenderValue<'a> {
+    fn owned(value: String) -> Self {
+        Self::Owned(SensitiveText::from(value))
+    }
+
+    fn as_str(&self) -> &str {
+        match self {
+            Self::Borrowed(value) => value,
+            Self::Owned(value) => value.as_str(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1004,6 +1025,14 @@ impl CompiledTemplate {
         &self,
         context: &TemplateContext,
     ) -> Result<(String, Option<usize>), TemplateError> {
+        self.render_sensitive_with_cursor(context)
+            .map(|(rendered, position)| (rendered.into_string(), position))
+    }
+
+    pub(crate) fn render_sensitive_with_cursor(
+        &self,
+        context: &TemplateContext,
+    ) -> Result<(SensitiveText, Option<usize>), TemplateError> {
         let (rendered, position) = self.render(context, true, MAX_RENDERED_BYTES)?;
         let cursor_offset = position.map(|position| rendered[position..].graphemes(true).count());
         Ok((rendered, cursor_offset))
@@ -1014,13 +1043,14 @@ impl CompiledTemplate {
         context: &TemplateContext,
         allow_cursor: bool,
         maximum_bytes: usize,
-    ) -> Result<(String, Option<usize>), TemplateError> {
-        let mut rendered = String::with_capacity(self.literal_bytes.min(maximum_bytes));
+    ) -> Result<(SensitiveText, Option<usize>), TemplateError> {
+        let mut rendered =
+            SensitiveText::new(String::with_capacity(self.literal_bytes.min(maximum_bytes)));
         let mut cursor_position = None;
-        let mut named = HashMap::new();
+        let mut named = HashMap::<String, SensitiveText>::new();
         for segment in &self.segments {
             let value = match segment {
-                Segment::Literal(text) => std::borrow::Cow::Borrowed(text.as_str()),
+                Segment::Literal(text) => RenderValue::Borrowed(text.as_str()),
                 Segment::Cursor { offset } if allow_cursor => {
                     if cursor_position.is_some() {
                         return Err(TemplateError::MultipleCursors { offset: *offset });
@@ -1036,14 +1066,14 @@ impl CompiledTemplate {
                 Segment::Variable {
                     variable: Variable::Snippet(trigger),
                     ..
-                } => std::borrow::Cow::Owned(
+                } => RenderValue::Owned(
                     render_include(trigger, context, 0, maximum_bytes, false, &mut named)?.0,
                 ),
                 Segment::Variable { name, variable } => {
-                    std::borrow::Cow::Owned(evaluate(variable, name, context, &mut named)?)
+                    evaluate(variable, name, context, &mut named)?
                 }
             };
-            push_bounded(&mut rendered, &value, maximum_bytes, false)?;
+            push_bounded(&mut rendered, value.as_str(), maximum_bytes, false)?;
         }
         Ok((rendered, cursor_position))
     }
@@ -1113,13 +1143,21 @@ pub fn render_template_with_cursor(
     template: &str,
     context: &TemplateContext,
 ) -> Result<(String, Option<usize>), TemplateError> {
+    render_template_with_cursor_sensitive(template, context)
+        .map(|(rendered, offset)| (rendered.into_string(), offset))
+}
+
+pub(crate) fn render_template_with_cursor_sensitive(
+    template: &str,
+    context: &TemplateContext,
+) -> Result<(SensitiveText, Option<usize>), TemplateError> {
     let (rendered, position) = render(template, context, true, MAX_RENDERED_BYTES)?;
     let cursor_offset = position.map(|position| rendered[position..].graphemes(true).count());
     Ok((rendered, cursor_offset))
 }
 
 fn push_bounded(
-    output: &mut String,
+    output: &mut SensitiveText,
     value: &str,
     maximum_bytes: usize,
     preview: bool,
@@ -1274,6 +1312,62 @@ pub(crate) fn civil_from_days(days_since_epoch: i64) -> (i64, i64, i64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clipboard_variable_is_adopted_by_sensitive_storage_without_copying() {
+        let original_pointer = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let pointer_from_reader = Arc::clone(&original_pointer);
+        let context = TemplateContext {
+            clipboard: Some(ClipboardReader(Arc::new(move || {
+                let value = String::from("synthetic clipboard secret");
+                pointer_from_reader.store(
+                    value.as_ptr() as usize,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+                Some(value)
+            }))),
+            ..TemplateContext::default()
+        };
+
+        let value = evaluate(
+            &Variable::Clipboard,
+            "clipboard",
+            &context,
+            &mut HashMap::new(),
+        )
+        .unwrap();
+        let RenderValue::Owned(value) = value else {
+            panic!("clipboard values must have zeroizing ownership");
+        };
+        assert_eq!(value.as_str(), "synthetic clipboard secret");
+        assert_eq!(
+            value.as_ptr() as usize,
+            original_pointer.load(std::sync::atomic::Ordering::Relaxed),
+            "the clipboard String allocation should move into protected storage"
+        );
+        assert_eq!(format!("{value:?}"), "[REDACTED]");
+    }
+
+    #[test]
+    fn partial_clipboard_render_failure_does_not_return_rendered_plaintext() {
+        let template = "prefix {{clipboard}} {{field:needs_input}}";
+        let context = TemplateContext {
+            clipboard: Some(ClipboardReader(Arc::new(|| {
+                Some("synthetic partial-render secret".to_owned())
+            }))),
+            ..TemplateContext::default()
+        };
+        let compiled = CompiledTemplate::compile(template).unwrap();
+        for error in [
+            render_template(template, &context).unwrap_err(),
+            compiled.render_sensitive_with_cursor(&context).unwrap_err(),
+        ] {
+            assert!(!error
+                .to_string()
+                .contains("synthetic partial-render secret"));
+            assert!(!format!("{error:?}").contains("synthetic partial-render secret"));
+        }
+    }
 
     #[test]
     fn local_today_reports_an_unrepresentable_timestamp() {
