@@ -609,9 +609,15 @@ impl Daemon {
     /// Answer a pending `explain` request from the live engine state, adding
     /// what only the daemon knows: whether the output route is connected.
     pub(crate) fn answer_explain_request(&mut self) {
-        let Some(request) = self.control.take_explain_request() else {
-            return;
-        };
+        // Process only the bounded batch currently queued. New control
+        // requests arriving during this loop are left for the next reactor
+        // turn so a busy diagnostics client cannot starve keyboard input.
+        for request in self.control.take_explain_requests() {
+            self.answer_one_explain_request(request);
+        }
+    }
+
+    fn answer_one_explain_request(&mut self, request: crate::control::ExplainRequest) {
         let backend = wayexpand_core::policy_backend_name(self.active_source, self.active_backend);
         let mut explanation = self.config.engine.explain(&request.text, backend);
         explanation.push(

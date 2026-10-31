@@ -1,5 +1,6 @@
 use anyhow::{bail, Context, Result};
 use std::{
+    collections::VecDeque,
     fs,
     io::{Read, Write},
     os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt},
@@ -27,6 +28,10 @@ use crate::socket_security::{
 const MAX_COMMAND_BYTES: usize = 1024;
 const CONTROL_IO_TIMEOUT: Duration = Duration::from_secs(2);
 const CONTROL_WORKERS: usize = 4;
+/// Match the pending explanation bound to the number of accepted control
+/// workers. Explain requests must not overwrite one another, and a stalled
+/// reactor must not allow timed-out clients to grow an unbounded queue.
+const EXPLAIN_QUEUE_CAPACITY: usize = CONTROL_WORKERS;
 const CONTROL_BUSY_RESPONSE: &[u8] = b"error=busy\nretryable=true\n";
 /// Reads of at most 1 KiB used to discard an overloaded client's request.
 const BUSY_DRAIN_READS: usize = 16;
@@ -53,7 +58,7 @@ pub struct ControlServer {
     focus_snapshot: Arc<Mutex<FocusSnapshot>>,
     /// A pending `explain` request, answered by the reactor from its live
     /// engine state.
-    explain_requested: Arc<Mutex<Option<ExplainRequest>>>,
+    explain_requested: Arc<Mutex<VecDeque<ExplainRequest>>>,
     usage_clear: Arc<Mutex<Option<crate::usage::UsageClearHandle>>>,
     status: Arc<Mutex<String>>,
     /// Wakes the reactor after a request that changes daemon state.
@@ -103,7 +108,7 @@ impl ControlServer {
             control_rejected_total: Arc::new(AtomicU64::new(0)),
             insert_requested: Arc::new(Mutex::new(None)),
             focus_snapshot: Arc::new(Mutex::new(FocusSnapshot::default())),
-            explain_requested: Arc::new(Mutex::new(None)),
+            explain_requested: Arc::new(Mutex::new(VecDeque::new())),
             usage_clear: Arc::new(Mutex::new(None)),
             status: Arc::new(Mutex::new("starting".into())),
             waker: Arc::default(),
@@ -191,7 +196,7 @@ impl ControlServer {
         let control_rejected_total = Arc::new(AtomicU64::new(0));
         let insert_requested = Arc::new(Mutex::new(None));
         let focus_snapshot = Arc::new(Mutex::new(FocusSnapshot::default()));
-        let explain_requested = Arc::new(Mutex::new(None));
+        let explain_requested = Arc::new(Mutex::new(VecDeque::new()));
         let usage_clear = Arc::new(Mutex::new(None));
         let explain_slot = Arc::clone(&explain_requested);
         let usage_clear_slot = Arc::clone(&usage_clear);
@@ -301,11 +306,8 @@ impl ControlServer {
     }
 
     /// Take a pending explain request; the reactor answers it on `reply`.
-    pub fn take_explain_request(&self) -> Option<ExplainRequest> {
-        self.explain_requested
-            .lock()
-            .ok()
-            .and_then(|mut slot| slot.take())
+    pub fn take_explain_requests(&self) -> VecDeque<ExplainRequest> {
+        take_explain_requests(&self.explain_requested)
     }
 
     /// Take the pending insert request, if any.
@@ -440,7 +442,7 @@ struct Flags {
     insert: Arc<Mutex<Option<InsertRequest>>>,
     require_verified_insert: bool,
     focus: Arc<Mutex<FocusSnapshot>>,
-    explain: Arc<Mutex<Option<ExplainRequest>>>,
+    explain: Arc<Mutex<VecDeque<ExplainRequest>>>,
     usage_clear: Arc<Mutex<Option<crate::usage::UsageClearHandle>>>,
     status: Arc<Mutex<String>>,
     waker: crate::waker::WakerSlot,
@@ -521,7 +523,7 @@ fn insert_request(line: &str) -> Option<Option<InsertRequest>> {
 /// reactor and wait for its answer. Returns `None` for other commands.
 fn explain_request(
     line: &str,
-    slot: &Mutex<Option<ExplainRequest>>,
+    queue: &Mutex<VecDeque<ExplainRequest>>,
     waker: &crate::waker::WakerSlot,
 ) -> Result<Option<String>> {
     let line = line.strip_suffix('\n').unwrap_or(line);
@@ -537,19 +539,48 @@ fn explain_request(
         return Ok(Some("invalid text\n".into()));
     }
     let (reply, answer) = std::sync::mpsc::sync_channel(1);
-    *slot
-        .lock()
-        .map_err(|_| anyhow::anyhow!("explain lock poisoned"))? = Some(ExplainRequest {
+    let request = ExplainRequest {
         text: text.to_owned(),
         json,
         reply,
-    });
+    };
+    if !enqueue_explain_request(queue, request)? {
+        return Ok(Some(if json {
+            "{\"error\":\"busy\",\"retryable\":true}\n".into()
+        } else {
+            "explain unavailable: daemon is busy; retry\n".into()
+        }));
+    }
     crate::waker::wake_slot(waker);
     Ok(Some(
         answer
             .recv_timeout(EXPLAIN_REPLY_TIMEOUT)
             .unwrap_or_else(|_| "explain unavailable: the daemon did not answer in time\n".into()),
     ))
+}
+
+/// Append an explanation without replacing an older request. The control
+/// worker admission limit and queue capacity bound memory and ensure callers
+/// receive either their own answer or an explicit busy response.
+fn enqueue_explain_request(
+    queue: &Mutex<VecDeque<ExplainRequest>>,
+    request: ExplainRequest,
+) -> Result<bool> {
+    let mut queue = queue
+        .lock()
+        .map_err(|_| anyhow::anyhow!("explain lock poisoned"))?;
+    if queue.len() >= EXPLAIN_QUEUE_CAPACITY {
+        return Ok(false);
+    }
+    queue.push_back(request);
+    Ok(true)
+}
+
+fn take_explain_requests(queue: &Mutex<VecDeque<ExplainRequest>>) -> VecDeque<ExplainRequest> {
+    queue
+        .lock()
+        .map(|mut queue| std::mem::take(&mut *queue))
+        .unwrap_or_default()
 }
 
 /// Read one request line within `budget` for the whole request, not per
@@ -717,6 +748,88 @@ mod tests {
     use std::io::Read;
     use std::sync::atomic::Ordering;
 
+    fn pending_explanation(text: &str) -> (ExplainRequest, std::sync::mpsc::Receiver<String>) {
+        let (reply, response) = std::sync::mpsc::sync_channel(1);
+        (
+            ExplainRequest {
+                text: text.to_owned(),
+                json: true,
+                reply,
+            },
+            response,
+        )
+    }
+
+    #[test]
+    fn simultaneous_explain_clients_receive_their_own_fifo_answers() {
+        let queue = Arc::new(Mutex::new(VecDeque::new()));
+        let waker = crate::waker::WakerSlot::default();
+        let first_queue = Arc::clone(&queue);
+        let first_waker = Arc::clone(&waker);
+        let first = thread::spawn(move || {
+            explain_request("explain-json .first", &first_queue, &first_waker)
+                .unwrap()
+                .unwrap()
+        });
+        wait_for_explain_queue_len(&queue, 1);
+
+        let second_queue = Arc::clone(&queue);
+        let second_waker = Arc::clone(&waker);
+        let second = thread::spawn(move || {
+            explain_request("explain-json .second", &second_queue, &second_waker)
+                .unwrap()
+                .unwrap()
+        });
+        wait_for_explain_queue_len(&queue, 2);
+
+        // This is the reactor operation: answer the current bounded batch.
+        // Both callers must receive their own answer rather than one being
+        // overwritten when the second request arrives.
+        for request in take_explain_requests(&queue) {
+            request
+                .reply
+                .try_send(format!("answer for {}", request.text))
+                .unwrap();
+        }
+        assert_eq!(first.join().unwrap(), "answer for .first");
+        assert_eq!(second.join().unwrap(), "answer for .second");
+        assert!(take_explain_requests(&queue).is_empty());
+    }
+
+    fn wait_for_explain_queue_len(queue: &Mutex<VecDeque<ExplainRequest>>, expected: usize) {
+        let deadline = Instant::now() + Duration::from_millis(500);
+        while queue.lock().unwrap().len() != expected {
+            assert!(Instant::now() < deadline, "explain client did not enqueue");
+            thread::yield_now();
+        }
+    }
+
+    #[test]
+    fn saturated_explanation_queue_returns_retryable_response_without_overwriting() {
+        let queue = Mutex::new(VecDeque::new());
+        let _receivers = (0..EXPLAIN_QUEUE_CAPACITY)
+            .map(|index| {
+                let (request, response) = pending_explanation(&format!(".pending{index}"));
+                assert!(enqueue_explain_request(&queue, request).unwrap());
+                response
+            })
+            .collect::<Vec<_>>();
+        let waker = Arc::default();
+
+        let json = explain_request("explain-json .extra", &queue, &waker)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&json).unwrap(),
+            serde_json::json!({"error": "busy", "retryable": true})
+        );
+        let text = explain_request("explain .extra", &queue, &waker)
+            .unwrap()
+            .unwrap();
+        assert_eq!(text, "explain unavailable: daemon is busy; retry\n");
+        assert_eq!(queue.lock().unwrap().len(), EXPLAIN_QUEUE_CAPACITY);
+    }
+
     #[test]
     fn shutdown_completes_when_the_socket_path_was_removed() {
         let directory = std::env::temp_dir().join(format!(
@@ -770,7 +883,7 @@ mod tests {
                     insert,
                     require_verified_insert: false,
                     focus,
-                    explain: Arc::new(Mutex::new(None)),
+                    explain: Arc::new(Mutex::new(VecDeque::new())),
                     usage_clear: Arc::new(Mutex::new(None)),
                     status: status_worker,
                     waker: Arc::default(),
@@ -827,7 +940,7 @@ mod tests {
             insert: Arc::clone(&insert),
             require_verified_insert: true,
             focus: Arc::new(Mutex::new(FocusSnapshot::default())),
-            explain: Arc::new(Mutex::new(None)),
+            explain: Arc::new(Mutex::new(VecDeque::new())),
             usage_clear: Arc::new(Mutex::new(None)),
             status: Arc::new(Mutex::new(String::new())),
             waker: Arc::default(),
@@ -866,7 +979,7 @@ mod tests {
             insert: Arc::clone(&insert),
             require_verified_insert: false,
             focus: Arc::clone(&focus),
-            explain: Arc::new(Mutex::new(None)),
+            explain: Arc::new(Mutex::new(VecDeque::new())),
             usage_clear: Arc::new(Mutex::new(None)),
             status,
             waker: Arc::default(),
@@ -1182,7 +1295,7 @@ mod tests {
             insert: Arc::new(Mutex::new(None)),
             require_verified_insert: false,
             focus: Arc::new(Mutex::new(FocusSnapshot::default())),
-            explain: Arc::new(Mutex::new(None)),
+            explain: Arc::new(Mutex::new(VecDeque::new())),
             usage_clear: Arc::new(Mutex::new(None)),
             status: Arc::new(Mutex::new(String::new())),
             waker: slot,

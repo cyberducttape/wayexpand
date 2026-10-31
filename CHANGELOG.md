@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Queue concurrent daemon `explain` requests independently instead of letting
+  one request overwrite another. Bound the queue and return an explicit
+  retryable busy response when it is full.
 - Keep the declared Rust 1.92 MSRV buildable by using egui/eframe 0.35 and
   compatible accessibility and screenshot APIs. Replace interface emoji that
   are unavailable in this egui release with vector-drawn icons. Make the MSRV

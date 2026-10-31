@@ -1723,3 +1723,20 @@ pass with both default parallel scheduling and `RUST_TEST_THREADS=1`; the full
 - Next steps: provision an eligible real-session certification runner and
   collect/review production evidence; obtain authorization before applying the
   prepared GitHub `main` protection ruleset.
+
+## Concurrent daemon explain requests: 2026-10-31
+
+- Fixed a control-server race where concurrent `wayexpand explain` requests
+  replaced one another in a single pending-request slot. Requests now enter a
+  bounded FIFO and receive their own response; a full queue returns an
+  explicit retryable busy response. The reactor drains a fixed snapshot so a
+  stream of diagnostics cannot starve input processing.
+- Added regressions for concurrent request/reply ownership and queue
+  saturation.
+- Verification: `cargo fmt --all -- --check`, both focused regressions,
+  `cargo test --locked -p wayexpand-daemon` (215 passed),
+  `cargo clippy --locked -p wayexpand-daemon --all-targets -- -D warnings`,
+  and `git diff --check` passed.
+- This fixes the observed control-plane timeout under concurrent diagnostics;
+  it does not change the open real-desktop certification or production release
+  gates.
