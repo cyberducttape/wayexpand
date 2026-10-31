@@ -14,6 +14,13 @@ Updated: 2026-10-30
   monitor tests, the daemon cancellation/drop-queued-work test, and the short
   polling cancellation test passed. These exercise mocked devices/channels;
   they do not establish physical keyboard correctness in a real client.
+- Ran the ignored live systemd preview integrations against the active user
+  manager. `live_preview_runs_in_the_daemon_sandbox` passed, verifying actual
+  `NoNewPrivs` and seccomp state, bounded timeout cancellation, and transient
+  unit cleanup. `live_preview_respects_custom_xdg_paths` also passed and
+  removed its temporary test tree. This validates command-preview sandboxing
+  on this host, not the separately open per-action broker device-namespace
+  gate.
 - GitHub's repository Actions runner API reported `total_count: 0`. The
   compositor certification workflow therefore has no registered self-hosted
   runner available. CI run
