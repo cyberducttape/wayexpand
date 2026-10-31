@@ -161,26 +161,53 @@ pub(crate) fn uuid_v4() -> Result<String, TemplateError> {
     random_bytes(&mut bytes)?;
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut text = String::with_capacity(36);
     for (index, byte) in bytes.iter().enumerate() {
         if matches!(index, 4 | 6 | 8 | 10) {
             text.push('-');
         }
-        text.push_str(&format!("{byte:02x}"));
+        text.push(char::from(HEX[usize::from(byte >> 4)]));
+        text.push(char::from(HEX[usize::from(byte & 0x0f)]));
     }
     Ok(text)
 }
 
-/// A uniformly random index below `bound` (at most 256), by rejection so no
-/// value is more likely than another.
-fn random_index(bound: usize) -> Result<usize, TemplateError> {
-    debug_assert!((1..=256).contains(&bound));
-    let limit = 256 - 256 % bound;
-    loop {
-        let mut byte = [0_u8; 1];
-        random_bytes(&mut byte)?;
-        if usize::from(byte[0]) < limit {
-            return Ok(usize::from(byte[0]) % bound);
+/// CSPRNG bytes drawn in batches, so a long random string costs a few
+/// `getrandom` calls instead of one per character.
+struct RandomPool {
+    bytes: [u8; 64],
+    next: usize,
+}
+
+impl RandomPool {
+    fn new() -> Self {
+        Self {
+            bytes: [0; 64],
+            next: 64,
+        }
+    }
+
+    fn byte(&mut self) -> Result<u8, TemplateError> {
+        if self.next == self.bytes.len() {
+            random_bytes(&mut self.bytes)?;
+            self.next = 0;
+        }
+        let byte = self.bytes[self.next];
+        self.next += 1;
+        Ok(byte)
+    }
+
+    /// A uniformly random index below `bound` (at most 256), by rejection
+    /// so no value is more likely than another.
+    fn index(&mut self, bound: usize) -> Result<usize, TemplateError> {
+        debug_assert!((1..=256).contains(&bound));
+        let limit = 256 - 256 % bound;
+        loop {
+            let byte = usize::from(self.byte()?);
+            if byte < limit {
+                return Ok(byte % bound);
+            }
         }
     }
 }
@@ -212,7 +239,7 @@ pub(crate) fn random_value(spec: &str) -> Result<String, TemplateError> {
         {
             return Err(invalid());
         }
-        return Ok(options[random_index(options.len())?].to_owned());
+        return Ok(options[RandomPool::new().index(options.len())?].to_owned());
     }
     let (kind, length) = spec.split_once(':').ok_or_else(invalid)?;
     let alphabet = random_alphabet(kind.trim()).ok_or_else(invalid)?;
@@ -220,8 +247,12 @@ pub(crate) fn random_value(spec: &str) -> Result<String, TemplateError> {
     if length == 0 || length > MAX_RANDOM_CHARS {
         return Err(invalid());
     }
+    let mut pool = RandomPool::new();
     (0..length)
-        .map(|_| random_index(alphabet.len()).map(|index| char::from(alphabet[index])))
+        .map(|_| {
+            pool.index(alphabet.len())
+                .map(|index| char::from(alphabet[index]))
+        })
         .collect()
 }
 
@@ -295,6 +326,19 @@ mod tests {
             parts[3].chars().next(),
             Some('8' | '9' | 'a' | 'b')
         ));
+    }
+
+    #[test]
+    fn long_random_values_span_several_pool_refills() {
+        let spec = format!("digits:{MAX_RANDOM_CHARS}");
+        let value = random_value(&spec).unwrap();
+        assert_eq!(value.len(), MAX_RANDOM_CHARS);
+        // 256 uniform digits all but certainly include every digit; a stuck
+        // or never-refilled pool would repeat a short pattern instead.
+        for digit in '0'..='9' {
+            assert!(value.contains(digit), "{digit} missing from {value}");
+        }
+        assert_ne!(value, random_value(&spec).unwrap());
     }
 
     #[test]

@@ -60,17 +60,10 @@ impl Daemon {
             .current_window()
             .and_then(|window| window.app_id.as_deref());
         let profile = self.profile_assignments.profile_for_app(app_id);
-        let target = profile.map_or_else(
-            || self.path.clone(),
-            |name| {
-                self.path
-                    .parent()
-                    .unwrap_or_else(|| std::path::Path::new("."))
-                    .join("profiles")
-                    .join(format!("{name}.toml"))
-            },
-        );
-        if target != self.config.path() {
+        // Runs on every input event: compare without building a path, and
+        // allocate the target only when a switch is actually needed.
+        if !is_profile_path(self.config.path(), &self.path, profile) {
+            let target = profile_path(&self.path, profile);
             if !self.profile_switch_pending {
                 process_event(
                     &mut self.config.engine,
@@ -96,12 +89,7 @@ impl Daemon {
     }
 
     pub(crate) fn reload_profile_assignments(&mut self) {
-        let path = self
-            .path
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new("."))
-            .join("profiles")
-            .join("applications.toml");
+        let path = profile_root(&self.path).join("applications.toml");
         match wayexpand_core::ProfileAssignments::load(&path) {
             Ok(assignments) => self.profile_assignments = assignments,
             Err(error) => {
@@ -145,10 +133,81 @@ pub(crate) fn drain_pending_window_events(
     Ok(())
 }
 
+/// The configuration a focused application should use: the base library,
+/// or `profiles/<name>.toml` beside it.
+fn profile_path(base: &std::path::Path, profile: Option<&str>) -> std::path::PathBuf {
+    match profile {
+        None => base.to_path_buf(),
+        Some(name) => profile_root(base).join(format!("{name}.toml")),
+    }
+}
+
+fn profile_root(base: &std::path::Path) -> std::path::PathBuf {
+    base.parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join("profiles")
+}
+
+/// Whether `active` already equals `profile_path(base, profile)`, decided
+/// component by component so the per-event check never allocates.
+fn is_profile_path(
+    active: &std::path::Path,
+    base: &std::path::Path,
+    profile: Option<&str>,
+) -> bool {
+    let Some(name) = profile else {
+        return active == base;
+    };
+    let directory = active.parent();
+    active
+        .extension()
+        .is_some_and(|extension| extension == "toml")
+        && active.file_stem().is_some_and(|stem| stem == name)
+        && directory
+            .and_then(std::path::Path::file_name)
+            .is_some_and(|directory| directory == "profiles")
+        && directory.and_then(std::path::Path::parent)
+            == Some(base.parent().unwrap_or_else(|| std::path::Path::new(".")))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::focus_token;
+    use super::{focus_token, is_profile_path, profile_path};
+    use std::path::Path;
     use wayexpand_core::WindowContext;
+
+    #[test]
+    fn profile_path_comparison_matches_the_built_target() {
+        let base = Path::new("/home/user/.config/wayexpand/expansions.toml");
+        for profile in [None, Some("work"), Some("work.v2"), Some("personal")] {
+            let target = profile_path(base, profile);
+            assert!(is_profile_path(&target, base, profile), "{profile:?}");
+        }
+        let work = profile_path(base, Some("work"));
+        assert!(!is_profile_path(&work, base, None));
+        assert!(!is_profile_path(base, base, Some("work")));
+        assert!(!is_profile_path(&work, base, Some("personal")));
+        assert!(!is_profile_path(
+            Path::new("/home/user/.config/wayexpand/other/work.toml"),
+            base,
+            Some("work")
+        ));
+        assert!(!is_profile_path(
+            Path::new("/elsewhere/profiles/work.toml"),
+            base,
+            Some("work")
+        ));
+        assert!(!is_profile_path(
+            Path::new("/home/user/.config/wayexpand/profiles/work.json"),
+            base,
+            Some("work")
+        ));
+
+        let relative = Path::new("expansions.toml");
+        let target = profile_path(relative, Some("work"));
+        assert_eq!(target, Path::new("profiles/work.toml"));
+        assert!(is_profile_path(&target, relative, Some("work")));
+    }
 
     #[test]
     fn exact_window_tokens_differ_for_same_app_and_title() {

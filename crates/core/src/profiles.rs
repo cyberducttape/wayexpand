@@ -127,8 +127,15 @@ impl ProfileAssignments {
     }
 
     pub fn profile_for_app(&self, app_id: Option<&str>) -> Option<&str> {
-        let app_id = app_id?.to_ascii_lowercase();
-        self.applications.get(&app_id).map(String::as_str)
+        let app_id = app_id?;
+        // The daemon asks on every input event; normalized IDs are already
+        // lowercase, so only allocate when there is something to fold.
+        let profile = if app_id.bytes().any(|byte| byte.is_ascii_uppercase()) {
+            self.applications.get(&app_id.to_ascii_lowercase())
+        } else {
+            self.applications.get(app_id)
+        };
+        profile.map(String::as_str)
     }
 
     /// Write through a private temporary file, then atomically replace the

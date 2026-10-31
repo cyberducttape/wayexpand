@@ -4,6 +4,14 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Draw `{{random:…}}` and `{{uuid}}` bytes in batches: a 256-character random
+  value now costs a handful of `getrandom` calls instead of one per character.
+- Stop allocating on every input event to route application profiles; the
+  daemon compares the active path component-wise and builds a new path only
+  when focus actually requires a switch.
+- Recover the IBus engine's connection slot from a poisoned lock instead of
+  panicking at startup.
+
 - Added a first-screen Wayland compatibility and reliability overview to GUI
   diagnostics, including the active compositor and route, reported capture,
   Unicode, replacement, focus, permission, and IME capabilities, p99 latency,

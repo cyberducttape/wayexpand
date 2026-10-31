@@ -520,7 +520,9 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
         .name(BUS_NAME)?
         .serve_at(FACTORY_PATH, factory)?
         .build()?;
-    *connection_slot.lock().expect("connection slot") = Some(connection);
+    *connection_slot
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(connection);
     loop {
         std::thread::park();
     }
