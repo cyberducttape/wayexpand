@@ -783,7 +783,23 @@ records only; the support matrix should not mark a compositor certified until a
 reviewed artifact reports `certified: true` for the relevant compositor,
 backend, layout, and client set.
 
-## Latest current-source compatibility report (2026-10-30)
+## Latest current-source compatibility report (2026-10-31)
+
+[`evidence/doctor-certify-48a39fb3.json`](evidence/doctor-certify-48a39fb3.json)
+records the clean, build-identity-matched report from commit `48a39fb3f63b`
+on private headless KWin 6.6.6. Thirteen checks passed, four were not tested,
+and injector latency was measured across 20 replacements per size. The
+libei keysym-fallback p50/p95/p99 was 12,635/12,759/12,848 µs (small),
+777,534/779,078/779,426 µs (medium), and 3,122,831/3,124,565/3,127,641 µs
+(large).
+
+Capture was simulated over stdin. Physical keyboard capture, Unicode insertion
+on this keysym-only route, suspend/resume, and overlapping physical input were
+not tested. The report explicitly remains partial and uncertified; it covers
+isolated output/focus behavior and does not establish active-desktop behavior,
+password-field protection, or a production route.
+
+## Previous current-source compatibility report (2026-10-30)
 
 [`evidence/doctor-certify-6ef75d59633a.json`](evidence/doctor-certify-6ef75d59633a.json)
 records the clean build at commit `6ef75d59633a` on private headless KWin

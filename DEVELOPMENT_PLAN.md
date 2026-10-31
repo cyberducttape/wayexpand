@@ -11,7 +11,15 @@ milestone is complete only when its acceptance evidence is recorded in
 
 **Status:** Open. No route is production-certified.
 
-Current partial evidence: `doctor --certify` ran from clean commit
+Latest partial evidence: `doctor --certify` ran from clean commit
+`48a39fb3f63b` on private headless KWin 6.6.6. The preserved report at
+[`docs/evidence/doctor-certify-48a39fb3.json`](docs/evidence/doctor-certify-48a39fb3.json)
+records 13 passing checks, four untested scenarios, and 20 injector latency
+samples per replacement-size bucket. Capture was simulated over stdin; the
+report is explicitly partial and does not satisfy physical capture, overlap,
+password-field, suspend/resume, or production certification criteria.
+
+Earlier partial evidence: `doctor --certify` ran from clean commit
 `c94a4f634bfb` in a private KWin 6.6.6 session. The preserved report at
 [`docs/evidence/doctor-certify-c94a4f634bfb.json`](docs/evidence/doctor-certify-c94a4f634bfb.json)
 records passing replacement, focus, reload, restart, and refusal checks, plus

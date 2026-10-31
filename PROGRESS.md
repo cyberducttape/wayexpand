@@ -1428,3 +1428,10 @@ pass with both default parallel scheduling and `RUST_TEST_THREADS=1`; the full
 - Production compositor certification remains open: these local tracker and
   capability checks do not validate physical keyboard capture, password-field
   behavior, or correct insertion across real target applications.
+- A fresh `cargo run --quiet --locked -p wayexpand -- doctor --certify --json`
+  run on clean pushed commit `48a39fb3f63b` passed 13 isolated output/focus
+  checks, measured 20 injector transactions per size, and left four scenarios
+  untested. The build identity matched. Capture was stdin-simulated on private
+  headless KWin 6.6.6; the report remains uncertified and is preserved at
+  [`docs/evidence/doctor-certify-48a39fb3.json`](docs/evidence/doctor-certify-48a39fb3.json).
+  The real-session certification gate remains open.
