@@ -31,6 +31,19 @@ Updated: 2026-10-30 (America/Denver; latest evidence collected through 2026-10-3
   physical capture and actual target-client verification is still required;
   no software-only test result substitutes for that evidence.
 
+## Exact-head local verification: 5ab177d8 / 2026-10-31 UTC
+
+- `RUST_TEST_THREADS=1 cargo test --workspace --locked --quiet`: 1,363 passed,
+  0 failed, 7 ignored across the workspace.
+- `cargo fmt --all -- --check` and
+  `cargo clippy --workspace --all-targets --locked -- -D warnings`: passed.
+- The commit contains documentation and evidence only; the tested Rust source
+  is the same clean source revision `fc063a4054ab` identified in the KWin
+  evidence summary.
+- No production certification claim follows from these desktop-independent
+  tests. Physical capture integrity, compositor acceptance, and long soak
+  gates remain open.
+
 ## Current-source KWin doctor smoke evidence: 2026-10-30
 
 - Ran `cargo run --locked -p wayexpand -- doctor --certify --json` from clean
