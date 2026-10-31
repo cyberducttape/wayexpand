@@ -23,6 +23,7 @@ pub(crate) fn process_event(
     active_backend: &str,
 ) -> std::result::Result<(), Box<EventError>> {
     let mut pending_results = Vec::new();
+    let mut ready_results = Vec::new();
     process_event_with_pending_buffer(
         engine,
         event,
@@ -30,6 +31,7 @@ pub(crate) fn process_event(
         policy,
         active_backend,
         &mut pending_results,
+        &mut ready_results,
     )
 }
 
@@ -43,9 +45,11 @@ pub(crate) fn process_event_with_pending_buffer(
     policy: &wayexpand_core::OrganizationPolicy,
     active_backend: &str,
     pending_results: &mut Vec<wayexpand_core::PendingExpansionResult>,
+    ready_results: &mut Vec<ExpansionResult>,
 ) -> std::result::Result<(), Box<EventError>> {
     if let InputEvent::Key(chord) = event {
         pending_results.clear();
+        ready_results.clear();
         // Undo is a transaction too: do not consume the undo record until
         // there is an injector and the replacement has been applied. This
         // preserves retryability across backend reconnects and failures.
@@ -65,6 +69,7 @@ pub(crate) fn process_event_with_pending_buffer(
         injector,
         policy,
         active_backend,
+        ready_results,
     )
 }
 
@@ -80,7 +85,7 @@ pub(crate) fn process_key_event(
         // Invalidate any pending asynchronous expansions before processing
         // the hotkey. This also updates undo validity: undo is only preserved
         // for the undo chord itself; all other keys invalidate it.
-        let _ = latency::measure_matcher(|| engine.process(InputEvent::Key(chord.clone())));
+        latency::measure_matcher(|| engine.process_key_state(&chord));
 
         for action in engine.process_key(&chord) {
             // Apply the organization policy only to configured hotkey
@@ -151,10 +156,16 @@ pub(crate) fn apply_pending_results_with_pending_buffer(
     injector: Option<&mut dyn TextInjector>,
     policy: &wayexpand_core::OrganizationPolicy,
     active_backend: &str,
+    ready_results: &mut Vec<ExpansionResult>,
 ) -> std::result::Result<(), Box<EventError>> {
-    let results =
-        dispatch_pending_results_with_pending_buffer(engine, pending, policy, active_backend);
-    apply_results(engine, results, injector, policy, active_backend)
+    dispatch_pending_results_with_pending_buffer(
+        engine,
+        pending,
+        ready_results,
+        policy,
+        active_backend,
+    );
+    apply_results_from_buffer(engine, ready_results, injector, policy, active_backend)
 }
 
 /// Apply policy and dispatch deferred expansions without injecting ready results.
@@ -170,16 +181,25 @@ pub(crate) fn dispatch_pending_results(
     active_backend: &str,
 ) -> Vec<ExpansionResult> {
     let mut pending = pending;
-    dispatch_pending_results_with_pending_buffer(engine, &mut pending, policy, active_backend)
+    let mut results = Vec::new();
+    dispatch_pending_results_with_pending_buffer(
+        engine,
+        &mut pending,
+        &mut results,
+        policy,
+        active_backend,
+    );
+    results
 }
 
 pub(crate) fn dispatch_pending_results_with_pending_buffer(
     engine: &mut ExpansionEngine,
     pending: &mut Vec<wayexpand_core::PendingExpansionResult>,
+    results: &mut Vec<ExpansionResult>,
     policy: &wayexpand_core::OrganizationPolicy,
     active_backend: &str,
-) -> Vec<ExpansionResult> {
-    let mut results = Vec::new();
+) {
+    results.clear();
     for pending_result in pending.drain(..) {
         let has_command = pending_result.command.is_some();
 
@@ -235,7 +255,6 @@ pub(crate) fn dispatch_pending_results_with_pending_buffer(
         };
         results.push(result);
     }
-    results
 }
 
 /// Apply evdev safety gating to expansion results before injection.
@@ -383,6 +402,7 @@ pub(crate) fn apply_deferred_evdev_event(
     active_backend: &str,
 ) -> std::result::Result<(), Box<EventError>> {
     let mut pending_results = Vec::new();
+    let mut ready_results = Vec::new();
     apply_deferred_evdev_event_with_pending_buffer(
         engine,
         event,
@@ -391,9 +411,13 @@ pub(crate) fn apply_deferred_evdev_event(
         policy,
         active_backend,
         &mut pending_results,
+        &mut ready_results,
     )
 }
 
+// The borrowed injector, evdev gate, policy, and the two reusable result
+// buffers are independent runtime inputs to this event boundary.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn apply_deferred_evdev_event_with_pending_buffer(
     engine: &mut ExpansionEngine,
     event: InputEvent,
@@ -402,18 +426,20 @@ pub(crate) fn apply_deferred_evdev_event_with_pending_buffer(
     policy: &wayexpand_core::OrganizationPolicy,
     active_backend: &str,
     pending_results: &mut Vec<wayexpand_core::PendingExpansionResult>,
+    ready_results: &mut Vec<ExpansionResult>,
 ) -> std::result::Result<(), Box<EventError>> {
     engine.process_deferred_into(event, pending_results);
-    let results = dispatch_pending_results_with_pending_buffer(
+    dispatch_pending_results_with_pending_buffer(
         engine,
         pending_results,
+        ready_results,
         policy,
         active_backend,
     );
-    if results.is_empty() {
+    if ready_results.is_empty() {
         return Ok(());
     }
-    let gating = apply_evdev_gating(results, evdev, active_backend);
+    let gating = apply_evdev_gating(std::mem::take(ready_results), evdev, active_backend);
     restore_abandoned_results(engine, gating.abandoned);
     apply_results(
         engine,
@@ -428,6 +454,7 @@ pub(crate) fn apply_deferred_evdev_event_with_pending_buffer(
         policy,
         active_backend,
         pending_results,
+        ready_results,
     )
 }
 
@@ -442,12 +469,14 @@ pub(crate) fn replay_evdev_follow_up(
     active_backend: &str,
 ) -> std::result::Result<(), Box<EventError>> {
     let mut pending_results = Vec::new();
+    let mut ready_results = Vec::new();
     replay_evdev_follow_up_with_pending_buffer(
         engine,
         follow_up,
         policy,
         active_backend,
         &mut pending_results,
+        &mut ready_results,
     )
 }
 
@@ -457,6 +486,7 @@ pub(crate) fn replay_evdev_follow_up_with_pending_buffer(
     policy: &wayexpand_core::OrganizationPolicy,
     active_backend: &str,
     pending_results: &mut Vec<wayexpand_core::PendingExpansionResult>,
+    ready_results: &mut Vec<ExpansionResult>,
 ) -> std::result::Result<(), Box<EventError>> {
     for event in follow_up {
         process_event_with_pending_buffer(
@@ -466,6 +496,7 @@ pub(crate) fn replay_evdev_follow_up_with_pending_buffer(
             policy,
             active_backend,
             pending_results,
+            ready_results,
         )?;
     }
     Ok(())
@@ -552,6 +583,26 @@ pub(crate) fn finish_expansion(
 pub(crate) fn apply_results(
     engine: &mut ExpansionEngine,
     results: Vec<ExpansionResult>,
+    injector: Option<&mut dyn TextInjector>,
+    policy: &wayexpand_core::OrganizationPolicy,
+    active_backend: &str,
+) -> std::result::Result<(), Box<EventError>> {
+    apply_results_iter(engine, results, injector, policy, active_backend)
+}
+
+fn apply_results_from_buffer(
+    engine: &mut ExpansionEngine,
+    results: &mut Vec<ExpansionResult>,
+    injector: Option<&mut dyn TextInjector>,
+    policy: &wayexpand_core::OrganizationPolicy,
+    active_backend: &str,
+) -> std::result::Result<(), Box<EventError>> {
+    apply_results_iter(engine, results.drain(..), injector, policy, active_backend)
+}
+
+fn apply_results_iter(
+    engine: &mut ExpansionEngine,
+    results: impl IntoIterator<Item = ExpansionResult>,
     mut injector: Option<&mut dyn TextInjector>,
     policy: &wayexpand_core::OrganizationPolicy,
     active_backend: &str,
@@ -684,5 +735,39 @@ mod tests {
         let refusal_json = serde_json::to_string(refusal).unwrap();
         assert!(!refusal_json.contains(":x"));
         assert!(!refusal_json.contains("private replacement text"));
+    }
+
+    #[test]
+    fn ready_result_dispatch_reuses_caller_capacity_across_expansions() {
+        let config = wayexpand_core::Config::parse(
+            "[[expansion]]\ntrigger = \":x\"\nreplacement = \"a sufficiently long replacement to allocate result storage\"\n",
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let policy = wayexpand_core::OrganizationPolicy::default();
+        let mut pending = Vec::new();
+        let mut ready = Vec::new();
+        let mut retained_capacity = None;
+
+        for _ in 0..2 {
+            process_event_with_pending_buffer(
+                &mut engine,
+                InputEvent::Text(":x".into()),
+                None,
+                &policy,
+                "test-route",
+                &mut pending,
+                &mut ready,
+            )
+            .unwrap();
+            assert!(ready.is_empty(), "application drains the dispatch buffer");
+            assert!(ready.capacity() > 0, "a completed result allocates storage");
+            if let Some(capacity) = retained_capacity {
+                assert_eq!(ready.capacity(), capacity);
+            } else {
+                retained_capacity = Some(ready.capacity());
+            }
+            engine.process(InputEvent::Reset);
+        }
     }
 }

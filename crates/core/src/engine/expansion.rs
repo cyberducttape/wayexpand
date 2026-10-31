@@ -47,6 +47,19 @@ impl MatchScratch {
 }
 
 impl ExpansionEngine {
+    /// Apply the state transition for an ordinary key event without taking
+    /// ownership of the chord. Key events never produce text matches; the
+    /// daemon can perform hotkey lookup separately using the same borrowed
+    /// chord.
+    pub fn process_key_state(&mut self, chord: &crate::KeyChord) {
+        // This is the ImmediateProcessor key-event path. Keep its ordering in
+        // sync with process_event_into: processor hook, undo invalidation,
+        // then generation/state update.
+        ImmediateProcessor::before_event(self);
+        self.invalidate_undo_unless_chord(chord);
+        self.note_key_event();
+    }
+
     /// Process an input event through the expansion state machine.
     ///
     /// The public entry point lives in this module so event processing remains
@@ -252,7 +265,19 @@ impl ExpansionEngine {
     /// application shortcuts, ...) invalidates it because the cursor position
     /// may have changed.
     fn invalidate_undo_unless_undo_chord(&mut self, event: &InputEvent) {
-        if matches!(event, InputEvent::Key(chord) if self.is_undo_chord(chord)) {
+        let chord = match event {
+            InputEvent::Key(chord) => Some(chord),
+            _ => None,
+        };
+        self.invalidate_undo_unless_chord_option(chord);
+    }
+
+    fn invalidate_undo_unless_chord(&mut self, chord: &crate::KeyChord) {
+        self.invalidate_undo_unless_chord_option(Some(chord));
+    }
+
+    fn invalidate_undo_unless_chord_option(&mut self, chord: Option<&crate::KeyChord>) {
+        if chord.is_some_and(|chord| self.is_undo_chord(chord)) {
             return;
         }
         self.last_expansion = None;

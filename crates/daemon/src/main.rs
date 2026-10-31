@@ -185,6 +185,8 @@ struct Daemon {
     /// Reused storage for match results; dispatch drains it before any later
     /// event can clear or overwrite the completed records.
     pending_results: Vec<wayexpand_core::PendingExpansionResult>,
+    /// Reused storage for policy-approved results ready for output.
+    ready_results: Vec<wayexpand_core::ExpansionResult>,
     /// Evdev is non-exclusive: keystrokes captured during a slow replacement
     /// must not be replayed into the matcher as fresh input afterward.
     evdev_quiet_since: Option<Instant>,
@@ -552,6 +554,7 @@ fn main() -> Result<()> {
         retiring_output_workers: Vec::new(),
         pending_output: None,
         pending_results: Vec::new(),
+        ready_results: Vec::new(),
         evdev_quiet_since: None,
         stdin_closed,
         logged_queue_rejections,

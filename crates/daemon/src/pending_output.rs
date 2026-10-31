@@ -413,12 +413,17 @@ impl Daemon {
         self.config
             .engine
             .process_deferred_into(event, &mut self.pending_results);
-        let results = dispatch_pending_results_with_pending_buffer(
+        dispatch_pending_results_with_pending_buffer(
             &mut self.config.engine,
             &mut self.pending_results,
+            &mut self.ready_results,
             &self.policy,
             self.active_backend,
         );
+        if self.ready_results.is_empty() {
+            return Ok(());
+        }
+        let results = std::mem::take(&mut self.ready_results);
         if results.is_empty() {
             return Ok(());
         }
@@ -601,6 +606,7 @@ mod tests {
                 retiring_output_workers: Vec::new(),
                 pending_output: None,
                 pending_results: Vec::new(),
+                ready_results: Vec::new(),
                 evdev_quiet_since: None,
                 stdin_closed: false,
                 logged_queue_rejections: 0,

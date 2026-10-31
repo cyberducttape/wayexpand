@@ -931,6 +931,36 @@ fn asynchronous_command_output_is_discarded_after_key_only_input() {
 }
 
 #[test]
+fn borrowed_key_state_matches_owned_key_event_without_cloning_the_chord() {
+    let config =
+        Config::parse("[[expansion]]\ntrigger = \":x\"\nreplacement = \"replacement\"\n").unwrap();
+    let mut owned_path = ExpansionEngine::new(config.clone()).unwrap();
+    let mut borrowed_path = ExpansionEngine::new(config).unwrap();
+    for engine in [&mut owned_path, &mut borrowed_path] {
+        let result = engine
+            .process(InputEvent::Text(":x".into()))
+            .pop()
+            .expect("fixture trigger should match");
+        engine.commit_applied_expansion(&result);
+    }
+
+    let chord = KeyChord::parse("Left").unwrap();
+    assert!(owned_path
+        .process(InputEvent::Key(chord.clone()))
+        .is_empty());
+    borrowed_path.process_key_state(&chord);
+
+    assert_eq!(owned_path.input_generation, borrowed_path.input_generation);
+    assert_eq!(
+        owned_path.last_expansion.is_none(),
+        borrowed_path.last_expansion.is_none()
+    );
+    assert_eq!(owned_path.buffer, borrowed_path.buffer);
+    assert!(owned_path.prepare_undo(&chord).is_none());
+    assert!(borrowed_path.prepare_undo(&chord).is_none());
+}
+
+#[test]
 fn command_expansion_times_out_without_blocking_forever() {
     let config = Config::parse(
         r#"

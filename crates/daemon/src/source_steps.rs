@@ -157,6 +157,7 @@ impl Daemon {
                         &self.policy,
                         self.active_backend,
                         &mut self.pending_results,
+                        &mut self.ready_results,
                     ),
                     None => {
                         return Err(anyhow::anyhow!(
@@ -192,6 +193,7 @@ impl Daemon {
                             &self.policy,
                             self.active_backend,
                             &mut self.pending_results,
+                            &mut self.ready_results,
                         )?;
                         set_daemon_status_with_config_state(
                             &mut self.status_publisher,
@@ -218,6 +220,7 @@ impl Daemon {
                     &self.policy,
                     self.active_backend,
                     &mut self.pending_results,
+                    &mut self.ready_results,
                 )?;
                 set_daemon_status_with_config_state(
                     &mut self.status_publisher,
@@ -318,6 +321,7 @@ impl Daemon {
                             &self.policy,
                             self.active_backend,
                             &mut self.pending_results,
+                            &mut self.ready_results,
                         )
                     } else {
                         // The outcome is a value: the injector is restored
@@ -331,6 +335,7 @@ impl Daemon {
                             &self.policy,
                             self.active_backend,
                             &mut self.pending_results,
+                            &mut self.ready_results,
                         )
                     };
                     self.injector = Some(backend);
@@ -343,6 +348,7 @@ impl Daemon {
                         &self.policy,
                         self.active_backend,
                         &mut self.pending_results,
+                        &mut self.ready_results,
                     )
                 };
                 match result {
@@ -374,6 +380,7 @@ impl Daemon {
                     &self.policy,
                     self.active_backend,
                     &mut self.pending_results,
+                    &mut self.ready_results,
                 );
                 set_daemon_status_with_config_state(
                     &mut self.status_publisher,
@@ -423,6 +430,7 @@ impl Daemon {
                                 &self.policy,
                                 self.active_backend,
                                 &mut self.pending_results,
+                                &mut self.ready_results,
                             );
                             (result, Some(backend))
                         } else {
@@ -434,6 +442,7 @@ impl Daemon {
                                     &self.policy,
                                     self.active_backend,
                                     &mut self.pending_results,
+                                    &mut self.ready_results,
                                 ),
                                 None,
                             )
@@ -466,6 +475,7 @@ impl Daemon {
                                 &self.policy,
                                 self.active_backend,
                                 &mut self.pending_results,
+                                &mut self.ready_results,
                             );
                             self.connection_state = "reconnecting";
                             set_daemon_status_with_config_state(
@@ -497,6 +507,7 @@ impl Daemon {
                                 &self.policy,
                                 self.active_backend,
                                 &mut self.pending_results,
+                                &mut self.ready_results,
                             ) {
                                 if !error.expansion_rejected() {
                                     return Err(error.into());
@@ -518,6 +529,7 @@ impl Daemon {
                         &self.policy,
                         self.active_backend,
                         &mut self.pending_results,
+                        &mut self.ready_results,
                     )?;
                     process_event_with_pending_buffer(
                         &mut self.config.engine,
@@ -526,6 +538,7 @@ impl Daemon {
                         &self.policy,
                         self.active_backend,
                         &mut self.pending_results,
+                        &mut self.ready_results,
                     )?;
                 }
             }

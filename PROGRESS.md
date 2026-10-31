@@ -1178,3 +1178,24 @@ pass with both default parallel scheduling and `RUST_TEST_THREADS=1`; the full
   not establish physical keyboard capture, password-field handling, or safe
   concurrent input. These records do not close the production certification
   gate.
+
+
+## Key-event and dispatch allocation follow-up: 2026-10-30
+
+- Replaced the daemon's `KeyChord` clone in the key-event state path with a
+  borrowed `ExpansionEngine::process_key_state` operation. `KeyChord` owns a
+  `String`, so this removes the clone allocation. Hotkey lookup remains a
+  separate necessary operation; the previous engine call did not traverse the
+  text matcher for key events.
+- Added a reusable ready-result vector alongside pending results in the daemon.
+  Synchronous dispatch drains it and retains its capacity; an async evdev
+  transaction takes ownership of the vector when its results must outlive the
+  reactor turn.
+- Regression tests compare borrowed key-state behavior with the prior owned
+  key event and verify ready-result capacity survives repeated dispatch.
+- `RUST_TEST_THREADS=1 cargo test --locked -p wayexpand-core
+  -p wayexpand-daemon --quiet`: 467 core tests passed (2 ignored), 2 core
+  documentation-config tests and the snapshot-consistency test passed, and all
+  209 daemon tests passed.
+- `cargo clippy --locked -p wayexpand-core -p wayexpand-daemon --all-targets
+  -- -D warnings`, `cargo fmt --all -- --check`, and `git diff --check`: passed.

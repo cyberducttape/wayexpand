@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Process daemon key events with a borrowed `KeyChord`, avoiding the owned
+  chord clone and its string allocation while preserving key-state and undo
+  invalidation behavior.
+- Reuse the daemon's ready-expansion result buffer across deferred matching and
+  synchronous dispatch, retaining capacity after each event. Async output paths
+  still transfer result ownership to their output transaction.
+
 - Exit with code 1 instead of panicking (exit 101) when the reader closes the
   CLI's standard output, as in `wayexpand doctor | head`.
 - Port the GUI to egui/eframe 0.37. Enable egui's `monochrome_emoji_fonts`,
