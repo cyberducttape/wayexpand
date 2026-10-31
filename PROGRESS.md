@@ -2,6 +2,28 @@
 
 Updated: 2026-10-30
 
+## Current verification and certification runner status: 2026-10-31 UTC
+
+- Re-ran `RUST_TEST_THREADS=1 cargo test --workspace --locked --quiet` on
+  synchronized commit `6665d98401b5b610a11dece5851c53b8b5fff709`; every
+  executed workspace test passed. The run included 2 ignored tests in their
+  ordinary harnesses.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`,
+  `cargo fmt --all -- --check`, and `git diff --check` passed.
+- Re-ran the physical-input interruption regressions: both evdev output
+  monitor tests, the daemon cancellation/drop-queued-work test, and the short
+  polling cancellation test passed. These exercise mocked devices/channels;
+  they do not establish physical keyboard correctness in a real client.
+- GitHub's repository Actions runner API reported `total_count: 0`. The
+  compositor certification workflow therefore has no registered self-hosted
+  runner available. CI run
+  [41163212844](https://github.com/cyberducttape/wayexpand/actions/runs/41163212844)
+  for this commit was still pending with jobs queued at the time of the check;
+  this is not a pass or failure result.
+- The certification gate remains open. A real supported desktop session with
+  physical capture and actual target-client verification is still required;
+  no software-only test result substitutes for that evidence.
+
 ## Current-source KWin smoke evidence: 2026-10-30
 
 - Ran `cargo run --locked -p wayexpand -- doctor --certify --json` from clean

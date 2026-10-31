@@ -43,6 +43,13 @@ non-atomic replacement and no password-field signal; the current doctor exits
 unhealthy. It is useful live status evidence, but does not satisfy certification
 or justify changing the installed service. Details are in `PROGRESS.md`.
 
+The GitHub repository runner API returned `total_count: 0` on 2026-10-31 UTC.
+The certification workflow requires an online self-hosted runner labeled
+`wayexpand-certification` and the compositor ID. Until at least one eligible
+runner is registered and online, real-session certification cannot be
+collected by the repository workflow. This is an infrastructure blocker, not
+certification evidence.
+
 The evidence collector now records the kernel release and SHA-256 of the
 tested CLI, and requires a complete application/toolkit version map before
 certifying a scenario matrix. It also reads `daemon_control_schema`
