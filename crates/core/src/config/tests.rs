@@ -595,6 +595,79 @@ fn organization_policy_can_require_absolute_hotkey_command_paths() {
 }
 
 #[test]
+fn require_broker_actions_rejects_direct_commands_but_accepts_named_actions() {
+    let direct_expansion = Config::parse(
+        r#"
+        [organization]
+        safe_mode = true
+        require_broker_actions = true
+
+        [[expansion]]
+        trigger = ":cmd"
+        replacement = "unused"
+        command = { program = "/usr/bin/true" }
+        "#,
+    )
+    .unwrap_err();
+    assert!(matches!(
+        direct_expansion,
+        ConfigError::InvalidCommand { index: 0, .. }
+    ));
+
+    let direct_hotkey = Config::parse(
+        r#"
+        [organization]
+        safe_mode = true
+        require_broker_actions = true
+
+        [[hotkey]]
+        chord = "Ctrl+Alt+T"
+        command = { program = "/usr/bin/true" }
+        "#,
+    )
+    .unwrap_err();
+    assert!(matches!(
+        direct_hotkey,
+        ConfigError::InvalidHotkey { index: 0, .. }
+    ));
+
+    let reviewed_action = Config::parse(
+        r#"
+        [organization]
+        safe_mode = true
+        require_broker_actions = true
+
+        [[expansion]]
+        trigger = ":cmd"
+        replacement = "unused"
+        command = { action = "approved-status" }
+
+        [[hotkey]]
+        chord = "Ctrl+Alt+T"
+        command = { action = "approved-status" }
+        "#,
+    );
+    assert!(reviewed_action.is_ok());
+}
+
+#[test]
+fn require_broker_actions_is_audit_only_outside_safe_mode() {
+    let config = Config::parse(
+        r#"
+        [organization]
+        safe_mode = false
+        require_broker_actions = true
+
+        [[expansion]]
+        trigger = ":cmd"
+        replacement = "unused"
+        command = { program = "/usr/bin/true" }
+        "#,
+    );
+    assert!(config.is_ok());
+}
+
+#[test]
 fn undo_chord_cannot_collide_with_an_enabled_hotkey() {
     let error = Config::parse(
         r#"

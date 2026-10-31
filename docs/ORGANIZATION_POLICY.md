@@ -44,6 +44,11 @@ safe_mode = false
 # Disable all command execution (expansions with commands are blocked)
 disable_commands = false
 
+# In safe mode, reject direct executables but permit named, administrator-
+# configured Action Broker actions. Each action must also be defined by the
+# broker; this setting alone does not authorize or sandbox an action.
+require_broker_actions = false
+
 # Disable hotkey execution (hotkeys parse but don't run)
 disable_hotkeys = false
 
@@ -124,6 +129,10 @@ When `safe_mode = true`:
   meets this requirement.
 - Blocks: commands, hotkeys, title matching, oversized replacements, disallowed backends, unverified inserts (with `require_verified_insert_target`), and control-socket mutations (with `disable_control_socket_mutations`)
 - Can require absolute command paths so `program = "git"` is rejected
+- `require_broker_actions = true` rejects configured executables and permits
+  only named actions resolved by the separately configured Action Broker.
+  Configuration validation, runtime expansion/hotkey dispatch, and GUI preview
+  enforce this rule. Audit mode reports policy intent without enforcing it.
 
 **Enforcement is consistent across all policy paths:** All expansion checks
 (core engine, daemon, CLI diagnostics) enforce the same restrictions. Violations

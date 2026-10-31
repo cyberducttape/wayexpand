@@ -31,6 +31,8 @@ pub enum HotkeyError {
     Failed(String),
     #[error("hotkey action queue is full")]
     QueueFull,
+    #[error("hotkey action is blocked by command execution policy")]
+    PolicyBlocked,
     #[error("hotkey action worker is unavailable")]
     WorkerUnavailable,
 }

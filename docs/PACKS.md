@@ -200,14 +200,18 @@ wayexpand validate /tmp/incident-pack.toml
 
 The importer reports command-backed entries and removes their commands from
 the generated configuration. This is intentional: importing downloaded or
-shared content must not silently grant process-execution privileges. Review
-the pack, restore any commands manually, and validate the result only after
-you have decided to trust each executable.
+shared content must not silently grant process-execution privileges. Do not
+restore an imported direct executable in place. If the workflow needs an
+action, have an administrator review its exact behavior and inputs, define a
+named Action Broker action with the required policy, and update the snippet to
+reference that action. Managed deployments can enforce this boundary with
+`safe_mode = true` and `require_broker_actions = true`.
 
 Hotkeys from packs are also disabled on import because their action is always
 command-backed. Organization policy can prohibit commands globally with
-`disable_commands = true`, require absolute command paths, and restrict pack
-names through `allowed_packs`.
+`disable_commands = true`, require broker-mediated named actions with
+`require_broker_actions = true` in safe mode, require absolute command paths,
+and restrict pack names through `allowed_packs`.
 
 ## Manifest capabilities and versions
 

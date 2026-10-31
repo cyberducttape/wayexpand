@@ -79,6 +79,9 @@ impl ExpansionEngine {
 
     pub(super) fn command_execution_disabled(&self, command: &CommandConfig) -> bool {
         self.runtime_policy.disable_commands
+            || (self.runtime_policy.safe_mode
+                && self.runtime_policy.require_broker_actions
+                && command.action.is_none())
             || (self.direct_commands_disabled && command.action.is_none())
     }
 

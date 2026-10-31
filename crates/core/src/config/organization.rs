@@ -19,6 +19,13 @@ pub struct OrganizationPolicy {
     /// command settings. Useful for locked-down environments.
     pub disable_commands: bool,
 
+    /// In safe mode, permit only named Action Broker actions and reject
+    /// commands that execute a configured program directly. This keeps
+    /// reviewed broker actions available while requiring their executable,
+    /// environment, and sandbox policy to be administrator-managed.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub require_broker_actions: bool,
+
     /// Disable hotkey execution. Hotkeys still parse but refuse to run.
     pub disable_hotkeys: bool,
 
@@ -114,6 +121,7 @@ impl Default for OrganizationPolicy {
         Self {
             safe_mode: false,
             disable_commands: false,
+            require_broker_actions: false,
             disable_hotkeys: false,
             require_absolute_commands: false,
             disable_title_matching: false,
@@ -151,6 +159,7 @@ impl OrganizationPolicy {
 
         let mut effective = self.clone();
         effective.disable_commands = false;
+        effective.require_broker_actions = false;
         effective.disable_hotkeys = false;
         effective.require_absolute_commands = false;
         effective.disable_title_matching = false;
@@ -176,6 +185,7 @@ impl OrganizationPolicy {
     pub fn is_active(&self) -> bool {
         self.safe_mode
             || self.disable_commands
+            || self.require_broker_actions
             || self.disable_hotkeys
             || self.require_absolute_commands
             || self.disable_title_matching

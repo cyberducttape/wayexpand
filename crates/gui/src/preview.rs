@@ -40,6 +40,12 @@ pub(crate) fn command_preview_policy_violation(
     if command.action.is_some() {
         return None;
     }
+    if effective.safe_mode && effective.require_broker_actions {
+        return Some(
+            "direct command previews are prohibited; use an administrator-approved broker action"
+                .into(),
+        );
+    }
     if let Some(reason) = effective.command_path_violation(&command.program) {
         return Some(reason);
     }
@@ -210,6 +216,24 @@ mod tests {
             ..OrganizationPolicy::default()
         };
         assert!(command_preview_policy_violation(&blocked, &command, false).is_some());
+    }
+
+    #[test]
+    fn broker_only_policy_blocks_direct_preview_and_allows_named_action() {
+        let policy = OrganizationPolicy {
+            safe_mode: true,
+            require_broker_actions: true,
+            ..OrganizationPolicy::default()
+        };
+        assert_eq!(
+            command_preview_policy_violation(&policy, &direct_command("/usr/bin/git"), true)
+                .as_deref(),
+            Some("direct command previews are prohibited; use an administrator-approved broker action")
+        );
+
+        let mut action = direct_command("");
+        action.action = Some("approved-status".into());
+        assert!(command_preview_policy_violation(&policy, &action, false).is_none());
     }
 
     fn direct_command(program: &str) -> wayexpand_core::CommandConfig {

@@ -118,6 +118,20 @@ fn doctor_policy_json_reports_absolute_command_requirement() {
 }
 
 #[test]
+fn doctor_policy_json_reports_broker_only_requirement() {
+    let policy = OrganizationPolicy {
+        safe_mode: true,
+        require_broker_actions: true,
+        ..OrganizationPolicy::default()
+    };
+    let diagnostics = print_policy_diagnostics_json(&Ok(policy));
+    assert_eq!(
+        diagnostics["policy"]["require_broker_actions"],
+        serde_json::Value::Bool(true)
+    );
+}
+
+#[test]
 fn doctor_policy_json_reports_exclusive_capture_requirement() {
     let policy = OrganizationPolicy {
         safe_mode: true,

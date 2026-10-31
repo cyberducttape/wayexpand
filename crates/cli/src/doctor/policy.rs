@@ -49,6 +49,7 @@ pub(crate) fn print_policy_diagnostics_json(
                 "valid": true,
                 "safe_mode": policy.safe_mode,
                 "disable_commands": policy.disable_commands,
+                "require_broker_actions": policy.require_broker_actions,
                 "require_absolute_commands": policy.require_absolute_commands,
                 "require_atomic_replace": policy.require_atomic_replace,
                 "require_exclusive_capture": policy.require_exclusive_capture,
@@ -158,6 +159,16 @@ pub(crate) fn print_policy_diagnostics() -> bool {
                 );
                 if policy.disable_commands {
                     println!("  Disable commands: enabled");
+                }
+                if policy.require_broker_actions {
+                    println!(
+                        "  Require broker actions: {}",
+                        if policy.safe_mode {
+                            "enforced"
+                        } else {
+                            "audit only"
+                        }
+                    );
                 }
                 if let Some(diagnostic) = absolute_command_policy_diagnostic(&policy) {
                     println!("  {diagnostic}");

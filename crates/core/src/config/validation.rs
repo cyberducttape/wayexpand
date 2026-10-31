@@ -110,6 +110,16 @@ impl Config {
             if let Err(reason) = validate_command_config(&binding.command) {
                 return Err(ConfigError::InvalidHotkey { index, reason });
             }
+            if self.organization.safe_mode
+                && self.organization.require_broker_actions
+                && binding.command.action.is_none()
+            {
+                return Err(ConfigError::InvalidHotkey {
+                    index,
+                    reason:
+                        "direct command execution is prohibited; configure a named broker action",
+                });
+            }
             if self
                 .organization
                 .command_path_is_blocked(&binding.command.program)
@@ -304,6 +314,15 @@ impl Config {
             if let Some(command) = &expansion.command {
                 if let Err(reason) = validate_command_config(command) {
                     return Err(ConfigError::InvalidCommand { index, reason });
+                }
+                if self.organization.safe_mode
+                    && self.organization.require_broker_actions
+                    && command.action.is_none()
+                {
+                    return Err(ConfigError::InvalidCommand {
+                        index,
+                        reason: "direct command execution is prohibited; configure a named broker action",
+                    });
                 }
                 if command.action.is_none()
                     && self.organization.command_path_is_blocked(&command.program)

@@ -568,7 +568,7 @@ fn hotkey_actions_use_direct_execution_and_timeout() {
         .process_key(&KeyChord::parse("Ctrl+M").unwrap())
         .pop()
         .unwrap();
-    ExpansionEngine::execute_hotkey(&action).unwrap();
+    engine.execute_hotkey(&action).unwrap();
 }
 
 #[test]
@@ -2885,6 +2885,78 @@ fn disable_commands_policy_blocks_command_execution() {
 }
 
 #[test]
+fn broker_only_runtime_policy_blocks_direct_expansion_after_validation_bypass() {
+    use std::{fs, path::PathBuf};
+
+    let marker = PathBuf::from(format!(
+        "/tmp/wayexpand-broker-only-expansion-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&marker);
+    let config = Config::parse(&format!(
+        r#"
+        [[expansion]]
+        trigger = ":cmd"
+        replacement = "unused"
+        command = {{ program = "/usr/bin/touch", args = ["{}"], environment = "inherit" }}
+        "#,
+        marker.display()
+    ))
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    // Simulate a caller that activated a configuration without passing the
+    // current administrator-policy validator. Runtime policy must still win.
+    engine.runtime_policy.safe_mode = true;
+    engine.runtime_policy.require_broker_actions = true;
+    engine.enable_async_commands();
+
+    assert!(engine.process(InputEvent::Text(":cmd".into())).is_empty());
+    thread::sleep(Duration::from_millis(30));
+    assert!(
+        !marker.exists(),
+        "direct command ran despite broker-only policy"
+    );
+}
+
+#[test]
+fn broker_only_runtime_policy_blocks_direct_hotkeys_but_allows_broker_actions() {
+    use crate::HotkeyError;
+
+    let config = Config::parse(
+        r#"
+        [[hotkey]]
+        chord = "Ctrl+Alt+T"
+        command = { program = "/usr/bin/true" }
+        "#,
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    engine.runtime_policy.safe_mode = true;
+    engine.runtime_policy.require_broker_actions = true;
+
+    let chord = KeyChord::parse("Ctrl+Alt+T").unwrap();
+    let direct = engine.process_key(&chord).pop().unwrap();
+    assert!(matches!(
+        engine.queue_hotkey(&direct),
+        Err(HotkeyError::PolicyBlocked)
+    ));
+    assert!(matches!(
+        engine.execute_hotkey(&direct),
+        Err(HotkeyError::PolicyBlocked)
+    ));
+
+    let mut approved = direct;
+    approved.command.action = Some("approved-status".into());
+    approved.command.program.clear();
+    // The runtime policy permits named actions; normal broker authorization
+    // and broker availability checks still apply in production.
+    assert!(matches!(
+        engine.queue_hotkey(&approved),
+        Err(HotkeyError::WorkerUnavailable)
+    ));
+}
+
+#[test]
 fn commands_execute_when_not_disabled() {
     // Positive control: verify that commands DO run when policy allows them.
     // This ensures the test infrastructure works and command execution isn't broken.
@@ -3130,7 +3202,8 @@ fn hotkey_descendants_are_cleaned_up_on_successful_exit() {
         },
     };
 
-    let result = ExpansionEngine::execute_hotkey(&action);
+    let engine = ExpansionEngine::new(Config::parse("").unwrap()).unwrap();
+    let result = engine.execute_hotkey(&action);
     thread::sleep(Duration::from_millis(1500));
     let survived = output_file.exists();
     let _ = std::fs::remove_file(&script_path);

@@ -2,6 +2,33 @@
 
 Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-31 UTC)
 
+## Broker-only command policy: 2026-10-31
+
+- Added `organization.require_broker_actions`. In enforced safe mode, direct
+  executable expansion and hotkey commands are rejected by config validation;
+  the engine checks again before expansion dispatch, queued hotkey execution,
+  and the public direct hotkey execution API. GUI command preview blocks direct
+  executables while allowing a named action to proceed to broker handling.
+- Added regressions proving a direct expansion configured before policy
+  application cannot create a side-effect file, direct hotkeys are blocked at
+  both execution boundaries, named actions pass the broker-only check, and
+  audit mode does not enforce the setting. Validation tests cover both
+  expansion and hotkey configurations; GUI preview has a dedicated policy
+  test. Existing Espanso import tests confirm shell executable content is not
+  imported as an executable snippet.
+- Added the field to CLI config-schema and doctor JSON/human diagnostics, and
+  documented the safe-mode setting and the reviewed-import-to-broker workflow.
+- Verification in this worktree: locked full workspace tests passed with no
+  failures (ignored cases remain ignored); workspace Clippy with warnings
+  denied is running. Formatting has been applied. No managed broker action was
+  executed as part of these tests.
+- Limitation: this policy requires use of the Action Broker, whose executable
+  allowlist and service sandbox remain its current shared security boundary.
+  It does not add per-action Landlock/seccomp isolation or protect against
+  malicious same-UID processes. The policy is root-owned administrator policy
+  when applied by the daemon; a user-editable library cannot strengthen the
+  daemon's administrator policy.
+
 ## Exact-head KWin output smoke: 2026-10-31
 
 - Rebuilt and ran `scripts/test-doctor-certify.sh` on clean commit

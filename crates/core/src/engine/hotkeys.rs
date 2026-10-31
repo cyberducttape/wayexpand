@@ -9,6 +9,9 @@ impl ExpansionEngine {
     /// must drain completions periodically; neither enqueueing nor draining
     /// waits for the child process.
     pub fn queue_hotkey(&self, action: &HotkeyResult) -> Result<(), HotkeyError> {
+        if self.command_execution_disabled(&action.command) {
+            return Err(HotkeyError::PolicyBlocked);
+        }
         let Some(runtime) = self.async_commands.as_ref() else {
             return Err(HotkeyError::WorkerUnavailable);
         };
@@ -63,7 +66,10 @@ impl ExpansionEngine {
     /// This is intentionally synchronous for explicit, user-initiated
     /// callers; the daemon must use [`Self::queue_hotkey`] so its capture loop
     /// never waits for a child process.
-    pub fn execute_hotkey(result: &HotkeyResult) -> Result<(), HotkeyError> {
+    pub fn execute_hotkey(&self, result: &HotkeyResult) -> Result<(), HotkeyError> {
+        if self.command_execution_disabled(&result.command) {
+            return Err(HotkeyError::PolicyBlocked);
+        }
         Self::execute_hotkey_with_shutdown(result, None)
     }
 

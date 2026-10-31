@@ -4,6 +4,14 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add the administrator policy `require_broker_actions`: in enforced safe mode,
+  direct executable snippets and hotkeys are rejected during validation and
+  again at expansion, hotkey queue, direct hotkey execution, and GUI preview
+  boundaries. Named actions remain eligible for the configured Action Broker.
+  Expose the policy in config schema and doctor output, and clarify that
+  imported executable content must be reviewed and converted to a broker
+  action rather than restored as a direct command. Regression tests cover
+  validation, runtime bypass attempts, GUI preview, and audit-only behavior.
 - Stop logging raw window tokens when an explicit insert is rejected after a
   focus change. Drain direct command stderr without retaining or formatting it
   into `CommandError`, preventing helper output from reaching normal logs or UI

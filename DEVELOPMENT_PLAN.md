@@ -7,6 +7,34 @@ milestone is complete only when its acceptance evidence is recorded in
 
 ## Release gates, in priority order
 
+### P1 — Require broker-mediated actions in managed profiles
+
+**Status:** Implemented with regression coverage; managed deployment adoption
+and review of each broker action remain operational requirements.
+
+The root-managed organization policy now supports
+`safe_mode = true` with `require_broker_actions = true`. Direct executable
+snippets and hotkeys fail configuration validation and are checked again at
+runtime, including direct hotkey execution and GUI command preview. Named
+Action Broker actions remain available subject to the broker's own allowlist
+and service policy. Espanso and pack imports continue to strip external
+commands; documentation now directs administrators to review and define
+broker actions rather than restoring imported executables directly.
+
+Acceptance criteria:
+
+- Reject direct executable expansions and hotkeys when both policy flags are
+  enabled, while accepting named broker actions.
+- Prove a direct executable cannot run if runtime policy is applied after the
+  library was constructed, and refuse it through both queued and direct
+  hotkey APIs.
+- Block direct GUI previews under this policy while preserving named broker
+  action eligibility.
+- Keep the policy audit-only when `safe_mode = false`, and publish it through
+  the CLI schema and doctor diagnostics.
+- Document import behavior and the limits of broker isolation; each action
+  still requires administrator review and broker configuration.
+
 ### P0 — Prove replacement integrity on a production route
 
 **Status:** Open. No route is production-certified.
