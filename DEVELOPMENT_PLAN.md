@@ -188,8 +188,10 @@ identify individual applications under the same UID. The root-owned
 `[organization] disable_control_socket_mutations = true` to deny all
 state-changing socket requests while retaining read-only diagnostics. This is
 a mitigation for managed deployments, not a capability system: a same-UID
-process may still use other user-session privileges, and focus tokens remain
-public freshness values.
+process may still use other user-session privileges. Restricted-mode focus
+diagnostics now omit the focus token because mutations are disabled there;
+unrestricted clients can still read it, and it remains a freshness value rather
+than an authorization secret.
 
 Acceptance criteria:
 

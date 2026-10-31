@@ -1886,3 +1886,25 @@ pass with both default parallel scheduling and `RUST_TEST_THREADS=1`; the full
   passed, 2 ignored; daemon: 220 passed; UI: 175 passed; all other workspace
   suites passed). Workspace Clippy with `-D warnings` passes on both toolchains,
   as do `cargo fmt --all -- --check` and `git diff --check`.
+
+## Restricted focus diagnostics and exact-head CI: 2026-10-31
+
+- In managed read-only socket mode, `focus` continues to report the active
+  generation and exact-identity availability but returns an empty focus token.
+  Since that mode rejects all mutation requests, exposing a replayable target
+  token provided no supported operation. Unrestricted picker behavior remains
+  unchanged. The same-UID authorization limitation remains open.
+- Updated the control-socket regression and changelog/plan to record this
+  narrower mitigation without treating a focus token as authorization.
+- Hosted CI for commit `59aaa7cee9fab902a7bf04fd0d81e7b41a43b1b9` completed
+  successfully: all 33 jobs passed, including release tests, lint, package
+  artifacts, integration tests, clean source build, and headless KWin/Sway
+  output checks.
+- The focused restricted-mode regression passed. All 219 daemon tests passed
+  serially, daemon Clippy with `-D warnings` passed, and `cargo fmt --all --
+  --check` plus `git diff --check` passed. An initial parallel daemon test run
+  exposed a pre-existing race in the two form-reason tests: they asserted
+  against the process-wide bounded trace ring while unrelated tests could
+  evict their entries. Those assertions now test the pure content-free reason
+  mapping directly, eliminating cross-test interference.
+- Hosted CI for this follow-up is pending; no claim is made until it passes.

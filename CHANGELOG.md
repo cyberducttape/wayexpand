@@ -30,8 +30,9 @@ All notable changes to WayExpand are documented here.
   root-managed `disable_control_socket_mutations` policy for deployments that
   need read-only socket access. The restriction denies inserts and lifecycle
   or statistics mutations while preserving status, focus, and explain. Focus
-  tokens remain freshness metadata, not authorization; same-UID application
-  authorization is outside what Unix peer credentials can establish.
+  tokens are withheld in restricted-mode focus diagnostics; same-UID
+  application authorization is outside what Unix peer credentials can
+  establish.
 - Queue concurrent daemon `explain` requests independently instead of letting
   one request overwrite another. Bound the queue and return an explicit
   retryable busy response when it is full.

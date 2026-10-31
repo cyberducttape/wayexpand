@@ -723,10 +723,19 @@ fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
             let snapshot = focus
                 .lock()
                 .map_err(|_| anyhow::anyhow!("focus lock poisoned"))?;
+            // A restricted deployment denies every mutation over this
+            // socket, so clients have no need to receive a replayable target
+            // token. Keep generation and availability visible for health
+            // diagnostics while withholding the window identity.
+            let token = if disable_control_socket_mutations {
+                ""
+            } else {
+                snapshot.token.as_deref().unwrap_or_default()
+            };
             format!(
                 "focus_generation={}\nfocus_token={}\nfocus_identity={}\n",
                 snapshot.generation,
-                snapshot.token.as_deref().unwrap_or_default(),
+                token,
                 if snapshot.exact_window_identity {
                     "exact"
                 } else {
@@ -948,7 +957,7 @@ mod tests {
 
         assert_eq!(
             send("focus\n"),
-            "focus_generation=42\nfocus_token=deadbeef\nfocus_identity=exact\n"
+            "focus_generation=42\nfocus_token=\nfocus_identity=exact\n"
         );
         for request in [
             "insert-target 42 deadbeef ;sig\n",
