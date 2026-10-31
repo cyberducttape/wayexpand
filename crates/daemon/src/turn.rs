@@ -18,6 +18,10 @@ fn compute_effective_pause(user_paused: bool, profile_switch_pending: bool) -> b
     user_paused || profile_switch_pending
 }
 
+fn log_insert_refused_focus_changed(_requested_token: Option<&str>, _actual_token: Option<&str>) {
+    warn!(reason = "focus_changed", "requested snippet insert refused");
+}
+
 fn input_method_injection_capabilities(
     mut text: InjectorCapabilities,
     key_pass_through: Option<InjectorCapabilities>,
@@ -246,10 +250,9 @@ impl Daemon {
             let snapshot = self.control.focus_snapshot();
             let current_token = self.config.engine.current_window().and_then(focus_token);
             if !insert_target_matches_current_focus(&request, current_token.as_deref(), &snapshot) {
-                warn!(
-                    expected = ?request.focus_token,
-                    actual = ?current_token,
-                    "requested snippet insert refused because focus changed"
+                log_insert_refused_focus_changed(
+                    request.focus_token.as_deref(),
+                    current_token.as_deref(),
                 );
                 return Ok(true);
             }
@@ -712,6 +715,59 @@ fn insert_target_matches_current_focus(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Clone)]
+    struct LogBuffer(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for LogBuffer {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn focus_change_refusal_log_does_not_include_window_tokens() {
+        let bytes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let writer = std::sync::Arc::clone(&bytes);
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(move || LogBuffer(std::sync::Arc::clone(&writer)))
+            .finish();
+        let dispatcher = tracing::Dispatch::new(subscriber);
+
+        tracing::dispatcher::with_default(&dispatcher, || {
+            log_insert_refused_focus_changed(
+                Some("expected-window-token-73da"),
+                Some("actual-window-token-b91c"),
+            );
+        });
+
+        let record = String::from_utf8(
+            bytes
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone(),
+        )
+        .unwrap();
+        assert!(record.contains("reason=\"focus_changed\""), "{record}");
+        assert!(
+            record.contains("requested snippet insert refused"),
+            "{record}"
+        );
+        assert!(!record.contains("expected"), "{record}");
+        assert!(!record.contains("actual"), "{record}");
+        assert!(!record.contains("expected-window-token-73da"), "{record}");
+        assert!(!record.contains("actual-window-token-b91c"), "{record}");
+    }
 
     #[test]
     fn unverified_insert_is_a_violation_only_under_the_policy() {

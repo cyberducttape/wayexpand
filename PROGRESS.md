@@ -1804,3 +1804,20 @@ pass with both default parallel scheduling and `RUST_TEST_THREADS=1`; the full
 - This reduces residual copies in selected owned buffers; it is not a guarantee
   of complete process-memory erasure or protection from a privileged memory
   dump. Real-desktop security and certification gates remain open.
+
+## Diagnostic privacy hardening: 2026-10-31
+
+- Focus-change insert refusals now log a fixed `focus_changed` reason without
+  expected or actual window tokens. A scoped tracing-subscriber regression
+  captures the emitted record and checks it contains neither token.
+- `CommandError::NonZeroExit` now contains only the exit status. Direct command
+  stderr is drained in bounded reads and discarded, preventing child-provided
+  secrets from entering `Display`, `Debug`, UI error strings, or daemon failure
+  traces. A process regression prints a recognizable synthetic secret to
+  stderr, exits unsuccessfully, and verifies the resulting error is
+  content-free.
+- Verification: both focused regressions pass with `--locked`; full locked
+  workspace tests pass on the current toolchain and Rust 1.92 (core: 476
+  passed, 2 ignored; daemon: 220 passed; UI: 175 passed; all other workspace
+  suites passed). Workspace Clippy with `-D warnings` passes on both toolchains,
+  as do `cargo fmt --all -- --check` and `git diff --check`.

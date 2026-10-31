@@ -310,6 +310,21 @@ Acceptance criteria:
 - Do not claim universal memory erasure or resistance to a privileged process
   dump based on these targeted wipes.
 
+### P1 — Keep diagnostic errors free of private context
+
+**Status:** Raw focus tokens and direct command stderr are no longer written to
+routine logs or retained in the public command error.
+
+Acceptance criteria:
+
+- A focus-mismatch refusal log contains a fixed reason and message but neither
+  expected nor actual compositor window token.
+- A command that writes a recognizable secret to stderr and exits unsuccessfully
+  yields a structured exit-status error whose `Display` and `Debug` output
+  contain no child stderr; stderr remains drained so pipe capacity cannot block
+  the child.
+- Preserve privacy-safe failure categories for the dashboard and support trace.
+
 ### P2 — Close measured performance and internationalization gaps
 
 **Status:** Open.

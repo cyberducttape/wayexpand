@@ -157,7 +157,6 @@ pub enum CommandError {
     BrokerRejected(ActionError),
     NonZeroExit {
         code: Option<i32>,
-        stderr: Option<String>,
     },
     OutputTooLarge,
     PolicyOutputTooLarge {
@@ -182,9 +181,10 @@ pub enum CommandError {
 
 /// Stable high-level classification for UI and diagnostics.
 ///
-/// The full [`CommandError`] retains operation details, broker reasons, exit
-/// status, and bounded stderr. Consumers that only need remediation guidance
-/// can use this projection instead of parsing display strings.
+/// The full [`CommandError`] retains safe operation details and exit status.
+/// Child stderr is deliberately drained and discarded because it can contain
+/// credentials or user data. Consumers can use this projection for
+/// remediation guidance instead of parsing display strings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandErrorKind {
     Spawn,
@@ -256,13 +256,10 @@ impl std::fmt::Display for CommandError {
                 write!(f, "action broker {operation} failed: {reason}")
             }
             Self::BrokerRejected(error) => write!(f, "action broker rejected the action: {error}"),
-            Self::NonZeroExit { code, stderr } => {
+            Self::NonZeroExit { code } => {
                 match code {
                     Some(code) => write!(f, "exited with status {code}")?,
                     None => write!(f, "was terminated by a signal")?,
-                }
-                if let Some(stderr) = stderr {
-                    write!(f, ": {stderr}")?;
                 }
                 Ok(())
             }

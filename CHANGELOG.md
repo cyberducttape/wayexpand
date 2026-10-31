@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Stop logging raw window tokens when an explicit insert is rejected after a
+  focus change. Drain direct command stderr without retaining or formatting it
+  into `CommandError`, preventing helper output from reaching normal logs or UI
+  error messages.
 - Best-effort zeroize engine-owned typed input, Unicode matching scratch,
   invalidated undo records, dropped command-cache entries, and prefetched
   clipboard values. Avoid retaining undo text when undo is not configured,

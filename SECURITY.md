@@ -285,6 +285,14 @@ systemd services do not inherit those units' core-dump limit. Do not treat
 zeroization as a guarantee that secrets never appear in a process dump or can
 never be recovered from memory.
 
+Routine insert-refusal logs record only the fixed reason `focus_changed`; they
+do not include compositor window identifiers or focus tokens. Direct command
+stderr is drained to avoid blocking the child, then discarded. It is not
+retained in `CommandError`, its `Display`/`Debug` representation, or the
+daemon's failure trace. This favors confidentiality over exposing arbitrary
+helper diagnostics; use the helper's own authorized administrative channel
+when detailed diagnostics are required.
+
 ## Command execution architecture limitations
 
 The current command-backed expansion architecture prioritizes safety at the cost

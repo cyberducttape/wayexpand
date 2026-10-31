@@ -23,8 +23,7 @@ use super::{
     CommandEnvironment, CommandError, ProcessWaitFailure, ProcessWaitOperation,
     MAX_COMMAND_OUTPUT_BYTES, MINIMAL_COMMAND_PATH,
 };
-
-const MAX_COMMAND_STDERR_BYTES: usize = 16 * 1024;
+use zeroize::Zeroize;
 
 /// Atomic counters shared by the expansion and hotkey workers. Keeping this
 /// state with the runtime module makes queue accounting independent of the
@@ -232,7 +231,8 @@ fn broker_output_text(
 ) -> Result<String, CommandError> {
     // The broker deliberately keeps a successful protocol response when
     // output is bounded, but a text expansion must never inject an incomplete
-    // stdout value as if it were complete. Stderr is diagnostic-only.
+    // stdout value as if it were complete. Broker stderr is not returned as
+    // expansion text or copied into the public command error.
     if output.stdout_truncated {
         return Err(CommandError::OutputTooLarge);
     }
@@ -252,7 +252,6 @@ pub(super) fn run_command_unix(
     set_nonblocking_stderr(&stderr)?;
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     let mut bytes = Vec::new();
-    let mut stderr_bytes = Vec::new();
     let mut stdout_eof = false;
     let mut stderr_eof = false;
 
@@ -264,7 +263,7 @@ pub(super) fn run_command_unix(
             stdout_eof = read_available_stdout(&mut stdout, &mut bytes, Some(deadline), shutdown)?;
         }
         if !stderr_eof {
-            stderr_eof = read_available_stderr(&mut stderr, &mut stderr_bytes)?;
+            stderr_eof = read_available_stderr(&mut stderr)?;
         }
         if guard
             .has_exited()
@@ -306,7 +305,7 @@ pub(super) fn run_command_unix(
     let drain_deadline = Instant::now() + Duration::from_millis(100);
     while (!stdout_eof || !stderr_eof) && Instant::now() < drain_deadline {
         stdout_eof = read_available_stdout(&mut stdout, &mut bytes, None, None)?;
-        stderr_eof = read_available_stderr(&mut stderr, &mut stderr_bytes)?;
+        stderr_eof = read_available_stderr(&mut stderr)?;
         if !stdout_eof || !stderr_eof {
             wait_for_command_event(
                 (!stdout_eof).then_some(&stdout),
@@ -320,7 +319,6 @@ pub(super) fn run_command_unix(
     if !status.success() {
         return Err(CommandError::NonZeroExit {
             code: status.code(),
-            stderr: diagnostic_stderr(&stderr_bytes),
         });
     }
     if !stdout_eof {
@@ -479,34 +477,21 @@ const STDERR_READS_PER_DRAIN: usize = 64;
 const STDOUT_READS_PER_DRAIN: usize = 64;
 
 #[cfg(unix)]
-fn read_available_stderr(
-    stderr: &mut ChildStderr,
-    bytes: &mut Vec<u8>,
-) -> Result<bool, CommandError> {
+fn read_available_stderr(stderr: &mut ChildStderr) -> Result<bool, CommandError> {
     let mut buffer = [0_u8; 4096];
-    // Once the diagnostic retention cap is reached, keep draining (discarding)
-    // so the child is never throttled by our bounded buffer. The per-call read
-    // budget returns control to the caller's deadline check even when a child
-    // writes stderr as fast as we can read it; poll reports the pipe ready
-    // again immediately, so this does not slow draining down.
+    // Child diagnostics may contain credentials, URLs, or user text, so stderr
+    // is drained only to prevent pipe backpressure and is never retained.
+    // The per-call budget returns control to the caller's deadline check even
+    // when a child writes continuously.
     for _ in 0..STDERR_READS_PER_DRAIN {
         match stderr.read(&mut buffer) {
             Ok(0) => return Ok(true),
-            Ok(count) => {
-                let remaining = MAX_COMMAND_STDERR_BYTES.saturating_sub(bytes.len());
-                bytes.extend_from_slice(&buffer[..count.min(remaining)]);
-            }
+            Ok(count) => buffer[..count].zeroize(),
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(false),
             Err(_) => return Err(CommandError::OutputChannelLost),
         }
     }
     Ok(false)
-}
-
-fn diagnostic_stderr(bytes: &[u8]) -> Option<String> {
-    let text = String::from_utf8_lossy(bytes);
-    let text = text.trim();
-    (!text.is_empty()).then(|| text.to_owned())
 }
 
 pub(super) fn configure_command_environment(process: &mut Command, command: &CommandConfig) {
@@ -858,6 +843,29 @@ pub(super) fn normalize_form_action_parameters(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn nonzero_command_error_never_retains_or_displays_stderr() {
+        let command = CommandConfig {
+            action: None,
+            program: "/bin/sh".into(),
+            args: vec![
+                "-c".into(),
+                "printf '%s' 'synthetic-secret-from-stderr' >&2; exit 23".into(),
+            ],
+            timeout_ms: 2_000,
+            cache_ms: 0,
+            environment: CommandEnvironment::Minimal,
+            pass_env: Vec::new(),
+        };
+
+        let error = run_command(&command).unwrap_err();
+
+        assert_eq!(error, CommandError::NonZeroExit { code: Some(23) });
+        assert!(!error.to_string().contains("synthetic-secret-from-stderr"));
+        assert!(!format!("{error:?}").contains("synthetic-secret-from-stderr"));
+    }
 
     #[test]
     fn form_action_parameters_drop_template_kind_prefixes() {
