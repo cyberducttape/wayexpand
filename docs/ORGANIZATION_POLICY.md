@@ -154,9 +154,12 @@ to false is an explicit opt-in to that same-UID trust model. Service-manager
 operations remain available to the logged-in user.
 
 `require_verified_insert_target` also defaults to true and is enforced outside
-safe mode. If an administrator opts into socket mutations, explicit snippet
-insertion still requires a fresh exact focus target. This prevents stale-target
-insertion; it does not authenticate the requesting application.
+safe mode. Whenever it or `disable_control_socket_mutations` is enabled, the
+general-purpose `focus` diagnostic withholds the window token and generation.
+As a result, verified insertion through the unauthenticated control socket is
+unavailable until a separately authorized picker/CLI channel exists. This
+prevents diagnostic clients from harvesting target identifiers; target
+verification itself does not authenticate the requesting application.
 
 ### Audit Mode (Logging Only)
 When `safe_mode = false`:

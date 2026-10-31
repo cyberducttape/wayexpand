@@ -775,35 +775,43 @@ client, because the request is accepted before the focused application is
 known.
 
 The picker uses three further control lines so it never types into a window
-other than the one it was opened from. `focus` replies
-`focus_generation=<n>`, `focus_token=<hex>`, and `focus_identity=<exact|unavailable>`:
-the token is derived from the backend's ephemeral identity for the exact
-toplevel, and the counter increases on every focus change. If the backend
-cannot provide an exact identity, the token is empty and the picker is
-clipboard-only. `insert-target <generation> <token> <trigger>` is `insert`
-that the daemon refuses unless the focused window still has that token and
-generation when the request is processed.
+other than the one it was opened from. In an unrestricted policy, `focus`
+replies `focus_generation=<n>`, `focus_token=<hex>`, and
+`focus_identity=<exact|unavailable>`: the token is derived from the backend's
+ephemeral identity for the exact toplevel, and the counter increases on every
+focus change. If the backend cannot provide an exact identity, the token is
+empty and the picker is clipboard-only. When either
+`disable_control_socket_mutations` or `require_verified_insert_target` is true,
+the general-purpose `focus` response leaves both generation and token empty;
+it still reports whether exact identity tracking is available. This prevents
+diagnostic clients from harvesting target identifiers. `insert-target
+<generation> <token> <trigger>` is `insert` that the daemon refuses unless the
+focused window still has that token and generation when the request is
+processed.
 
 `wayexpand insert --verified <trigger>` is the verified-target form of the
 CLI: it reads `focus` and sends `insert-target` for the window focused when
-the command runs. It fails (exit `4`) when `focus_identity` is not `exact`,
-rather than falling back to an unverified insert. As with the picker, a
-refusal because focus moved after the request was accepted is logged by the
-daemon, not reported to the client.
+the command runs. It fails (exit `4`) when exact target details are unavailable
+or withheld by policy, rather than falling back to an unverified insert. As
+with the picker, a refusal because focus moved after the request was accepted
+is logged by the daemon, not reported to the client.
 
 By default, `require_verified_insert_target` makes the daemon reply `insert
 refused: organization policy requires a verified insert target (use insert
---verified)` to a plain `insert` line and queue nothing; `insert-target` is
-unaffected. This control-socket safety check is enforced in audit and safe
-mode.
+--verified)` to a plain `insert` line and queue nothing. However, the generic
+focus endpoint withholds target identifiers under this policy, so verified
+insertion through the unauthenticated control socket is unavailable. A
+separately authorized picker/CLI target channel is not yet implemented. This
+control-socket safety check is enforced in audit and safe mode.
 
 By default, `disable_control_socket_mutations = true` refuses insert, pause,
 resume, reload, stop, and usage-stat clearing over the socket regardless of
-audit mode. The focus token remains a public freshness value, not an
-authorization secret. Linux peer credentials validate the connecting UID;
-they cannot distinguish individual applications under that UID. Setting the
-root-managed policy to false explicitly opts into same-UID mutation requests.
-`status`, `focus`, and `explain` remain available either way.
+audit mode. Focus tokens are target-freshness values, not authorization
+secrets. Linux peer credentials validate the connecting UID; they cannot
+distinguish individual applications under that UID. Setting the root-managed
+mutation policy to false explicitly opts into same-UID mutation requests, but
+focus identifiers remain hidden while `require_verified_insert_target` is
+true. `status`, `focus`, and `explain` remain available either way.
 
 **Exit codes:** `0` when the daemon accepted the request, `2` for a missing or
 malformed trigger, `4` when the daemon is unreachable or rejects the request,

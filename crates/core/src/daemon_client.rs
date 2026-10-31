@@ -76,15 +76,21 @@ pub struct DaemonFocus {
 
 impl DaemonFocus {
     /// Parse a `focus` response. Returns `None` when it is missing a
-    /// required field, which proves nothing about the focused window.
+    /// required field, which proves nothing about the focused window. A
+    /// withheld (empty) generation is represented as zero; it cannot produce
+    /// a verified target because the associated token is also withheld.
     pub fn parse(response: &str) -> Option<Self> {
         let field = |name: &str| {
             response
                 .lines()
                 .find_map(|line| line.strip_prefix(name)?.strip_prefix('='))
         };
+        let generation = match field("focus_generation")? {
+            "" => 0,
+            value => value.parse().ok()?,
+        };
         Some(Self {
-            generation: field("focus_generation")?.parse().ok()?,
+            generation,
             token: field("focus_token")?.to_owned(),
             exact_identity: field("focus_identity") == Some("exact"),
         })
@@ -291,6 +297,12 @@ mod tests {
         let unknown =
             DaemonFocus::parse("focus_generation=4\nfocus_token=\nfocus_identity=exact\n").unwrap();
         assert_eq!(unknown.verified_target(), None);
+
+        let restricted =
+            DaemonFocus::parse("focus_generation=\nfocus_token=\nfocus_identity=exact\n").unwrap();
+        assert_eq!(restricted.generation, 0);
+        assert_eq!(restricted.verified_target(), None);
+        assert!(restricted.exact_identity);
 
         assert_eq!(
             DaemonFocus::parse("focus_token=abcd\nfocus_identity=exact\n"),

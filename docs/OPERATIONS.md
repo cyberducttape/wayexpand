@@ -516,6 +516,9 @@ opt into same-UID mutations with the root-managed
 `[organization] disable_control_socket_mutations = false` setting. Explicit
 inserts still require a verified focus target by default; that protects the
 target against focus races but does not authenticate the requesting process.
+While that requirement is enabled, the read-only focus response withholds its
+window token and generation, so the current generic CLI/picker cannot submit a
+verified insert. A separately authorized target channel remains future work.
 Service-manager controls remain available to the logged-in user.
 
 ### Prometheus metrics

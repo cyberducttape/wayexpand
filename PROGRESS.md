@@ -23,6 +23,16 @@ Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-3
   GUI/CLI control mutations therefore remain unavailable unless this policy
   is opted out; a separate OS-mediated authorization channel remains future
   work.
+- Follow-up hardening: the read-only `focus` reply withholds both token and
+  generation whenever either control mutations are disabled or verified
+  targets are required. This prevents a diagnostic caller from harvesting
+  identifiers even in the mutation-enabled/verified-target configuration. It
+  also means the current generic CLI/picker cannot perform verified inserts
+  under that policy; a separately authorized focus-target channel is still
+  needed.
+- Regression coverage verifies identifier withholding in both restricted
+  policy configurations and confirms the shared focus parser treats a hidden
+  target as unavailable without losing daemon or exact-identity status.
 
 ## Command descendant containment: 2026-10-31
 

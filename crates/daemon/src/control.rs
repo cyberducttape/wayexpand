@@ -723,18 +723,26 @@ fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
             let snapshot = focus
                 .lock()
                 .map_err(|_| anyhow::anyhow!("focus lock poisoned"))?;
-            // A restricted deployment denies every mutation over this
-            // socket, so clients have no need to receive a replayable target
-            // token. Keep generation and availability visible for health
-            // diagnostics while withholding the window identity.
-            let token = if disable_control_socket_mutations {
+            // Focus identifiers are target-freshness data, not authorization
+            // credentials. Withhold them from general diagnostic clients
+            // whenever policy either denies mutations or requires a verified
+            // target. The generation is also withheld because it reveals
+            // focus transitions and is useful only alongside the token.
+            let restricted_focus =
+                disable_control_socket_mutations || require_verified_insert;
+            let generation = if restricted_focus {
+                String::new()
+            } else {
+                snapshot.generation.to_string()
+            };
+            let token = if restricted_focus {
                 ""
             } else {
                 snapshot.token.as_deref().unwrap_or_default()
             };
             format!(
                 "focus_generation={}\nfocus_token={}\nfocus_identity={}\n",
-                snapshot.generation,
+                generation,
                 token,
                 if snapshot.exact_window_identity {
                     "exact"
@@ -937,7 +945,7 @@ mod tests {
             stop: Arc::new(AtomicBool::new(false)),
             pause: Arc::new(AtomicBool::new(false)),
             insert: Arc::clone(&insert),
-            require_verified_insert: false,
+            require_verified_insert: true,
             disable_control_socket_mutations: true,
             focus,
             explain: Arc::new(Mutex::new(VecDeque::new())),
@@ -957,7 +965,7 @@ mod tests {
 
         assert_eq!(
             send("focus\n"),
-            "focus_generation=42\nfocus_token=\nfocus_identity=exact\n"
+            "focus_generation=\nfocus_token=\nfocus_identity=exact\n"
         );
         for request in [
             "insert-target 42 deadbeef ;sig\n",
@@ -979,6 +987,40 @@ mod tests {
         assert!(!flags.reload.load(Ordering::Acquire));
         assert!(!flags.pause.load(Ordering::Acquire));
         assert_eq!(send("status\n"), "running\nrunning\n");
+    }
+
+    #[test]
+    fn verified_target_policy_withholds_focus_identifiers_even_if_mutations_are_enabled() {
+        let flags = Flags {
+            reload: Arc::new(AtomicBool::new(false)),
+            stop: Arc::new(AtomicBool::new(false)),
+            pause: Arc::new(AtomicBool::new(false)),
+            insert: Arc::new(Mutex::new(None)),
+            require_verified_insert: true,
+            disable_control_socket_mutations: false,
+            focus: Arc::new(Mutex::new(FocusSnapshot {
+                generation: 9,
+                token: Some("window-instance-id".into()),
+                exact_window_identity: true,
+            })),
+            explain: Arc::new(Mutex::new(VecDeque::new())),
+            usage_clear: Arc::new(Mutex::new(None)),
+            status: Arc::new(Mutex::new("running".into())),
+            waker: Arc::default(),
+        };
+        let (mut client, server) = UnixStream::pair().unwrap();
+        client.write_all(b"focus\n").unwrap();
+        client.shutdown(std::net::Shutdown::Write).unwrap();
+        handle_request(server, flags).unwrap();
+
+        let mut response = String::new();
+        client.read_to_string(&mut response).unwrap();
+        assert_eq!(
+            response,
+            "focus_generation=\nfocus_token=\nfocus_identity=exact\n"
+        );
+        assert!(!response.contains("window-instance-id"));
+        assert!(!response.contains("focus_generation=9"));
     }
 
     #[test]
