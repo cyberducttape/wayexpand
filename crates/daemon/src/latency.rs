@@ -115,6 +115,8 @@ fn matcher_window() -> &'static Mutex<Window> {
 }
 
 static MATCHER_DROPPED_SAMPLES: AtomicU64 = AtomicU64::new(0);
+static OUTPUT_DROPPED_SAMPLES: AtomicU64 = AtomicU64::new(0);
+static PROFILE_DROPPED_SAMPLES: AtomicU64 = AtomicU64::new(0);
 
 /// Number of matcher timing samples skipped because a diagnostics reader held
 /// the rolling-window lock. Recording is best-effort so metrics never delay
@@ -123,32 +125,76 @@ pub fn matcher_dropped_samples() -> u64 {
     MATCHER_DROPPED_SAMPLES.load(Ordering::Relaxed)
 }
 
+/// Output timing samples omitted because a diagnostics snapshot held the
+/// aggregate rolling-window lock.
+pub fn output_dropped_samples() -> u64 {
+    OUTPUT_DROPPED_SAMPLES.load(Ordering::Relaxed)
+}
+
+/// Per-mode output timing samples omitted because a diagnostics snapshot held
+/// the segmented profile lock.
+pub fn profile_dropped_samples() -> u64 {
+    PROFILE_DROPPED_SAMPLES.load(Ordering::Relaxed)
+}
+
 fn profile_windows() -> &'static Mutex<ProfileWindows> {
     static WINDOWS: OnceLock<Mutex<ProfileWindows>> = OnceLock::new();
     WINDOWS.get_or_init(|| Mutex::new(ProfileWindows::default()))
 }
 
-fn record(elapsed_ns: u64) {
-    let mut state = window()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    state.record(elapsed_ns);
+fn increment_saturating(counter: &AtomicU64) {
+    let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+        Some(value.saturating_add(1))
+    });
+}
+
+fn record_matcher(elapsed_ns: u64) {
+    record_nonblocking(matcher_window(), elapsed_ns, &MATCHER_DROPPED_SAMPLES);
+}
+
+fn snapshot_cache() -> &'static Mutex<Snapshot> {
+    static CACHE: OnceLock<Mutex<Snapshot>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(Snapshot::default()))
+}
+
+fn nonblocking_snapshot(source: &Mutex<Window>, cache: &Mutex<Snapshot>) -> Snapshot {
+    let snapshot = match source.try_lock() {
+        Ok(mut state) => Some(state.snapshot()),
+        Err(TryLockError::Poisoned(poisoned)) => Some(poisoned.into_inner().snapshot()),
+        Err(TryLockError::WouldBlock) => None,
+    };
+    if let Some(snapshot) = snapshot {
+        if let Ok(mut cached) = cache.try_lock() {
+            *cached = snapshot;
+        }
+        snapshot
+    } else {
+        cache
+            .try_lock()
+            .map_or_else(|_| Snapshot::default(), |cached| *cached)
+    }
+}
+
+fn record_nonblocking(source: &Mutex<Window>, elapsed_ns: u64, dropped: &AtomicU64) {
+    match source.try_lock() {
+        Ok(mut state) => state.record(elapsed_ns),
+        Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner().record(elapsed_ns),
+        Err(TryLockError::WouldBlock) => increment_saturating(dropped),
+    }
 }
 
 pub fn snapshot() -> Snapshot {
-    window()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .snapshot()
+    nonblocking_snapshot(window(), snapshot_cache())
 }
 
 /// Snapshot of time spent processing input through the matcher and preparing
 /// an expansion, excluding output injection and its serialized actor.
 pub fn matcher_snapshot() -> Snapshot {
-    matcher_window()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .snapshot()
+    static CACHE: OnceLock<Mutex<Snapshot>> = OnceLock::new();
+    nonblocking_snapshot(
+        matcher_window(),
+        CACHE.get_or_init(|| Mutex::new(Snapshot::default())),
+    )
 }
 
 pub fn apply(injector: &mut dyn TextInjector, result: &ExpansionResult) -> TransactionOutcome {
@@ -168,17 +214,7 @@ pub fn measure_matcher<T>(operation: impl FnOnce() -> T) -> T {
     let started = Instant::now();
     let result = operation();
     let elapsed_ns = started.elapsed().as_nanos().min(u64::MAX as u128) as u64;
-    match matcher_window().try_lock() {
-        Ok(mut state) => state.record(elapsed_ns),
-        Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner().record(elapsed_ns),
-        Err(TryLockError::WouldBlock) => {
-            let _ = MATCHER_DROPPED_SAMPLES.fetch_update(
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-                |count| Some(count.saturating_add(1)),
-            );
-        }
-    }
+    record_matcher(elapsed_ns);
     result
 }
 
@@ -186,11 +222,14 @@ fn measure<T>(mode: usize, size: usize, operation: impl FnOnce() -> T) -> T {
     let started = Instant::now();
     let outcome = operation();
     let elapsed_ns = started.elapsed().as_nanos().min(u64::MAX as u128) as u64;
-    record(elapsed_ns);
-    let mut profiles = profile_windows()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    profiles.windows[mode][size].record(elapsed_ns);
+    record_nonblocking(window(), elapsed_ns, &OUTPUT_DROPPED_SAMPLES);
+    match profile_windows().try_lock() {
+        Ok(mut profiles) => profiles.windows[mode][size].record(elapsed_ns),
+        Err(TryLockError::Poisoned(poisoned)) => {
+            poisoned.into_inner().windows[mode][size].record(elapsed_ns)
+        }
+        Err(TryLockError::WouldBlock) => increment_saturating(&PROFILE_DROPPED_SAMPLES),
+    }
     outcome
 }
 
@@ -220,14 +259,30 @@ fn output_size_bucket(chars: usize) -> usize {
 /// output mode and replacement size. Empty profiles are omitted so ordinary
 /// deployments do not carry misleading zero-valued measurements.
 pub fn profiles_json() -> String {
-    let mut profiles = profile_windows()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    static CACHE: OnceLock<Mutex<String>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new("{}".to_owned()));
+    profiles_json_from(profile_windows(), cache)
+}
+
+fn profiles_json_from(source: &Mutex<ProfileWindows>, cache: &Mutex<String>) -> String {
+    let mut profiles = match source.try_lock() {
+        Ok(profiles) => profiles,
+        Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+        Err(TryLockError::WouldBlock) => {
+            return cache
+                .try_lock()
+                .map_or_else(|_| "{}".to_owned(), |cached| cached.clone());
+        }
+    };
+    let snapshots: [[Snapshot; 3]; 5] = std::array::from_fn(|mode| {
+        std::array::from_fn(|size| profiles.windows[mode][size].snapshot())
+    });
+    drop(profiles);
     let mut modes = serde_json::Map::new();
     for (mode_index, mode) in OUTPUT_MODES.iter().enumerate() {
         let mut sizes = serde_json::Map::new();
         for (size_index, size) in OUTPUT_SIZE_BUCKETS.iter().enumerate() {
-            let snapshot = profiles.windows[mode_index][size_index].snapshot();
+            let snapshot = snapshots[mode_index][size_index];
             if snapshot.window_count == 0 {
                 continue;
             }
@@ -247,7 +302,11 @@ pub fn profiles_json() -> String {
             modes.insert((*mode).to_owned(), serde_json::Value::Object(sizes));
         }
     }
-    serde_json::Value::Object(modes).to_string()
+    let serialized = serde_json::Value::Object(modes).to_string();
+    if let Ok(mut cached) = cache.try_lock() {
+        *cached = serialized.clone();
+    }
+    serialized
 }
 
 /// Record a very slow sample in every profile window, so status-size tests
@@ -318,6 +377,73 @@ mod tests {
         assert_eq!(measure_matcher(|| 42), 42);
         assert_eq!(matcher_dropped_samples(), dropped_before + 1);
         guard.record(1_000);
+    }
+
+    #[test]
+    fn output_measurement_drops_contended_samples_instead_of_waiting() {
+        let aggregate = window().lock().unwrap();
+        let profiles = profile_windows().lock().unwrap();
+        let output_dropped_before = output_dropped_samples();
+        let profiles_dropped_before = profile_dropped_samples();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            sender.send(measure(0, 0, || 17)).unwrap();
+        });
+
+        assert_eq!(
+            receiver.recv_timeout(Duration::from_millis(100)),
+            Ok(17),
+            "recording must return while diagnostics holds both metric locks"
+        );
+        drop(aggregate);
+        drop(profiles);
+        worker.join().unwrap();
+        assert!(output_dropped_samples() > output_dropped_before);
+        assert!(profile_dropped_samples() > profiles_dropped_before);
+    }
+
+    #[test]
+    fn snapshot_reads_fall_back_to_the_last_cached_value_without_waiting() {
+        let source = std::sync::Arc::new(Mutex::new(Window::default()));
+        let cache = Mutex::new(Snapshot {
+            sample_count: 8,
+            window_count: 3,
+            p50_us: 4,
+            p95_us: 7,
+            p99_us: 8,
+            mean_us: 5,
+        });
+        let source_guard = source.lock().unwrap();
+        let source_for_worker = std::sync::Arc::clone(&source);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            sender
+                .send(nonblocking_snapshot(&source_for_worker, &cache))
+                .unwrap();
+        });
+        let result = receiver.recv_timeout(Duration::from_millis(100));
+        drop(source_guard);
+        assert_eq!(result.unwrap().sample_count, 8);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn profile_snapshot_uses_cached_json_when_the_window_is_contended() {
+        let source = std::sync::Arc::new(Mutex::new(ProfileWindows::default()));
+        let cache = std::sync::Arc::new(Mutex::new("{\"last\":1}".to_owned()));
+        let source_guard = source.lock().unwrap();
+        let source_for_worker = std::sync::Arc::clone(&source);
+        let cache_for_worker = std::sync::Arc::clone(&cache);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            sender
+                .send(profiles_json_from(&source_for_worker, &cache_for_worker))
+                .unwrap();
+        });
+        let result = receiver.recv_timeout(Duration::from_millis(100));
+        drop(source_guard);
+        assert_eq!(result.unwrap(), "{\"last\":1}");
+        worker.join().unwrap();
     }
 
     #[test]

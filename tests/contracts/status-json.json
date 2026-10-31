@@ -1,6 +1,6 @@
 {
   "schema_version": 10,
-  "daemon_control_schema": 14,
+  "daemon_control_schema": 15,
   "fields": {
     "response": "string",
     "source": "string",
@@ -44,6 +44,8 @@
     "injection_latency_p50_us": "integer",
     "injection_latency_p95_us": "integer",
     "injection_latency_p99_us": "integer",
+    "injection_latency_dropped_total": "integer",
+    "injection_latency_profile_dropped_total": "integer",
     "injection_latency_profiles": "object",
     "matcher_latency_sample_count": "integer",
     "matcher_latency_window_count": "integer",

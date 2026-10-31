@@ -520,7 +520,7 @@ side never counts as a match (`commit_matches` is then `false`).
   "backend": "input-method-v2",
   "route_id": "input-method-v2",
   "backend_mode": "unknown",
-  "status_schema": 14,
+  "status_schema": 15,
   "daemon_commit": "example-commit",
   "state": "connected",
   "paused": false,
@@ -564,6 +564,8 @@ side never counts as a match (`commit_matches` is then `false`).
   "injection_latency_p50_us": 0,
   "injection_latency_p95_us": 0,
   "injection_latency_p99_us": 0,
+  "injection_latency_dropped_total": 0,
+  "injection_latency_profile_dropped_total": 0,
   "injection_latency_profiles": {},
   "matcher_latency_sample_count": 0,
   "matcher_latency_window_count": 0,
@@ -613,7 +615,7 @@ side never counts as a match (`commit_matches` is then `false`).
 - `backend` (string): Active output backend (`"input-method-v2"`, `"wlroots-virtual-keyboard"`, `"libei"`, ...)
 - `route_id` (string): Canonical capture/injection route ID from the shared route catalog; `"stdin-test"` identifies the stdin harness, and `"unknown"` means the active pair has no catalog entry. Consumers should use this field instead of reconstructing route identity from `source` and `backend`.
 - `backend_mode` (string): Negotiated backend capability detail. Libei reports either `"ei_text (UTF-8 insertion)"` or `"ei_keyboard keysym fallback (12ms key pacing)"`; it is `"unknown"` before a backend has negotiated a mode or for backends without submodes.
-- `status_schema` (integer): Version of the daemon status contract. Certification requires a matching schema before treating runtime capabilities as current; missing or different values mean the daemon should be restarted/updated. Schema 11 adds canonical `route_id`; schema 12 adds usage-event recorded, persisted, and dropped counters; schema 13 adds precise `replacement_assurance`; schema 14 adds the count of matcher-latency samples skipped to avoid blocking input on diagnostics contention.
+- `status_schema` (integer): Version of the daemon status contract. Certification requires a matching schema before treating runtime capabilities as current; missing or different values mean the daemon should be restarted/updated. Schema 11 adds canonical `route_id`; schema 12 adds usage-event recorded, persisted, and dropped counters; schema 13 adds precise `replacement_assurance`; schema 14 adds matcher-latency dropped-sample reporting; schema 15 adds aggregate and per-mode output-latency dropped-sample reporting.
 - `state` (string): Backend connection state (e.g. `"connected"`, `"reconnecting"`)
 - `paused` (bool): Whether expansion matching is currently disabled
 - `config` (string): Path to the active configuration file
@@ -639,6 +641,8 @@ side never counts as a match (`commit_matches` is then `false`).
 - `injection_latency_window_count` (integer): Number of most recent apply attempts used for the rolling percentile window (maximum 1,024)
 - `injection_latency_mean_us` (integer): Mean synchronous backend apply duration across the rolling latency window, in microseconds
 - `injection_latency_p50_us`, `injection_latency_p95_us`, `injection_latency_p99_us` (integers): Nearest-rank percentiles of synchronous backend apply duration, in microseconds
+- `injection_latency_dropped_total` (integer): Output timing samples skipped because a diagnostics snapshot held the aggregate recording lock; recording is best-effort and never waits for the lock
+- `injection_latency_profile_dropped_total` (integer): Per-mode output timing samples skipped because a diagnostics snapshot held the profile recording lock; recording is best-effort and never waits for the lock
 - `injection_latency_profiles` (object): Non-empty rolling percentile profiles keyed by negotiated output mode (`ei_text`, `libei_keysym_fallback`, `input_method_v2`, `wlroots_virtual_keyboard`, or `other`) and replacement-size bucket (`small` ≤32, `medium` 33–256, `large` >256 Unicode scalar values). Each profile contains `sample_count`, `window_count`, and p50/p95/p99 microsecond values; empty profiles are omitted.
 - `matcher_latency_sample_count` (integer): Lifetime count of matcher timing samples recorded; contended samples are reported separately
 - `matcher_latency_window_count` (integer): Number of recent matcher samples used for percentiles (maximum 1,024)

@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Make aggregate and per-route output latency recording nonblocking, matching
+  the matcher recorder. Status readers also use nonblocking snapshots with
+  last-known caches, so a metrics lock cannot stall the reactor. Expose skipped
+  output samples in status, bump the status schema to 15, and allow the bounded
+  status payload to use up to 12 KiB.
+
 - Process daemon key events with a borrowed `KeyChord`, avoiding the owned
   chord clone and its string allocation while preserving key-state and undo
   invalidation behavior.

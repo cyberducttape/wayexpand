@@ -1199,3 +1199,25 @@ pass with both default parallel scheduling and `RUST_TEST_THREADS=1`; the full
   209 daemon tests passed.
 - `cargo clippy --locked -p wayexpand-core -p wayexpand-daemon --all-targets
   -- -D warnings`, `cargo fmt --all -- --check`, and `git diff --check`: passed.
+
+
+## Nonblocking latency instrumentation: 2026-10-30
+
+- Confirmed the matcher recorder was already best-effort and nonblocking.
+  Changed aggregate injection and segmented profile recording to `try_lock`;
+  contended samples are dropped and counted independently.
+- Changed aggregate, matcher, and profile status snapshots to avoid blocking
+  metrics locks. Snapshot readers use cached values when a writer owns the
+  window; the one-second percentile refresh remains unchanged, and profile JSON
+  is serialized after releasing its window lock.
+- Added regression tests that hold metric locks while recording or reading and
+  verify calls return without waiting and dropped-sample counters advance.
+- Exposed `injection_latency_dropped_total` and
+  `injection_latency_profile_dropped_total`, updated the stable status contract,
+  and bumped the daemon status schema to 15. Increased the shared bounded
+  control response cap from 8 KiB to 12 KiB after the expanded status crossed
+  the previous cap in saturated-profile tests.
+- `RUST_TEST_THREADS=1 cargo test --locked -p wayexpand-core -p
+  wayexpand-daemon -p wayexpand-gui -p wayexpand --quiet`: 467 core tests
+  passed (2 ignored), 2 core config-doc tests and snapshot consistency passed,
+  212 daemon tests passed, 174 GUI tests passed, and 131 CLI tests passed.
