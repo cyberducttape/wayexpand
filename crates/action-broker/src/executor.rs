@@ -22,18 +22,23 @@ use std::sync::{
     Arc,
 };
 use std::time::{Duration, Instant};
+use tokio::sync::Mutex as AsyncMutex;
 #[cfg(unix)]
 use wayexpand_process_supervisor::configure_process_group;
 
 pub struct ActionExecutor {
     config: BrokerConfig,
+    authorization_prompt: AsyncMutex<()>,
 }
 
 impl ActionExecutor {
     pub fn new(config: &BrokerConfig) -> Result<Self, Box<dyn std::error::Error>> {
         let mut config = config.clone();
         config.validate_and_canonicalize()?;
-        Ok(Self { config })
+        Ok(Self {
+            config,
+            authorization_prompt: AsyncMutex::new(()),
+        })
     }
 
     /// Resolve the effective timeout: the broker config is the upper bound,
@@ -46,6 +51,7 @@ impl ActionExecutor {
     }
 
     /// Execute an action with process-group containment and policy enforcement.
+    #[cfg(test)]
     pub async fn execute(&self, request: ActionRequest) -> Result<ActionResponse, ActionError> {
         self.execute_inner(request, None).await
     }
@@ -53,11 +59,74 @@ impl ActionExecutor {
     /// Execute an action that can be cancelled when the broker begins
     /// shutdown. The process-group supervisor kills and reaps the action
     /// before returning, allowing the broker to audit the cancellation.
+    #[cfg(test)]
     pub async fn execute_cancellable(
         &self,
         request: ActionRequest,
         shutdown: Arc<AtomicBool>,
     ) -> Result<ActionResponse, ActionError> {
+        self.execute_inner(request, Some(shutdown)).await
+    }
+
+    /// Authorize the authenticated socket peer for this specific action with
+    /// the active desktop's polkit authority before entering the executor.
+    /// Authorization is intentionally non-cached: each invocation requires
+    /// fresh active-session authentication under the packaged policy.
+    pub async fn execute_authorized_cancellable(
+        &self,
+        request: ActionRequest,
+        peer: &crate::ipc::PeerIdentity,
+        shutdown: Arc<AtomicBool>,
+    ) -> Result<ActionResponse, ActionError> {
+        let action_id = request.action_id.clone();
+        if !valid_action_id(&action_id) {
+            return Err(ActionError::ActionNotFound { action_id });
+        }
+        let Some(action) = self.config.get_action(&action_id) else {
+            return Err(ActionError::ActionNotFound { action_id });
+        };
+        if !action.is_enabled() {
+            return Err(ActionError::ActionBlocked {
+                action_id,
+                reason: "action is disabled".into(),
+            });
+        }
+        if let Err(reason) = action.arguments_for(&request.parameters) {
+            return Err(ActionError::ActionBlocked {
+                action_id,
+                reason: format!("action parameters rejected: {reason}"),
+            });
+        }
+        if request.timeout_ms == 0 {
+            return Err(ActionError::ActionBlocked {
+                action_id,
+                reason: "request timeout_ms must be > 0".into(),
+            });
+        }
+        let Some(pid) = peer.pid else {
+            return Err(authorization_denied(&action_id));
+        };
+        let Some(start_time) = peer.start_time else {
+            return Err(authorization_denied(&action_id));
+        };
+        if peer.uid != rustix::process::geteuid().as_raw() {
+            return Err(authorization_denied(&action_id));
+        }
+        let Ok(_prompt) = self.authorization_prompt.try_lock() else {
+            return Err(ActionError::ActionBlocked {
+                action_id,
+                reason: "another action authorization is in progress".into(),
+            });
+        };
+        if shutdown.load(Ordering::Acquire) {
+            return Err(ActionError::CommunicationError {
+                reason: "broker is shutting down; action was not started".into(),
+            });
+        }
+        if !polkit_authorized(pid, start_time, peer.uid, &request.action_id, &shutdown).await {
+            return Err(authorization_denied(&request.action_id));
+        }
+        drop(_prompt);
         self.execute_inner(request, Some(shutdown)).await
     }
 
@@ -361,6 +430,104 @@ impl ActionExecutor {
         }
         map
     }
+}
+
+pub(crate) fn valid_action_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= crate::protocol::MAX_ACTION_ID_BYTES
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+}
+
+fn authorization_denied(action_id: &str) -> ActionError {
+    ActionError::ActionBlocked {
+        action_id: action_id.to_string(),
+        reason: "caller was not authorized by the active desktop session".into(),
+    }
+}
+
+#[cfg(target_os = "linux")]
+async fn polkit_authorized(
+    pid: u32,
+    start_time: u64,
+    uid: u32,
+    action_id: &str,
+    shutdown: &AtomicBool,
+) -> bool {
+    let helper = trusted_pkcheck_path();
+    let Some(helper) = helper else { return false };
+    run_pkcheck(&helper, pid, start_time, uid, action_id, shutdown).await
+}
+
+#[cfg(target_os = "linux")]
+fn trusted_pkcheck_path() -> Option<std::path::PathBuf> {
+    use std::os::unix::fs::MetadataExt;
+    ["/usr/bin/pkcheck", "/bin/pkcheck"]
+        .into_iter()
+        .find_map(|path| {
+            let (file, canonical) =
+                crate::path_security::open_validated_program("polkit", path).ok()?;
+            (file.metadata().ok()?.uid() == 0).then_some(canonical)
+        })
+}
+
+#[cfg(target_os = "linux")]
+async fn run_pkcheck(
+    helper: &std::path::Path,
+    pid: u32,
+    start_time: u64,
+    uid: u32,
+    action_id: &str,
+    shutdown: &AtomicBool,
+) -> bool {
+    use tokio::process::Command as TokioCommand;
+
+    const POLKIT_ACTION: &str = "org.wayexpand.execute-action";
+    let subject = format!("{pid},{start_time},{uid}");
+    let mut child = match TokioCommand::new(helper)
+        .arg("--action-id")
+        .arg(POLKIT_ACTION)
+        .arg("--process")
+        .arg(subject)
+        .arg("--allow-user-interaction")
+        .arg("--detail")
+        .arg("action_id")
+        .arg(action_id)
+        .env_clear()
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(_) => return false,
+    };
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+    loop {
+        if shutdown.load(Ordering::Acquire) || tokio::time::Instant::now() >= deadline {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            return false;
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) => tokio::time::sleep(Duration::from_millis(50)).await,
+            Err(_) => return false,
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn polkit_authorized(
+    _pid: u32,
+    _start_time: u64,
+    _uid: u32,
+    _action_id: &str,
+    _shutdown: &AtomicBool,
+) -> bool {
+    false
 }
 
 /// Some filesystems briefly return ETXTBSY when an executable is atomically
@@ -1128,6 +1295,59 @@ mod tests {
             stdout_capture: true,
             parameters: std::collections::BTreeMap::new(),
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn authorized_executor_refuses_peer_without_kernel_process_identity() {
+        let executor = ActionExecutor::new(&timeout_test_config(1000)).unwrap();
+        let peer = crate::ipc::PeerIdentity {
+            pid: None,
+            start_time: None,
+            uid: rustix::process::geteuid().as_raw(),
+            executable: None,
+        };
+        let error = executor
+            .execute_authorized_cancellable(
+                timeout_test_request(1000),
+                &peer,
+                Arc::new(AtomicBool::new(false)),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(error, ActionError::ActionBlocked { .. }));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn polkit_helper_success_is_required_and_denial_fails_closed() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-pkcheck-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let helper = directory.join("pkcheck");
+        let shutdown = AtomicBool::new(false);
+
+        for (script, expected) in [
+            ("#!/bin/sh\nexit 0\n", true),
+            ("#!/bin/sh\nexit 1\n", false),
+        ] {
+            std::fs::write(&helper, script).unwrap();
+            std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o700)).unwrap();
+            assert_eq!(
+                run_pkcheck(&helper, 123, 456, 789, "cluster.read", &shutdown).await,
+                expected
+            );
+        }
+        let _ = std::fs::remove_dir_all(directory);
     }
 
     #[test]

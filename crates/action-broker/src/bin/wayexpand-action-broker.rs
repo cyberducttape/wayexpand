@@ -765,7 +765,7 @@ async fn run() -> Result<()> {
             let action_started = Instant::now();
             let mut action_response = if audit_start_recorded {
                 match executor
-                    .execute_cancellable(request, shutdown_requested)
+                    .execute_authorized_cancellable(request, &peer, shutdown_requested)
                     .await
                 {
                     Ok(output) => output,

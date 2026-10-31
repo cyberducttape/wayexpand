@@ -74,6 +74,8 @@ override_dh_install:
 	install -Dm644 scripts/kwin-e2e-report.sh debian/wayexpand/usr/libexec/wayexpand-certification/kwin-e2e-report.sh
 	dh_install --package=wayexpand desktop/wayexpand-ibus.xml usr/share/ibus/component/
 	dh_install --package=wayexpand desktop/wayexpand.desktop usr/share/applications/
+	install -Dm644 polkit/org.wayexpand.action.policy \
+		debian/wayexpand/usr/share/polkit-1/actions/org.wayexpand.action.policy
 	dh_install --package=wayexpand io.github.cyberducttape.WayExpand.metainfo.xml usr/share/metainfo/
 	dh_install --package=wayexpand docs/wayexpand.1 usr/share/man/man1/
 	dh_install --package=wayexpand assets/icon/hicolor/16x16/apps/wayexpand.png usr/share/icons/hicolor/16x16/apps/

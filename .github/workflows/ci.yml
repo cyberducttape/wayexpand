@@ -586,6 +586,7 @@ jobs:
           mkdir -p "$source_dir" "$top/rpmbuild/SOURCES"
           git archive --format=tar "HEAD^{tree}" | tar -x -C "$source_dir"
           test -f "$source_dir/docs/wayexpand.1"
+          test -f "$source_dir/polkit/org.wayexpand.action.policy"
           source_commit=$(git rev-parse --short=12 HEAD)
           mkdir -p "$source_dir/debian"
           printf '%s\n' "$source_commit" > "$source_dir/debian/wayexpand-build-sha"
@@ -604,6 +605,7 @@ jobs:
           for path in \
             '/usr/bin/wayexpand-install-evdev-access' \
             '/etc/wayexpand/expansions.toml.example' \
+            '/usr/share/polkit-1/actions/org.wayexpand.action.policy' \
             '/usr/lib/systemd/user/wayexpand-evdev.service' \
             '/usr/share/wayexpand/udev/71-wayexpand-evdev.rules' \
             '/usr/share/wayexpand/udev/69-wayexpand-evdev-uaccess.rules'; do
@@ -612,6 +614,8 @@ jobs:
           rpm -qlp "$rpm" | grep -E '^/usr/share/man/man1/wayexpand\.1(\.gz)?$'
           deb_root=$(mktemp -d)
           dpkg-deb -x "$deb" "$deb_root"
+          grep -F 'id="org.wayexpand.execute-action"' \
+            "$deb_root/usr/share/polkit-1/actions/org.wayexpand.action.policy"
           grep -Fx 'ExecStart=/usr/bin/wayexpand-daemon --source=input-method' \
             "$deb_root/usr/lib/systemd/user/wayexpand-input-method.service"
           grep -Fx 'ExecStart=/usr/bin/wayexpand-daemon --source=evdev --backend=libei --allow-evdev-sensitive-fields' \
@@ -620,6 +624,8 @@ jobs:
             "$deb_root/usr/lib/systemd/user/wayexpand-action-broker.service"
           rpm_root=$(mktemp -d)
           (cd "$rpm_root" && rpm2cpio "$rpm" | cpio -idm --quiet)
+          grep -F 'id="org.wayexpand.execute-action"' \
+            "$rpm_root/usr/share/polkit-1/actions/org.wayexpand.action.policy"
           grep -Fx 'ExecStart=/usr/bin/wayexpand-daemon --source=input-method' \
             "$rpm_root/usr/lib/systemd/user/wayexpand-input-method.service"
           grep -Fx 'ExecStart=/usr/bin/wayexpand-daemon --source=evdev --backend=libei --allow-evdev-sensitive-fields' \

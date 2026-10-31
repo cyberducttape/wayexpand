@@ -22,6 +22,7 @@ optdepends=(
     'kwin: for isolated headless compositor certification'
     'jq: for the isolated certification harness'
     'wl-clipboard: for the certification harness clipboard scenarios'
+    'polkit: for action-specific authorization of broker actions'
 )
 source=("https://github.com/cyberducttape/wayexpand/releases/download/v1.3.3/wayexpand-1.3.3.tar.gz")
 sha256sums=('6c240d77090e8c93c8137ae679aab13aaaaa6df80b48bec85cad6f459df19451')
@@ -62,6 +63,8 @@ package() {
 
     # Install desktop entry
     install -Dm644 desktop/wayexpand.desktop "${pkgdir}/usr/share/applications/wayexpand.desktop"
+    install -Dm644 polkit/org.wayexpand.action.policy \
+        "${pkgdir}/usr/share/polkit-1/actions/org.wayexpand.action.policy"
     install -Dm644 desktop/wayexpand-ibus.xml "${pkgdir}/usr/share/ibus/component/wayexpand-ibus.xml"
     install -Dm644 io.github.cyberducttape.WayExpand.metainfo.xml \
         "${pkgdir}/usr/share/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml"

@@ -109,8 +109,16 @@ overridden by an IPC client. Use `client_forward_env` only for values that a
 same-UID client is explicitly allowed to provide. Loader and interpreter
 variables such as `LD_PRELOAD`, `LD_LIBRARY_PATH`, `PYTHONPATH`, `PERL5LIB`,
 `RUBYOPT`, `BASH_ENV`, `ENV`, and `PATH` are rejected unless an action opts into
-`allow_dangerous_env = true`. The broker authenticates the peer UID; it is not
-a sandbox against compromised software running as the same desktop user.
+`allow_dangerous_env = true`. Socket peer credentials identify the connecting
+process, but UID equality alone does not authorize an action. Before every
+execution, the broker asks the active desktop's polkit authority to authorize
+that kernel-identified PID, process start time, UID, and action ID. The
+packaged policy requires fresh active-session authentication and names the
+action in the prompt. Execution is denied if polkit, its policy, or an
+authentication agent is unavailable, if the request is dismissed, or if the
+check times out. Concurrent authorization prompts are rejected. This is an
+explicit user-consent gate, not isolation from malware running under the same
+UID; a user can still approve a deceptive request.
 
 When a request does not capture output (`stdout_capture = false`), the
 action's stdout and stderr go to `/dev/null`. Command output can contain
@@ -227,6 +235,11 @@ To build the standalone broker from a checkout:
 
 The packaged user service uses `~/.config/wayexpand/broker.toml` and
 `$XDG_RUNTIME_DIR/wayexpand-broker.sock`; enable it after creating that policy.
+Debian, RPM, and Arch packages install `org.wayexpand.execute-action` polkit
+policy. A manual user-local install requires an administrator to install
+`polkit/org.wayexpand.action.policy` in the system polkit actions directory;
+without it, broker actions fail closed. Every invocation asks for fresh
+active-session authentication, including actions triggered by snippets.
 The packaged unit restricts the broker and its child actions to `AF_UNIX`, uses
 `IPAddressDeny=any`, denies high-risk syscall groups, uses
 `ProtectSystem=strict`, and exposes only the configuration, runtime socket, and
@@ -316,10 +329,10 @@ namespaces. Validate the setting by starting a transient user unit on each
 supported distribution before making it mandatory; a unit-file syntax check
 cannot prove the namespace can be created. Custom service launches should keep
 service-level network controls and must not treat per-action Landlock as a
-replacement for a device namespace. The broker trusts
-software running under its own UID, including the user who can edit the broker
-policy; neither Landlock nor authenticated IPC is a boundary against malicious
-same-UID software.
+replacement for a device namespace. Landlock and authenticated IPC are not
+boundaries against malicious same-UID software. The polkit check adds a fresh,
+action-specific user-consent gate; it does not provide automatic trusted-app
+identification.
 
 ### Daemon routing configuration
 

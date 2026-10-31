@@ -9,6 +9,7 @@ trap 'if [ "$broker_pid" -ne 0 ]; then kill "$broker_pid" 2>/dev/null || true; w
 
 config="$test_root/broker.toml"
 socket="$test_root/broker.sock"
+action_marker="$test_root/action-ran"
 cat >"$config" <<EOF
 [broker]
 require_absolute_paths = true
@@ -16,8 +17,8 @@ strict_env = true
 audit_path = "$test_root/action-audit.jsonl"
 
 [actions."integration-echo"]
-program = "/bin/sh"
-args = ["-c", "sleep 0.2; printf broker-e2e-pass"]
+program = "/usr/bin/touch"
+args = ["$action_marker"]
 timeout_ms = 2000
 enabled = true
 EOF
@@ -54,23 +55,20 @@ request = {
     "stdout_capture": True,
 }
 client.sendall((json.dumps(request) + "\n").encode())
-# Exercise graceful shutdown while the connection task still owns the audit
-# logger and is waiting for the action subprocess. The broker must await that
-# task before dropping the logger and exiting.
-time.sleep(0.05)
-os.kill(int(os.environ["BROKER_PID"]), signal.SIGTERM)
 response = json.loads(client.makefile("rb").readline())
 client.close()
 assert response == {
     "Error": {
-        "CommunicationError": {
-            "reason": "action was cancelled because the broker is shutting down"
+        "ActionBlocked": {
+            "action_id": "integration-echo",
+            "reason": "caller was not authorized by the active desktop session"
         }
     }
 }, response
 PY
 
-wait "$broker_pid"
+kill "$broker_pid"
+wait "$broker_pid" || true
 broker_pid=0
 
 AUDIT_FILE="$test_root/action-audit.jsonl" python3 - <<'PY'
@@ -79,12 +77,14 @@ import os
 
 with open(os.environ["AUDIT_FILE"], encoding="utf-8") as audit:
     events = [json.loads(line) for line in audit if line.strip()]
-cancelled = [event for event in events if event["action_id"] == "integration-echo"]
-assert len(cancelled) == 1, events
-assert cancelled[0]["exit_status"] is None, cancelled[0]
-assert cancelled[0]["timed_out"] is False, cancelled[0]
-assert cancelled[0]["output_size"] == 0, cancelled[0]
+denied = [event for event in events if event["action_id"] == "integration-echo"]
+assert len(denied) == 1, events
+assert denied[0]["event_type"] == "action_completed", denied[0]
+assert denied[0]["exit_status"] is None, denied[0]
+assert denied[0]["timed_out"] is False, denied[0]
+assert denied[0]["output_size"] == 0, denied[0]
 PY
+test ! -e "$action_marker"
 
 HEALTH_FILE="$test_root/wayexpand-broker-health.json" python3 - <<'PY'
 import json

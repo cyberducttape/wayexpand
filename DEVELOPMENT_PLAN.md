@@ -7,6 +7,30 @@ milestone is complete only when its acceptance evidence is recorded in
 
 ## Release gates, in priority order
 
+### P1 — Require OS-mediated consent for broker actions
+
+**Status:** Implemented; package builds, hosted CI, and an interactive desktop
+authorization run are still required.
+
+The broker now verifies each requested action with polkit using the socket
+peer's kernel-reported PID, process start time, and UID. The packaged action
+requires fresh active-session authentication and reports the configured action
+ID in the prompt. Missing policy or an unavailable authentication agent fails
+closed. This adds explicit user consent; it does not claim to isolate
+same-UID applications or identify WayExpand through a pathname.
+
+Acceptance criteria:
+
+- No action reaches the executor unless polkit authorizes the exact socket
+  peer and configured action ID.
+- Invalid/unknown/disabled actions do not create authorization prompts.
+- Denial, timeout, broker shutdown, missing policy, and unavailable polkit
+  prevent execution.
+- Debian, RPM, and release instructions deliver or explain system policy
+  installation; package tests inspect the installed action policy.
+- An interactive desktop run confirms the prompt identifies the action and
+  ordinary snippets still work without a broker.
+
 ### P1 — Require broker-mediated actions in managed profiles
 
 **Status:** Implemented with regression coverage; managed deployment adoption

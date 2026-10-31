@@ -269,6 +269,11 @@ printf '%s\n' "  # If named actions are configured, edit $config_dir/broker.toml
 printf '%s\n' "  systemctl --user enable --now wayexpand-action-broker.service"
 printf '%s\n' "  wayexpand explain-backend"
 printf '%s\n' "  wayexpand edit"
+if [ -f "$release_dir/polkit/org.wayexpand.action.policy" ] &&
+    [ ! -f /usr/share/polkit-1/actions/org.wayexpand.action.policy ]; then
+    printf '%s\n' "Broker actions require administrator installation of the polkit policy:"
+    printf '%s\n' "  sudo install -m 0644 \"$release_dir/polkit/org.wayexpand.action.policy\" /usr/share/polkit-1/actions/"
+fi
 printf '%s\n' "Setup never grants raw-input permissions or portal consent. If it reports"
 printf '%s\n' "no safe automatic path, review doctor and the documented explicit modes."
 printf '%s\n' "To remove this installation later, run scripts/uninstall-user.sh."

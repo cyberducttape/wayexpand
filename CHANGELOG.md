@@ -4,6 +4,17 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Require action-specific polkit authorization before every Action Broker
+  execution. The broker binds authorization to the Unix peer's kernel-reported
+  PID, process start time, and UID, requires fresh active-session
+  authentication, and denies requests when authorization is unavailable or
+  fails. The action ID shown in the prompt is restricted to safe ASCII
+  characters. Debian, RPM, and Arch packages now install the polkit policy;
+  manual installs must have an administrator install it or broker actions
+  remain disabled. This is an explicit consent gate, not same-UID process
+  isolation.
+  Add tests for missing peer identity, process start-time parsing, safe action
+  IDs, and package policy inclusion.
 - Add the administrator policy `require_broker_actions`: in enforced safe mode,
   direct executable snippets and hotkeys are rejected during validation and
   again at expansion, hotkey queue, direct hotkey execution, and GUI preview

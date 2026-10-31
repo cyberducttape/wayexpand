@@ -73,8 +73,31 @@ pub struct BrokerServer {
 #[derive(Debug, Clone)]
 pub struct PeerIdentity {
     pub pid: Option<u32>,
+    /// `/proc/<pid>/stat` start time in clock ticks. Paired with PID to prevent
+    /// PID-reuse races when polkit checks this exact Unix process.
+    pub start_time: Option<u64>,
     pub uid: u32,
     pub executable: Option<String>,
+}
+
+#[cfg(target_os = "linux")]
+fn process_start_time(stat: &str) -> Option<u64> {
+    // The parenthesized comm field may itself contain spaces or `)`, so split
+    // at its final closing delimiter. The remaining fields begin at field 3;
+    // starttime is field 22 (index 19 in that suffix).
+    let (_, fields) = stat.rsplit_once(") ")?;
+    fields.split_whitespace().nth(19)?.parse().ok()
+}
+
+#[cfg(target_os = "linux")]
+fn read_process_start_time(pid: libc::pid_t) -> Result<u64, std::io::Error> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat"))?;
+    process_start_time(&stat).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "could not determine peer process start time",
+        )
+    })
 }
 
 #[cfg(target_os = "linux")]
@@ -110,8 +133,9 @@ fn peer_identity(stream: &UnixStream) -> Result<PeerIdentity, std::io::Error> {
         return Err(std::io::Error::last_os_error());
     }
     validate_peer_credential_length(length)?;
-    // SO_PEERCRED authenticates the Unix identity, not the calling process's
-    // intent. Same-UID applications are inside the broker's trust boundary.
+    // SO_PEERCRED supplies the identity polkit must authorize. UID equality
+    // alone is not action authorization; every request receives a separate
+    // action-specific polkit check before execution.
     if credentials.uid != rustix::process::geteuid().as_raw() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
@@ -123,6 +147,7 @@ fn peer_identity(stream: &UnixStream) -> Result<PeerIdentity, std::io::Error> {
         .map(|path| path.to_string_lossy().into_owned());
     Ok(PeerIdentity {
         pid: u32::try_from(credentials.pid).ok(),
+        start_time: Some(read_process_start_time(credentials.pid)?),
         uid: credentials.uid,
         executable,
     })
@@ -132,6 +157,7 @@ fn peer_identity(stream: &UnixStream) -> Result<PeerIdentity, std::io::Error> {
 fn peer_identity(_stream: &UnixStream) -> Result<PeerIdentity, std::io::Error> {
     Ok(PeerIdentity {
         pid: None,
+        start_time: None,
         uid: rustix::process::geteuid().as_raw(),
         executable: None,
     })
@@ -518,6 +544,17 @@ mod bounded_frame_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn process_start_time_parses_comm_with_spaces_and_parentheses() {
+        let mut fields = vec!["S".to_string()];
+        fields.extend((3..=21).map(|value| value.to_string()));
+        fields[19] = "987654".into(); // field 22, starttime
+        let stat = format!("42 (worker ) with spaces) {}", fields.join(" "));
+        assert_eq!(process_start_time(&stat), Some(987654));
+        assert_eq!(process_start_time("42 (truncated) S"), None);
+    }
     use crate::protocol::ActionOutput;
     use std::{
         thread,
@@ -696,6 +733,7 @@ mod tests {
             stream: server_stream,
             peer: PeerIdentity {
                 pid: None,
+                start_time: None,
                 uid: 0,
                 executable: None,
             },
@@ -735,6 +773,7 @@ mod tests {
             stream: server_stream,
             peer: PeerIdentity {
                 pid: None,
+                start_time: None,
                 uid: 0,
                 executable: None,
             },
@@ -785,6 +824,7 @@ mod tests {
             stream: server_stream,
             peer: PeerIdentity {
                 pid: None,
+                start_time: None,
                 uid: 0,
                 executable: None,
             },

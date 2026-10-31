@@ -2,6 +2,37 @@
 
 Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-31 UTC)
 
+## Action Broker caller authorization: 2026-10-31
+
+- Replaced UID-only dispatch authorization with a mandatory polkit check at the
+  executor entry point. The broker obtains the connecting process PID from
+  `SO_PEERCRED`, reads its `/proc/<pid>/stat` start time, and asks polkit to
+  authorize the exact PID/start-time/UID plus configured action ID. Unknown,
+  disabled, malformed, or invalid-parameter requests are rejected before a
+  prompt. The packaged policy requires fresh active-session authentication;
+  missing polkit, policy, or session authorization fails closed. Only one
+  authorization prompt runs at a time, with a two-minute deadline and shutdown
+  cancellation.
+- Added the policy to Debian, RPM, and Arch packages. Release and source user
+  installers print the administrator installation requirement. Action IDs are
+  restricted to ASCII letters, digits, period, underscore, and hyphen so the
+  requested action can be named safely in the polkit prompt. Updated broker
+  and threat-model docs to describe the consent gate and its limits.
+- Regression evidence: `cargo test --locked -p action-broker` passed (88
+  passed, 1 existing ignored sandbox probe; integration: 9 passed, 1 ignored
+  test requires interactive polkit consent). The polkit helper success/denial
+  path, missing process identity, action ID validation, and PID start-time
+  parsing are covered. `cargo clippy --locked -p action-broker --all-targets
+  -- -D warnings`, formatting, shell syntax, XML parsing, and
+  `scripts/test-action-broker-e2e.sh` passed. The end-to-end test confirms an
+  unauthorised request cannot create its action marker.
+- Remaining evidence: package builds and hosted CI have not yet run on this
+  change. A real desktop authorization prompt has not been exercised. One
+  existing SIGTERM integration scenario now requires a live interactive grant
+  and is ignored in headless tests; subprocess cancellation remains covered by
+  executor tests. Polkit consent is not automatic application identity or an
+  OS sandbox, and a user can still approve a deceptive request.
+
 ## Live KDE session health and library validation: 2026-10-31
 
 - Built release CLI and daemon binaries from commit `0446fd0ef4ff`; both

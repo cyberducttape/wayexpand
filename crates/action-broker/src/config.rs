@@ -494,8 +494,11 @@ impl BrokerConfig {
             validate_audit_path(path)?;
         }
         for (id, action) in &self.actions {
-            if id.is_empty() || id.len() > MAX_ACTION_ID_BYTES {
-                return Err(format!("action id must be 1-{} bytes", MAX_ACTION_ID_BYTES));
+            if !crate::executor::valid_action_id(id) {
+                return Err(format!(
+                    "action id must be 1-{} ASCII letters, digits, '.', '_' or '-'",
+                    MAX_ACTION_ID_BYTES
+                ));
             }
             action
                 .validate()
@@ -577,6 +580,33 @@ impl BrokerConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn action_ids_are_safe_for_polkit_prompt_details() {
+        let mut config = BrokerConfig::default();
+        config.actions.insert(
+            "cluster.read".into(),
+            ActionConfig {
+                parameters: std::collections::HashMap::new(),
+                sandbox: None,
+                program: "/usr/bin/true".into(),
+                args: vec![],
+                timeout_ms: 1000,
+                server_env: vec![],
+                client_forward_env: vec![],
+                allow_dangerous_env: false,
+                inherit_env: false,
+                cwd: None,
+                log_output: false,
+                enabled: true,
+                description: None,
+            },
+        );
+        assert!(config.validate().is_ok());
+        let action = config.actions.remove("cluster.read").unwrap();
+        config.actions.insert("cluster $(id)".into(), action);
+        assert!(config.validate().unwrap_err().contains("ASCII letters"));
+    }
 
     #[test]
     fn action_config_validation() {
