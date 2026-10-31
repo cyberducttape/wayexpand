@@ -32,6 +32,13 @@ Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-3
   and is ignored in headless tests; subprocess cancellation remains covered by
   executor tests. Polkit consent is not automatic application identity or an
   OS sandbox, and a user can still approve a deceptive request.
+- Initial hosted CI for `2e913e52` found one ShellCheck issue in the source
+  installer (`release_dir` versus `project_dir`); fixed and pushed in
+  `1be7f9d8`. The corrected CI then exposed the service-sandbox audit test's
+  old assumption that actions execute without consent. The test now verifies
+  denial, audit recording, and absence of its action marker; unit tests retain
+  the Landlock and process-cancellation coverage. CI is rerunning for this
+  follow-up.
 
 ## Live KDE session health and library validation: 2026-10-31
 

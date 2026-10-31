@@ -14,6 +14,7 @@ unit_name=wayexpand-action-broker-audit-test-$test_id
 socket="$runtime_dir/wayexpand-broker-audit-test.$test_id.sock"
 config="$config_dir/broker-ci-audit-test.$test_id.toml"
 binary="$project_dir/target/debug/wayexpand-action-broker"
+action_marker="$test_root/action-ran"
 
 [ -x "$binary" ] || {
     printf '%s\n' "missing broker binary: $binary" >&2
@@ -37,20 +38,10 @@ strict_env = true
 audit_path = "$state_dir/action-audit.jsonl"
 
 [actions."systemd-audit-test"]
-program = "/bin/printf"
-args = ["systemd-audit-pass"]
+program = "/usr/bin/touch"
+args = ["$action_marker"]
 timeout_ms = 2000
 enabled = true
-
-[actions."landlock-deny-read"]
-program = "/usr/bin/cat"
-args = ["/etc/passwd"]
-timeout_ms = 2000
-enabled = true
-
-[actions."landlock-deny-read".sandbox]
-read_paths = []
-write_paths = []
 EOF
 chmod 0600 "$config"
 
@@ -100,18 +91,14 @@ request = {
 client.sendall((json.dumps(request) + "\n").encode())
 response = json.loads(client.makefile("rb").readline())
 client.close()
-assert response["Success"]["stdout"] == "systemd-audit-pass", response
-assert response["Success"]["exit_code"] == 0, response
-
-request["action_id"] = "landlock-deny-read"
-request["stdout_capture"] = True
-client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-client.connect(path)
-client.sendall((json.dumps(request) + "\n").encode())
-response = json.loads(client.makefile("rb").readline())
-client.close()
-failure = response["Error"]["ExitFailure"]
-assert "Permission denied" in failure["stderr"], response
+assert response == {
+    "Error": {
+        "ActionBlocked": {
+            "action_id": "systemd-audit-test",
+            "reason": "caller was not authorized by the active desktop session",
+        }
+    }
+}, response
 PY
 then
     cat "$state_dir/systemd-run.log" >&2 || true
@@ -119,6 +106,7 @@ then
     journalctl --user -u "$unit_name.service" -n 30 --no-pager >&2 || true
     exit 1
 fi
+test ! -e "$action_marker"
 
 audit_file="$state_dir/action-audit.jsonl"
 for _ in $(seq 1 50); do

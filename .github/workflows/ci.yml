@@ -727,7 +727,7 @@ jobs:
         run: bash scripts/check-systemd-hardening.sh
       - name: Enforce libei token storage contract
         run: bash scripts/check-libei-token-paths.sh
-      - name: Test Action Broker audit under service sandbox
+      - name: Test denied Action Broker audit under service sandbox
         run: bash scripts/test-action-broker-systemd-audit.sh
 
   udev:
