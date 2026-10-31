@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Best-effort zeroize engine-owned typed input, Unicode matching scratch,
+  invalidated undo records, dropped command-cache entries, and prefetched
+  clipboard values. Avoid retaining undo text when undo is not configured,
+  and wipe owned text events after processing. Document remaining copies and
+  the limits of memory erasure.
 - Check Linux control-socket peer credentials against the daemon UID and add a
   root-managed `disable_control_socket_mutations` policy for deployments that
   need read-only socket access. The restriction denies inserts and lifecycle

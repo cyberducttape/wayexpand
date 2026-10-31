@@ -1777,3 +1777,30 @@ pass with both default parallel scheduling and `RUST_TEST_THREADS=1`; the full
   `Stephan Loesevitz <stephan.loesevitz@gmail.com>`. Its Launchpad sync, fuzz,
   and push workflows were still in progress and full CI was queued at the time
   this entry was written; hosted checks are not yet claimed as passing.
+
+## Best-effort sensitive-memory cleanup: 2026-10-31
+
+- Added explicit zeroization for the engine's live typed-character deque,
+  reusable Unicode matching scratch, evicted/backspaced characters, invalidated
+  undo copies, deferred trigger reservations, and command-cache values. Undo
+  text is no longer retained when no undo chord is configured.
+- Wipe owned text events after synchronous processing and prefetched clipboard
+  values after consumption, replacement, expiration, or shutdown. Command cache
+  expiration now clears entries on daemon reactor turns and uses a bounded
+  deadline index so expired command output is not retained indefinitely.
+- Added regressions that inspect retained backing allocations after buffer,
+  scratch, undo, clipboard, and shutdown cleanup, plus cache expiry coverage.
+- Documented scope and limitations in `SECURITY.md`: immutable configuration
+  and returned results, in-flight data, stack/register copies, allocator/OS
+  copies, and GUI processes outside the shipped systemd units are not covered
+  by these targeted wipes. All four shipped units already set `LimitCORE=0`.
+- Verification: `RUST_TEST_THREADS=1 cargo test --workspace --locked --quiet`
+  passed on the current toolchain and Rust 1.92 (core: 475 passed, 2 ignored;
+  daemon: 219 passed; UI: 175 passed; all other workspace suites passed).
+  Current-toolchain and Rust 1.92 workspace Clippy with `-D warnings`,
+  `cargo deny check`, `cargo fmt --all -- --check`, and `git diff --check`
+  passed. `cargo deny` reports pre-existing duplicate-version warnings; its
+  advisories, bans, licenses, and sources checks pass.
+- This reduces residual copies in selected owned buffers; it is not a guarantee
+  of complete process-memory erasure or protection from a privileged memory
+  dump. Real-desktop security and certification gates remain open.

@@ -18,6 +18,7 @@
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
+use zeroize::Zeroize;
 
 use wayexpand_core::{
     run_command, ClipboardPrefetch, ClipboardReader, CommandConfig, CommandEnvironment,
@@ -139,6 +140,12 @@ struct Slot {
     value: Prefetched,
 }
 
+impl Drop for Slot {
+    fn drop(&mut self) {
+        clear_prefetched(&mut self.value);
+    }
+}
+
 struct Shared {
     slot: Mutex<Slot>,
     ready: Condvar,
@@ -199,6 +206,17 @@ fn lock(shared: &Shared) -> std::sync::MutexGuard<'_, Slot> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+fn zeroize_prefetched_contents(value: &mut Prefetched) {
+    if let Prefetched::Ready { value, .. } = value {
+        value.zeroize();
+    }
+}
+
+fn clear_prefetched(value: &mut Prefetched) {
+    zeroize_prefetched_contents(value);
+    *value = Prefetched::Empty;
+}
+
 fn queue_read(sender: &mpsc::SyncSender<ReadJob>, slot: &mut Slot) -> Option<u64> {
     let generation = slot.generation.wrapping_add(1);
     let deadline = Instant::now() + Duration::from_millis(CLIPBOARD_TIMEOUT_MS);
@@ -216,6 +234,7 @@ fn queue_read(sender: &mpsc::SyncSender<ReadJob>, slot: &mut Slot) -> Option<u64
     // may receive the job immediately, but it must acquire this same slot
     // mutex before checking whether the generation is still pending.
     slot.generation = generation;
+    clear_prefetched(&mut slot.value);
     slot.value = Prefetched::Pending {
         generation,
         deadline,
@@ -257,11 +276,11 @@ fn take_or_read(
         }
         Prefetched::Pending { generation, .. } => *generation,
         Prefetched::Unavailable { .. } => {
-            slot.value = Prefetched::Empty;
+            clear_prefetched(&mut slot.value);
             return None;
         }
         Prefetched::Empty | Prefetched::Ready { .. } => {
-            let _ = std::mem::take(&mut slot.value);
+            clear_prefetched(&mut slot.value);
             queue_read(sender, &mut slot)?
         }
     };
@@ -288,7 +307,7 @@ fn take_or_read(
                 ..
             } if *active_generation == generation => {
                 if at.elapsed() >= max_age {
-                    slot.value = Prefetched::Empty;
+                    clear_prefetched(&mut slot.value);
                     return None;
                 }
                 let Prefetched::Ready { value, .. } = std::mem::take(&mut slot.value) else {
@@ -328,7 +347,7 @@ fn clipboard_worker(
             }
             // Each missed deadline is counted once, below, whether the job
             // expired in the queue or during its read.
-            let value = if Instant::now() < job.deadline {
+            let mut value = if Instant::now() < job.deadline {
                 let started = Instant::now();
                 let active = ActiveRead::new();
                 let value = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read()))
@@ -353,8 +372,9 @@ fn clipboard_worker(
                 Prefetched::Pending { generation, .. } if generation == job.generation
             );
             let ready_until = if still_pending && completed_at <= job.deadline {
-                match value {
+                match value.take() {
                     Some(value) => {
+                        clear_prefetched(&mut slot.value);
                         slot.value = Prefetched::Ready {
                             generation: job.generation,
                             at: completed_at,
@@ -377,6 +397,9 @@ fn clipboard_worker(
             } else {
                 None
             };
+            if let Some(value) = value.as_mut() {
+                value.zeroize();
+            }
             drop(slot);
             shared.ready.notify_all();
 
@@ -394,7 +417,7 @@ fn clipboard_worker(
                             Prefetched::Ready { generation, .. }
                                 if generation == job.generation
                         ) {
-                            slot.value = Prefetched::Empty;
+                            clear_prefetched(&mut slot.value);
                         }
                         drop(slot);
                         shared.ready.notify_all();
@@ -410,6 +433,29 @@ fn clipboard_worker(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clearing_prefetched_clipboard_overwrites_the_retained_value() {
+        let mut value = Prefetched::Ready {
+            generation: 7,
+            at: Instant::now(),
+            value: "clipboard secret".into(),
+        };
+        let (pointer, length) = match &value {
+            Prefetched::Ready { value, .. } => (value.as_ptr(), value.len()),
+            _ => unreachable!(),
+        };
+        zeroize_prefetched_contents(&mut value);
+        assert!(matches!(&value, Prefetched::Ready { value, .. } if value.is_empty()));
+        // The String allocation remains live until `clear_prefetched` below.
+        // SAFETY: these bytes were initialized by the original String and its
+        // allocation remains retained after zeroize clears the logical length.
+        for index in 0..length {
+            assert_eq!(unsafe { pointer.add(index).read_volatile() }, 0);
+        }
+        clear_prefetched(&mut value);
+        assert!(matches!(value, Prefetched::Empty));
+    }
 
     #[test]
     fn clipboard_command_is_bounded_and_passes_only_wayland_variables() {

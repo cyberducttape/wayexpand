@@ -1,4 +1,5 @@
 use std::{collections::VecDeque, time::Instant};
+use zeroize::Zeroize;
 
 use crate::Matcher;
 
@@ -54,8 +55,15 @@ impl ClipboardTriggers {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(super) struct CommandCacheEntry {
     pub(super) expires_at: Instant,
+    pub(super) generation: u64,
     pub(super) value: String,
+}
+
+impl Drop for CommandCacheEntry {
+    fn drop(&mut self) {
+        self.value.zeroize();
+    }
 }

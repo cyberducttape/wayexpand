@@ -283,6 +283,33 @@ Acceptance criteria:
   that arbitrary malicious processes running under the broker's same UID are
   outside the IPC trust boundary.
 
+### P2 — Reduce sensitive-data residency in process memory
+
+**Status:** Best-effort wiping added for engine-owned working buffers; full
+process-memory erasure is not achievable with the current public result and
+configuration ownership model.
+
+The engine wipes its rolling typed-character history, Unicode matching
+scratch, invalidated undo records, dropped command-cache values, and deferred
+reservations. It avoids making undo copies when undo is not configured. The
+daemon wipes prefetched clipboard values on consumption, replacement,
+expiration, and shutdown. Shipped systemd services disable core dumps with
+`LimitCORE=0`.
+
+Acceptance criteria:
+
+- Exercise backspace, rolling-buffer eviction, reset, sensitive-focus change,
+  Unicode scratch reuse, undo invalidation/commit, clipboard expiration, and
+  engine shutdown; inspect designated allocations to confirm overwrite before
+  logical clear or deallocation.
+- Keep the rolling input limit and clipboard prefetch age bounded, and avoid
+  retaining undo content when no undo chord is configured.
+- Document that immutable config/results, in-flight command/template data,
+  stack/register copies, allocator reallocation history, GUI processes outside
+  systemd, and operating-system copies are outside this zeroization contract.
+- Do not claim universal memory erasure or resistance to a privileged process
+  dump based on these targeted wipes.
+
 ### P2 — Close measured performance and internationalization gaps
 
 **Status:** Open.

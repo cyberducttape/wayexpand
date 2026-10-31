@@ -11,6 +11,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use super::async_runtime::send_completion_or_shutdown;
 use super::command_runtime::run_command_with_shutdown;
 use super::*;
+use super::{pop_back_zeroized, pop_front_zeroized};
 use crate::MatchMode;
 
 fn engine() -> ExpansionEngine {
@@ -997,6 +998,24 @@ fn command_expansion_cache_reuses_recent_output() {
     assert_eq!(results.len(), 2);
     assert_eq!(results[0].insert, "1");
     assert_eq!(results[1].insert, "1");
+}
+
+#[test]
+fn expired_command_output_is_removed_and_expiry_index_stays_bounded() {
+    let mut engine = engine();
+    engine.cache_command_output(0, 2, "temporary command secret".into());
+    assert_eq!(
+        engine.cached_command_output(0).as_deref(),
+        Some("temporary command secret")
+    );
+    std::thread::sleep(Duration::from_millis(10));
+    engine.expire_command_cache();
+    assert!(engine.command_cache[0].is_none());
+
+    for index in 0..256 {
+        engine.cache_command_output(0, 60_000, format!("replacement-{index}"));
+    }
+    assert!(engine.command_cache_expirations.len() <= 64);
 }
 
 #[test]
@@ -3411,6 +3430,9 @@ fn undo_is_disabled_when_intervening_input_occurs() {
     // This test verifies the safety invariant.
     let config = Config::parse(
         r#"
+        [settings]
+        undo_chord = "Ctrl+Z"
+
         [[expansion]]
         trigger = ":date"
         replacement = "2024-01-15"
@@ -3446,6 +3468,15 @@ fn undo_is_disabled_when_intervening_input_occurs() {
         engine.last_expansion.is_none(),
         "any intervening event clears undo state"
     );
+}
+
+#[test]
+fn expansion_does_not_retain_undo_text_when_undo_is_disabled() {
+    let mut engine = engine();
+    let result = engine.process(InputEvent::Text(":hello".into()));
+    assert_eq!(result.len(), 1);
+    assert!(engine.validated.undo_chord.is_none());
+    assert!(engine.last_expansion.is_none());
 }
 
 #[test]
@@ -4028,6 +4059,110 @@ fn non_ascii_buffer_count_tracks_edits_eviction_restoration_and_clear() {
     engine.restore_buffered("bc");
     assert_eq!(engine.non_ascii_buffer_chars, 0);
     assert_eq!(engine.buffer.iter().collect::<String>(), "abc");
+}
+
+#[test]
+fn engine_wipes_typed_text_unicode_scratch_and_undo_copies() {
+    let mut engine = engine();
+
+    engine.process(InputEvent::Text("sensitive typed text".into()));
+    assert!(!engine.buffer.is_empty());
+    engine.zeroize_buffer_contents();
+    assert!(engine.buffer.iter().all(|character| *character == '\0'));
+    engine.clear_buffer();
+    assert!(engine.buffer.is_empty());
+
+    // Decomposed Unicode takes the reusable raw/normalized path.
+    engine.process(InputEvent::Reset);
+    engine.process(InputEvent::Text("secret e\u{301}".into()));
+    assert!(!engine.match_scratch.contents_are_zeroized());
+    engine.match_scratch.zeroize_contents();
+    assert!(engine.match_scratch.contents_are_zeroized());
+
+    engine.last_expansion = Some(("secret trigger".into(), "secret replacement".into()));
+    let (restore_ptr, restore_len, erase_ptr, erase_len) = {
+        let (restore, erase) = engine.last_expansion.as_ref().unwrap();
+        (restore.as_ptr(), restore.len(), erase.as_ptr(), erase.len())
+    };
+    engine.zeroize_undo_contents();
+    let (restore, erase) = engine.last_expansion.as_ref().unwrap();
+    assert!(restore.is_empty());
+    assert!(erase.is_empty());
+    // String::zeroize retains the allocations while overwriting their bytes.
+    // SAFETY: the pointers refer to initialized string bytes in allocations
+    // retained by the empty strings until `clear_undo_state` below.
+    for index in 0..restore_len {
+        assert_eq!(unsafe { restore_ptr.add(index).read_volatile() }, 0);
+    }
+    for index in 0..erase_len {
+        assert_eq!(unsafe { erase_ptr.add(index).read_volatile() }, 0);
+    }
+    engine.clear_undo_state();
+    assert!(engine.last_expansion.is_none());
+
+    // Sensitive-focus transitions use the same wiping clear path.
+    engine.process(InputEvent::Text("password".into()));
+    let (first, second) = engine.buffer.as_slices();
+    let first_ptr = first.as_ptr();
+    let first_len = first.len();
+    let second_ptr = second.as_ptr();
+    let second_len = second.len();
+    engine.process(InputEvent::FocusChanged { sensitive: true });
+    assert!(engine.buffer.is_empty());
+    assert!(engine.is_sensitive_focus());
+    // clear() retains the deque allocation; verify both active slices were
+    // overwritten before their logical lengths became zero.
+    // SAFETY: these pointers refer to initialized chars in the retained deque
+    // allocation. The focus event clears but does not deallocate that storage.
+    for index in 0..first_len {
+        assert_eq!(unsafe { first_ptr.add(index).read_volatile() }, '\0');
+    }
+    for index in 0..second_len {
+        assert_eq!(unsafe { second_ptr.add(index).read_volatile() }, '\0');
+    }
+}
+
+#[test]
+fn shutdown_cleanup_wipes_engine_owned_sensitive_state() {
+    let mut engine = engine();
+    engine.process(InputEvent::Text("typed secret".into()));
+    engine.last_expansion = Some(("secret trigger".into(), "secret output".into()));
+    engine.deferred_matches.push(DeferredMatchReservation {
+        matched_text: "reserved secret".into(),
+        command_backed: true,
+    });
+    engine.cache_command_output(0, 5_000, "cached secret output".into());
+
+    engine.clear_sensitive_runtime_state();
+    assert!(engine.buffer.is_empty());
+    assert!(engine.match_scratch.contents_are_zeroized());
+    assert!(engine.last_expansion.is_none());
+    assert!(engine.deferred_matches.is_empty());
+    assert!(engine.command_cache.iter().all(Option::is_none));
+}
+
+#[test]
+fn front_and_back_buffer_evictions_overwrite_the_removed_scalar() {
+    use zeroize::Zeroize;
+
+    for pop in [
+        pop_front_zeroized as fn(&mut std::collections::VecDeque<char>) -> Option<char>,
+        pop_back_zeroized,
+    ] {
+        let mut buffer = std::collections::VecDeque::with_capacity(4);
+        buffer.push_back('S');
+        let address = buffer.as_slices().0.as_ptr();
+        let mut removed = pop(&mut buffer).unwrap();
+        assert_eq!(removed, 'S');
+        removed.zeroize();
+        assert!(buffer.is_empty());
+
+        // The deque retains its allocation after pop. Inspect the slot while
+        // it is still allocated to assert the secret scalar was overwritten.
+        // SAFETY: `address` points to the initialized first char in the deque's
+        // retained allocation; pop does not deallocate or reallocate it.
+        assert_eq!(unsafe { address.read_volatile() }, '\0');
+    }
 }
 
 #[test]

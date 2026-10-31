@@ -9,6 +9,7 @@ use super::{MAX_RESULTS_PER_EVENT, MAX_RESULT_BYTES_PER_EVENT};
 use crate::MatchMode;
 use unicode_normalization::UnicodeNormalization;
 use unicode_segmentation::{GraphemeCursor, UnicodeSegmentation};
+use zeroize::{Zeroize, Zeroizing};
 
 const GRAPHEME_CHUNK_CHARS: usize = 64;
 
@@ -30,7 +31,16 @@ pub(super) struct MatchScratch {
 }
 
 impl MatchScratch {
-    fn clear(&mut self) {
+    pub(super) fn zeroize_contents(&mut self) {
+        // Wipe used bytes/scalars before resetting lengths, while retaining
+        // warmed allocations for the next input event.
+        self.raw.as_mut_str().zeroize();
+        self.normalized.as_mut_slice().zeroize();
+        self.source_starts.as_mut_slice().zeroize();
+    }
+
+    pub(super) fn clear(&mut self) {
+        self.zeroize_contents();
         self.raw.clear();
         self.normalized.clear();
         self.source_starts.clear();
@@ -43,6 +53,19 @@ impl MatchScratch {
             self.normalized.capacity(),
             self.source_starts.capacity(),
         )
+    }
+
+    #[cfg(test)]
+    pub(super) fn contents_are_zeroized(&self) -> bool {
+        self.raw.bytes().all(|byte| byte == 0)
+            && self.normalized.iter().all(|character| *character == '\0')
+            && self.source_starts.iter().all(|offset| *offset == 0)
+    }
+}
+
+impl Drop for MatchScratch {
+    fn drop(&mut self) {
+        self.clear();
     }
 }
 
@@ -186,7 +209,7 @@ impl MatchProcessor for ImmediateProcessor {
     }
 
     fn invalidate_outputs(engine: &mut ExpansionEngine, _: &mut [Self::Output]) {
-        engine.last_expansion = None;
+        engine.clear_undo_state();
     }
 
     fn finish_end_of_input(_: &ExpansionEngine, output: Self::Output) -> Self::Output {
@@ -280,7 +303,7 @@ impl ExpansionEngine {
         if chord.is_some_and(|chord| self.is_undo_chord(chord)) {
             return;
         }
-        self.last_expansion = None;
+        self.clear_undo_state();
     }
 
     fn on_backspace(&mut self) {
@@ -322,7 +345,7 @@ impl ExpansionEngine {
 
         let chunk_start = len.saturating_sub(GRAPHEME_CHUNK_CHARS);
         let chunk_start_byte = self.buffered_bytes - self.buffer_range_byte_len(chunk_start, len);
-        let chunk = self.buffer_range_string(chunk_start, len);
+        let chunk = Zeroizing::new(self.buffer_range_string(chunk_start, len));
         let mut cursor = GraphemeCursor::new(self.buffered_bytes, self.buffered_bytes, true);
         if let Ok(Some(boundary)) = cursor.prev_boundary(&chunk, chunk_start_byte) {
             if boundary >= chunk_start_byte {
@@ -332,7 +355,7 @@ impl ExpansionEngine {
         // Any request for context or a preceding chunk means the suffix alone
         // is insufficient. This uncommon path favors exact deletion over a
         // guessed scalar or grapheme boundary.
-        let buffered: String = self.buffer.iter().collect();
+        let buffered = Zeroizing::new(self.buffer.iter().collect::<String>());
         buffered
             .graphemes(true)
             .next_back()
@@ -622,6 +645,7 @@ impl ExpansionEngine {
         event: InputEvent,
         results: &mut Vec<P::Output>,
     ) {
+        self.expire_command_cache();
         results.clear();
         P::before_event(self);
         self.invalidate_undo_unless_undo_chord(&event);
@@ -633,7 +657,10 @@ impl ExpansionEngine {
                 let mut encoded = [0; 4];
                 self.process_text_contents::<P>(character.encode_utf8(&mut encoded), results)
             }
-            InputEvent::Text(text) => self.process_text_contents::<P>(&text, results),
+            InputEvent::Text(mut text) => {
+                self.process_text_contents::<P>(&text, results);
+                text.zeroize();
+            }
             InputEvent::Delimiter(character) => {
                 // Encode into a stack buffer and pass the borrowed text to
                 // the common scanner, avoiding a one-character String and a
@@ -686,9 +713,10 @@ impl ExpansionEngine {
         text: &str,
         results: &mut Vec<P::Output>,
     ) {
+        self.expire_command_cache();
         results.clear();
         P::before_event(self);
-        self.last_expansion = None;
+        self.clear_undo_state();
         self.process_text_contents::<P>(text, results);
     }
 

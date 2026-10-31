@@ -36,7 +36,7 @@ impl ExpansionEngine {
                 restore == &result.insert && erase == &result.matched_text
             })
         {
-            self.last_expansion = None;
+            self.clear_undo_state();
         }
     }
 

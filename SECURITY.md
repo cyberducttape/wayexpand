@@ -265,6 +265,26 @@ malicious code with the same UID using other user-session privileges such as
 `systemctl --user`, editing user-owned configuration, or controlling the
 desktop session.
 
+## Sensitive data in process memory
+
+The engine now uses `zeroize` for its live input history when characters are
+backspaced, evicted, reset, or cleared after a focus/context transition. It
+wipes its reusable Unicode matching scratch before reuse and shutdown, wipes
+undo text when the undo record is invalidated, and does not retain undo copies
+unless an undo chord is configured. Command-cache values are wiped when their
+cache entries are dropped. Owned `InputEvent::Text` input and prefetched
+clipboard values are wiped after processing or when consumed, replaced,
+expired, or shut down. Shipped systemd services set `LimitCORE=0`.
+
+These are best-effort controls over specific engine-owned allocations. They do
+not erase immutable configuration snapshots, returned expansion results,
+in-flight command/template strings, all clipboard-reader copies, stack spills,
+registers, prior allocations left by reallocation, or data copied by the
+allocator or operating system. GUI processes launched outside the shipped
+systemd services do not inherit those units' core-dump limit. Do not treat
+zeroization as a guarantee that secrets never appear in a process dump or can
+never be recovered from memory.
+
 ## Command execution architecture limitations
 
 The current command-backed expansion architecture prioritizes safety at the cost

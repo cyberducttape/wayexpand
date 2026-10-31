@@ -34,6 +34,7 @@ fn input_method_injection_capabilities(
 impl Daemon {
     /// Apply window, pause, reload, and stop transitions; report hotkey results and worker failures. Breaks when the daemon should stop.
     pub(crate) fn maintain(&mut self) -> Result<ControlFlow<(), CommandMetrics>> {
+        self.config.engine.expire_command_cache();
         // Before any reload replaces the engine and its pending events.
         self.usage.collect(&mut self.config.engine);
         drain_pending_window_events(

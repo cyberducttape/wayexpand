@@ -16,7 +16,9 @@ impl ExpansionEngine {
     pub fn commit_applied_expansion(&mut self, result: &ExpansionResult) {
         self.release_deferred_match_for_result(result);
         self.record_usage(result);
-        if result.undoable && result.cursor_offset.is_none() {
+        if result.undoable && result.cursor_offset.is_none() && self.validated.undo_chord.is_some()
+        {
+            self.clear_undo_state();
             self.last_expansion = Some(transaction::transaction_texts(
                 &result.matched_text,
                 &result.insert,

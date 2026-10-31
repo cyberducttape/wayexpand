@@ -45,7 +45,8 @@ use crate::{
     InjectorCapabilities, KeyChord, Matcher,
 };
 use std::{
-    collections::VecDeque,
+    cmp::Reverse,
+    collections::{BinaryHeap, VecDeque},
     process::{Command, Stdio},
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -53,6 +54,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
+use zeroize::Zeroize;
 
 pub(crate) use crate::limits::{
     MAX_COMMAND_OUTPUT_BYTES, MAX_RESULTS_PER_EVENT, MAX_RESULT_BYTES_PER_EVENT,
@@ -111,6 +113,8 @@ pub struct ExpansionEngine {
     /// broker actions use their own IPC boundary and are not blocked by this.
     direct_commands_disabled: bool,
     command_cache: Vec<Option<CommandCacheEntry>>,
+    command_cache_expirations: BinaryHeap<Reverse<(Instant, usize, u64)>>,
+    next_command_cache_generation: u64,
     current_window: Option<WindowContext>,
     normalized_window: Option<NormalizedWindowContext>,
     /// The most recent successful expansion, kept only until the very next
@@ -255,7 +259,9 @@ impl ExpansionEngine {
         let template_base =
             config.template_context_with_snippets(None, Arc::clone(&validated.snippets));
         let max_buffer_chars = config.settings.max_buffer_chars;
-        let command_cache = vec![None; config.expansion.len()];
+        let command_cache = std::iter::repeat_with(|| None)
+            .take(config.expansion.len())
+            .collect();
         Self {
             config,
             validated: Arc::clone(&validated),
@@ -273,6 +279,8 @@ impl ExpansionEngine {
             composition_active: false,
             direct_commands_disabled: false,
             command_cache,
+            command_cache_expirations: BinaryHeap::new(),
+            next_command_cache_generation: 0,
             current_window: None,
             normalized_window: None,
             last_expansion: None,
@@ -547,10 +555,11 @@ impl ExpansionEngine {
 
             // Update cache before case propagation (cache stores original command output)
             if completion.cache_ms > 0 {
-                self.command_cache[completion.config_index] = Some(CommandCacheEntry {
-                    expires_at: Instant::now() + Duration::from_millis(completion.cache_ms),
-                    value: validated_output.clone(),
-                });
+                self.cache_command_output(
+                    completion.config_index,
+                    completion.cache_ms,
+                    validated_output.clone(),
+                );
             }
 
             // Apply case propagation
@@ -633,10 +642,7 @@ impl ExpansionEngine {
         }
 
         if command_backed && pending.cache_ms > 0 {
-            self.command_cache[pending.config_index] = Some(CommandCacheEntry {
-                expires_at: Instant::now() + Duration::from_millis(pending.cache_ms),
-                value: output.clone(),
-            });
+            self.cache_command_output(pending.config_index, pending.cache_ms, output.clone());
         }
 
         let insert = if pending.propagate_case {
@@ -845,14 +851,16 @@ impl ExpansionEngine {
     /// Remove the reservation represented by a result. Evdev may absorb one
     /// delimiter into `matched_text` after the reservation was created, so a
     /// result can be the reserved trigger plus exactly one scalar.
-    fn take_deferred_reservation(&mut self, matched_text: &str) -> Option<String> {
+    fn take_deferred_reservation(&mut self, matched_text: &str) -> Option<()> {
         let index = self.deferred_matches.iter().position(|reservation| {
             reservation.matched_text == matched_text
                 || matched_text
                     .strip_prefix(&reservation.matched_text)
                     .is_some_and(|suffix| suffix.chars().count() == 1)
         })?;
-        Some(self.deferred_matches.remove(index).matched_text)
+        let mut reservation = self.deferred_matches.remove(index);
+        reservation.matched_text.zeroize();
+        Some(())
     }
 
     /// The text this result reserved when it was matched, before a host folded
@@ -885,8 +893,9 @@ impl ExpansionEngine {
 
     fn restore_deferred_matches(&mut self) {
         let reservations = std::mem::take(&mut self.deferred_matches);
-        for reservation in reservations {
+        for mut reservation in reservations {
             self.restore_buffered_as_context(&reservation.matched_text);
+            reservation.matched_text.zeroize();
         }
         debug_assert!(self.buffer.len() <= self.max_buffer_chars);
     }
@@ -898,9 +907,10 @@ impl ExpansionEngine {
     /// caller applies them.
     fn restore_stale_command_reservations(&mut self) {
         let mut retained = Vec::with_capacity(self.deferred_matches.len());
-        for reservation in std::mem::take(&mut self.deferred_matches) {
+        for mut reservation in std::mem::take(&mut self.deferred_matches) {
             if reservation.command_backed {
                 self.restore_buffered_as_context(&reservation.matched_text);
+                reservation.matched_text.zeroize();
             } else {
                 retained.push(reservation);
             }
@@ -955,27 +965,25 @@ impl ExpansionEngine {
         }
         self.buffer.push_back(character);
         while self.buffer.len() > self.max_buffer_chars {
-            let evicted = self
-                .buffer
-                .pop_front()
-                .expect("buffer length exceeded its cap");
+            let mut evicted =
+                pop_front_zeroized(&mut self.buffer).expect("buffer length exceeded its cap");
             if !evicted.is_ascii() {
                 self.non_ascii_buffer_chars -= 1;
             }
             self.buffered_bytes -= evicted.len_utf8();
+            evicted.zeroize();
             self.buffer_truncated = true;
         }
     }
 
     fn pop_buffered_back(&mut self) {
-        let removed = self
-            .buffer
-            .pop_back()
+        let mut removed = pop_back_zeroized(&mut self.buffer)
             .expect("grapheme cleanup exceeded the buffer length");
         if !removed.is_ascii() {
             self.non_ascii_buffer_chars -= 1;
         }
         self.buffered_bytes -= removed.len_utf8();
+        removed.zeroize();
     }
 
     /// Unified commit: apply all post-execution logic to create final ExpansionResult.
@@ -1000,7 +1008,9 @@ impl ExpansionEngine {
         // Skip undo for async commands since they return empty immediately
         if plan.cursor_offset.is_none()
             && (!plan.is_command_backed() || self.async_commands.is_none())
+            && self.validated.undo_chord.is_some()
         {
+            self.clear_undo_state();
             self.last_expansion = Some(transaction::transaction_texts(
                 &plan.matched_text,
                 &final_insert,
@@ -1041,16 +1051,14 @@ impl ExpansionEngine {
             return None;
         }
 
-        let expansion = &self.config.expansion[config_index];
-
         // Check cache before deciding on async vs sync
-        let cached_command = expansion.command.as_ref().and_then(|command| {
-            (command.cache_ms > 0)
-                .then(|| self.command_cache[config_index].as_ref())
-                .flatten()
-                .filter(|entry| entry.expires_at > Instant::now())
-                .map(|entry| entry.value.clone())
-        });
+        let cache_ms = self.config.expansion[config_index]
+            .command
+            .as_ref()
+            .map_or(0, |command| command.cache_ms);
+        let cached_command = (cache_ms > 0)
+            .then(|| self.cached_command_output(config_index))
+            .flatten();
 
         // Cached command: use cache
         if let Some(cached_value) = cached_command {
@@ -1058,6 +1066,8 @@ impl ExpansionEngine {
             // Commit with cached value (already cached, no re-caching needed)
             return Some(self.commit_expansion(plan, cached_value));
         }
+
+        let expansion = &self.config.expansion[config_index];
 
         // Async command: queue and return empty
         if let Some(runtime) = self.async_commands.as_ref() {
@@ -1094,7 +1104,7 @@ impl ExpansionEngine {
                 }
                 // Do not consume the trigger until the worker has accepted
                 self.consume_matched_text();
-                self.last_expansion = None;
+                self.clear_undo_state();
                 return None;
             }
         }
@@ -1125,6 +1135,10 @@ impl ExpansionEngine {
     ) -> Option<PendingExpansionResult> {
         // Generate match plan with full context
         let mut plan = self.take_match_plan(config_index, length, terminating_char)?;
+        let cache_ms = plan.command.as_ref().map_or(0, |command| command.cache_ms);
+        let cached_output = (cache_ms > 0)
+            .then(|| self.cached_command_output(config_index))
+            .flatten();
 
         // Policy is checked by the caller before deferred completion.
 
@@ -1159,14 +1173,8 @@ impl ExpansionEngine {
                 .as_ref()
                 .and_then(|_| self.current_window.clone()),
             propagate_case: plan.propagate_case,
-            cache_ms: plan.command.as_ref().map_or(0, |command| command.cache_ms),
-            cached_output: plan.command.as_ref().and_then(|command| {
-                (command.cache_ms > 0)
-                    .then(|| self.command_cache[config_index].as_ref())
-                    .flatten()
-                    .filter(|entry| entry.expires_at > Instant::now())
-                    .map(|entry| entry.value.clone())
-            }),
+            cache_ms,
+            cached_output,
             undoable: true,
             command: plan.command.clone(),
             form_template: plan.form_template,
@@ -1177,23 +1185,17 @@ impl ExpansionEngine {
     /// Execute a command-backed expansion, using the short-lived cache when
     /// configured. Static templates are rendered while creating `MatchPlan`.
     fn render_expansion(&mut self, config_index: usize) -> Result<String, ()> {
-        let expansion = &self.config.expansion[config_index];
-        let Some(command) = &expansion.command else {
+        let Some(command) = self.config.expansion[config_index].command.clone() else {
             return Err(());
         };
         if command.cache_ms > 0 {
-            if let Some(entry) = self.command_cache[config_index].as_ref() {
-                if entry.expires_at > Instant::now() {
-                    return Ok(entry.value.clone());
-                }
+            if let Some(value) = self.cached_command_output(config_index) {
+                return Ok(value);
             }
         }
-        let value = run_command(command).map_err(|_| ())?;
+        let value = run_command(&command).map_err(|_| ())?;
         if command.cache_ms > 0 {
-            self.command_cache[config_index] = Some(CommandCacheEntry {
-                expires_at: Instant::now() + Duration::from_millis(command.cache_ms),
-                value: value.clone(),
-            });
+            self.cache_command_output(config_index, command.cache_ms, value.clone());
         }
         Ok(value)
     }
@@ -1211,18 +1213,136 @@ impl ExpansionEngine {
         self.buffer_truncated = true;
     }
 
+    /// Expire and wipe command output cache entries. The heap keeps cleanup
+    /// proportional to entries actually expiring rather than scanning the
+    /// entire snippet library on each keystroke.
+    pub fn expire_command_cache(&mut self) {
+        let now = Instant::now();
+        while let Some(Reverse((expires_at, index, generation))) =
+            self.command_cache_expirations.peek().copied()
+        {
+            if expires_at > now {
+                break;
+            }
+            self.command_cache_expirations.pop();
+            let expired_current_entry = self
+                .command_cache
+                .get(index)
+                .and_then(Option::as_ref)
+                .is_some_and(|entry| entry.generation == generation && entry.expires_at <= now);
+            if expired_current_entry {
+                self.command_cache[index] = None;
+            }
+        }
+    }
+
+    fn cached_command_output(&mut self, index: usize) -> Option<String> {
+        self.expire_command_cache();
+        self.command_cache
+            .get(index)
+            .and_then(Option::as_ref)
+            .map(|entry| entry.value.clone())
+    }
+
+    fn cache_command_output(&mut self, index: usize, ttl_ms: u64, value: String) {
+        if ttl_ms == 0 || index >= self.command_cache.len() {
+            return;
+        }
+        let expires_at = Instant::now() + Duration::from_millis(ttl_ms);
+        self.next_command_cache_generation = self.next_command_cache_generation.wrapping_add(1);
+        let generation = self.next_command_cache_generation;
+        self.command_cache[index] = Some(CommandCacheEntry {
+            expires_at,
+            generation,
+            value,
+        });
+        self.command_cache_expirations
+            .push(Reverse((expires_at, index, generation)));
+
+        // Replaced cache entries leave stale heap records until their old
+        // deadlines. Compact on cache writes once those records exceed a
+        // small multiple of the configured snippet count.
+        let heap_limit = self.command_cache.len().saturating_mul(4).max(64);
+        if self.command_cache_expirations.len() > heap_limit {
+            self.command_cache_expirations.clear();
+            for (index, entry) in self.command_cache.iter().enumerate() {
+                if let Some(entry) = entry {
+                    self.command_cache_expirations.push(Reverse((
+                        entry.expires_at,
+                        index,
+                        entry.generation,
+                    )));
+                }
+            }
+        }
+    }
+
     /// Resets the matcher buffer to a known boundary. Always use this
     /// instead of `self.buffer.clear()` directly: it also clears
     /// `buffer_truncated`, since a fresh boundary means whatever preceded it
     /// is no longer relevant to word-boundary checks.
     fn clear_buffer(&mut self) {
+        self.zeroize_buffer_contents();
         self.buffer.clear();
+        self.match_scratch.clear();
         self.buffered_bytes = 0;
         self.restored_reservation_chars = 0;
         self.non_ascii_buffer_chars = 0;
         self.buffer_truncated = false;
         self.clipboard_prefetch_armed = false;
     }
+
+    fn zeroize_buffer_contents(&mut self) {
+        for character in &mut self.buffer {
+            character.zeroize();
+        }
+    }
+
+    fn zeroize_undo_contents(&mut self) {
+        if let Some((restore, erase)) = self.last_expansion.as_mut() {
+            restore.zeroize();
+            erase.zeroize();
+        }
+    }
+
+    fn clear_undo_state(&mut self) {
+        self.zeroize_undo_contents();
+        self.last_expansion = None;
+    }
+}
+
+impl Drop for ExpansionEngine {
+    fn drop(&mut self) {
+        self.clear_sensitive_runtime_state();
+    }
+}
+
+impl ExpansionEngine {
+    fn clear_sensitive_runtime_state(&mut self) {
+        self.clear_buffer();
+        self.clear_undo_state();
+        for reservation in &mut self.deferred_matches {
+            reservation.matched_text.zeroize();
+        }
+        self.deferred_matches.clear();
+        // CommandCacheEntry wipes its output when each cache slot is dropped.
+        self.command_cache.clear();
+        self.command_cache_expirations.clear();
+    }
+}
+
+fn pop_front_zeroized(buffer: &mut VecDeque<char>) -> Option<char> {
+    let character = *buffer.front()?;
+    buffer.front_mut()?.zeroize();
+    buffer.pop_front();
+    Some(character)
+}
+
+fn pop_back_zeroized(buffer: &mut VecDeque<char>) -> Option<char> {
+    let character = *buffer.back()?;
+    buffer.back_mut()?.zeroize();
+    buffer.pop_back();
+    Some(character)
 }
 
 #[cfg(test)]
