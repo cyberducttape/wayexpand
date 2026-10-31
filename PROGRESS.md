@@ -2,6 +2,30 @@
 
 Updated: 2026-10-30
 
+## Replacement safety and current-source smoke evidence: 2026-10-30
+
+- Re-audited capture/injection gates, deferred-output cancellation, transaction
+  outcome handling, and GUI/status assurance labels. Existing code refuses
+  unverified erasure by default, rechecks focus at paced output checkpoints,
+  stops non-atomic output on observed physical input, and discards uncertain
+  results rather than retrying. Regression tests cover these cases in the
+  daemon, core engine, and assurance wrapper.
+- Ran the current-source isolated KWin test-client harness on clean commit
+  `589d2682360f` and preserved the report at
+  `docs/evidence/doctor-certify-589d2682360f.json`. Twelve output/focus/reload/
+  refusal checks passed and latency was measured; the report remains `partial`
+  because capture was simulated and physical keyboard, password-field,
+  suspend/resume, Unicode on this keysym-only mode, and non-atomic concurrent
+  input cases were not certified.
+- A live `wayexpand doctor --json` check also showed this host's active route
+  as evdev plus libei keysym fallback: focus-tracked best effort, no
+  sensitive-field signal, and no atomic replacement. This is expected to
+  remain a release blocker unless a supported protocol route is available and
+  certified in real client sessions.
+- Validated the saved report as JSON and refreshed the certification guide's
+  latest-run link and latency summary. Markdown links and documentation
+  contracts passed after the update.
+
 ## Process supervisor lifecycle audit: 2026-10-30
 
 - Added Linux regression tests for an already-exited child at supervisor

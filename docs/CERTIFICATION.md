@@ -66,15 +66,15 @@ intentionally out of scope and is reported as `unsupported-by-design`; a
 certification never implies otherwise.
 
 The latest current-source isolated KWin smoke run is preserved in
-[`docs/evidence/doctor-certify-60315df9bf4c.json`](evidence/doctor-certify-60315df9bf4c.json).
-It tested commit `60315df9bf4c` on KWin 6.6.6. Twelve insertion, focus,
+[`docs/evidence/doctor-certify-589d2682360f.json`](evidence/doctor-certify-589d2682360f.json).
+It tested clean commit `589d2682360f` on KWin 6.6.6. Twelve insertion, focus,
 reload, restart, refusal, and build-identity checks passed. The negotiated
 route was libei keysym fallback; capture was simulated over stdin. The
 second-trigger overlap, Unicode insertion, suspend/resume, and physical
 keyboard capture were not tested. Twenty injector transactions per size
-measured p50/p95/p99 of 12.571/12.712/12.750 ms (small),
-777.592/778.047/778.497 ms (medium), and
-3,121.796/3,126.553/3,127.312 ms (large). These measurements exclude physical
+measured p50/p95/p99 of 12.582/12.689/12.956 ms (small),
+777.423/779.423/779.643 ms (medium), and
+3,121.750/3,131.421/3,131.454 ms (large). These measurements exclude physical
 capture and client paint latency. This is partial compatibility evidence, not
 production certification; password-field behavior and concurrent physical
 input integrity remain unverified.

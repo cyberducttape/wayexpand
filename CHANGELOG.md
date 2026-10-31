@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Preserved a current-source isolated KWin output/focus smoke report for
+  commit `589d2682360f`. It is explicitly partial: keyboard capture, password
+  fields, active Unicode on the keysym-only route, suspend/resume, and
+  non-atomic concurrent-input certification remain unverified.
+
 - Added process-supervisor regression coverage for child exit before supervisor
   setup, descendants ignoring SIGTERM, inherited output pipes, and the known
   `setsid()` escape from process-group cleanup. Documented that broker service
