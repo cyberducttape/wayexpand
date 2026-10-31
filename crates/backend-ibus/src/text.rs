@@ -1,6 +1,6 @@
 //! Pure text and replacement helpers for the protocol-neutral IBus adapter.
 
-use wayexpand_core::ExpansionResult;
+use wayexpand_core::{ExpansionResult, SensitiveText};
 
 use super::IbusAction;
 
@@ -71,7 +71,7 @@ impl SurroundingText {
 pub(super) fn replacement_actions(
     result: &ExpansionResult,
     key_delivered: bool,
-) -> (String, Vec<IbusAction>) {
+) -> (SensitiveText, Vec<IbusAction>) {
     let mut delivered = result.matched_text.clone();
     match (key_delivered, result.reinsert_after) {
         (true, Some(delimiter)) => delivered.push(delimiter),

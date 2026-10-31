@@ -105,7 +105,7 @@ pub enum IbusAction {
     /// Delete `nchars` Unicode scalar values before the insertion cursor.
     DeleteSurroundingText { nchars: u32 },
     /// Commit text at the application cursor.
-    CommitText(String),
+    CommitText(wayexpand_core::SensitiveText),
 }
 
 /// Result of processing one IBus key press.
@@ -284,7 +284,7 @@ impl IbusEngineAdapter {
             // The key that queued the command was committed at queue time,
             // so the whole trigger (and any delimiter) is in the document.
             let (delivered, actions) = replacement_actions(&result, true);
-            if !self.surrounding_confirms(&delivered) {
+            if !self.surrounding_confirms(delivered.as_str()) {
                 warn!("IBus surrounding text no longer matches the trigger; replacement discarded");
                 self.engine.restore_deferred_match(&result.matched_text);
                 self.reset();
@@ -521,7 +521,7 @@ impl IbusEngineAdapter {
                     // replacement unless the client's own text confirms the
                     // rest of the trigger sits right before the cursor.
                     let (delivered, replacement) = replacement_actions(&result, false);
-                    if !self.surrounding_confirms(&delivered) {
+                    if !self.surrounding_confirms(delivered.as_str()) {
                         warn!(
                             "IBus surrounding text does not confirm the trigger; replacement refused"
                         );
@@ -539,7 +539,7 @@ impl IbusEngineAdapter {
                     // The current key has not reached the client yet. Commit
                     // it now so the eventual surrounding-text deletion covers
                     // the complete trigger and preserves key order.
-                    actions.push(IbusAction::CommitText(character.to_string()));
+                    actions.push(IbusAction::CommitText(character.to_string().into()));
                 }
             }
         }
@@ -557,7 +557,7 @@ impl IbusEngineAdapter {
             // IBus engines must commit ordinary text themselves once they
             // claim the key; this avoids duplicate delivery to the client.
             if !delimiter {
-                actions.push(IbusAction::CommitText(character.to_string()));
+                actions.push(IbusAction::CommitText(character.to_string().into()));
                 return IbusKeyResult {
                     handled: true,
                     actions,

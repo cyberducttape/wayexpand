@@ -262,7 +262,7 @@ impl AsyncCommandRuntime {
                                             cache_ms: 0,
                                             additional_max_size,
                                             result,
-                                            output,
+                                            output: output.map(Into::into),
                                             form: Some(origin),
                                         },
                                         &command_shutdown,
@@ -310,7 +310,7 @@ impl AsyncCommandRuntime {
                                 cache_ms,
                                 additional_max_size,
                                 result,
-                                output,
+                                output: output.map(Into::into),
                                 form: None,
                             },
                             &command_shutdown,
@@ -492,7 +492,7 @@ pub(super) struct AsyncCommandCompletion {
     pub(super) cache_ms: u64,
     pub(super) additional_max_size: usize,
     pub(super) result: ExpansionResult,
-    pub(super) output: Result<String, CommandError>,
+    pub(super) output: Result<super::SensitiveText, CommandError>,
     pub(super) form: Option<FormOrigin>,
 }
 

@@ -2,6 +2,30 @@
 
 Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-31 UTC)
 
+## Transient expansion transaction text: 2026-10-31
+
+- Added `SensitiveText`, backed by `Zeroizing<String>`, with independent
+  zeroizing clones and redacted `Debug` output. Applied it to matched text,
+  rendered replacements, deferred results, cached command output, command
+  completion output, output-worker commands, IBus commits, and GUI preview
+  cache entries. Transaction preflight scratch values are also wiped.
+- Existing asynchronous output currently clones a result because the reactor
+  retains completion bookkeeping. Both copies now have zeroizing ownership;
+  future ownership-transfer work can remove this extra protected allocation.
+- Added tests proving the wrapper's retained bytes are overwritten on explicit
+  clear, clones remain independently owned, and debug formatting reveals no
+  content. Existing input-method wipe tests continue to cover its queues.
+- Verification: `cargo fmt --all`, `cargo check --workspace --all-targets
+  --locked`, `RUST_TEST_THREADS=1 cargo test --workspace --locked` (passed;
+  two environment-dependent systemd integration tests are ignored), and
+  `cargo clippy --workspace --all-targets --locked -- -D warnings` all pass.
+- Limitation: zeroization is best effort for these owned transient buffers. It
+  does not erase persistent configuration, copies in the allocator/kernel or
+  Wayland transport, swap, logs, or text already inserted into another
+  application. A UI preview or CLI output intentionally creates plaintext for
+  display. This does not protect against a compromised process with access to
+  WayExpand's address space.
+
 ## Input-method plaintext lifetime: 2026-10-31
 
 - Wrapped compositor-provided surrounding text in `Zeroizing<String>` and

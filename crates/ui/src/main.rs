@@ -71,7 +71,7 @@ struct App {
     /// Cached visible_indices result and the query that produced it
     visible_cache: Option<(String, Vec<usize>)>,
     /// Cached preview result: (selected_index, trigger, result)
-    preview_cache: Option<(usize, String, String)>,
+    preview_cache: Option<(usize, String, wayexpand_core::SensitiveText)>,
     preview_app: String,
 }
 
@@ -551,7 +551,7 @@ impl App {
         }
     }
 
-    fn preview(&mut self) -> String {
+    fn preview(&mut self) -> wayexpand_core::SensitiveText {
         let Some(index) = self.selected_index() else {
             return "No snippet selected".into();
         };
@@ -562,7 +562,7 @@ impl App {
             }
         }
         let Ok(mut engine) = ExpansionEngine::new(self.config.clone()) else {
-            let result: String = "Configuration is invalid".into();
+            let result: wayexpand_core::SensitiveText = "Configuration is invalid".into();
             self.preview_cache = Some((index, trigger, result.clone()));
             return result;
         };
@@ -1065,7 +1065,7 @@ fn frame_for(app: &mut App, width: u16, height: u16) -> Vec<render::Line> {
         tone: app.tone,
         prompt,
         confirm_delete: app.confirm_delete.is_some(),
-        preview: &preview,
+        preview: preview.as_str(),
         preview_app: &app.preview_app,
         show_help: app.show_help,
     };

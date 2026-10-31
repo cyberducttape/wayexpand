@@ -3,11 +3,13 @@
 //! Handles pattern matching against the input buffer, match plan generation,
 //! and policy application for deciding whether and how to execute expansions.
 
-use std::{borrow::Cow, sync::Arc};
+#[cfg(test)]
+use std::borrow::Cow;
+use std::sync::Arc;
 
 use unicode_general_category::{get_general_category, GeneralCategory};
 
-use super::{ExpansionEngine, MatchPlan};
+use super::{ExpansionEngine, MatchPlan, SensitiveText};
 use crate::config::capitalize_first_letter;
 use crate::{AppFilter, ExpansionConfig, MatchMode};
 
@@ -116,11 +118,30 @@ pub(super) fn continues_word_after(preceding: Option<char>, character: char) -> 
 
 /// Recases a rendered replacement to match the casing pattern of the typed
 /// trigger when `propagate_case` is enabled.
+#[cfg(test)]
 pub(super) fn apply_case_style<'a>(typed: &str, text: Cow<'a, str>) -> Cow<'a, str> {
     match CaseStyle::classify(typed) {
         CaseStyle::Lower | CaseStyle::Mixed => text,
         CaseStyle::Upper => Cow::Owned(text.to_uppercase()),
         CaseStyle::Title => Cow::Owned(capitalize_first_letter(&text)),
+    }
+}
+
+/// Apply case propagation to an owned sensitive output without allowing an
+/// intermediate plaintext `String` to be dropped unwiped.
+pub(super) fn apply_case_style_sensitive(typed: &str, text: SensitiveText) -> SensitiveText {
+    match CaseStyle::classify(typed) {
+        CaseStyle::Lower | CaseStyle::Mixed => text,
+        CaseStyle::Upper => {
+            let transformed = text.to_uppercase();
+            drop(text);
+            transformed.into()
+        }
+        CaseStyle::Title => {
+            let transformed = capitalize_first_letter(&text);
+            drop(text);
+            transformed.into()
+        }
     }
 }
 
@@ -290,12 +311,12 @@ impl ExpansionEngine {
         let matched_text: String = self.buffer.iter().skip(start).collect();
         Some(MatchPlan {
             snippet_id: Arc::clone(&compiled.id),
-            matched_text,
+            matched_text: matched_text.into(),
             terminating_char,
             cursor_offset,
             generation: self.input_generation,
             trigger_config: Arc::clone(&compiled.trigger),
-            replacement_text,
+            replacement_text: replacement_text.into(),
             command: compiled.command.clone(),
             propagate_case: expansion.propagate_case,
             form_template,

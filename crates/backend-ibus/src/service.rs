@@ -162,7 +162,7 @@ impl EngineObject {
                             self.path.as_str(),
                             "org.freedesktop.IBus.Engine",
                             "CommitText",
-                            &(Value::from(ibus_text_value(text)),),
+                            &(Value::from(ibus_text_value(text.as_str())),),
                         )
                         .await
                 }
@@ -211,7 +211,7 @@ fn emit_actions(
                 path.as_str(),
                 "org.freedesktop.IBus.Engine",
                 "CommitText",
-                &(Value::from(ibus_text_value(text)),),
+                &(Value::from(ibus_text_value(text.as_str())),),
             ),
         };
         result.map_err(zbus::fdo::Error::ZBus)?;

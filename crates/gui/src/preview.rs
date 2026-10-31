@@ -129,7 +129,7 @@ pub(crate) fn render_with_library_snippets(
     results.extend(engine.process(InputEvent::EndOfInput));
     Ok(results
         .last()
-        .map(|result| result.insert.clone())
+        .map(|result| result.insert.to_string())
         .unwrap_or_else(|| "No expansion matched".into()))
 }
 

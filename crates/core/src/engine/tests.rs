@@ -174,7 +174,7 @@ fn the_immediate_and_deferred_processors_agree_on_what_matches() {
             .map(|result| {
                 (
                     result.trigger.to_string(),
-                    result.matched_text,
+                    result.matched_text.to_string(),
                     result.reinsert_after,
                 )
             })
@@ -185,7 +185,7 @@ fn the_immediate_and_deferred_processors_agree_on_what_matches() {
             .map(|pending| {
                 (
                     pending.trigger.to_string(),
-                    pending.matched_text.clone(),
+                    pending.matched_text.to_string(),
                     pending.reinsert_after,
                 )
             })
@@ -1005,7 +1005,10 @@ fn expired_command_output_is_removed_and_expiry_index_stays_bounded() {
     let mut engine = engine();
     engine.cache_command_output(0, 2, "temporary command secret".into());
     assert_eq!(
-        engine.cached_command_output(0).as_deref(),
+        engine
+            .cached_command_output(0)
+            .as_ref()
+            .map(|text| text.as_str()),
         Some("temporary command secret")
     );
     std::thread::sleep(Duration::from_millis(10));
@@ -1013,7 +1016,7 @@ fn expired_command_output_is_removed_and_expiry_index_stays_bounded() {
     assert!(engine.command_cache[0].is_none());
 
     for index in 0..256 {
-        engine.cache_command_output(0, 60_000, format!("replacement-{index}"));
+        engine.cache_command_output(0, 60_000, format!("replacement-{index}").into());
     }
     assert!(engine.command_cache_expirations.len() <= 64);
 }
@@ -1544,7 +1547,7 @@ fn apply_preflights_backend_capabilities_before_destructive_output() {
         snippet_id: Arc::from(""),
         trigger: ":x".into(),
         matched_text: ":x".into(),
-        insert: "x".repeat(251),
+        insert: "x".repeat(251).into(),
         cursor_offset: None,
         reinsert_after: None,
         command_backed: false,
@@ -1605,7 +1608,7 @@ fn apply_preflight_counts_reinserted_delimiter_as_one_character() {
         snippet_id: Arc::from(""),
         trigger: ":x".into(),
         matched_text: ":x".into(),
-        insert: "x".repeat(249),
+        insert: "x".repeat(249).into(),
         cursor_offset: None,
         reinsert_after: Some('—'),
         command_backed: false,
@@ -4640,8 +4643,8 @@ fn queued_async_command_that_becomes_stale_is_discarded_before_spawn() {
         let result = ExpansionResult {
             snippet_id: Arc::from(""),
             trigger: format!(":job{index}").into(),
-            matched_text: format!(":job{index}"),
-            insert: String::new(),
+            matched_text: format!(":job{index}").into(),
+            insert: String::new().into(),
             cursor_offset: None,
             reinsert_after: None,
             command_backed: true,
@@ -4677,7 +4680,7 @@ fn queued_async_command_that_becomes_stale_is_discarded_before_spawn() {
         snippet_id: Arc::from(""),
         trigger: ":stale".into(),
         matched_text: ":stale".into(),
-        insert: String::new(),
+        insert: String::new().into(),
         cursor_offset: None,
         reinsert_after: None,
         command_backed: true,
@@ -6243,7 +6246,7 @@ fn expansions_render_from_templates_compiled_at_validation() {
     let results = engine.process(InputEvent::Text(";hi".into()));
     assert_eq!(results.len(), 1);
     assert_eq!(
-        (results[0].insert.clone(), results[0].cursor_offset),
+        (results[0].insert.to_string(), results[0].cursor_offset),
         expected
     );
     assert_eq!(results[0].cursor_offset, Some(1));

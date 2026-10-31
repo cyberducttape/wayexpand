@@ -189,7 +189,7 @@ fn apply(text: &mut String, result: &ExpansionResult) -> Option<Option<usize>> {
         erase.push(character);
         insert.push(character);
     }
-    if !text.ends_with(&erase) {
+    if !text.ends_with(erase.as_str()) {
         return None;
     }
     text.truncate(text.len() - erase.len());

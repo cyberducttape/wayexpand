@@ -1,7 +1,6 @@
 use std::{collections::VecDeque, time::Instant};
-use zeroize::Zeroize;
 
-use crate::Matcher;
+use crate::{Matcher, SensitiveText};
 
 /// Triggers whose snippets read the clipboard.
 #[derive(Debug, Clone)]
@@ -59,11 +58,5 @@ impl ClipboardTriggers {
 pub(super) struct CommandCacheEntry {
     pub(super) expires_at: Instant,
     pub(super) generation: u64,
-    pub(super) value: String,
-}
-
-impl Drop for CommandCacheEntry {
-    fn drop(&mut self) {
-        self.value.zeroize();
-    }
+    pub(super) value: SensitiveText,
 }

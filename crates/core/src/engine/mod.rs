@@ -24,7 +24,7 @@ pub use explain::{CheckStatus, ExplainCheck, Explanation};
 pub use insertion::InsertError;
 pub use state::{
     ExpansionResult, InputEvent, MatchPlan, PendingExpansionDispatch, PendingExpansionResult,
-    WindowContext,
+    SensitiveText, WindowContext,
 };
 pub use transaction::{
     route_limit, RouteLimit, TransactionOutcome, TransactionPhase, TransactionReport,
@@ -65,7 +65,7 @@ const ASYNC_COMMAND_WORKER_COUNT: usize = 4;
 const COMMAND_FAILURE_HISTORY_LIMIT: usize = 16;
 
 struct DeferredMatchReservation {
-    matched_text: String,
+    matched_text: SensitiveText,
     command_backed: bool,
 }
 
@@ -564,11 +564,10 @@ impl ExpansionEngine {
 
             // Apply case propagation
             let final_output = if self.config.expansion[completion.config_index].propagate_case {
-                matching::apply_case_style(
+                matching::apply_case_style_sensitive(
                     &completion.result.matched_text,
-                    std::borrow::Cow::Owned(validated_output),
+                    validated_output,
                 )
-                .into_owned()
             } else {
                 validated_output
             };
@@ -627,7 +626,7 @@ impl ExpansionEngine {
         let output = if let Some(cached) = pending.cached_output {
             cached
         } else if let Some(command) = &pending.command {
-            run_command(command)?
+            run_command(command)?.into()
         } else {
             pending.template_text
         };
@@ -646,8 +645,7 @@ impl ExpansionEngine {
         }
 
         let insert = if pending.propagate_case {
-            matching::apply_case_style(&pending.matched_text, std::borrow::Cow::Owned(output))
-                .into_owned()
+            matching::apply_case_style_sensitive(&pending.matched_text, output)
         } else {
             output
         };
@@ -724,7 +722,7 @@ impl ExpansionEngine {
             snippet_id: pending.snippet_id.clone(),
             trigger: pending.trigger,
             matched_text: pending.matched_text,
-            insert: String::new(),
+            insert: String::new().into(),
             cursor_offset: pending.cursor_offset,
             reinsert_after: pending.reinsert_after,
             command_backed: true,
@@ -796,7 +794,7 @@ impl ExpansionEngine {
                 snippet_id: pending.snippet_id,
                 trigger: pending.trigger,
                 matched_text: pending.matched_text,
-                insert: String::new(),
+                insert: String::new().into(),
                 cursor_offset: None,
                 reinsert_after: pending.reinsert_after,
                 command_backed,
@@ -855,7 +853,7 @@ impl ExpansionEngine {
         let index = self.deferred_matches.iter().position(|reservation| {
             reservation.matched_text == matched_text
                 || matched_text
-                    .strip_prefix(&reservation.matched_text)
+                    .strip_prefix(reservation.matched_text.as_str())
                     .is_some_and(|suffix| suffix.chars().count() == 1)
         })?;
         let mut reservation = self.deferred_matches.remove(index);
@@ -992,12 +990,11 @@ impl ExpansionEngine {
     /// Takes the plan by value: it is always the caller's last use of it, and
     /// the trigger and matched text move straight into the result instead of
     /// being copied out of a plan that is dropped on the next line.
-    fn commit_expansion(&mut self, plan: MatchPlan, insert: String) -> ExpansionResult {
+    fn commit_expansion(&mut self, plan: MatchPlan, insert: SensitiveText) -> ExpansionResult {
         // Cow keeps this already-owned rendered String in place for the
         // common lower/mixed-case paths; transformed casing creates new text.
         let final_insert = if plan.propagate_case {
-            matching::apply_case_style(&plan.matched_text, std::borrow::Cow::Owned(insert))
-                .into_owned()
+            matching::apply_case_style_sensitive(&plan.matched_text, insert)
         } else {
             insert
         };
@@ -1085,7 +1082,7 @@ impl ExpansionEngine {
                         snippet_id: plan.snippet_id,
                         trigger: plan.trigger_config,
                         matched_text: plan.matched_text,
-                        insert: String::new(),
+                        insert: String::new().into(),
                         cursor_offset: None,
                         reinsert_after,
                         command_backed: true,
@@ -1145,7 +1142,7 @@ impl ExpansionEngine {
         // Static templates were rendered once while creating the plan. For a
         // command-backed match this field is unused until command completion.
         let template_text = if plan.command.is_some() || plan.form.is_some() {
-            String::new()
+            SensitiveText::default()
         } else {
             std::mem::take(&mut plan.replacement_text)
         };
@@ -1184,7 +1181,7 @@ impl ExpansionEngine {
 
     /// Execute a command-backed expansion, using the short-lived cache when
     /// configured. Static templates are rendered while creating `MatchPlan`.
-    fn render_expansion(&mut self, config_index: usize) -> Result<String, ()> {
+    fn render_expansion(&mut self, config_index: usize) -> Result<SensitiveText, ()> {
         let Some(command) = self.config.expansion[config_index].command.clone() else {
             return Err(());
         };
@@ -1193,7 +1190,7 @@ impl ExpansionEngine {
                 return Ok(value);
             }
         }
-        let value = run_command(&command).map_err(|_| ())?;
+        let value = SensitiveText::from(run_command(&command).map_err(|_| ())?);
         if command.cache_ms > 0 {
             self.cache_command_output(config_index, command.cache_ms, value.clone());
         }
@@ -1236,7 +1233,7 @@ impl ExpansionEngine {
         }
     }
 
-    fn cached_command_output(&mut self, index: usize) -> Option<String> {
+    fn cached_command_output(&mut self, index: usize) -> Option<SensitiveText> {
         self.expire_command_cache();
         self.command_cache
             .get(index)
@@ -1244,7 +1241,7 @@ impl ExpansionEngine {
             .map(|entry| entry.value.clone())
     }
 
-    fn cache_command_output(&mut self, index: usize, ttl_ms: u64, value: String) {
+    fn cache_command_output(&mut self, index: usize, ttl_ms: u64, value: SensitiveText) {
         if ttl_ms == 0 || index >= self.command_cache.len() {
             return;
         }

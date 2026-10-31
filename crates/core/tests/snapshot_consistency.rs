@@ -23,7 +23,7 @@ fn expand_all(engine: &mut ExpansionEngine, triggers: &[&str]) -> Vec<(String, O
         .map(|trigger| {
             let results = engine.process(InputEvent::Text((*trigger).into()));
             assert_eq!(results.len(), 1, "{trigger} must expand");
-            (results[0].insert.clone(), results[0].cursor_offset)
+            (results[0].insert.to_string(), results[0].cursor_offset)
         })
         .collect()
 }

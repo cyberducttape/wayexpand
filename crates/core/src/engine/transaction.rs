@@ -3,10 +3,8 @@
 //! Handles undo history, deferred match reservations, and transaction tracking
 //! for expansion results that need to maintain undo semantics across async completion.
 
-use std::borrow::Cow;
-
 use super::{ExpansionEngine, ExpansionResult};
-use crate::{InjectorCapabilities, InjectorError, TextInjector};
+use crate::{InjectorCapabilities, InjectorError, SensitiveText, TextInjector};
 
 /// Result of the multi-stage replacement transaction.
 ///
@@ -265,16 +263,16 @@ impl ExpansionEngine {
         // Checked first and before anything is typed, so a refusal is a clean
         // "not applied" rather than an uncertain partial write.
         injector.admit(!result.matched_text.is_empty() || result.reinsert_after.is_some())?;
-        let preflight_text = result.reinsert_after.map_or_else(
-            || Cow::Borrowed(result.insert.as_str()),
-            |character| {
-                let mut text = String::with_capacity(result.insert.len() + character.len_utf8());
-                text.push_str(&result.insert);
-                text.push(character);
-                Cow::Owned(text)
-            },
-        );
-        injector.preflight_text(&preflight_text)?;
+        let preflight_owned = result.reinsert_after.map(|character| {
+            let mut text = String::with_capacity(result.insert.len() + character.len_utf8());
+            text.push_str(&result.insert);
+            text.push(character);
+            SensitiveText::from(text)
+        });
+        let preflight_text = preflight_owned
+            .as_ref()
+            .map_or_else(|| result.insert.as_str(), SensitiveText::as_str);
+        injector.preflight_text(preflight_text)?;
         match route_limit(
             &capabilities,
             &result.insert,
@@ -340,7 +338,9 @@ impl ExpansionEngine {
                 let mut insert = String::with_capacity(result.insert.len() + character.len_utf8());
                 insert.push_str(&result.insert);
                 insert.push(character);
-                if let Err(source) = injector.replace(&erase, &insert) {
+                let erase = SensitiveText::from(erase);
+                let insert = SensitiveText::from(insert);
+                if let Err(source) = injector.replace(erase.as_str(), insert.as_str()) {
                     let outcome = if injector.capabilities().atomic_replace
                         && !injector.replace_error_may_have_applied()
                     {

@@ -16,8 +16,8 @@ impl ExpansionEngine {
         Some(ExpansionResult {
             snippet_id: Arc::from(""),
             trigger: Arc::from(""),
-            matched_text: erase_text.clone(),
-            insert: restore_text.clone(),
+            matched_text: erase_text.clone().into(),
+            insert: restore_text.clone().into(),
             cursor_offset: None,
             reinsert_after: None,
             command_backed: false,
@@ -33,7 +33,7 @@ impl ExpansionEngine {
             .last_expansion
             .as_ref()
             .is_some_and(|(restore, erase)| {
-                restore == &result.insert && erase == &result.matched_text
+                restore == result.insert.as_str() && erase == result.matched_text.as_str()
             })
         {
             self.clear_undo_state();

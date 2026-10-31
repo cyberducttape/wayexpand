@@ -116,10 +116,10 @@ fn check_result(model: &Model, result: &ExpansionResult) {
     assert!(!result.matched_text.is_empty());
     let typed = &model.typed;
     assert!(
-        typed.ends_with(&result.matched_text)
+        typed.ends_with(result.matched_text.as_str())
             || result.reinsert_after.is_some_and(|delimiter| typed
                 .strip_suffix(delimiter)
-                .is_some_and(|before| before.ends_with(&result.matched_text))),
+                .is_some_and(|before| before.ends_with(result.matched_text.as_str()))),
         "match {:?} erases text that was not typed ({typed:?})",
         result.matched_text
     );
@@ -171,8 +171,8 @@ fn apply(engine: &mut ExpansionEngine, model: &mut Model, event: InputEvent) {
         let prefix = result
             .reinsert_after
             .and_then(|delimiter| model.typed.strip_suffix(delimiter))
-            .and_then(|before| before.strip_suffix(&result.matched_text))
-            .or_else(|| model.typed.strip_suffix(&result.matched_text));
+            .and_then(|before| before.strip_suffix(result.matched_text.as_str()))
+            .or_else(|| model.typed.strip_suffix(result.matched_text.as_str()));
         let Some(prefix) = prefix else {
             unreachable!("check_result accepted a result that is not a typed suffix");
         };

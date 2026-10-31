@@ -169,12 +169,12 @@ pub fn shutdown_injector(injector: Box<dyn TextInjector>) {
 
 enum OutputCommand {
     Replace {
-        trigger: String,
-        text: String,
+        trigger: wayexpand_core::SensitiveText,
+        text: wayexpand_core::SensitiveText,
         completion: Completion,
     },
-    Erase(String, Completion),
-    Insert(String, Completion),
+    Erase(wayexpand_core::SensitiveText, Completion),
+    Insert(wayexpand_core::SensitiveText, Completion),
     MoveCursor(usize, Completion),
     Key(u32, Completion),
     KeyWithModifiers(u32, Modifiers, Completion),
@@ -375,9 +375,13 @@ pub fn spawn_async_injector(
                         trigger,
                         text,
                         completion,
-                    } => (backend.replace(&trigger, &text), completion),
-                    OutputCommand::Erase(text, completion) => (backend.erase(&text), completion),
-                    OutputCommand::Insert(text, completion) => (backend.insert(&text), completion),
+                    } => (backend.replace(trigger.as_str(), text.as_str()), completion),
+                    OutputCommand::Erase(text, completion) => {
+                        (backend.erase(text.as_str()), completion)
+                    }
+                    OutputCommand::Insert(text, completion) => {
+                        (backend.insert(text.as_str()), completion)
+                    }
                     OutputCommand::MoveCursor(count, completion) => {
                         (backend.move_cursor_left(count), completion)
                     }
@@ -788,7 +792,7 @@ mod tests {
         ExpansionResult {
             snippet_id: String::new().into(),
             trigger: String::new().into(),
-            matched_text: String::new(),
+            matched_text: String::new().into(),
             insert: "replacement".into(),
             cursor_offset: None,
             reinsert_after: None,
@@ -1046,8 +1050,8 @@ mod tests {
         let result = ExpansionResult {
             snippet_id: String::new().into(),
             trigger: String::new().into(),
-            matched_text: String::new(),
-            insert: "x".repeat(200),
+            matched_text: String::new().into(),
+            insert: "x".repeat(200).into(),
             cursor_offset: None,
             reinsert_after: None,
             command_backed: false,
@@ -1091,7 +1095,7 @@ mod tests {
             snippet_id: String::new().into(),
             trigger: ":t".into(),
             matched_text: ":t".into(),
-            insert: "x".repeat(200),
+            insert: "x".repeat(200).into(),
             cursor_offset: None,
             reinsert_after: None,
             command_backed: false,

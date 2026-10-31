@@ -4,6 +4,14 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Wrap transient matched text, rendered replacements, cached command output,
+  deferred results, output commands, IBus commits, and GUI preview cache values
+  in a zeroizing `SensitiveText` type. Each clone has independent zeroizing
+  ownership, and its `Debug` output is redacted. Protect transaction preflight
+  strings as well. The output worker still clones a result where reactor-side
+  completion bookkeeping requires ownership; both copies are wiped on drop.
+  Persistent snippet configuration and text already delivered to the target
+  application are outside this transient-buffer guarantee.
 - Zeroize input-method-v2 surrounding text when it is replaced or discarded,
   suppress collection while content sensitivity is unknown or sensitive, and
   wipe queued text/scalar events before focus-change or overflow clears.

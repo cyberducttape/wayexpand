@@ -71,7 +71,7 @@ pub(crate) fn test_command(mut args: Args) -> Result<()> {
                     "trigger_characters": result.trigger.graphemes(true).count(),
                     "erase_characters": result.matched_text.graphemes(true).count(),
                     "replacement_bytes": result.insert.len(),
-                    "replacement": result.insert,
+                    "replacement": result.insert.as_str(),
                     "cursor_offset": result.cursor_offset,
                 })).collect::<Vec<_>>(),
             })
@@ -79,7 +79,7 @@ pub(crate) fn test_command(mut args: Args) -> Result<()> {
         println!("{response}");
     } else {
         match results.last() {
-            Some(result) => println!("{}", result.insert),
+            Some(result) => println!("{}", result.insert.as_str()),
             None => {
                 let explanation = engine.explain(&trigger, "unknown");
                 let form = explanation.snippet.as_ref().and_then(|snippet| {
@@ -196,14 +196,14 @@ pub(crate) fn preview_command(mut args: Args) -> Result<()> {
                     serde_json::json!({
                         "matched": true,
                         "trigger": result.trigger.as_ref(),
-                        "replacement": result.insert,
+                        "replacement": result.insert.as_str(),
                         "cursor_offset": result.cursor_offset,
                     })
                 );
             } else {
                 println!("trigger: {}", result.trigger);
                 println!("replacement:");
-                println!("{}", result.insert);
+                println!("{}", result.insert.as_str());
             }
         }
         None => {
