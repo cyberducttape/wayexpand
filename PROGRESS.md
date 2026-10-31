@@ -845,6 +845,11 @@ Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-3
   remains defense in depth; complete device isolation needs a successful
   runtime test on an eligible supported host and a documented
   systemd/user-namespace minimum.
+- Revalidated on the active user manager (systemd 259) on 2026-10-31: a
+  transient `PrivateDevices=yes` one-shot unit again exited before exec with
+  `218/CAPABILITIES`; `unshare -Ur true` failed with `Operation not permitted`.
+  The transient unit was collected. This confirms the local environment still
+  cannot produce the required device-namespace evidence.
 
 ## Per-user installer transaction verification
 
