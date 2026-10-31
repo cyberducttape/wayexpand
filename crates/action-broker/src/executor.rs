@@ -13,22 +13,158 @@ use crate::{
     config::{BrokerConfig, MAX_ACTION_TIMEOUT_MS},
     protocol::{ActionError, ActionOutput, ActionRequest, ActionResponse},
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
 use std::process::{Child, Command, Stdio};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
+    Arc, Mutex,
 };
 use std::time::{Duration, Instant};
-use tokio::sync::Mutex as AsyncMutex;
 #[cfg(unix)]
 use wayexpand_process_supervisor::{configure_process_group, ChildCgroup};
 
 pub struct ActionExecutor {
     config: BrokerConfig,
-    authorization_prompt: AsyncMutex<()>,
+    authorization_gate: AuthorizationGate,
+}
+
+const MAX_PENDING_AUTHORIZATIONS: usize = 4;
+const MAX_AUTHORIZATION_FAILURES: usize = 256;
+const AUTHORIZATION_COOLDOWN_BASE: Duration = Duration::from_secs(2);
+const AUTHORIZATION_COOLDOWN_MAX: Duration = Duration::from_secs(60);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct CallerKey {
+    uid: u32,
+    pid: u32,
+    start_time: u64,
+}
+
+#[derive(Default)]
+struct AuthorizationGateState {
+    pending: HashSet<CallerKey>,
+    failures: HashMap<CallerKey, AuthorizationFailure>,
+}
+
+#[derive(Clone, Copy)]
+struct AuthorizationFailure {
+    count: u8,
+    retry_at: Instant,
+    forget_at: Instant,
+}
+
+#[derive(Default)]
+struct AuthorizationGate {
+    state: Mutex<AuthorizationGateState>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AuthorizationAdmissionError {
+    AlreadyPending,
+    CoolingDown,
+    Busy,
+}
+
+struct AuthorizationPermit<'a> {
+    gate: &'a AuthorizationGate,
+    caller: CallerKey,
+    active: bool,
+}
+
+impl AuthorizationGate {
+    fn begin(
+        &self,
+        uid: u32,
+        pid: u32,
+        start_time: u64,
+    ) -> Result<AuthorizationPermit<'_>, AuthorizationAdmissionError> {
+        let caller = CallerKey {
+            uid,
+            pid,
+            start_time,
+        };
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let now = Instant::now();
+        state.failures.retain(|_, failure| failure.forget_at > now);
+        if state
+            .failures
+            .get(&caller)
+            .is_some_and(|failure| failure.retry_at > now)
+        {
+            return Err(AuthorizationAdmissionError::CoolingDown);
+        }
+        if state.pending.contains(&caller) {
+            return Err(AuthorizationAdmissionError::AlreadyPending);
+        }
+        if state.pending.len() >= MAX_PENDING_AUTHORIZATIONS {
+            return Err(AuthorizationAdmissionError::Busy);
+        }
+        state.pending.insert(caller);
+        Ok(AuthorizationPermit {
+            gate: self,
+            caller,
+            active: true,
+        })
+    }
+
+    fn complete(&self, caller: CallerKey, authorized: bool) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.pending.remove(&caller);
+        if authorized {
+            state.failures.remove(&caller);
+            return;
+        }
+
+        let previous = state.failures.get(&caller).copied();
+        if state.failures.len() >= MAX_AUTHORIZATION_FAILURES && previous.is_none() {
+            if let Some(oldest) = state
+                .failures
+                .iter()
+                .min_by_key(|(_, failure)| failure.retry_at)
+                .map(|(caller, _)| *caller)
+            {
+                state.failures.remove(&oldest);
+            }
+        }
+        let count = previous.map_or(1, |failure| failure.count.saturating_add(1));
+        let exponent = u32::from(count.saturating_sub(1).min(5));
+        let cooldown = AUTHORIZATION_COOLDOWN_BASE
+            .saturating_mul(1_u32 << exponent)
+            .min(AUTHORIZATION_COOLDOWN_MAX);
+        let now = Instant::now();
+        state.failures.insert(
+            caller,
+            AuthorizationFailure {
+                count,
+                retry_at: now + cooldown,
+                forget_at: now + Duration::from_secs(10 * 60),
+            },
+        );
+    }
+}
+
+impl AuthorizationPermit<'_> {
+    fn complete(mut self, authorized: bool) {
+        self.gate.complete(self.caller, authorized);
+        self.active = false;
+    }
+}
+
+impl Drop for AuthorizationPermit<'_> {
+    fn drop(&mut self) {
+        if self.active {
+            self.gate.complete(self.caller, false);
+            self.active = false;
+        }
+    }
 }
 
 impl ActionExecutor {
@@ -37,7 +173,7 @@ impl ActionExecutor {
         config.validate_and_canonicalize()?;
         Ok(Self {
             config,
-            authorization_prompt: AsyncMutex::new(()),
+            authorization_gate: AuthorizationGate::default(),
         })
     }
 
@@ -112,21 +248,35 @@ impl ActionExecutor {
         if peer.uid != rustix::process::geteuid().as_raw() {
             return Err(authorization_denied(&action_id));
         }
-        let Ok(_prompt) = self.authorization_prompt.try_lock() else {
-            return Err(ActionError::ActionBlocked {
-                action_id,
-                reason: "another action authorization is in progress".into(),
-            });
-        };
+        let prompt = self
+            .authorization_gate
+            .begin(peer.uid, pid, start_time)
+            .map_err(|reason| ActionError::ActionBlocked {
+                action_id: action_id.clone(),
+                reason: match reason {
+                    AuthorizationAdmissionError::AlreadyPending => {
+                        "an action authorization is already pending for this caller"
+                    }
+                    AuthorizationAdmissionError::CoolingDown => {
+                        "authorization was recently denied; retry after the cooldown"
+                    }
+                    AuthorizationAdmissionError::Busy => {
+                        "authorization service is busy; retry shortly"
+                    }
+                }
+                .into(),
+            })?;
         if shutdown.load(Ordering::Acquire) {
             return Err(ActionError::CommunicationError {
                 reason: "broker is shutting down; action was not started".into(),
             });
         }
-        if !polkit_authorized(pid, start_time, peer.uid, &request.action_id, &shutdown).await {
+        let authorized =
+            polkit_authorized(pid, start_time, peer.uid, &request.action_id, &shutdown).await;
+        prompt.complete(authorized);
+        if !authorized {
             return Err(authorization_denied(&request.action_id));
         }
-        drop(_prompt);
         self.execute_inner(request, Some(shutdown)).await
     }
 
@@ -497,6 +647,7 @@ async fn run_pkcheck(
     use tokio::process::Command as TokioCommand;
 
     const POLKIT_ACTION: &str = "org.wayexpand.execute-action";
+    const POLKIT_PROMPT_TIMEOUT: Duration = Duration::from_secs(30);
     let subject = format!("{pid},{start_time},{uid}");
     let mut child = match TokioCommand::new(helper)
         .arg("--action-id")
@@ -517,7 +668,7 @@ async fn run_pkcheck(
         Ok(child) => child,
         Err(_) => return false,
     };
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+    let deadline = tokio::time::Instant::now() + POLKIT_PROMPT_TIMEOUT;
     loop {
         if shutdown.load(Ordering::Acquire) || tokio::time::Instant::now() >= deadline {
             let _ = child.kill().await;
@@ -1376,6 +1527,71 @@ mod tests {
                 expected
             );
         }
+    }
+
+    #[tokio::test]
+    async fn unanswered_polkit_prompt_does_not_block_another_caller() {
+        let gate = Arc::new(AuthorizationGate::default());
+        let first_gate = Arc::clone(&gate);
+        let (started_send, started_receive) = tokio::sync::oneshot::channel();
+        let (finish_send, finish_receive) = tokio::sync::oneshot::channel();
+        let first = tokio::spawn(async move {
+            let permit = first_gate.begin(1000, 101, 5001).unwrap();
+            started_send.send(()).unwrap();
+            // Simulate a polkit dialog that the first caller leaves unanswered.
+            let allowed = finish_receive.await.unwrap_or(false);
+            permit.complete(allowed);
+        });
+        started_receive.await.unwrap();
+
+        let second_gate = Arc::clone(&gate);
+        let legitimate = tokio::time::timeout(Duration::from_millis(100), async move {
+            let permit = second_gate.begin(1000, 202, 6002).unwrap();
+            permit.complete(true);
+            true
+        })
+        .await
+        .expect("an unrelated caller should obtain an authorization slot");
+        assert!(legitimate);
+
+        finish_send.send(false).unwrap();
+        first.await.unwrap();
+        assert!(matches!(
+            gate.begin(1000, 101, 5001),
+            Err(AuthorizationAdmissionError::CoolingDown)
+        ));
+        // A denial cooldown is scoped to that exact process identity.
+        gate.begin(1000, 202, 6002).unwrap().complete(true);
+    }
+
+    #[test]
+    fn duplicate_prompts_for_one_peer_are_rejected_without_global_locking() {
+        let gate = AuthorizationGate::default();
+        let first = gate.begin(1000, 101, 5001).unwrap();
+        assert!(matches!(
+            gate.begin(1000, 101, 5001),
+            Err(AuthorizationAdmissionError::AlreadyPending)
+        ));
+        gate.begin(1000, 202, 6002).unwrap().complete(true);
+        drop(first);
+    }
+
+    #[test]
+    fn authorization_gate_bounds_distinct_pending_prompts() {
+        let gate = AuthorizationGate::default();
+        let permits = (0..MAX_PENDING_AUTHORIZATIONS)
+            .map(|index| {
+                gate.begin(1000, 100 + index as u32, 5000 + index as u64)
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        assert!(matches!(
+            gate.begin(1000, 999, 9000),
+            Err(AuthorizationAdmissionError::Busy)
+        ));
+
+        permits.into_iter().next().unwrap().complete(true);
+        gate.begin(1000, 999, 9000).unwrap().complete(true);
     }
 
     #[test]

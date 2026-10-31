@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Allow up to four independent Action Broker polkit authorizations instead of
+  holding a global lock while a user prompt is open. Limit each PID/start-time
+  peer to one pending prompt, cap prompts at 30 seconds, and apply an
+  exponential per-peer cooldown after failed authorization. Authorization
+  remains per invocation and is never cached. Add a regression showing an
+  unanswered prompt does not block another peer.
 - Restrict live control-socket explanations to `matched`, `would_expand`, and
   a generic suppression reason. Omit typed text, canonical triggers, aliases,
   detailed checks, executable paths, broker action IDs, template-variable

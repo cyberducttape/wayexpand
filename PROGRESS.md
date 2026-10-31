@@ -2,6 +2,23 @@
 
 Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-31 UTC)
 
+## Action Broker polkit prompt admission: 2026-10-31
+
+- Replaced the global authorization mutex with a bounded gate: up to four
+  distinct kernel-identified peers can authorize concurrently; each peer
+  (UID, PID, process start time) can have one prompt pending. One unanswered
+  prompt no longer rejects unrelated callers.
+- Bound each `pkcheck` interaction to 30 seconds and apply exponential
+  per-peer cooldown after denials/timeouts, capped at 60 seconds. Successful
+  authorization clears that caller's failure state. Per-invocation polkit
+  authorization remains uncached.
+- Added tests for a deliberately pending first caller while a second caller
+  completes authorization, duplicate same-peer admission, and cooldown
+  isolation between peers.
+- Verification: all Action Broker tests passed (91 library, 7 binary, 9
+  integration; 1 ignored interactive-polkit test). Targeted Clippy and
+  formatting checks passed with `-D warnings`; `git diff --check` passed.
+
 ## Restricted control-socket diagnostics: 2026-10-31
 
 - Reduced live socket explanation output to three fields: `matched`,

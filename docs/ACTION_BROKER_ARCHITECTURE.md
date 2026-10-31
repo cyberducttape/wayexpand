@@ -116,9 +116,14 @@ that kernel-identified PID, process start time, UID, and action ID. The
 packaged policy requires fresh active-session authentication and names the
 action in the prompt. Execution is denied if polkit, its policy, or an
 authentication agent is unavailable, if the request is dismissed, or if the
-check times out. Concurrent authorization prompts are rejected. This is an
-explicit user-consent gate, not isolation from malware running under the same
-UID; a user can still approve a deceptive request.
+check times out. Each prompt has a 30-second deadline. Up to four distinct
+peer processes may authorize concurrently, while a process may have only one
+pending prompt. Failed attempts enter a per-process exponential cooldown
+capped at 60 seconds; authorization is never cached. This prevents one
+unanswered request from holding a global prompt lock while keeping prompt
+admission bounded. This is an explicit user-consent gate, not isolation from
+malware running under the same UID; a user can still approve a deceptive
+request.
 
 When a request does not capture output (`stdout_capture = false`), the
 action's stdout and stderr go to `/dev/null`. Command output can contain
