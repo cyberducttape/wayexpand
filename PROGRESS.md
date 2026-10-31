@@ -1692,5 +1692,12 @@ pass with both default parallel scheduling and `RUST_TEST_THREADS=1`; the full
 - An initial release-test attempt filled the 7.2 GiB `/tmp` tmpfs. No source
   files were affected; the rerun used a disk-backed target directory and
   completed successfully.
+- Re-running `cargo deny check` against the downgraded GUI dependency graph
+  found BSL-1.0 metadata on Windows-only `clipboard-win` and `error-code`, both
+  pulled in by egui-winit's clipboard feature. Added BSL-1.0 to the accepted
+  license set with a scoped dependency rationale; `cargo deny check` then
+  passed (with the existing duplicate-version warnings), and `cargo audit
+  --deny yanked` passed with only the three already-allowed zbus lineage
+  unmaintained advisories.
 - The real-session physical-input certification blocker remains open; this
   toolchain compatibility fix does not change that release gate.

@@ -28,6 +28,9 @@ allow = [
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
+    # egui-winit's Windows clipboard backend pulls clipboard-win and
+    # error-code under this OSI-approved, non-copyleft license.
+    "BSL-1.0",
     "CC0-1.0",
     "ISC",
     "MIT",

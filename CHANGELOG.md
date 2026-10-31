@@ -9,6 +9,8 @@ All notable changes to WayExpand are documented here.
   are unavailable in this egui release with vector-drawn icons. Make the MSRV
   CI job invoke Rust 1.92 explicitly so the repository's Rust toolchain pin
   cannot silently run the newer development compiler instead.
+- Allow BSL-1.0 in dependency license checks for the Windows clipboard crates
+  pulled in by egui-winit; the license is OSI-approved and non-copyleft.
 - Reuse the immutable validated configuration snapshot for engine filters,
   forms, hotkeys, undo settings, and trigger indexes instead of keeping
   duplicate metadata copies in each engine.
