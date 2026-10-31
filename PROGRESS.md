@@ -1463,3 +1463,18 @@ pass with both default parallel scheduling and `RUST_TEST_THREADS=1`; the full
   all 31 CI jobs are queued without a runner assignment. This is not a hosted
   CI pass. Local checks do not replace the pending hosted build matrix or the
   open real-session certification gate.
+
+## Focused private KWin client matrix: 2026-10-30
+
+- Ran `scripts/kwin-certification-prepare.sh` from clean exact source commit
+  `f59873ba62d2` in a private KWin 6.6.6 session, with stdin-simulated capture,
+  production libei keysym fallback, one `us` layout, and a real GTK text
+  client. Seven scenarios passed: rapid multiline typing, cross-window focus,
+  focus change during expansion, target closure, configuration reload, daemon
+  restart, and fail-closed insertion refusal.
+- Preserved the machine-readable result store at
+  [`docs/evidence/kwin-real-client-f59873ba62d2.txt`](docs/evidence/kwin-real-client-f59873ba62d2.txt)
+  and linked it from `DEVELOPMENT_PLAN.md`. This does not exercise physical
+  keyboard capture, other layouts or clients, concurrent physical input during
+  paced output, password fields, or suspend/resume; it is partial evidence and
+  does not close the certification gate.

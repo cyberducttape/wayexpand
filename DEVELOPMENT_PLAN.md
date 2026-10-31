@@ -19,6 +19,16 @@ samples per replacement-size bucket. Capture was simulated over stdin; the
 report is explicitly partial and does not satisfy physical capture, overlap,
 password-field, suspend/resume, or production certification criteria.
 
+Additional focused output-path evidence was collected on exact source commit
+`f59873ba62d2` in a private KWin 6.6.6 session. Seven scenarios passed against
+a real GTK text client: rapid multiline input, cross-window focus, focus
+change, target closure, configuration reload, daemon restart, and refusal
+before insertion. The result store is preserved at
+[`docs/evidence/kwin-real-client-f59873ba62d2.txt`](docs/evidence/kwin-real-client-f59873ba62d2.txt).
+Capture was stdin-simulated and only the `us` layout and GTK client were used;
+this adds output/focus regression evidence but does not satisfy the real
+capture, layout, password-field, overlap, or production certification gates.
+
 Earlier partial evidence: `doctor --certify` ran from clean commit
 `c94a4f634bfb` in a private KWin 6.6.6 session. The preserved report at
 [`docs/evidence/doctor-certify-c94a4f634bfb.json`](docs/evidence/doctor-certify-c94a4f634bfb.json)

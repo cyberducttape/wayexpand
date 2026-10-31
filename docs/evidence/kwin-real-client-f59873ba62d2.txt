@@ -1,0 +1,16 @@
+# wayexpand KWin certification store
+schema=1
+commit=f59873ba62d2
+source_tree_state=clean
+kwin_version=6.6.6
+capture=stdin
+output_backend=libei
+backend_mode=ei_keyboard keysym fallback (12ms key pacing)
+generated_at_unix=1793418421
+cell multiline-rapid|us|gtk3-textview pass text=zany$quizok$ cursor=11
+cell focus-cross-window|us|gtk3-textview pass target: text=only here$ cursor=9; other: text=;only$ cursor=5
+cell focus-change-during-expansion|us|gtk3-textview pass target: text=;slow$ cursor=5; other: text=$ cursor=0
+cell target-closes-during-expansion|us|gtk3-textview pass other: text=$ cursor=0
+cell config-reload|us|gtk3-textview pass text=zany quiz$ cursor=9
+cell daemon-restart|us|gtk3-textview pass text=zany quizzany quiz$ cursor=18
+cell failed-insertion|us|gtk3-textview pass route refused and left the trigger intact; text=;far$ cursor=4
