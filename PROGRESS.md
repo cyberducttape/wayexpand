@@ -1,9 +1,24 @@
 # Production Readiness Progress
 
-Updated: 2026-10-30 (America/Denver; latest evidence collected through 2026-10-31 UTC)
+Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-31 UTC)
 
 ## Current verification and certification runner status: 2026-10-31 UTC
 
+- Refreshed GitHub state and incorporated upstream `main` through
+  `753365dc4d7f`. That upstream revision includes the per-event profile and
+  batched-randomness optimizations (`314037b5`) and the KWin tracker-ID rename.
+  Its CI run `41173643747`, Launchpad sync `41173643741`, CodeQL run
+  `41173643603`, and scheduled fuzz run `41189987642` all completed
+  successfully; package smoke jobs for Ubuntu 26.04 and Fedora also passed.
+  The repository has no open GitHub issues, and its Actions runner API still
+  reports zero certification runners. These results are for upstream
+  `753365dc`, not for the local commits below.
+- Rebased the three local verified commits onto that upstream tip without a
+  merge commit. Exact combined HEAD `7ca29928`: `RUST_TEST_THREADS=1 cargo
+  test --workspace --locked --quiet` passed with 1,369 tests passed, 0 failed,
+  and 6 ignored. Workspace Clippy with `-D warnings`, formatting, and diff
+  checks passed. This exact combined HEAD has not run in GitHub Actions because
+  it has not been pushed.
 - Closed a gap in the non-atomic evdev output monitor: it now watches
   `/dev/input` topology events through inotify in addition to polling already
   open keyboards. Any device-node change interrupts output immediately, and
