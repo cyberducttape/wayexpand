@@ -1,7 +1,7 @@
 # WayExpand Compositor Certification Matrix
 
 **Version:** 1.3.3
-**Last Updated:** 2026-10-30
+**Last Updated:** 2026-10-31
 **Status:** No compositor route is production-certified
 
 ## Overview

@@ -18,6 +18,12 @@ Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-3
   replacement, keyboard hotplug during output, Unicode insertion, password
   fields, and suspend/resume remain untested. The report correctly says
   `overall: partial` and `certified: false`; this does not close the P0 gate.
+- Fresh local supply-chain checks passed: `cargo audit --deny yanked` found no
+  vulnerabilities or yanked locked dependencies, with the three already
+  allowed unmaintained zbus 5-lineage advisories; `cargo deny check` passed.
+  GitHub still has zero online certification runners. Upstream CI, Launchpad,
+  CodeQL, and fuzz jobs pass for `753365dc`, but do not cover this local branch,
+  now 11 commits ahead of `origin/main`.
 
 ## Validated configuration snapshot reuse: 2026-10-31
 
