@@ -1413,9 +1413,18 @@ pass with both default parallel scheduling and `RUST_TEST_THREADS=1`; the full
   cleanup only removes a strictly named, private, single-link file whose
   exact script contents are recognized, whose PID is no longer active, and
   whose corresponding KWin script is confirmed unloaded. Unknown states and
-  active scripts are preserved. Added parser and conservative-cleanup tests;
-  the live KWin tracker health test passed on Plasma/KWin 6.6.6 and checked
-  the file mode.
+  active scripts are preserved. Follow-up review bounded each cleanup to 512
+  directory entries and at most four compositor checks; file verification
+  opens with `O_NOFOLLOW` and reads only the expected script size. Added parser,
+  cleanup-safety, and work-bound tests. The live KWin tracker health test
+  passed on Plasma/KWin 6.6.6 and checked the file mode.
+- After the cleanup bounds were added, the full serial workspace test suite
+  passed (all test binaries passed; 2 tests ignored by existing annotations),
+  workspace Clippy with warnings denied passed, Markdown validation checked
+  54 files and 485 local links, documentation contracts passed, and formatting
+  and diff checks passed. The corresponding hosted CI run for the earlier
+  dashboard commit remained queued throughout this verification; the bounded
+  cleanup follow-up still needs an exact-head hosted run.
 - Production compositor certification remains open: these local tracker and
   capability checks do not validate physical keyboard capture, password-field
   behavior, or correct insertion across real target applications.

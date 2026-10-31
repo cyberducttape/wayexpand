@@ -12,7 +12,7 @@
 
 use std::{
     fs,
-    io::Write,
+    io::{Read, Write},
     os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     path::Path,
     process,
@@ -48,6 +48,10 @@ const TRACKER_HEALTH_GRACE: Duration = Duration::from_secs(10);
 /// well under this; this exists specifically for the case where it does
 /// not (see `probe()`'s doc comment).
 const DBUS_METHOD_TIMEOUT: Duration = Duration::from_secs(1);
+/// Keep orphan cleanup from turning a daemon start into an unbounded scan or
+/// a series of slow synchronous compositor round trips.
+const ORPHAN_SCAN_ENTRY_LIMIT: usize = 512;
+const ORPHAN_CHECK_LIMIT: usize = 4;
 
 #[derive(Debug, Error)]
 pub enum KwinWindowError {
@@ -387,7 +391,8 @@ fn cleanup_orphan_tracker_scripts(
     };
     let current_uid = unsafe { libc::geteuid() };
 
-    for entry in entries.flatten() {
+    let mut orphan_checks = 0;
+    for entry in entries.take(ORPHAN_SCAN_ENTRY_LIMIT).flatten() {
         let path = entry.path();
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
@@ -399,26 +404,60 @@ fn cleanup_orphan_tracker_scripts(
             continue;
         }
 
-        let Ok(metadata) = fs::symlink_metadata(&path) else {
+        orphan_checks += 1;
+        if orphan_checks > ORPHAN_CHECK_LIMIT {
+            break;
+        }
+
+        // Pin the file without following a last-moment symlink swap, then
+        // validate the opened inode rather than path metadata. Bound the read
+        // to the exact generated script length so a forged file cannot cause
+        // an unbounded allocation during daemon startup.
+        let Ok(mut file) = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(&path)
+        else {
             continue;
         };
+        let Ok(metadata) = file.metadata() else {
+            continue;
+        };
+        let bus_name = format!("org.wayexpand.WindowTracker.pid{pid}.n{nonce}");
+        let expected_contents = SCRIPT_TEMPLATE.replace("__WAYEXPAND_BUS_NAME__", &bus_name);
         if !metadata.is_file()
             || metadata.uid() != current_uid
             || metadata.nlink() != 1
             || metadata.mode() & 0o777 != 0o600
+            || metadata.len() != expected_contents.len() as u64
         {
             continue;
         }
 
-        let bus_name = format!("org.wayexpand.WindowTracker.pid{pid}.n{nonce}");
-        let expected_contents = SCRIPT_TEMPLATE.replace("__WAYEXPAND_BUS_NAME__", &bus_name);
-        if !fs::read_to_string(&path).is_ok_and(|contents| contents == expected_contents) {
+        let mut contents = String::with_capacity(expected_contents.len());
+        if Read::by_ref(&mut file)
+            .take(expected_contents.len() as u64 + 1)
+            .read_to_string(&mut contents)
+            .is_err()
+            || contents != expected_contents
+        {
             continue;
         }
 
         let plugin_name = format!("wayexpand-window-tracker-{pid}-{nonce}");
         if script_is_loaded(&plugin_name) == Some(false) {
-            let _ = fs::remove_file(path);
+            // Remove only if the directory entry still names the inode that
+            // was inspected. This avoids unlinking a replacement file after
+            // the descriptor check above.
+            let Ok(current) = fs::symlink_metadata(&path) else {
+                continue;
+            };
+            if current.dev() == metadata.dev()
+                && current.ino() == metadata.ino()
+                && !current.file_type().is_symlink()
+            {
+                let _ = fs::remove_file(path);
+            }
         }
     }
 }
@@ -585,7 +624,7 @@ mod tests {
     use super::{
         bounded_session_connection, cleanup_orphan_tracker_scripts, is_kwin_sender,
         parse_tracker_script_filename, window_context_from_signal, KwinWindowError,
-        KwinWindowTracker, SCRIPT_TEMPLATE, TRACKER_HEALTH_CHECK_INTERVAL,
+        KwinWindowTracker, ORPHAN_CHECK_LIMIT, SCRIPT_TEMPLATE, TRACKER_HEALTH_CHECK_INTERVAL,
     };
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
     use std::{
@@ -740,6 +779,44 @@ mod tests {
         ] {
             assert_eq!(parse_tracker_script_filename(invalid), None, "{invalid}");
         }
+    }
+
+    #[test]
+    fn orphan_cleanup_bounds_synchronous_compositor_checks() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-kwin-orphan-limit-{}-{suffix}",
+            process::id()
+        ));
+        fs::create_dir(&directory).unwrap();
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+        for index in 0..8 {
+            write_tracker_file(
+                &directory,
+                420_000 + index,
+                &format!("aabbccddeeff{index:04x}"),
+            );
+        }
+
+        let checks = std::cell::Cell::new(0);
+        cleanup_orphan_tracker_scripts(
+            &directory,
+            |_| false,
+            |_| {
+                checks.set(checks.get() + 1);
+                Some(false)
+            },
+        );
+
+        assert_eq!(checks.get(), ORPHAN_CHECK_LIMIT);
+        assert_eq!(
+            fs::read_dir(&directory).unwrap().count(),
+            8 - ORPHAN_CHECK_LIMIT
+        );
+        fs::remove_dir_all(directory).unwrap();
     }
 
     fn write_tracker_file(directory: &Path, pid: u32, nonce: &str) -> std::path::PathBuf {
