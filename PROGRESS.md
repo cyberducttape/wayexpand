@@ -37,11 +37,10 @@ Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-3
   malicious same-UID processes. The policy is root-owned administrator policy
   when applied by the daemon; a user-editable library cannot strengthen the
   daemon's administrator policy.
-- The policy-only changes were pushed as `3523331a` and the evidence record as
-  `a92064d6` using SSH and the configured identity
-  `Stephan Loesevitz <stephan.loesevitz@gmail.com>`. The hotkey routing fix and
-  its tests are now locally verified and will be committed separately. CI on
-  the earlier policy-only revision does not verify this follow-up.
+- The policy-only changes were pushed as `3523331a`, the evidence record as
+  `a92064d6`, and the broker-hotkey routing fix as `1b37d426`, all over SSH
+  using `Stephan Loesevitz <stephan.loesevitz@gmail.com>`. GitHub CI run
+  `41224163396` is running against `1b37d426`; no hosted result is claimed yet.
 
 ## Exact-head KWin output smoke: 2026-10-31
 
