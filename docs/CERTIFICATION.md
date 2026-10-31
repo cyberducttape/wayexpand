@@ -66,6 +66,18 @@ intentionally out of scope and is reported as `unsupported-by-design`; a
 certification never implies otherwise.
 
 The latest current-source isolated KWin smoke run is preserved in
+[`docs/evidence/doctor-certify-494aac93.json`](evidence/doctor-certify-494aac93.json).
+It tested clean commit `494aac93b15d` on KWin 6.6.6 on 2026-10-30 local time.
+Thirteen checks passed, four were not tested, and backend latency was measured. The
+private session used stdin-simulated capture and libei keysym fallback. Its 20
+injector samples per replacement size measured p50/p95/p99 of
+12.569/12.765/12.828 ms (small), 779.039/787.663/807.576 ms (medium), and
+3,123.171/3,159.319/3,159.673 ms (large). These measurements exclude keyboard
+capture and client paint. The run remains partial: physical capture, overlapping
+input, Unicode insertion on this route, suspend/resume, password-field
+behavior, and long-running stability are not certified.
+
+The preceding current-source isolated KWin smoke run is preserved in
 [`docs/evidence/doctor-certify-589d2682360f.json`](evidence/doctor-certify-589d2682360f.json).
 It tested clean commit `589d2682360f` on KWin 6.6.6. Twelve insertion, focus,
 reload, restart, refusal, and build-identity checks passed. The negotiated

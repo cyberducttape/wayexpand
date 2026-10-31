@@ -20,6 +20,13 @@ physical capture, overlap input, password fields, suspend/resume, and long soak
 untested, and reports `certified: false`. This is current-source output-path
 evidence only; the release gate remains open.
 
+The newer clean-source run at commit `494aac93b15d` is preserved in
+[`docs/evidence/doctor-certify-494aac93.json`](docs/evidence/doctor-certify-494aac93.json).
+It passed 13 checks, measured 20 injector samples in each size bucket, and
+left four scenarios untested. It still uses private headless KWin and
+stdin-simulated capture, so it does not close this gate; its p99 for a large
+replacement was 3.16 seconds on the keysym fallback.
+
 On the same source commit, the opt-in private KWin overlap scenario reproduced
 corruption: 124 of 128 replacement characters remained and the stale second
 trigger expanded ([failure report](docs/evidence/kwin-overlap-reproduction-0136588a.json)).

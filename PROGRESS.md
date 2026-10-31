@@ -2,6 +2,31 @@
 
 Updated: 2026-10-30
 
+## Current-source KWin smoke evidence: 2026-10-30
+
+- Ran `cargo run --locked -p wayexpand -- doctor --certify --json` from clean
+  commit `494aac93b15d` in an isolated private headless KWin 6.6.6 session.
+  Preserved the machine-readable report at
+  `docs/evidence/doctor-certify-494aac93.json`.
+- The report records 13 passed checks, 4 not-tested checks, and one measured
+  backend-latency check. The route negotiated libei keysym fallback; capture
+  was simulated over stdin. It remains `partial` and `certified: false`.
+- Twenty injector samples per size reported p50/p95/p99 of
+  12.569/12.765/12.828 ms (small), 779.039/787.663/807.576 ms (medium), and
+  3,123.171/3,159.319/3,159.673 ms (large). These exclude physical capture
+  and client paint latency. Physical capture, concurrent input integrity,
+  Unicode on this keysym route, suspend/resume, password-field behavior, and
+  long soak remain unverified.
+- Updated `docs/CERTIFICATION.md` and `DEVELOPMENT_PLAN.md` to identify this as
+  the latest report without promoting it to production certification.
+- Queried the active KDE desktop with the installed CLI's read-only doctor
+  command. It exited unhealthy and reports a live evdev + libei keysym-fallback
+  route, focus-tracked best-effort non-atomic replacement, no full-Unicode
+  support, and no sensitive-field signal. The daemon is connected, but this
+  route remains uncertified; the JSON is in `/tmp/wayexpand-active-doctor.json`
+  and was not added to the repository because it describes this machine's
+  private runtime state.
+
 ## Wayland compatibility dashboard overview: 2026-10-30
 
 - Added a concise overview at the top of GUI diagnostics with detected
