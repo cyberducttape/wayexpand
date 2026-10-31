@@ -16,13 +16,36 @@ Updated: 2026-10-30
   a lockfile conflict and is the only open pull request.
 - `wayexpand doctor | head` panicked with exit 101; commit `2427f55c` makes a
   closed stdout exit 1.
-- Documentation sprint: removed `docs/archive/` and 12 unreferenced,
-  superseded evidence reports (all `certified: false`); corrected the
+- Documentation sprint: removed `docs/archive/`, 11 unreferenced and
+  superseded `doctor --certify` reports (all `certified: false`), and one
+  superseded KWin overlap-reproduction report; corrected the
   contributing guide's MSRV (1.92, not 1.95) and project layout; added the
   missing `profile` and pack commands to the man page and `wayexpand help`;
   completed the configuration-limits table; replaced unsupported performance
   expectations in troubleshooting with measured values and live metrics;
   brought the German README up to date.
+
+## Current-source verification and remaining release gates
+
+- GitHub CI run [41076472952](https://github.com/cyberducttape/wayexpand/actions/runs/41076472952)
+  passed all 33 jobs on `65d4c7c3`, including locked debug/release workspace
+  tests, debug/release Clippy, integration and system tests, security audit,
+  clean-source build/test, Debian/RPM artifacts, Ubuntu 26.04 and Fedora
+  package-install smoke tests, and headless KWin/Sway E2E. Launchpad sync
+  [41076473005](https://github.com/cyberducttape/wayexpand/actions/runs/41076473005)
+  also passed.
+- Fuzz run [41040557794](https://github.com/cyberducttape/wayexpand/actions/runs/41040557794)
+  passed all eight targets on ancestor commit `dda02daf`. This predates the
+  eframe 0.37 GUI port, so it is not fuzz evidence for that later change.
+- On this checkout, all 131 CLI binary tests pass; workspace formatting,
+  targeted CLI Clippy, 54 Markdown files / 483 local links, and documentation
+  contracts pass. The CLI help test now asserts the pack diff/rollback and
+  per-app profile commands are listed.
+- GitHub still has no online self-hosted certification runners. The only
+  repository ruleset is `pro` with enforcement disabled; `main` is unprotected.
+  PR #32 (notify 8.2.1) is open with green checks. No current CI result or
+  headless desktop test satisfies physical-input, final-target-text, or
+  production compositor certification requirements.
 
 ## Current-source nightly fuzz run
 

@@ -1158,6 +1158,21 @@ fn help_rows_share_one_summary_column() {
 }
 
 #[test]
+fn help_lists_current_pack_and_profile_management_commands() {
+    let help = help_text();
+    for command in [
+        "pack search|inspect|diff",
+        "rollback|import|verify|sign",
+        "profile list|create|switch|remove|assign-app|unassign-app",
+    ] {
+        assert!(
+            help.contains(command),
+            "help does not list {command:?}:\n{help}"
+        );
+    }
+}
+
+#[test]
 fn missing_configuration_names_the_path_and_keeps_the_config_exit_code() {
     let path = Path::new("/nonexistent/wayexpand/expansions.toml");
     let error = config_load_error(path, Config::load(path).unwrap_err());
