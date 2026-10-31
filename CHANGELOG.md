@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Check `/dev/input` topology notifications before translating each retained
+  evdev batch slice, so keyboard hotplug cannot wait behind a raw-event backlog
+  while non-atomic replacement output continues. Add a dedicated required
+  certification scenario for hotplug during replacement; headless KWin runs
+  correctly report it unverified without physical input devices.
 - Draw `{{random:…}}` and `{{uuid}}` bytes in batches: a 256-character random
   value now costs a handful of `getrandom` calls instead of one per character.
 - Stop allocating on every input event to route application profiles; the
