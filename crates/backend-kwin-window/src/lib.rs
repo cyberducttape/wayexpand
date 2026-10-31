@@ -69,8 +69,8 @@ pub enum KwinWindowError {
     ScriptStopped,
     #[error("org.kde.KWin's scripting interface is not reachable on the session bus")]
     NotAvailable,
-    #[error("could not generate a unique KWin tracker nonce: {0}")]
-    Nonce(String),
+    #[error("could not generate a unique KWin tracker ID: {0}")]
+    TrackerId(String),
 }
 
 struct WindowTrackerService {
@@ -203,11 +203,11 @@ impl KwinWindowTracker {
         // Reconnects may overlap cleanup of a failed tracker. Give each
         // attempt distinct D-Bus and KWin script identities so a delayed
         // unload cannot collide with the replacement instance.
-        let mut nonce_bytes = [0_u8; 8];
-        getrandom::fill(&mut nonce_bytes)
-            .map_err(|error| KwinWindowError::Nonce(error.to_string()))?;
-        let nonce = u64::from_le_bytes(nonce_bytes);
-        let bus_name = format!("org.wayexpand.WindowTracker.pid{pid}.n{nonce:x}");
+        let mut tracker_id_bytes = [0_u8; 8];
+        getrandom::fill(&mut tracker_id_bytes)
+            .map_err(|error| KwinWindowError::TrackerId(error.to_string()))?;
+        let tracker_id = u64::from_le_bytes(tracker_id_bytes);
+        let bus_name = format!("org.wayexpand.WindowTracker.pid{pid}.n{tracker_id:x}");
         let (sender, receiver) = window_update_channel();
         let owner_connection = bounded_session_connection(
             zbus::connection::Builder::session()?.method_timeout(DBUS_METHOD_TIMEOUT),
@@ -244,7 +244,7 @@ impl KwinWindowTracker {
             DBUS_CONNECTION_TIMEOUT,
         )?;
 
-        let plugin_name = format!("wayexpand-window-tracker-{pid}-{nonce:x}");
+        let plugin_name = format!("wayexpand-window-tracker-{pid}-{tracker_id:x}");
         // The path is otherwise predictable (PID plus a fixed prefix, under
         // world-writable /tmp), so a local attacker who guesses this
         // process's upcoming PID could pre-place a symlink here pointing at
@@ -253,7 +253,7 @@ impl KwinWindowTracker {
         // the exact path unguessable, and `create_new` (O_CREAT|O_EXCL) refuses
         // to open through anything already there -- symlink or not -- as defense
         // in depth against symlink attacks.
-        let script_path = std::env::temp_dir().join(format!("{plugin_name}-{nonce:x}.js"));
+        let script_path = std::env::temp_dir().join(format!("{plugin_name}-{tracker_id:x}.js"));
         let script_contents = SCRIPT_TEMPLATE.replace("__WAYEXPAND_BUS_NAME__", &bus_name);
         let mut file = fs::OpenOptions::new()
             .write(true)
@@ -397,7 +397,7 @@ fn cleanup_orphan_tracker_scripts(
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        let Some((pid, nonce)) = parse_tracker_script_filename(name) else {
+        let Some((pid, tracker_id)) = parse_tracker_script_filename(name) else {
             continue;
         };
         if process_is_alive(pid) {
@@ -423,7 +423,7 @@ fn cleanup_orphan_tracker_scripts(
         let Ok(metadata) = file.metadata() else {
             continue;
         };
-        let bus_name = format!("org.wayexpand.WindowTracker.pid{pid}.n{nonce}");
+        let bus_name = format!("org.wayexpand.WindowTracker.pid{pid}.n{tracker_id}");
         let expected_contents = SCRIPT_TEMPLATE.replace("__WAYEXPAND_BUS_NAME__", &bus_name);
         if !metadata.is_file()
             || metadata.uid() != current_uid
@@ -444,7 +444,7 @@ fn cleanup_orphan_tracker_scripts(
             continue;
         }
 
-        let plugin_name = format!("wayexpand-window-tracker-{pid}-{nonce}");
+        let plugin_name = format!("wayexpand-window-tracker-{pid}-{tracker_id}");
         if script_is_loaded(&plugin_name) == Some(false) {
             // Remove only if the directory entry still names the inode that
             // was inspected. This avoids unlinking a replacement file after
@@ -466,19 +466,19 @@ fn cleanup_orphan_tracker_scripts(
 fn parse_tracker_script_filename(name: &str) -> Option<(u32, String)> {
     let name = name.strip_prefix("wayexpand-window-tracker-")?;
     let (pid, suffix) = name.split_once('-')?;
-    let (nonce, repeated_nonce) = suffix.strip_suffix(".js")?.split_once('-')?;
+    let (tracker_id, repeated_tracker_id) = suffix.strip_suffix(".js")?.split_once('-')?;
     let pid = pid.parse::<u32>().ok()?;
     if pid == 0
-        || nonce.is_empty()
-        || nonce.len() > 16
-        || !nonce
+        || tracker_id.is_empty()
+        || tracker_id.len() > 16
+        || !tracker_id
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        || nonce != repeated_nonce
+        || tracker_id != repeated_tracker_id
     {
         return None;
     }
-    Some((pid, nonce.to_owned()))
+    Some((pid, tracker_id.to_owned()))
 }
 
 #[derive(Debug)]
@@ -819,10 +819,10 @@ mod tests {
         fs::remove_dir_all(directory).unwrap();
     }
 
-    fn write_tracker_file(directory: &Path, pid: u32, nonce: &str) -> std::path::PathBuf {
-        let plugin = format!("wayexpand-window-tracker-{pid}-{nonce}");
-        let path = directory.join(format!("{plugin}-{nonce}.js"));
-        let bus_name = format!("org.wayexpand.WindowTracker.pid{pid}.n{nonce}");
+    fn write_tracker_file(directory: &Path, pid: u32, tracker_id: &str) -> std::path::PathBuf {
+        let plugin = format!("wayexpand-window-tracker-{pid}-{tracker_id}");
+        let path = directory.join(format!("{plugin}-{tracker_id}.js"));
+        let bus_name = format!("org.wayexpand.WindowTracker.pid{pid}.n{tracker_id}");
         let contents = SCRIPT_TEMPLATE.replace("__WAYEXPAND_BUS_NAME__", &bus_name);
         let mut file = fs::OpenOptions::new()
             .write(true)
