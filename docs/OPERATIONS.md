@@ -170,10 +170,13 @@ service cgroup. If that migration is permitted, spawn is rejected before the
 configured program runs; the supervisor cannot safely contain commands in a
 delegation writable by those commands.
 This requires unified cgroup v2 with `cgroup.kill` support (Linux 5.14 or newer)
-and a systemd user manager that honors service delegation.
-When launched outside those units, WayExpand retains process-group cleanup as
-a compatibility fallback; that fallback cannot contain a descendant that
-creates a new session. Cgroup containment limits lifetime, not privilege:
+and a delegated subtree. The bundled units use systemd delegation; another
+launcher must provide an equivalent subtree and permissions. If cgroup setup
+or the child migration check fails, command startup fails closed. To explicitly
+use the weaker process-group compatibility mode, set
+`WAYEXPAND_PROCESS_CGROUP=disabled`; that
+mode cannot contain a descendant that creates a new session. Cgroup
+containment limits lifetime, not privilege:
 commands remain trusted user-configured programs and rely on the surrounding
 systemd sandbox for filesystem and network restrictions.
 

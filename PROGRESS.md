@@ -2,6 +2,34 @@
 
 Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-31 UTC)
 
+## Cgroup cleanup retries and default containment: 2026-10-31
+
+- Split cleanup state into kill requested, empty confirmed, and directory
+  removed. Cleanup retries incomplete steps, removes nested cgroups bottom-up,
+  and transfers failures to a bounded 32-job reaper queue with exponential
+  backoff capped at two seconds. Child supervisors retain failed cleanup
+  ownership until retry/transfer instead of dropping it after the first error.
+- Require cgroup v2 containment when `WAYEXPAND_PROCESS_CGROUP` is unset or
+  `required`. Only the explicit value `disabled` selects weaker process-group
+  cleanup; invalid values fail closed. Add the test-only opt-out to CI, Debian
+  test builds, and contributor commands, while the delegated integration test
+  still opts into containment.
+- Regression coverage includes nested empty cgroup directory removal,
+  injected cgroup.kill and cgroup.events failures followed by retry, reaper
+  backoff retry, and the default/explicit-opt-out policy. The systemd
+  integration script passed. In this host it exercised the parent-writable
+  fail-closed path, so nested cgroups were covered by unit-level cleanup tests
+  rather than a live command cgroup.
+- Verification: full `WAYEXPAND_PROCESS_CGROUP=disabled RUST_TEST_THREADS=1
+  cargo test --workspace --locked --quiet` passed; workspace Clippy with
+  `-D warnings`, formatting, diff checks, shell syntax checks, and
+  `scripts/test-process-cgroup-containment.sh` passed.
+- Limitation: process-group-only compatibility mode cannot contain `setsid()`
+  descendants. Manual production launches require an externally delegated
+  cgroup v2 subtree; if cgroup setup or the child's migration check is
+  unavailable, command launch fails. No non-systemd delegation/provisioning
+  workflow was added; operators must provide an equivalent subtree themselves.
+
 ## Delegated cgroup migration guard: 2026-10-31
 
 - The process supervisor now probes the parent service `cgroup.procs` from

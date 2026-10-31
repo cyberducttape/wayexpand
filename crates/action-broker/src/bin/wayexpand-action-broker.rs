@@ -486,7 +486,7 @@ fn validate_config_ancestors(path: &Path) -> Result<()> {
 /// count: the `#[tokio::main]` default of one worker per core cannot even
 /// start on large machines. Blocking-pool tasks queue beyond the limit.
 const RUNTIME_WORKER_THREADS: usize = 2;
-const MAX_BLOCKING_THREADS: usize = 24;
+const MAX_BLOCKING_THREADS: usize = 23;
 /// The main thread and the audit writer, outside the Tokio runtime.
 #[cfg(test)]
 const OTHER_THREADS: usize = 2;
@@ -925,9 +925,9 @@ mod tests {
             .expect("broker unit sets TasksMax")
             .parse()
             .unwrap();
-        // Leave room for short-lived threads such as the ones std spawns
-        // while resolving a process launch.
-        let budget = OTHER_THREADS + RUNTIME_WORKER_THREADS + MAX_BLOCKING_THREADS + 4;
+        // Reserve one thread for the cgroup cleanup reaper and three for
+        // short-lived threads such as the ones std spawns during process launch.
+        let budget = OTHER_THREADS + RUNTIME_WORKER_THREADS + MAX_BLOCKING_THREADS + 1 + 3;
         assert!(
             budget <= tasks_max,
             "{budget} threads exceed TasksMax={tasks_max}"

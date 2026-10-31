@@ -34,7 +34,7 @@ cd wayexpand
 cargo build --release
 
 # Test locally
-cargo test --workspace
+WAYEXPAND_PROCESS_CGROUP=disabled cargo test --workspace
 cargo fmt --all -- --check
 cargo clippy --locked --workspace --all-targets -- -D warnings
 shellcheck scripts/*.sh
@@ -44,12 +44,18 @@ shellcheck scripts/*.sh
 ./target/release/wayexpand-gui          # Launch GUI
 ```
 
+The test command sets the explicit `disabled` compatibility mode because
+ordinary build runners usually have no delegated cgroup. Production command
+execution requires cgroup v2 containment by default. To test the real
+delegated path, run `scripts/test-process-cgroup-containment.sh` in a logged-in
+systemd user session; it fails if the required cgroup setup is unavailable.
+
 ## Before Opening a Pull Request
 
 1. **Run all checks** (same as CI):
    ```sh
    cargo fmt --all -- --check
-   cargo test --locked --workspace
+   WAYEXPAND_PROCESS_CGROUP=disabled cargo test --locked --workspace
    cargo clippy --locked --workspace --all-targets -- -D warnings
    shellcheck scripts/*.sh
    git diff --check

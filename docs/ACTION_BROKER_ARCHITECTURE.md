@@ -167,7 +167,8 @@ What's implemented:
   - Safe command execution with policy enforcement
   - Environment variable filtering with strict mode
   - Deadline-aware delegated cgroup v2 termination (including new sessions),
-    with process-group cleanup as a secondary mechanism
+    with process-group cleanup as a secondary mechanism; cgroup containment
+    is required by default and the process-group-only mode is explicit opt-in
   - Bounded output capture (stdout/stderr) with exit code tracking
   - Bounded concurrent execution (16 actions per broker process)
 

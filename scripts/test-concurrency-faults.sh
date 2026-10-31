@@ -8,7 +8,7 @@ run_test() {
     shift 2
     local output
     output=$(mktemp "${TMPDIR:-/tmp}/wayexpand-targeted-test.XXXXXX")
-    if ! env "$@" cargo test --locked -p "$package" "$test_name" -- --exact 2>&1 | tee "$output"; then
+    if ! env WAYEXPAND_PROCESS_CGROUP=disabled "$@" cargo test --locked -p "$package" "$test_name" -- --exact 2>&1 | tee "$output"; then
         rm -f "$output"
         return 1
     fi

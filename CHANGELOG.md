@@ -10,6 +10,14 @@ All notable changes to WayExpand are documented here.
   successful migration probes abort before the configured executable starts.
   Add regression coverage for writable parent cgroups and for `setsid()` plus
   migration attempts where the host provides a restricted delegated cgroup.
+- Require delegated cgroup v2 containment for commands by default, including
+  manually started daemons and brokers. Process-group-only containment is now
+  available only through the explicit `WAYEXPAND_PROCESS_CGROUP=disabled`
+  compatibility opt-out. Track cgroup kill requests, empty confirmation, and
+  directory removal separately; recursively remove empty nested cgroups and
+  hand failed cleanup to a bounded background reaper with capped backoff.
+  Regressions cover default policy, nested directory removal, injected kill,
+  event-read, and directory-removal failures, and eventual retry.
 - Wrap transient matched text, rendered replacements, cached command output,
   deferred results, output commands, IBus commits, and GUI preview cache values
   in a zeroizing `SensitiveText` type. Each clone has independent zeroizing
@@ -37,8 +45,8 @@ All notable changes to WayExpand are documented here.
   completion, and worker teardown now kill descendants even after `setsid()`;
   process-group cleanup remains a secondary path. Before exec, probe whether
   the command could migrate itself back to the service cgroup; refuse to run
-  configured code when that migration is allowed. Managed command execution
-  fails closed when delegation, `cgroup.kill`, or migration isolation is
+  configured code when that migration is allowed. Command execution fails
+  closed by default when delegation, `cgroup.kill`, or migration isolation is
   unavailable. Add adversarial migration/`setsid()` regression coverage and
   update process-containment guidance.
 - Require action-specific polkit authorization before every Action Broker

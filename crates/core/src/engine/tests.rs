@@ -3260,7 +3260,7 @@ fn detached_stdout_holder_returns_incomplete_output_without_blocking() {
     let elapsed = started.elapsed();
 
     let cgroup_required =
-        std::env::var_os("WAYEXPAND_PROCESS_CGROUP").is_some_and(|value| value == "required");
+        std::env::var_os("WAYEXPAND_PROCESS_CGROUP").is_none_or(|value| value != "disabled");
     thread::sleep(Duration::from_millis(1200));
     let escaped_work_ran = std::path::Path::new(&escaped_marker).exists();
     let _ = std::fs::remove_file(&script_path);
@@ -3680,7 +3680,7 @@ fn command_rejects_output_when_descendant_keeps_stdout_open() {
 
     let result = run_command(&command);
     let cgroup_required =
-        std::env::var_os("WAYEXPAND_PROCESS_CGROUP").is_some_and(|value| value == "required");
+        std::env::var_os("WAYEXPAND_PROCESS_CGROUP").is_none_or(|value| value != "disabled");
     let descendant_pid = std::fs::read_to_string(&pid_file).and_then(|text| {
         text.trim()
             .parse::<libc::pid_t>()

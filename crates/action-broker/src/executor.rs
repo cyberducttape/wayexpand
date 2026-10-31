@@ -1122,7 +1122,7 @@ mod tests {
                 .map_err(std::io::Error::other)
         });
         let cgroup_required =
-            std::env::var_os("WAYEXPAND_PROCESS_CGROUP").is_some_and(|value| value == "required");
+            std::env::var_os("WAYEXPAND_PROCESS_CGROUP").is_none_or(|value| value != "disabled");
         if cgroup_required {
             let pid = descendant_pid.expect("test command should report its detached child");
             let exited = |pid: libc::pid_t| {

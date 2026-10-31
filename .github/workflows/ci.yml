@@ -26,6 +26,9 @@ env:
   # bounded worker resources. Keep CI deterministic across hosted runners;
   # coverage is unchanged.
   RUST_TEST_THREADS: 1
+  # Workspace tests exercise command behavior without requiring access to a
+  # systemd-delegated cgroup. The standalone cgroup integration script opts back in.
+  WAYEXPAND_PROCESS_CGROUP: disabled
 
 jobs:
   versions:
