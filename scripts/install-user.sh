@@ -282,10 +282,10 @@ printf '%s\n' "2. Reload systemd:"
 printf '%s\n' "   systemctl --user daemon-reload"
 printf '%s\n' "   # If named actions are configured, edit $broker_config and enable:"
 printf '%s\n' "   systemctl --user enable --now wayexpand-action-broker.service"
-if [ -f "$release_dir/polkit/org.wayexpand.action.policy" ] &&
+if [ -f "$project_dir/polkit/org.wayexpand.action.policy" ] &&
     [ ! -f /usr/share/polkit-1/actions/org.wayexpand.action.policy ]; then
     printf '%s\n' "Broker actions require administrator installation of the polkit policy:"
-    printf '%s\n' "   sudo install -m 0644 \"$release_dir/polkit/org.wayexpand.action.policy\" /usr/share/polkit-1/actions/"
+    printf '%s\n' "   sudo install -m 0644 \"$project_dir/polkit/org.wayexpand.action.policy\" /usr/share/polkit-1/actions/"
 fi
 if command -v systemctl >/dev/null 2>&1 && systemctl --user is-active --quiet wayexpand-action-broker.service 2>/dev/null; then
     printf '%s\n' "Active broker service still uses its current process; restart it after this upgrade:"
