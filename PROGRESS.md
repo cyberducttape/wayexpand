@@ -37,6 +37,17 @@ Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-3
   warnings`: passed; daemon physical-input cancellation regression passed.
   This proves monitor ordering with test devices, not physical hotplug during
   real output. The release certification requirement remains open.
+- Exact source commit `97b6c105`: `RUST_TEST_THREADS=1 cargo test --workspace
+  --locked --quiet` passed with 1,370 passed, 0 failed, and 6 ignored;
+  `cargo clippy --workspace --all-targets --locked -- -D warnings`, formatting,
+  documentation contracts, Markdown links, and diff checks passed.
+- A fresh read-only `wayexpand doctor --json` against the active desktop shows
+  KDE Wayland, an older running evdev + libei daemon, keysym-fallback output,
+  non-atomic replacement, and no sensitive-field signal. The input-method-v2
+  protocol and IBus route are unavailable in this session. Doctor correctly
+  exits unhealthy for production readiness; this is not evidence that the
+  configured personal snippets themselves are invalid or that physical
+  replacement passed.
 
 ## Current verification and certification runner status: 2026-10-31 UTC
 
