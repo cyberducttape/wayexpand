@@ -58,6 +58,7 @@ pub(crate) fn print_policy_diagnostics_json(
                 "require_sensitive_focus": policy.require_sensitive_focus,
                 "require_composition_aware": policy.require_composition_aware,
                 "require_verified_insert_target": policy.require_verified_insert_target,
+                "disable_control_socket_mutations": policy.disable_control_socket_mutations,
                 "disable_hotkeys": policy.disable_hotkeys,
                 "disable_title_matching": policy.disable_title_matching,
                 "max_replacement_size": policy.max_replacement_size,

@@ -251,6 +251,20 @@ They additionally isolate temporary files, devices, mounts, kernel interfaces,
 process visibility, realtime scheduling, and syscall architecture through the
 shipped systemd user units.
 
+The daemon also checks Linux `SO_PEERCRED` on each control connection and
+requires the peer UID to match the daemon UID. This authenticates the Unix user,
+not an individual application: all ordinary processes under one UID share that
+identity. The focused-window token is a freshness check, not an authorization
+secret. Organizations that must prevent local applications from invoking
+WayExpand through the socket can set
+`[organization] safe_mode = true` and
+`disable_control_socket_mutations = true`; this denies socket-based insert,
+pause/resume, reload, stop, and usage-stat clearing while leaving read-only
+status, focus, and explain requests available. It does not defend against
+malicious code with the same UID using other user-session privileges such as
+`systemctl --user`, editing user-owned configuration, or controlling the
+desktop session.
+
 ## Command execution architecture limitations
 
 The current command-backed expansion architecture prioritizes safety at the cost

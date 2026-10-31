@@ -72,6 +72,13 @@ pub struct OrganizationPolicy {
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub require_verified_insert_target: bool,
 
+    /// Disable all state-changing commands on the daemon control socket,
+    /// including insert, pause/resume, reload, stop, and usage-stat clearing.
+    /// This is enforced in safe mode and is intended for managed deployments
+    /// where local applications must not invoke WayExpand on the user's behalf.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub disable_control_socket_mutations: bool,
+
     /// Maximum replacement size in bytes. Replacements larger than this
     /// are rejected. Prevents DoS via huge expansions. 0 = unlimited.
     pub max_replacement_size: usize,
@@ -117,6 +124,7 @@ impl Default for OrganizationPolicy {
             require_sensitive_focus: false,
             require_composition_aware: false,
             require_verified_insert_target: false,
+            disable_control_socket_mutations: false,
             max_replacement_size: 0,
             allowed_backends: Vec::new(),
             allowed_packs: Vec::new(),
@@ -152,6 +160,9 @@ impl OrganizationPolicy {
         effective.require_sensitive_focus = false;
         effective.require_composition_aware = false;
         effective.require_verified_insert_target = false;
+        // This setting is an access-control boundary for daemon RPC, rather
+        // than an expansion policy. Honor it even while expansion policies
+        // are in audit mode.
         effective.max_replacement_size = 0;
         effective.allowed_backends.clear();
         effective.allowed_packs.clear();
@@ -175,6 +186,7 @@ impl OrganizationPolicy {
             || self.require_sensitive_focus
             || self.require_composition_aware
             || self.require_verified_insert_target
+            || self.disable_control_socket_mutations
             || self.max_replacement_size > 0
             || !self.allowed_backends.is_empty()
             || !self.allowed_packs.is_empty()

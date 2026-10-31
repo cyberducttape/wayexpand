@@ -22,6 +22,12 @@ pub(crate) fn control_command(requested: &str, mut args: Args) -> Result<()> {
         _ => return Err(daemon_error("unknown daemon operation")),
     };
     let response = control_operation(operation)?;
+    if let Some(message) = response
+        .strip_prefix("error=policy\nmessage=")
+        .map(str::trim)
+    {
+        return Err(daemon_error(message.to_owned()));
+    }
     if requested_json {
         println!("{}", status_as_json(&response)?);
     } else {

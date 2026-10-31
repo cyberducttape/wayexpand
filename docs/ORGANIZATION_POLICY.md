@@ -122,13 +122,21 @@ When `safe_mode = true`:
   input source reports active external IME/preedit visibility; local
   dead-key/Compose tracking does not satisfy it. No shipped source currently
   meets this requirement.
-- Blocks: commands, hotkeys, title matching, oversized replacements, disallowed backends, unverified inserts (with `require_verified_insert_target`)
+- Blocks: commands, hotkeys, title matching, oversized replacements, disallowed backends, unverified inserts (with `require_verified_insert_target`), and control-socket mutations (with `disable_control_socket_mutations`)
 - Can require absolute command paths so `program = "git"` is rejected
 
 **Enforcement is consistent across all policy paths:** All expansion checks
 (core engine, daemon, CLI diagnostics) enforce the same restrictions. Violations
 are never silent; they are always logged and always block execution when
 safe_mode is true.
+
+`disable_control_socket_mutations` is enforced in both safe and audit modes
+because it controls daemon RPC access rather than snippet-policy enforcement.
+It blocks insert, pause, resume, reload, stop, and usage-stat clearing over the
+socket. Linux peer credentials verify the user ID but cannot distinguish
+applications under the same UID; use this setting for a managed read-only
+control socket. Service-manager operations remain available to the logged-in
+user.
 
 ### Audit Mode (Logging Only)
 When `safe_mode = false`:
@@ -186,6 +194,7 @@ require_sensitive_focus = true
 # No currently shipped input source satisfies this requirement.
 # require_composition_aware = true
 require_verified_insert_target = true
+disable_control_socket_mutations = true
 max_replacement_size = 1024
 allowed_backends = ["input-method-v2"]
 # Empty is unrestricted, so list the packs explicitly when restricting use.

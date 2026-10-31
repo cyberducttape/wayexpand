@@ -5034,6 +5034,39 @@ fn verified_insert_policy_is_omitted_from_saved_toml_unless_set() {
 }
 
 #[test]
+fn control_socket_mutation_restriction_is_enforced_even_in_audit_mode() {
+    let config = Config::parse("[[expansion]]\ntrigger = \":a\"\nreplacement = \"x\"\n").unwrap();
+    let text = toml::to_string(&config).unwrap();
+    assert!(!text.contains("disable_control_socket_mutations"), "{text}");
+
+    let restricted = Config::parse(
+        "[organization]\nsafe_mode = true\ndisable_control_socket_mutations = true\n",
+    )
+    .unwrap();
+    let round_trip = Config::parse(&toml::to_string(&restricted).unwrap()).unwrap();
+    assert!(round_trip.organization.disable_control_socket_mutations);
+    assert!(round_trip.organization.is_active());
+    assert!(
+        round_trip
+            .organization
+            .effective_enforcement_policy()
+            .disable_control_socket_mutations
+    );
+
+    let audit = Config::parse(
+        "[organization]\nsafe_mode = false\ndisable_control_socket_mutations = true\n",
+    )
+    .unwrap();
+    assert!(audit.organization.disable_control_socket_mutations);
+    assert!(
+        audit
+            .organization
+            .effective_enforcement_policy()
+            .disable_control_socket_mutations
+    );
+}
+
+#[test]
 fn exclusive_capture_policy_is_omitted_from_saved_toml_unless_set() {
     let config = Config::parse("[[expansion]]\ntrigger = \":a\"\nreplacement = \"x\"\n").unwrap();
     let text = toml::to_string(&config).unwrap();

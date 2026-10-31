@@ -3,6 +3,7 @@ use std::{
     collections::VecDeque,
     fs,
     io::{Read, Write},
+    os::fd::AsRawFd,
     os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt},
     os::unix::net::{UnixListener, UnixStream},
     path::PathBuf,
@@ -33,6 +34,8 @@ const CONTROL_WORKERS: usize = 4;
 /// reactor must not allow timed-out clients to grow an unbounded queue.
 const EXPLAIN_QUEUE_CAPACITY: usize = CONTROL_WORKERS;
 const CONTROL_BUSY_RESPONSE: &[u8] = b"error=busy\nretryable=true\n";
+const CONTROL_MUTATIONS_DISABLED_RESPONSE: &[u8] =
+    b"error=policy\nmessage=control socket mutations are disabled by organization policy\n";
 /// Reads of at most 1 KiB used to discard an overloaded client's request.
 const BUSY_DRAIN_READS: usize = 16;
 
@@ -122,14 +125,25 @@ impl ControlServer {
     /// Start the control socket. With `require_verified_insert`, an insert
     /// request without a focus target is refused before it reaches the
     /// reactor, so the client learns why nothing was inserted.
-    pub fn start(require_verified_insert: bool) -> Result<Self> {
+    pub fn start(
+        require_verified_insert: bool,
+        disable_control_socket_mutations: bool,
+    ) -> Result<Self> {
         let Some(requested_path) = socket_path() else {
             return Ok(Self::detached());
         };
-        Self::start_at(&requested_path, require_verified_insert)
+        Self::start_at(
+            &requested_path,
+            require_verified_insert,
+            disable_control_socket_mutations,
+        )
     }
 
-    fn start_at(requested_path: &std::path::Path, require_verified_insert: bool) -> Result<Self> {
+    fn start_at(
+        requested_path: &std::path::Path,
+        require_verified_insert: bool,
+        disable_control_socket_mutations: bool,
+    ) -> Result<Self> {
         let path = secure_socket_path(requested_path)?;
         validate_socket_parent(&path)?;
         #[cfg(target_os = "linux")]
@@ -248,6 +262,7 @@ impl ControlServer {
                         pause: Arc::clone(&pause_flag),
                         insert: Arc::clone(&insert_slot),
                         require_verified_insert,
+                        disable_control_socket_mutations,
                         focus: Arc::clone(&focus_slot),
                         explain: Arc::clone(&explain_slot),
                         usage_clear: Arc::clone(&usage_clear_slot),
@@ -441,6 +456,7 @@ struct Flags {
     pause: Arc<AtomicBool>,
     insert: Arc<Mutex<Option<InsertRequest>>>,
     require_verified_insert: bool,
+    disable_control_socket_mutations: bool,
     focus: Arc<Mutex<FocusSnapshot>>,
     explain: Arc<Mutex<VecDeque<ExplainRequest>>>,
     usage_clear: Arc<Mutex<Option<crate::usage::UsageClearHandle>>>,
@@ -636,6 +652,7 @@ fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
         pause,
         insert,
         require_verified_insert,
+        disable_control_socket_mutations,
         focus,
         explain,
         usage_clear,
@@ -643,6 +660,11 @@ fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
         waker,
     } = flags;
     stream.set_write_timeout(Some(CONTROL_IO_TIMEOUT))?;
+    let peer_uid = peer_uid(&stream)?;
+    if !peer_uid_is_authorized(peer_uid, rustix::process::geteuid().as_raw()) {
+        stream.write_all(b"error=permission\n")?;
+        return Ok(());
+    }
     // An oversized request is answered like any unknown command.
     let command = match read_command(&mut stream, CONTROL_IO_TIMEOUT)? {
         Some(command) => command,
@@ -651,6 +673,10 @@ fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
             String::new()
         }
     };
+    if disable_control_socket_mutations && is_mutating_request(&command) {
+        stream.write_all(CONTROL_MUTATIONS_DISABLED_RESPONSE)?;
+        return Ok(());
+    }
     if let Some(request) = insert_request(&command) {
         let response = match request {
             Some(request) if require_verified_insert && request.focus_token.is_none() => {
@@ -733,6 +759,65 @@ fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
     };
     stream.write_all(response.as_bytes())?;
     Ok(())
+}
+
+fn is_mutating_request(command: &str) -> bool {
+    let command = command.trim();
+    matches!(
+        command,
+        "insert" | "insert-target" | "reload" | "stop" | "pause" | "resume" | "stats-clear"
+    ) || command.starts_with("insert ")
+        || command.starts_with("insert-target ")
+        || command.starts_with("stats-clear ")
+}
+
+fn peer_uid_is_authorized(peer_uid: u32, daemon_uid: u32) -> bool {
+    peer_uid == daemon_uid
+}
+
+#[cfg(target_os = "linux")]
+fn validate_peer_credential_length(length: libc::socklen_t) -> std::io::Result<()> {
+    if length as usize != std::mem::size_of::<libc::ucred>() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "unexpected control peer credentials size",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn peer_uid(stream: &UnixStream) -> std::io::Result<u32> {
+    let mut credentials = libc::ucred {
+        pid: 0,
+        uid: 0,
+        gid: 0,
+    };
+    let mut length = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    // SAFETY: `credentials` points to a writable `ucred` of the exact size
+    // requested by SO_PEERCRED. The descriptor is a connected Unix stream.
+    let result = unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            (&mut credentials as *mut libc::ucred).cast(),
+            &mut length,
+        )
+    };
+    if result != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    validate_peer_credential_length(length)?;
+    Ok(credentials.uid)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn peer_uid(_stream: &UnixStream) -> std::io::Result<u32> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "control peer credentials are unavailable on this platform",
+    ))
 }
 
 pub fn socket_path() -> Option<PathBuf> {
@@ -831,6 +916,98 @@ mod tests {
     }
 
     #[test]
+    fn focus_read_does_not_authorize_insert_target_in_restricted_mode() {
+        let insert = Arc::new(Mutex::new(None));
+        let focus = Arc::new(Mutex::new(FocusSnapshot {
+            generation: 42,
+            token: Some("deadbeef".into()),
+            exact_window_identity: true,
+        }));
+        let flags = Flags {
+            reload: Arc::new(AtomicBool::new(false)),
+            stop: Arc::new(AtomicBool::new(false)),
+            pause: Arc::new(AtomicBool::new(false)),
+            insert: Arc::clone(&insert),
+            require_verified_insert: false,
+            disable_control_socket_mutations: true,
+            focus,
+            explain: Arc::new(Mutex::new(VecDeque::new())),
+            usage_clear: Arc::new(Mutex::new(None)),
+            status: Arc::new(Mutex::new("running".into())),
+            waker: Arc::default(),
+        };
+        let send = |command: &str| {
+            let (mut client, server) = UnixStream::pair().unwrap();
+            client.write_all(command.as_bytes()).unwrap();
+            client.shutdown(std::net::Shutdown::Write).unwrap();
+            handle_request(server, flags.clone()).unwrap();
+            let mut response = String::new();
+            client.read_to_string(&mut response).unwrap();
+            response
+        };
+
+        assert_eq!(
+            send("focus\n"),
+            "focus_generation=42\nfocus_token=deadbeef\nfocus_identity=exact\n"
+        );
+        for request in [
+            "insert-target 42 deadbeef ;sig\n",
+            "insert ;sig\n",
+            "reload\n",
+            "pause\n",
+            "resume\n",
+            "stop\n",
+            "stats-clear /tmp/usage.json\n",
+        ] {
+            assert_eq!(
+                send(request).as_bytes(),
+                CONTROL_MUTATIONS_DISABLED_RESPONSE,
+                "request {request:?}"
+            );
+        }
+        assert!(insert.lock().unwrap().is_none());
+        assert!(!flags.stop.load(Ordering::Acquire));
+        assert!(!flags.reload.load(Ordering::Acquire));
+        assert!(!flags.pause.load(Ordering::Acquire));
+        assert_eq!(send("status\n"), "running\nrunning\n");
+    }
+
+    #[test]
+    fn control_mutation_classifier_covers_all_state_changing_commands() {
+        for request in [
+            "insert ;sig",
+            "insert-target 42 deadbeef ;sig",
+            "reload",
+            "stop",
+            "pause",
+            "resume",
+            "stats-clear /tmp/usage.json",
+        ] {
+            assert!(is_mutating_request(request), "{request}");
+        }
+        for request in ["status", "focus", "explain ;sig", "explain-json ;sig"] {
+            assert!(!is_mutating_request(request), "{request}");
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn control_peer_credentials_match_the_daemon_uid() {
+        let (stream, _peer) = UnixStream::pair().unwrap();
+        assert_eq!(
+            peer_uid(&stream).unwrap(),
+            rustix::process::geteuid().as_raw()
+        );
+        let uid = rustix::process::geteuid().as_raw();
+        assert!(peer_uid_is_authorized(uid, uid));
+        assert!(!peer_uid_is_authorized(uid.saturating_add(1), uid));
+        let expected = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+        assert!(validate_peer_credential_length(expected).is_ok());
+        let error = validate_peer_credential_length(expected.saturating_sub(1)).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test]
     fn shutdown_completes_when_the_socket_path_was_removed() {
         let directory = std::env::temp_dir().join(format!(
             "wayexpand-control-removed-{}-{}",
@@ -843,7 +1020,7 @@ mod tests {
         fs::create_dir(&directory).unwrap();
         fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
         let path = directory.join("wayexpand.sock");
-        let server = ControlServer::start_at(&path, false).unwrap();
+        let server = ControlServer::start_at(&path, false, false).unwrap();
         // For example, a session cleanup removed the runtime directory.
         fs::remove_file(&path).unwrap();
 
@@ -882,6 +1059,7 @@ mod tests {
                     pause: pause_worker,
                     insert,
                     require_verified_insert: false,
+                    disable_control_socket_mutations: false,
                     focus,
                     explain: Arc::new(Mutex::new(VecDeque::new())),
                     usage_clear: Arc::new(Mutex::new(None)),
@@ -939,6 +1117,7 @@ mod tests {
             pause: Arc::new(AtomicBool::new(false)),
             insert: Arc::clone(&insert),
             require_verified_insert: true,
+            disable_control_socket_mutations: false,
             focus: Arc::new(Mutex::new(FocusSnapshot::default())),
             explain: Arc::new(Mutex::new(VecDeque::new())),
             usage_clear: Arc::new(Mutex::new(None)),
@@ -978,6 +1157,7 @@ mod tests {
             pause,
             insert: Arc::clone(&insert),
             require_verified_insert: false,
+            disable_control_socket_mutations: false,
             focus: Arc::clone(&focus),
             explain: Arc::new(Mutex::new(VecDeque::new())),
             usage_clear: Arc::new(Mutex::new(None)),
@@ -1294,6 +1474,7 @@ mod tests {
             pause: Arc::new(AtomicBool::new(false)),
             insert: Arc::new(Mutex::new(None)),
             require_verified_insert: false,
+            disable_control_socket_mutations: false,
             focus: Arc::new(Mutex::new(FocusSnapshot::default())),
             explain: Arc::new(Mutex::new(VecDeque::new())),
             usage_clear: Arc::new(Mutex::new(None)),

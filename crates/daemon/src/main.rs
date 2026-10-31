@@ -322,6 +322,9 @@ fn main() -> Result<()> {
         policy
             .effective_enforcement_policy()
             .require_verified_insert_target,
+        policy
+            .effective_enforcement_policy()
+            .disable_control_socket_mutations,
     )?;
     let managed = control.path().is_some();
     // Work arriving from other threads wakes the reactor instead of waiting

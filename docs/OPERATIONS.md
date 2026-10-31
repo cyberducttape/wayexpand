@@ -507,6 +507,14 @@ wayexpand status --json
 
 The control socket is user-owned and mode `0600`; do not expose it through a
 shared filesystem or proxy it over a network.
+On Linux, the daemon also checks `SO_PEERCRED` and accepts requests only from
+its own UID. This does not distinguish applications running under the same
+user. For managed deployments that should keep applications from requesting
+insertion or lifecycle changes, enforce
+`[organization] safe_mode = true` with
+`disable_control_socket_mutations = true`. The setting disables socket
+mutations regardless of expansion audit mode; service-manager controls remain
+available to the logged-in user.
 
 ### Prometheus metrics
 

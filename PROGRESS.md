@@ -1740,3 +1740,27 @@ pass with both default parallel scheduling and `RUST_TEST_THREADS=1`; the full
 - This fixes the observed control-plane timeout under concurrent diagnostics;
   it does not change the open real-desktop certification or production release
   gates.
+
+## Daemon control-socket access policy: 2026-10-31
+
+- Validate Linux `SO_PEERCRED` on every connection, require the connecting UID
+  to equal the daemon UID, and reject malformed credential lengths.
+- Add the root-managed organization-policy setting
+  `disable_control_socket_mutations`. When enabled, it refuses insert,
+  insert-target, reload, pause, resume, stop, and usage-stat clearing, while
+  retaining status, focus, and explain. This access-control setting remains
+  enforced even when snippet policy is in audit mode.
+- Add regressions proving a client cannot replay a visible, current focus
+  generation/token to insert in restricted mode, cannot change lifecycle
+  flags, and cannot clear stats; add coverage for every mutation verb and
+  peer-UID checks.
+- Limitation: peer credentials distinguish Unix UIDs, not applications under
+  one UID. The focus token remains a public freshness value. Managed read-only
+  mode mitigates daemon-socket invocation; a trusted per-application consent
+  mechanism remains open, and same-UID processes retain other user-session
+  privileges.
+- The isolated installation smoke test passed. Its release-artifact substep
+  stopped because adding the daemon's direct `libc` dependency required a
+  `Cargo.lock` update while the script invokes Cargo with `--locked`; the lock
+  entry has since been updated. Re-run the complete package and workspace
+  checks after the focused tests.

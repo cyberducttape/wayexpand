@@ -142,6 +142,34 @@ Acceptance criteria:
   input interruption signal; real-session tests verify the client document
   after interruption.
 
+### P1 — Restrict daemon control-socket mutations
+
+**Status:** Managed read-only mode implemented; per-application authorization
+remains open.
+
+Linux control connections now validate `SO_PEERCRED` UID against the daemon.
+This prevents a different Unix user from invoking daemon requests but does not
+identify individual applications under the same UID. The root-owned
+`/etc/wayexpand/policy.toml` can set
+`[organization] disable_control_socket_mutations = true` to deny all
+state-changing socket requests while retaining read-only diagnostics. This is
+a mitigation for managed deployments, not a capability system: a same-UID
+process may still use other user-session privileges, and focus tokens remain
+public freshness values.
+
+Acceptance criteria:
+
+- Reject peer UIDs other than the daemon UID before parsing or dispatching
+  requests; validate the Linux credential structure length.
+- In restricted mode, deny insert, insert-target, reload, pause, resume, stop,
+  and usage-stat clearing, while preserving status, focus, and explain.
+- Prove that reading an exact focus token does not authorize an insert in the
+  restricted mode, and test peer UID mismatch handling.
+- Keep the remaining same-UID authorization limitation explicit. A stronger
+  per-application approval mechanism requires a trusted OS authorization
+  principal or user-confirmed capability flow and is not satisfied by a
+  caller-supplied focus token.
+
 ### P1 — Complete compositor and input-context coverage
 
 **Status:** Open.

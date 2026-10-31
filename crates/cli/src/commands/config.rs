@@ -580,7 +580,7 @@ pub(crate) fn schema_command(mut args: Args) -> Result<()> {
                     "fields": ["action", "program", "args", "timeout_ms", "cache_ms", "environment", "pass_env"]
                 },
                 "OrganizationPolicy": {
-                    "fields": ["safe_mode", "disable_commands", "disable_hotkeys", "require_absolute_commands", "disable_title_matching", "allow_weak_app_filters", "require_atomic_replace", "require_exclusive_capture", "minimum_replacement_guarantee", "require_sensitive_focus", "require_composition_aware", "require_verified_insert_target", "max_replacement_size", "allowed_backends", "allowed_packs", "require_signed_packs", "pack_signers_file", "disable_clipboard", "disable_template_env", "audit_prefix"]
+                    "fields": ["safe_mode", "disable_commands", "disable_hotkeys", "require_absolute_commands", "disable_title_matching", "allow_weak_app_filters", "require_atomic_replace", "require_exclusive_capture", "minimum_replacement_guarantee", "require_sensitive_focus", "require_composition_aware", "require_verified_insert_target", "disable_control_socket_mutations", "max_replacement_size", "allowed_backends", "allowed_packs", "require_signed_packs", "pack_signers_file", "disable_clipboard", "disable_template_env", "audit_prefix"]
                 }
             }
         }))?
@@ -2278,6 +2278,15 @@ pub(crate) fn stats_command(args: Args) -> Result<()> {
                     // the running daemon, or the daemon predates stats-clear;
                     // clear the requested file directly under its lock below.
                 } else {
+                    if response.starts_with("error=policy\n") {
+                        return Err(config_error(
+                            response
+                                .lines()
+                                .find_map(|line| line.strip_prefix("message="))
+                                .unwrap_or("usage-stat clearing denied by policy")
+                                .to_string(),
+                        ));
+                    }
                     if response.starts_with("could not clear") || response.contains("unavailable") {
                         return Err(config_error(response.trim().to_string()));
                     }
