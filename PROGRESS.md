@@ -22,6 +22,22 @@ Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-3
   keyboard session for the required hotplug scenario. No production
   certification claim is made.
 
+## Hotplug cancellation with buffered evdev events
+
+- Follow-up source review found that the output monitor returned early to
+  translate retained raw events without checking the inotify watch. This could
+  delay hotplug interruption while a large non-key event backlog was drained.
+- The output-monitor path now polls the topology descriptor nonblocking before
+  each buffered event slice and fails closed if the descriptor is invalidated.
+  A regression creates a device-node notification while 512 non-key raw events
+  are buffered and verifies cancellation is reported before the raw backlog is
+  consumed.
+- `cargo test --locked -p wayexpand-backend-evdev`: 25 passed, 1 ignored;
+  `cargo clippy --locked -p wayexpand-backend-evdev --all-targets -- -D
+  warnings`: passed; daemon physical-input cancellation regression passed.
+  This proves monitor ordering with test devices, not physical hotplug during
+  real output. The release certification requirement remains open.
+
 ## Current verification and certification runner status: 2026-10-31 UTC
 
 - Refreshed GitHub state and incorporated upstream `main` through

@@ -116,7 +116,10 @@ KWin, the isolated test client retained the trigger while the daemon reported
 `compatibility-mode-off`, with zero uncertain output. The full doctor report
 contract passed on clean commit `b2037049`. This validates opt-out refusal;
 it does not establish integrity when a user explicitly enables compatibility
-mode or verify the physical evdev monitor.
+mode or verify the physical evdev monitor. The evdev hotplug monitor now polls
+its topology watch before translating each retained raw-event slice, so a
+large already-read batch cannot postpone a device-change interruption. Unit
+coverage exercises this ordering; physical-device behavior remains unverified.
 
 Acceptance criteria:
 

@@ -698,6 +698,16 @@ impl EvdevSource {
             // input and therefore interrupts an in-flight replacement.
             return Ok(true);
         }
+        if self
+            .poll_topology_nonblocking()
+            .map_err(|error| InputSourceError {
+                source: SOURCE_NAME,
+                retryable: error.is_retryable(),
+                message: error.to_string(),
+            })?
+        {
+            return Ok(true);
+        }
         if self.has_buffered_raw_events() {
             let (key_activity, _) = self.process_buffered_raw_events(MAX_RAW_EVENTS_PER_SLICE);
             if key_activity {
@@ -740,6 +750,49 @@ impl EvdevSource {
             self.pending.pop_front();
         }
         Ok(key_activity)
+    }
+
+    /// Check the topology watch even when a previously read device batch is
+    /// still being translated. Output cancellation must not wait for a large
+    /// raw-event backlog to drain before noticing a keyboard hotplug.
+    fn poll_topology_nonblocking(&mut self) -> Result<bool, EvdevError> {
+        let Some(watch) = self.topology_watch.as_ref() else {
+            return Ok(false);
+        };
+        let mut fds = [rustix::event::PollFd::new(
+            watch,
+            rustix::event::PollFlags::IN
+                | rustix::event::PollFlags::ERR
+                | rustix::event::PollFlags::HUP
+                | rustix::event::PollFlags::NVAL,
+        )];
+        let ready = rustix::event::poll(
+            &mut fds,
+            Some(&rustix::event::Timespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            }),
+        )
+        .map_err(|error| EvdevError::HotplugMonitor(error.to_string()))?;
+        if ready == 0 {
+            return Ok(false);
+        }
+        let revents = fds[0].revents();
+        if revents.intersects(
+            rustix::event::PollFlags::ERR
+                | rustix::event::PollFlags::HUP
+                | rustix::event::PollFlags::NVAL,
+        ) {
+            return Err(EvdevError::HotplugMonitor(
+                "inotify descriptor became unavailable".into(),
+            ));
+        }
+        if !revents.contains(rustix::event::PollFlags::IN) {
+            return Ok(false);
+        }
+        let changed = drain_topology_events(watch.as_fd())?;
+        self.topology_refresh_pending |= changed;
+        Ok(changed)
     }
 }
 
@@ -1227,6 +1280,47 @@ mod tests {
             .unwrap());
         assert!(source.topology_refresh_pending);
         assert_eq!(source.devices.len(), 1);
+
+        drop(source);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn topology_notification_interrupts_before_a_buffered_raw_event_slice() {
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-evdev-buffered-hotplug-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir(&directory).unwrap();
+        let topology_watch = create_topology_watch(&directory).unwrap();
+        let (reader, _writer) = UnixStream::pair().unwrap();
+        reader.set_nonblocking(true).unwrap();
+        let mut source = EvdevSource {
+            devices: vec![Box::new(TestKeyboard {
+                path: PathBuf::from("/dev/input/test-keyboard"),
+                reader,
+                events: Arc::new(Mutex::new(Vec::new())),
+            })],
+            state: test_state(),
+            pending: VecDeque::new(),
+            raw_events: (0..MAX_RAW_EVENTS_PER_SLICE * 4)
+                .map(|_| evdev::InputEvent::new(evdev::EventType::SYNCHRONIZATION.0, 0, 0))
+                .collect(),
+            raw_event_cursor: 0,
+            raw_event_device: Some(0),
+            pending_lost_devices: Vec::new(),
+            pressed: vec![HashSet::new()],
+            last_device_refresh: Instant::now(),
+            wake: None,
+            topology_watch: Some(topology_watch),
+            topology_refresh_pending: false,
+        };
+
+        std::fs::write(directory.join("event-new-keyboard"), b"device").unwrap();
+        assert!(source.next_event_during_output(Duration::ZERO).unwrap());
+        assert!(source.topology_refresh_pending);
+        assert_eq!(source.raw_event_cursor, 0, "hotplug wins over raw backlog");
 
         drop(source);
         std::fs::remove_dir_all(directory).unwrap();
