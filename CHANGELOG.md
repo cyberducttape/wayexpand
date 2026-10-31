@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Deny daemon control-socket mutations by default while retaining read-only
+  status, focus, and explain requests. Require exact focused-window validation
+  for explicit inserts in audit and safe modes, and withhold focus tokens while
+  mutations are disabled. Enabling same-UID mutations is now an explicit
+  root-managed policy opt-in; it does not provide per-application identity.
 - Put direct commands and broker actions launched by the bundled systemd units
   into individual delegated cgroup v2 groups. Timeout, cancellation, normal
   completion, and worker teardown now kill descendants even after `setsid()`;

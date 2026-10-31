@@ -2,6 +2,28 @@
 
 Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-31 UTC)
 
+## Control-socket mutation defaults: 2026-10-31
+
+- Changed the default organization policy to deny every mutating control
+  request (insert, pause, resume, reload, stop, and usage-stat clear), while
+  leaving status, focus diagnostics, and explain available. Focus identity
+  tokens stay hidden in this default read-only mode.
+- Exact-focus validation for explicit insert requests now defaults on and
+  remains enforced in audit mode. When an administrator explicitly enables
+  socket mutations, a plain unverified insert is still refused unless the
+  root-managed policy also opts out of verified-target checks.
+- Updated organization-policy, compatibility, operations, and man-page docs;
+  added tests for default, round-trip, audit-mode, and explicit opt-out policy
+  behavior. The daemon's existing control-handler regression verifies all
+  mutating commands are rejected without changing daemon state.
+- Limitation: this does not add per-application authorization. The secure
+  default closes the mutation channel; an administrator setting
+  `disable_control_socket_mutations = false` explicitly trusts same-UID socket
+  clients. Focus tokens prove freshness/target identity, not caller identity.
+  GUI/CLI control mutations therefore remain unavailable unless this policy
+  is opted out; a separate OS-mediated authorization channel remains future
+  work.
+
 ## Command descendant containment: 2026-10-31
 
 - Added optional per-command cgroup v2 placement to the shared process

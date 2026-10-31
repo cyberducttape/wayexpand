@@ -24,7 +24,7 @@ Ask the running daemon to type the snippet with this trigger at the cursor.
 With \fB--verified\fR, the insert is bound to the window focused when the
 command runs and is refused if focus has moved; it fails when the window
 tracker cannot identify that window exactly. Organization policy
-\fBrequire_verified_insert_target\fR refuses inserts without it.
+\fBrequire_verified_insert_target\fR is enabled by default and refuses inserts without it. Mutating control-socket commands are also disabled by default; root-managed policy may explicitly opt in.
 Bind \fBwayexpand-gui --picker\fR to a desktop shortcut to choose a snippet
 interactively instead. Inserts follow the same pause, sensitive-field, and
 application-filter rules as typed triggers; command snippets are not run.

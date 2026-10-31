@@ -5253,13 +5253,16 @@ fn aliases_are_omitted_from_saved_toml_when_empty() {
 }
 
 #[test]
-fn verified_insert_policy_is_omitted_from_saved_toml_unless_set() {
+fn verified_insert_policy_round_trips_and_audit_does_not_disable_it() {
     let config = Config::parse("[[expansion]]\ntrigger = \":a\"\nreplacement = \"x\"\n").unwrap();
     let text = toml::to_string(&config).unwrap();
+    assert!(!config.organization.require_verified_insert_target);
     assert!(!text.contains("require_verified_insert_target"), "{text}");
 
-    let required =
-        Config::parse("[organization]\nrequire_verified_insert_target = true\n").unwrap();
+    let required = Config::parse(
+        "[organization]\nrequire_verified_insert_target = true\ndisable_control_socket_mutations = true\n",
+    )
+    .unwrap();
     let text = toml::to_string(&required).unwrap();
     assert!(
         Config::parse(&text)
@@ -5269,18 +5272,19 @@ fn verified_insert_policy_is_omitted_from_saved_toml_unless_set() {
     );
     assert!(required.organization.is_active());
     assert!(
-        !required
+        required
             .organization
             .effective_enforcement_policy()
-            .require_verified_insert_target,
-        "audit mode must not enforce"
+            .require_verified_insert_target
     );
+    assert!(required.organization.disable_control_socket_mutations);
 }
 
 #[test]
 fn control_socket_mutation_restriction_is_enforced_even_in_audit_mode() {
     let config = Config::parse("[[expansion]]\ntrigger = \":a\"\nreplacement = \"x\"\n").unwrap();
     let text = toml::to_string(&config).unwrap();
+    assert!(!config.organization.disable_control_socket_mutations);
     assert!(!text.contains("disable_control_socket_mutations"), "{text}");
 
     let restricted = Config::parse(

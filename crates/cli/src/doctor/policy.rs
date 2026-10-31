@@ -136,9 +136,10 @@ pub(crate) fn print_capabilities_diagnostics_json() -> serde_json::Value {
 pub(crate) fn print_policy_diagnostics() -> bool {
     if !Path::new(wayexpand_core::ORGANIZATION_POLICY_PATH).exists() {
         println!(
-            "Organization policy: {} (not found, using default permissive policy)",
+            "Organization policy: {} (not found; control-socket mutations are disabled by default)",
             wayexpand_core::ORGANIZATION_POLICY_PATH
         );
+        println!("  Explicit control-socket inserts require a verified focused target.");
         return true;
     }
 
@@ -147,6 +148,22 @@ pub(crate) fn print_policy_diagnostics() -> bool {
             println!(
                 "Organization policy: {} (valid)",
                 wayexpand_core::ORGANIZATION_POLICY_PATH
+            );
+            println!(
+                "  Control-socket mutations: {}",
+                if policy.disable_control_socket_mutations {
+                    "disabled"
+                } else {
+                    "enabled for same-UID clients by administrator policy"
+                }
+            );
+            println!(
+                "  Explicit insert target verification: {}",
+                if policy.require_verified_insert_target {
+                    "required"
+                } else {
+                    "not required"
+                }
             );
             if policy.is_active() {
                 println!(

@@ -71,18 +71,19 @@ pub struct OrganizationPolicy {
     /// does not satisfy this requirement.
     pub require_composition_aware: bool,
 
-    /// Refuse explicit snippet inserts (`wayexpand insert`, the quick-insert
-    /// picker) unless the request names the exact focused window it was
-    /// prepared for and that window is still focused. Unverified best-effort
-    /// inserts are logged in audit mode and refused in safe mode. Omitted
-    /// from saved files when false so older releases can still read them.
+    /// Refuse explicit control-socket snippet inserts unless the request names
+    /// the exact focused window it was prepared for and that window is still
+    /// focused. The root policy loader defaults this to true and enforces it
+    /// in audit and safe mode. Ordinary config deserialization defaults false.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub require_verified_insert_target: bool,
 
     /// Disable all state-changing commands on the daemon control socket,
     /// including insert, pause/resume, reload, stop, and usage-stat clearing.
-    /// This is enforced in safe mode and is intended for managed deployments
-    /// where local applications must not invoke WayExpand on the user's behalf.
+    /// The root policy loader defaults this to true and enforces it in every
+    /// mode. Setting it false in root policy explicitly opts into same-UID
+    /// applications invoking control-socket mutations. Ordinary config
+    /// deserialization defaults false.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub disable_control_socket_mutations: bool,
 
@@ -146,6 +147,16 @@ impl Default for OrganizationPolicy {
 }
 
 impl OrganizationPolicy {
+    /// Defaults applied by the root-managed daemon policy loader when the
+    /// administrator has not configured these control-socket fields.
+    pub fn secure_control_defaults() -> Self {
+        Self {
+            require_verified_insert_target: true,
+            disable_control_socket_mutations: true,
+            ..Self::default()
+        }
+    }
+
     /// Return the policy values that are allowed to block behavior.
     ///
     /// Audit mode deliberately retains the original policy for violation
@@ -168,7 +179,8 @@ impl OrganizationPolicy {
         effective.minimum_replacement_guarantee = None;
         effective.require_sensitive_focus = false;
         effective.require_composition_aware = false;
-        effective.require_verified_insert_target = false;
+        // Explicit insertion is a control-socket access path, not ordinary
+        // snippet policy. Keep exact-target validation active in audit mode.
         // This setting is an access-control boundary for daemon RPC, rather
         // than an expansion policy. Honor it even while expansion policies
         // are in audit mode.

@@ -89,11 +89,16 @@ require_sensitive_focus = false
 # shipped source satisfies this policy requirement.
 require_composition_aware = false
 
-# Refuse explicit snippet inserts unless they name the exact focused window
-# (`wayexpand insert --verified` or the quick-insert picker). Plain
-# `wayexpand insert` is best-effort: it targets whatever is focused when the
-# daemon types. Requires a window tracker with exact identity (KWin).
-require_verified_insert_target = false
+# Require explicit snippet inserts to name the exact focused window. This is
+# enabled by default and remains enforced in audit mode. Requires a window
+# tracker with exact identity (currently KWin); plain inserts are refused.
+require_verified_insert_target = true
+
+# Mutating control-socket commands are disabled by default, including insert,
+# pause/resume, reload, stop, and usage-stat clearing. Read-only diagnostics
+# remain available. Set false only when same-UID applications are trusted to
+# invoke these operations; focus tokens are not authorization credentials.
+disable_control_socket_mutations = true
 
 # Maximum replacement text size in bytes (0 = unlimited)
 max_replacement_size = 65536
@@ -139,13 +144,19 @@ When `safe_mode = true`:
 are never silent; they are always logged and always block execution when
 safe_mode is true.
 
-`disable_control_socket_mutations` is enforced in both safe and audit modes
-because it controls daemon RPC access rather than snippet-policy enforcement.
-It blocks insert, pause, resume, reload, stop, and usage-stat clearing over the
-socket. Linux peer credentials verify the user ID but cannot distinguish
-applications under the same UID; use this setting for a managed read-only
-control socket. Service-manager operations remain available to the logged-in
-user.
+`disable_control_socket_mutations` defaults to true and is enforced in both
+safe and audit modes because it controls daemon RPC access rather than
+snippet-policy enforcement. It blocks insert, pause, resume, reload, stop, and
+usage-stat clearing over the socket, while status, focus diagnostics, and
+explain remain available. Linux peer credentials verify the user ID but cannot
+distinguish applications under the same UID. Setting this root-managed policy
+to false is an explicit opt-in to that same-UID trust model. Service-manager
+operations remain available to the logged-in user.
+
+`require_verified_insert_target` also defaults to true and is enforced outside
+safe mode. If an administrator opts into socket mutations, explicit snippet
+insertion still requires a fresh exact focus target. This prevents stale-target
+insertion; it does not authenticate the requesting application.
 
 ### Audit Mode (Logging Only)
 When `safe_mode = false`:

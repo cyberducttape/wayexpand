@@ -796,7 +796,7 @@ mod tests {
     }
 
     #[test]
-    fn unverified_insert_is_a_violation_only_under_the_policy() {
+    fn unverified_control_socket_insert_is_blocked_by_default() {
         let unguarded = InsertRequest {
             trigger: ";sig".into(),
             focus_token: None,
@@ -807,11 +807,17 @@ mod tests {
             focus_generation: Some(1),
             ..unguarded.clone()
         };
-        let mut policy = wayexpand_core::OrganizationPolicy::default();
-        assert_eq!(unverified_insert_violation(&policy, &unguarded), None);
-        policy.require_verified_insert_target = true;
+        let policy = wayexpand_core::OrganizationPolicy::secure_control_defaults();
+        assert!(policy.require_verified_insert_target);
         assert!(unverified_insert_violation(&policy, &unguarded).is_some());
         assert_eq!(unverified_insert_violation(&policy, &guarded), None);
+
+        let mut explicitly_permissive = policy;
+        explicitly_permissive.require_verified_insert_target = false;
+        assert_eq!(
+            unverified_insert_violation(&explicitly_permissive, &unguarded),
+            None
+        );
     }
 
     #[test]
