@@ -1,5 +1,5 @@
 use super::command_runtime::{
-    configure_command_environment, configure_process_group, ChildSupervisor,
+    configure_command_environment, configure_process_group, run_broker_hotkey, ChildSupervisor,
 };
 use super::*;
 use std::{sync::atomic::AtomicBool, thread};
@@ -77,6 +77,12 @@ impl ExpansionEngine {
         result: &HotkeyResult,
         shutdown: Option<&AtomicBool>,
     ) -> Result<(), HotkeyError> {
+        if result.command.action.is_some() {
+            return run_broker_hotkey(&result.command, shutdown).map_err(|error| match error {
+                CommandError::Timeout => HotkeyError::Timeout(result.command.timeout_ms),
+                error => HotkeyError::CommandFailure(error.kind()),
+            });
+        }
         let mut command = Command::new(&result.command.program);
         configure_command_environment(&mut command, &result.command);
         command

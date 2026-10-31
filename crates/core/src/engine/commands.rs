@@ -33,6 +33,8 @@ pub enum HotkeyError {
     QueueFull,
     #[error("hotkey action is blocked by command execution policy")]
     PolicyBlocked,
+    #[error("hotkey action failed ({0:?})")]
+    CommandFailure(CommandErrorKind),
     #[error("hotkey action worker is unavailable")]
     WorkerUnavailable,
 }

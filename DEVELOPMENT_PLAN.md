@@ -17,7 +17,9 @@ The root-managed organization policy now supports
 snippets and hotkeys fail configuration validation and are checked again at
 runtime, including direct hotkey execution and GUI command preview. Named
 Action Broker actions remain available subject to the broker's own allowlist
-and service policy. Espanso and pack imports continue to strip external
+and service policy; both expansion and hotkey actions use the broker protocol.
+Hotkey requests disable output capture because their output is discarded.
+Espanso and pack imports continue to strip external
 commands; documentation now directs administrators to review and define
 broker actions rather than restoring imported executables directly.
 

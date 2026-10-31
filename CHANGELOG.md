@@ -8,6 +8,9 @@ All notable changes to WayExpand are documented here.
   direct executable snippets and hotkeys are rejected during validation and
   again at expansion, hotkey queue, direct hotkey execution, and GUI preview
   boundaries. Named actions remain eligible for the configured Action Broker.
+  Route named hotkeys through the broker with output capture disabled, instead
+  of attempting to launch their empty direct-program field; report only a
+  stable error category if the broker action fails.
   Expose the policy in config schema and doctor output, and clarify that
   imported executable content must be reviewed and converted to a broker
   action rather than restored as a direct command. Regression tests cover

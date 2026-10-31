@@ -92,7 +92,7 @@ pub(super) fn run_command_with_parameters(
     shutdown: Option<&AtomicBool>,
 ) -> Result<String, CommandError> {
     if let Some(action_id) = &command.action {
-        return run_broker_action(action_id, command, parameters, shutdown);
+        return run_broker_action(action_id, command, parameters, shutdown, true);
     }
     if !parameters.is_empty() {
         return Err(CommandError::PolicyBlocked);
@@ -125,11 +125,29 @@ pub(super) fn run_command_with_parameters(
     }
 }
 
+pub(super) fn run_broker_hotkey(
+    command: &CommandConfig,
+    shutdown: Option<&AtomicBool>,
+) -> Result<(), CommandError> {
+    let Some(action_id) = &command.action else {
+        return Err(CommandError::PolicyBlocked);
+    };
+    run_broker_action(
+        action_id,
+        command,
+        &std::collections::HashMap::new(),
+        shutdown,
+        false,
+    )
+    .map(|_| ())
+}
+
 fn run_broker_action(
     action_id: &str,
     command: &CommandConfig,
     parameters: &std::collections::HashMap<String, String>,
     shutdown: Option<&AtomicBool>,
+    capture_stdout: bool,
 ) -> Result<String, CommandError> {
     let deadline = Instant::now() + Duration::from_millis(command.timeout_ms);
     if shutdown.is_some_and(|flag| flag.load(Ordering::Acquire)) {
@@ -175,7 +193,7 @@ fn run_broker_action(
             timeout_ms: command.timeout_ms,
             inherit_env: false,
             env_vars,
-            stdout_capture: true,
+            stdout_capture: capture_stdout,
             parameters: parameters
                 .iter()
                 .map(|(name, value)| (name.clone(), value.clone()))
@@ -186,7 +204,10 @@ fn run_broker_action(
         .recv_response_until(deadline, shutdown)
         .map_err(|error| broker_command_error(BrokerOperation::ReceiveResponse, error))?
     {
-        wayexpand_broker_client::ActionResponse::Success(output) => broker_output_text(output),
+        wayexpand_broker_client::ActionResponse::Success(output) if capture_stdout => {
+            broker_output_text(output)
+        }
+        wayexpand_broker_client::ActionResponse::Success(_) => Ok(String::new()),
         wayexpand_broker_client::ActionResponse::Error(error) => {
             Err(CommandError::BrokerRejected(error))
         }

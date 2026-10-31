@@ -6289,6 +6289,73 @@ fn form_values_are_sent_to_the_named_broker_action_and_its_result_inserts() {
     drop(_environment);
 }
 
+#[cfg(unix)]
+#[test]
+fn named_hotkey_action_is_sent_to_broker_without_capturing_output() {
+    use std::io::{BufRead, Write};
+    use std::os::unix::net::UnixListener;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let directory = std::env::temp_dir().join(format!(
+        "wayexpand-hotkey-action-{}-{nonce}",
+        std::process::id()
+    ));
+    std::fs::create_dir(&directory).unwrap();
+    std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let socket = directory.join("broker.sock");
+    let listener = UnixListener::bind(&socket).unwrap();
+    let broker = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request_line = String::new();
+        std::io::BufReader::new(&stream)
+            .read_line(&mut request_line)
+            .unwrap();
+        let request: wayexpand_broker_client::ActionRequest =
+            serde_json::from_str(&request_line).unwrap();
+        let response = wayexpand_broker_client::ActionResponse::Success(
+            wayexpand_broker_client::ActionOutput {
+                exit_code: 0,
+                stdout: "must not be captured".into(),
+                stderr: String::new(),
+                stdout_truncated: false,
+                stderr_truncated: false,
+                duration_ms: 1,
+            },
+        );
+        stream
+            .write_all(&serde_json::to_vec(&response).unwrap())
+            .unwrap();
+        stream.write_all(b"\n").unwrap();
+        request
+    });
+    let _environment = FakeFormActionEnvironment::new(directory, &socket);
+    let config = Config::parse(
+        r#"
+        [[hotkey]]
+        chord = "Ctrl+Alt+L"
+        command = { action = "approved-list", timeout_ms = 1000 }
+        "#,
+    )
+    .unwrap();
+    let engine = ExpansionEngine::new(config).unwrap();
+    let action = engine
+        .process_key(&KeyChord::parse("Ctrl+Alt+L").unwrap())
+        .pop()
+        .unwrap();
+
+    engine.execute_hotkey(&action).unwrap();
+    let request = broker.join().unwrap();
+    assert_eq!(request.action_id, "approved-list");
+    assert!(!request.stdout_capture);
+    assert!(!request.inherit_env);
+    assert!(request.parameters.is_empty());
+    drop(_environment);
+}
+
 #[test]
 fn conflicting_repeated_form_field_rules_fail_configuration_validation() {
     let config = r#"

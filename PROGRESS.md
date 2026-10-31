@@ -16,21 +16,32 @@ Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-3
   expansion and hotkey configurations; GUI preview has a dedicated policy
   test. Existing Espanso import tests confirm shell executable content is not
   imported as an executable snippet.
+- End-to-end tracing found named hotkeys were accepted by policy but sent to
+  the direct process launcher, which has no executable path for broker actions.
+  Hotkey execution now uses the same broker IPC path as command expansions,
+  disables output capture, and reduces broker failures to a stable error
+  category. A fake broker regression verifies the action ID, empty parameters,
+  non-inherited environment, and disabled stdout capture.
 - Added the field to CLI config-schema and doctor JSON/human diagnostics, and
   documented the safe-mode setting and the reviewed-import-to-broker workflow.
 - Verification in this worktree: locked full workspace tests passed with no
   failures (ignored cases remain ignored); the focused doctor JSON policy test,
   workspace Clippy with warnings denied, formatting check, and `git diff
-  --check` passed. No managed broker action was executed as part of these tests.
+  --check` passed. After the named-hotkey broker-routing fix, the full locked
+  workspace suite passed again, including 481 core tests and the fake-broker
+  hotkey request test. No managed broker action was executed as part of these
+  tests.
 - Limitation: this policy requires use of the Action Broker, whose executable
   allowlist and service sandbox remain its current shared security boundary.
   It does not add per-action Landlock/seccomp isolation or protect against
   malicious same-UID processes. The policy is root-owned administrator policy
   when applied by the daemon; a user-editable library cannot strengthen the
   daemon's administrator policy.
-- Committed and pushed as `3523331a` using SSH and the configured identity
-  `Stephan Loesevitz <stephan.loesevitz@gmail.com>`. No GitHub Actions run was
-  listed for this commit when checked.
+- The policy-only changes were pushed as `3523331a` and the evidence record as
+  `a92064d6` using SSH and the configured identity
+  `Stephan Loesevitz <stephan.loesevitz@gmail.com>`. The hotkey routing fix and
+  its tests are now locally verified and will be committed separately. CI on
+  the earlier policy-only revision does not verify this follow-up.
 
 ## Exact-head KWin output smoke: 2026-10-31
 
