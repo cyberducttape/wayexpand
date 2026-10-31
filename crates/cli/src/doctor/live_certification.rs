@@ -496,6 +496,11 @@ fn make_report_for_build(
         "The private KWin smoke session simulates capture over stdin and cannot test physical input arriving during an in-flight non-atomic replacement.",
     ));
     checks.push(check(
+        "keyboard-hotplug-during-nonatomic-replacement",
+        "not-tested",
+        "The private KWin smoke session has no physical keyboard devices and cannot verify hotplug interruption during a non-atomic replacement.",
+    ));
+    checks.push(check(
         "word-boundary-delimiter",
         result
             .outcomes
@@ -749,6 +754,9 @@ fn check(name: &str, status: &str, evidence: &str) -> serde_json::Value {
         "focus-change-during-expansion" => "Focus change during expansion",
         "second-trigger-during-nonatomic-replacement" => {
             "Second trigger during non-atomic replacement"
+        }
+        "keyboard-hotplug-during-nonatomic-replacement" => {
+            "Keyboard hotplug during non-atomic replacement"
         }
         "target-closes-during-expansion" => "Target closes during expansion",
         "command-completion" => "Command completion",
@@ -1114,6 +1122,15 @@ mod tests {
                 .unwrap()
                 .iter()
                 .find(|check| check["name"] == "second-trigger-during-nonatomic-replacement")
+                .unwrap()["status"],
+            "not-tested"
+        );
+        assert_eq!(
+            report["checks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|check| check["name"] == "keyboard-hotplug-during-nonatomic-replacement")
                 .unwrap()["status"],
             "not-tested"
         );

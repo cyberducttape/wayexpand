@@ -26,8 +26,8 @@ jq -e '
   .schema == 1 and
   .configuration.valid == true and
   (.application.version | type == "string") and
-  .certification.required_scenario_count == 47 and
-  (.certification.check_status_counts["not-run"] == 47)
+  .certification.required_scenario_count == 48 and
+  (.certification.check_status_counts["not-run"] == 48)
 ' "$report" >/dev/null
 for secret in "$config_home" ':secret-support-trigger' 'SUPPORT_REPLACEMENT_SECRET'; do
     if grep -F "$secret" "$report" >/dev/null; then

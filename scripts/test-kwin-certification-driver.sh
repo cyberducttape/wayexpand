@@ -73,6 +73,8 @@ grep -F 'cannot exercise physical input arriving during an in-flight replacement
 expect 2 modifier-during-nonatomic-replacement
 grep -F 'cannot exercise physical modifier or lock-key activity during replacement' "$test_root/out" >/dev/null
 expect 2 keyboard-hotplug
+expect 2 keyboard-hotplug-during-nonatomic-replacement
+grep -F 'cannot verify hotplug interruption during a non-atomic replacement' "$test_root/out" >/dev/null
 expect 3 password-field
 # Cells, clients and layouts the store does not cover.
 expect 2 daemon-restart

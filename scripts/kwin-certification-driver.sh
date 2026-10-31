@@ -57,6 +57,9 @@ case "$scenario" in
     keyboard-hotplug | bluetooth-keyboard-reconnect | multiple-keyboards)
         unverified 'needs physical input devices; the private session has none'
         ;;
+    keyboard-hotplug-during-nonatomic-replacement)
+        unverified 'the private KWin session has no physical devices and cannot verify hotplug interruption during a non-atomic replacement'
+        ;;
     suspend-resume | compositor-restart)
         unverified 'not exercised by the private headless session'
         ;;

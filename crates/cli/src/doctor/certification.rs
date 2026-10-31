@@ -421,6 +421,7 @@ pub(crate) fn certification_scenario_category(scenario: &str) -> &'static str {
         | "focus-cross-window"
         | "focus-change-during-expansion"
         | "second-trigger-during-nonatomic-replacement"
+        | "keyboard-hotplug-during-nonatomic-replacement"
         | "target-closes-during-expansion" => "safety",
         "config-reload" | "daemon-restart" | "compositor-restart" | "failed-insertion" => {
             "recovery"

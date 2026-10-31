@@ -56,6 +56,10 @@ session evidence; unit tests alone do not satisfy them.
       A separate `modifier-during-nonatomic-replacement` certification case
       now records this requirement; the headless KWin driver marks it
       unverified because it does not exercise physical capture.
+      The `keyboard-hotplug-during-nonatomic-replacement` case separately
+      requires removing or reconnecting a physical keyboard while paced output
+      is active. The headless driver marks it unverified because it has no
+      physical input devices; monitor unit tests do not satisfy this gate.
       This is containment only: any already delivered physical keys or
       synthetic characters may leave partial text, so the target-integrity
       gate still requires a passing real-session test or refusing automatic

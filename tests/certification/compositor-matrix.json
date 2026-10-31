@@ -115,6 +115,7 @@
     "failed-insertion",
     "expansion-after-committed-composition",
     "keyboard-hotplug",
+    "keyboard-hotplug-during-nonatomic-replacement",
     "bluetooth-keyboard-reconnect",
     "multiple-keyboards",
     "electron-client",

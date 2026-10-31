@@ -2,6 +2,26 @@
 
 Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-31 UTC)
 
+## Hotplug during replacement certification coverage
+
+- Added a distinct `keyboard-hotplug-during-nonatomic-replacement` required
+  scenario. It requires physical device removal or reconnection during paced
+  output and verifies that the daemon interrupts further synthetic input.
+- The private KWin driver explicitly returns `UNVERIFIED` because its capture
+  is stdin-simulated and it has no physical keyboard devices. The isolated
+  `doctor --certify` report also labels the check `not-tested`; existing
+  inotify and cancellation unit tests do not count as desktop evidence.
+- Updated matrix uniqueness/count checks, safety categorization, support-bundle
+  expectations, and production acceptance documentation. Focused shell
+  contracts passed (`test-certification-matrix.sh`, KWin driver contract,
+  full certification-driver contract, support-bundle contract), as did the
+  17 `doctor::live_certification` unit tests, CLI Clippy with warnings denied,
+  formatting, documentation contracts, and `git diff --check`. The full
+  `test-doctor-certify.sh` run was stopped after it entered its private KWin
+  harness (which has a 16-minute deadline); this environment has no physical
+  keyboard session for the required hotplug scenario. No production
+  certification claim is made.
+
 ## Current verification and certification runner status: 2026-10-31 UTC
 
 - Refreshed GitHub state and incorporated upstream `main` through
