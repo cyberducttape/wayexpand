@@ -1450,3 +1450,16 @@ pass with both default parallel scheduling and `RUST_TEST_THREADS=1`; the full
   blanket-suppressed.
 - Dependency audit findings do not change the status of the open real-session
   certification and production acceptance gates.
+
+## Exact-head workspace verification: 2026-10-30
+
+- On commit `01671a20c3b11d1b620d2272b9e01d3e27ef7f82`,
+  `RUST_TEST_THREADS=1 cargo test --workspace --locked --quiet` passed across
+  all workspace test binaries; tests marked ignored by their existing
+  annotations remained ignored.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings` passed.
+- GitHub CI for this exact head is queued, as are CodeQL and Launchpad sync.
+  The repository currently has no registered Actions runners (`total_count: 0`);
+  all 31 CI jobs are queued without a runner assignment. This is not a hosted
+  CI pass. Local checks do not replace the pending hosted build matrix or the
+  open real-session certification gate.
