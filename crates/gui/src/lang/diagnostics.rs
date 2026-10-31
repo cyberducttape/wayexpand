@@ -54,6 +54,42 @@ impl Strings {
         }
     }
 
+    pub fn refresh_session_report(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Refresh session report",
+            Language::Indonesian => "Segarkan laporan sesi",
+            Language::German => "Sitzungsbericht aktualisieren",
+        }
+    }
+
+    pub fn report_updated_just_now(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Session report updated just now",
+            Language::Indonesian => "Laporan sesi baru saja diperbarui",
+            Language::German => "Sitzungsbericht gerade aktualisiert",
+        }
+    }
+
+    pub fn report_updated_minutes_ago(&self, minutes: u64) -> String {
+        match self.lang {
+            Language::English => format!("Session report updated {minutes} min ago · refresh before relying on it"),
+            Language::Indonesian => format!("Laporan sesi diperbarui {minutes} mnt lalu · segarkan sebelum mengandalkannya"),
+            Language::German => format!("Sitzungsbericht vor {minutes} Min. aktualisiert · vor der Verwendung aktualisieren"),
+        }
+    }
+
+    pub fn report_not_run_yet(&self) -> &'static str {
+        match self.lang {
+            Language::English => "No session report yet · refresh to collect current evidence",
+            Language::Indonesian => {
+                "Belum ada laporan sesi · segarkan untuk mengumpulkan bukti saat ini"
+            }
+            Language::German => {
+                "Noch kein Sitzungsbericht · aktualisieren, um aktuelle Daten zu erfassen"
+            }
+        }
+    }
+
     pub fn unicode_insertion(&self) -> &'static str {
         match self.lang {
             Language::English => "Unicode insertion",

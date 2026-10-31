@@ -61,14 +61,6 @@ impl Strings {
         }
     }
 
-    pub fn run_compatibility_test(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Run protocol checks",
-            Language::Indonesian => "Jalankan pemeriksaan protokol",
-            Language::German => "Protokollprüfungen ausführen",
-        }
-    }
-
     pub fn live_test_boundary(&self) -> &'static str {
         match self.lang {
             Language::English => {

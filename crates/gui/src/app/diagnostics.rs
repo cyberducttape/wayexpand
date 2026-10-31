@@ -61,7 +61,39 @@ impl GuiApp {
     }
 
     pub(crate) fn render_diagnostics_body(&mut self, ui: &mut egui::Ui, palette: &Palette) {
-        theme::section_header(ui, "", self.strings.runtime_dashboard());
+        ui.horizontal_wrapped(|ui| {
+            ui.label(
+                RichText::new(self.strings.runtime_dashboard())
+                    .size(18.0)
+                    .strong(),
+            );
+            if ui
+                .add_enabled(
+                    !self.diagnostics_running,
+                    egui::Button::new(self.strings.refresh_session_report()),
+                )
+                .clicked()
+            {
+                self.refresh_diagnostics(true);
+            }
+            if self.diagnostics_running {
+                ui.spinner();
+            }
+        });
+        let freshness = self.diagnostics_checked_at.map(|checked| checked.elapsed());
+        let freshness_text = match freshness {
+            Some(age) if age.as_secs() < 60 => self.strings.report_updated_just_now().to_owned(),
+            Some(age) => self
+                .strings
+                .report_updated_minutes_ago((age.as_secs() / 60).max(1)),
+            None => self.strings.report_not_run_yet().to_owned(),
+        };
+        let freshness_color = if freshness.is_some_and(|age| age >= Duration::from_secs(60)) {
+            palette.warning
+        } else {
+            palette.muted
+        };
+        ui.label(RichText::new(freshness_text).small().color(freshness_color));
         let active_route_id = compact_status_value(&self.daemon_status, "route_id");
         let active_replacement = self
             .daemon_capabilities
@@ -558,20 +590,6 @@ impl GuiApp {
                 }
             });
         }
-        ui.horizontal(|ui| {
-            if ui
-                .add_enabled(
-                    !self.diagnostics_running,
-                    egui::Button::new(self.strings.run_compatibility_test()),
-                )
-                .clicked()
-            {
-                self.refresh_diagnostics(true);
-            }
-            if self.diagnostics_running {
-                ui.spinner();
-            }
-        });
         ui.add_space(8.0);
         theme::section_header(ui, "", self.strings.runtime_health());
         ui.add_space(4.0);

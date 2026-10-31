@@ -13,6 +13,8 @@
 use std::{
     fs,
     io::Write,
+    os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
+    path::Path,
     process,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -252,10 +254,18 @@ impl KwinWindowTracker {
         let mut file = fs::OpenOptions::new()
             .write(true)
             .create_new(true)
+            .mode(0o600)
             .open(&script_path)
             .map_err(KwinWindowError::ScriptWrite)?;
-        file.write_all(script_contents.as_bytes())
-            .map_err(KwinWindowError::ScriptWrite)?;
+        let write_result = file
+            .set_permissions(fs::Permissions::from_mode(0o600))
+            .and_then(|()| file.write_all(script_contents.as_bytes()));
+        if let Err(error) = write_result {
+            drop(file);
+            let _ = fs::remove_file(&script_path);
+            return Err(KwinWindowError::ScriptWrite(error));
+        }
+        drop(file);
 
         if let Err(error) = Self::load_and_run(
             &connection,
@@ -274,6 +284,23 @@ impl KwinWindowTracker {
             let _ = fs::remove_file(&script_path);
             return Err(error);
         }
+
+        cleanup_orphan_tracker_scripts(
+            &std::env::temp_dir(),
+            |old_pid| Path::new("/proc").join(old_pid.to_string()).exists(),
+            |old_plugin| {
+                connection
+                    .call_method(
+                        Some("org.kde.KWin"),
+                        "/Scripting",
+                        Some("org.kde.kwin.Scripting"),
+                        "isScriptLoaded",
+                        &(old_plugin,),
+                    )
+                    .and_then(|reply| reply.body().deserialize())
+                    .ok()
+            },
+        );
 
         Ok(Self {
             connection,
@@ -343,6 +370,76 @@ impl KwinWindowTracker {
         }
         Err(KwinWindowError::ScriptNotReady)
     }
+}
+
+/// Remove temporary files left by WayExpand tracker processes that exited
+/// without running `Drop` (for example, after SIGKILL or a process crash).
+/// This deliberately does not unload scripts or touch files owned by another
+/// process: it removes only an exact generated file for a dead PID after KWin
+/// confirms that the corresponding script is not loaded.
+fn cleanup_orphan_tracker_scripts(
+    directory: &Path,
+    mut process_is_alive: impl FnMut(u32) -> bool,
+    mut script_is_loaded: impl FnMut(&str) -> Option<bool>,
+) {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
+    };
+    let current_uid = unsafe { libc::geteuid() };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let Some((pid, nonce)) = parse_tracker_script_filename(name) else {
+            continue;
+        };
+        if process_is_alive(pid) {
+            continue;
+        }
+
+        let Ok(metadata) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if !metadata.is_file()
+            || metadata.uid() != current_uid
+            || metadata.nlink() != 1
+            || metadata.mode() & 0o777 != 0o600
+        {
+            continue;
+        }
+
+        let bus_name = format!("org.wayexpand.WindowTracker.pid{pid}.n{nonce}");
+        let expected_contents = SCRIPT_TEMPLATE.replace("__WAYEXPAND_BUS_NAME__", &bus_name);
+        if !fs::read_to_string(&path).is_ok_and(|contents| contents == expected_contents) {
+            continue;
+        }
+
+        let plugin_name = format!("wayexpand-window-tracker-{pid}-{nonce}");
+        if script_is_loaded(&plugin_name) == Some(false) {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+
+/// Parse only the exact filename shape emitted by `KwinWindowTracker::new`.
+fn parse_tracker_script_filename(name: &str) -> Option<(u32, String)> {
+    let name = name.strip_prefix("wayexpand-window-tracker-")?;
+    let (pid, suffix) = name.split_once('-')?;
+    let (nonce, repeated_nonce) = suffix.strip_suffix(".js")?.split_once('-')?;
+    let pid = pid.parse::<u32>().ok()?;
+    if pid == 0
+        || nonce.is_empty()
+        || nonce.len() > 16
+        || !nonce
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        || nonce != repeated_nonce
+    {
+        return None;
+    }
+    Some((pid, nonce.to_owned()))
 }
 
 #[derive(Debug)]
@@ -486,13 +583,17 @@ impl WindowTracker for KwinWindowTracker {
 #[cfg(test)]
 mod tests {
     use super::{
-        bounded_session_connection, is_kwin_sender, window_context_from_signal, KwinWindowError,
-        KwinWindowTracker, TRACKER_HEALTH_CHECK_INTERVAL,
+        bounded_session_connection, cleanup_orphan_tracker_scripts, is_kwin_sender,
+        parse_tracker_script_filename, window_context_from_signal, KwinWindowError,
+        KwinWindowTracker, SCRIPT_TEMPLATE, TRACKER_HEALTH_CHECK_INTERVAL,
     };
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
     use std::{
-        io::Read,
+        fs,
+        io::{Read, Write},
         os::unix::net::UnixListener,
-        thread,
+        path::Path,
+        process, thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     };
     use wayexpand_core::WindowTracker;
@@ -566,6 +667,97 @@ mod tests {
     }
 
     #[test]
+    fn orphan_tracker_cleanup_removes_only_exact_unloaded_private_files() {
+        use std::os::unix::fs::symlink;
+
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-kwin-orphan-cleanup-{}-{suffix}",
+            process::id()
+        ));
+        fs::create_dir(&directory).unwrap();
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+
+        let stale = write_tracker_file(&directory, 410_001, "aabbccddeeff0011");
+        let active = write_tracker_file(&directory, 410_002, "aabbccddeeff0022");
+        let loaded = write_tracker_file(&directory, 410_003, "aabbccddeeff0033");
+        let forged = write_tracker_file(&directory, 410_004, "aabbccddeeff0044");
+        fs::write(&forged, "not the embedded WayExpand tracker script").unwrap();
+        let target = directory.join("keep-me");
+        fs::write(&target, "leave target unchanged").unwrap();
+        let linked =
+            directory.join("wayexpand-window-tracker-410005-aabbccddeeff0055-aabbccddeeff0055.js");
+        symlink(&target, &linked).unwrap();
+
+        cleanup_orphan_tracker_scripts(
+            &directory,
+            |pid| pid == 410_002,
+            |plugin| {
+                if plugin.contains("410003") {
+                    Some(true)
+                } else {
+                    Some(false)
+                }
+            },
+        );
+
+        assert!(!stale.exists(), "a confirmed orphan should be removed");
+        assert!(active.exists(), "a live process's file must be preserved");
+        assert!(loaded.exists(), "a loaded KWin script must be preserved");
+        assert!(
+            forged.exists(),
+            "unrecognized file contents must be preserved"
+        );
+        assert!(linked.symlink_metadata().unwrap().file_type().is_symlink());
+        assert_eq!(
+            fs::read_to_string(target).unwrap(),
+            "leave target unchanged"
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn tracker_script_filename_parser_rejects_ambiguous_names() {
+        assert_eq!(
+            parse_tracker_script_filename(
+                "wayexpand-window-tracker-42-aabbccddeeff0011-aabbccddeeff0011.js"
+            ),
+            Some((42, "aabbccddeeff0011".into()))
+        );
+        assert_eq!(
+            parse_tracker_script_filename("wayexpand-window-tracker-42-a-a.js"),
+            Some((42, "a".into()))
+        );
+        for invalid in [
+            "wayexpand-window-tracker-0-aabb-aabb.js",
+            "wayexpand-window-tracker-42-aabb-bbcc.js",
+            "wayexpand-window-tracker-42-not-hex-not-hex.js",
+            "wayexpand-window-tracker-42-1234567890abcdef0-1234567890abcdef0.js",
+            "wayexpand-window-tracker-42-aabb-aabb.js.bak",
+        ] {
+            assert_eq!(parse_tracker_script_filename(invalid), None, "{invalid}");
+        }
+    }
+
+    fn write_tracker_file(directory: &Path, pid: u32, nonce: &str) -> std::path::PathBuf {
+        let plugin = format!("wayexpand-window-tracker-{pid}-{nonce}");
+        let path = directory.join(format!("{plugin}-{nonce}.js"));
+        let bus_name = format!("org.wayexpand.WindowTracker.pid{pid}.n{nonce}");
+        let contents = SCRIPT_TEMPLATE.replace("__WAYEXPAND_BUS_NAME__", &bus_name);
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+            .unwrap();
+        file.write_all(contents.as_bytes()).unwrap();
+        path
+    }
+
+    #[test]
     fn session_bus_authentication_is_cancelled_at_connection_deadline() {
         let socket_path = std::env::temp_dir().join(format!(
             "wayexpand-kwin-timeout-{}-{}.sock",
@@ -612,6 +804,11 @@ mod tests {
                 .as_deref()
                 .is_some_and(|identity| !identity.is_empty()),
             "KWin should provide a strong identity for the exact focused window"
+        );
+        assert_eq!(
+            std::fs::metadata(&tracker.script_path).unwrap().mode() & 0o777,
+            0o600,
+            "tracker script files must be private regardless of the process umask"
         );
 
         let untrusted_client =

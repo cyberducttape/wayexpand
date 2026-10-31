@@ -1687,6 +1687,7 @@ fn diagnostics_accessibly_explains_keysym_fallback_and_separates_latency() {
     let _ = fs::remove_file(&path);
     let mut app = GuiApp::load(path.clone()).unwrap();
     app.diagnostics_open = true;
+    app.diagnostics_checked_at = Some(Instant::now() - Duration::from_secs(75));
     app.daemon_reachable = Some(true);
     app.daemon_status = "source=evdev · backend=libei · route_id=kde-evdev-libei".into();
     app.daemon_capabilities = Some(runtime::DaemonCapabilities {
@@ -1747,6 +1748,8 @@ fn diagnostics_accessibly_explains_keysym_fallback_and_separates_latency() {
     );
     assert!(semantics.contains("libei keysym fallback"));
     assert!(semantics.contains("Wayland compatibility & reliability"));
+    assert!(semantics.contains("Refresh session report"));
+    assert!(semantics.contains("refresh before relying on it"));
     assert!(semantics.contains("Live session reports, not application tests"));
     assert!(semantics.contains("Unicode insertion"));
     assert!(semantics.contains("Route reports supported"));
@@ -1821,6 +1824,7 @@ fn diagnostics_overview_does_not_invent_missing_capability_or_latency_evidence()
     assert!(semantics.contains("no samples yet"));
     assert!(!semantics.contains("0 µs"));
     assert!(semantics.contains("Live session reports, not application tests"));
+    assert!(semantics.contains("No session report yet"));
     fs::remove_file(path).unwrap();
 }
 

@@ -58,6 +58,7 @@ impl GuiApp {
                     self.daemon_capabilities = snapshot.daemon_capabilities;
                     self.daemon_reachable = snapshot.daemon_reachable;
                     self.route_state = snapshot.route_state;
+                    self.diagnostics_checked_at = Some(Instant::now());
                     if let Some(paused) = snapshot.paused {
                         self.paused = paused;
                     }

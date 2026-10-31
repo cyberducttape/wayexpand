@@ -1391,3 +1391,31 @@ pass with both default parallel scheduling and `RUST_TEST_THREADS=1`; the full
 - `cargo clippy --workspace --all-targets --locked -- -D warnings`,
   `cargo fmt --all -- --check`, Markdown-link validation (54 files, 483 local
   links), documentation-contract checks, and `git diff --check`: passed.
+
+
+## Wayland health dashboard and KWin tracker lifecycle: 2026-10-31
+
+- Promoted the session report refresh action to the top of the Wayland
+  compatibility dashboard. The panel now says when diagnostics have not yet
+  run, when the current report was refreshed, and when its snapshot is more
+  than a minute old. This avoids presenting an old route/latency snapshot as
+  current. The dashboard continues to label runtime capability reports as
+  diagnostics, not app tests or production certification.
+- Added accessible GUI regressions for initial no-evidence state and stale
+  report messaging. The focused diagnostics GUI tests passed (4/4); GUI
+  Clippy with warnings denied, formatting, and whitespace checks passed.
+- Combined verification passed: `RUST_TEST_THREADS=1 cargo test --workspace
+  --locked --quiet` (all workspace test binaries passed; 2 tests ignored by
+  their existing annotations), `cargo clippy --workspace --all-targets
+  --locked -- -D warnings`, `cargo fmt --all -- --check`, and `git diff
+  --check`.
+- KWin tracker temp files now use mode 0600 independent of umask. Startup
+  cleanup only removes a strictly named, private, single-link file whose
+  exact script contents are recognized, whose PID is no longer active, and
+  whose corresponding KWin script is confirmed unloaded. Unknown states and
+  active scripts are preserved. Added parser and conservative-cleanup tests;
+  the live KWin tracker health test passed on Plasma/KWin 6.6.6 and checked
+  the file mode.
+- Production compositor certification remains open: these local tracker and
+  capability checks do not validate physical keyboard capture, password-field
+  behavior, or correct insertion across real target applications.
