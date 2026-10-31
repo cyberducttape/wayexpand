@@ -2,6 +2,35 @@
 
 Updated: 2026-10-30
 
+## Performance verification: 2026-10-30
+
+- Confirmed the daemon owns and reuses pending/ready vectors on its normal
+  event-processing paths. Safety-gated output transfers ownership into a
+  transaction batch, so reusing that storage would require redesigning output
+  transaction ownership; no wrapper-only refactor was added.
+- Confirmed `ExpansionEngine` already retains Unicode normalization scratch
+  (`raw`, normalized scalars, and source offsets) across matching calls. The
+  warmed scalar API remains stack encoded and has no recurring allocations on
+  ordinary ASCII input.
+- `RUST_TEST_THREADS=1 cargo test --workspace --locked`: passed across all
+  workspace crates.
+- `cargo bench --locked -p wayexpand-core --bench matcher` and
+  `cargo bench --locked -p wayexpand-core --bench template_render`: completed
+  on Linux x86_64 (kernel 7.0.0-38-generic), Rust 1.96.0, 16 logical CPUs.
+  Selected absolute observations: matcher latency was ~4.0 µs at 100 entries,
+  ~6.8 µs at 1,000, and ~8.9 µs at 10,000; amplified construction was ~30 ms
+  at 1,000 and ~223 ms at 10,000. Near-miss Unicode matching was ~4.0–4.7 µs.
+  Criterion reported regressions against its local saved baseline for several
+  workloads, including amplified construction and template rendering. The
+  baseline's source revision and host conditions are not recorded here, so
+  these are follow-up profiling signals rather than attributable regressions.
+- `cargo run --locked --release -p wayexpand-core --example
+  input_path_allocations`: 0 allocations over 100,000 warmed immediate ASCII
+  events and 0 over 100,000 warmed deferred ASCII events.
+- These microbenchmarks do not measure backend capture/injection or certified
+  desktop end-to-end latency. Reproducible comparisons need pinned hardware,
+  controlled load, and a named source baseline.
+
 ## Evdev signal-test isolation and scalar API audit: 2026-10-30
 
 - Moved SIGUSR1 disposition changes into a dedicated ignored helper test that
