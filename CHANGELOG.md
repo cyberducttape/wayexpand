@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Isolated the evdev SIGUSR1 polling regression test in its own subprocess so
+  the temporary process-wide signal disposition cannot interfere with other
+  parallel unit tests. Confirmed production scalar input paths use the
+  existing char-specific engine API; owned text events remain for multi-scalar
+  commits and composed text. Latency recorder tests now use private metric
+  state, avoiding flaky assertions under parallel test execution.
+
 - Preserved a current-source isolated KWin output/focus smoke report for
   commit `589d2682360f`. It is explicitly partial: keyboard capture, password
   fields, active Unicode on the keysym-only route, suspend/resume, and

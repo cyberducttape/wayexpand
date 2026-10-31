@@ -2,6 +2,30 @@
 
 Updated: 2026-10-30
 
+## Evdev signal-test isolation and scalar API audit: 2026-10-30
+
+- Moved SIGUSR1 disposition changes into a dedicated ignored helper test that
+  is launched by the parent regression test as a separate process. This
+  prevents parallel tests in the unit-test process from observing the
+  temporary handler; the helper still verifies restoration before exit.
+- Audited production scalar paths: evdev and input-method-v2 enqueue
+  `TextChar`, while IBus calls `process_deferred_char`. Owned `Text(String)` is
+  retained where a protocol delivers multi-character commits/composition.
+- Made latency recorder tests use private metric windows and counters. This
+  removes scheduling-dependent assertions against process-global telemetry,
+  while retaining explicit tests that contended recording returns immediately
+  and increments dropped-sample counters.
+- `cargo test --locked -p wayexpand-backend-evdev -- --nocapture`: 21 tests
+  passed; the subprocess-only helper is intentionally ignored by the parent
+  test runner and was executed successfully through its parent test.
+- `cargo test --workspace --locked --quiet`: passed across the workspace under
+  default parallel execution; two tests were ignored in the core suite and
+  three subprocess/platform helpers were ignored by their parent runners.
+- `cargo fmt --all -- --check`,
+  `cargo clippy --workspace --all-targets --locked -- -D warnings`, local
+  Markdown link checks (54 files, 483 links), documentation contracts, and
+  `git diff --check`: passed.
+
 ## Replacement safety and current-source smoke evidence: 2026-10-30
 
 - Re-audited capture/injection gates, deferred-output cancellation, transaction

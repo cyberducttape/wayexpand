@@ -148,10 +148,6 @@ fn increment_saturating(counter: &AtomicU64) {
     });
 }
 
-fn record_matcher(elapsed_ns: u64) {
-    record_nonblocking(matcher_window(), elapsed_ns, &MATCHER_DROPPED_SAMPLES);
-}
-
 fn snapshot_cache() -> &'static Mutex<Snapshot> {
     static CACHE: OnceLock<Mutex<Snapshot>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(Snapshot::default()))
@@ -211,24 +207,52 @@ pub fn apply(injector: &mut dyn TextInjector, result: &ExpansionResult) -> Trans
 }
 
 pub fn measure_matcher<T>(operation: impl FnOnce() -> T) -> T {
+    measure_matcher_with(matcher_window(), &MATCHER_DROPPED_SAMPLES, operation)
+}
+
+fn measure_matcher_with<T>(
+    source: &Mutex<Window>,
+    dropped: &AtomicU64,
+    operation: impl FnOnce() -> T,
+) -> T {
     let started = Instant::now();
     let result = operation();
     let elapsed_ns = started.elapsed().as_nanos().min(u64::MAX as u128) as u64;
-    record_matcher(elapsed_ns);
+    record_nonblocking(source, elapsed_ns, dropped);
     result
 }
 
 fn measure<T>(mode: usize, size: usize, operation: impl FnOnce() -> T) -> T {
+    measure_with(
+        window(),
+        profile_windows(),
+        &OUTPUT_DROPPED_SAMPLES,
+        &PROFILE_DROPPED_SAMPLES,
+        mode,
+        size,
+        operation,
+    )
+}
+
+fn measure_with<T>(
+    aggregate: &Mutex<Window>,
+    profiles: &Mutex<ProfileWindows>,
+    aggregate_dropped: &AtomicU64,
+    profile_dropped: &AtomicU64,
+    mode: usize,
+    size: usize,
+    operation: impl FnOnce() -> T,
+) -> T {
     let started = Instant::now();
     let outcome = operation();
     let elapsed_ns = started.elapsed().as_nanos().min(u64::MAX as u128) as u64;
-    record_nonblocking(window(), elapsed_ns, &OUTPUT_DROPPED_SAMPLES);
-    match profile_windows().try_lock() {
+    record_nonblocking(aggregate, elapsed_ns, aggregate_dropped);
+    match profiles.try_lock() {
         Ok(mut profiles) => profiles.windows[mode][size].record(elapsed_ns),
         Err(TryLockError::Poisoned(poisoned)) => {
             poisoned.into_inner().windows[mode][size].record(elapsed_ns)
         }
-        Err(TryLockError::WouldBlock) => increment_saturating(&PROFILE_DROPPED_SAMPLES),
+        Err(TryLockError::WouldBlock) => increment_saturating(profile_dropped),
     }
     outcome
 }
@@ -361,33 +385,73 @@ mod tests {
 
     #[test]
     fn measurements_are_recorded_for_successes_and_failures() {
-        let before = snapshot().sample_count;
-        assert_eq!(measure(0, 0, || Ok::<_, ()>(())), Ok(()));
+        let aggregate = Mutex::new(Window::default());
+        let profiles = Mutex::new(ProfileWindows::default());
+        let aggregate_dropped = AtomicU64::new(0);
+        let profile_dropped = AtomicU64::new(0);
         assert_eq!(
-            measure(0, 0, || Err::<(), _>("injection failed")),
+            measure_with(
+                &aggregate,
+                &profiles,
+                &aggregate_dropped,
+                &profile_dropped,
+                0,
+                0,
+                || Ok::<_, ()>(())
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            measure_with(
+                &aggregate,
+                &profiles,
+                &aggregate_dropped,
+                &profile_dropped,
+                0,
+                0,
+                || Err::<(), _>("injection failed")
+            ),
             Err("injection failed")
         );
-        assert!(snapshot().sample_count >= before + 2);
+        assert_eq!(aggregate.lock().unwrap().total, 2);
+        assert_eq!(profiles.lock().unwrap().windows[0][0].total, 2);
     }
 
     #[test]
     fn matcher_measurement_skips_contended_window_without_blocking() {
-        let mut guard = matcher_window().lock().unwrap();
-        let dropped_before = matcher_dropped_samples();
-        assert_eq!(measure_matcher(|| 42), 42);
-        assert_eq!(matcher_dropped_samples(), dropped_before + 1);
+        let source = Mutex::new(Window::default());
+        let dropped = AtomicU64::new(0);
+        let mut guard = source.lock().unwrap();
+        assert_eq!(measure_matcher_with(&source, &dropped, || 42), 42);
+        assert_eq!(dropped.load(Ordering::Relaxed), 1);
         guard.record(1_000);
     }
 
     #[test]
     fn output_measurement_drops_contended_samples_instead_of_waiting() {
-        let aggregate = window().lock().unwrap();
-        let profiles = profile_windows().lock().unwrap();
-        let output_dropped_before = output_dropped_samples();
-        let profiles_dropped_before = profile_dropped_samples();
+        let aggregate = std::sync::Arc::new(Mutex::new(Window::default()));
+        let profiles = std::sync::Arc::new(Mutex::new(ProfileWindows::default()));
+        let aggregate_dropped = std::sync::Arc::new(AtomicU64::new(0));
+        let profile_dropped = std::sync::Arc::new(AtomicU64::new(0));
+        let aggregate_guard = aggregate.lock().unwrap();
+        let profiles_guard = profiles.lock().unwrap();
+        let aggregate_for_worker = std::sync::Arc::clone(&aggregate);
+        let profiles_for_worker = std::sync::Arc::clone(&profiles);
+        let aggregate_dropped_for_worker = std::sync::Arc::clone(&aggregate_dropped);
+        let profile_dropped_for_worker = std::sync::Arc::clone(&profile_dropped);
         let (sender, receiver) = std::sync::mpsc::channel();
         let worker = std::thread::spawn(move || {
-            sender.send(measure(0, 0, || 17)).unwrap();
+            sender
+                .send(measure_with(
+                    &aggregate_for_worker,
+                    &profiles_for_worker,
+                    &aggregate_dropped_for_worker,
+                    &profile_dropped_for_worker,
+                    0,
+                    0,
+                    || 17,
+                ))
+                .unwrap();
         });
 
         assert_eq!(
@@ -395,11 +459,11 @@ mod tests {
             Ok(17),
             "recording must return while diagnostics holds both metric locks"
         );
-        drop(aggregate);
-        drop(profiles);
+        drop(aggregate_guard);
+        drop(profiles_guard);
         worker.join().unwrap();
-        assert!(output_dropped_samples() > output_dropped_before);
-        assert!(profile_dropped_samples() > profiles_dropped_before);
+        assert_eq!(aggregate_dropped.load(Ordering::Relaxed), 1);
+        assert_eq!(profile_dropped.load(Ordering::Relaxed), 1);
     }
 
     #[test]
@@ -448,14 +512,38 @@ mod tests {
 
     #[test]
     fn profiles_are_segmented_by_mode_and_replacement_size() {
-        let before: serde_json::Value = profiles_json().parse().unwrap();
-        let before_count = before["ei_text"]["small"]["sample_count"]
-            .as_u64()
-            .unwrap_or(0);
-        let _ = measure(0, 0, || Ok::<_, ()>(()));
-        let profiles: serde_json::Value = profiles_json().parse().unwrap();
-        assert!(profiles["ei_text"]["small"]["sample_count"]
-            .as_u64()
-            .is_some_and(|count| count > before_count));
+        let aggregate = Mutex::new(Window::default());
+        let windows = Mutex::new(ProfileWindows::default());
+        let aggregate_dropped = AtomicU64::new(0);
+        let profile_dropped = AtomicU64::new(0);
+        let cache = Mutex::new("{}".to_owned());
+        measure_with(
+            &aggregate,
+            &windows,
+            &aggregate_dropped,
+            &profile_dropped,
+            0,
+            0,
+            || (),
+        );
+        measure_with(
+            &aggregate,
+            &windows,
+            &aggregate_dropped,
+            &profile_dropped,
+            1,
+            1,
+            || (),
+        );
+        let profiles: serde_json::Value = profiles_json_from(&windows, &cache).parse().unwrap();
+        assert_eq!(profiles["ei_text"]["small"]["sample_count"], 1);
+        assert_eq!(
+            profiles["libei_keysym_fallback"]["medium"]["sample_count"],
+            1
+        );
+        assert!(profiles.get("ei_text").is_some());
+        assert!(profiles.get("libei_keysym_fallback").is_some());
+        assert_eq!(aggregate_dropped.load(Ordering::Relaxed), 0);
+        assert_eq!(profile_dropped.load(Ordering::Relaxed), 0);
     }
 }

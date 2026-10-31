@@ -830,8 +830,47 @@ mod tests {
         assert!(!poll_with_wake(&mut fds, Duration::ZERO, Some(&wake)).unwrap());
     }
 
+    const SIGNAL_TEST_CHILD_ENV: &str = "WAYEXPAND_EVDEV_SIGNAL_TEST_CHILD";
+
     #[test]
     fn a_signal_interrupting_the_poll_is_not_a_device_failure() {
+        // Signal dispositions are process-global. Run the actual sigaction
+        // manipulation in a one-test child process so it cannot race with
+        // unrelated tests in this libtest process.
+        let executable = std::env::current_exe().expect("locate evdev unit-test executable");
+        let output = std::process::Command::new(executable)
+            .args([
+                "--ignored",
+                "--exact",
+                "tests::signal_interrupting_poll_subprocess_worker",
+                "--nocapture",
+            ])
+            .env(SIGNAL_TEST_CHILD_ENV, "1")
+            .output()
+            .expect("run signal test in an isolated process");
+        assert!(
+            output.status.success(),
+            "isolated signal test failed:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stdout)
+                .contains("tests::signal_interrupting_poll_subprocess_worker ... ok"),
+            "isolated test worker did not run: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+
+    #[test]
+    #[ignore = "helper executed only by the isolated signal test"]
+    fn signal_interrupting_poll_subprocess_worker() {
+        assert_eq!(
+            std::env::var(SIGNAL_TEST_CHILD_ENV).as_deref(),
+            Ok("1"),
+            "run this helper only through the subprocess-isolated parent test"
+        );
+
         extern "C" fn ignore(_: libc::c_int) {}
         // SAFETY: installs a handler that does nothing, without SA_RESTART,
         // so the signal interrupts poll exactly as the daemon's handler does.
@@ -848,6 +887,15 @@ mod tests {
             signal: libc::SIGUSR1,
             previous,
         };
+        let wake = rustix::event::eventfd(
+            0,
+            rustix::event::EventfdFlags::CLOEXEC | rustix::event::EventfdFlags::NONBLOCK,
+        )
+        .unwrap();
+        let mut fds = [rustix::event::PollFd::new(
+            &wake,
+            rustix::event::PollFlags::IN,
+        )];
         // SAFETY: pthread_self has no preconditions.
         let target = unsafe { libc::pthread_self() };
         let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -861,15 +909,6 @@ mod tests {
                 unsafe { libc::pthread_kill(target, libc::SIGUSR1) };
             }
         });
-        let wake = rustix::event::eventfd(
-            0,
-            rustix::event::EventfdFlags::CLOEXEC | rustix::event::EventfdFlags::NONBLOCK,
-        )
-        .unwrap();
-        let mut fds = [rustix::event::PollFd::new(
-            &wake,
-            rustix::event::PollFlags::IN,
-        )];
         let started = std::time::Instant::now();
         let woken = poll_with_wake(&mut fds, Duration::from_secs(10), Some(&wake));
         done.store(true, std::sync::atomic::Ordering::Release);
