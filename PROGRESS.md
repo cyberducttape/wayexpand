@@ -4,6 +4,19 @@ Updated: 2026-10-30 (America/Denver; latest evidence collected through 2026-10-3
 
 ## Current verification and certification runner status: 2026-10-31 UTC
 
+- Closed a gap in the non-atomic evdev output monitor: it now watches
+  `/dev/input` topology events through inotify in addition to polling already
+  open keyboards. Any device-node change interrupts output immediately, and
+  device discovery is deferred to the next normal input turn so it cannot
+  delay cancellation. Watch creation precedes initial discovery to avoid a
+  startup race. If the watcher fails during operation, the source reports a
+  retryable error so pending output is treated as uncertain and canceled.
+- Added regressions for inotify node creation and for a hotplug event
+  interrupting output before discovery. Full evdev tests: 23 passed, 1 ignored.
+  `RUST_TEST_THREADS=1 cargo test --workspace --locked --quiet`: 1,366 passed,
+  0 failed, 6 ignored. Workspace Clippy with `-D warnings`, formatting, and
+  `git diff --check` passed. This is unit evidence; physical hotplug during
+  real output remains in the open certification matrix.
 - Fixed a misleading live/offline snippet explanation: when no sensitive-focus
   event is active, it now reports that field safety is unverified instead of
   claiming “not a sensitive field.” A positive signal still blocks the

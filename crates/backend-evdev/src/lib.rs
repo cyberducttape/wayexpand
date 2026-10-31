@@ -50,6 +50,7 @@ pub fn readable_keyboard_available() -> bool {
 use std::{
     collections::{HashSet, VecDeque},
     os::fd::{AsFd, BorrowedFd, OwnedFd},
+    path::Path,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -106,6 +107,8 @@ pub enum EvdevError {
     Read { path: String, message: String },
     #[error("all keyboard devices were disconnected")]
     AllDevicesLost,
+    #[error("watching /dev/input for keyboard hotplug failed: {0}")]
+    HotplugMonitor(String),
     #[error("timed out waiting for all keyboard keys to be released")]
     KeyReleaseTimeout,
 }
@@ -114,7 +117,10 @@ impl EvdevError {
     pub fn is_retryable(&self) -> bool {
         matches!(
             self,
-            EvdevError::Poll(_) | EvdevError::Read { .. } | EvdevError::AllDevicesLost
+            EvdevError::Poll(_)
+                | EvdevError::Read { .. }
+                | EvdevError::AllDevicesLost
+                | EvdevError::HotplugMonitor(_)
         )
     }
 }
@@ -143,10 +149,21 @@ pub struct EvdevSource {
     /// Optional non-blocking eventfd that ends an idle wait early; see
     /// [`EvdevSource::set_wake_fd`].
     wake: Option<Arc<OwnedFd>>,
+    /// Watches device-node creation/removal so an output transaction can
+    /// fail closed if a keyboard is hotplugged while only the current device
+    /// descriptors are being monitored.
+    topology_watch: Option<OwnedFd>,
+    /// Defer device discovery until the next ordinary input turn, so handling
+    /// a hotplug notification never delays cancellation of in-flight output.
+    topology_refresh_pending: bool,
 }
 
 impl EvdevSource {
     pub fn connect() -> Result<Self, EvdevError> {
+        // Install the topology watch before discovery. If a keyboard appears
+        // during discovery, either the scan sees it or inotify reports it.
+        let topology_watch = create_topology_watch(Path::new("/dev/input"))
+            .map_err(|error| EvdevError::HotplugMonitor(error.to_string()))?;
         let discovery = device::discover_keyboards();
         if discovery.keyboards.is_empty() {
             return Err(if discovery.unreadable_event_paths.is_empty() {
@@ -182,6 +199,8 @@ impl EvdevSource {
             pressed,
             last_device_refresh: Instant::now(),
             wake: None,
+            topology_watch: Some(topology_watch),
+            topology_refresh_pending: false,
         })
     }
 
@@ -228,6 +247,17 @@ impl EvdevSource {
                 )
             })
             .collect();
+        let device_count = fds.len();
+        let topology_index = self.topology_watch.as_ref().map(|watch| {
+            fds.push(rustix::event::PollFd::new(
+                watch,
+                rustix::event::PollFlags::IN
+                    | rustix::event::PollFlags::ERR
+                    | rustix::event::PollFlags::HUP
+                    | rustix::event::PollFlags::NVAL,
+            ));
+            fds.len() - 1
+        });
         let wake = with_wake.then_some(self.wake.as_deref()).flatten();
         if let Some(wake) = wake {
             fds.push(rustix::event::PollFd::new(
@@ -239,9 +269,10 @@ impl EvdevSource {
         if wake.is_some() {
             fds.pop();
         }
+        let topology_revents = topology_index.map(|index| fds[index].revents());
         let mut ready = Vec::new();
         let mut lost = Vec::new();
-        for (index, fd) in fds.iter().enumerate() {
+        for (index, fd) in fds.iter().take(device_count).enumerate() {
             let revents = fd.revents();
             if revents.intersects(
                 rustix::event::PollFlags::ERR
@@ -255,12 +286,33 @@ impl EvdevSource {
         }
         drop(fds);
         drop(borrowed);
+        let topology_changed = match topology_revents {
+            Some(revents)
+                if revents.intersects(
+                    rustix::event::PollFlags::ERR
+                        | rustix::event::PollFlags::HUP
+                        | rustix::event::PollFlags::NVAL,
+                ) =>
+            {
+                return Err(EvdevError::HotplugMonitor(
+                    "inotify descriptor became unavailable".into(),
+                ));
+            }
+            Some(revents) if revents.contains(rustix::event::PollFlags::IN) => {
+                let watch = self.topology_watch.as_ref().ok_or_else(|| {
+                    EvdevError::HotplugMonitor("inotify descriptor disappeared".into())
+                })?;
+                drain_topology_events(watch.as_fd())?
+            }
+            _ => false,
+        };
         self.pending_lost_devices.extend(lost);
         let key_activity = self.drain_ready(&ready)?;
         if !self.has_buffered_raw_events() {
             self.apply_pending_lost_devices()?;
         }
-        Ok(key_activity)
+        self.topology_refresh_pending |= topology_changed;
+        Ok(key_activity || topology_changed)
     }
 
     #[cfg(test)]
@@ -605,14 +657,16 @@ impl EvdevSource {
             return Ok(Some(event));
         }
         // Device discovery scans /dev/input and is intentionally decoupled
-        // from latency-sensitive polling. Existing descriptors remain active;
-        // this periodic pass is only the fallback for keyboards added after
-        // startup. Release and quiet-period safety waits never refresh.
+        // from latency-sensitive polling. A topology event forces this pass
+        // on the next ordinary turn; during output, the event is returned to
+        // the daemon immediately so it can cancel before discovery begins.
         if !self.has_buffered_raw_events()
             && self.pending_lost_devices.is_empty()
-            && self.last_device_refresh.elapsed() >= DEVICE_REFRESH_INTERVAL
+            && (self.topology_refresh_pending
+                || self.last_device_refresh.elapsed() >= DEVICE_REFRESH_INTERVAL)
         {
             self.refresh_devices();
+            self.topology_refresh_pending = false;
             self.last_device_refresh = Instant::now();
         }
         self.poll_once(timeout, true)
@@ -631,11 +685,10 @@ impl EvdevSource {
         Ok(self.pending.pop_front())
     }
 
-    /// Poll already-open keyboard devices without sleeping or refreshing
-    /// discovery state. Reports every raw key event, including modifier and
-    /// lock-key events that do not become matcher input, so the daemon can
-    /// interrupt a non-atomic output transaction before such input changes
-    /// how the target application interprets synthetic keys.
+    /// Poll open keyboard devices and the input-device topology without
+    /// sleeping. Reports raw key activity, including modifiers, and device
+    /// changes so the daemon can interrupt non-atomic output before unseen
+    /// input changes its target.
     pub fn next_event_during_output(
         &mut self,
         timeout: Duration,
@@ -670,6 +723,14 @@ impl EvdevSource {
                 source: SOURCE_NAME,
                 retryable: true,
                 message: EvdevError::AllDevicesLost.to_string(),
+            });
+        }
+        if self.topology_watch.is_none() && !key_activity {
+            return Err(InputSourceError {
+                source: SOURCE_NAME,
+                retryable: true,
+                message: "keyboard hotplug monitoring is unavailable during non-atomic output"
+                    .into(),
             });
         }
         if key_activity {
@@ -713,6 +774,42 @@ fn drain_wake_fd(fd: BorrowedFd<'_>) {
             Err(_) => break,
         }
     }
+}
+
+fn create_topology_watch(path: &Path) -> rustix::io::Result<OwnedFd> {
+    use rustix::fs::inotify::{self, CreateFlags, WatchFlags};
+
+    let fd = inotify::init(CreateFlags::CLOEXEC | CreateFlags::NONBLOCK)?;
+    inotify::add_watch(
+        &fd,
+        path,
+        WatchFlags::CREATE
+            | WatchFlags::ATTRIB
+            | WatchFlags::DELETE
+            | WatchFlags::MOVED_FROM
+            | WatchFlags::MOVED_TO
+            | WatchFlags::DELETE_SELF
+            | WatchFlags::MOVE_SELF,
+    )?;
+    Ok(fd)
+}
+
+/// Consume pending device-topology notifications. Any event, including queue
+/// overflow, means the monitor cannot prove that all physical keyboards were
+/// observed during a replacement, so callers interrupt that operation.
+fn drain_topology_events(fd: BorrowedFd<'_>) -> Result<bool, EvdevError> {
+    let mut changed = false;
+    let mut buffer = [0_u8; 4096];
+    for _ in 0..64 {
+        match rustix::io::read(fd, &mut buffer) {
+            Ok(0) => break,
+            Ok(_) => changed = true,
+            Err(rustix::io::Errno::INTR) => continue,
+            Err(rustix::io::Errno::AGAIN) => break,
+            Err(error) => return Err(EvdevError::HotplugMonitor(error.to_string())),
+        }
+    }
+    Ok(changed)
 }
 
 /// Poll the device descriptors and, when present, the final wake descriptor.
@@ -961,6 +1058,8 @@ mod tests {
             pressed: vec![HashSet::new()],
             last_device_refresh: Instant::now(),
             wake: None,
+            topology_watch: None,
+            topology_refresh_pending: false,
         };
 
         events
@@ -1008,11 +1107,83 @@ mod tests {
             pressed: vec![HashSet::new()],
             last_device_refresh: Instant::now(),
             wake: None,
+            topology_watch: None,
+            topology_refresh_pending: false,
         };
         writer.write_all(b"event").unwrap();
 
         assert!(source.next_event_during_output(Duration::ZERO).unwrap());
         assert_eq!(source.pending.pop_front(), Some(InputEvent::TextChar('a')));
+    }
+
+    #[test]
+    fn input_topology_watch_observes_device_node_creation() {
+        let directory =
+            std::env::temp_dir().join(format!("wayexpand-evdev-topology-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir(&directory).unwrap();
+        let watch = create_topology_watch(&directory).unwrap();
+
+        std::fs::write(directory.join("event-test"), b"device").unwrap();
+        let mut poll_fds = [rustix::event::PollFd::new(
+            &watch,
+            rustix::event::PollFlags::IN,
+        )];
+        let timeout = rustix::event::Timespec {
+            tv_sec: 1,
+            tv_nsec: 0,
+        };
+        assert_eq!(
+            rustix::event::poll(&mut poll_fds, Some(&timeout)).unwrap(),
+            1
+        );
+        assert!(poll_fds[0].revents().contains(rustix::event::PollFlags::IN));
+        assert!(drain_topology_events(watch.as_fd()).unwrap());
+        assert!(!drain_topology_events(watch.as_fd()).unwrap());
+
+        drop(watch);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn hotplug_during_output_interrupts_before_device_discovery() {
+        let directory =
+            std::env::temp_dir().join(format!("wayexpand-evdev-interrupt-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir(&directory).unwrap();
+        let topology_watch = create_topology_watch(&directory).unwrap();
+        let path = PathBuf::from("/dev/input/test-keyboard");
+        let (reader, _writer) = UnixStream::pair().unwrap();
+        reader.set_nonblocking(true).unwrap();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut source = EvdevSource {
+            devices: vec![Box::new(TestKeyboard {
+                path,
+                reader,
+                events,
+            })],
+            state: test_state(),
+            pending: VecDeque::new(),
+            raw_events: Vec::new(),
+            raw_event_cursor: 0,
+            raw_event_device: None,
+            pending_lost_devices: Vec::new(),
+            pressed: vec![HashSet::new()],
+            last_device_refresh: Instant::now(),
+            wake: None,
+            topology_watch: Some(topology_watch),
+            topology_refresh_pending: false,
+        };
+
+        std::fs::write(directory.join("event-new-keyboard"), b"device").unwrap();
+        assert!(source
+            .next_event_during_output(Duration::from_secs(1))
+            .unwrap());
+        assert!(source.topology_refresh_pending);
+        assert_eq!(source.devices.len(), 1);
+
+        drop(source);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -1040,6 +1211,8 @@ mod tests {
             pressed: vec![HashSet::new()],
             last_device_refresh: Instant::now(),
             wake: None,
+            topology_watch: None,
+            topology_refresh_pending: false,
         };
         writer.write_all(b"event").unwrap();
 
@@ -1079,6 +1252,8 @@ mod tests {
             pressed: vec![HashSet::new()],
             last_device_refresh: Instant::now(),
             wake: None,
+            topology_watch: None,
+            topology_refresh_pending: false,
         };
         writer.write_all(b"events").unwrap();
 
@@ -1134,6 +1309,8 @@ mod tests {
             pressed: vec![HashSet::new(), HashSet::new()],
             last_device_refresh: Instant::now(),
             wake: None,
+            topology_watch: None,
+            topology_refresh_pending: false,
         };
         writer_a.write_all(b"noise").unwrap();
         writer_b.write_all(b"key").unwrap();
@@ -1165,6 +1342,8 @@ mod tests {
             pressed: Vec::new(),
             last_device_refresh: Instant::now(),
             wake: None,
+            topology_watch: None,
+            topology_refresh_pending: false,
         };
         source.translate(event);
         *state = source.state;
@@ -1211,6 +1390,8 @@ mod tests {
             pressed: Vec::new(),
             last_device_refresh: Instant::now(),
             wake: None,
+            topology_watch: None,
+            topology_refresh_pending: false,
         };
         source.translate(event);
         assert_eq!(source.pending.pop_front(), Some(InputEvent::TextChar('a')));
@@ -1232,6 +1413,8 @@ mod tests {
             pressed: Vec::new(),
             last_device_refresh: Instant::now(),
             wake: None,
+            topology_watch: None,
+            topology_refresh_pending: false,
         };
         source.translate(event);
         assert_eq!(source.pending.pop_front(), None);
@@ -1251,6 +1434,8 @@ mod tests {
             pressed: Vec::new(),
             last_device_refresh: Instant::now(),
             wake: None,
+            topology_watch: None,
+            topology_refresh_pending: false,
         };
         assert!(!source.keys_held());
 
@@ -1283,6 +1468,8 @@ mod tests {
             pressed: Vec::new(),
             last_device_refresh: Instant::now(),
             wake: None,
+            topology_watch: None,
+            topology_refresh_pending: false,
         };
         let keyboard_a = 0;
         let keyboard_b = 1;
@@ -1331,6 +1518,8 @@ mod tests {
                 pressed: Vec::new(),
                 last_device_refresh: Instant::now(),
                 wake: None,
+                topology_watch: None,
+                topology_refresh_pending: false,
             };
             source.translate_for_device(
                 keyboard_b,
@@ -1393,6 +1582,8 @@ mod tests {
             pressed: Vec::new(),
             last_device_refresh: Instant::now(),
             wake: None,
+            topology_watch: None,
+            topology_refresh_pending: false,
         };
 
         assert!(!source
@@ -1414,6 +1605,8 @@ mod tests {
             pressed: Vec::new(),
             last_device_refresh: Instant::now(),
             wake: None,
+            topology_watch: None,
+            topology_refresh_pending: false,
         };
         source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 1));
         // Value 2 is kernel auto-repeat. It must not be mistaken for a release.
@@ -1434,6 +1627,8 @@ mod tests {
             pressed: Vec::new(),
             last_device_refresh: Instant::now(),
             wake: None,
+            topology_watch: None,
+            topology_refresh_pending: false,
         };
         source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 29, 1));
         source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 1));
@@ -1464,6 +1659,8 @@ mod tests {
             pressed: vec![HashSet::from([30])],
             last_device_refresh: Instant::now(),
             wake: None,
+            topology_watch: None,
+            topology_refresh_pending: false,
         };
         let error = source.wait_for_key_release(Duration::ZERO).unwrap_err();
         assert!(error.message.contains("timed out"));
@@ -1482,6 +1679,8 @@ mod tests {
             pressed: Vec::new(),
             last_device_refresh: Instant::now(),
             wake: None,
+            topology_watch: None,
+            topology_refresh_pending: false,
         };
         assert!(matches!(
             source.poll_once(Duration::ZERO, false),
@@ -1502,6 +1701,8 @@ mod tests {
             pressed: Vec::new(),
             last_device_refresh: Instant::now(),
             wake: None,
+            topology_watch: None,
+            topology_refresh_pending: false,
         };
 
         for _ in 0..=MAX_PENDING_EVENTS {

@@ -45,6 +45,12 @@ session evidence; unit tests alone do not satisfy them.
       regression covers the reactor polling path, but its input source is
       simulated. The monitor treats every raw key event as activity, including
       modifiers and lock keys ignored by matcher translation.
+      The evdev source also watches `/dev/input` topology with inotify. A
+      device-node create, remove, move, attribute change, or watcher failure
+      interrupts pending non-atomic output; device discovery is deferred until
+      the next ordinary input turn so discovery cannot delay cancellation.
+      Unit tests verify notification delivery and interruption before
+      discovery, but do not verify a real keyboard hotplug during output.
       A separate `modifier-during-nonatomic-replacement` certification case
       now records this requirement; the headless KWin driver marks it
       unverified because it does not exercise physical capture.
