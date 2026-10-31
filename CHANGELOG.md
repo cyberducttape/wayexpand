@@ -11,6 +11,8 @@ All notable changes to WayExpand are documented here.
   Route named hotkeys through the broker with output capture disabled, instead
   of attempting to launch their empty direct-program field; report only a
   stable error category if the broker action fails.
+  Regression coverage exercises both direct and queued broker-backed hotkey
+  execution.
   Expose the policy in config schema and doctor output, and clarify that
   imported executable content must be reviewed and converted to a broker
   action rather than restored as a direct command. Regression tests cover

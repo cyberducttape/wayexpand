@@ -2,6 +2,29 @@
 
 Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-31 UTC)
 
+## Live KDE session health and library validation: 2026-10-31
+
+- Built release CLI and daemon binaries from commit `0446fd0ef4ff`; both
+  identify that exact commit. `wayexpand validate --fleet --json` passed for
+  the active library: 26 expansions, no hotkeys, no command-backed snippets,
+  no policy violations, and no trigger-risk findings.
+- The read-only release CLI `doctor --json` exited unhealthy for runtime
+  readiness, while reporting the configuration valid. The running daemon is
+  commit `1fb141d767f7`, status schema 14; current source expects schema 15.
+  Its status reports evdev capture with libei keysym fallback, focus-tracked
+  best-effort/non-atomic replacement, and no full-Unicode or sensitive-field
+  signal. The old status schema also leaves current daemon configuration state
+  unavailable to the new CLI. This establishes a stale runtime and unsafe,
+  uncertified route; it does not prove the cause of an individual missed
+  trigger.
+- `systemctl --user show` confirms `wayexpand-evdev.service` is active and
+  launches the old versioned daemon. No install, symlink switch, reload, or
+  service restart was performed. Those changes affect live keyboard capture
+  and require deployment authorization under the project instructions.
+- This is live session diagnostics, not compositor certification: no text was
+  inserted, and focus, physical-key capture, and client document contents were
+  not tested.
+
 ## Broker-only command policy: 2026-10-31
 
 - Added `organization.require_broker_actions`. In enforced safe mode, direct
@@ -20,17 +43,17 @@ Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-3
   the direct process launcher, which has no executable path for broker actions.
   Hotkey execution now uses the same broker IPC path as command expansions,
   disables output capture, and reduces broker failures to a stable error
-  category. A fake broker regression verifies the action ID, empty parameters,
+  category. A fake broker regression exercises both direct and queued-worker
+  hotkey execution and verifies the action ID, empty parameters,
   non-inherited environment, and disabled stdout capture.
 - Added the field to CLI config-schema and doctor JSON/human diagnostics, and
   documented the safe-mode setting and the reviewed-import-to-broker workflow.
-- Verification in this worktree: locked full workspace tests passed with no
-  failures (ignored cases remain ignored); the focused doctor JSON policy test,
-  workspace Clippy with warnings denied, formatting check, and `git diff
-  --check` passed. After the named-hotkey broker-routing fix, the full locked
-  workspace suite passed again, including 481 core tests and the fake-broker
-  hotkey request test. No managed broker action was executed as part of these
-  tests.
+- Verification: the full locked workspace suite and workspace Clippy passed
+  after the broker-routing fix. After extending the regression through the
+  queued worker, `cargo test --locked -p wayexpand-core` passed with 481 tests
+  passed and 2 ignored; workspace Clippy, formatting, and `git diff --check`
+  passed. The fake broker verified both request paths. No managed broker
+  action was executed as part of these tests.
 - Limitation: this policy requires use of the Action Broker, whose executable
   allowlist and service sandbox remain its current shared security boundary.
   It does not add per-action Landlock/seccomp isolation or protect against
@@ -40,7 +63,9 @@ Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-3
 - The policy-only changes were pushed as `3523331a`, the evidence record as
   `a92064d6`, and the broker-hotkey routing fix as `1b37d426`, all over SSH
   using `Stephan Loesevitz <stephan.loesevitz@gmail.com>`. GitHub CI run
-  `41224163396` is running against `1b37d426`; no hosted result is claimed yet.
+  `41224310749` was active on `0446fd0e` at the time this follow-up was
+  prepared. The asynchronous worker regression and live-session evidence are
+  separate uncommitted follow-up changes and need CI on their own commit.
 
 ## Exact-head KWin output smoke: 2026-10-31
 

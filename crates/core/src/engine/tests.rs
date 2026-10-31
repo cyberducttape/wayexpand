@@ -6309,28 +6309,32 @@ fn named_hotkey_action_is_sent_to_broker_without_capturing_output() {
     let socket = directory.join("broker.sock");
     let listener = UnixListener::bind(&socket).unwrap();
     let broker = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
-        let mut request_line = String::new();
-        std::io::BufReader::new(&stream)
-            .read_line(&mut request_line)
-            .unwrap();
-        let request: wayexpand_broker_client::ActionRequest =
-            serde_json::from_str(&request_line).unwrap();
-        let response = wayexpand_broker_client::ActionResponse::Success(
-            wayexpand_broker_client::ActionOutput {
-                exit_code: 0,
-                stdout: "must not be captured".into(),
-                stderr: String::new(),
-                stdout_truncated: false,
-                stderr_truncated: false,
-                duration_ms: 1,
-            },
-        );
-        stream
-            .write_all(&serde_json::to_vec(&response).unwrap())
-            .unwrap();
-        stream.write_all(b"\n").unwrap();
-        request
+        (0..2)
+            .map(|_| {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request_line = String::new();
+                std::io::BufReader::new(&stream)
+                    .read_line(&mut request_line)
+                    .unwrap();
+                let request: wayexpand_broker_client::ActionRequest =
+                    serde_json::from_str(&request_line).unwrap();
+                let response = wayexpand_broker_client::ActionResponse::Success(
+                    wayexpand_broker_client::ActionOutput {
+                        exit_code: 0,
+                        stdout: "must not be captured".into(),
+                        stderr: String::new(),
+                        stdout_truncated: false,
+                        stderr_truncated: false,
+                        duration_ms: 1,
+                    },
+                );
+                stream
+                    .write_all(&serde_json::to_vec(&response).unwrap())
+                    .unwrap();
+                stream.write_all(b"\n").unwrap();
+                request
+            })
+            .collect::<Vec<_>>()
     });
     let _environment = FakeFormActionEnvironment::new(directory, &socket);
     let config = Config::parse(
@@ -6341,18 +6345,35 @@ fn named_hotkey_action_is_sent_to_broker_without_capturing_output() {
         "#,
     )
     .unwrap();
-    let engine = ExpansionEngine::new(config).unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    assert!(engine.enable_async_commands());
     let action = engine
         .process_key(&KeyChord::parse("Ctrl+Alt+L").unwrap())
         .pop()
         .unwrap();
 
     engine.execute_hotkey(&action).unwrap();
-    let request = broker.join().unwrap();
-    assert_eq!(request.action_id, "approved-list");
-    assert!(!request.stdout_capture);
-    assert!(!request.inherit_env);
-    assert!(request.parameters.is_empty());
+    engine.queue_hotkey(&action).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        if let Some((_, result)) = engine.drain_completed_hotkeys().pop() {
+            assert!(result.is_ok());
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "broker-backed hotkey did not finish"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+    let requests = broker.join().unwrap();
+    assert_eq!(requests.len(), 2);
+    for request in requests {
+        assert_eq!(request.action_id, "approved-list");
+        assert!(!request.stdout_capture);
+        assert!(!request.inherit_env);
+        assert!(request.parameters.is_empty());
+    }
     drop(_environment);
 }
 

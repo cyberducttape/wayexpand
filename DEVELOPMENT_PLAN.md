@@ -106,11 +106,15 @@ scenarios remained unverified ([availability report](docs/evidence/kwin-input-me
 The supported production route still needs an actual compositor setup that
 offers the required protocol and the required physical-capture evidence.
 
-The active KDE desktop was also checked read-only on 2026-10-30. Its installed
-daemon is an older evdev + libei keysym fallback route with best-effort,
-non-atomic replacement and no password-field signal; the current doctor exits
-unhealthy. It is useful live status evidence, but does not satisfy certification
-or justify changing the installed service. Details are in `PROGRESS.md`.
+The active KDE desktop was checked read-only again on 2026-10-31. The complete
+fleet library validates (26 expansions, no command-backed snippets), but the
+installed daemon is commit `1fb141d767f7`, status schema 14, while the current
+CLI expects schema 15. Its active evdev + libei keysym-fallback route reports
+best-effort non-atomic replacement, no full Unicode, and no password-field
+signal; doctor exits unhealthy. This does not establish that the config caused
+an expansion failure, or satisfy desktop certification. The versioned install
+was not switched and the active service was not restarted. Details are in
+`PROGRESS.md`.
 
 The GitHub repository runner API returned `total_count: 0` on 2026-10-31 UTC.
 The certification workflow requires an online self-hosted runner labeled
