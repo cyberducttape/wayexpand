@@ -518,3 +518,24 @@ capture and the production 12 ms keysym pacing. It verifies final sink text for
 this workload, but excludes physical capture, client paint latency, other
 applications, and input arriving during the transaction. It is not desktop
 certification or evidence to lower the default pacing interval.
+
+## Reused Unicode normalization scratch: 2026-10-30
+
+The non-NFC suffix matcher now retains its raw text, normalized scalar, and
+source-offset buffers on `ExpansionEngine`, preserving grapheme-aware mapping
+from a normalized match back to the exact raw trigger range. The targeted
+Criterion case was `unicode_worst_case_keystroke/near_miss_trigger/zalgo`,
+run with 15 samples, 1 s warmup, and 2 s measurement on the same AMD Ryzen 7
+7735U / Linux 7.0.0-38-generic / Rust 1.96.0 host:
+
+| State | Estimate | Criterion interval |
+| --- | ---: | ---: |
+| Before scratch reuse | 4.180 µs | 4.164–4.200 µs |
+| After scratch reuse | 3.895 µs | 3.892–3.900 µs |
+
+Criterion reported a 7.35% improvement for this targeted workload. This is a
+single host-specific microbenchmark with a short sample run; it does not
+establish a desktop-visible or general Unicode latency improvement. The
+implementation also adds mutable scratch state to matching, so correctness is
+covered by a regression that verifies decomposed-to-composed matching, raw
+trigger offsets, and retained buffer capacity across repeated input.

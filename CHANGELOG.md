@@ -14,6 +14,13 @@ All notable changes to WayExpand are documented here.
   when they carry GitHub's pinned web-flow signature; the key is committed
   under `.github/keys/`. Dependabot commits on pull requests now need the same
   signature.
+- Preserve a fresh private KWin 6.6.6 output/focus run for clean commit
+  `4663ff4d4bcc`: all 15 scenarios passed, with 20 latency samples per size.
+  The report explicitly records stdin-simulated capture and remains partial,
+  not compositor certification.
+- Preserve the matching `doctor --certify --json` report for `4663ff4d4bcc`,
+  including the tested build identity, environment, route, latency profiles,
+  and explicit untested scenarios.
 - Remove `docs/archive/` and superseded, unreferenced `doctor --certify`
   evidence reports; they remain in Git history. Refresh the contributing
   guide, man page, `wayexpand help`, configuration limits, troubleshooting

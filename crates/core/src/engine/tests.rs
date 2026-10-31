@@ -4828,6 +4828,30 @@ fn scalar_events_preserve_combining_graphemes_and_backspace_behavior() {
 }
 
 #[test]
+fn decomposed_matching_reuses_normalization_scratch_and_keeps_raw_offsets() {
+    let config =
+        Config::parse("[[expansion]]\ntrigger = \":café\"\nreplacement = \"matched\"\n").unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    let typed = ":cafe\u{301}";
+    let mut capacities = None;
+
+    for _ in 0..2 {
+        let results = engine.process(InputEvent::Text(typed.into()));
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].matched_text, typed);
+        assert_eq!(results[0].insert, "matched");
+
+        let current = engine.match_scratch.capacities();
+        if let Some(previous) = capacities {
+            assert_eq!(current, previous, "normalization buffers should be reused");
+        } else {
+            capacities = Some(current);
+        }
+        engine.process(InputEvent::Reset);
+    }
+}
+
+#[test]
 fn backspace_walks_beyond_the_unicode_suffix_window_without_losing_context() {
     let mut engine =
         ExpansionEngine::new(Config::parse("[settings]\nmax_buffer_chars = 4096\n").unwrap())

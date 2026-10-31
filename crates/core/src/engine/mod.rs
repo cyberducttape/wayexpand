@@ -31,6 +31,7 @@ pub use transaction::{
 };
 
 use cache::{ClipboardTriggers, CommandCacheEntry};
+use expansion::MatchScratch;
 use matching::GlobPattern;
 use state::NormalizedWindowContext;
 
@@ -85,6 +86,9 @@ pub struct ExpansionEngine {
     app_filter_globs: Vec<Vec<Option<GlobPattern>>>,
     matcher: Matcher,
     matcher_indices: Vec<usize>,
+    /// Reused temporary storage for NFC normalization and raw-offset mapping
+    /// of decomposed input suffixes.
+    match_scratch: MatchScratch,
     buffer: VecDeque<char>,
     /// UTF-8 length of `buffer`, maintained with the character deque so
     /// grapheme backspace can address bounded suffix chunks without rescanning
@@ -276,6 +280,7 @@ impl ExpansionEngine {
             app_filter_globs,
             matcher,
             matcher_indices,
+            match_scratch: MatchScratch::default(),
             buffer: VecDeque::new(),
             buffered_bytes: 0,
             non_ascii_buffer_chars: 0,

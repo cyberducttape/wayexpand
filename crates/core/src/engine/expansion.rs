@@ -15,8 +15,35 @@ const GRAPHEME_CHUNK_CHARS: usize = 64;
 struct MatchSuffix {
     index: usize,
     raw_length: usize,
-    normalized: Option<Vec<char>>,
+    uses_normalized_scratch: bool,
     normalized_length: usize,
+}
+
+/// Reusable storage for matching buffers that are not already NFC. The raw
+/// view is needed for grapheme segmentation; the normalized scalar positions
+/// map the selected trigger back to the exact source range to erase.
+#[derive(Default)]
+pub(super) struct MatchScratch {
+    raw: String,
+    normalized: Vec<char>,
+    source_starts: Vec<usize>,
+}
+
+impl MatchScratch {
+    fn clear(&mut self) {
+        self.raw.clear();
+        self.normalized.clear();
+        self.source_starts.clear();
+    }
+
+    #[cfg(test)]
+    pub(super) fn capacities(&self) -> (usize, usize, usize) {
+        (
+            self.raw.capacity(),
+            self.normalized.capacity(),
+            self.source_starts.capacity(),
+        )
+    }
 }
 
 impl ExpansionEngine {
@@ -343,7 +370,7 @@ impl ExpansionEngine {
     /// This is the "a longer trigger could still have followed, but did not"
     /// case: `:a` matches only once the next character rules out `:address`.
     /// Returns the configured expansion and the matched suffix length.
-    fn match_completed_by(&self, character: char) -> Option<(usize, usize)> {
+    fn match_completed_by(&mut self, character: char) -> Option<(usize, usize)> {
         let suffix = self
             .find_match_suffix()
             .filter(|suffix| !self.suffix_is_restored_reservation(suffix.raw_length))?;
@@ -354,11 +381,17 @@ impl ExpansionEngine {
         // string present in the forward trie, not the generated sibling. The
         // suffix is read straight out of the rolling buffer; collecting it
         // into a `String` first cost one allocation per keystroke.
-        let can_continue = if let Some(normalized) = &suffix.normalized {
+        let can_continue = if suffix.uses_normalized_scratch {
             self.matcher.can_continue(
-                normalized
+                self.match_scratch
+                    .normalized
                     .iter()
-                    .skip(normalized.len().saturating_sub(suffix.normalized_length))
+                    .skip(
+                        self.match_scratch
+                            .normalized
+                            .len()
+                            .saturating_sub(suffix.normalized_length),
+                    )
                     .copied(),
                 character,
             )
@@ -385,18 +418,24 @@ impl ExpansionEngine {
 
     /// Whether the buffer, with `character` already appended, now ends in a
     /// complete trigger that nothing can extend.
-    fn settled_match(&self) -> SettledMatch {
+    fn settled_match(&mut self) -> SettledMatch {
         let Some(suffix) = self.find_match_suffix() else {
             return SettledMatch::Continue;
         };
         let Some(config_index) = self.matcher_indices.get(suffix.index).copied() else {
             return SettledMatch::Stale;
         };
-        let has_continuation = if let Some(normalized) = &suffix.normalized {
+        let has_continuation = if suffix.uses_normalized_scratch {
             self.matcher.has_continuation(
-                normalized
+                self.match_scratch
+                    .normalized
                     .iter()
-                    .skip(normalized.len().saturating_sub(suffix.normalized_length))
+                    .skip(
+                        self.match_scratch
+                            .normalized
+                            .len()
+                            .saturating_sub(suffix.normalized_length),
+                    )
                     .copied(),
             )
         } else {
@@ -425,7 +464,8 @@ impl ExpansionEngine {
     /// raw scalar length. NFC input takes the allocation-free trie path; other
     /// buffers need a normalized view of the trailing graphemes and a map
     /// back to their source positions.
-    fn find_match_suffix(&self) -> Option<MatchSuffix> {
+    fn find_match_suffix(&mut self) -> Option<MatchSuffix> {
+        self.match_scratch.clear();
         // The quick check proves almost all text is NFC without composing
         // it. `No` and `Maybe` take the bounded normalized path below, which
         // is also correct for text that turns out to be NFC already.
@@ -439,7 +479,7 @@ impl ExpansionEngine {
             return Some(MatchSuffix {
                 index,
                 raw_length: length,
-                normalized: None,
+                uses_normalized_scratch: false,
                 normalized_length: length,
             });
         }
@@ -447,31 +487,36 @@ impl ExpansionEngine {
         // Normalize whole graphemes from the end, and only as many as the
         // longest trigger can consume; earlier text cannot affect the match.
         // Reverse segmentation still sees the full buffer as context.
-        let raw: String = self.buffer.iter().collect();
         let limit = self.matcher.max_trigger_chars();
-        let mut normalized = Vec::new();
-        let mut source_starts = Vec::new();
+        self.match_scratch.raw.reserve(self.buffered_bytes);
+        self.match_scratch.raw.extend(self.buffer.iter());
+        self.match_scratch.normalized.reserve(limit);
+        self.match_scratch.source_starts.reserve(limit);
         let mut raw_end = self.buffer.len();
-        for grapheme in raw.graphemes(true).rev() {
-            if normalized.len() >= limit {
+        for grapheme in self.match_scratch.raw.graphemes(true).rev() {
+            if self.match_scratch.normalized.len() >= limit {
                 break;
             }
             let raw_start = raw_end - grapheme.chars().count();
-            let cluster_start = normalized.len();
-            normalized.extend(grapheme.nfc());
-            normalized[cluster_start..].reverse();
-            source_starts.resize(normalized.len(), raw_start);
+            let cluster_start = self.match_scratch.normalized.len();
+            self.match_scratch.normalized.extend(grapheme.nfc());
+            self.match_scratch.normalized[cluster_start..].reverse();
+            self.match_scratch
+                .source_starts
+                .resize(self.match_scratch.normalized.len(), raw_start);
             raw_end = raw_start;
         }
-        normalized.reverse();
-        source_starts.reverse();
-        let (index, length) = self.matcher.find_suffix(normalized.iter().rev().copied())?;
-        let normalized_start = normalized.len().checked_sub(length)?;
-        let raw_start = *source_starts.get(normalized_start)?;
+        self.match_scratch.normalized.reverse();
+        self.match_scratch.source_starts.reverse();
+        let (index, length) = self
+            .matcher
+            .find_suffix(self.match_scratch.normalized.iter().rev().copied())?;
+        let normalized_start = self.match_scratch.normalized.len().checked_sub(length)?;
+        let raw_start = *self.match_scratch.source_starts.get(normalized_start)?;
         Some(MatchSuffix {
             index,
             raw_length: self.buffer.len().saturating_sub(raw_start),
-            normalized: Some(normalized),
+            uses_normalized_scratch: true,
             normalized_length: length,
         })
     }

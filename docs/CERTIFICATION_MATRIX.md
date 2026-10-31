@@ -46,24 +46,26 @@ availability claims, and no target is certified without reviewed evidence.
 ## Current evidence
 
 The latest full private KWin output/focus suite is the
-[captured report](evidence/kwin-e2e-5e0a434d2f10.txt), run on clean source
-commit `5e0a434d2f10` against KWin 6.6.6. All 15 scenarios passed, including
-trigger replacement, focus tracking/cancellation, reload/restart, default
-refusal without compatibility consent, and 20 injector latency samples per
-size. Capture was stdin-simulated; this is current-source compatibility
-evidence and does not certify physical capture, passwords, overlapping input,
-suspend/resume, or long-term stability.
+[captured report](evidence/kwin-e2e-4663ff4d4bcc.txt), run on clean source
+commit `4663ff4d4bcc` with kernel `7.0.0-38-generic` against KWin 6.6.6. All 15
+scenarios passed, including trigger replacement, focus tracking/cancellation,
+reload/restart, default refusal without compatibility consent, and 20 injector
+latency samples per size. Capture was stdin-simulated; this is current-source
+compatibility evidence and does not certify physical capture, passwords,
+overlapping input, suspend/resume, or long-term stability. The prior report for
+`5e0a434d2f10` remains in Git history.
 
-The latest current-source private KWin compatibility smoke evidence is
-[`doctor-certify-9311e1e5be3f.json`](evidence/doctor-certify-9311e1e5be3f.json),
-bound to clean source commit `9311e1e5be3f`. Insertion, focus switching,
-focus-change cancellation, target closure, command completion, reload,
-restart, and refusal checks passed. The libei keysym fallback measured 20
-samples per size: p95 was 12.663 ms (small), 784.051 ms (medium), and 3.139 s
-(large). Keyboard capture used stdin simulation; overlapping input, Unicode
-insertion, suspend/resume, password-field behavior, and long-running stability
-were not tested. This is partial compatibility evidence, not production
-certification.
+The latest structured `doctor --certify --json` report is
+[`doctor-certify-4663ff4d4bcc.json`](evidence/doctor-certify-4663ff4d4bcc.json),
+bound to clean source commit `4663ff4d4bcc` and kernel `7.0.0-38-generic`.
+Insertion, focus switching/cancellation, target closure, command completion,
+reload, restart, and default refusal passed. The libei keysym fallback measured
+20 samples per size: p95 was 12.625 ms (small), 778.493 ms (medium), and
+3.126 s (large). The report marks Unicode insertion, physical keyboard capture,
+overlapping input, suspend/resume, and password-field behavior not tested and
+sets `certified: false`. This is partial compatibility evidence, not
+production certification. The previous structured report remains in Git
+history.
 The latest clean-source concurrent-input failure is preserved separately in
 the [negative overlap report](evidence/kwin-overlap-reproduction-ad8f169c4402.json).
 It reproduces the prior corruption on commit `ad8f169c4402`, but uses simulated

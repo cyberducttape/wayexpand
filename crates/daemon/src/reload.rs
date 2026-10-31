@@ -65,6 +65,8 @@ struct InFlightReload {
     path: PathBuf,
     /// The file stamp seen when the build started.
     current: Option<FileStamp>,
+    /// Metadata signature of fleet layers when this request was queued.
+    fleet_signature: u64,
 }
 
 struct BuiltConfig {
@@ -87,19 +89,32 @@ enum BuildFailure {
 type BuildResult = Result<BuiltConfig, BuildFailure>;
 
 fn build_config(path: &Path, fleet: bool, policy: &OrganizationPolicy) -> BuildResult {
-    let fleet_signature = if fleet { standard_fleet_signature() } else { 0 };
-    let (config, stamp) = load_for_mode(path, fleet, policy).map_err(BuildFailure::Load)?;
-    let expansions = config.expansion.len();
-    let snapshot = config
-        .validate_snapshot()
-        .map_err(|error| BuildFailure::Engine(anyhow::Error::new(error)))?;
-    let engine = ExpansionEngine::from_validated(Arc::new(snapshot));
-    Ok(BuiltConfig {
-        engine,
-        expansions,
-        stamp,
-        fleet_signature,
-    })
+    for attempt in 0..MAX_CONSISTENCY_ATTEMPTS {
+        let fleet_before = if fleet { standard_fleet_signature() } else { 0 };
+        let loaded = load_for_mode(path, fleet, policy);
+        let fleet_after = if fleet { standard_fleet_signature() } else { 0 };
+        if fleet_before != fleet_after {
+            if attempt + 1 == MAX_CONSISTENCY_ATTEMPTS {
+                return Err(BuildFailure::Load(anyhow::anyhow!(
+                    "fleet configuration changed while being built after {MAX_CONSISTENCY_ATTEMPTS} attempts"
+                )));
+            }
+            continue;
+        }
+        let (config, stamp) = loaded.map_err(BuildFailure::Load)?;
+        let expansions = config.expansion.len();
+        let snapshot = config
+            .validate_snapshot()
+            .map_err(|error| BuildFailure::Engine(anyhow::Error::new(error)))?;
+        let engine = ExpansionEngine::from_validated(Arc::new(snapshot));
+        return Ok(BuiltConfig {
+            engine,
+            expansions,
+            stamp,
+            fleet_signature: fleet_after,
+        });
+    }
+    unreachable!("fleet consistency loop returns or fails on every attempt")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -498,6 +513,7 @@ impl ReloadableConfig {
         let path = self.path.clone();
         let in_flight_path = path.clone();
         let fleet = self.fleet;
+        let fleet_signature = if fleet { standard_fleet_signature() } else { 0 };
         let policy = self.policy.clone();
         let waker = self.waker.clone();
         let spawned = thread::Builder::new()
@@ -515,6 +531,7 @@ impl ReloadableConfig {
                     result,
                     current,
                     path: in_flight_path,
+                    fleet_signature,
                 })
             }
             Err(error) => {
@@ -540,10 +557,33 @@ impl ReloadableConfig {
             ))),
         };
         let current = in_flight.current;
+        let requested_fleet_signature = in_flight.fleet_signature;
         let built_path = in_flight.path.clone();
         self.in_flight = None;
         if built_path == self.path {
-            self.apply_reload(built, current);
+            let current_stamp = file_stamp(&self.path);
+            let current_fleet_signature = if self.fleet {
+                standard_fleet_signature()
+            } else {
+                0
+            };
+            let built_snapshot_is_current = match &built {
+                Ok(built) => {
+                    built.stamp == current_stamp && built.fleet_signature == current_fleet_signature
+                }
+                Err(_) => {
+                    current == current_stamp && requested_fleet_signature == current_fleet_signature
+                }
+            };
+            if built_snapshot_is_current {
+                self.apply_reload(built, current);
+            } else {
+                // A validated build can still become stale before the reactor
+                // promotes it. Keep the active engine and build the current
+                // on-disk generation instead of briefly installing old text.
+                self.observed = current_stamp;
+                self.rebuild_after_in_flight = true;
+            }
         }
         if std::mem::take(&mut self.rebuild_after_in_flight) {
             let current = file_stamp(&self.path);
@@ -1287,6 +1327,48 @@ mod tests {
             .pop()
             .unwrap();
         assert_eq!(result.insert, "second");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_completed_stale_snapshot_is_not_promoted() {
+        let path = temporary_config();
+        write_config(&path, &config_text("old"));
+        let mut config =
+            ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
+
+        write_config(&path, &config_text("first"));
+        let stale_build = build_config(&path, false, &config.policy)
+            .unwrap_or_else(|_| panic!("fixture configuration must build"));
+        let requested_stamp = file_stamp(&path);
+        let (sender, result) = mpsc::sync_channel(1);
+        assert!(sender.send(Ok(stale_build)).is_ok());
+        config.in_flight = Some(InFlightReload {
+            result,
+            path: path.clone(),
+            current: requested_stamp,
+            fleet_signature: 0,
+        });
+
+        // The worker has completed a valid build, but the source changes
+        // before the reactor gets a chance to collect and promote it.
+        write_config(&path, &config_text("second"));
+        config.collect_reload();
+        assert!(config.in_flight.is_some());
+        let still_active = config
+            .engine
+            .process(InputEvent::Text(":x".into()))
+            .pop()
+            .unwrap();
+        assert_eq!(still_active.insert, "old");
+
+        config.finish_pending_reload();
+        let current = config
+            .engine
+            .process(InputEvent::Text(":x".into()))
+            .pop()
+            .unwrap();
+        assert_eq!(current.insert, "second");
         let _ = fs::remove_file(path);
     }
 

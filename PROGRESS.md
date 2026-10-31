@@ -1145,3 +1145,36 @@ pass with both default parallel scheduling and `RUST_TEST_THREADS=1`; the full
    checks cannot establish physical capture integrity, password-field
    behavior, layout switching, or long-term recovery; the live runner inventory
    is empty and the production gate correctly fails closed.
+
+## Latest verification and changes: 2026-10-30
+
+- Reused NFC normalization scratch storage in `ExpansionEngine` for the
+  decomposed-text suffix path. Existing grapheme normalization and normalized
+  to raw source-offset mapping are preserved. A regression verifies composed
+  trigger matching against decomposed input, exact matched source text, and
+  stable scratch capacities after warmup.
+- `cargo test --locked -p wayexpand-core`: 466 passed, 0 failed, 2 ignored;
+  documentation configuration tests and snapshot consistency passed.
+- Targeted Criterion `unicode_worst_case_keystroke/near_miss_trigger/zalgo`
+  measured 4.180 µs before and 3.895 µs after scratch reuse (15 samples, 1 s
+  warmup, 2 s measurement). This is a single-host microbenchmark, not an
+  end-to-end latency claim; details are in `docs/BENCHMARKS.md`.
+- Investigated the intermittent daemon concurrency stress failure from GitHub
+  CI run [41157338093](https://github.com/cyberducttape/wayexpand/actions/runs/41157338093):
+  a reload result could be promoted after its source file had changed. Reload
+  builds now retry when fleet metadata changes during construction, and the
+  reactor discards stale completed snapshots and rebuilds the current source.
+  Added a deterministic stale-promotion regression.
+- `cargo test --locked -p wayexpand-daemon -- --test-threads=8`: 208 passed,
+  0 failed. The updated daemon concurrency stress run passed 20/20 iterations,
+  each running all 208 daemon tests.
+- The prior exact-head CI exposed the concurrency failure, so that run is not
+  recorded as passing. Its separate SSH push workflow completed successfully.
+  The source fix still needs a fresh exact-commit CI result after it is
+  committed and pushed.
+- On clean commit `4663ff4d4bcc`, the private KWin E2E suite passed 15/15 and
+  `doctor --certify --json` reported partial, non-certified status. Reports
+  are preserved under `docs/evidence/`; capture was stdin-simulated and did
+  not establish physical keyboard capture, password-field handling, or safe
+  concurrent input. These records do not close the production certification
+  gate.
