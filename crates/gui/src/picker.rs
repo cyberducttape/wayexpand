@@ -377,7 +377,7 @@ impl eframe::App for PickerApp {
                     .inner_margin(egui::Margin::same(16)),
             )
             .show(root, |ui| {
-                let search_id = egui::Id::unique("picker_search");
+                let search_id = egui::Id::new("picker_search");
                 let response = ui.add(
                     TextEdit::singleline(&mut self.query)
                         .id(search_id)
@@ -544,12 +544,12 @@ fn picker_row(
         });
     let response = ui.interact(
         frame.response.rect,
-        ui.scope_id().with(("picker_row", &expansion.trigger)),
+        ui.id().with(("picker_row", &expansion.trigger)),
         egui::Sense::click(),
     );
     response.widget_info(|| {
         egui::WidgetInfo::selected(
-            egui::Role::Button,
+            egui::WidgetType::Button,
             true,
             selected,
             expansion.trigger.as_str(),

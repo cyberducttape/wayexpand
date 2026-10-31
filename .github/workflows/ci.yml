@@ -282,10 +282,12 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config
+      - name: Verify selected MSRV toolchain
+        run: rustc +1.92.0 --version && cargo +1.92.0 --version
       - name: Check workspace at MSRV
-        run: cargo check --locked --workspace
+        run: cargo +1.92.0 check --locked --workspace
       - name: Run workspace tests at MSRV
-        run: cargo test --locked --workspace --release
+        run: cargo +1.92.0 test --locked --workspace --release
 
   clean-source-build:
     name: Clean Source Build (no cache, no vendor)

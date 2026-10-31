@@ -1669,3 +1669,28 @@ pass with both default parallel scheduling and `RUST_TEST_THREADS=1`; the full
   keyboard capture, other layouts or clients, concurrent physical input during
   paced output, password fields, or suspend/resume; it is partial evidence and
   does not close the certification gate.
+
+## Rust 1.92 MSRV correction: 2026-10-31
+
+- Reproduced the declared MSRV failure: the GUI's egui/eframe 0.37 dependency
+  requires Rust 1.95, while the workspace and Ubuntu 26.04 source package
+  contract require Rust 1.92. The existing MSRV CI job was a false green
+  because plain `cargo` followed the repository's `rust-toolchain.toml` pin
+  and ran Rust 1.96 instead of 1.92.
+- Moved the GUI to egui/eframe 0.35 and adapted accessibility widget types,
+  stable IDs, row identity, and screenshot capture to that API. Replaced emoji
+  interface marks with vector-drawn icons and made the font regression test
+  install the application's actual font fallbacks.
+- Updated CI to print and invoke `rustc +1.92.0` / `cargo +1.92.0` explicitly,
+  so the repository toolchain override cannot mask future MSRV regressions.
+- Verification: Rust 1.92 GUI tests passed (175 tests); both the locked
+  workspace check and full locked release workspace tests passed under Rust
+  1.92; the GUI screenshot script rendered
+  successfully in a private KWin session and the resulting image was visually
+  inspected; Rust 1.96 Clippy passed for the GUI and all targets with warnings
+  denied; formatting and `git diff --check` passed.
+- An initial release-test attempt filled the 7.2 GiB `/tmp` tmpfs. No source
+  files were affected; the rerun used a disk-backed target directory and
+  completed successfully.
+- The real-session physical-input certification blocker remains open; this
+  toolchain compatibility fix does not change that release gate.

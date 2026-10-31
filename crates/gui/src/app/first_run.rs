@@ -132,7 +132,7 @@ impl GuiApp {
             .show(ui, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.add_space(12.0);
-                    ui.label(RichText::new("⚡").size(36.0).color(palette.accent));
+                    theme::brand_mark(ui, 36.0, palette.accent);
                     ui.label(
                         RichText::new(self.strings.welcome_title())
                             .size(26.0)

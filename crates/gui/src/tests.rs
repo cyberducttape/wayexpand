@@ -386,7 +386,7 @@ fn matcher_playground_gui_applies_one_rewrite_per_typed_trigger() {
 
     let ctx = egui::Context::default();
     let screen_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 760.0));
-    ctx.memory_mut(|memory| memory.request_focus(egui::Id::unique("try_live_field")));
+    ctx.memory_mut(|memory| memory.request_focus(egui::Id::new("try_live_field")));
     let render = |app: &mut GuiApp, events: Vec<egui::Event>| {
         let input = egui::RawInput {
             screen_rect: Some(screen_rect),
@@ -417,7 +417,7 @@ fn matcher_playground_gui_applies_one_rewrite_per_typed_trigger() {
         }],
     );
     assert!(app.playground.needs_engine());
-    ctx.memory_mut(|memory| memory.request_focus(egui::Id::unique("try_live_field")));
+    ctx.memory_mut(|memory| memory.request_focus(egui::Id::new("try_live_field")));
     render(&mut app, vec![egui::Event::Text("!".into())]);
 
     assert_eq!(app.playground.text, "Expanded :inner!");
@@ -447,7 +447,7 @@ fn matcher_playground_paste_expands_once_when_output_contains_another_trigger() 
 
     let ctx = egui::Context::default();
     let screen_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 760.0));
-    ctx.memory_mut(|memory| memory.request_focus(egui::Id::unique("try_live_field")));
+    ctx.memory_mut(|memory| memory.request_focus(egui::Id::new("try_live_field")));
     let input = egui::RawInput {
         screen_rect: Some(screen_rect),
         events: vec![egui::Event::Paste(":go".into())],
@@ -1669,7 +1669,7 @@ fn diagnostics_dialog_stays_inside_a_small_window() {
         });
     }
     let window = ctx
-        .memory(|memory| memory.area_rect(egui::Id::unique(Some(app.strings.diagnostics_title()))))
+        .memory(|memory| memory.area_rect(egui::Id::new(Some(app.strings.diagnostics_title()))))
         .expect("diagnostics window was laid out");
     assert!(
         screen.expand(1.0).contains_rect(window),

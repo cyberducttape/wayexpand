@@ -270,7 +270,7 @@ impl GuiApp {
         // excluded so moving the mouse does not invalidate the preview.
         let playground_has_text_focus = root
             .ctx()
-            .memory(|memory| memory.has_focus(egui::Id::unique("try_live_field")));
+            .memory(|memory| memory.has_focus(egui::Id::new("try_live_field")));
         let editor_input = root.ctx().input(|input| {
             input.events.iter().any(|event| {
                 matches!(event, egui::Event::PointerButton { pressed: true, .. })
@@ -506,7 +506,7 @@ impl GuiApp {
                     ui.add(
                         TextEdit::multiline(&mut draft.replacement)
                             .margin(theme::FIELD_MARGIN)
-                            .id(egui::Id::unique(REPLACEMENT_EDITOR_SALT))
+                            .id(egui::Id::new(REPLACEMENT_EDITOR_SALT))
                             .font(egui::TextStyle::Monospace)
                             .desired_rows(7)
                             .desired_width(field_width),
@@ -1000,7 +1000,7 @@ impl GuiApp {
                         .add(
                             egui::Button::new(
                                 RichText::new(format!(
-                                    "{arrow}  ⚡ {}",
+                                    "{arrow}  {}",
                                     self.strings.try_live_title()
                                 ))
                                 .strong()
@@ -1062,7 +1062,7 @@ impl GuiApp {
                             .color(palette.warning),
                     );
                 }
-                let id = egui::Id::unique("try_live_field");
+                let id = egui::Id::new("try_live_field");
                 let output = TextEdit::multiline(&mut self.playground.text)
                     .id(id)
                     .margin(theme::FIELD_MARGIN)
@@ -1430,7 +1430,7 @@ pub(crate) fn insert_into_replacement_editor(
     replacement: &mut String,
     text: &str,
 ) {
-    let id = egui::Id::unique(REPLACEMENT_EDITOR_SALT);
+    let id = egui::Id::new(REPLACEMENT_EDITOR_SALT);
     let mut state = egui::text_edit::TextEditState::load(ctx, id);
     let selection = state
         .as_ref()

@@ -200,7 +200,7 @@ impl GuiApp {
                     if self.config.expansion.is_empty() {
                         ui.add_space(16.0);
                         ui.vertical_centered(|ui| {
-                            ui.label(RichText::new("📭").size(28.0));
+                            theme::empty_library_icon(ui, palette.muted);
                             ui.label(
                                 RichText::new(self.strings.no_snippets()).color(palette.muted),
                             );
@@ -209,7 +209,7 @@ impl GuiApp {
                     } else if nothing_visible {
                         ui.add_space(16.0);
                         ui.vertical_centered(|ui| {
-                            ui.label(RichText::new("🔍").size(28.0));
+                            theme::search_icon(ui, palette.muted);
                             let reason = match (self.filter.is_empty(), &self.category_filter) {
                                 (false, Some(category)) => {
                                     self.strings.no_matches_category(&self.filter, category)

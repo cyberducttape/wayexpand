@@ -149,11 +149,9 @@ mod tests {
         assert_eq!(proportional.last().map(String::as_str), Some("symbols"));
     }
 
-    /// Every symbol the GUI draws must come from the bundled fonts, except
-    /// the arrows and status marks that the `wayexpand-system-symbols`
-    /// fallback group supplies. egui 0.37 moved its emoji and symbol fonts
-    /// behind `monochrome_emoji_fonts`, which silently turned arrows such as
-    /// `⏵` into missing-glyph boxes.
+    /// Every symbol the GUI draws must come from the fonts actually installed
+    /// by the application, except arrows and status marks supplied by the
+    /// `wayexpand-system-symbols` fallback group.
     #[test]
     fn bundled_fonts_cover_every_symbol_in_the_interface() {
         const SYSTEM_FALLBACK_SYMBOLS: &str = "↑→↓⊘◌●✓";
@@ -181,7 +179,7 @@ mod tests {
         assert!(symbols.contains(&'⏵'), "source scan found no symbols");
 
         let context = egui::Context::default();
-        context.set_fonts(FontDefinitions::default());
+        install(&context);
         let mut output = context.run_ui(egui::RawInput::default(), |_| {});
         output.textures_delta.clear();
         let missing: Vec<String> = context.fonts_mut(|fonts| {

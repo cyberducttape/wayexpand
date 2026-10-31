@@ -126,7 +126,7 @@ impl GuiApp {
             // clicks. As a floating window, clicking another snippet while
             // this prompt was open silently replaced the pending action.
             let dirty = self.draft_is_dirty();
-            let response = egui::Modal::new(egui::Id::unique("pending_action_modal"))
+            let response = egui::Modal::new(egui::Id::new("pending_action_modal"))
                 .frame(
                     egui::Frame::popup(&ctx.global_style())
                         .fill(palette.surface)

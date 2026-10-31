@@ -58,7 +58,7 @@ impl GuiApp {
     }
 
     pub(crate) fn render_toolbar_brand(&mut self, ui: &mut egui::Ui, palette: &Palette) {
-        ui.label(RichText::new("⚡").size(20.0).color(palette.accent));
+        theme::brand_mark(ui, 20.0, palette.accent);
         ui.label(RichText::new("WayExpand").heading().strong());
         ui.label(RichText::new(self.strings.title()).color(palette.muted));
         ui.add_space(8.0);
@@ -445,8 +445,9 @@ impl GuiApp {
                 }
             })
             .response;
-        actions_response
-            .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, more_actions));
+        actions_response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, more_actions)
+        });
         actions_response.on_hover_text(more_actions);
         if ui
             .add(
@@ -585,7 +586,7 @@ impl GuiApp {
                     (ui.available_width() - f32::from(margin.left + margin.right)).max(40.0);
                 ui.add(
                     TextEdit::singleline(&mut self.filter)
-                        .id(egui::Id::unique(SEARCH_FIELD_SALT))
+                        .id(egui::Id::new(SEARCH_FIELD_SALT))
                         .hint_text(self.strings.search_placeholder())
                         .margin(margin)
                         .desired_width(width),

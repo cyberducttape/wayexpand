@@ -174,6 +174,12 @@ Acceptance criteria:
 
 **Status:** Open; release publication is correctly gated by certification.
 
+The declared Rust 1.92 MSRV is now checked with explicit `cargo +1.92.0`
+commands, avoiding the repository's development-toolchain override. The GUI
+dependency is pinned to the compatible egui/eframe 0.35 line. The exact-head
+locked workspace release suite passed on Rust 1.92 on 2026-10-31; hosted CI
+must still pass for each release candidate.
+
 Partial evidence: hermetic per-user and release-archive installer tests cover
 staged installation, validation preflight, rollback after filesystem, signal,
 service restart, and service enable failures, immutable payload checks, and
@@ -197,6 +203,9 @@ guard before any package-manager operation.
 
 Acceptance criteria:
 
+- Run the locked workspace check and release tests with the declared MSRV
+  toolchain explicitly selected; do not allow `rust-toolchain.toml` to mask
+  the tested compiler version.
 - Build locked, reproducible artifacts for supported architectures and package
   formats; validate signatures and provenance.
 - Pass package install, upgrade, rollback, and uninstall smoke tests on each

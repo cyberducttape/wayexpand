@@ -295,7 +295,7 @@ impl GuiApp {
                                 ui.small_button("↑").on_hover_text(self.strings.move_up());
                             move_up.widget_info(|| {
                                 egui::WidgetInfo::labeled(
-                                    egui::Role::Button,
+                                    egui::WidgetType::Button,
                                     true,
                                     self.strings.move_up(),
                                 )
@@ -307,7 +307,7 @@ impl GuiApp {
                                 ui.small_button("↓").on_hover_text(self.strings.move_down());
                             move_down.widget_info(|| {
                                 egui::WidgetInfo::labeled(
-                                    egui::Role::Button,
+                                    egui::WidgetType::Button,
                                     true,
                                     self.strings.move_down(),
                                 )
@@ -320,7 +320,7 @@ impl GuiApp {
                                 .on_hover_text(self.strings.remove_argument());
                             remove_argument.widget_info(|| {
                                 egui::WidgetInfo::labeled(
-                                    egui::Role::Button,
+                                    egui::WidgetType::Button,
                                     true,
                                     self.strings.remove_argument(),
                                 )
@@ -377,7 +377,7 @@ impl GuiApp {
                             .on_hover_text(self.strings.remove_environment_variable());
                         remove_environment.widget_info(|| {
                             egui::WidgetInfo::labeled(
-                                egui::Role::Button,
+                                egui::WidgetType::Button,
                                 true,
                                 self.strings.remove_environment_variable(),
                             )

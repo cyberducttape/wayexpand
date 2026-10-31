@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Keep the declared Rust 1.92 MSRV buildable by using egui/eframe 0.35 and
+  compatible accessibility and screenshot APIs. Replace interface emoji that
+  are unavailable in this egui release with vector-drawn icons. Make the MSRV
+  CI job invoke Rust 1.92 explicitly so the repository's Rust toolchain pin
+  cannot silently run the newer development compiler instead.
 - Reuse the immutable validated configuration snapshot for engine filters,
   forms, hotkeys, undo settings, and trigger indexes instead of keeping
   duplicate metadata copies in each engine.

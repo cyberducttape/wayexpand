@@ -13,6 +13,68 @@ use wayexpand_core::FontScale;
 /// setting for this, so every field applies it explicitly.
 pub const FIELD_MARGIN: Margin = Margin::symmetric(8, 6);
 
+pub(crate) fn brand_mark(ui: &mut egui::Ui, size: f32, color: Color32) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
+    let w = rect.width();
+    let h = rect.height();
+    let points = vec![
+        egui::pos2(rect.left() + 0.60 * w, rect.top()),
+        egui::pos2(rect.left() + 0.22 * w, rect.top() + 0.55 * h),
+        egui::pos2(rect.left() + 0.47 * w, rect.top() + 0.55 * h),
+        egui::pos2(rect.left() + 0.34 * w, rect.bottom()),
+        egui::pos2(rect.left() + 0.80 * w, rect.top() + 0.39 * h),
+        egui::pos2(rect.left() + 0.54 * w, rect.top() + 0.39 * h),
+    ];
+    ui.painter()
+        .add(egui::Shape::convex_polygon(points, color, Stroke::NONE));
+}
+
+pub(crate) fn empty_library_icon(ui: &mut egui::Ui, color: Color32) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(34.0), Sense::hover());
+    let painter = ui.painter();
+    let stroke = Stroke::new(1.7, color);
+    let left = rect.left() + 5.0;
+    let right = rect.right() - 5.0;
+    let top = rect.top() + 8.0;
+    let bottom = rect.bottom() - 6.0;
+    painter.line_segment([egui::pos2(left, top), egui::pos2(right, top)], stroke);
+    painter.line_segment([egui::pos2(left, top), egui::pos2(left, bottom)], stroke);
+    painter.line_segment([egui::pos2(right, top), egui::pos2(right, bottom)], stroke);
+    painter.line_segment(
+        [egui::pos2(left, bottom), egui::pos2(right, bottom)],
+        stroke,
+    );
+    painter.line_segment(
+        [
+            egui::pos2(left, rect.center().y),
+            egui::pos2(rect.center().x - 4.0, rect.center().y),
+        ],
+        stroke,
+    );
+    painter.line_segment(
+        [
+            egui::pos2(rect.center().x + 4.0, rect.center().y),
+            egui::pos2(right, rect.center().y),
+        ],
+        stroke,
+    );
+}
+
+pub(crate) fn search_icon(ui: &mut egui::Ui, color: Color32) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(34.0), Sense::hover());
+    let painter = ui.painter();
+    let stroke = Stroke::new(1.8, color);
+    let center = egui::pos2(rect.left() + 14.0, rect.top() + 13.0);
+    painter.circle_stroke(center, 8.0, stroke);
+    painter.line_segment(
+        [
+            egui::pos2(center.x + 5.5, center.y + 5.5),
+            rect.right_bottom() - Vec2::splat(4.0),
+        ],
+        stroke,
+    );
+}
+
 #[derive(Clone, Copy)]
 pub struct Palette {
     /// Main text: labels, typed text, button text.
@@ -282,8 +344,9 @@ pub fn chip_scaled(
         .layout_no_wrap(text.to_owned(), font.clone(), Color32::TRANSPARENT);
     let size = Vec2::new(galley.size().x + 20.0 * scale, (28.0 * scale).max(28.0));
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
-    response
-        .widget_info(|| egui::WidgetInfo::selected(egui::Role::RadioButton, true, selected, text));
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, selected, text)
+    });
     if ui.is_rect_visible(rect) {
         let hovered = response.hovered();
         let (fg, bg) = if selected {
@@ -325,8 +388,9 @@ pub fn colorpack_card(
         Vec2::new(ui.available_width(), 62.0 * scale),
         Sense::click(),
     );
-    response
-        .widget_info(|| egui::WidgetInfo::selected(egui::Role::RadioButton, true, selected, name));
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, selected, name)
+    });
     if ui.is_rect_visible(rect) {
         let hovered = response.hovered();
         let background = if selected {
@@ -591,11 +655,11 @@ pub fn snippet_row_scaled(
     }
 
     response.widget_info(|| {
-        egui::WidgetInfo::selected(egui::Role::Button, true, row.selected, row.trigger)
+        egui::WidgetInfo::selected(egui::WidgetType::Button, true, row.selected, row.trigger)
     });
     toggle_response.widget_info(|| {
         egui::WidgetInfo::selected(
-            egui::Role::CheckBox,
+            egui::WidgetType::Checkbox,
             true,
             row.enabled,
             format!("{} — {}", row.toggle_hint, row.trigger),
@@ -647,7 +711,7 @@ pub fn token_editor(
                     .on_hover_text(text.remove_hint);
                 response.widget_info(|| {
                     egui::WidgetInfo::labeled(
-                        egui::Role::Button,
+                        egui::WidgetType::Button,
                         true,
                         format!("{}: {token}", text.remove_hint),
                     )
