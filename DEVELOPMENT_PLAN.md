@@ -11,13 +11,24 @@ milestone is complete only when its acceptance evidence is recorded in
 
 **Status:** Open. No route is production-certified.
 
-Latest partial evidence: `doctor --certify` ran from clean commit
+An earlier `doctor --certify` report ran from clean commit
 `48a39fb3f63b` on private headless KWin 6.6.6. The preserved report at
 [`docs/evidence/doctor-certify-48a39fb3.json`](docs/evidence/doctor-certify-48a39fb3.json)
 records 13 passing checks, four untested scenarios, and 20 injector latency
 samples per replacement-size bucket. Capture was simulated over stdin; the
 report is explicitly partial and does not satisfy physical capture, overlap,
 password-field, suspend/resume, or production certification criteria.
+
+The latest focused current-source KWin real-client run is preserved in
+[`docs/evidence/kwin-real-client-fc063a4054ab.summary.json`](docs/evidence/kwin-real-client-fc063a4054ab.summary.json)
+and its raw store. All 35 selected cells passed across five target clients
+for multiline typing, cross-window focus, pending-output focus changes, target
+closure, configuration reload, daemon restart, and pre-delete refusal of
+unsupported Unicode output. The run used private KWin 6.6.6, the `us` layout,
+stdin-simulated capture, and libei keysym output. It is compatibility evidence
+only; physical capture and overlapping-input integrity remain unverified, and
+the previously reproduced non-atomic overlap corruption remains a release
+blocker.
 
 Additional focused output-path evidence was collected on exact source commit
 `f59873ba62d2` in a private KWin 6.6.6 session. Seven scenarios passed against
@@ -38,7 +49,7 @@ physical capture, overlap input, password fields, suspend/resume, and long soak
 untested, and reports `certified: false`. This is current-source output-path
 evidence only; the release gate remains open.
 
-The newer clean-source run at commit `494aac93b15d` is preserved in
+The latest `doctor --certify` run at commit `494aac93b15d` is preserved in
 [`docs/evidence/doctor-certify-494aac93.json`](docs/evidence/doctor-certify-494aac93.json).
 It passed 13 checks, measured 20 injector samples in each size bucket, and
 left four scenarios untested. It still uses private headless KWin and

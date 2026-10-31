@@ -1,6 +1,6 @@
 # Production Readiness Progress
 
-Updated: 2026-10-30
+Updated: 2026-10-30 (America/Denver; latest evidence collected through 2026-10-31 UTC)
 
 ## Current verification and certification runner status: 2026-10-31 UTC
 
@@ -31,7 +31,7 @@ Updated: 2026-10-30
   physical capture and actual target-client verification is still required;
   no software-only test result substitutes for that evidence.
 
-## Current-source KWin smoke evidence: 2026-10-30
+## Current-source KWin doctor smoke evidence: 2026-10-30
 
 - Ran `cargo run --locked -p wayexpand -- doctor --certify --json` from clean
   commit `494aac93b15d` in an isolated private headless KWin 6.6.6 session.
@@ -55,6 +55,38 @@ Updated: 2026-10-30
   route remains uncertified; the JSON is in `/tmp/wayexpand-active-doctor.json`
   and was not added to the repository because it describes this machine's
   private runtime state.
+
+## Focused KWin real-client matrix: 2026-10-30 local / 2026-10-31 UTC
+
+- Ran the selected seven-scenario matrix across five real target clients in a
+  private headless KWin 6.6.6 session on clean source commit
+  `fc063a4054aba7069474cc1237fdc93ea767eae1`. All 35 cells passed.
+- The store and its metadata summary are preserved at
+  `docs/evidence/kwin-real-client-fc063a4054ab.txt` and
+  `docs/evidence/kwin-real-client-fc063a4054ab.summary.json`. The summary binds
+  the run to source/binary hashes, KWin and kernel versions, GTK/Qt/client
+  versions, and the `us` layout.
+- Verified multiline output and continued typing, cross-window app filtering,
+  cancellation after focus change, target closure without late output into a
+  second window, config reload, daemon restart, and refusal of unsupported
+  Unicode while preserving the trigger.
+- The harness used stdin-simulated capture and libei keysym output. It does not
+  verify physical-input overlap, password fields, layout changes, suspend/resume,
+  or end-to-end latency. This is partial compatibility evidence, not route
+  certification. The prior non-atomic overlap corruption remains a P0 gate.
+- `scripts/test-kwin-certification-driver.sh`: passed.
+- The preserved store was independently loaded through
+  `scripts/kwin-certification-driver.sh config-reload`; it returned the stored
+  GTK client result as `pass` for the matching CLI build and KWin version.
+- Focused GUI diagnostics tests: 4 passed. The Wayland dashboard is already
+  implemented in the diagnostics view and distinguishes live route reports
+  from application testing and production certification.
+- GitHub run `41165906032` (Launchpad sync) completed successfully. Main CI
+  run `41165905971` remained queued, while Push on main run `41165906042` was
+  in progress on the last check. The repository still had no self-hosted
+  certification runners.
+- The JSON evidence validator, local Markdown links (54 files, 493 links),
+  documentation contracts, and `git diff --check` passed.
 
 ## Wayland compatibility dashboard overview: 2026-10-30
 

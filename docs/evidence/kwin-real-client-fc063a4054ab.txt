@@ -1,0 +1,44 @@
+# wayexpand KWin certification store
+schema=1
+commit=fc063a4054ab
+source_tree_state=clean
+kwin_version=6.6.6
+capture=stdin
+output_backend=libei
+backend_mode=ei_keyboard keysym fallback (12ms key pacing)
+generated_at_unix=1793420287
+cell multiline-rapid|us|gtk3-textview pass text=zany$quizok$ cursor=11
+cell focus-cross-window|us|gtk3-textview pass target: text=only here$ cursor=9; other: text=;only$ cursor=5
+cell focus-change-during-expansion|us|gtk3-textview pass target: text=;slow$ cursor=5; other: text=$ cursor=0
+cell target-closes-during-expansion|us|gtk3-textview pass other: text=$ cursor=0
+cell config-reload|us|gtk3-textview pass text=zany quiz$ cursor=9
+cell daemon-restart|us|gtk3-textview pass text=zany quizzany quiz$ cursor=18
+cell failed-insertion|us|gtk3-textview pass route refused and left the trigger intact; text=;far$ cursor=4
+cell multiline-rapid|us|qt6-plaintextedit pass text=zany$quizok$ cursor=11
+cell focus-cross-window|us|qt6-plaintextedit pass target: text=only here$ cursor=9; other: text=;only$ cursor=5
+cell focus-change-during-expansion|us|qt6-plaintextedit pass target: text=;slow$ cursor=5; other: text=$ cursor=0
+cell target-closes-during-expansion|us|qt6-plaintextedit pass other: text=$ cursor=0
+cell config-reload|us|qt6-plaintextedit pass text=zany quiz$ cursor=9
+cell daemon-restart|us|qt6-plaintextedit pass text=zany quizzany quiz$ cursor=18
+cell failed-insertion|us|qt6-plaintextedit pass route refused and left the trigger intact; text=;far$ cursor=4
+cell multiline-rapid|us|terminal-konsole pass text=zany$quizok$ cursor=11
+cell focus-cross-window|us|terminal-konsole pass target: text=only here$ cursor=9; other: text=;only$ cursor=5
+cell focus-change-during-expansion|us|terminal-konsole pass target: text=;slow$ cursor=5; other: text=$ cursor=0
+cell target-closes-during-expansion|us|terminal-konsole pass other: text=$ cursor=0
+cell config-reload|us|terminal-konsole pass text=zany quiz$ cursor=9
+cell daemon-restart|us|terminal-konsole pass text=zany quizzany quiz$ cursor=18
+cell failed-insertion|us|terminal-konsole pass route refused and left the trigger intact; text=;far$ cursor=4
+cell multiline-rapid|us|text-editor-gedit pass text=zany$quizok$ cursor=11
+cell focus-cross-window|us|text-editor-gedit pass target: text=only here$ cursor=9; other: text=;only$ cursor=5
+cell focus-change-during-expansion|us|text-editor-gedit pass target: text=;slow$ cursor=5; other: text=$ cursor=0
+cell target-closes-during-expansion|us|text-editor-gedit pass other: text=$ cursor=0
+cell config-reload|us|text-editor-gedit pass text=zany quiz$ cursor=9
+cell daemon-restart|us|text-editor-gedit pass text=zany quizzany quiz$ cursor=18
+cell failed-insertion|us|text-editor-gedit pass route refused and left the trigger intact; text=;far$ cursor=4
+cell multiline-rapid|us|qt6-editor-kate pass text=zany$quizok$ cursor=11
+cell focus-cross-window|us|qt6-editor-kate pass target: text=only here$ cursor=9; other: text=;only$ cursor=5
+cell focus-change-during-expansion|us|qt6-editor-kate pass target: text=;slow$ cursor=5; other: text=$ cursor=0
+cell target-closes-during-expansion|us|qt6-editor-kate pass other: text=$ cursor=0
+cell config-reload|us|qt6-editor-kate pass text=zany quiz$ cursor=9
+cell daemon-restart|us|qt6-editor-kate pass text=zany quizzany quiz$ cursor=18
+cell failed-insertion|us|qt6-editor-kate pass route refused and left the trigger intact; text=;far$ cursor=4

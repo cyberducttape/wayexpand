@@ -1,0 +1,65 @@
+{
+  "schema": 3,
+  "recorded_at_utc": "2026-10-31T04:18:07Z",
+  "compositor": "kde",
+  "compositor_version": "6.6.6",
+  "kernel": "7.0.0-38-generic",
+  "backend": "libei keysym fallback (12 ms pacing)",
+  "capture": "stdin-simulated",
+  "keyboard_layout": "us",
+  "target_apps": [
+    "gtk3-textview",
+    "qt6-plaintextedit",
+    "terminal-konsole",
+    "text-editor-gedit",
+    "qt6-editor-kate"
+  ],
+  "application_versions": {
+    "gtk3-textview": "WayExpand certification client; GTK 3.24.52",
+    "qt6-plaintextedit": "WayExpand certification client; PyQt 6.10.2 / Qt 6.10.2",
+    "terminal-konsole": "25.12.3",
+    "text-editor-gedit": "48.1",
+    "qt6-editor-kate": "25.12.3"
+  },
+  "wayexpand_commit": "fc063a4054aba7069474cc1237fdc93ea767eae1",
+  "source_tree_state": "clean at run start",
+  "binary_sha256": {
+    "wayexpand": "ce3eb3201a6fd709f5d78173902da84a3becb489040daa87be22294e37a2fdb1",
+    "wayexpand-daemon": "fc82366bcb79e784e60af6959ffbf521b28fe2fc448e3539941df81acd7e504c",
+    "wx-e2e-sink": "4c060f72c771afe7b9025b855c2ccad9cfee238513917e4cb123c1bf89678214",
+    "wx-e2e-type": "b7b5702156129aa1acdf0b0eec8cd57da6b81e3f66e08b1b2117ec0e96125cc8"
+  },
+  "toolchain": "rustc 1.96.0 (ac68faa20 2026-05-25)",
+  "certified": false,
+  "status": "incomplete",
+  "certification_scope": "compatibility",
+  "backend_certification_eligible": false,
+  "backend_certification_block_reason": "stdin-simulated capture does not verify physical-input safety; the selected non-exclusive evdev plus libei route does not provide atomic replacement or a sensitive-field signal",
+  "driver": "scripts/kwin-certification-prepare.sh and scripts/kwin-certification-session.sh",
+  "store": "kwin-real-client-fc063a4054ab.txt",
+  "result_counts": {
+    "pass": 35,
+    "fail": 0,
+    "unverified": 0,
+    "unsupported-by-design": 0
+  },
+  "pass_by_scenario": {
+    "multiline-rapid": 5,
+    "focus-cross-window": 5,
+    "focus-change-during-expansion": 5,
+    "target-closes-during-expansion": 5,
+    "config-reload": 5,
+    "daemon-restart": 5,
+    "failed-insertion": 5
+  },
+  "not_tested": [
+    "physical keyboard capture and interleaving during non-atomic replacement",
+    "password-field behavior",
+    "keyboard-layout changes and non-US layouts",
+    "active external IME composition",
+    "suspend/resume and long-running stability",
+    "browser and additional application coverage",
+    "end-to-end latency including capture and client paint"
+  ],
+  "note": "All 35 selected cells passed in an isolated private headless KWin 6.6.6 session against real target applications. Focus, lifecycle, and refused-output results were read from the target clients. This is partial compatibility evidence only, not physical-capture validation or production certification."
+}

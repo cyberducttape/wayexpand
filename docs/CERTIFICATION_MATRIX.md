@@ -45,6 +45,21 @@ availability claims, and no target is certified without reviewed evidence.
 
 ## Current evidence
 
+The latest focused private KWin real-client run is preserved in
+[`kwin-real-client-fc063a4054ab.summary.json`](evidence/kwin-real-client-fc063a4054ab.summary.json)
+with its raw store at
+[`kwin-real-client-fc063a4054ab.txt`](evidence/kwin-real-client-fc063a4054ab.txt).
+On clean source commit `fc063a4054aba7069474cc1237fdc93ea767eae1`, all 35
+selected cells passed across GTK TextView, Qt PlainTextEdit, Konsole, Gedit,
+and Kate: rapid multiline output, cross-window focus filtering, focus change
+during a pending command, target closure, config reload, daemon restart, and
+refusal of unsupported Unicode output before deleting its trigger. The run
+used private headless KWin 6.6.6, kernel `7.0.0-38-generic`, the `us` layout,
+stdin-simulated capture, and the production libei keysym fallback for output.
+It does not test physical-input interleaving, password fields, non-US or
+changing layouts, suspend/resume, or end-to-end capture-to-paint latency. The
+result is partial compatibility evidence; it does not certify any route.
+
 The latest full private KWin output/focus suite is the
 [captured report](evidence/kwin-e2e-4663ff4d4bcc.txt), run on clean source
 commit `4663ff4d4bcc` with kernel `7.0.0-38-generic` against KWin 6.6.6. All 15
