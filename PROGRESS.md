@@ -27,6 +27,18 @@ Updated: 2026-10-30
 
 ## Current-source verification and remaining release gates
 
+- On current `main` commit `e7f2c013d2caa3124d577f69010fcf0b55ae62af`,
+  GitHub CI [41155252763](https://github.com/cyberducttape/wayexpand/actions/runs/41155252763)
+  passed all 33 jobs. This includes locked debug/release workspace tests,
+  debug/release Clippy, matcher construction and allocation checks, CLI/UI/GUI
+  smoke checks, installer/system tests, Debian/RPM builds and install smoke
+  tests on Ubuntu 26.04 and Fedora, security audit, clean-source build, and
+  headless KWin/Sway tests. The main-branch workflow
+  [41155252450](https://github.com/cyberducttape/wayexpand/actions/runs/41155252450)
+  passed all four jobs, and Launchpad sync
+  [41155252845](https://github.com/cyberducttape/wayexpand/actions/runs/41155252845)
+  passed. These results establish CI and package evidence only; headless tests
+  do not establish physical-input or final-target-text integrity.
 - GitHub CI run [41076472952](https://github.com/cyberducttape/wayexpand/actions/runs/41076472952)
   passed all 33 jobs on `65d4c7c3`, including locked debug/release workspace
   tests, debug/release Clippy, integration and system tests, security audit,
