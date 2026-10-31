@@ -8,6 +8,8 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
+Environment=WAYEXPAND_PROCESS_CGROUP=required
+Delegate=yes
 Environment=WAYEXPAND_PORTAL_TOKEN_PATH=%h/.config/wayexpand/libei-portal-token
 ExecStartPre=%h/.local/lib/wayexpand/current/bin/wayexpand validate
 ExecStart=%h/.local/lib/wayexpand/current/bin/wayexpand-daemon --source=input-method
@@ -31,7 +33,9 @@ ProtectProc=invisible
 ProcSubset=pid
 SystemCallArchitectures=native
 ProtectKernelTunables=yes
-ProtectControlGroups=yes
+# Commands run by WayExpand are placed in delegated child cgroups so timeout
+# and cancellation also terminate descendants that call setsid().
+ProtectControlGroups=no
 # PrivateDevices=, ProtectClock=, ProtectKernelLogs=, and ProtectKernelModules=
 # are deliberately omitted: each tries to strip a capability (CAP_MKNOD +
 # CAP_SYS_RAWIO, CAP_SYS_TIME + CAP_WAKE_ALARM, CAP_SYSLOG, CAP_SYS_MODULE
@@ -59,6 +63,7 @@ LimitCORE=0
 # ReadWritePaths exception below; without it, portal restoration silently fails
 # after the first session.
 ReadWritePaths=%t %h/.config/wayexpand
+ReadWritePaths=/sys/fs/cgroup
 
 [Install]
 WantedBy=graphical-session.target

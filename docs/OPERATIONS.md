@@ -159,18 +159,19 @@ shell snippets: pipes, redirects, and operators are passed as ordinary
 arguments. Treat command-enabled configuration as executable user content and
 keep the configuration ownership and mode protections enabled.
 
-WayExpand starts direct commands in a separate process group and kills that
-group after completion or timeout as best-effort cleanup for ordinary
-descendants. The supervisor observes child exit without reaping the group
-leader first, then signals the group before reaping it; it also reports
-non-`ESRCH` cleanup failures. This is not a containment boundary. A deliberately
-written command can fork, call `setsid()`, detach from the process group, and
-outlive that command's timeout. The Action Broker applies its own per-action
-process-group deadline, but its systemd service cgroup only provides a final
-cleanup boundary when the broker service stops; WayExpand does not currently
-place each action in a separate cgroup. Treat command definitions as trusted
-local executable content, and do not use process-group cleanup as isolation
-for hostile commands.
+Bundled systemd daemon and broker units delegate a private cgroup v2 subtree.
+Each direct command and broker action is placed into its own child cgroup
+before `exec`; timeout, cancellation, normal completion, and worker teardown
+kill that cgroup with `cgroup.kill`, then also clean up its process group.
+This catches descendants that fork and call `setsid()`. Managed services fail
+command startup closed if delegation or Linux `cgroup.kill` support is missing.
+This requires unified cgroup v2 with `cgroup.kill` support (Linux 5.14 or newer)
+and a systemd user manager that honors service delegation.
+When launched outside those units, WayExpand retains process-group cleanup as
+a compatibility fallback; that fallback cannot contain a descendant that
+creates a new session. Cgroup containment limits lifetime, not privilege:
+commands remain trusted user-configured programs and rely on the surrounding
+systemd sandbox for filesystem and network restrictions.
 
 **Command-backed expansions and systemd sandbox:** Commands run under the
 daemon's systemd-enforced sandbox (see `systemd/wayexpand.service` for details).

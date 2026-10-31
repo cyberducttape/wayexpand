@@ -5,6 +5,8 @@ PartOf=graphical-session.target
 
 [Service]
 Type=simple
+Environment=WAYEXPAND_PROCESS_CGROUP=required
+Delegate=yes
 ExecStart=%h/.local/lib/wayexpand/current/bin/wayexpand-action-broker --config %h/.config/wayexpand/broker.toml --socket %t/wayexpand-broker.sock
 Restart=on-failure
 RestartSec=2s
@@ -22,7 +24,9 @@ ProtectHostname=yes
 ProtectProc=invisible
 ProcSubset=pid
 ProtectKernelTunables=yes
-ProtectControlGroups=yes
+# Broker actions are placed in delegated child cgroups so timeout and
+# cancellation also terminate descendants that call setsid().
+ProtectControlGroups=no
 SystemCallArchitectures=native
 SystemCallFilter=~@clock @cpu-emulation @debug @module @mount @obsolete @privileged @raw-io @reboot @resources @swap
 IPAddressDeny=any
@@ -37,6 +41,7 @@ TasksMax=32
 LimitNOFILE=64
 LimitCORE=0
 ReadWritePaths=%t %h/.config/wayexpand %h/.local/state/wayexpand
+ReadWritePaths=/sys/fs/cgroup
 
 [Install]
 WantedBy=graphical-session.target

@@ -3256,11 +3256,22 @@ fn detached_stdout_holder_returns_incomplete_output_without_blocking() {
     let output = run_command(&command);
     let elapsed = started.elapsed();
 
-    let _ = std::fs::remove_file(&script_path);
+    let cgroup_required =
+        std::env::var_os("WAYEXPAND_PROCESS_CGROUP").is_some_and(|value| value == "required");
     thread::sleep(Duration::from_millis(1200));
+    let escaped_work_ran = std::path::Path::new(&escaped_marker).exists();
+    let _ = std::fs::remove_file(&script_path);
     let _ = std::fs::remove_file(&escaped_marker);
 
-    assert_eq!(output, Err(CommandError::IncompleteOutput));
+    if cgroup_required {
+        assert_eq!(output, Ok("ready".to_string()));
+        assert!(
+            !escaped_work_ran,
+            "setsid descendant outlived command cleanup"
+        );
+    } else {
+        assert_eq!(output, Err(CommandError::IncompleteOutput));
+    }
     assert!(
         elapsed < Duration::from_millis(1000),
         "detached stdout holder delayed command output for {elapsed:?}"
@@ -3665,17 +3676,42 @@ fn command_rejects_output_when_descendant_keeps_stdout_open() {
     };
 
     let result = run_command(&command);
-    if let Ok(pid) = std::fs::read_to_string(&pid_file).and_then(|text| {
+    let cgroup_required =
+        std::env::var_os("WAYEXPAND_PROCESS_CGROUP").is_some_and(|value| value == "required");
+    let descendant_pid = std::fs::read_to_string(&pid_file).and_then(|text| {
         text.trim()
             .parse::<libc::pid_t>()
             .map_err(std::io::Error::other)
-    }) {
+    });
+    if cgroup_required {
+        let pid = descendant_pid.expect("test command should report its detached child");
+        let exited = |pid: libc::pid_t| {
+            let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+                return true;
+            };
+            stat.rsplit_once(')')
+                .and_then(|(_, fields)| fields.split_whitespace().next())
+                .is_some_and(|state| state == "Z")
+        };
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while !exited(pid) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            exited(pid),
+            "setsid descendant {pid} survived command cleanup"
+        );
+    } else if let Ok(pid) = descendant_pid {
         unsafe {
             libc::kill(pid, libc::SIGKILL);
         }
     }
     let _ = std::fs::remove_file(pid_file);
-    assert_eq!(result, Err(CommandError::IncompleteOutput));
+    if cgroup_required {
+        assert_eq!(result, Ok("complete".to_string()));
+    } else {
+        assert_eq!(result, Err(CommandError::IncompleteOutput));
+    }
 }
 
 #[test]

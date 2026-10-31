@@ -219,13 +219,15 @@ boundaries:
 | Clipboard | bounded command environment, single worker, deadline, and disconnected-worker tests |
 | Environment forwarding | broker tests prove an empty allowlist does not inherit client variables and client values cannot override server-owned values |
 | Configuration saves | parent ownership/mode and symlink tests; `config_lock_rejects_hard_linked_lock_files`; concurrent-writer tests |
-| Process cancellation | descendant cleanup, inherited-stdout, and cancellation tests in the command runtime and CLI form helper |
+| Process cancellation | delegated cgroup v2 `setsid()` descendant cleanup, inherited-stdout, and cancellation tests in command runtime and broker |
 | Audit logs | private/single-link file, symlink-safe rotation, bounded required-audit backpressure, and rollback-failure tests |
 
 These tests establish code-level properties for their tested conditions. They
 do not certify sensitive-field behavior in a real compositor/client, validate
 every filesystem race on every supported filesystem, or replace desktop
-session testing. No compositor route is currently certified.
+session testing. Cgroup containment requires the bundled systemd delegation
+and is not a privilege boundary against hostile same-UID commands. No
+compositor route is currently certified.
 
 Backends must document their permission requirements explicitly:
 

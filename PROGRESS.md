@@ -2,6 +2,40 @@
 
 Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-31 UTC)
 
+## Command descendant containment: 2026-10-31
+
+- Added optional per-command cgroup v2 placement to the shared process
+  supervisor. Bundled daemon and broker units require a delegated subtree and
+  cgroup v2 `cgroup.kill`; each spawned command is attached before `exec`.
+  Timeout, cancellation, normal completion, and worker teardown kill the full
+  cgroup, then retain process-group signaling as secondary cleanup. Failed
+  cgroup cleanup is logged and returned as a failed reap instead of reporting
+  success.
+- Updated all daemon and broker systemd units to delegate only their own
+  subtree, allow cgroup filesystem access through the service sandbox, and set
+  `WAYEXPAND_PROCESS_CGROUP=required`. The command preview transient unit
+  mirrors those sandbox directives. Unmanaged launches keep the documented
+  process-group fallback; managed command launch fails closed without usable
+  cgroup v2 delegation and `cgroup.kill` (Linux 5.14+).
+- Replaced the old regression that documented `setsid()` escape with one that
+  asserts the escaped descendant is terminated. Added broker and core command
+  regressions for a detached child holding stdout; with required cgroup mode,
+  the child is terminated and complete output is returned. Legacy fallback
+  behavior remains covered.
+- Verification on this host: process-supervisor/cgroup integration passed
+  inside a transient systemd unit with `Delegate=yes`,
+  `ProtectControlGroups=no`, and `ProtectKernelTunables=yes`; systemd unit
+  verification and the hardening contract passed. Required-cgroup tests passed
+  for action-broker (88 library tests, 7 binary tests, 9 integration tests),
+  core (481 unit tests, 3 integration tests), and process-supervisor (10 tests);
+  two broker tests and two core tests are intentionally ignored. Targeted
+  Clippy with `-D warnings`, formatting, and diff checks passed.
+- Limitation: cgroup containment controls descendant lifetime for managed
+  commands; it is not a privilege boundary against a deliberately hostile
+  same-UID command that can manipulate its delegated cgroup subtree. Continue
+  treating command definitions as trusted executable content and rely on the
+  existing systemd and broker sandbox policies for privilege restrictions.
+
 ## Action Broker caller authorization: 2026-10-31
 
 - Replaced UID-only dispatch authorization with a mandatory polkit check at the

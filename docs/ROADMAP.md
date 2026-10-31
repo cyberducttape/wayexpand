@@ -157,7 +157,8 @@ docs/ACTION_BROKER_ARCHITECTURE.md.
       closed when the broker is unavailable; direct commands remain a separate
       explicitly configured path.
 - [x] Broker-side executable ownership, permission, working-directory, timeout,
-      environment, output, and process-group checks are implemented.
+      environment, output, and delegated cgroup v2 descendant cleanup are
+      implemented.
 - [x] The packaged broker service has an independent systemd sandbox with
       explicit no-network (`AF_UNIX` only), read-only-home, and restricted
       filesystem policy; its contract is tested in CI.

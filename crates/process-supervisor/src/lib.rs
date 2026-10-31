@@ -1,7 +1,7 @@
-//! Shared process-group lifecycle management.
+//! Shared child-process lifecycle management.
 //!
 //! On Linux, child exit is observed with `waitid(..., WNOWAIT)` so the leader
-//! remains a zombie until its process group has been terminated. This closes
+//! remains a zombie until its owned descendants have been terminated. This closes
 //! the PID/PGID reuse window between observing exit and group cleanup.
 
 use std::io;
@@ -9,6 +9,9 @@ use std::process::{Child, ChildStdout, Command, ExitStatus};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 use std::time::Instant;
+
+#[cfg(target_os = "linux")]
+use std::path::PathBuf;
 
 #[cfg(unix)]
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
@@ -27,6 +30,189 @@ pub fn configure_process_group(command: &mut Command) {
             Ok(())
         });
     }
+}
+
+/// A private cgroup v2 below a systemd-delegated service. Unlike a process
+/// group, it also contains descendants which call `setsid()`.
+#[cfg(target_os = "linux")]
+pub struct CommandCgroup {
+    path: PathBuf,
+    _procs: std::fs::File,
+    cleanup_attempted: bool,
+}
+
+#[cfg(not(target_os = "linux"))]
+pub struct CommandCgroup;
+
+/// Backwards-compatible name emphasizing that the cgroup belongs to one child.
+pub type ChildCgroup = CommandCgroup;
+
+impl CommandCgroup {
+    /// Prepare a command cgroup when `WAYEXPAND_PROCESS_CGROUP=required` is
+    /// set by a managed service. Otherwise process groups remain the explicit
+    /// compatibility fallback for manually launched/unmanaged instances.
+    pub fn prepare(command: &mut Command) -> io::Result<Option<Self>> {
+        let required =
+            std::env::var_os("WAYEXPAND_PROCESS_CGROUP").is_some_and(|value| value == "required");
+        if !required {
+            return Ok(None);
+        }
+        Self::prepare_required(command).map(Some)
+    }
+
+    /// Prepare cgroup containment regardless of environment. Primarily useful
+    /// to integration tests and callers that enforce this policy themselves.
+    #[cfg(target_os = "linux")]
+    pub fn prepare_required(command: &mut Command) -> io::Result<Self> {
+        let parent = delegated_cgroup_path()?;
+        let name = format!(
+            "wayexpand-command-{}-{}",
+            std::process::id(),
+            next_scope_id()
+        );
+        let path = parent.join(name);
+        std::fs::create_dir(&path)?;
+        let procs_path = path.join("cgroup.procs");
+        let procs = match std::fs::OpenOptions::new().write(true).open(&procs_path) {
+            Ok(file) => file,
+            Err(error) => {
+                let _ = std::fs::remove_dir(&path);
+                return Err(error);
+            }
+        };
+        let procs_fd = procs.as_raw_fd();
+        // SAFETY: the child callback uses only getpid/write, performs no
+        // allocation or locking, and the descriptor remains open until exec.
+        unsafe {
+            command.pre_exec(move || {
+                let mut digits = [0u8; 20];
+                let mut value = libc::getpid() as u32;
+                let mut cursor = digits.len();
+                loop {
+                    cursor -= 1;
+                    digits[cursor] = b'0' + (value % 10) as u8;
+                    value /= 10;
+                    if value == 0 {
+                        break;
+                    }
+                }
+                let bytes = &digits[cursor..];
+                let written = libc::write(procs_fd, bytes.as_ptr().cast(), bytes.len());
+                if written < 0 {
+                    return Err(io::Error::last_os_error());
+                }
+                if written as usize != bytes.len() {
+                    return Err(io::Error::from(io::ErrorKind::WriteZero));
+                }
+                Ok(())
+            });
+        }
+        if !path.join("cgroup.kill").exists() {
+            let _ = std::fs::remove_dir(&path);
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "cgroup v2 cgroup.kill is unavailable (Linux 5.14 or newer is required)",
+            ));
+        }
+        Ok(Self {
+            path,
+            _procs: procs,
+            cleanup_attempted: false,
+        })
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub fn prepare_required(_command: &mut Command) -> io::Result<Self> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "cgroup command containment is Linux-only",
+        ))
+    }
+
+    fn kill_and_remove(&mut self) -> io::Result<()> {
+        #[cfg(target_os = "linux")]
+        {
+            if self.cleanup_attempted {
+                return Ok(());
+            }
+            self.cleanup_attempted = true;
+            if !self.path.exists() {
+                return Ok(());
+            }
+            std::fs::write(self.path.join("cgroup.kill"), b"1")?;
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            loop {
+                let events = std::fs::read_to_string(self.path.join("cgroup.events"))?;
+                if events.lines().any(|line| line == "populated 0") {
+                    return std::fs::remove_dir(&self.path);
+                }
+                if std::time::Instant::now() >= deadline {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "command cgroup did not empty after cgroup.kill",
+                    ));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            Ok(())
+        }
+    }
+}
+
+impl Drop for CommandCgroup {
+    fn drop(&mut self) {
+        if !self.cleanup_attempted {
+            if let Err(error) = self.kill_and_remove() {
+                tracing::error!(%error, "could not clean up a WayExpand command cgroup");
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn delegated_cgroup_path() -> io::Result<PathBuf> {
+    let contents = std::fs::read_to_string("/proc/self/cgroup")?;
+    let relative = contents
+        .lines()
+        .find_map(|line| line.strip_prefix("0::"))
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::Unsupported,
+                "unified cgroup v2 is not active",
+            )
+        })?;
+    let relative = relative.trim_start_matches('/');
+    if relative
+        .split('/')
+        .any(|part| part.is_empty() || part == "." || part == "..")
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid process cgroup path",
+        ));
+    }
+    let path = PathBuf::from("/sys/fs/cgroup").join(relative);
+    let probe = path.join("cgroup.procs");
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(probe)
+        .map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!("current service cgroup is not delegated: {error}"),
+            )
+        })?;
+    Ok(path)
+}
+
+#[cfg(target_os = "linux")]
+static NEXT_SCOPE_ID: AtomicU64 = AtomicU64::new(1);
+#[cfg(target_os = "linux")]
+fn next_scope_id() -> u64 {
+    NEXT_SCOPE_ID.fetch_add(1, Ordering::Relaxed)
 }
 
 static KILL_FAILURES: AtomicU64 = AtomicU64::new(0);
@@ -88,6 +274,8 @@ fn record_kill_failure(pid: libc::pid_t, error: &io::Error) {
 pub struct ChildSupervisor {
     child: Option<Child>,
     pid: Option<u32>,
+    cgroup: Option<CommandCgroup>,
+    cgroup_cleanup_error: Option<io::Error>,
     #[cfg(unix)]
     pidfd: Option<OwnedFd>,
     #[cfg(not(target_os = "linux"))]
@@ -96,10 +284,16 @@ pub struct ChildSupervisor {
 
 impl ChildSupervisor {
     pub fn new(child: Child) -> Self {
+        Self::new_with_cgroup(child, None)
+    }
+
+    pub fn new_with_cgroup(child: Child, cgroup: Option<CommandCgroup>) -> Self {
         let pid = child.id();
         Self {
             child: Some(child),
             pid: Some(pid),
+            cgroup,
+            cgroup_cleanup_error: None,
             #[cfg(unix)]
             pidfd: open_pidfd(pid),
             #[cfg(not(target_os = "linux"))]
@@ -165,8 +359,16 @@ impl ChildSupervisor {
         }
     }
 
-    /// Terminate the complete process group and invalidate the group ID.
+    /// Terminate the owned cgroup when present, then the process group, and
+    /// invalidate the process-group identifier.
     pub fn kill_group(&mut self) {
+        if let Some(mut cgroup) = self.cgroup.take() {
+            if let Err(error) = cgroup.kill_and_remove() {
+                let total = KILL_FAILURES.fetch_add(1, Ordering::Relaxed) + 1;
+                tracing::error!(%error, kill_failures_total = total, "could not empty command cgroup; descendants may remain");
+                self.cgroup_cleanup_error = Some(error);
+            }
+        }
         if let Some(pid) = self.pid.take() {
             if let Ok(pid) = libc::pid_t::try_from(pid) {
                 // The PID is invalidated above before signalling, so a second
@@ -189,10 +391,18 @@ impl ChildSupervisor {
             self.child = None;
             return Ok(status);
         }
-        self.child
+        let status = self
+            .child
             .take()
             .ok_or_else(|| io::Error::other("child already reaped"))?
-            .wait()
+            .wait()?;
+        if let Some(error) = self.cgroup_cleanup_error.take() {
+            return Err(io::Error::new(
+                error.kind(),
+                format!("command cgroup cleanup failed: {error}"),
+            ));
+        }
+        Ok(status)
     }
 }
 
@@ -453,14 +663,24 @@ mod tests {
 
     #[test]
     #[cfg(target_os = "linux")]
-    fn process_group_cleanup_does_not_claim_to_contain_new_sessions() {
+    fn delegated_cgroup_cleanup_terminates_new_sessions() {
         let mut command = Command::new("sh");
         command
             .args(["-c", "setsid sh -c 'echo $$; exec sleep 30' & wait"])
             .stdout(Stdio::piped());
         configure_process_group(&mut command);
+        let cgroup = match CommandCgroup::prepare_required(&mut command) {
+            Ok(cgroup) => Some(cgroup),
+            Err(error) if std::env::var_os("WAYEXPAND_REQUIRE_CGROUP_TEST").is_some() => {
+                panic!("required delegated cgroup containment unavailable: {error}");
+            }
+            Err(error) => {
+                eprintln!("skipping delegated cgroup regression: {error}");
+                return;
+            }
+        };
         let child = command.spawn().expect("spawn test child");
-        let mut supervisor = ChildSupervisor::new(child);
+        let mut supervisor = ChildSupervisor::new_with_cgroup(child, cgroup);
         let mut stdout =
             std::io::BufReader::new(supervisor.take_stdout().expect("capture escaped PID"));
         let mut escaped_pid = String::new();
@@ -469,22 +689,14 @@ mod tests {
             .expect("read escaped PID");
         let escaped_pid = escaped_pid.trim().parse::<u32>().expect("valid PID");
 
-        let _ = supervisor.reap().expect("clean original process group");
-        assert!(
-            !process_is_gone_or_zombie(escaped_pid),
-            "new-session process unexpectedly appeared contained by the original group"
-        );
-
-        // Escaping the group is a documented limitation. Clean up this test
-        // process explicitly so the regression test never leaks a child.
-        assert_eq!(
-            unsafe { libc::kill(escaped_pid as libc::pid_t, libc::SIGKILL) },
-            0
-        );
+        let _ = supervisor.reap().expect("kill cgroup and reap command");
         let deadline = std::time::Instant::now() + Duration::from_secs(1);
         while !process_is_gone_or_zombie(escaped_pid) && std::time::Instant::now() < deadline {
             thread::sleep(Duration::from_millis(5));
         }
-        assert!(process_is_gone_or_zombie(escaped_pid));
+        assert!(
+            process_is_gone_or_zombie(escaped_pid),
+            "setsid descendant {escaped_pid} survived cgroup cleanup"
+        );
     }
 }

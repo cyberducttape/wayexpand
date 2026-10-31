@@ -39,7 +39,8 @@ const DAEMON_SANDBOX_PROPERTIES: &[&str] = &[
     "ProcSubset=pid",
     "SystemCallArchitectures=native",
     "ProtectKernelTunables=yes",
-    "ProtectControlGroups=yes",
+    "ProtectControlGroups=no",
+    "Delegate=yes",
     "RestrictSUIDSGID=yes",
     "RestrictNamespaces=yes",
     "RestrictRealtime=yes",
@@ -128,6 +129,7 @@ pub fn run_command_preview(
             .timeout_ms
             .saturating_add(SANDBOX_STARTUP_ALLOWANCE_MS),
         Some(cancelled),
+        None,
     );
     if result.is_err() {
         // systemd-run owns a separate cgroup: killing the wrapper on timeout
@@ -160,7 +162,9 @@ fn sandboxed_preview_args(
     }
     // Match the installed units' resolved XDG writable paths. "-" tolerates a
     // path that does not exist instead of failing the transient unit.
-    let mut writable = Vec::new();
+    // Cgroup access mirrors the delegated parent service so preview and
+    // daemon commands have the same process-containment capabilities.
+    let mut writable = vec![systemd_path_argument(Path::new("/sys/fs/cgroup"))];
     if let Some(runtime) = env("XDG_RUNTIME_DIR") {
         writable.push(systemd_path_argument(Path::new(&runtime)));
     }
@@ -301,8 +305,9 @@ mod tests {
             assert_eq!(directives, expected, "{unit}");
             assert!(
                 service.contains("ReadWritePaths=%t %h/.config/wayexpand"),
-                "{unit}: update the ReadWritePaths mapping in sandboxed_preview_args"
+                "{unit}"
             );
+            assert!(service.contains("ReadWritePaths=/sys/fs/cgroup"), "{unit}");
         }
     }
 
@@ -349,7 +354,7 @@ mod tests {
                 "+%F".into(),
             ]
         );
-        assert!(args.contains(&"--property=ReadWritePaths=\"-/run/user/1000\" \"-/home/u/.config/wayexpand\" \"-/home/u/.local/state/wayexpand\"".to_string()));
+        assert!(args.contains(&"--property=ReadWritePaths=\"-/sys/fs/cgroup\" \"-/run/user/1000\" \"-/home/u/.config/wayexpand\" \"-/home/u/.local/state/wayexpand\"".to_string()));
         assert!(args.contains(&"--property=MemoryDenyWriteExecute=yes".to_string()));
         assert!(args.contains(&"--property=RuntimeMaxSec=2500ms".to_string()));
     }
@@ -470,7 +475,7 @@ mod tests {
         let Some(stderr) = child.stderr.take() else {
             panic!("systemd-run stderr was not piped");
         };
-        let result = run_command_unix(child, stdout, stderr, 6_000, None);
+        let result = run_command_unix(child, stdout, stderr, 6_000, None, None);
         if result.is_err() {
             stop_transient_unit(Some(&unit));
         }
@@ -502,6 +507,6 @@ mod tests {
         };
         let args =
             sandboxed_preview_args(&command(CommandEnvironment::Inherit), "unit.service", env);
-        assert!(args.contains(&"--property=ReadWritePaths=\"-/run/user/1000\" \"-/tmp/config dir%%home/wayexpand\" \"-/tmp/state \\\"dir\\\"/wayexpand\"".to_string()));
+        assert!(args.contains(&"--property=ReadWritePaths=\"-/sys/fs/cgroup\" \"-/run/user/1000\" \"-/tmp/config dir%%home/wayexpand\" \"-/tmp/state \\\"dir\\\"/wayexpand\"".to_string()));
     }
 }

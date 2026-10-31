@@ -16,7 +16,9 @@ use std::os::fd::AsRawFd;
 #[cfg(unix)]
 use std::os::fd::OwnedFd;
 #[cfg(unix)]
-pub(super) use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
+pub(super) use wayexpand_process_supervisor::{
+    configure_process_group, ChildCgroup, ChildSupervisor,
+};
 
 use super::{
     BrokerOperation, BrokerProtocolFailure, BrokerUnavailableReason, CommandConfig,
@@ -110,12 +112,16 @@ pub(super) fn run_command_with_parameters(
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         configure_process_group(&mut process);
+        let cgroup =
+            ChildCgroup::prepare(&mut process).map_err(|error| CommandError::SpawnFailed {
+                detail: format!("could not establish command containment: {error}"),
+            })?;
         let mut child = process.spawn().map_err(|error| CommandError::SpawnFailed {
             detail: error.to_string(),
         })?;
         let stdout = child.stdout.take().ok_or(CommandError::OutputChannelLost)?;
         let stderr = child.stderr.take().ok_or(CommandError::OutputChannelLost)?;
-        run_command_unix(child, stdout, stderr, command.timeout_ms, shutdown)
+        run_command_unix(child, stdout, stderr, command.timeout_ms, shutdown, cgroup)
     }
 
     #[cfg(not(unix))]
@@ -267,8 +273,9 @@ pub(super) fn run_command_unix(
     mut stderr: ChildStderr,
     timeout_ms: u64,
     shutdown: Option<&AtomicBool>,
+    cgroup: Option<ChildCgroup>,
 ) -> Result<String, CommandError> {
-    let mut guard = ChildSupervisor::new(child);
+    let mut guard = ChildSupervisor::new_with_cgroup(child, cgroup);
     set_nonblocking_stdout(&stdout)?;
     set_nonblocking_stderr(&stderr)?;
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);

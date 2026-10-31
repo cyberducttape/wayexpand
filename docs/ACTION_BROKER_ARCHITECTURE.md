@@ -166,7 +166,8 @@ What's implemented:
 - **Executor** (crates/action-broker/src/executor.rs)
   - Safe command execution with policy enforcement
   - Environment variable filtering with strict mode
-  - Deadline-aware process-group termination and reaping
+  - Deadline-aware delegated cgroup v2 termination (including new sessions),
+    with process-group cleanup as a secondary mechanism
   - Bounded output capture (stdout/stderr) with exit code tracking
   - Bounded concurrent execution (16 actions per broker process)
 
@@ -202,9 +203,9 @@ What's implemented:
     writer before the process exits
   - On SIGINT/SIGTERM the broker stops accepting, disconnects clients that
     have not finished sending a request, gives in-flight response writes one
-    second, and cancels/reaps running action process groups so long configured
-    action timeouts cannot outlive the service stop deadline; cancellation is
-    recorded in the audit sink
+    second, and cancels/reaps each running action's delegated cgroup (plus its
+    process group) so action descendants cannot outlive the service stop
+    deadline; cancellation is recorded in the audit sink
   - Runtime health is published as mode `0600` JSON beside the broker socket;
     `wayexpand doctor` reports queue drops, write failures, and health state
   - By default, slow or unavailable storage does not block action execution;

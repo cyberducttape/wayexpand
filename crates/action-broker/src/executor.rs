@@ -8,7 +8,7 @@ use crate::child_process::ChildRunError;
 #[cfg(test)]
 use crate::child_process::MAX_STREAM_OUTPUT_BYTES;
 #[cfg(unix)]
-use crate::child_process::{run_child_unix, run_child_unix_cancellable};
+use crate::child_process::{run_child_unix_cancellable_with_cgroup, run_child_unix_with_cgroup};
 use crate::{
     config::{BrokerConfig, MAX_ACTION_TIMEOUT_MS},
     protocol::{ActionError, ActionOutput, ActionRequest, ActionResponse},
@@ -24,7 +24,7 @@ use std::sync::{
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex as AsyncMutex;
 #[cfg(unix)]
-use wayexpand_process_supervisor::configure_process_group;
+use wayexpand_process_supervisor::{configure_process_group, ChildCgroup};
 
 pub struct ActionExecutor {
     config: BrokerConfig,
@@ -307,6 +307,12 @@ impl ActionExecutor {
 
         #[cfg(unix)]
         configure_process_group(&mut cmd);
+        #[cfg(unix)]
+        let cgroup = ChildCgroup::prepare(&mut cmd).map_err(|error| ActionError::SpawnFailed {
+            action_id: request.action_id.clone(),
+            program: action_config.program.clone(),
+            reason: format!("could not establish command containment: {error}"),
+        })?;
 
         if shutdown
             .as_ref()
@@ -339,14 +345,21 @@ impl ActionExecutor {
             #[cfg(unix)]
             {
                 match shutdown {
-                    Some(shutdown) => run_child_unix_cancellable(
+                    Some(shutdown) => run_child_unix_cancellable_with_cgroup(
                         child,
                         child_stdout,
                         child_stderr,
                         timeout,
                         Some(shutdown),
+                        cgroup,
                     ),
-                    None => run_child_unix(child, child_stdout, child_stderr, timeout),
+                    None => run_child_unix_with_cgroup(
+                        child,
+                        child_stdout,
+                        child_stderr,
+                        timeout,
+                        cgroup,
+                    ),
                 }
             }
             #[cfg(not(unix))]
@@ -580,6 +593,8 @@ fn configure_pinned_executable(cmd: &mut Command, file: &std::fs::File, original
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use crate::child_process::run_child_unix;
     use crate::config::ActionConfig;
 
     #[cfg(unix)]
@@ -1061,7 +1076,7 @@ mod tests {
 
     #[tokio::test]
     #[cfg(unix)]
-    async fn executor_rejects_output_when_descendant_keeps_pipe_open() {
+    async fn executor_cleans_session_descendant_holding_output_pipe() {
         let pid_file = format!(
             "/tmp/wayexpand-broker-incomplete-output-{}.pid",
             std::process::id()
@@ -1101,23 +1116,52 @@ mod tests {
         };
 
         let result = executor.execute(request).await;
-        if let Ok(pid) = std::fs::read_to_string(&pid_file).and_then(|text| {
+        let descendant_pid = std::fs::read_to_string(&pid_file).and_then(|text| {
             text.trim()
                 .parse::<libc::pid_t>()
                 .map_err(std::io::Error::other)
-        }) {
+        });
+        let cgroup_required =
+            std::env::var_os("WAYEXPAND_PROCESS_CGROUP").is_some_and(|value| value == "required");
+        if cgroup_required {
+            let pid = descendant_pid.expect("test command should report its detached child");
+            let exited = |pid: libc::pid_t| {
+                let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+                    return true;
+                };
+                stat.rsplit_once(')')
+                    .and_then(|(_, fields)| fields.split_whitespace().next())
+                    .is_some_and(|state| state == "Z")
+            };
+            let deadline = std::time::Instant::now() + Duration::from_secs(1);
+            while !exited(pid) && std::time::Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert!(
+                exited(pid),
+                "setsid descendant {pid} survived broker cleanup"
+            );
+        } else if let Ok(pid) = descendant_pid {
+            // Unmanaged compatibility mode has only process-group cleanup.
             unsafe {
                 libc::kill(pid, libc::SIGKILL);
             }
         }
         let _ = std::fs::remove_file(pid_file);
-        assert!(
-            matches!(
-                &result,
-                Err(ActionError::Internal { reason }) if reason.contains("output may be incomplete")
-            ),
-            "unexpected result: {result:?}"
-        );
+        if cgroup_required {
+            assert!(
+                matches!(&result, Ok(ActionResponse::Success(output)) if output.stdout == "complete"),
+                "cgroup cleanup should close the descendant pipe cleanly: {result:?}"
+            );
+        } else {
+            assert!(
+                matches!(
+                    &result,
+                    Err(ActionError::Internal { reason }) if reason.contains("output may be incomplete")
+                ),
+                "unexpected result: {result:?}"
+            );
+        }
     }
 
     #[tokio::test]

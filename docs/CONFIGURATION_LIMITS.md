@@ -47,7 +47,8 @@ Rendering and packs have their own bounds:
 The values are defined in `crates/core/src/limits.rs`.
 
 Invalid values are rejected before a configuration becomes active. Runtime
-command execution is additionally bounded by the configured timeout and runs
-in a process group so timeout cleanup reaches ordinary descendants. This is
-best-effort resource cleanup, not sandbox containment: a trusted command can
-deliberately fork, call `setsid()`, and escape the original process group.
+command execution is additionally bounded by the configured timeout. Bundled
+systemd units require delegated cgroup v2 containment, which also terminates
+descendants that call `setsid()`. Unmanaged launches use process-group cleanup
+as a compatibility fallback and cannot contain new sessions. Neither mechanism
+is a privilege sandbox; commands remain trusted executable content.

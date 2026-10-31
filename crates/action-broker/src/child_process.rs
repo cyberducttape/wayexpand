@@ -149,16 +149,29 @@ fn read_available<R: Read>(
 }
 
 #[cfg(unix)]
+#[cfg(test)]
 pub fn run_child_unix(
     child: Child,
     stdout: Option<ChildStdout>,
     stderr: Option<ChildStderr>,
     timeout: Duration,
 ) -> Result<ChildRunOutput, ChildRunError> {
-    run_child_unix_cancellable(child, stdout, stderr, timeout, None)
+    run_child_unix_cancellable_with_cgroup(child, stdout, stderr, timeout, None, None)
 }
 
 #[cfg(unix)]
+pub fn run_child_unix_with_cgroup(
+    child: Child,
+    stdout: Option<ChildStdout>,
+    stderr: Option<ChildStderr>,
+    timeout: Duration,
+    cgroup: Option<wayexpand_process_supervisor::ChildCgroup>,
+) -> Result<ChildRunOutput, ChildRunError> {
+    run_child_unix_cancellable_with_cgroup(child, stdout, stderr, timeout, None, cgroup)
+}
+
+#[cfg(unix)]
+#[cfg(test)]
 pub fn run_child_unix_cancellable(
     child: Child,
     stdout: Option<ChildStdout>,
@@ -166,7 +179,19 @@ pub fn run_child_unix_cancellable(
     timeout: Duration,
     cancelled: Option<Arc<AtomicBool>>,
 ) -> Result<ChildRunOutput, ChildRunError> {
-    let mut guard = ChildSupervisor::new(child);
+    run_child_unix_cancellable_with_cgroup(child, stdout, stderr, timeout, cancelled, None)
+}
+
+#[cfg(unix)]
+pub fn run_child_unix_cancellable_with_cgroup(
+    child: Child,
+    stdout: Option<ChildStdout>,
+    stderr: Option<ChildStderr>,
+    timeout: Duration,
+    cancelled: Option<Arc<AtomicBool>>,
+    cgroup: Option<wayexpand_process_supervisor::ChildCgroup>,
+) -> Result<ChildRunOutput, ChildRunError> {
+    let mut guard = ChildSupervisor::new_with_cgroup(child, cgroup);
     let mut stdout = stdout;
     let mut stderr = stderr;
     if let Some(stream) = stdout.as_ref() {

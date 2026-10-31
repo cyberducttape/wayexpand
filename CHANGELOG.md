@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Put direct commands and broker actions launched by the bundled systemd units
+  into individual delegated cgroup v2 groups. Timeout, cancellation, normal
+  completion, and worker teardown now kill descendants even after `setsid()`;
+  process-group cleanup remains a secondary path. Managed command execution
+  fails closed when delegation or `cgroup.kill` is unavailable. Add a transient
+  systemd integration regression and update process-containment guidance.
 - Require action-specific polkit authorization before every Action Broker
   execution. The broker binds authorization to the Unix peer's kernel-reported
   PID, process start time, and UID, requires fresh active-session
