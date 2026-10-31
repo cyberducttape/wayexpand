@@ -42,6 +42,7 @@ use wayland_protocols_misc::zwp_input_method_v2::client::{
 };
 use xkbcommon_rs::xkb_state::{KeyDirection, StateComponent};
 use xkbcommon_rs::{keysym::keysym_get_name, Context, Keymap, KeymapFormat, State};
+use zeroize::{Zeroize, Zeroizing};
 
 const SOURCE_NAME: &str = "input-method-v2";
 const MAX_KEYMAP_BYTES: u32 = 4 * 1024 * 1024;
@@ -185,7 +186,7 @@ struct PendingKeyPassThrough {
 
 #[derive(Debug, Clone)]
 struct SurroundingText {
-    text: String,
+    text: Zeroizing<String>,
     cursor: u32,
     anchor: u32,
 }
@@ -245,6 +246,7 @@ struct StateData {
     events: VecDeque<InputEvent>,
     keyboard_state: Option<State>,
     surrounding_text: Option<SurroundingText>,
+    sensitive_content: bool,
     pending_sensitive: Option<bool>,
     /// Local XKB dead-key/Compose state. This is separate from compositor
     /// IME preedit, which zwp_input_method_v2 does not expose.
@@ -273,6 +275,7 @@ impl StateData {
             events: VecDeque::new(),
             keyboard_state: None,
             surrounding_text: None,
+            sensitive_content: true,
             pending_sensitive: None,
             composition_active: false,
             local_compose: LocalCompose::new(),
@@ -297,13 +300,33 @@ impl StateData {
     fn finish_protocol_batch(&mut self) {
         self.commit_serial = self.commit_serial.wrapping_add(1);
         if let Some(sensitive) = self.pending_sensitive.take() {
+            self.sensitive_content = sensitive;
+            if sensitive {
+                clear_surrounding_text(&mut self.surrounding_text);
+            }
             self.queue_event(InputEvent::FocusChanged { sensitive });
         }
     }
 
+    fn set_surrounding_text(&mut self, text: String, cursor: u32, anchor: u32) {
+        if self.pending_sensitive.unwrap_or(self.sensitive_content) {
+            // The compositor text is wrapped immediately so even discarded
+            // sensitive updates are wiped when this scope ends.
+            drop(Zeroizing::new(text));
+            clear_surrounding_text(&mut self.surrounding_text);
+            return;
+        }
+        self.surrounding_text = Some(SurroundingText {
+            text: Zeroizing::new(text),
+            cursor,
+            anchor,
+        });
+    }
+
     fn activate(&mut self) {
         self.keyboard_state = None;
-        self.surrounding_text = None;
+        clear_surrounding_text(&mut self.surrounding_text);
+        self.sensitive_content = true;
         self.pending_sensitive = None;
         reset_local_composition(self);
         // Do not capture until the compositor reports the current content
@@ -313,7 +336,8 @@ impl StateData {
 
     fn deactivate(&mut self) {
         self.keyboard_state = None;
-        self.surrounding_text = None;
+        clear_surrounding_text(&mut self.surrounding_text);
+        self.sensitive_content = true;
         self.pending_sensitive = None;
         reset_local_composition(self);
         // Deactivation can race with already-queued keyboard events. Keep the
@@ -326,7 +350,7 @@ impl StateData {
         // prevents stale text from being processed across activation,
         // deactivation, or a sensitive-field transition.
         if matches!(event, InputEvent::FocusChanged { .. }) {
-            self.events.clear();
+            clear_input_events(&mut self.events);
             // Preserve queued virtual transitions, then release every key
             // still held before the focus transition reaches the daemon.
             let pending_count = self.pending_key_pass_through.len();
@@ -356,7 +380,7 @@ impl StateData {
             // Never let compositor traffic grow memory without bound. A
             // boundary discards the partial trigger while preserving the
             // engine's normal non-sensitive capture policy.
-            self.events.clear();
+            clear_input_events(&mut self.events);
             self.error = Some(InputMethodError::PassThrough {
                 message: format!(
                     "input-method event queue overflow (max {} events)",
@@ -433,6 +457,45 @@ impl StateData {
         // notifications that are represented by the held virtual key.
         self.queue_event(InputEvent::Reset);
     }
+}
+
+fn zeroize_input_events(events: &mut VecDeque<InputEvent>) {
+    for event in events.iter_mut() {
+        match event {
+            InputEvent::Text(text) => text.zeroize(),
+            InputEvent::TextChar(character) | InputEvent::Delimiter(character) => {
+                character.zeroize();
+            }
+            InputEvent::WindowChanged(Some(window)) => {
+                if let Some(app_id) = &mut window.app_id {
+                    app_id.zeroize();
+                }
+                if let Some(title) = &mut window.title {
+                    title.zeroize();
+                }
+                if let Some(instance_id) = &mut window.instance_id {
+                    instance_id.zeroize();
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn clear_input_events(events: &mut VecDeque<InputEvent>) {
+    zeroize_input_events(events);
+    events.clear();
+}
+
+fn zeroize_surrounding_text(surrounding: &mut Option<SurroundingText>) {
+    if let Some(surrounding) = surrounding.as_mut() {
+        surrounding.text.zeroize();
+    }
+}
+
+fn clear_surrounding_text(surrounding: &mut Option<SurroundingText>) {
+    zeroize_surrounding_text(surrounding);
+    surrounding.take();
 }
 
 fn key_is_composition(keyboard_state: Option<&State>, key: u32) -> bool {
@@ -1099,6 +1162,45 @@ impl TextInjector for InputMethodSource {
     }
 }
 
+/// Replace bytes in the retained compositor context and erase any bytes that
+/// fell beyond the new logical length. `String::replace_range` shifts data but
+/// does not promise to wipe the old tail when the result is shorter.
+fn replace_surrounding_range(
+    text: &mut Zeroizing<String>,
+    range: std::ops::Range<usize>,
+    replacement: &str,
+) {
+    let old_len = text.len();
+    let new_len = old_len - (range.end - range.start) + replacement.len();
+    if new_len > text.capacity() {
+        // Growing beyond the current allocation would otherwise reallocate
+        // and free an unwiped copy. Build the new value first, wipe the old
+        // allocation while it is still owned, then replace it.
+        let mut updated = String::with_capacity(new_len);
+        updated.push_str(&text[..range.start]);
+        updated.push_str(replacement);
+        updated.push_str(&text[range.end..]);
+        text.zeroize();
+        *text = Zeroizing::new(updated);
+        return;
+    }
+
+    // Keep edits in the existing allocation. The range is validated as a
+    // UTF-8 boundary by callers, and the final bytes are valid UTF-8 because
+    // the prefix, replacement, and suffix are each valid strings.
+    unsafe {
+        let bytes = text.as_mut_vec();
+        let replacement_end = range.start + replacement.len();
+        bytes.copy_within(range.end..old_len, replacement_end);
+        bytes[range.start..replacement_end].copy_from_slice(replacement.as_bytes());
+        if new_len < old_len {
+            // Wipe the truncated old suffix before shrinking the Vec length.
+            bytes[new_len..old_len].zeroize();
+        }
+        bytes.set_len(new_len);
+    }
+}
+
 fn optimistic_commit(surrounding: &mut Option<SurroundingText>, text: &str) {
     let Some(surrounding) = surrounding.as_mut() else {
         return;
@@ -1118,7 +1220,7 @@ fn optimistic_commit(surrounding: &mut Option<SurroundingText>, text: &str) {
     }
     let start = cursor.min(anchor);
     let end = cursor.max(anchor);
-    surrounding.text.replace_range(start..end, text);
+    replace_surrounding_range(&mut surrounding.text, start..end, text);
     let new_cursor = start + text.len();
     let Ok(new_cursor) = u32::try_from(new_cursor) else {
         return;
@@ -1152,7 +1254,7 @@ fn optimistic_replace(
             message: "replacement trigger exceeds surrounding text".into(),
             retryable: true,
         })?;
-    surrounding.text.replace_range(start..cursor, text);
+    replace_surrounding_range(&mut surrounding.text, start..cursor, text);
     let new_cursor = start + text.len();
     surrounding.cursor = u32::try_from(new_cursor).map_err(|_| InjectorError {
         backend: SOURCE_NAME,

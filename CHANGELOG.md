@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Zeroize input-method-v2 surrounding text when it is replaced or discarded,
+  suppress collection while content sensitivity is unknown or sensitive, and
+  wipe queued text/scalar events before focus-change or overflow clears.
+  Clear truncated bytes after shorter in-place surrounding-text edits and wipe
+  local Compose fallback state on reset and drop.
 - Deny daemon control-socket mutations by default while retaining read-only
   status, focus, and explain requests. Require exact focused-window validation
   for explicit inserts in audit and safe modes. Withhold focus tokens and

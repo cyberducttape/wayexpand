@@ -2,6 +2,27 @@
 
 Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-31 UTC)
 
+## Input-method plaintext lifetime: 2026-10-31
+
+- Wrapped compositor-provided surrounding text in `Zeroizing<String>` and
+  wipe it on activation/deactivation, sensitive content transitions, and
+  replacement. Do not retain newly received surrounding text while the active
+  content type is unknown or sensitive.
+- Wipe queued `Text`, `TextChar`, delimiter, and window-context payloads before
+  focus-change or overflow clears. Local Compose fallback and keysym buffers
+  are zeroized on reset and drop.
+- Shorter in-place surrounding-text updates explicitly wipe the truncated
+  bytes beyond the new string length; growth beyond existing capacity wipes
+  the old allocation before releasing it.
+- Verification: `cargo test -p wayexpand-backend-input-method --offline` — 74
+  passed; includes direct assertions over the old initialized bytes after
+  queue, context, Compose, and replacement clears. `cargo fmt --all -- --check`,
+  `git diff --check`, and `cargo clippy -p wayexpand-backend-input-method
+  --all-targets --locked -- -D warnings` pass.
+- Limitation: zeroization reduces residual copies in these owned buffers; it
+  cannot erase copies made by the compositor, Wayland transport, allocator,
+  kernel, swap, or unrelated process memory.
+
 ## Control-socket mutation defaults: 2026-10-31
 
 - Changed the default organization policy to deny every mutating control

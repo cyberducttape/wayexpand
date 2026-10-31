@@ -4432,6 +4432,7 @@ dependencies = [
  "xkbcommon",
  "xkbcommon-rs",
  "xkeysym",
+ "zeroize",
 ]
 
 [[package]]

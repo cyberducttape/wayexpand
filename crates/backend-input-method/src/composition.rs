@@ -5,6 +5,7 @@ use xkbcommon::xkb::{
     compose::{self, Status},
     Context, Keysym,
 };
+use zeroize::Zeroize;
 
 const MAX_COMPOSE_FALLBACK_BYTES: usize = 256;
 const MAX_COMPOSE_SEQUENCE_KEYS: usize = 64;
@@ -176,8 +177,14 @@ impl LocalCompose {
     }
 
     fn reset(&mut self) {
-        self.sequence.clear();
-        self.fallback.clear();
+        self.sequence.zeroize();
+        self.fallback.zeroize();
+    }
+}
+
+impl Drop for LocalCompose {
+    fn drop(&mut self) {
+        self.reset();
     }
 }
 
@@ -233,5 +240,23 @@ mod tests {
             compose.feed(xkeysym::key::q, Some("q")),
             ComposeUpdate::Cancelled(text) if text == "oq"
         ));
+    }
+
+    #[test]
+    fn reset_zeroizes_buffered_compose_fallback() {
+        let Some(mut compose) = LocalCompose::new() else {
+            panic!("the test locale must provide an XKB Compose table");
+        };
+        compose.fallback.push_str("private compose fallback");
+        let pointer = compose.fallback.as_ptr();
+        let length = compose.fallback.len();
+
+        compose.reset();
+
+        assert!(compose.fallback.is_empty());
+        // The buffer remains allocated and owned by `compose`, so its former
+        // initialized range can be checked after the logical clear.
+        let residual = unsafe { std::slice::from_raw_parts(pointer, length) };
+        assert!(residual.iter().all(|byte| *byte == 0));
     }
 }

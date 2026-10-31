@@ -1151,7 +1151,7 @@ fn activation_discards_stale_keymap_and_waits_for_safe_content_type() {
     let mut state = StateData::new();
     state.keyboard_state = Some(default_state());
     state.surrounding_text = Some(SurroundingText {
-        text: "old context".into(),
+        text: "old context".to_owned().into(),
         cursor: 11,
         anchor: 11,
     });
@@ -1185,7 +1185,7 @@ fn deactivation_clears_context_and_keeps_capture_sensitive() {
     let mut state = StateData::new();
     state.keyboard_state = Some(default_state());
     state.surrounding_text = Some(SurroundingText {
-        text: "private context".into(),
+        text: "private context".to_owned().into(),
         cursor: 15,
         anchor: 15,
     });
@@ -1238,7 +1238,7 @@ fn transport_failures_are_retryable_but_protocol_failures_are_not() {
 #[test]
 fn backspace_uses_utf8_byte_length() {
     let surrounding = SurroundingText {
-        text: "café".into(),
+        text: "café".to_owned().into(),
         cursor: 5,
         anchor: 5,
     };
@@ -1251,7 +1251,7 @@ fn backspace_deletes_whole_grapheme_cluster() {
     // extended grapheme cluster; Backspace must remove both codepoints,
     // not just the trailing combining mark.
     let surrounding = SurroundingText {
-        text: "e\u{0301}".into(),
+        text: "e\u{0301}".to_owned().into(),
         cursor: 3,
         anchor: 3,
     };
@@ -1262,7 +1262,7 @@ fn backspace_deletes_whole_grapheme_cluster() {
 fn backspace_deletes_modifier_zwj_and_indic_graphemes_whole() {
     for grapheme in ["👍🏽", "👩‍💻", "क्ष", "क्‍ष"] {
         let surrounding = SurroundingText {
-            text: grapheme.to_owned(),
+            text: grapheme.to_owned().into(),
             cursor: grapheme.len() as u32,
             anchor: grapheme.len() as u32,
         };
@@ -1277,7 +1277,7 @@ fn backspace_deletes_modifier_zwj_and_indic_graphemes_whole() {
 #[test]
 fn backspace_deletes_selection_or_fails_closed() {
     let selected = SurroundingText {
-        text: "hello".into(),
+        text: "hello".to_owned().into(),
         cursor: 5,
         anchor: 2,
     };
@@ -1288,12 +1288,12 @@ fn backspace_deletes_selection_or_fails_closed() {
 #[test]
 fn selection_backspace_is_a_boundary_for_matching() {
     let selected = SurroundingText {
-        text: "hello".into(),
+        text: "hello".to_owned().into(),
         cursor: 5,
         anchor: 2,
     };
     let collapsed = SurroundingText {
-        text: "hello".into(),
+        text: "hello".to_owned().into(),
         cursor: 5,
         anchor: 5,
     };
@@ -1305,7 +1305,7 @@ fn selection_backspace_is_a_boundary_for_matching() {
 #[test]
 fn empty_surrounding_text_does_not_emit_matcher_backspace() {
     let empty = SurroundingText {
-        text: String::new(),
+        text: String::new().into(),
         cursor: 0,
         anchor: 0,
     };
@@ -1337,7 +1337,7 @@ fn deactivation_disables_matching() {
 #[test]
 fn replacement_context_must_match_exact_utf8_trigger() {
     let surrounding = SurroundingText {
-        text: "café:x".into(),
+        text: "café:x".to_owned().into(),
         cursor: 7,
         anchor: 7,
     };
@@ -1349,7 +1349,7 @@ fn replacement_context_must_match_exact_utf8_trigger() {
 #[test]
 fn forwarded_text_updates_context_before_immediate_replacement() {
     let mut surrounding = Some(SurroundingText {
-        text: ":".into(),
+        text: ":".to_owned().into(),
         cursor: 1,
         anchor: 1,
     });
@@ -1358,7 +1358,7 @@ fn forwarded_text_updates_context_before_immediate_replacement() {
 
     assert!(surrounding_ends_with_trigger(surrounding.as_ref(), ":x"));
     optimistic_replace(&mut surrounding, ":x", "expanded").unwrap();
-    assert_eq!(surrounding.as_ref().unwrap().text, "expanded");
+    assert_eq!(surrounding.as_ref().unwrap().text.as_str(), "expanded");
 }
 
 #[test]
@@ -1369,27 +1369,47 @@ fn forwarded_word_boundary_delimiter_is_replaced_atomically() {
     // would reject the expansion because the surrounding text ends in
     // `:sig `.
     let mut surrounding = Some(SurroundingText {
-        text: ":sig ".into(),
+        text: ":sig ".to_owned().into(),
         cursor: 5,
         anchor: 5,
     });
 
     assert!(surrounding_ends_with_trigger(surrounding.as_ref(), ":sig "));
     optimistic_replace(&mut surrounding, ":sig ", "signature ").unwrap();
-    assert_eq!(surrounding.as_ref().unwrap().text, "signature ");
+    assert_eq!(surrounding.as_ref().unwrap().text.as_str(), "signature ");
     assert_eq!(surrounding.as_ref().unwrap().cursor, 10);
+}
+
+#[test]
+fn shortening_surrounding_replacement_wipes_the_stale_allocation_tail() {
+    let mut surrounding = Some(SurroundingText {
+        text: "topsecret".to_owned().into(),
+        cursor: 9,
+        anchor: 9,
+    });
+    let text = &surrounding.as_ref().unwrap().text;
+    let pointer = text.as_ptr();
+    let old_len = text.len();
+
+    optimistic_replace(&mut surrounding, "secret", "x").unwrap();
+
+    assert_eq!(surrounding.as_ref().unwrap().text.as_str(), "topx");
+    // The allocation remains owned by the surrounding-text wrapper, making
+    // the truncated suffix safe to inspect for residual plaintext.
+    let stale_tail = unsafe { std::slice::from_raw_parts(pointer.add(4), old_len - 4) };
+    assert!(stale_tail.iter().all(|byte| *byte == 0));
 }
 
 #[test]
 fn replacement_context_rejects_selection_and_invalid_cursor() {
     let selected = SurroundingText {
-        text: ":x".into(),
+        text: ":x".to_owned().into(),
         cursor: 2,
         anchor: 0,
     };
     assert!(!surrounding_ends_with_trigger(Some(&selected), ":x"));
     let invalid = SurroundingText {
-        text: ":x".into(),
+        text: ":x".to_owned().into(),
         cursor: 1,
         anchor: 1,
     };
@@ -1444,6 +1464,75 @@ fn focus_policy_events_supersede_queued_keyboard_events() {
         state.events.as_slices().0,
         &[InputEvent::FocusChanged { sensitive: true }]
     );
+}
+
+#[test]
+fn discarded_input_event_payloads_are_zeroized_before_queue_clear() {
+    let mut events = VecDeque::from([
+        InputEvent::Text("credential-like text".to_owned()),
+        InputEvent::TextChar('x'),
+        InputEvent::Delimiter('!'),
+    ]);
+    let (text_ptr, text_len) = match events.front().unwrap() {
+        InputEvent::Text(text) => (text.as_ptr(), text.len()),
+        _ => unreachable!(),
+    };
+
+    zeroize_input_events(&mut events);
+
+    let InputEvent::Text(text) = &events[0] else {
+        unreachable!();
+    };
+    assert!(text.is_empty());
+    assert_eq!(events[1], InputEvent::TextChar('\0'));
+    assert_eq!(events[2], InputEvent::Delimiter('\0'));
+    // The allocation is still owned by `events`; inspect the old initialized
+    // range to ensure zeroize wiped bytes, not only the String length.
+    let residual = unsafe { std::slice::from_raw_parts(text_ptr, text_len) };
+    assert!(residual.iter().all(|byte| *byte == 0));
+
+    clear_input_events(&mut events);
+    assert!(events.is_empty());
+}
+
+#[test]
+fn surrounding_text_is_zeroized_before_focus_lifecycle_drops_it() {
+    let mut surrounding = Some(SurroundingText {
+        text: "private surrounding text".to_owned().into(),
+        cursor: 24,
+        anchor: 24,
+    });
+    let (text_ptr, text_len) = {
+        let text = &surrounding.as_ref().unwrap().text;
+        (text.as_ptr(), text.len())
+    };
+
+    zeroize_surrounding_text(&mut surrounding);
+
+    let current = surrounding.as_ref().unwrap();
+    assert!(current.text.is_empty());
+    let residual = unsafe { std::slice::from_raw_parts(text_ptr, text_len) };
+    assert!(residual.iter().all(|byte| *byte == 0));
+    clear_surrounding_text(&mut surrounding);
+    assert!(surrounding.is_none());
+}
+
+#[test]
+fn sensitive_content_type_discards_surrounding_text() {
+    use wayland_protocols::wp::text_input::zv3::client::zwp_text_input_v3::{
+        ContentHint, ContentPurpose,
+    };
+
+    let mut state = StateData::new();
+    state.set_content_type(
+        WEnum::Value(ContentHint::None),
+        WEnum::Value(ContentPurpose::Password),
+    );
+    state.set_surrounding_text("sensitive value".to_owned(), 15, 15);
+    assert!(state.surrounding_text.is_none());
+
+    state.finish_protocol_batch();
+    assert!(state.sensitive_content);
 }
 
 #[test]

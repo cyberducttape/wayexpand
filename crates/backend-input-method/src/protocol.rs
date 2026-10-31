@@ -101,11 +101,7 @@ impl Dispatch<ZwpInputMethodV2, ()> for StateData {
                 cursor,
                 anchor,
             } => {
-                state.surrounding_text = Some(SurroundingText {
-                    text,
-                    cursor,
-                    anchor,
-                });
+                state.set_surrounding_text(text, cursor, anchor);
             }
             wayland_protocols_misc::zwp_input_method_v2::client::zwp_input_method_v2::Event::Done => {
                 state.finish_protocol_batch();
