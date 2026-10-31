@@ -2,6 +2,29 @@
 
 Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-31 UTC)
 
+## Delegated cgroup migration guard: 2026-10-31
+
+- The process supervisor now probes the parent service `cgroup.procs` from
+  the child after placing it in its command cgroup. If the kernel permits the
+  child to migrate back, spawn fails before the configured program executes.
+  Unexpected probe setup/write failures fail closed; permission-denied parent
+  controls are treated as migration isolation.
+- Extended the Linux regression to attempt both `setsid()` and migration to
+  the parent cgroup. In this environment, parent migration was permitted, so
+  the guard correctly rejected launch and the test verified the command's
+  start marker was never created. On a restricted delegated host, the same
+  test continues into the command and checks migration denial and descendant
+  cleanup.
+- Verification: all 10 `wayexpand-process-supervisor` tests passed; action
+  broker tests passed (88 library, 7 binary, 9 integration; 1 ignored for a
+  required interactive polkit grant); targeted Clippy with `-D warnings`,
+  `cargo fmt --all -- --check`, and `git diff --check` passed.
+- Limitation: this is fail-closed launch validation, not an OS-enforced
+  privilege boundary against a privileged actor or a separate concurrent
+  administrator changing cgroup policy. Commands remain trusted executable
+  content; a systemd-managed external containment manager is the stronger
+  architecture for mutually untrusted same-UID workloads.
+
 ## Launchpad Rust-version build failure: 2026-10-31
 
 - Investigated Launchpad build `33891053` from its full build log. It failed

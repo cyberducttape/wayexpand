@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Fail closed before executing a configured command if the command process can
+  migrate itself from its per-command cgroup back into the delegated service
+  cgroup. The pre-exec check runs with the child PID and kernel credentials;
+  successful migration probes abort before the configured executable starts.
+  Add regression coverage for writable parent cgroups and for `setsid()` plus
+  migration attempts where the host provides a restricted delegated cgroup.
 - Wrap transient matched text, rendered replacements, cached command output,
   deferred results, output commands, IBus commits, and GUI preview cache values
   in a zeroizing `SensitiveText` type. Each clone has independent zeroizing
@@ -29,9 +35,12 @@ All notable changes to WayExpand are documented here.
 - Put direct commands and broker actions launched by the bundled systemd units
   into individual delegated cgroup v2 groups. Timeout, cancellation, normal
   completion, and worker teardown now kill descendants even after `setsid()`;
-  process-group cleanup remains a secondary path. Managed command execution
-  fails closed when delegation or `cgroup.kill` is unavailable. Add a transient
-  systemd integration regression and update process-containment guidance.
+  process-group cleanup remains a secondary path. Before exec, probe whether
+  the command could migrate itself back to the service cgroup; refuse to run
+  configured code when that migration is allowed. Managed command execution
+  fails closed when delegation, `cgroup.kill`, or migration isolation is
+  unavailable. Add adversarial migration/`setsid()` regression coverage and
+  update process-containment guidance.
 - Require action-specific polkit authorization before every Action Broker
   execution. The broker binds authorization to the Unix peer's kernel-reported
   PID, process start time, and UID, requires fresh active-session

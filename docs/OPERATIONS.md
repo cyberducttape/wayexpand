@@ -165,6 +165,10 @@ before `exec`; timeout, cancellation, normal completion, and worker teardown
 kill that cgroup with `cgroup.kill`, then also clean up its process group.
 This catches descendants that fork and call `setsid()`. Managed services fail
 command startup closed if delegation or Linux `cgroup.kill` support is missing.
+Before exec, the child also probes whether it can move itself back into the
+service cgroup. If that migration is permitted, spawn is rejected before the
+configured program runs; the supervisor cannot safely contain commands in a
+delegation writable by those commands.
 This requires unified cgroup v2 with `cgroup.kill` support (Linux 5.14 or newer)
 and a systemd user manager that honors service delegation.
 When launched outside those units, WayExpand retains process-group cleanup as

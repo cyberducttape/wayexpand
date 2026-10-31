@@ -49,6 +49,8 @@ The values are defined in `crates/core/src/limits.rs`.
 Invalid values are rejected before a configuration becomes active. Runtime
 command execution is additionally bounded by the configured timeout. Bundled
 systemd units require delegated cgroup v2 containment, which also terminates
-descendants that call `setsid()`. Unmanaged launches use process-group cleanup
-as a compatibility fallback and cannot contain new sessions. Neither mechanism
-is a privilege sandbox; commands remain trusted executable content.
+descendants that call `setsid()`. Before executing a command, the supervisor
+checks whether that process could migrate into its service cgroup and refuses
+the command if migration is permitted. Unmanaged launches use process-group
+cleanup as a compatibility fallback and cannot contain new sessions. Neither
+mechanism is a privilege sandbox; commands remain trusted executable content.

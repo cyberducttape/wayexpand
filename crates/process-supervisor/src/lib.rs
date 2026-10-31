@@ -38,6 +38,7 @@ pub fn configure_process_group(command: &mut Command) {
 pub struct CommandCgroup {
     path: PathBuf,
     _procs: std::fs::File,
+    _parent_procs: Option<std::fs::File>,
     cleanup_attempted: bool,
 }
 
@@ -81,8 +82,36 @@ impl CommandCgroup {
             }
         };
         let procs_fd = procs.as_raw_fd();
+        // A delegated service owns its cgroup subtree. If the service-root
+        // cgroup.procs is writable by the command's UID, a child could move
+        // itself out of this command cgroup before cgroup.kill. Keep an
+        // opened descriptor so the pre-exec child can test the exact kernel
+        // migration permission before any untrusted program code runs.
+        let parent_procs = match std::fs::OpenOptions::new()
+            .write(true)
+            .open(parent.join("cgroup.procs"))
+        {
+            Ok(file) => Some(file),
+            // The command runs with the same credentials and cgroup access
+            // as this process. If we cannot open the parent control file for
+            // one of these permission-related reasons, the child cannot use
+            // it to migrate itself either.
+            Err(error)
+                if matches!(
+                    error.raw_os_error(),
+                    Some(libc::EACCES) | Some(libc::EPERM) | Some(libc::EROFS)
+                ) =>
+            {
+                None
+            }
+            Err(error) => {
+                let _ = std::fs::remove_dir(&path);
+                return Err(error);
+            }
+        };
+        let parent_procs_fd = parent_procs.as_ref().map(AsRawFd::as_raw_fd);
         // SAFETY: the child callback uses only getpid/write, performs no
-        // allocation or locking, and the descriptor remains open until exec.
+        // allocation or locking, and the descriptors remain open until exec.
         unsafe {
             command.pre_exec(move || {
                 let mut digits = [0u8; 20];
@@ -104,6 +133,33 @@ impl CommandCgroup {
                 if written as usize != bytes.len() {
                     return Err(io::Error::from(io::ErrorKind::WriteZero));
                 }
+
+                if let Some(parent_procs_fd) = parent_procs_fd {
+                    // cgroup v2 requires write access to the common
+                    // ancestor's cgroup.procs when moving a process between
+                    // sibling cgroups or back to the delegated service root.
+                    // Probe that exact operation while this process is in its
+                    // command cgroup. A successful write means the process
+                    // escaped; abort spawn before exec so no configured
+                    // command can run with that escape path available.
+                    let written = libc::write(parent_procs_fd, bytes.as_ptr().cast(), bytes.len());
+                    if written >= 0 {
+                        // `Command::spawn` transports only errno from
+                        // pre_exec back to the parent, so use a real errno
+                        // rather than a custom io::Error kind/message.
+                        return Err(io::Error::from_raw_os_error(libc::EACCES));
+                    }
+                    let error = io::Error::last_os_error();
+                    if !matches!(
+                        error.raw_os_error(),
+                        Some(libc::EACCES)
+                            | Some(libc::EPERM)
+                            | Some(libc::EROFS)
+                            | Some(libc::EINVAL)
+                    ) {
+                        return Err(error);
+                    }
+                }
                 Ok(())
             });
         }
@@ -117,6 +173,7 @@ impl CommandCgroup {
         Ok(Self {
             path,
             _procs: procs,
+            _parent_procs: parent_procs,
             cleanup_attempted: false,
         })
     }
@@ -663,11 +720,22 @@ mod tests {
 
     #[test]
     #[cfg(target_os = "linux")]
-    fn delegated_cgroup_cleanup_terminates_new_sessions() {
+    fn delegated_cgroup_rejects_or_terminates_new_session_parent_migration() {
+        let marker = std::env::temp_dir().join(format!(
+            "wayexpand-cgroup-child-started-{}-{}",
+            std::process::id(),
+            next_scope_id()
+        ));
+        let _ = std::fs::remove_file(&marker);
         let mut command = Command::new("sh");
-        command
-            .args(["-c", "setsid sh -c 'echo $$; exec sleep 30' & wait"])
-            .stdout(Stdio::piped());
+        command.args([
+            "-c",
+            &format!(
+                "echo started > '{}'; setsid sh -c 'path=$(sed -n '\''s/^0:://p'\'' /proc/self/cgroup); parent=/sys/fs/cgroup${{path%/*}}; if printf \"%s\\n\" \"$$\" > \"$parent/cgroup.procs\" 2>/dev/null; then echo migrated; else echo denied; fi; echo $$; exec sleep 30' & wait",
+                marker.display()
+            ),
+        ])
+        .stdout(Stdio::piped());
         configure_process_group(&mut command);
         let cgroup = match CommandCgroup::prepare_required(&mut command) {
             Ok(cgroup) => Some(cgroup),
@@ -679,17 +747,46 @@ mod tests {
                 return;
             }
         };
-        let child = command.spawn().expect("spawn test child");
+        let child = match command.spawn() {
+            Ok(child) => child,
+            Err(error) if error.raw_os_error() == Some(libc::EACCES) => {
+                assert!(
+                    !marker.exists(),
+                    "the command ran despite a writable service cgroup.procs"
+                );
+                return;
+            }
+            Err(error) => panic!("spawn guarded test child: {error}"),
+        };
+        assert!(marker.exists(), "test command did not start");
         let mut supervisor = ChildSupervisor::new_with_cgroup(child, cgroup);
         let mut stdout =
             std::io::BufReader::new(supervisor.take_stdout().expect("capture escaped PID"));
+        let mut migration = String::new();
+        stdout
+            .read_line(&mut migration)
+            .expect("read parent migration result");
+        let migration = migration.trim();
+        assert!(
+            matches!(migration, "denied" | "migrated"),
+            "unexpected parent migration result: {migration:?}"
+        );
         let mut escaped_pid = String::new();
         stdout
             .read_line(&mut escaped_pid)
-            .expect("read escaped PID");
+            .expect("read descendant PID");
         let escaped_pid = escaped_pid.trim().parse::<u32>().expect("valid PID");
 
         let _ = supervisor.reap().expect("kill cgroup and reap command");
+        if migration == "migrated" {
+            // The test deliberately cleans up if the kernel permits the
+            // migration, then fails below. Production pre-exec probing must
+            // prevent the configured command from reaching this point.
+            // SAFETY: this PID was emitted by the child test process.
+            unsafe {
+                libc::kill(escaped_pid as libc::pid_t, libc::SIGKILL);
+            }
+        }
         let deadline = std::time::Instant::now() + Duration::from_secs(1);
         while !process_is_gone_or_zombie(escaped_pid) && std::time::Instant::now() < deadline {
             thread::sleep(Duration::from_millis(5));
@@ -697,6 +794,11 @@ mod tests {
         assert!(
             process_is_gone_or_zombie(escaped_pid),
             "setsid descendant {escaped_pid} survived cgroup cleanup"
+        );
+        let _ = std::fs::remove_file(marker);
+        assert_eq!(
+            migration, "denied",
+            "a running command could migrate itself to the service cgroup"
         );
     }
 }
