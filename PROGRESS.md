@@ -1435,3 +1435,18 @@ pass with both default parallel scheduling and `RUST_TEST_THREADS=1`; the full
   headless KWin 6.6.6; the report remains uncertified and is preserved at
   [`docs/evidence/doctor-certify-48a39fb3.json`](docs/evidence/doctor-certify-48a39fb3.json).
   The real-session certification gate remains open.
+
+## Dependency policy audit: 2026-10-30
+
+- `cargo audit --deny yanked` passed with no vulnerability advisories and no
+  yanked locked dependencies. Three informational unmaintained advisories
+  affect the zbus 5 dependency lineage; `deny.toml` already records the
+  rationale for allowing them while current desktop integration dependencies
+  still require that major version.
+- `cargo deny check` passed. Removed 12 obsolete duplicate-version skips, one
+  unmatched Windows skip, and an unused BSL-1.0 license allowance. The check
+  still reports eight duplicate-version groups from upstream/platform-specific
+  dependency trees; these remain visible for review rather than being
+  blanket-suppressed.
+- Dependency audit findings do not change the status of the open real-session
+  certification and production acceptance gates.
