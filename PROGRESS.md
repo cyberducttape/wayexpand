@@ -1221,3 +1221,6 @@ pass with both default parallel scheduling and `RUST_TEST_THREADS=1`; the full
   wayexpand-daemon -p wayexpand-gui -p wayexpand --quiet`: 467 core tests
   passed (2 ignored), 2 core config-doc tests and snapshot consistency passed,
   212 daemon tests passed, 174 GUI tests passed, and 131 CLI tests passed.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`,
+  `cargo fmt --all -- --check`, Markdown-link validation (54 files, 483 local
+  links), documentation-contract checks, and `git diff --check`: passed.
