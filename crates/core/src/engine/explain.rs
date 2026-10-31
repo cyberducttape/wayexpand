@@ -186,8 +186,9 @@ impl ExpansionEngine {
         } else {
             explanation.push(
                 "sensitive field",
-                CheckStatus::Pass,
-                "not a sensitive field",
+                CheckStatus::Info,
+                "no sensitive-field signal is currently active; whether this field is safe is not \
+                 verified by this check",
             );
         }
         if self.form_active {

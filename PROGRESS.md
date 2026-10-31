@@ -4,6 +4,18 @@ Updated: 2026-10-30 (America/Denver; latest evidence collected through 2026-10-3
 
 ## Current verification and certification runner status: 2026-10-31 UTC
 
+- Fixed a misleading live/offline snippet explanation: when no sensitive-focus
+  event is active, it now reports that field safety is unverified instead of
+  claiming “not a sensitive field.” A positive signal still blocks the
+  expansion. This makes the explanation accurate on routes such as evdev that
+  cannot identify password fields; it does not add sensitive-field detection
+  or change route enforcement.
+- Added a core regression proving the no-signal explanation is informational,
+  explicitly says safety is not verified, and does not hide the independent
+  “would expand” result. The focused explanation suite passed (8 tests), then
+  `RUST_TEST_THREADS=1 cargo test --workspace --locked --quiet` completed with
+  1,364 passed, 0 failed, and 6 ignored. Workspace Clippy with `-D warnings`,
+  formatting, and `git diff --check` passed.
 - Re-ran `RUST_TEST_THREADS=1 cargo test --workspace --locked --quiet` on
   synchronized commit `6665d98401b5b610a11dece5851c53b8b5fff709`; every
   executed workspace test passed. The run included 2 ignored tests in their
@@ -68,6 +80,14 @@ Updated: 2026-10-30 (America/Denver; latest evidence collected through 2026-10-3
   route remains uncertified; the JSON is in `/tmp/wayexpand-active-doctor.json`
   and was not added to the repository because it describes this machine's
   private runtime state.
+- A newer read-only check using the working-tree CLI found the active daemon
+  at commit `1fb141d767f7` with control schema 14; the working-tree CLI is
+  `fc063a4054ab` and requires schema 15. This makes that CLI's live explanation
+  unavailable. It does not establish a mismatch with the user's installed
+  GUI/CLI or prove the cause of an expansion failure. The saved library
+  validates with 26 expansions; `.ty` and `.ssl` are enabled and render
+  successfully, while `.test` is absent. No service restart or install was
+  performed.
 
 ## Focused KWin real-client matrix: 2026-10-30 local / 2026-10-31 UTC
 

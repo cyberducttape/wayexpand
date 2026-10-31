@@ -5150,6 +5150,22 @@ fn explain_reports_runtime_state_that_blocks_matching() {
 }
 
 #[test]
+fn explain_does_not_claim_field_is_safe_without_a_sensitive_signal() {
+    let engine = explain_engine("[[expansion]]\ntrigger = \":sig\"\nreplacement = \"x\"\n");
+
+    let explanation = engine.explain(":sig", "libei");
+    let check = explanation
+        .checks
+        .iter()
+        .find(|check| check.name == "sensitive field")
+        .expect("explanation includes sensitive-field status");
+
+    assert_eq!(check.status, crate::CheckStatus::Info);
+    assert!(check.detail.contains("not verified"));
+    assert!(explanation.would_expand());
+}
+
+#[test]
 fn explain_gives_hints_for_unrecognized_triggers() {
     let engine = explain_engine(
         "[[expansion]]\ntrigger = \":Sig\"\nreplacement = \"x\"\n\
