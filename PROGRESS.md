@@ -1907,4 +1907,6 @@ pass with both default parallel scheduling and `RUST_TEST_THREADS=1`; the full
   against the process-wide bounded trace ring while unrelated tests could
   evict their entries. Those assertions now test the pure content-free reason
   mapping directly, eliminating cross-test interference.
-- Hosted CI for this follow-up is pending; no claim is made until it passes.
+- Hosted CI run `41226725007` for commit
+  `9d79a4c04b833238b99f96849604224df6dc70d9` completed successfully: all 33
+  jobs passed, including package install smoke tests on Ubuntu 26.04 and Fedora.
