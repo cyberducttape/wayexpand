@@ -9,8 +9,8 @@ milestone is complete only when its acceptance evidence is recorded in
 
 ### P1 — Require OS-mediated consent for broker actions
 
-**Status:** Implemented; package builds, hosted CI, and an interactive desktop
-authorization run are still required.
+**Status:** Implemented; hosted CI and Debian/RPM artifact checks pass. A
+logged-in desktop authorization prompt still needs manual verification.
 
 The broker now verifies each requested action with polkit using the socket
 peer's kernel-reported PID, process start time, and UID. The packaged action

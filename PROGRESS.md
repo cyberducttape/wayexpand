@@ -26,12 +26,18 @@ Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-3
   -- -D warnings`, formatting, shell syntax, XML parsing, and
   `scripts/test-action-broker-e2e.sh` passed. The end-to-end test confirms an
   unauthorised request cannot create its action marker.
-- Remaining evidence: package builds and hosted CI have not yet run on this
-  change. A real desktop authorization prompt has not been exercised. One
-  existing SIGTERM integration scenario now requires a live interactive grant
-  and is ignored in headless tests; subprocess cancellation remains covered by
+- Hosted CI passed 33/33 jobs for `7a93f36d` (run `41243593669`). Debian and
+  RPM packaging both passed and the artifact manifest checks confirmed the
+  installed polkit action. Launchpad sync (`41243593599`), CodeQL
+  (`41243593271`), and fuzz workflow (`41243593621`) also passed. The Arch
+  manifest and user-installer behavior are covered by repository CI checks.
+- A real desktop authorization prompt has not been exercised. One existing
+  SIGTERM integration scenario now requires an interactive grant and is
+  ignored in headless tests; subprocess cancellation remains covered by
   executor tests. Polkit consent is not automatic application identity or an
-  OS sandbox, and a user can still approve a deceptive request.
+  OS sandbox, and a user can still approve a deceptive request. No system
+  polkit policy was installed on the developer host and no real action prompt
+  was accepted.
 - Initial hosted CI for `2e913e52` found one ShellCheck issue in the source
   installer (`release_dir` versus `project_dir`); fixed and pushed in
   `1be7f9d8`. The corrected CI then exposed the service-sandbox audit test's
@@ -41,8 +47,7 @@ Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-3
 - CI on `2f38768d` found the authorization helper test depended on executable
   scripts in the temporary directory, which is mounted `noexec` on hosted
   runners. Replaced those scripts with `/usr/bin/true` and `/usr/bin/false`;
-  local `cargo test --locked -p action-broker -- --test-threads=8` passed
-  (88 passed, 1 ignored). The final hosted rerun is pending.
+  local concurrent tests passed and the final hosted run passed all 33 jobs.
 
 ## Live KDE session health and library validation: 2026-10-31
 
