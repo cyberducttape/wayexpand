@@ -798,12 +798,29 @@ fn create_topology_watch(path: &Path) -> rustix::io::Result<OwnedFd> {
 /// overflow, means the monitor cannot prove that all physical keyboards were
 /// observed during a replacement, so callers interrupt that operation.
 fn drain_topology_events(fd: BorrowedFd<'_>) -> Result<bool, EvdevError> {
+    use rustix::fs::inotify::{self, ReadFlags};
+
     let mut changed = false;
-    let mut buffer = [0_u8; 4096];
-    for _ in 0..64 {
-        match rustix::io::read(fd, &mut buffer) {
-            Ok(0) => break,
-            Ok(_) => changed = true,
+    let mut buffer = [std::mem::MaybeUninit::uninit(); 4096];
+    let mut reader = inotify::Reader::new(fd, &mut buffer);
+    let mut remaining = 512;
+    loop {
+        match reader.next() {
+            Ok(event) => {
+                if remaining == 0 {
+                    return Err(EvdevError::HotplugMonitor(
+                        "input-device topology event queue exceeded its drain budget".into(),
+                    ));
+                }
+                remaining -= 1;
+                let flags = event.events();
+                if flags.intersects(ReadFlags::IGNORED | ReadFlags::UNMOUNT) {
+                    return Err(EvdevError::HotplugMonitor(
+                        "input-device directory watch was removed".into(),
+                    ));
+                }
+                changed = true;
+            }
             Err(rustix::io::Errno::INTR) => continue,
             Err(rustix::io::Errno::AGAIN) => break,
             Err(error) => return Err(EvdevError::HotplugMonitor(error.to_string())),
@@ -1143,6 +1160,35 @@ mod tests {
 
         drop(watch);
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn input_topology_watch_invalidation_is_an_error() {
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-evdev-watch-invalidation-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir(&directory).unwrap();
+        let watch = create_topology_watch(&directory).unwrap();
+        std::fs::remove_dir(&directory).unwrap();
+
+        let mut poll_fds = [rustix::event::PollFd::new(
+            &watch,
+            rustix::event::PollFlags::IN,
+        )];
+        let timeout = rustix::event::Timespec {
+            tv_sec: 1,
+            tv_nsec: 0,
+        };
+        assert_eq!(
+            rustix::event::poll(&mut poll_fds, Some(&timeout)).unwrap(),
+            1
+        );
+        let error = drain_topology_events(watch.as_fd()).unwrap_err();
+        assert!(matches!(error, EvdevError::HotplugMonitor(_)));
+
+        drop(watch);
     }
 
     #[test]

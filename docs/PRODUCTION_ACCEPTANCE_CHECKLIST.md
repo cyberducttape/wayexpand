@@ -49,6 +49,8 @@ session evidence; unit tests alone do not satisfy them.
       device-node create, remove, move, attribute change, or watcher failure
       interrupts pending non-atomic output; device discovery is deferred until
       the next ordinary input turn so discovery cannot delay cancellation.
+      Watch invalidation, unmount, read failure, and excessive event backlog
+      retire the monitor instead of leaving it silently inactive.
       Unit tests verify notification delivery and interruption before
       discovery, but do not verify a real keyboard hotplug during output.
       A separate `modifier-during-nonatomic-replacement` certification case

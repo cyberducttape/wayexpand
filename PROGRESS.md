@@ -12,11 +12,14 @@ Updated: 2026-10-30 (America/Denver; latest evidence collected through 2026-10-3
   startup race. If the watcher fails during operation, the source reports a
   retryable error so pending output is treated as uncertain and canceled.
 - Added regressions for inotify node creation and for a hotplug event
-  interrupting output before discovery. Full evdev tests: 23 passed, 1 ignored.
-  `RUST_TEST_THREADS=1 cargo test --workspace --locked --quiet`: 1,366 passed,
-  0 failed, 6 ignored. Workspace Clippy with `-D warnings`, formatting, and
-  `git diff --check` passed. This is unit evidence; physical hotplug during
-  real output remains in the open certification matrix.
+  interrupting output before discovery. The watcher now parses inotify event
+  records and fails closed on invalidation, unmount, read failure, or a drain
+  budget overrun; regressions cover node creation and invalidation. Full evdev
+  tests: 24 passed, 1 ignored. `RUST_TEST_THREADS=1 cargo test --workspace
+  --locked --quiet`: 1,367 passed, 0 failed, 6 ignored. Workspace Clippy with
+  `-D warnings`, formatting, and `git diff --check` passed. This is unit
+  evidence; physical hotplug during real output remains in the open
+  certification matrix.
 - Fixed a misleading live/offline snippet explanation: when no sensitive-focus
   event is active, it now reports that field safety is unverified instead of
   claiming “not a sensitive field.” A positive signal still blocks the
