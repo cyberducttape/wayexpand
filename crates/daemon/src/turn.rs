@@ -12,7 +12,6 @@ use crate::status_publisher::{
     set_daemon_status_with_runtime_capabilities_and_config_state,
 };
 use crate::*;
-use wayexpand_core::CheckStatus;
 
 fn compute_effective_pause(user_paused: bool, profile_switch_pending: bool) -> bool {
     user_paused || profile_switch_pending
@@ -614,69 +613,63 @@ impl Daemon {
         }
     }
 
-    /// Answer a pending `explain` request from the live engine state, adding
-    /// what only the daemon knows: whether the output route is connected.
-    pub(crate) fn answer_explain_request(&mut self) {
-        // Process only the bounded batch currently queued. New control
-        // requests arriving during this loop are left for the next reactor
-        // turn so a busy diagnostics client cannot starve keyboard input.
-        for request in self.control.take_explain_requests() {
-            self.answer_one_explain_request(request);
-        }
-    }
-
-    fn answer_one_explain_request(&mut self, request: crate::control::ExplainRequest) {
+    /// Publish the small state diagnostics need. Matching and rendering are
+    /// performed only by the isolated diagnostics worker.
+    pub(crate) fn publish_explain_snapshot(&mut self) {
         let backend = wayexpand_core::policy_backend_name(self.active_source, self.active_backend);
-        let mut explanation = self.config.engine.explain(&request.text, backend);
-        explanation.push(
-            "daemon",
-            CheckStatus::Pass,
-            format!(
-                "running with {} capture and {} output",
-                self.active_source, self.active_backend
-            ),
-        );
         let output_connected = if self.input_method_mode {
             self.input_method.is_some()
         } else {
             self.backend_name == "none" || self.injector.is_some()
         };
-        if self.backend_name == "none" && !self.input_method_mode {
-            explanation.push(
-                "output backend",
-                CheckStatus::Info,
-                "no output backend (test mode): matches are reported, not typed",
-            );
-        } else if output_connected {
-            explanation.push("output backend", CheckStatus::Pass, "connected");
-            if let Some(capabilities) = self.output_capabilities() {
-                self.config
-                    .engine
-                    .explain_output_route(&mut explanation, &capabilities);
-            }
-        } else {
-            explanation.push(
-                "output backend",
-                CheckStatus::Fail,
-                format!("not connected ({})", self.connection_state),
-            );
+        let capabilities = self.output_capabilities();
+        let current_window = self.config.engine.current_window();
+        let unchanged = self
+            .explain_snapshot_cache
+            .as_ref()
+            .is_some_and(|previous| {
+                Arc::ptr_eq(&previous.validated, self.config.engine.validated_config())
+                    && previous.backend == backend
+                    && previous.capture == self.active_source
+                    && previous.output == self.active_backend
+                    && previous.connection_detail == self.connection_state
+                    && previous.output_connected == output_connected
+                    && previous.capabilities == capabilities
+                    && previous.paused == self.config.engine.is_user_paused()
+                    && previous.sensitive == self.config.engine.is_sensitive_focus()
+                    && previous.composition == self.config.engine.is_composition_active()
+                    && previous.form_open == self.config.engine.is_form_open()
+                    && previous.window.as_deref() == current_window
+                    && previous.form_guarantee == self.config.engine.form_replacement_guarantee()
+                    && previous.commands_disabled == self.config.engine.commands_disabled()
+                    && previous.direct_commands_disabled
+                        == self.config.engine.direct_commands_disabled()
+                    && previous.title_matching_disabled
+                        == self.config.engine.title_matching_disabled()
+            });
+        if unchanged {
+            return;
         }
-        let answer = if request.json {
-            let suppressed_by = explanation.suppressed_by().map(|check| check.name);
-            format!(
-                "{}\n",
-                serde_json::json!({
-                    "would_expand": suppressed_by.is_none(),
-                    "suppressed_by": suppressed_by,
-                    "typed": explanation.typed,
-                    "snippet": explanation.snippet,
-                    "checks": explanation.checks,
-                })
-            )
-        } else {
-            explanation.render_text()
+        let snapshot = crate::control::ExplainSnapshot {
+            validated: Arc::clone(self.config.engine.validated_config()),
+            backend,
+            capture: self.active_source,
+            output: self.active_backend,
+            connection_detail: self.connection_state,
+            output_connected,
+            capabilities,
+            paused: self.config.engine.is_user_paused(),
+            sensitive: self.config.engine.is_sensitive_focus(),
+            composition: self.config.engine.is_composition_active(),
+            form_open: self.config.engine.is_form_open(),
+            window: current_window.cloned().map(Arc::new),
+            form_guarantee: self.config.engine.form_replacement_guarantee(),
+            commands_disabled: self.config.engine.commands_disabled(),
+            direct_commands_disabled: self.config.engine.direct_commands_disabled(),
+            title_matching_disabled: self.config.engine.title_matching_disabled(),
         };
-        let _ = request.reply.try_send(answer);
+        self.control.set_explain_snapshot(snapshot.clone());
+        self.explain_snapshot_cache = Some(snapshot);
     }
 }
 

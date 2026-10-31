@@ -1,6 +1,5 @@
 use anyhow::{bail, Context, Result};
 use std::{
-    collections::VecDeque,
     fs,
     io::{Read, Write},
     os::fd::AsRawFd,
@@ -29,9 +28,8 @@ use crate::socket_security::{
 const MAX_COMMAND_BYTES: usize = 1024;
 const CONTROL_IO_TIMEOUT: Duration = Duration::from_secs(2);
 const CONTROL_WORKERS: usize = 4;
-/// Match the pending explanation bound to the number of accepted control
-/// workers. Explain requests must not overwrite one another, and a stalled
-/// reactor must not allow timed-out clients to grow an unbounded queue.
+/// The diagnostics worker is single-consumer and bounded independently of
+/// the keyboard reactor.
 const EXPLAIN_QUEUE_CAPACITY: usize = CONTROL_WORKERS;
 const CONTROL_BUSY_RESPONSE: &[u8] = b"error=busy\nretryable=true\n";
 const CONTROL_MUTATIONS_DISABLED_RESPONSE: &[u8] =
@@ -59,9 +57,8 @@ pub struct ControlServer {
     /// user action and a stale queued one must never fire later.
     insert_requested: Arc<Mutex<Option<InsertRequest>>>,
     focus_snapshot: Arc<Mutex<FocusSnapshot>>,
-    /// A pending `explain` request, answered by the reactor from its live
-    /// engine state.
-    explain_requested: Arc<Mutex<VecDeque<ExplainRequest>>>,
+    explain_snapshot: Arc<Mutex<Option<ExplainSnapshot>>>,
+    _explain_worker: Option<JoinHandle<()>>,
     usage_clear: Arc<Mutex<Option<crate::usage::UsageClearHandle>>>,
     status: Arc<Mutex<String>>,
     /// Wakes the reactor after a request that changes daemon state.
@@ -89,8 +86,29 @@ pub struct ExplainRequest {
     pub reply: std::sync::mpsc::SyncSender<String>,
 }
 
-/// How long a control client waits for the reactor to answer an explain
-/// request before being told the daemon is busy.
+/// Cheap immutable daemon state consumed by the diagnostics worker. The
+/// worker owns the engine and refreshes runtime state from this snapshot.
+#[derive(Clone)]
+pub(crate) struct ExplainSnapshot {
+    pub validated: Arc<wayexpand_core::ValidatedConfig>,
+    pub backend: &'static str,
+    pub capture: &'static str,
+    pub output: &'static str,
+    pub connection_detail: &'static str,
+    pub output_connected: bool,
+    pub capabilities: Option<wayexpand_core::InjectorCapabilities>,
+    pub paused: bool,
+    pub sensitive: bool,
+    pub composition: bool,
+    pub form_open: bool,
+    pub window: Option<Arc<wayexpand_core::WindowContext>>,
+    pub form_guarantee: wayexpand_core::ReplacementGuarantee,
+    pub commands_disabled: bool,
+    pub direct_commands_disabled: bool,
+    pub title_matching_disabled: bool,
+}
+
+/// Bound the time a control client waits for a diagnostics-worker response.
 const EXPLAIN_REPLY_TIMEOUT: Duration = Duration::from_millis(1500);
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -111,7 +129,8 @@ impl ControlServer {
             control_rejected_total: Arc::new(AtomicU64::new(0)),
             insert_requested: Arc::new(Mutex::new(None)),
             focus_snapshot: Arc::new(Mutex::new(FocusSnapshot::default())),
-            explain_requested: Arc::new(Mutex::new(VecDeque::new())),
+            explain_snapshot: Arc::new(Mutex::new(None)),
+            _explain_worker: None,
             usage_clear: Arc::new(Mutex::new(None)),
             status: Arc::new(Mutex::new("starting".into())),
             waker: Arc::default(),
@@ -210,9 +229,16 @@ impl ControlServer {
         let control_rejected_total = Arc::new(AtomicU64::new(0));
         let insert_requested = Arc::new(Mutex::new(None));
         let focus_snapshot = Arc::new(Mutex::new(FocusSnapshot::default()));
-        let explain_requested = Arc::new(Mutex::new(VecDeque::new()));
+        let explain_snapshot = Arc::new(Mutex::new(None));
+        let (explain_requests, explain_receiver) =
+            std::sync::mpsc::sync_channel(EXPLAIN_QUEUE_CAPACITY);
+        let worker_snapshot = Arc::clone(&explain_snapshot);
+        let explain_worker = thread::Builder::new()
+            .name("wayexpand-diagnostics".into())
+            .spawn(move || explain_worker(explain_receiver, worker_snapshot))
+            .context("starting diagnostics worker")?;
         let usage_clear = Arc::new(Mutex::new(None));
-        let explain_slot = Arc::clone(&explain_requested);
+        let explain_slot = explain_requests.clone();
         let usage_clear_slot = Arc::clone(&usage_clear);
         let status = Arc::new(Mutex::new("starting".into()));
         let waker: crate::waker::WakerSlot = Arc::default();
@@ -264,7 +290,7 @@ impl ControlServer {
                         require_verified_insert,
                         disable_control_socket_mutations,
                         focus: Arc::clone(&focus_slot),
-                        explain: Arc::clone(&explain_slot),
+                        explain: explain_slot.clone(),
                         usage_clear: Arc::clone(&usage_clear_slot),
                         status: Arc::clone(&status_flag),
                         waker: Arc::clone(&waker_slot),
@@ -309,7 +335,8 @@ impl ControlServer {
             control_rejected_total,
             insert_requested,
             focus_snapshot,
-            explain_requested,
+            explain_snapshot,
+            _explain_worker: Some(explain_worker),
             usage_clear,
             status,
             waker,
@@ -320,9 +347,10 @@ impl ControlServer {
         })
     }
 
-    /// Take a pending explain request; the reactor answers it on `reply`.
-    pub fn take_explain_requests(&self) -> VecDeque<ExplainRequest> {
-        take_explain_requests(&self.explain_requested)
+    pub fn set_explain_snapshot(&self, snapshot: ExplainSnapshot) {
+        if let Ok(mut current) = self.explain_snapshot.lock() {
+            *current = Some(snapshot);
+        }
     }
 
     /// Take the pending insert request, if any.
@@ -458,7 +486,7 @@ struct Flags {
     require_verified_insert: bool,
     disable_control_socket_mutations: bool,
     focus: Arc<Mutex<FocusSnapshot>>,
-    explain: Arc<Mutex<VecDeque<ExplainRequest>>>,
+    explain: std::sync::mpsc::SyncSender<ExplainRequest>,
     usage_clear: Arc<Mutex<Option<crate::usage::UsageClearHandle>>>,
     status: Arc<Mutex<String>>,
     waker: crate::waker::WakerSlot,
@@ -539,8 +567,7 @@ fn insert_request(line: &str) -> Option<Option<InsertRequest>> {
 /// reactor and wait for its answer. Returns `None` for other commands.
 fn explain_request(
     line: &str,
-    queue: &Mutex<VecDeque<ExplainRequest>>,
-    waker: &crate::waker::WakerSlot,
+    queue: &std::sync::mpsc::SyncSender<ExplainRequest>,
 ) -> Result<Option<String>> {
     let line = line.strip_suffix('\n').unwrap_or(line);
     let line = line.strip_suffix('\r').unwrap_or(line);
@@ -560,14 +587,13 @@ fn explain_request(
         json,
         reply,
     };
-    if !enqueue_explain_request(queue, request)? {
+    if queue.try_send(request).is_err() {
         return Ok(Some(if json {
             "{\"error\":\"busy\",\"retryable\":true}\n".into()
         } else {
             "explain unavailable: daemon is busy; retry\n".into()
         }));
     }
-    crate::waker::wake_slot(waker);
     Ok(Some(
         answer
             .recv_timeout(EXPLAIN_REPLY_TIMEOUT)
@@ -575,28 +601,109 @@ fn explain_request(
     ))
 }
 
-/// Append an explanation without replacing an older request. The control
-/// worker admission limit and queue capacity bound memory and ensure callers
-/// receive either their own answer or an explicit busy response.
-fn enqueue_explain_request(
-    queue: &Mutex<VecDeque<ExplainRequest>>,
-    request: ExplainRequest,
-) -> Result<bool> {
-    let mut queue = queue
-        .lock()
-        .map_err(|_| anyhow::anyhow!("explain lock poisoned"))?;
-    if queue.len() >= EXPLAIN_QUEUE_CAPACITY {
-        return Ok(false);
-    }
-    queue.push_back(request);
-    Ok(true)
-}
+fn explain_worker(
+    requests: std::sync::mpsc::Receiver<ExplainRequest>,
+    snapshot: Arc<Mutex<Option<ExplainSnapshot>>>,
+) {
+    let mut engine: Option<wayexpand_core::ExpansionEngine> = None;
+    let mut validated: Option<Arc<wayexpand_core::ValidatedConfig>> = None;
+    while let Ok(request) = requests.recv() {
+        let started = Instant::now();
+        let current = snapshot.lock().ok().and_then(|snapshot| snapshot.clone());
+        let answer = current.map_or_else(
+            || "explain unavailable: diagnostics are starting; retry\n".to_owned(),
+            |state| {
+                if validated
+                    .as_ref()
+                    .is_none_or(|previous| !Arc::ptr_eq(previous, &state.validated))
+                {
+                    engine = Some(wayexpand_core::ExpansionEngine::from_validated(Arc::clone(
+                        &state.validated,
+                    )));
+                    validated = Some(Arc::clone(&state.validated));
+                }
+                let Some(engine) = engine.as_mut() else {
+                    return "explain unavailable: diagnostics could not initialize\n".to_owned();
+                };
+                engine.set_user_paused(state.paused);
+                engine.set_sensitive_focus(state.sensitive);
+                engine.set_composition_active(state.composition);
+                engine.set_form_open_for_diagnostics(state.form_open);
+                engine.set_current_window(state.window.as_deref().cloned());
+                engine.set_form_replacement_guarantee(state.form_guarantee);
+                engine.set_commands_disabled(state.commands_disabled);
+                engine.set_direct_commands_disabled(state.direct_commands_disabled);
+                engine.set_title_matching_disabled(state.title_matching_disabled);
 
-fn take_explain_requests(queue: &Mutex<VecDeque<ExplainRequest>>) -> VecDeque<ExplainRequest> {
-    queue
-        .lock()
-        .map(|mut queue| std::mem::take(&mut *queue))
-        .unwrap_or_default()
+                let mut explanation = engine.explain_diagnostic(&request.text, state.backend);
+                explanation.push(
+                    "daemon",
+                    wayexpand_core::CheckStatus::Pass,
+                    format!(
+                        "running with {} capture and {} output",
+                        state.capture, state.output
+                    ),
+                );
+                if state.output == "none" {
+                    explanation.push(
+                        "output backend",
+                        wayexpand_core::CheckStatus::Info,
+                        "no output backend (test mode): matches are reported, not typed",
+                    );
+                } else if state.output_connected {
+                    explanation.push(
+                        "output backend",
+                        wayexpand_core::CheckStatus::Pass,
+                        "connected",
+                    );
+                    if explanation.snippet.is_some() {
+                        let route_detail = state.capabilities.as_ref().map_or_else(
+                            || "route-specific replacement compatibility is not evaluated by control-socket diagnostics".to_owned(),
+                            |capabilities| format!(
+                                "{} selected; replacement compatibility is not evaluated by control-socket diagnostics",
+                                capabilities.insertion_mode
+                            ),
+                        );
+                        explanation.push(
+                            "output route",
+                            wayexpand_core::CheckStatus::Info,
+                            route_detail,
+                        );
+                    }
+                } else {
+                    explanation.push(
+                        "output backend",
+                        wayexpand_core::CheckStatus::Fail,
+                        format!("not connected ({})", state.connection_detail),
+                    );
+                }
+                if started.elapsed() > EXPLAIN_REPLY_TIMEOUT {
+                    return if request.json {
+                        "{\"error\":\"deadline\",\"retryable\":true}\n".to_owned()
+                    } else {
+                        "explain unavailable: diagnostics exceeded their time budget; retry\n"
+                            .to_owned()
+                    };
+                }
+                if request.json {
+                    let suppressed_by = explanation.suppressed_by().map(|check| check.name);
+                    format!(
+                        "{}\n",
+                        serde_json::json!({
+                            "would_expand": suppressed_by.is_none(),
+                            "suppressed_by": suppressed_by,
+                            "typed": explanation.typed,
+                            "snippet": explanation.snippet,
+                            "checks": explanation.checks,
+                        })
+                    )
+                } else {
+                    explanation.render_text()
+                }
+            },
+        );
+        let _ = request.reply.try_send(answer);
+    }
 }
 
 /// Read one request line within `budget` for the whole request, not per
@@ -694,7 +801,7 @@ fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
         stream.write_all(response.as_bytes())?;
         return Ok(());
     }
-    if let Some(response) = explain_request(&command, &explain, &waker)? {
+    if let Some(response) = explain_request(&command, &explain)? {
         stream.write_all(response.as_bytes())?;
         return Ok(());
     }
@@ -850,44 +957,25 @@ mod tests {
     use std::io::Read;
     use std::sync::atomic::Ordering;
 
-    fn pending_explanation(text: &str) -> (ExplainRequest, std::sync::mpsc::Receiver<String>) {
-        let (reply, response) = std::sync::mpsc::sync_channel(1);
-        (
-            ExplainRequest {
-                text: text.to_owned(),
-                json: true,
-                reply,
-            },
-            response,
-        )
-    }
-
     #[test]
     fn simultaneous_explain_clients_receive_their_own_fifo_answers() {
-        let queue = Arc::new(Mutex::new(VecDeque::new()));
-        let waker = crate::waker::WakerSlot::default();
-        let first_queue = Arc::clone(&queue);
-        let first_waker = Arc::clone(&waker);
+        let (queue, requests) = std::sync::mpsc::sync_channel(EXPLAIN_QUEUE_CAPACITY);
+        let first_queue = queue.clone();
         let first = thread::spawn(move || {
-            explain_request("explain-json .first", &first_queue, &first_waker)
+            explain_request("explain-json .first", &first_queue)
                 .unwrap()
                 .unwrap()
         });
-        wait_for_explain_queue_len(&queue, 1);
 
-        let second_queue = Arc::clone(&queue);
-        let second_waker = Arc::clone(&waker);
+        let second_queue = queue.clone();
         let second = thread::spawn(move || {
-            explain_request("explain-json .second", &second_queue, &second_waker)
+            explain_request("explain-json .second", &second_queue)
                 .unwrap()
                 .unwrap()
         });
-        wait_for_explain_queue_len(&queue, 2);
 
-        // This is the reactor operation: answer the current bounded batch.
-        // Both callers must receive their own answer rather than one being
-        // overwritten when the second request arrives.
-        for request in take_explain_requests(&queue) {
+        for _ in 0..2 {
+            let request = requests.recv_timeout(Duration::from_millis(500)).unwrap();
             request
                 .reply
                 .try_send(format!("answer for {}", request.text))
@@ -895,41 +983,188 @@ mod tests {
         }
         assert_eq!(first.join().unwrap(), "answer for .first");
         assert_eq!(second.join().unwrap(), "answer for .second");
-        assert!(take_explain_requests(&queue).is_empty());
-    }
-
-    fn wait_for_explain_queue_len(queue: &Mutex<VecDeque<ExplainRequest>>, expected: usize) {
-        let deadline = Instant::now() + Duration::from_millis(500);
-        while queue.lock().unwrap().len() != expected {
-            assert!(Instant::now() < deadline, "explain client did not enqueue");
-            thread::yield_now();
-        }
     }
 
     #[test]
     fn saturated_explanation_queue_returns_retryable_response_without_overwriting() {
-        let queue = Mutex::new(VecDeque::new());
-        let _receivers = (0..EXPLAIN_QUEUE_CAPACITY)
-            .map(|index| {
-                let (request, response) = pending_explanation(&format!(".pending{index}"));
-                assert!(enqueue_explain_request(&queue, request).unwrap());
-                response
-            })
-            .collect::<Vec<_>>();
-        let waker = Arc::default();
+        let (queue, _requests) = std::sync::mpsc::sync_channel(EXPLAIN_QUEUE_CAPACITY);
+        let mut held_replies = Vec::new();
+        for index in 0..EXPLAIN_QUEUE_CAPACITY {
+            let (reply, response) = std::sync::mpsc::sync_channel(1);
+            held_replies.push(response);
+            queue
+                .try_send(ExplainRequest {
+                    text: format!(".pending{index}"),
+                    json: true,
+                    reply,
+                })
+                .unwrap();
+        }
 
-        let json = explain_request("explain-json .extra", &queue, &waker)
+        let json = explain_request("explain-json .extra", &queue)
             .unwrap()
             .unwrap();
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&json).unwrap(),
             serde_json::json!({"error": "busy", "retryable": true})
         );
-        let text = explain_request("explain .extra", &queue, &waker)
+        let text = explain_request("explain .extra", &queue).unwrap().unwrap();
+        assert_eq!(text, "explain unavailable: daemon is busy; retry\n");
+        drop(held_replies);
+    }
+
+    #[test]
+    fn diagnostics_worker_answers_clipboard_snippets_without_rendering_them() {
+        let config = wayexpand_core::Config::parse(
+            "[settings]\nallow_clipboard = true\n\
+             [[expansion]]\ntrigger = ':clip'\nreplacement = '{{clipboard}}'\n",
+        )
+        .unwrap();
+        let validated = Arc::new(config.validate_snapshot().unwrap());
+        let snapshot = Arc::new(Mutex::new(Some(ExplainSnapshot {
+            validated,
+            backend: "test",
+            capture: "test-capture",
+            output: "none",
+            connection_detail: "test mode",
+            output_connected: true,
+            capabilities: None,
+            paused: false,
+            sensitive: false,
+            composition: false,
+            form_open: false,
+            window: None,
+            form_guarantee: wayexpand_core::ReplacementGuarantee::Unsupported,
+            commands_disabled: false,
+            direct_commands_disabled: false,
+            title_matching_disabled: false,
+        })));
+        let (sender, receiver) = std::sync::mpsc::sync_channel(EXPLAIN_QUEUE_CAPACITY);
+        let worker = thread::spawn(move || explain_worker(receiver, snapshot));
+
+        let started = Instant::now();
+        let answer = explain_request("explain-json :clip", &sender)
             .unwrap()
             .unwrap();
-        assert_eq!(text, "explain unavailable: daemon is busy; retry\n");
-        assert_eq!(queue.lock().unwrap().len(), EXPLAIN_QUEUE_CAPACITY);
+        let elapsed = started.elapsed();
+        let response: serde_json::Value = serde_json::from_str(&answer).unwrap();
+        let checks = response["checks"].as_array().unwrap();
+        assert!(checks.iter().any(|check| {
+            check["name"] == "replacement"
+                && check["detail"] == "not rendered by control-socket diagnostics"
+        }));
+        assert!(checks.iter().any(|check| {
+            check["name"] == "variables"
+                && check["detail"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("clipboard")
+        }));
+        assert!(elapsed < Duration::from_millis(500));
+
+        drop(sender);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn socket_diagnostic_flood_does_not_stall_keyboard_processing_with_slow_clipboard() {
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-explain-stress-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&directory).unwrap();
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let socket = directory.join("control.sock");
+        let server = ControlServer::start_at(&socket, false, false).unwrap();
+        let config = wayexpand_core::Config::parse(
+            "[settings]\nallow_clipboard = true\n\
+             [[expansion]]\ntrigger = ':clip'\nreplacement = '{{clipboard}}'\n",
+        )
+        .unwrap();
+        server.set_explain_snapshot(ExplainSnapshot {
+            validated: Arc::new(config.validate_snapshot().unwrap()),
+            backend: "test",
+            capture: "test-capture",
+            output: "none",
+            connection_detail: "test mode",
+            output_connected: true,
+            capabilities: None,
+            paused: false,
+            sensitive: false,
+            composition: false,
+            form_open: false,
+            window: None,
+            form_guarantee: wayexpand_core::ReplacementGuarantee::Unsupported,
+            commands_disabled: false,
+            direct_commands_disabled: false,
+            title_matching_disabled: false,
+        });
+
+        let stop_input = Arc::new(AtomicBool::new(false));
+        let max_input_delay_ns = Arc::new(AtomicU64::new(0));
+        let clipboard_reads = Arc::new(AtomicU64::new(0));
+        let input_stop = Arc::clone(&stop_input);
+        let max_delay = Arc::clone(&max_input_delay_ns);
+        let reads = Arc::clone(&clipboard_reads);
+        let input_thread = thread::spawn(move || {
+            let mut engine = wayexpand_core::ExpansionEngine::new(
+                wayexpand_core::Config::parse(
+                    "[settings]\nallow_clipboard = true\n\
+                     [[expansion]]\ntrigger = ':clip'\nreplacement = '{{clipboard}}'\n",
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            engine.set_clipboard_reader(Some(wayexpand_core::ClipboardReader(Arc::new(
+                move || {
+                    reads.fetch_add(1, Ordering::Relaxed);
+                    thread::sleep(Duration::from_millis(250));
+                    Some("slow clipboard".to_owned())
+                },
+            ))));
+            let mut pending = Vec::new();
+            while !input_stop.load(Ordering::Acquire) {
+                let started = Instant::now();
+                engine.process_deferred_char_into('x', &mut pending);
+                max_delay.fetch_max(
+                    started.elapsed().as_nanos().min(u64::MAX as u128) as u64,
+                    Ordering::Relaxed,
+                );
+            }
+        });
+
+        let clients = (0..CONTROL_WORKERS)
+            .map(|_| {
+                let socket = socket.clone();
+                thread::spawn(move || {
+                    for _ in 0..12 {
+                        let mut stream = UnixStream::connect(&socket).unwrap();
+                        stream.write_all(b"explain-json :clip\n").unwrap();
+                        let mut response = String::new();
+                        stream.read_to_string(&mut response).unwrap();
+                        assert!(!response.is_empty());
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        for client in clients {
+            client.join().unwrap();
+        }
+        stop_input.store(true, Ordering::Release);
+        input_thread.join().unwrap();
+
+        assert_eq!(clipboard_reads.load(Ordering::Relaxed), 0);
+        assert!(
+            max_input_delay_ns.load(Ordering::Relaxed) < 100_000_000,
+            "maximum simulated input processing gap was {} ms",
+            max_input_delay_ns.load(Ordering::Relaxed) / 1_000_000
+        );
+        drop(server);
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -948,7 +1183,7 @@ mod tests {
             require_verified_insert: true,
             disable_control_socket_mutations: true,
             focus,
-            explain: Arc::new(Mutex::new(VecDeque::new())),
+            explain: std::sync::mpsc::sync_channel(EXPLAIN_QUEUE_CAPACITY).0,
             usage_clear: Arc::new(Mutex::new(None)),
             status: Arc::new(Mutex::new("running".into())),
             waker: Arc::default(),
@@ -1003,7 +1238,7 @@ mod tests {
                 token: Some("window-instance-id".into()),
                 exact_window_identity: true,
             })),
-            explain: Arc::new(Mutex::new(VecDeque::new())),
+            explain: std::sync::mpsc::sync_channel(EXPLAIN_QUEUE_CAPACITY).0,
             usage_clear: Arc::new(Mutex::new(None)),
             status: Arc::new(Mutex::new("running".into())),
             waker: Arc::default(),
@@ -1112,7 +1347,7 @@ mod tests {
                     require_verified_insert: false,
                     disable_control_socket_mutations: false,
                     focus,
-                    explain: Arc::new(Mutex::new(VecDeque::new())),
+                    explain: std::sync::mpsc::sync_channel(EXPLAIN_QUEUE_CAPACITY).0,
                     usage_clear: Arc::new(Mutex::new(None)),
                     status: status_worker,
                     waker: Arc::default(),
@@ -1170,7 +1405,7 @@ mod tests {
             require_verified_insert: true,
             disable_control_socket_mutations: false,
             focus: Arc::new(Mutex::new(FocusSnapshot::default())),
-            explain: Arc::new(Mutex::new(VecDeque::new())),
+            explain: std::sync::mpsc::sync_channel(EXPLAIN_QUEUE_CAPACITY).0,
             usage_clear: Arc::new(Mutex::new(None)),
             status: Arc::new(Mutex::new(String::new())),
             waker: Arc::default(),
@@ -1210,7 +1445,7 @@ mod tests {
             require_verified_insert: false,
             disable_control_socket_mutations: false,
             focus: Arc::clone(&focus),
-            explain: Arc::new(Mutex::new(VecDeque::new())),
+            explain: std::sync::mpsc::sync_channel(EXPLAIN_QUEUE_CAPACITY).0,
             usage_clear: Arc::new(Mutex::new(None)),
             status,
             waker: Arc::default(),
@@ -1527,7 +1762,7 @@ mod tests {
             require_verified_insert: false,
             disable_control_socket_mutations: false,
             focus: Arc::new(Mutex::new(FocusSnapshot::default())),
-            explain: Arc::new(Mutex::new(VecDeque::new())),
+            explain: std::sync::mpsc::sync_channel(EXPLAIN_QUEUE_CAPACITY).0,
             usage_clear: Arc::new(Mutex::new(None)),
             status: Arc::new(Mutex::new(String::new())),
             waker: slot,

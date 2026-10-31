@@ -4,6 +4,14 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Move control-socket `explain` requests to a dedicated, bounded diagnostics
+  worker that uses immutable validated-configuration and runtime snapshots.
+  The keyboard reactor no longer scans snippets or renders replacements for
+  diagnostics. Control explanations identify configured dynamic variables
+  without resolving clipboard, environment, or random values, and enforce a
+  cooperative 100 ms analysis deadline. Route-specific replacement
+  compatibility is explicitly reported as unevaluated. Add regressions for
+  queue saturation and clipboard-backed diagnostics.
 - Fail closed before executing a configured command if the command process can
   migrate itself from its per-command cgroup back into the delegated service
   cgroup. The pre-exec check runs with the child PID and kernel credentials;

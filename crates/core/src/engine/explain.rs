@@ -5,6 +5,7 @@
 //! only its size.
 
 use serde::Serialize;
+use std::time::{Duration, Instant};
 
 use super::{route_limit, ExpansionEngine, RouteLimit};
 use crate::{AppFilter, InjectorCapabilities, MatchMode, ReplacementGuarantee};
@@ -75,10 +76,34 @@ impl Explanation {
 }
 
 impl ExpansionEngine {
+    const DIAGNOSTIC_BUDGET: Duration = Duration::from_millis(100);
     /// Explain what would happen if `typed` were typed now. `backend` is the
     /// policy identity of the active output route (for example `libei` or
     /// `ibus`), used for the organization backend allowlist.
     pub fn explain(&self, typed: &str, backend: &str) -> Explanation {
+        self.explain_impl(typed, backend, true, None)
+    }
+
+    /// Explain a control-socket request without rendering the replacement.
+    /// Dynamic template variables can access clipboard/environment state and
+    /// may block, so diagnostics must describe their presence without
+    /// resolving them.
+    pub fn explain_diagnostic(&self, typed: &str, backend: &str) -> Explanation {
+        self.explain_impl(
+            typed,
+            backend,
+            false,
+            Some(Instant::now() + Self::DIAGNOSTIC_BUDGET),
+        )
+    }
+
+    fn explain_impl(
+        &self,
+        typed: &str,
+        backend: &str,
+        render_replacement: bool,
+        deadline: Option<Instant>,
+    ) -> Explanation {
         let typed = typed.trim_end().to_owned();
         let mut explanation = Explanation {
             typed: typed.clone(),
@@ -88,26 +113,40 @@ impl ExpansionEngine {
 
         // The snippet whose trigger, alias, or variant the text ends with;
         // the longest such trigger wins, as it would for the matcher.
-        let candidate = self
-            .config
-            .expansion
-            .iter()
-            .enumerate()
-            .flat_map(|(index, expansion)| {
-                expansion
-                    .effective_triggers()
-                    .into_iter()
-                    .filter(|variant| typed.ends_with(variant.as_str()))
-                    .map(move |variant| (index, variant))
-            })
-            .max_by_key(|(index, variant)| {
-                (
-                    self.config.expansion[*index].enabled,
-                    variant.chars().count(),
-                )
-            });
+        let mut candidate: Option<(usize, String)> = None;
+        for (index, expansion) in self.config.expansion.iter().enumerate() {
+            if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                return diagnostic_budget_exceeded(&typed);
+            }
+            for variant in expansion.effective_triggers() {
+                if !typed.ends_with(&variant) {
+                    continue;
+                }
+                let key = (expansion.enabled, variant.chars().count());
+                let replaces = candidate.as_ref().is_none_or(|(previous_index, previous)| {
+                    key >= (
+                        self.config.expansion[*previous_index].enabled,
+                        previous.chars().count(),
+                    )
+                });
+                if replaces {
+                    candidate = Some((index, variant));
+                }
+            }
+        }
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            return diagnostic_budget_exceeded(&typed);
+        }
         let Some((index, variant)) = candidate else {
-            explanation.push("trigger", CheckStatus::Fail, self.no_match_hint(&typed));
+            let hint = if deadline.is_some() {
+                match self.no_match_hint_until(&typed, deadline) {
+                    Some(hint) => hint,
+                    None => return diagnostic_budget_exceeded(&typed),
+                }
+            } else {
+                self.no_match_hint(&typed)
+            };
+            explanation.push("trigger", CheckStatus::Fail, hint);
             return explanation;
         };
         let expansion = &self.config.expansion[index];
@@ -140,12 +179,16 @@ impl ExpansionEngine {
                     .config
                     .expansion
                     .iter()
+                    .take_while(|_| deadline.is_none_or(|deadline| Instant::now() < deadline))
                     .filter(|other| other.enabled)
                     .find_map(|other| {
                         other.effective_triggers().into_iter().find(|trigger| {
                             trigger.len() > variant.len() && trigger.starts_with(variant.as_str())
                         })
                     });
+                if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                    return diagnostic_budget_exceeded(&typed);
+                }
                 match longer {
                     Some(longer) => explanation.push(
                         "match mode",
@@ -239,8 +282,8 @@ impl ExpansionEngine {
                 }
             }
             None => {
-                let variables = crate::template_variables(&expansion.replacement);
-                if variables.contains(&"clipboard") {
+                let variables = &self.validated.template_variables[index];
+                if variables.iter().any(|name| name == "clipboard") {
                     explanation.push(
                         "variables",
                         CheckStatus::Info,
@@ -313,17 +356,25 @@ impl ExpansionEngine {
                     );
                     return explanation_with_policy(self, explanation, expansion, backend);
                 }
-                match self.render_replacement(index) {
-                    Ok((rendered, _)) => explanation.push(
+                if !render_replacement {
+                    explanation.push(
                         "replacement",
-                        CheckStatus::Pass,
-                        format!("renders to {} characters", rendered.chars().count()),
-                    ),
-                    Err(error) => explanation.push(
-                        "replacement",
-                        CheckStatus::Fail,
-                        format!("template cannot be rendered: {error}"),
-                    ),
+                        CheckStatus::Info,
+                        "not rendered by control-socket diagnostics",
+                    );
+                } else {
+                    match self.render_replacement(index) {
+                        Ok((rendered, _)) => explanation.push(
+                            "replacement",
+                            CheckStatus::Pass,
+                            format!("renders to {} characters", rendered.chars().count()),
+                        ),
+                        Err(error) => explanation.push(
+                            "replacement",
+                            CheckStatus::Fail,
+                            format!("template cannot be rendered: {error}"),
+                        ),
+                    }
                 }
             }
         }
@@ -374,29 +425,58 @@ impl ExpansionEngine {
     }
 
     fn no_match_hint(&self, typed: &str) -> String {
+        self.no_match_hint_until(typed, None)
+            .unwrap_or_else(|| "diagnostic time budget exceeded; retry".to_owned())
+    }
+
+    fn no_match_hint_until(&self, typed: &str, deadline: Option<Instant>) -> Option<String> {
         let lowered = typed.to_lowercase();
         for expansion in &self.config.expansion {
+            if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                return None;
+            }
             for trigger in std::iter::once(&expansion.trigger).chain(&expansion.aliases) {
                 if lowered.ends_with(&trigger.to_lowercase()) && !expansion.propagate_case {
-                    return format!(
+                    return Some(format!(
                         "no snippet uses this trigger; {trigger} differs only in case (type it \
                          exactly, or enable case propagation on that snippet)"
-                    );
+                    ));
                 }
             }
         }
-        let prefix_of = self.config.expansion.iter().find_map(|expansion| {
-            std::iter::once(&expansion.trigger)
+        let mut prefix_of = None;
+        for expansion in &self.config.expansion {
+            if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                return None;
+            }
+            prefix_of = std::iter::once(&expansion.trigger)
                 .chain(&expansion.aliases)
-                .find(|trigger| trigger.starts_with(typed) && trigger.as_str() != typed)
-        });
-        match prefix_of {
+                .find(|trigger| trigger.starts_with(typed) && trigger.as_str() != typed);
+            if prefix_of.is_some() {
+                break;
+            }
+        }
+        Some(match prefix_of {
             Some(trigger) => {
                 format!("no snippet uses this trigger; it is only the start of {trigger}")
             }
             None => "no snippet uses this trigger".to_owned(),
-        }
+        })
     }
+}
+
+fn diagnostic_budget_exceeded(typed: &str) -> Explanation {
+    let mut explanation = Explanation {
+        typed: typed.to_owned(),
+        snippet: None,
+        checks: Vec::new(),
+    };
+    explanation.push(
+        "diagnostics",
+        CheckStatus::Fail,
+        "time budget exceeded; retry",
+    );
+    explanation
 }
 
 /// Append the organization-policy check and return the explanation.

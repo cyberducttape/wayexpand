@@ -65,6 +65,12 @@ impl ExpansionEngine {
         self.sensitive_focus = sensitive;
     }
 
+    /// Synchronize the read-only diagnostics engine with form activity in the
+    /// live engine. This does not start or cancel a form.
+    pub fn set_form_open_for_diagnostics(&mut self, open: bool) {
+        self.form_active = open;
+    }
+
     /// Whether text expansion capture is currently enabled.
     /// Both user pause and sensitive field focus independently disable capture.
     pub(super) fn is_capture_enabled(&self) -> bool {

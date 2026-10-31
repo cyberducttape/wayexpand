@@ -211,7 +211,6 @@ impl Daemon {
         {
             return Ok(Step::Stop);
         }
-        self.answer_explain_request();
         self.cancel_non_atomic_output_on_physical_input(Duration::ZERO);
         let metrics = self.config.engine.command_metrics();
         self.publish_status(metrics);
@@ -584,6 +583,7 @@ mod tests {
                 input_method_mode: false,
                 evdev_mode: true,
                 config,
+                explain_snapshot_cache: None,
                 injector: Some(injector),
                 input_method: None,
                 evdev: None,

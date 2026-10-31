@@ -2,6 +2,28 @@
 
 Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-31 UTC)
 
+## Control-socket explanation isolation: 2026-10-31
+
+- Moved explain requests from the input reactor to a dedicated single-consumer
+  diagnostics worker with a bounded queue. The reactor publishes a coherent
+  validated-config/runtime snapshot only when its values change; window
+  identity is shared by `Arc` so ordinary keystrokes do not allocate a copy.
+- Socket diagnostics use their own engine and never render replacement text.
+  They describe clipboard/environment/snippet variables without resolving
+  them, and return a clear informational result when route-specific text
+  compatibility was not evaluated. Matching scans cooperatively stop at a
+  100 ms deadline; queued work is capped at four requests.
+- Added regression tests proving a clipboard reader that stalls for 250 ms is
+  never invoked by diagnostics, simultaneous clients receive their own
+  responses, saturated requests receive retryable busy errors, and a live
+  control-socket diagnostic flood leaves a concurrent keyboard-processing
+  loop responsive. The flood test records the maximum processing gap.
+- Verification: `WAYEXPAND_PROCESS_CGROUP=disabled RUST_TEST_THREADS=1 cargo
+  test -p wayexpand-core -p wayexpand-daemon` passed (core: 485 unit tests,
+  2 systemd-dependent tests ignored, 3 integration tests; daemon: 221 tests).
+  The added socket-flood regression passed separately. Formatting, targeted
+  Clippy with `-D warnings`, and diff checks passed.
+
 ## Cgroup cleanup retries and default containment: 2026-10-31
 
 - Split cleanup state into kill requested, empty confirmed, and directory

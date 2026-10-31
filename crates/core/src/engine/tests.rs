@@ -6495,6 +6495,39 @@ fn engine_renders_with_the_library_it_validated() {
     ));
 }
 
+#[test]
+fn control_explanation_never_resolves_a_slow_clipboard_variable() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    let mut engine = ExpansionEngine::new(
+        Config::parse(
+            "[settings]\nallow_clipboard = true\n\
+             [[expansion]]\ntrigger = ':clip'\nreplacement = '{{clipboard}}'\n",
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let reads = Arc::new(AtomicUsize::new(0));
+    let reader_calls = Arc::clone(&reads);
+    engine.set_clipboard_reader(Some(crate::ClipboardReader(Arc::new(move || {
+        reader_calls.fetch_add(1, Ordering::SeqCst);
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        Some("clipboard payload".to_owned())
+    }))));
+
+    let started = std::time::Instant::now();
+    let explanation = engine.explain_diagnostic(":clip", "test");
+    assert_eq!(reads.load(Ordering::SeqCst), 0);
+    assert!(started.elapsed() < std::time::Duration::from_millis(100));
+    assert!(explanation
+        .checks
+        .iter()
+        .any(|check| check.name == "replacement" && check.detail.contains("not rendered")));
+}
+
 fn prefetch_engine(
     config: &str,
 ) -> (

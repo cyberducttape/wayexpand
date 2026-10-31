@@ -155,6 +155,7 @@ struct Daemon {
     input_method_mode: bool,
     evdev_mode: bool,
     config: ReloadableConfig,
+    explain_snapshot_cache: Option<control::ExplainSnapshot>,
     injector: Option<Box<dyn TextInjector>>,
     input_method: Option<wayexpand_backend_input_method::InputMethodSource>,
     evdev: Option<EvdevSource>,
@@ -535,6 +536,7 @@ fn main() -> Result<()> {
         input_method_mode,
         evdev_mode,
         config,
+        explain_snapshot_cache: None,
         injector,
         input_method,
         evdev,
@@ -589,13 +591,13 @@ fn main() -> Result<()> {
         if daemon.pending_output.is_some() {
             continue;
         }
-        daemon.answer_explain_request();
         if daemon.handle_insert_request()? || daemon.pending_output.is_some() {
             continue;
         }
         daemon.publish_status(metrics);
         daemon.recover_output()?;
         daemon.declare_form_replacement_guarantee();
+        daemon.publish_explain_snapshot();
         if daemon.input_method_mode {
             match daemon.input_method_step(poll_interval)? {
                 Step::Next => continue,
