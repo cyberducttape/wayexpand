@@ -1762,5 +1762,18 @@ pass with both default parallel scheduling and `RUST_TEST_THREADS=1`; the full
 - The isolated installation smoke test passed. Its release-artifact substep
   stopped because adding the daemon's direct `libc` dependency required a
   `Cargo.lock` update while the script invokes Cargo with `--locked`; the lock
-  entry has since been updated. Re-run the complete package and workspace
-  checks after the focused tests.
+  entry was updated and the complete release checks were rerun successfully.
+- Verification on commit `66fb852414ad86d56a86c2a021242ee09f4f78a0`:
+  `RUST_TEST_THREADS=1 cargo test --workspace --locked --quiet` passed (all
+  workspace suites; 2 ignored core tests), as did the same full test command
+  under Rust 1.92. `cargo clippy --workspace --all-targets --locked -- -D
+  warnings` and `cargo +1.92.0 clippy --workspace --all-targets --locked --
+  -D warnings` passed. `scripts/test-install-user.sh`,
+  `scripts/test-install-release.sh`, and `scripts/test-release.sh` passed; the
+  latter verified reproducible release archives, checksums, staged install,
+  CLI smoke behavior, and source packaging. `cargo fmt --all` and
+  `git diff --check` passed.
+- Commit `66fb8524` was pushed to `main` over SSH with author and committer
+  `Stephan Loesevitz <stephan.loesevitz@gmail.com>`. Its Launchpad sync, fuzz,
+  and push workflows were still in progress and full CI was queued at the time
+  this entry was written; hosted checks are not yet claimed as passing.
