@@ -37,8 +37,12 @@ Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-3
   `1be7f9d8`. The corrected CI then exposed the service-sandbox audit test's
   old assumption that actions execute without consent. The test now verifies
   denial, audit recording, and absence of its action marker; unit tests retain
-  the Landlock and process-cancellation coverage. CI is rerunning for this
-  follow-up.
+  the Landlock and process-cancellation coverage; that test passed locally.
+- CI on `2f38768d` found the authorization helper test depended on executable
+  scripts in the temporary directory, which is mounted `noexec` on hosted
+  runners. Replaced those scripts with `/usr/bin/true` and `/usr/bin/false`;
+  local `cargo test --locked -p action-broker -- --test-threads=8` passed
+  (88 passed, 1 ignored). The final hosted rerun is pending.
 
 ## Live KDE session health and library validation: 2026-10-31
 

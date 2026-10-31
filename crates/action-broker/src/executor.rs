@@ -1321,33 +1321,17 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn polkit_helper_success_is_required_and_denial_fails_closed() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let directory = std::env::temp_dir().join(format!(
-            "wayexpand-pkcheck-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir(&directory).unwrap();
-        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let helper = directory.join("pkcheck");
         let shutdown = AtomicBool::new(false);
 
-        for (script, expected) in [
-            ("#!/bin/sh\nexit 0\n", true),
-            ("#!/bin/sh\nexit 1\n", false),
+        for (helper, expected) in [
+            (std::path::Path::new("/usr/bin/true"), true),
+            (std::path::Path::new("/usr/bin/false"), false),
         ] {
-            std::fs::write(&helper, script).unwrap();
-            std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o700)).unwrap();
             assert_eq!(
-                run_pkcheck(&helper, 123, 456, 789, "cluster.read", &shutdown).await,
+                run_pkcheck(helper, 123, 456, 789, "cluster.read", &shutdown).await,
                 expected
             );
         }
-        let _ = std::fs::remove_dir_all(directory);
     }
 
     #[test]
