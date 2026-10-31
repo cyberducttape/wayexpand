@@ -302,5 +302,7 @@ one; `wayexpand new --show NAME` prints a built-in template to start from.
 
 In safe mode, `disable_template_env = true` and `disable_clipboard = true`
 switch these variables off regardless of user settings; snippets that use them
-then do not expand. `wayexpand explain <trigger>` shows which of these a
-snippet uses and why it was blocked.
+then do not expand. `wayexpand explain <trigger> --offline` shows local
+configuration checks, including variable references. Live control-socket
+explanations intentionally omit variable names and return only a generic block
+reason.

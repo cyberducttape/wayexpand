@@ -2,6 +2,25 @@
 
 Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-31 UTC)
 
+## Restricted control-socket diagnostics: 2026-10-31
+
+- Reduced live socket explanation output to three fields: `matched`,
+  `would_expand`, and generic `suppression_reason`. Both text and JSON omit
+  the caller's text, snippet/alias names, internal check names/details,
+  command paths/action IDs, template-variable names, output lengths, and
+  route-specific Unicode diagnostics. Detailed local configuration analysis
+  remains available through the explicit offline CLI path.
+- Added regression coverage that injects synthetic trigger, executable path,
+  environment-variable, clipboard, output-length, and Unicode details into
+  the internal explanation and asserts none appear in socket responses. The
+  clipboard-worker response test now asserts the minimal schema.
+- Updated compatibility, troubleshooting, and template docs to describe the
+  live privacy boundary and the offline/live-state distinction.
+- Verification: all 223 daemon tests passed with
+  `WAYEXPAND_PROCESS_CGROUP=disabled RUST_TEST_THREADS=1 cargo test
+  -p wayexpand-daemon`. Targeted daemon Clippy with `-D warnings`, formatting,
+  and diff checks passed.
+
 ## Control-socket explanation isolation: 2026-10-31
 
 - Moved explain requests from the input reactor to a dedicated single-consumer

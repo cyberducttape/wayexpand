@@ -740,20 +740,24 @@ The file stores snippet IDs, counts, character totals, and dates only.
 
 ### `wayexpand explain <text>` and the `explain` control command
 
-`wayexpand explain <text> [--json]` reports, check by check, whether typed text
-would expand. With a running daemon it sends the control line `explain <text>`
-(or `explain-json <text>`) and the daemon answers from its live engine state;
-text must be 1–256 characters without control characters. Without a daemon, or
-with `--offline`, `--app ID`, or an explicit config path, the CLI explains from
-the configuration and organization policy and adds a `daemon` check.
+`wayexpand explain <text> [--json]` reports whether the text matches a
+configured snippet and whether current live checks would allow expansion. With
+a running daemon it sends the control line `explain <text>` (or
+`explain-json <text>`); text must be 1–256 characters without control
+characters. The live control response is intentionally restricted because any
+same-user process can query the socket. It contains only `matched`,
+`would_expand`, and a generic `suppression_reason` (`none`, `no_match`,
+`blocked`, or `unavailable`). It does not include typed text, trigger or alias
+names, check details, command paths/action IDs, template-variable names,
+rendered lengths, or route-specific Unicode details.
 
-JSON fields: `would_expand` (bool), `suppressed_by` (name of the first failing
-check, or `null`), `typed`, `snippet` (configured trigger of the resolved
-snippet, or `null`), `checks` (array of `{name, status, detail}` with `status`
-one of `pass`, `fail`, `warn`, `info`), and `offline: true` for offline
-answers. **Stability:** 🧪 **Experimental** — check names and details may
-change; `would_expand` and `suppressed_by` are intended to stay. Replacement
-text is never included. The command exits 0 whether or not the text expands.
+Without a daemon, or with `--offline`, `--app ID`, or an explicit config path,
+the CLI explains from the local configuration and organization policy and adds
+a `daemon` check. This interactive local mode provides detailed checks; it
+does not validate current focus, sensitive-field state, or output connection.
+Treat its output as configuration information. **Stability:** 🧪
+**Experimental** — response fields and offline check details may change. The
+command exits 0 whether or not the text expands.
 
 ---
 

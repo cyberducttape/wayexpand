@@ -685,24 +685,48 @@ fn explain_worker(
                             .to_owned()
                     };
                 }
-                if request.json {
-                    let suppressed_by = explanation.suppressed_by().map(|check| check.name);
-                    format!(
-                        "{}\n",
-                        serde_json::json!({
-                            "would_expand": suppressed_by.is_none(),
-                            "suppressed_by": suppressed_by,
-                            "typed": explanation.typed,
-                            "snippet": explanation.snippet,
-                            "checks": explanation.checks,
-                        })
-                    )
-                } else {
-                    explanation.render_text()
-                }
+                restricted_explain_response(&explanation, request.json)
             },
         );
         let _ = request.reply.try_send(answer);
+    }
+}
+
+/// Control-socket diagnostics are available to every process running as the
+/// user. Keep their response independent of configured trigger names, checks,
+/// command metadata, rendered lengths, and template-variable details.
+fn restricted_explain_response(explanation: &wayexpand_core::Explanation, json: bool) -> String {
+    let matched = explanation.snippet.is_some();
+    let unavailable = explanation
+        .checks
+        .iter()
+        .any(|check| check.name == "diagnostics");
+    let would_expand = matched && explanation.suppressed_by().is_none();
+    let suppression_reason = if unavailable {
+        "unavailable"
+    } else if !matched {
+        "no_match"
+    } else if would_expand {
+        "none"
+    } else {
+        "blocked"
+    };
+    if json {
+        format!(
+            "{}\n",
+            serde_json::json!({
+                "matched": matched,
+                "would_expand": would_expand,
+                "suppression_reason": suppression_reason,
+            })
+        )
+    } else {
+        format!(
+            "Snippet match: {}\nWould expand: {}\nReason: {}\n",
+            if matched { "yes" } else { "no" },
+            if would_expand { "yes" } else { "no" },
+            suppression_reason,
+        )
     }
 }
 
@@ -1048,22 +1072,72 @@ mod tests {
             .unwrap();
         let elapsed = started.elapsed();
         let response: serde_json::Value = serde_json::from_str(&answer).unwrap();
-        let checks = response["checks"].as_array().unwrap();
-        assert!(checks.iter().any(|check| {
-            check["name"] == "replacement"
-                && check["detail"] == "not rendered by control-socket diagnostics"
-        }));
-        assert!(checks.iter().any(|check| {
-            check["name"] == "variables"
-                && check["detail"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .contains("clipboard")
-        }));
+        assert_eq!(
+            response,
+            serde_json::json!({
+                "matched": true,
+                "would_expand": true,
+                "suppression_reason": "none",
+            })
+        );
         assert!(elapsed < Duration::from_millis(500));
 
         drop(sender);
         worker.join().unwrap();
+    }
+
+    #[test]
+    fn restricted_diagnostics_redact_snippet_and_dynamic_value_metadata() {
+        let explanation = wayexpand_core::Explanation {
+            typed: "::payroll-secret".to_owned(),
+            snippet: Some("::payroll-secret".to_owned()),
+            checks: vec![
+                wayexpand_core::ExplainCheck {
+                    name: "command",
+                    status: wayexpand_core::CheckStatus::Info,
+                    detail: "runs /usr/local/libexec/private-helper".to_owned(),
+                },
+                wayexpand_core::ExplainCheck {
+                    name: "variables",
+                    status: wayexpand_core::CheckStatus::Info,
+                    detail: "reads env:PAYROLL_TOKEN and clipboard".to_owned(),
+                },
+                wayexpand_core::ExplainCheck {
+                    name: "replacement",
+                    status: wayexpand_core::CheckStatus::Pass,
+                    detail: "renders to 47 characters; Unicode U+202F at character 12".to_owned(),
+                },
+            ],
+        };
+
+        let response = restricted_explain_response(&explanation, true);
+        let value: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "matched": true,
+                "would_expand": true,
+                "suppression_reason": "none",
+            })
+        );
+        for private in [
+            "::payroll-secret",
+            "/usr/local/libexec/private-helper",
+            "PAYROLL_TOKEN",
+            "clipboard",
+            "47",
+            "U+202F",
+            "character 12",
+        ] {
+            assert!(
+                !response.contains(private),
+                "leaked {private:?}: {response}"
+            );
+        }
+        assert_eq!(
+            restricted_explain_response(&explanation, false),
+            "Snippet match: yes\nWould expand: yes\nReason: none\n"
+        );
     }
 
     #[test]

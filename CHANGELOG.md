@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Restrict live control-socket explanations to `matched`, `would_expand`, and
+  a generic suppression reason. Omit typed text, canonical triggers, aliases,
+  detailed checks, executable paths, broker action IDs, template-variable
+  names, rendered lengths, and route-specific character diagnostics. Keep
+  detailed configuration analysis in the explicit local/offline CLI path and
+  update the compatibility and troubleshooting docs. Add redaction tests for
+  synthetic secret-like values and command metadata.
 - Move control-socket `explain` requests to a dedicated, bounded diagnostics
   worker that uses immutable validated-configuration and runtime snapshots.
   The keyboard reactor no longer scans snippets or renders replacements for
