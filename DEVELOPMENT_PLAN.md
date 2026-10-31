@@ -176,9 +176,12 @@ Acceptance criteria:
 
 The declared Rust 1.92 MSRV is now checked with explicit `cargo +1.92.0`
 commands, avoiding the repository's development-toolchain override. The GUI
-dependency is pinned to the compatible egui/eframe 0.35 line. The exact-head
-locked workspace release suite passed on Rust 1.92 on 2026-10-31; hosted CI
-must still pass for each release candidate.
+dependency is pinned to the compatible egui/eframe 0.35 line. Exact-head CI for
+`584e38c6a4cb` passed all 33 jobs on 2026-10-31, including Rust 1.92 MSRV,
+workspace tests and Clippy, native aarch64, Debian/RPM artifacts, Ubuntu 26.04
+and Fedora package-install smoke tests, and headless KWin/Sway checks. Launchpad
+sync also passed for that commit. This is release-candidate CI evidence only;
+it does not close the real-session compositor-certification gate.
 
 Partial evidence: hermetic per-user and release-archive installer tests cover
 staged installation, validation preflight, rollback after filesystem, signal,
@@ -192,12 +195,10 @@ service behavior, or published artifact signing/provenance on supported
 release hosts. Re-ran `scripts/test-install-release.sh`,
 `scripts/test-install-user.sh`, and `scripts/test-release.sh` on the current
 checkout; all passed. This environment has no local container runtime for
-package smoke tests. The GitHub main run for `f6c338b42f40` passed the
+package smoke tests; exact-head CI for `584e38c6a4cb` passed both
 `Package Install Smoke (ubuntu:26.04)` and `Package Install Smoke
-(fedora:latest)` jobs, along with native aarch64 and Debian/RPM artifact jobs.
-That run predates the current local changes and must be rerun after those
-commits reach CI. The
-package smoke script now also refuses to run on a host without a Docker or
+(fedora:latest)`, plus native aarch64 and Debian/RPM artifact jobs. The package
+smoke script also refuses to run on a host without a Docker or
 Podman marker, even when its explicit opt-in is set; a regression covers this
 guard before any package-manager operation.
 

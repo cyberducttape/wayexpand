@@ -1701,3 +1701,25 @@ pass with both default parallel scheduling and `RUST_TEST_THREADS=1`; the full
   zbus lineage unmaintained advisories.
 - The real-session physical-input certification blocker remains open; this
   toolchain compatibility fix does not change that release gate.
+
+## Exact-head hosted CI and Launchpad validation: 2026-10-31
+
+- GitHub CI run [41212740021](https://github.com/cyberducttape/wayexpand/actions/runs/41212740021)
+  completed successfully for exact commit `584e38c6a4cb10551f89cd9b867620c123377fc9`:
+  all 33 jobs passed, with no failures, cancellations, or skipped jobs.
+- Coverage included locked debug and release workspace tests, debug and release
+  Clippy, the explicit Rust 1.92 MSRV suite, seeded and concurrent stress tests,
+  security/dependency checks, clean-source build, native aarch64 build,
+  Debian/RPM artifact builds, Ubuntu 26.04 and Fedora package-install smoke
+  tests, headless KWin/Sway E2E, and the three-minute daemon soak.
+- Launchpad sync [41212740148](https://github.com/cyberducttape/wayexpand/actions/runs/41212740148)
+  also passed for the same exact commit. At validation time the tested
+  worktree was clean and `main` was synchronized with `origin/main`.
+- This confirms hosted software-build and packaging checks for this commit.
+  It does not establish production compositor certification, physical-input
+  replacement integrity, password-field behavior, or the required 72-hour
+  real-desktop soak. The repository still has zero registered certification
+  runners; the release gate remains open.
+- Next steps: provision an eligible real-session certification runner and
+  collect/review production evidence; obtain authorization before applying the
+  prepared GitHub `main` protection ruleset.
