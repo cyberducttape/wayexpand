@@ -18,8 +18,16 @@ fn compute_effective_pause(user_paused: bool, profile_switch_pending: bool) -> b
     user_paused || profile_switch_pending
 }
 
-fn log_insert_refused_focus_changed(_requested_token: Option<&str>, _actual_token: Option<&str>) {
+fn insert_focus_validation_failed(
+    request: &InsertRequest,
+    current_token: Option<&str>,
+    snapshot: &FocusSnapshot,
+) -> bool {
+    if insert_target_matches_current_focus(request, current_token, snapshot) {
+        return false;
+    }
     warn!(reason = "focus_changed", "requested snippet insert refused");
+    true
 }
 
 fn input_method_injection_capabilities(
@@ -249,11 +257,7 @@ impl Daemon {
             }
             let snapshot = self.control.focus_snapshot();
             let current_token = self.config.engine.current_window().and_then(focus_token);
-            if !insert_target_matches_current_focus(&request, current_token.as_deref(), &snapshot) {
-                log_insert_refused_focus_changed(
-                    request.focus_token.as_deref(),
-                    current_token.as_deref(),
-                );
+            if insert_focus_validation_failed(&request, current_token.as_deref(), &snapshot) {
                 return Ok(true);
             }
             match self.config.engine.prepare_insert(&request.trigger) {
@@ -735,6 +739,27 @@ mod tests {
 
     #[test]
     fn focus_change_refusal_log_does_not_include_window_tokens() {
+        let original_window = WindowContext {
+            app_id: Some("org.kde.konsole".into()),
+            title: Some("bash".into()),
+            instance_id: Some("expected-window-instance".into()),
+        };
+        let focused_window = WindowContext {
+            instance_id: Some("actual-window-instance".into()),
+            ..original_window.clone()
+        };
+        let expected_token = focus_token(&original_window).unwrap();
+        let actual_token = focus_token(&focused_window).unwrap();
+        let request = InsertRequest {
+            trigger: ";sig".into(),
+            focus_token: Some(expected_token.clone()),
+            focus_generation: Some(4),
+        };
+        let snapshot = FocusSnapshot {
+            generation: 5,
+            token: Some(actual_token.clone()),
+            exact_window_identity: true,
+        };
         let bytes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let writer = std::sync::Arc::clone(&bytes);
         let subscriber = tracing_subscriber::fmt()
@@ -745,10 +770,11 @@ mod tests {
         let dispatcher = tracing::Dispatch::new(subscriber);
 
         tracing::dispatcher::with_default(&dispatcher, || {
-            log_insert_refused_focus_changed(
-                Some("expected-window-token-73da"),
-                Some("actual-window-token-b91c"),
-            );
+            assert!(insert_focus_validation_failed(
+                &request,
+                Some(&actual_token),
+                &snapshot,
+            ));
         });
 
         let record = String::from_utf8(
@@ -765,8 +791,8 @@ mod tests {
         );
         assert!(!record.contains("expected"), "{record}");
         assert!(!record.contains("actual"), "{record}");
-        assert!(!record.contains("expected-window-token-73da"), "{record}");
-        assert!(!record.contains("actual-window-token-b91c"), "{record}");
+        assert!(!record.contains(&expected_token), "{record}");
+        assert!(!record.contains(&actual_token), "{record}");
     }
 
     #[test]
