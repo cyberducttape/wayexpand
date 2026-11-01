@@ -26,6 +26,12 @@ on:
 permissions:
   contents: read
 
+env:
+  # crates.io occasionally resets multiplexed HTTP/2 downloads on hosted
+  # runners; serial requests with retries keep cargo-fuzz setup reproducible.
+  CARGO_HTTP_MULTIPLEXING: "false"
+  CARGO_NET_RETRY: 10
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
