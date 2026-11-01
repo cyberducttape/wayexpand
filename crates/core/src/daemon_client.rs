@@ -72,6 +72,12 @@ pub struct DaemonFocus {
     pub token: String,
     /// Whether the window tracker reports exact window identity.
     pub exact_identity: bool,
+    /// Whether the connected output route reports atomic replacement.
+    /// Missing values from older daemons fail closed.
+    pub atomic_replace: bool,
+    /// Whether the connected route verifies surrounding text before erase.
+    /// Missing values from older daemons fail closed.
+    pub verified_replace: bool,
 }
 
 impl DaemonFocus {
@@ -93,6 +99,8 @@ impl DaemonFocus {
             generation,
             token: field("focus_token")?.to_owned(),
             exact_identity: field("focus_identity") == Some("exact"),
+            atomic_replace: field("atomic_replace") == Some("true"),
+            verified_replace: field("verified_replace") == Some("true"),
         })
     }
 
@@ -284,13 +292,16 @@ mod tests {
 
     #[test]
     fn focus_response_yields_a_target_only_for_exact_identity() {
-        let exact =
-            DaemonFocus::parse("focus_generation=4\nfocus_token=abcd\nfocus_identity=exact\n")
-                .unwrap();
+        let exact = DaemonFocus::parse(
+            "focus_generation=4\nfocus_token=abcd\nfocus_identity=exact\natomic_replace=true\nverified_replace=true\n",
+        )
+        .unwrap();
         assert_eq!(exact.verified_target(), Some((4, "abcd")));
+        assert!(exact.atomic_replace);
+        assert!(exact.verified_replace);
 
         let inexact = DaemonFocus::parse(
-            "focus_generation=4\nfocus_token=abcd\nfocus_identity=unavailable\n",
+            "focus_generation=4\nfocus_token=abcd\nfocus_identity=unavailable\natomic_replace=false\nverified_replace=false\n",
         )
         .unwrap();
         assert_eq!(inexact.verified_target(), None);
@@ -303,6 +314,8 @@ mod tests {
         assert_eq!(restricted.generation, 0);
         assert_eq!(restricted.verified_target(), None);
         assert!(restricted.exact_identity);
+        assert!(!restricted.atomic_replace);
+        assert!(!restricted.verified_replace);
 
         assert_eq!(
             DaemonFocus::parse("focus_token=abcd\nfocus_identity=exact\n"),

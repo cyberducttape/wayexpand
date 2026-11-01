@@ -1064,27 +1064,13 @@ impl Strings {
     pub fn picker_footer_clipboard(&self) -> &'static str {
         match self.lang {
             Language::English => {
-                "Can't type into the previous app (no daemon or window tracking) · Enter copies the snippet to the clipboard"
+                "Automatic insertion unavailable · Enter copies the snippet to the clipboard"
             }
             Language::Indonesian => {
-                "Tidak dapat mengetik ke aplikasi sebelumnya (tidak ada daemon atau pelacakan jendela) · Enter menyalin cuplikan ke papan klip"
+                "Penyisipan otomatis tidak tersedia · Enter menyalin cuplikan ke papan klip"
             }
             Language::German => {
-                "Tippen in die vorherige App nicht möglich (kein Dienst oder Fenster-Tracking) · Enter kopiert das Snippet in die Zwischenablage"
-            }
-        }
-    }
-
-    pub fn picker_footer_identity_unavailable(&self) -> &'static str {
-        match self.lang {
-            Language::English => {
-                "Exact window identity: unavailable · Quick Picker typing: clipboard-only"
-            }
-            Language::Indonesian => {
-                "Identitas jendela yang tepat: tidak tersedia · Pengetikan Quick Picker: hanya papan klip"
-            }
-            Language::German => {
-                "Exakte Fensteridentität: nicht verfügbar · Quick Picker-Eingabe: nur Zwischenablage"
+                "Automatisches Einfügen nicht verfügbar · Enter kopiert das Snippet in die Zwischenablage"
             }
         }
     }
