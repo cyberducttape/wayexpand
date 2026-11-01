@@ -108,6 +108,7 @@ pub(crate) fn runtime_capabilities_from_status(snapshot: &serde_json::Value) -> 
             "composition_aware": value("capture_composition_aware"),
             "local_compose_aware": value("capture_local_compose_aware"),
             "layout_aware": value("capture_layout_aware"),
+            "layout_state": value("capture_layout_state"),
         },
         "window_context": {
             "tracker_connected": value("window_tracker_connected"),
@@ -220,7 +221,7 @@ pub(crate) fn session_capabilities_from_status(snapshot: &serde_json::Value) -> 
     let backend_name = backend.unwrap_or("unknown backend");
     let unavailable = !connected;
 
-    let capture = if unavailable {
+    let mut capture = if unavailable {
         capability(
             "unavailable",
             "No connected capture route is reported by the daemon.",
@@ -250,10 +251,11 @@ pub(crate) fn session_capabilities_from_status(snapshot: &serde_json::Value) -> 
                 None => "active-capability-unknown",
             },
             &format!("The daemon reports {source_name} capture connected."),
-            &format!("Exclusive capture: {}. Key state reliable: {}. Layout aware: {}.", display_bool(exclusive), display_bool(boolean("capture_reliable_key_state")), display_bool(boolean("capture_layout_aware"))),
-            vec!["Try a harmless test snippet in the application you use; this live status does not certify physical key delivery across clients."],
+            &format!("Exclusive capture: {}. Key state reliable: {}. Layout state: {}.", display_bool(exclusive), display_bool(boolean("capture_reliable_key_state")), text("capture_layout_state").unwrap_or("unknown")),
+            vec!["If layout state is unavailable, evdev disables layout-dependent matching and hotkeys. Choose an input route with compositor layout tracking to use those features.", "Try a harmless test snippet in the application you use; this live status does not certify physical key delivery across clients."],
         )
     };
+    capture["layout_state"] = serde_json::json!(text("capture_layout_state"));
 
     let insertion_mode = text("inject_insertion_mode");
     let injection = if unavailable {

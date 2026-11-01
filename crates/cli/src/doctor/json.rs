@@ -155,6 +155,7 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
                         "composition_awareness": snapshot.get("capture_composition_aware"),
                         "local_compose_tracking": snapshot.get("capture_local_compose_aware"),
                         "layout_awareness": snapshot.get("capture_layout_aware"),
+                        "layout_state": snapshot.get("capture_layout_state"),
                         "key_passthrough": snapshot.get("capture_key_passthrough")
                             .and_then(|capture| {
                                 snapshot.get("inject_key_passthrough").map(|inject| {
