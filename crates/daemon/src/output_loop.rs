@@ -572,8 +572,9 @@ impl std::error::Error for OutputConnectError {}
 /// Connect to the specified output backend.
 ///
 /// Both backends type keystrokes without seeing the target's text, so every
-/// connection is wrapped in the assurance gate here: no caller can obtain one
-/// that erases without the user's compatibility-mode consent and a focus check.
+/// connection is wrapped in the assurance gate here: atomic verified routes
+/// may replace by default; other routes require compatibility-mode consent
+/// and a focus check before they can erase.
 pub fn connect_output_backend(
     name: &str,
     persist_portal_token: bool,

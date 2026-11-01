@@ -952,15 +952,26 @@ fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
             } else {
                 snapshot.token.as_deref().unwrap_or_default()
             };
+            let status = status
+                .lock()
+                .map_err(|_| anyhow::anyhow!("status lock poisoned"))?;
+            let atomic_replace = status
+                .lines()
+                .any(|line| line == "inject_atomic_replace=true");
+            let verified_replace = status
+                .lines()
+                .any(|line| line == "replacement_assurance=verified");
             format!(
-                "focus_generation={}\nfocus_token={}\nfocus_identity={}\n",
+                "focus_generation={}\nfocus_token={}\nfocus_identity={}\natomic_replace={}\nverified_replace={}\n",
                 generation,
                 token,
                 if snapshot.exact_window_identity {
                     "exact"
                 } else {
                     "unavailable"
-                }
+                },
+                atomic_replace,
+                verified_replace
             )
         }
         "reload" => {
@@ -1380,7 +1391,7 @@ mod tests {
 
         assert_eq!(
             send("focus\n"),
-            "focus_generation=\nfocus_token=\nfocus_identity=exact\n"
+            "focus_generation=\nfocus_token=\nfocus_identity=exact\natomic_replace=false\nverified_replace=false\n"
         );
         for request in [
             "insert-target 42 deadbeef ;sig\n",
@@ -1421,7 +1432,9 @@ mod tests {
             })),
             explain: std::sync::mpsc::sync_channel(EXPLAIN_QUEUE_CAPACITY).0,
             usage_clear: Arc::new(Mutex::new(None)),
-            status: Arc::new(Mutex::new("running".into())),
+            status: Arc::new(Mutex::new(
+                "running\ninject_atomic_replace=true\nreplacement_assurance=verified\n".into(),
+            )),
             waker: Arc::default(),
         };
         let send = |command: &str| {
@@ -1437,7 +1450,7 @@ mod tests {
         // The picker and `insert --verified` read the token, then insert.
         assert_eq!(
             send("focus\n"),
-            "focus_generation=9\nfocus_token=deadbeef\nfocus_identity=exact\n"
+            "focus_generation=9\nfocus_token=deadbeef\nfocus_identity=exact\natomic_replace=true\nverified_replace=true\n"
         );
         assert_eq!(
             send("insert-target 9 deadbeef ;sig\n"),
@@ -1671,7 +1684,7 @@ mod tests {
         };
         assert_eq!(
             send("focus\n"),
-            "focus_generation=4\nfocus_token=abcd\nfocus_identity=exact\n"
+            "focus_generation=4\nfocus_token=abcd\nfocus_identity=exact\natomic_replace=false\nverified_replace=false\n"
         );
         assert_eq!(send("insert-target 4 abcd ;target\n"), "insert scheduled\n");
         assert_eq!(
