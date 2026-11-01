@@ -10,7 +10,7 @@
 
 use std::{
     fs::{self, File, OpenOptions},
-    io::Read,
+    io::{self, Read},
     os::fd::AsRawFd,
     os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
@@ -33,8 +33,15 @@ const GITIGNORE: &str = "\
 !snippets.d/*.toml
 ";
 const GIT_TIMEOUT: Duration = Duration::from_secs(60);
-const MAX_GIT_OUTPUT_BYTES: usize = 128 * 1024;
+const MAX_GIT_OUTPUT_BYTES: usize = 1024 * 1024;
 const SYNC_LOCK_TIMEOUT: Duration = Duration::from_secs(2);
+
+#[derive(Clone, Copy)]
+pub(crate) struct GitResourceLimits {
+    pub timeout: Duration,
+    pub max_file_size: u64,
+    pub cpu_seconds: u64,
+}
 
 /// Serialize the complete sync transaction, not just individual Git
 /// commands. Git's index lock does not cover fetch/rebase/validation/reset as
@@ -149,13 +156,31 @@ fn git_command(directory: &Path, args: &[&str]) -> Command {
 }
 
 fn git(directory: &Path, args: &[&str]) -> Result<Output> {
-    git_with_config(directory, args, false)
+    git_with_config(directory, args, false, None, None, false)
 }
 
 /// Run Git without system or global config. Repository intake must not execute
 /// user configured clean/smudge filters while checking out untrusted content.
 pub(crate) fn git_library_output(directory: &Path, args: &[&str]) -> Result<Output> {
-    git_with_config(directory, args, true)
+    git_with_config(directory, args, true, None, None, false)
+}
+
+pub(crate) fn git_library_output_bounded(
+    directory: &Path,
+    args: &[&str],
+    stdin: Option<Vec<u8>>,
+    limits: GitResourceLimits,
+) -> Result<Output> {
+    git_with_config(directory, args, true, stdin, Some(limits), false)
+}
+
+pub(crate) fn git_library_output_bounded_no_lazy_fetch(
+    directory: &Path,
+    args: &[&str],
+    stdin: Option<Vec<u8>>,
+    limits: GitResourceLimits,
+) -> Result<Output> {
+    git_with_config(directory, args, true, stdin, Some(limits), true)
 }
 
 pub(crate) fn git_library_ok(directory: &Path, args: &[&str]) -> Result<String> {
@@ -170,15 +195,30 @@ pub(crate) fn git_library_ok(directory: &Path, args: &[&str]) -> Result<String> 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
-fn git_with_config(directory: &Path, args: &[&str], isolated_config: bool) -> Result<Output> {
+fn git_with_config(
+    directory: &Path,
+    args: &[&str],
+    isolated_config: bool,
+    stdin: Option<Vec<u8>>,
+    limits: Option<GitResourceLimits>,
+    no_lazy_fetch: bool,
+) -> Result<Output> {
     let mut stdout = Vec::new();
-    let (status, stderr) = run_git(directory, args, None, isolated_config, &mut |chunk| {
-        stdout.extend_from_slice(chunk);
-        if stdout.len() > MAX_GIT_OUTPUT_BYTES {
-            bail!("git output exceeded the safety limit");
-        }
-        Ok(())
-    })?;
+    let (status, stderr) = run_git(
+        directory,
+        args,
+        stdin,
+        isolated_config,
+        limits,
+        no_lazy_fetch,
+        &mut |chunk| {
+            stdout.extend_from_slice(chunk);
+            if stdout.len() > MAX_GIT_OUTPUT_BYTES {
+                bail!("git output exceeded the safety limit");
+            }
+            Ok(())
+        },
+    )?;
     Ok(Output {
         status,
         stdout,
@@ -194,6 +234,8 @@ fn run_git(
     args: &[&str],
     stdin: Option<Vec<u8>>,
     isolated_config: bool,
+    limits: Option<GitResourceLimits>,
+    no_lazy_fetch: bool,
     on_stdout: &mut dyn FnMut(&[u8]) -> Result<()>,
 ) -> Result<(std::process::ExitStatus, Vec<u8>)> {
     let mut command = git_command(directory, args);
@@ -206,7 +248,34 @@ fn run_git(
             .env_remove("GIT_ASKPASS")
             .env_remove("SSH_ASKPASS");
     }
+    if no_lazy_fetch {
+        command.env("GIT_NO_LAZY_FETCH", "1");
+    }
     configure_process_group(&mut command);
+    if let Some(limits) = limits {
+        use std::os::unix::process::CommandExt;
+        // The file-size ceiling caps Git packfiles and checked-out regular
+        // files. CPU and wall-clock limits bound object decompression work.
+        unsafe {
+            command.pre_exec(move || {
+                let file_size = libc::rlimit {
+                    rlim_cur: limits.max_file_size as libc::rlim_t,
+                    rlim_max: limits.max_file_size as libc::rlim_t,
+                };
+                if libc::setrlimit(libc::RLIMIT_FSIZE, &file_size) != 0 {
+                    return Err(io::Error::last_os_error());
+                }
+                let cpu = libc::rlimit {
+                    rlim_cur: limits.cpu_seconds as libc::rlim_t,
+                    rlim_max: limits.cpu_seconds as libc::rlim_t,
+                };
+                if libc::setrlimit(libc::RLIMIT_CPU, &cpu) != 0 {
+                    return Err(io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+    }
     let mut child = command
         .stdin(if stdin.is_some() {
             Stdio::piped()
@@ -246,6 +315,7 @@ fn run_git(
         &mut stderr,
         &mut git_input,
         args,
+        limits.map_or(GIT_TIMEOUT, |limits| limits.timeout),
         on_stdout,
     );
     if result.is_err() {
@@ -267,6 +337,7 @@ fn supervise_git(
     stderr: &mut std::process::ChildStderr,
     stdin: &mut GitInput<'_>,
     args: &[&str],
+    timeout: Duration,
     on_stdout: &mut dyn FnMut(&[u8]) -> Result<()>,
 ) -> Result<(std::process::ExitStatus, Vec<u8>)> {
     let mut stderr_bytes = Vec::new();
@@ -284,7 +355,7 @@ fn supervise_git(
         })?;
         Ok((stdout_eof, stderr_eof))
     };
-    let deadline = Instant::now() + GIT_TIMEOUT;
+    let deadline = Instant::now() + timeout;
     loop {
         if let Some(input) = stdin.bytes {
             write_git_input(stdin.pipe, input, stdin.offset)?;
@@ -422,7 +493,7 @@ fn git_records(
         }
         on_record(std::str::from_utf8(record).context("git reported a non-UTF-8 path")?)
     };
-    let (status, stderr) = run_git(directory, args, stdin, false, &mut |chunk| {
+    let (status, stderr) = run_git(directory, args, stdin, false, None, false, &mut |chunk| {
         let mut rest = chunk;
         while let Some(end) = rest.iter().position(|&byte| byte == 0) {
             if pending.is_empty() {
@@ -822,9 +893,15 @@ fn commit_library(directory: &Path, primary: &str, message: &str) -> Result<bool
         "--pathspec-from-file=-",
         "--pathspec-file-nul",
     ];
-    let output = run_git(directory, &commit, Some(library_paths), false, &mut |_| {
-        Ok(())
-    })
+    let output = run_git(
+        directory,
+        &commit,
+        Some(library_paths),
+        false,
+        None,
+        false,
+        &mut |_| Ok(()),
+    )
     .and_then(|(status, stderr)| {
         if status.success() {
             Ok(())
