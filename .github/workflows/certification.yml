@@ -38,6 +38,9 @@ jobs:
     outputs:
       matrix: ${{ steps.runners.outputs.matrix }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
       # Production-required compositors must have an online runner. Optional
       # ones are certified only when their runner is online: a matrix entry
       # without any runner would wait in the queue until GitHub cancels it,
@@ -46,7 +49,10 @@ jobs:
         id: runners
         env:
           CERTIFICATION_RUNNER_TOKEN: ${{ secrets.CERTIFICATION_RUNNER_TOKEN }}
-          REQUIRE_PRODUCTION: ${{ inputs.require_production }}
+          # Scheduled compatibility runs have no `inputs` context. Normalize
+          # the optional value to a real boolean so the gate never receives
+          # an empty argument; reusable release calls keep their true default.
+          REQUIRE_PRODUCTION: ${{ inputs.require_production == true }}
         run: |
           set -euo pipefail
           scripts/check-production-certification.sh \

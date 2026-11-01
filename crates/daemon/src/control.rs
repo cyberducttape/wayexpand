@@ -34,8 +34,10 @@ const EXPLAIN_QUEUE_CAPACITY: usize = CONTROL_WORKERS;
 const CONTROL_BUSY_RESPONSE: &[u8] = b"error=busy\nretryable=true\n";
 const CONTROL_MUTATIONS_DISABLED_RESPONSE: &[u8] =
     b"error=policy\nmessage=control socket mutations are disabled by organization policy\n";
-/// Reads of at most 1 KiB used to discard an overloaded client's request.
+/// Bound how much request data and wall time the listener spends draining an
+/// overloaded client before closing its socket.
 const BUSY_DRAIN_READS: usize = 16;
+const BUSY_DRAIN_TIMEOUT: Duration = Duration::from_millis(250);
 
 fn is_stale_socket_error(error: &std::io::Error) -> bool {
     matches!(
@@ -322,6 +324,12 @@ impl ControlServer {
                         continue;
                     }
                     let active_requests = Arc::clone(&active_requests_for_listener);
+                    // Keep a spare descriptor so a transient thread-resource
+                    // failure can still return the same bounded busy response
+                    // as request-pool saturation. `spawn` consumes its
+                    // closure on failure, which would otherwise drop the only
+                    // stream and leave clients with a broken pipe.
+                    let busy_stream = stream.try_clone().ok();
                     let worker = thread::Builder::new()
                         .name("wayexpand-control-request".into())
                         .spawn(move || {
@@ -333,7 +341,10 @@ impl ControlServer {
                         });
                     if let Err(error) = worker {
                         active_requests_for_listener.fetch_sub(1, Ordering::AcqRel);
-                        warn!(%error, "could not start control request worker; dropping request");
+                        warn!(%error, "could not start control request worker");
+                        if let Some(stream) = busy_stream {
+                            reject_busy(stream, &rejected_for_listener);
+                        }
                     }
                     if stop_flag.load(Ordering::Acquire) {
                         break;
@@ -512,27 +523,42 @@ fn reject_busy(mut stream: UnixStream, rejected_total: &AtomicU64) {
         control_rejected_total = total,
         "control request rejected: worker pool busy"
     );
-    discard_unread_request(&mut stream);
     let _ = stream.set_write_timeout(Some(Duration::from_millis(50)));
     let _ = stream.write_all(CONTROL_BUSY_RESPONSE);
     let _ = stream.shutdown(std::net::Shutdown::Write);
+    // Keep reading after replying so a client that connected before writing
+    // its request does not get ECONNRESET when its bytes arrive. The total
+    // deadline and byte budget keep a slow or oversized client from holding
+    // the accept loop indefinitely.
+    discard_unread_request(&mut stream);
 }
 
 /// Closing a Unix stream with unread request bytes makes the kernel report
 /// ECONNRESET to the peer, which would hide the response behind a generic
-/// read error. Discard whatever the client already sent, without blocking.
+/// read error. Drain the bounded one-line request, including bytes that arrive
+/// just after accept, and return on EOF, newline, timeout, or the byte limit.
 fn discard_unread_request(stream: &mut UnixStream) {
-    if stream.set_nonblocking(true).is_ok() {
-        // Bounded: a client that keeps writing must not be able to hold the
-        // caller (the accept thread, or a worker) in this loop.
-        let mut discard = [0_u8; 1024];
-        for _ in 0..BUSY_DRAIN_READS {
-            match stream.read(&mut discard) {
-                Ok(0) | Err(_) => break,
-                Ok(_) => {}
-            }
+    let deadline = Instant::now() + BUSY_DRAIN_TIMEOUT;
+    let mut discard = [0_u8; 1024];
+    for _ in 0..BUSY_DRAIN_READS {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() || stream.set_read_timeout(Some(remaining)).is_err() {
+            break;
         }
-        let _ = stream.set_nonblocking(false);
+        match stream.read(&mut discard) {
+            Ok(0) => break,
+            Ok(count) if discard[..count].contains(&b'\n') => break,
+            Ok(_) => {}
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::Interrupted | std::io::ErrorKind::WouldBlock
+                ) =>
+            {
+                continue;
+            }
+            Err(_) => break,
+        }
     }
 }
 
@@ -1807,6 +1833,26 @@ mod tests {
         client.read_to_string(&mut response).unwrap();
         assert_eq!(response, "error=busy\nretryable=true\n");
         assert_eq!(rejected.load(Ordering::Acquire), 1);
+    }
+
+    #[test]
+    fn busy_response_keeps_socket_open_for_request_bytes_sent_after_connect() {
+        let (mut client, server) = UnixStream::pair().unwrap();
+        let server_thread = thread::spawn(move || {
+            let rejected = AtomicU64::new(0);
+            reject_busy(server, &rejected);
+            rejected.load(Ordering::Acquire)
+        });
+
+        // Read the response before sending the request to force the accept-
+        // then-write ordering that used to close the socket with a broken
+        // pipe. The server's write half is shut down, but its read half must
+        // stay alive long enough to consume this bounded request.
+        let mut response = String::new();
+        client.read_to_string(&mut response).unwrap();
+        assert_eq!(response, "error=busy\nretryable=true\n");
+        client.write_all(b"explain-json :clip\n").unwrap();
+        assert_eq!(server_thread.join().unwrap(), 1);
     }
 
     #[test]
