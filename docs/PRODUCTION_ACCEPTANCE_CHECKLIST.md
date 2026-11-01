@@ -7,12 +7,11 @@ session evidence; unit tests alone do not satisfy them.
 
 ## Security
 
-- [ ] Protect the default branch with required successful CI checks, pull
+- [x] Protect the default branch with required successful CI checks, pull
       requests, resolved review conversations, and force-push/deletion
       restrictions. Verify a failing required check blocks merge. See
-      [REPOSITORY_GOVERNANCE](REPOSITORY_GOVERNANCE.md). The ruleset is
-      active as of 2026-10-31; confirming that a failing check blocks a merge
-      is still open.
+      [REPOSITORY_GOVERNANCE](REPOSITORY_GOVERNANCE.md). Active since
+      2026-10-31; probe PR #37 with a failing required check was `BLOCKED`.
 - [x] Document and enforce an acceptable backend policy. Recommended setup
       excludes evdev; organization policy can restrict allowed backends.
       See [BACKENDS](BACKENDS.md), [ORGANIZATION_POLICY](ORGANIZATION_POLICY.md),

@@ -11,8 +11,9 @@ On 2026-10-31 the `main protection` ruleset (id `26295869`) was applied from
 with `active` enforcement. `gh api repos/cyberducttape/wayexpand/rules/branches/main`
 reports its `deletion`, `non_fast_forward`, `pull_request`, and
 `required_status_checks` rules, and pull request #36 reported `BLOCKED` while
-its required checks were pending. Changes now reach `main` through pull
-requests.
+its required checks were pending. Probe pull request #37, which deliberately
+failed the required `Version Consistency Check`, reported `BLOCKED` and was
+closed unmerged. Changes now reach `main` through pull requests.
 
 Before that, on 2026-10-30, the GitHub branch-protection API returned `Branch not
 protected` for `main`, and the only repository ruleset (`pro`) was disabled. The current `main` CI run passed, but without an enforced
