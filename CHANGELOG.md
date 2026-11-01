@@ -4,6 +4,31 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- The daemon control socket is usable again without an administrator policy:
+  `disable_control_socket_mutations` and `require_verified_insert_target`
+  default to `false`, as before, so `wayexpand pause/resume/reload/stop`,
+  `wayexpand insert`, and picker inserts work out of the box. Administrators
+  can still set either in `/etc/wayexpand/policy.toml`.
+- `require_verified_insert_target` no longer hides focus tokens, which made
+  verified inserts (the picker and `insert --verified`) impossible under that
+  policy. Tokens are withheld only when socket mutations are disabled.
+- Live `wayexpand explain` returns its detailed checks again (`typed`,
+  `snippet`, `suppressed_by`, `checks`) alongside `matched`, `would_expand`,
+  and `suppression_reason`. The minimal answer is kept for read-only sockets
+  (`disable_control_socket_mutations = true`). Replacements are still never
+  rendered for live explanations.
+- Fix: `explain` right after `pause` or `resume` reported the previous state,
+  because the diagnostics worker read a snapshot the reactor had not yet
+  refreshed.
+- Command snippets run again in a daemon started by hand. Cgroup containment
+  is used, and fails closed, when `WAYEXPAND_PROCESS_CGROUP=required` (set by
+  the bundled systemd units); otherwise commands fall back to process-group
+  cleanup with a one-time log notice. Plain `cargo test` works again.
+- Form values are wiped from memory when dropped: the form helper's parsed
+  output, the checked values, normalized broker parameters, the broker
+  request copy, and the template context now hold them in the new
+  `FormValues` type, whose `Debug` output omits values.
+
 - GUI polish: status pills never wrap mid-word (the diagnostics "Active
   route" badge rendered one character per line in narrow windows); the
   form-field builder now follows the snippet details card instead of sitting
@@ -13,9 +38,9 @@ All notable changes to WayExpand are documented here.
   Terminal Blue color pack from a committed CyberDuctTape sample library
   (`docs/images/screenshot-library.toml`). `scripts/gui-screenshot.sh` can
   now capture the quick-insert picker (`WAYEXPAND_GUI_SCREENSHOT_PICKER=1`).
-- Fix: a missing `/etc/wayexpand/policy.toml` no longer discards the user's
-  embedded `[organization]` policy. The secure control-socket defaults are
-  merged into it instead of replacing it.
+- Fix: a root policy that only sets control-socket fields no longer discards
+  the user's embedded `[organization]` policy; the stricter value of each
+  control-socket field wins.
 - Fix: zeroizing text and command/form output buffers no longer leave unwiped
   copies in freed memory when they grow. Form helper output is now zeroized.
 - Fix: one command cgroup that cannot be removed no longer starves the

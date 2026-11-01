@@ -88,8 +88,8 @@ pub use store::{ConfigSnapshot, ConfigStore, ConfigStoreStatus};
 pub use template::{
     form_fields, render_template, render_template_preview, render_template_with_cursor,
     template_variables, today_local_date, ClipboardPrefetch, ClipboardReader, CompiledTemplate,
-    DateError, FormField, FormFieldKind, FormValueError, SnippetLibrary, TemplateContext,
-    TemplateError,
+    DateError, FormField, FormFieldKind, FormValueError, FormValues, SnippetLibrary,
+    TemplateContext, TemplateError,
 };
 pub use usage::{
     latest_usage_event_sequence, trigger_risks, usage_stats_path, SnippetUsage, TriggerRisk,

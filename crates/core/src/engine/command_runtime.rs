@@ -193,19 +193,23 @@ fn run_broker_action(
                 .map(|value| format!("{name}={value}"))
         })
         .collect();
-    client
-        .send_request(&wayexpand_broker_client::ActionRequest {
-            action_id: action_id.to_owned(),
-            timeout_ms: command.timeout_ms,
-            inherit_env: false,
-            env_vars,
-            stdout_capture: capture_stdout,
-            parameters: parameters
-                .iter()
-                .map(|(name, value)| (name.clone(), value.clone()))
-                .collect(),
-        })
-        .map_err(|error| broker_command_error(BrokerOperation::SendRequest, error))?;
+    let mut request = wayexpand_broker_client::ActionRequest {
+        action_id: action_id.to_owned(),
+        timeout_ms: command.timeout_ms,
+        inherit_env: false,
+        env_vars,
+        stdout_capture: capture_stdout,
+        parameters: parameters
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect(),
+    };
+    let sent = client.send_request(&request);
+    // Parameters are form values the user typed; wipe this copy too.
+    for value in request.parameters.values_mut() {
+        value.zeroize();
+    }
+    sent.map_err(|error| broker_command_error(BrokerOperation::SendRequest, error))?;
     match client
         .recv_response_until(deadline, shutdown)
         .map_err(|error| broker_command_error(BrokerOperation::ReceiveResponse, error))?
@@ -743,7 +747,7 @@ pub(super) fn run_form_helper(
     title: &str,
     fields: &[crate::FormField],
     shutdown: &AtomicBool,
-) -> Result<std::collections::HashMap<String, String>, CommandError> {
+) -> Result<crate::FormValues, CommandError> {
     let spec = serde_json::json!({ "title": title, "fields": fields }).to_string();
     let helper = form_helper_command();
     let FormHelperCommand {
@@ -856,14 +860,16 @@ pub(super) fn run_form_helper(
         stop_transient_unit(transient_unit.as_deref());
         return Err(CommandError::OutputTooLarge);
     }
-    let values: std::collections::HashMap<String, String> = match serde_json::from_slice(&bytes) {
+    // Wiped on drop, including the values of fields this snippet did not ask
+    // for, which are discarded below.
+    let values: crate::FormValues = match serde_json::from_slice(&bytes) {
         Ok(values) => values,
         Err(_) => {
             stop_transient_unit(transient_unit.as_deref());
             return Err(CommandError::InvalidFormOutput);
         }
     };
-    let mut checked = std::collections::HashMap::with_capacity(fields.len());
+    let mut checked = crate::FormValues::default();
     for field in fields {
         let value = values.get(&field.key).ok_or_else(|| {
             stop_transient_unit(transient_unit.as_deref());
@@ -880,8 +886,8 @@ pub(super) fn run_form_helper(
 
 pub(super) fn normalize_form_action_parameters(
     fields: &std::collections::HashMap<String, String>,
-) -> Result<std::collections::HashMap<String, String>, CommandError> {
-    let mut normalized = std::collections::HashMap::with_capacity(fields.len());
+) -> Result<crate::FormValues, CommandError> {
+    let mut normalized = crate::FormValues::default();
     for (field_key, value) in fields {
         let Some((kind, name)) = field_key.split_once(':') else {
             return Err(CommandError::InvalidFormOutput);
@@ -893,7 +899,7 @@ pub(super) fn normalize_form_action_parameters(
             || !name
                 .bytes()
                 .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
-            || normalized.insert(name.to_owned(), value.clone()).is_some()
+            || normalized.insert(name.to_owned(), value.clone())
         {
             return Err(CommandError::InvalidFormOutput);
         }

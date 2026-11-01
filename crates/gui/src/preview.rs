@@ -15,7 +15,7 @@ pub(crate) fn render_form_template(
     snippets: Arc<wayexpand_core::SnippetLibrary>,
 ) -> Result<(String, Option<usize>), String> {
     let mut context = TemplateContext::system();
-    context.fields = Arc::new(fields.clone());
+    context.fields = Arc::new(fields.clone().into());
     context.snippets = snippets;
     render_template_with_cursor(template, &context).map_err(|error| error.to_string())
 }

@@ -61,7 +61,65 @@ pub struct TemplateContext {
     pub validating: bool,
     /// Values the user entered in a snippet form, keyed by field key (see
     /// [`FormField::key`]).
-    pub fields: Arc<HashMap<String, String>>,
+    pub fields: Arc<FormValues>,
+}
+
+/// Values a user typed into a snippet form, keyed by field key. They are
+/// wiped from memory when the last owner drops them, and `Debug` never
+/// prints them.
+#[derive(Clone, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(transparent)]
+pub struct FormValues(HashMap<String, String>);
+
+impl FormValues {
+    /// Insert a value, wiping any value it replaces. Returns whether the key
+    /// was already present.
+    pub fn insert(&mut self, key: String, value: String) -> bool {
+        match self.0.insert(key, value) {
+            Some(mut previous) => {
+                zeroize::Zeroize::zeroize(&mut previous);
+                true
+            }
+            None => false,
+        }
+    }
+}
+
+impl std::ops::Deref for FormValues {
+    type Target = HashMap<String, String>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<HashMap<String, String>> for FormValues {
+    fn from(values: HashMap<String, String>) -> Self {
+        Self(values)
+    }
+}
+
+impl FromIterator<(String, String)> for FormValues {
+    fn from_iter<I: IntoIterator<Item = (String, String)>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl std::fmt::Debug for FormValues {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_set()
+            .entries(self.0.keys())
+            .finish_non_exhaustive()
+    }
+}
+
+impl Drop for FormValues {
+    fn drop(&mut self) {
+        for value in self.0.values_mut() {
+            zeroize::Zeroize::zeroize(value);
+        }
+    }
 }
 
 /// A value the user fills in when a form snippet expands.
@@ -1800,7 +1858,7 @@ mod tests {
         values.insert("choice:state".to_owned(), "latest".to_owned());
         values.insert("field:package".to_owned(), "nginx".to_owned());
         let context = TemplateContext {
-            fields: Arc::new(values),
+            fields: Arc::new(values.into()),
             ..TemplateContext::default()
         };
         assert_eq!(
@@ -2063,5 +2121,31 @@ mod tests {
         );
         // The filter must have matched: a renamed test would pass vacuously.
         assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+    }
+}
+
+#[cfg(test)]
+mod form_values_tests {
+    use super::FormValues;
+
+    #[test]
+    fn form_values_redact_debug_and_report_replaced_keys() {
+        let mut values = FormValues::default();
+        assert!(!values.insert("field:token".into(), "synthetic-form-secret".into()));
+        assert!(values.insert("field:token".into(), "replacement".into()));
+        assert_eq!(
+            values.get("field:token").map(String::as_str),
+            Some("replacement")
+        );
+        let debug = format!("{values:?}");
+        assert!(debug.contains("field:token"));
+        assert!(!debug.contains("replacement"));
+        assert!(!debug.contains("synthetic-form-secret"));
+    }
+
+    #[test]
+    fn form_values_deserialize_from_a_json_object() {
+        let values: FormValues = serde_json::from_str(r#"{"field:name":"Ada"}"#).unwrap();
+        assert_eq!(values.get("field:name").map(String::as_str), Some("Ada"));
     }
 }

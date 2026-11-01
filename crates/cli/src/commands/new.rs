@@ -168,7 +168,7 @@ pub(crate) fn new_command(args: Args) -> Result<()> {
         }
     }
     let context = TemplateContext {
-        fields: Arc::new(values),
+        fields: Arc::new(values.into()),
         ..config.template_context(None)
     };
     let (rendered, _) = render_template_with_cursor(&snippet.replacement, &context)
@@ -937,7 +937,7 @@ replacement = "Regards"
                 })
                 .collect();
             let context = TemplateContext {
-                fields: Arc::new(values),
+                fields: Arc::new(values.into()),
                 ..builtins.template_context(None)
             };
             let (rendered, _) = render_template_with_cursor(&snippet.replacement, &context)
