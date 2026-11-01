@@ -50,7 +50,7 @@ grep -F -- 'if: always()' "$workflow" >/dev/null
 grep -F -- 'schedule:' "$workflow" >/dev/null
 grep -F -- '30 3 * * 1' "$workflow" >/dev/null
 grep -F -- 'require_production:' "$workflow" >/dev/null
-grep -F -- "REQUIRE_PRODUCTION: \${{ inputs.require_production }}" "$workflow" >/dev/null
+grep -F -- "REQUIRE_PRODUCTION: \${{ inputs.require_production == true }}" "$workflow" >/dev/null
 grep -F -- 'scripts/check-production-certification.sh' "$workflow" >/dev/null
 grep -F -- 'GITHUB_STEP_SUMMARY' "$gate_script" >/dev/null
 grep -F -- 'Compatibility jobs will still be selected when their real-session runners are online.' "$gate_script" >/dev/null

@@ -46,7 +46,10 @@ jobs:
         id: runners
         env:
           CERTIFICATION_RUNNER_TOKEN: ${{ secrets.CERTIFICATION_RUNNER_TOKEN }}
-          REQUIRE_PRODUCTION: ${{ inputs.require_production }}
+          # Scheduled compatibility runs have no `inputs` context. Normalize
+          # the optional value to a real boolean so the gate never receives
+          # an empty argument; reusable release calls keep their true default.
+          REQUIRE_PRODUCTION: ${{ inputs.require_production == true }}
         run: |
           set -euo pipefail
           scripts/check-production-certification.sh \
