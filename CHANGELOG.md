@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Fix: the input-method backend panicked ("dest is out of bounds") when an
+  expansion's replacement was longer than its trigger and the tracked
+  surrounding text had spare capacity, which is the common case. The
+  in-place edit added with surrounding-text zeroization shifted the suffix
+  past the string's length; it now extends within capacity first.
+
 - Hotkey actions now run in their own command cgroup too, like expansion
   commands and broker actions, so their `setsid` descendants are cleaned up.
 

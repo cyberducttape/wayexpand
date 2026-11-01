@@ -1188,16 +1188,24 @@ fn replace_surrounding_range(
     // Keep edits in the existing allocation. The range is validated as a
     // UTF-8 boundary by callers, and the final bytes are valid UTF-8 because
     // the prefix, replacement, and suffix are each valid strings.
+    // SAFETY: the bytes may be invalid UTF-8 only inside this block; every
+    // path leaves prefix + replacement + suffix, each valid UTF-8 split at
+    // boundaries the callers validated.
     unsafe {
         let bytes = text.as_mut_vec();
         let replacement_end = range.start + replacement.len();
+        if new_len > old_len {
+            // Extend within the existing capacity (no reallocation) so the
+            // suffix can shift right inside the initialized length.
+            bytes.resize(new_len, 0);
+        }
         bytes.copy_within(range.end..old_len, replacement_end);
         bytes[range.start..replacement_end].copy_from_slice(replacement.as_bytes());
         if new_len < old_len {
-            // Wipe the truncated old suffix before shrinking the Vec length.
+            // Wipe the truncated old suffix before shrinking the length.
             bytes[new_len..old_len].zeroize();
+            bytes.truncate(new_len);
         }
-        bytes.set_len(new_len);
     }
 }
 

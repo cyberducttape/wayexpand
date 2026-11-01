@@ -1806,3 +1806,27 @@ fn key_release_does_not_generate_action() {
         None
     );
 }
+
+#[test]
+fn surrounding_range_replacement_grows_and_shrinks_in_place() {
+    let mut text = Zeroizing::new(String::with_capacity(64));
+    text.push_str("hello ;sig!");
+    let capacity = text.capacity();
+
+    // Growing within capacity must shift the suffix right without panicking.
+    replace_surrounding_range(&mut text, 6..10, "Best regards");
+    assert_eq!(text.as_str(), "hello Best regards!");
+    assert_eq!(text.capacity(), capacity);
+
+    // Shrinking keeps the allocation and leaves no stale tail.
+    replace_surrounding_range(&mut text, 6..18, "ok");
+    assert_eq!(text.as_str(), "hello ok!");
+    let residual = unsafe { std::slice::from_raw_parts(text.as_ptr(), capacity) };
+    assert!(residual[text.len()..19].iter().all(|byte| *byte == 0));
+
+    // Growing past capacity reallocates.
+    let long = "x".repeat(capacity);
+    replace_surrounding_range(&mut text, 0..0, &long);
+    assert!(text.ends_with("hello ok!"));
+    assert_eq!(text.len(), capacity + "hello ok!".len());
+}
