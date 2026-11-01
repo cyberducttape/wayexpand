@@ -256,6 +256,7 @@ wayexpand new dockerfile-python -o api/Dockerfile
 wayexpand new compose --stdout      # print instead of writing
 wayexpand new k8s-deployment --gui  # ask in the form window
 wayexpand new --show playbook       # print it as a snippet to copy
+wayexpand new ansible-role --set role=web --output roles/web
 ```
 
 A snippet becomes a file template by naming the file it writes:
@@ -288,6 +289,11 @@ name it writes. Typing the trigger still inserts the text as usual.
 - `--set NAME=VALUE` fills a field by its label; a choice must be one of its
   options. In a terminal you are asked for the rest (Enter keeps the default).
   Without a terminal, defaults are used, and a field without one is an error.
+- The built-in `ansible-role` template writes a complete role directory with
+  `tasks/main.yml`, `handlers/main.yml`, `defaults/main.yml`, and
+  `templates/default.conf.j2`. It stages every file beside the destination and
+  publishes the directory with one rename; an existing role requires
+  `--force`, which replaces the directory atomically.
 - Fields, environment variables and includes work as they do when typing.
   `{{clipboard}}` is not available, and command snippets cannot be written to
   a file.
