@@ -309,6 +309,22 @@ mod tests {
             );
             assert!(service.contains("ReadWritePaths=/sys/fs/cgroup"), "{unit}");
         }
+        for unit in [
+            "wayexpand.service",
+            "wayexpand-evdev.service",
+            "wayexpand-input-method.service",
+            "wayexpand-action-broker.service",
+        ] {
+            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../systemd")
+                .join(unit);
+            let text = std::fs::read_to_string(path).unwrap();
+            assert!(
+                text.lines()
+                    .any(|line| line.trim() == "Environment=WAYEXPAND_PROCESS_CGROUP=required"),
+                "{unit} must make the required containment policy explicit"
+            );
+        }
     }
 
     fn command(environment: CommandEnvironment) -> CommandConfig {

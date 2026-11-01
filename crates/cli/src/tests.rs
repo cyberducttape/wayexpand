@@ -652,7 +652,9 @@ fn status_json_matches_documented_stable_contract() {
          evdev_quarantined_events_total=7\n\
          control_rejected_total=4\n\
          memory_rss_kib=5\n\
-         memory_high_water_kib=6";
+         memory_high_water_kib=6\n\
+         command_containment=cgroup\n\
+         command_containment_mode=required-cgroup";
     let value = status_as_json(daemon_response).unwrap();
     let object = value.as_object().expect("status --json returns an object");
     let contract: serde_json::Value =

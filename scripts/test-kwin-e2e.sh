@@ -176,6 +176,7 @@ env -i \
     XDG_RUNTIME_DIR="$runtime" \
     XDG_CONFIG_HOME="$work/home/.config" \
     XDG_CACHE_HOME="$work/home/.cache" \
+    WAYEXPAND_PROCESS_CGROUP=disabled \
     XDG_CURRENT_DESKTOP=KDE \
     KDE_SESSION_VERSION=6 \
     QT_QPA_PLATFORM=offscreen \
