@@ -21,8 +21,8 @@ pub fn policy_backend_name<'a>(source: &str, backend: &'a str) -> &'a str {
 }
 
 /// Load the system organization policy using the same trust checks enforced by
-/// the daemon. Missing control-socket fields default to read-only; an existing
-/// invalid policy is an error.
+/// the daemon. A missing policy is intentionally equivalent to the default
+/// permissive policy; an existing invalid policy is an error.
 pub fn load_organization_policy() -> Result<OrganizationPolicy, String> {
     load_organization_policy_from_paths(
         Path::new(ORGANIZATION_POLICY_PATH),
@@ -37,7 +37,7 @@ pub fn load_organization_policy_from_paths(
     let metadata = match std::fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(OrganizationPolicy::secure_control_defaults());
+            return Ok(OrganizationPolicy::default());
         }
         Err(error) => return Err(format!("could not inspect {}: {error}", path.display())),
     };
@@ -103,38 +103,26 @@ pub fn validate_organization_policy_file(
 }
 
 pub fn parse_organization_policy(content: &str) -> Result<OrganizationPolicy, String> {
-    let mut value = toml::from_str::<toml::Value>(content)
-        .map_err(|error| format!("invalid policy TOML: {error}"))?;
-    let root = value
-        .as_table_mut()
-        .ok_or_else(|| "invalid policy TOML: policy must be a table".to_string())?;
-    let wrapped = root.contains_key("organization");
-    let policy_table = if wrapped {
-        root.get_mut("organization")
-            .and_then(toml::Value::as_table_mut)
-            .ok_or_else(|| "invalid policy TOML: [organization] must be a table".to_string())?
-    } else {
-        root
-    };
-    policy_table
-        .entry("require_verified_insert_target")
-        .or_insert(toml::Value::Boolean(true));
-    policy_table
-        .entry("disable_control_socket_mutations")
-        .or_insert(toml::Value::Boolean(true));
-
-    if wrapped {
-        let file = value.try_into::<PolicyFile>().map_err(|error| {
-            format!("invalid policy TOML: expected [organization] table: {error}")
-        })?;
-        file.organization.ok_or_else(|| {
-            "invalid policy TOML: policy file must contain an [organization] table".to_string()
-        })
-    } else {
-        value
-            .try_into::<OrganizationPolicy>()
-            .map_err(|error| format!("invalid policy TOML: expected flat policy fields: {error}"))
+    match toml::from_str::<PolicyFile>(content) {
+        Ok(file) => {
+            if let Some(policy) = file.organization {
+                return Ok(policy);
+            }
+        }
+        Err(wrapper_error) => {
+            return toml::from_str::<OrganizationPolicy>(content).map_err(|flat_error| {
+                format!(
+                    "invalid policy TOML: policy file must contain either [organization] table or flat policy fields (wrapper: {wrapper_error}; flat: {flat_error})"
+                )
+            });
+        }
     }
+
+    toml::from_str::<OrganizationPolicy>(content).map_err(|error| {
+        format!(
+            "invalid policy TOML: policy file must contain either [organization] table or flat policy fields: {error}"
+        )
+    })
 }
 
 /// Pre-flight policy check: violations determinable before trigger matching.
@@ -188,28 +176,12 @@ mod tests {
     }
 
     #[test]
-    fn missing_policy_uses_read_only_control_defaults() {
+    fn missing_policy_is_permissive() {
         let root = std::env::temp_dir().join("wayexpand-policy-missing");
         assert_eq!(
             load_organization_policy_from_paths(&root.join("policy.toml"), &root).unwrap(),
-            OrganizationPolicy::secure_control_defaults()
+            OrganizationPolicy::default()
         );
-    }
-
-    #[test]
-    fn control_socket_policy_defaults_closed_but_supports_explicit_admin_opt_out() {
-        for content in ["[organization]\nsafe_mode = false\n", "safe_mode = false\n"] {
-            let policy = parse_organization_policy(content).unwrap();
-            assert!(policy.require_verified_insert_target);
-            assert!(policy.disable_control_socket_mutations);
-        }
-
-        let opt_out = parse_organization_policy(
-            "[organization]\nrequire_verified_insert_target = false\ndisable_control_socket_mutations = false\n",
-        )
-        .unwrap();
-        assert!(!opt_out.require_verified_insert_target);
-        assert!(!opt_out.disable_control_socket_mutations);
     }
 
     #[test]

@@ -7,8 +7,7 @@ use wayexpand_core::OrganizationPolicy;
 
 /// Load organization policy from /etc/wayexpand/policy.toml
 ///
-/// Returns the policy if it exists, or WayExpand's secure control-socket
-/// defaults if no administrator policy file exists.
+/// Returns the policy if it exists, or a default (permissive) policy if not.
 /// An existing policy that cannot be securely read or parsed is fatal.
 pub fn load_policy() -> Result<OrganizationPolicy, String> {
     match wayexpand_core::load_organization_policy() {
@@ -346,11 +345,11 @@ allowed_backends = ["input-method-v2", "libei"]
     }
 
     #[test]
-    fn missing_policy_file_disables_control_mutations() {
+    fn missing_policy_file_is_permissive() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/policy-test-missing");
         let path = root.join("policy.toml");
         let policy = load_policy_from_path(&path, &root).expect("missing policy is optional");
-        assert_eq!(policy, OrganizationPolicy::secure_control_defaults());
+        assert_eq!(policy, OrganizationPolicy::default());
     }
 
     #[test]

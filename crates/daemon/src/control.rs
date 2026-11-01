@@ -98,6 +98,11 @@ pub(crate) struct ExplainSnapshot {
     pub output_connected: bool,
     pub capabilities: Option<wayexpand_core::InjectorCapabilities>,
     pub paused: bool,
+    /// The control-socket pause request the reactor had applied when this
+    /// snapshot was taken, and whether a profile switch was holding expansion.
+    /// A newer request answers `explain` before the reactor catches up.
+    pub requested_pause: bool,
+    pub profile_switch_pending: bool,
     pub sensitive: bool,
     pub composition: bool,
     pub form_open: bool,
@@ -233,9 +238,17 @@ impl ControlServer {
         let (explain_requests, explain_receiver) =
             std::sync::mpsc::sync_channel(EXPLAIN_QUEUE_CAPACITY);
         let worker_snapshot = Arc::clone(&explain_snapshot);
+        let worker_pause = Arc::clone(&pause_requested);
         let explain_worker = thread::Builder::new()
             .name("wayexpand-diagnostics".into())
-            .spawn(move || explain_worker(explain_receiver, worker_snapshot))
+            .spawn(move || {
+                explain_worker(
+                    explain_receiver,
+                    worker_snapshot,
+                    !disable_control_socket_mutations,
+                    worker_pause,
+                )
+            })
             .context("starting diagnostics worker")?;
         let usage_clear = Arc::new(Mutex::new(None));
         let explain_slot = explain_requests.clone();
@@ -604,6 +617,8 @@ fn explain_request(
 fn explain_worker(
     requests: std::sync::mpsc::Receiver<ExplainRequest>,
     snapshot: Arc<Mutex<Option<ExplainSnapshot>>>,
+    detailed: bool,
+    pause_requested: Arc<AtomicBool>,
 ) {
     let mut engine: Option<wayexpand_core::ExpansionEngine> = None;
     let mut validated: Option<Arc<wayexpand_core::ValidatedConfig>> = None;
@@ -625,7 +640,14 @@ fn explain_worker(
                 let Some(engine) = engine.as_mut() else {
                     return "explain unavailable: diagnostics could not initialize\n".to_owned();
                 };
-                engine.set_user_paused(state.paused);
+                // `pause` and `resume` reply before the reactor applies
+                // them; answer from the request rather than a stale snapshot.
+                let requested_pause = pause_requested.load(Ordering::Acquire);
+                engine.set_user_paused(if requested_pause == state.requested_pause {
+                    state.paused
+                } else {
+                    requested_pause || state.profile_switch_pending
+                });
                 engine.set_sensitive_focus(state.sensitive);
                 engine.set_composition_active(state.composition);
                 engine.set_form_open_for_diagnostics(state.form_open);
@@ -685,17 +707,19 @@ fn explain_worker(
                             .to_owned()
                     };
                 }
-                restricted_explain_response(&explanation, request.json)
+                if detailed {
+                    detailed_explain_response(&explanation, request.json)
+                } else {
+                    restricted_explain_response(&explanation, request.json)
+                }
             },
         );
         let _ = request.reply.try_send(answer);
     }
 }
 
-/// Control-socket diagnostics are available to every process running as the
-/// user. Keep their response independent of configured trigger names, checks,
-/// command metadata, rendered lengths, and template-variable details.
-fn restricted_explain_response(explanation: &wayexpand_core::Explanation, json: bool) -> String {
+/// Summary fields shared by the detailed and restricted responses.
+fn explain_summary(explanation: &wayexpand_core::Explanation) -> (bool, bool, &'static str) {
     let matched = explanation.snippet.is_some();
     let unavailable = explanation
         .checks
@@ -711,6 +735,37 @@ fn restricted_explain_response(explanation: &wayexpand_core::Explanation, json: 
     } else {
         "blocked"
     };
+    (matched, would_expand, suppression_reason)
+}
+
+/// The full explanation for the user who owns the daemon. Anything this
+/// reveals (triggers, checks, command paths) is already readable by that user
+/// in their own configuration, and replacements are never rendered here.
+fn detailed_explain_response(explanation: &wayexpand_core::Explanation, json: bool) -> String {
+    let (matched, would_expand, suppression_reason) = explain_summary(explanation);
+    if json {
+        format!(
+            "{}\n",
+            serde_json::json!({
+                "matched": matched,
+                "would_expand": would_expand,
+                "suppression_reason": suppression_reason,
+                "suppressed_by": explanation.suppressed_by().map(|check| check.name),
+                "typed": explanation.typed,
+                "snippet": explanation.snippet,
+                "checks": explanation.checks,
+            })
+        )
+    } else {
+        explanation.render_text()
+    }
+}
+
+/// When administrator policy makes the control socket read-only, explain
+/// answers only whether the text would expand, independent of configured
+/// trigger names, checks, command metadata, and template-variable details.
+fn restricted_explain_response(explanation: &wayexpand_core::Explanation, json: bool) -> String {
+    let (matched, would_expand, suppression_reason) = explain_summary(explanation);
     if json {
         format!(
             "{}\n",
@@ -855,12 +910,12 @@ fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
                 .lock()
                 .map_err(|_| anyhow::anyhow!("focus lock poisoned"))?;
             // Focus identifiers are target-freshness data, not authorization
-            // credentials. Withhold them from general diagnostic clients
-            // whenever policy either denies mutations or requires a verified
-            // target. The generation is also withheld because it reveals
-            // focus transitions and is useful only alongside the token.
-            let restricted_focus =
-                disable_control_socket_mutations || require_verified_insert;
+            // credentials. A read-only socket has no use for them, so withhold
+            // them there; the generation is withheld too because it reveals
+            // focus transitions. Verified inserts (the picker and
+            // `insert --verified`) need them, so the verified-target policy
+            // alone must not hide them or verified insertion is impossible.
+            let restricted_focus = disable_control_socket_mutations;
             let generation = if restricted_focus {
                 String::new()
             } else {
@@ -1054,6 +1109,8 @@ mod tests {
             output_connected: true,
             capabilities: None,
             paused: false,
+            requested_pause: false,
+            profile_switch_pending: false,
             sensitive: false,
             composition: false,
             form_open: false,
@@ -1063,27 +1120,48 @@ mod tests {
             direct_commands_disabled: false,
             title_matching_disabled: false,
         })));
-        let (sender, receiver) = std::sync::mpsc::sync_channel(EXPLAIN_QUEUE_CAPACITY);
-        let worker = thread::spawn(move || explain_worker(receiver, snapshot));
+        for detailed in [true, false] {
+            let (sender, receiver) = std::sync::mpsc::sync_channel(EXPLAIN_QUEUE_CAPACITY);
+            let worker_snapshot = Arc::clone(&snapshot);
+            let worker = thread::spawn(move || {
+                explain_worker(
+                    receiver,
+                    worker_snapshot,
+                    detailed,
+                    Arc::new(AtomicBool::new(false)),
+                )
+            });
 
-        let started = Instant::now();
-        let answer = explain_request("explain-json :clip", &sender)
-            .unwrap()
-            .unwrap();
-        let elapsed = started.elapsed();
-        let response: serde_json::Value = serde_json::from_str(&answer).unwrap();
-        assert_eq!(
-            response,
-            serde_json::json!({
-                "matched": true,
-                "would_expand": true,
-                "suppression_reason": "none",
-            })
-        );
-        assert!(elapsed < Duration::from_millis(500));
+            let started = Instant::now();
+            let answer = explain_request("explain-json :clip", &sender)
+                .unwrap()
+                .unwrap();
+            let elapsed = started.elapsed();
+            let response: serde_json::Value = serde_json::from_str(&answer).unwrap();
+            assert_eq!(response["matched"], true);
+            assert_eq!(response["would_expand"], true);
+            assert_eq!(response["suppression_reason"], "none");
+            if detailed {
+                assert_eq!(response["snippet"], ":clip");
+                assert!(response["checks"].as_array().unwrap().iter().any(|check| {
+                    check["name"] == "replacement"
+                        && check["detail"] == "not rendered by control-socket diagnostics"
+                }));
+            } else {
+                assert_eq!(
+                    response,
+                    serde_json::json!({
+                        "matched": true,
+                        "would_expand": true,
+                        "suppression_reason": "none",
+                    })
+                );
+            }
+            assert!(elapsed < Duration::from_millis(500));
 
-        drop(sender);
-        worker.join().unwrap();
+            drop(sender);
+            worker.join().unwrap();
+        }
     }
 
     #[test]
@@ -1168,6 +1246,8 @@ mod tests {
             output_connected: true,
             capabilities: None,
             paused: false,
+            requested_pause: false,
+            profile_switch_pending: false,
             sensitive: false,
             composition: false,
             form_open: false,
@@ -1299,17 +1379,18 @@ mod tests {
     }
 
     #[test]
-    fn verified_target_policy_withholds_focus_identifiers_even_if_mutations_are_enabled() {
+    fn verified_target_policy_keeps_focus_identifiers_for_verified_inserts() {
+        let insert = Arc::new(Mutex::new(None));
         let flags = Flags {
             reload: Arc::new(AtomicBool::new(false)),
             stop: Arc::new(AtomicBool::new(false)),
             pause: Arc::new(AtomicBool::new(false)),
-            insert: Arc::new(Mutex::new(None)),
+            insert: Arc::clone(&insert),
             require_verified_insert: true,
             disable_control_socket_mutations: false,
             focus: Arc::new(Mutex::new(FocusSnapshot {
                 generation: 9,
-                token: Some("window-instance-id".into()),
+                token: Some("deadbeef".into()),
                 exact_window_identity: true,
             })),
             explain: std::sync::mpsc::sync_channel(EXPLAIN_QUEUE_CAPACITY).0,
@@ -1317,19 +1398,27 @@ mod tests {
             status: Arc::new(Mutex::new("running".into())),
             waker: Arc::default(),
         };
-        let (mut client, server) = UnixStream::pair().unwrap();
-        client.write_all(b"focus\n").unwrap();
-        client.shutdown(std::net::Shutdown::Write).unwrap();
-        handle_request(server, flags).unwrap();
+        let send = |command: &str| {
+            let (mut client, server) = UnixStream::pair().unwrap();
+            client.write_all(command.as_bytes()).unwrap();
+            client.shutdown(std::net::Shutdown::Write).unwrap();
+            handle_request(server, flags.clone()).unwrap();
+            let mut response = String::new();
+            client.read_to_string(&mut response).unwrap();
+            response
+        };
 
-        let mut response = String::new();
-        client.read_to_string(&mut response).unwrap();
+        // The picker and `insert --verified` read the token, then insert.
         assert_eq!(
-            response,
-            "focus_generation=\nfocus_token=\nfocus_identity=exact\n"
+            send("focus\n"),
+            "focus_generation=9\nfocus_token=deadbeef\nfocus_identity=exact\n"
         );
-        assert!(!response.contains("window-instance-id"));
-        assert!(!response.contains("focus_generation=9"));
+        assert_eq!(
+            send("insert-target 9 deadbeef ;sig\n"),
+            "insert scheduled\n"
+        );
+        assert!(insert.lock().unwrap().is_some());
+        assert_eq!(send("insert ;sig\n"), UNVERIFIED_INSERT_REFUSED);
     }
 
     #[test]

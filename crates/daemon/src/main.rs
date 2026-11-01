@@ -251,9 +251,8 @@ fn main() -> Result<()> {
         );
     }
 
-    // The policy loader supplies restrictive control-socket defaults when no
-    // administrator policy exists. Invalid policies are fatal so a malformed
-    // management update cannot silently disable restrictions.
+    // An absent policy is permissive; an existing invalid or insecure policy
+    // is fatal so a management update cannot silently disable restrictions.
     let policy = policy::load_policy()
         .map_err(|error| anyhow::anyhow!("organization policy is invalid: {error}"))?;
     let policy_backend = wayexpand_core::policy_backend_name(source_name, backend_name);

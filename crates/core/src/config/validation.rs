@@ -502,8 +502,7 @@ impl Config {
             candidate.validate()?;
             self.organization = policy.effective_enforcement_policy();
         } else {
-            // A policy that only carries the control-socket fields (including
-            // the secure defaults used when no policy file exists) must not
+            // A policy that only carries the control-socket fields must not
             // discard the user's own embedded policy. The stricter setting of
             // the two wins for each control-socket field.
             self.organization.require_verified_insert_target |=

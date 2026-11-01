@@ -458,8 +458,8 @@ Diagnostic output suitable for health checks and monitoring systems.
 - `policy.policy.minimum_replacement_guarantee` (string|null): Minimum replacement guarantee the selected injector must provide: `"best-effort"`, `"verified"`, or `"atomic"`; null when unset; enforced only when `safe_mode` is true
 - `policy.policy.require_sensitive_focus` (bool): Whether startup requires an input source that reports password/sensitive-field focus; enforced only when `safe_mode` is true
 - `policy.policy.require_composition_aware` (bool): Whether startup requires an input source that reports active external IME/preedit composition; local dead-key/Compose tracking does not satisfy it, and enforcement is active only when `safe_mode` is true
-- `policy.policy.require_verified_insert_target` (bool, default `true`): Explicit inserts must name the exact focused window (`insert --verified` or the picker); enforced in audit and safe mode
-- `policy.policy.disable_control_socket_mutations` (bool, default `true`): Whether the daemon refuses state-changing control-socket commands; enforced regardless of `safe_mode`
+- `policy.policy.require_verified_insert_target` (bool): Whether explicit inserts must name the exact focused window (`insert --verified` or the picker); enforced only when `safe_mode` is true
+- `policy.policy.disable_control_socket_mutations` (bool): Whether the daemon refuses all state-changing control-socket commands; enforced regardless of `safe_mode`
 - `backends` (array): Available backends
   - `kind` (string): One of "input-method-v2", "evdev", "libei", "wlroots-virtual-keyboard", "uinput", "clipboard", "window-tracker"
   - `state` (string): One of "Implemented", "Available", "Unavailable", "NotImplemented", "RequiresPermission" (the `BackendState` enum in `crates/core/src/backend.rs`; "Available" is defined but no backend reports it today). These legacy values mix implementation status with environment status; consumers should use the separate fields when present.
@@ -744,12 +744,20 @@ The file stores snippet IDs, counts, character totals, and dates only.
 configured snippet and whether current live checks would allow expansion. With
 a running daemon it sends the control line `explain <text>` (or
 `explain-json <text>`); text must be 1–256 characters without control
-characters. The live control response is intentionally restricted because any
-same-user process can query the socket. It contains only `matched`,
-`would_expand`, and a generic `suppression_reason` (`none`, `no_match`,
-`blocked`, or `unavailable`). It does not include typed text, trigger or alias
-names, check details, command paths/action IDs, template-variable names,
-rendered lengths, or route-specific Unicode details.
+characters. The JSON response always contains `matched`, `would_expand`, and
+a generic `suppression_reason` (`none`, `no_match`, `blocked`, or
+`unavailable`). By default it also contains `suppressed_by` (the first
+blocking check's name, or null), `typed`, `snippet` (the matched trigger), and
+`checks` (`{name, status, detail}`); the text form lists the same checks. The
+daemon never renders the replacement for this answer, so clipboard, command,
+and other dynamic values are described, not resolved.
+
+When the administrator policy sets `disable_control_socket_mutations = true`,
+the live answer is restricted to `matched`, `would_expand`, and
+`suppression_reason`, with no typed text, trigger or alias names, check
+details, command paths/action IDs, or template-variable names: any same-user
+process can query the socket, and a read-only deployment may not want it to
+learn the library's contents.
 
 Without a daemon, or with `--offline`, `--app ID`, or an explicit config path,
 the CLI explains from the local configuration and organization policy and adds
@@ -784,11 +792,11 @@ replies `focus_generation=<n>`, `focus_token=<hex>`, and
 `focus_identity=<exact|unavailable>`: the token is derived from the backend's
 ephemeral identity for the exact toplevel, and the counter increases on every
 focus change. If the backend cannot provide an exact identity, the token is
-empty and the picker is clipboard-only. When either
-`disable_control_socket_mutations` or `require_verified_insert_target` is true,
-the general-purpose `focus` response leaves both generation and token empty;
-it still reports whether exact identity tracking is available. This prevents
-diagnostic clients from harvesting target identifiers. `insert-target
+empty and the picker is clipboard-only. When
+`disable_control_socket_mutations` is true, the `focus` response leaves both
+generation and token empty, since no insert can use them; it still reports
+whether exact identity tracking is available. `require_verified_insert_target`
+alone does not withhold them, because verified inserts depend on them. `insert-target
 <generation> <token> <trigger>` is `insert` that the daemon refuses unless the
 focused window still has that token and generation when the request is
 processed.
@@ -800,22 +808,21 @@ or withheld by policy, rather than falling back to an unverified insert. As
 with the picker, a refusal because focus moved after the request was accepted
 is logged by the daemon, not reported to the client.
 
-By default, `require_verified_insert_target` makes the daemon reply `insert
-refused: organization policy requires a verified insert target (use insert
---verified)` to a plain `insert` line and queue nothing. However, the generic
-focus endpoint withholds target identifiers under this policy, so verified
-insertion through the unauthenticated control socket is unavailable. A
-separately authorized picker/CLI target channel is not yet implemented. This
-control-socket safety check is enforced in audit and safe mode.
+When the administrator policy sets `require_verified_insert_target` and
+`safe_mode`, the daemon replies `insert refused: organization policy requires
+a verified insert target (use insert --verified)` to a plain `insert` line and
+queues nothing; `insert-target` (used by `insert --verified` and the picker)
+is unaffected. In audit mode the plain insert proceeds and the violation is
+logged.
 
-By default, `disable_control_socket_mutations = true` refuses insert, pause,
-resume, reload, stop, and usage-stat clearing over the socket regardless of
-audit mode. Focus tokens are target-freshness values, not authorization
-secrets. Linux peer credentials validate the connecting UID; they cannot
-distinguish individual applications under that UID. Setting the root-managed
-mutation policy to false explicitly opts into same-UID mutation requests, but
-focus identifiers remain hidden while `require_verified_insert_target` is
-true. `status`, `focus`, and `explain` remain available either way.
+`disable_control_socket_mutations = true` refuses insert, pause, resume, reload,
+stop, and usage-stat clearing over the socket regardless of audit mode, and the
+`focus` response then withholds the window token and generation. Both settings
+default to `false`. The focus token is a freshness value, not an authorization
+secret. Linux peer credentials validate the connecting UID; they cannot
+distinguish individual applications under that UID. Managed deployments
+requiring a read-only socket can keep `status`, `focus`, and `explain` while
+disabling all socket mutations with this policy.
 
 **Exit codes:** `0` when the daemon accepted the request, `2` for a missing or
 malformed trigger, `4` when the daemon is unreachable or rejects the request,
@@ -851,14 +858,13 @@ These fields are guaranteed present and backward-compatible. Missing fields use 
 - `Settings::template_env` and `Settings::allow_clipboard`, and
   `OrganizationPolicy::disable_template_env` / `disable_clipboard` — see
   [TEMPLATES.md](TEMPLATES.md).
-- `policy.policy.require_verified_insert_target` (bool, root-policy default
-  `true`) — explicit control-socket inserts must name a verified focus target.
-  This access-control check applies in audit and safe mode.
-- `policy.policy.disable_control_socket_mutations` (bool, root-policy default
-  `true`) — deny insert, pause, resume, reload, stop, and usage-stat clearing
-  over the daemon control socket. Read-only status, focus diagnostics, and
-  explain remain available. This applies in audit and safe mode; setting it to
-  false is an administrator opt-in to same-UID client trust.
+- `OrganizationPolicy::require_verified_insert_target` (bool, default
+  `false`, omitted from saved TOML when `false`) — refuse explicit inserts
+  that do not name a verified focus target; see the `insert` section.
+- `OrganizationPolicy::disable_control_socket_mutations` (bool, default
+  `false`, omitted from saved TOML when `false`) — deny insert, pause, resume,
+  reload, stop, and usage-stat clearing over the daemon control socket. This
+  access-control restriction applies in both safe and audit modes.
 - `Settings::clipboard_mode` (`prefetch`, `fresh`, or `disabled`; default
   `prefetch`) — controls whether clipboard-backed templates may use a bounded
   prefetch snapshot, read at render time, or be blocked.

@@ -171,11 +171,12 @@ configured program runs; the supervisor cannot safely contain commands in a
 delegation writable by those commands.
 This requires unified cgroup v2 with `cgroup.kill` support (Linux 5.14 or newer)
 and a delegated subtree. The bundled units use systemd delegation; another
-launcher must provide an equivalent subtree and permissions. If cgroup setup
-or the child migration check fails, command startup fails closed. To explicitly
-use the weaker process-group compatibility mode, set
-`WAYEXPAND_PROCESS_CGROUP=disabled`; that
-mode cannot contain a descendant that creates a new session. Cgroup
+launcher must provide an equivalent subtree and permissions. The bundled units
+set `WAYEXPAND_PROCESS_CGROUP=required`; with it, command startup fails closed
+if cgroup setup or the child migration check fails. When the variable is unset
+or `disabled` (for example a daemon started by hand), commands use the weaker
+process-group cleanup, which cannot contain a descendant that creates a new
+session. Cgroup
 containment limits lifetime, not privilege:
 commands remain trusted user-configured programs and rely on the surrounding
 systemd sandbox for filesystem and network restrictions.
@@ -515,18 +516,13 @@ wayexpand status --json
 
 The control socket is user-owned and mode `0600`; do not expose it through a
 shared filesystem or proxy it over a network.
-On Linux, the daemon checks `SO_PEERCRED` and accepts requests only from its
-own UID. That does not distinguish applications under the same user, so
-mutating socket commands are disabled by default. Read-only status, focus
-diagnostics, and explain remain available. An administrator can explicitly
-opt into same-UID mutations with the root-managed
-`[organization] disable_control_socket_mutations = false` setting. Explicit
-inserts still require a verified focus target by default; that protects the
-target against focus races but does not authenticate the requesting process.
-While that requirement is enabled, the read-only focus response withholds its
-window token and generation, so the current generic CLI/picker cannot submit a
-verified insert. A separately authorized target channel remains future work.
-Service-manager controls remain available to the logged-in user.
+On Linux, the daemon also checks `SO_PEERCRED` and accepts requests only from
+its own UID. This does not distinguish applications running under the same
+user. For managed deployments that should keep applications from requesting
+insertion or lifecycle changes, set
+`[organization] disable_control_socket_mutations = true` in the root-managed
+policy. The setting disables socket mutations regardless of expansion audit
+mode; service-manager controls remain available to the logged-in user.
 
 ### Prometheus metrics
 

@@ -3260,7 +3260,7 @@ fn detached_stdout_holder_returns_incomplete_output_without_blocking() {
     let elapsed = started.elapsed();
 
     let cgroup_required =
-        std::env::var_os("WAYEXPAND_PROCESS_CGROUP").is_none_or(|value| value != "disabled");
+        std::env::var_os("WAYEXPAND_PROCESS_CGROUP").is_some_and(|value| value == "required");
     thread::sleep(Duration::from_millis(1200));
     let escaped_work_ran = std::path::Path::new(&escaped_marker).exists();
     let _ = std::fs::remove_file(&script_path);
@@ -3686,7 +3686,7 @@ fn command_rejects_output_when_descendant_keeps_stdout_open() {
 
     let result = run_command(&command);
     let cgroup_required =
-        std::env::var_os("WAYEXPAND_PROCESS_CGROUP").is_none_or(|value| value != "disabled");
+        std::env::var_os("WAYEXPAND_PROCESS_CGROUP").is_some_and(|value| value == "required");
     let descendant_pid = std::fs::read_to_string(&pid_file).and_then(|text| {
         text.trim()
             .parse::<libc::pid_t>()
@@ -5262,16 +5262,13 @@ fn aliases_are_omitted_from_saved_toml_when_empty() {
 }
 
 #[test]
-fn verified_insert_policy_round_trips_and_audit_does_not_disable_it() {
+fn verified_insert_policy_is_omitted_from_saved_toml_unless_set() {
     let config = Config::parse("[[expansion]]\ntrigger = \":a\"\nreplacement = \"x\"\n").unwrap();
     let text = toml::to_string(&config).unwrap();
-    assert!(!config.organization.require_verified_insert_target);
     assert!(!text.contains("require_verified_insert_target"), "{text}");
 
-    let required = Config::parse(
-        "[organization]\nrequire_verified_insert_target = true\ndisable_control_socket_mutations = true\n",
-    )
-    .unwrap();
+    let required =
+        Config::parse("[organization]\nrequire_verified_insert_target = true\n").unwrap();
     let text = toml::to_string(&required).unwrap();
     assert!(
         Config::parse(&text)
@@ -5281,19 +5278,18 @@ fn verified_insert_policy_round_trips_and_audit_does_not_disable_it() {
     );
     assert!(required.organization.is_active());
     assert!(
-        required
+        !required
             .organization
             .effective_enforcement_policy()
-            .require_verified_insert_target
+            .require_verified_insert_target,
+        "audit mode must not enforce"
     );
-    assert!(required.organization.disable_control_socket_mutations);
 }
 
 #[test]
 fn control_socket_mutation_restriction_is_enforced_even_in_audit_mode() {
     let config = Config::parse("[[expansion]]\ntrigger = \":a\"\nreplacement = \"x\"\n").unwrap();
     let text = toml::to_string(&config).unwrap();
-    assert!(!config.organization.disable_control_socket_mutations);
     assert!(!text.contains("disable_control_socket_mutations"), "{text}");
 
     let restricted = Config::parse(

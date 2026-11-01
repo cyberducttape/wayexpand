@@ -39,16 +39,18 @@ journalctl --user -u wayexpand-input-method.service -n 80 --no-pager
 **Symptoms:** Daemon is running, but triggers don't work
 
 **Diagnosis:** start with `wayexpand explain`, which asks the running daemon
-whether the supplied text matches and whether live checks allow expansion. For
-privacy, live answers give only a generic reason (`no_match`, `blocked`, or
-`unavailable`) and do not disclose snippet names or check details. Use
-`wayexpand explain '<text>' --offline` for detailed configuration checks; this
-does not include live focus, sensitive-field, or output-connection state.
+why a specific trigger would or would not expand right now: whether the trigger
+or an alias is recognized, the match mode, the focused application against the
+snippet's app filter, pause, password-field and composition state, organization
+policy, and whether the output backend is connected. It ends with the first
+check that blocks the expansion. (Where administrator policy makes the control
+socket read-only, live answers give only a generic reason; use `--offline` for
+detailed configuration checks.)
 
 ```sh
-wayexpand explain ';sig'           # Restricted live answer from the daemon
-wayexpand explain ';sig' --json    # Minimal live result, for scripts
-wayexpand explain ';sig' --offline # Detailed local configuration checks
+wayexpand explain ';sig'           # Live answer from the daemon
+wayexpand explain ';sig' --json    # The same, for scripts
+wayexpand explain ';sig' --app org.kde.konsole --offline  # From the config alone
 ```
 
 ```sh

@@ -1141,7 +1141,7 @@ fn validated_snapshot_retains_the_config_and_normalized_ids() {
 }
 
 #[test]
-fn default_control_socket_policy_preserves_user_embedded_policy() {
+fn control_socket_only_policy_preserves_user_embedded_policy() {
     let mut config = Config::parse(
         r#"
         [organization]
@@ -1153,8 +1153,12 @@ fn default_control_socket_policy_preserves_user_embedded_policy() {
         "#,
     )
     .unwrap();
-    // What the root loader returns when /etc/wayexpand/policy.toml is absent.
-    let policy = OrganizationPolicy::secure_control_defaults();
+    // A root policy that only locks down the control socket.
+    let policy = OrganizationPolicy {
+        require_verified_insert_target: true,
+        disable_control_socket_mutations: true,
+        ..OrganizationPolicy::default()
+    };
 
     config.apply_administrator_policy(&policy).unwrap();
     assert!(config.organization.disable_clipboard);
