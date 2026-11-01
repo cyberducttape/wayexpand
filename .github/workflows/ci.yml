@@ -456,6 +456,8 @@ jobs:
         run: cargo build --locked --workspace
       - name: Ansible role syntax and idempotence regression
         run: cargo test --locked -p wayexpand ansible_role_builtin_renders_the_conventional_role_tree
+      - name: Run generated Ansible role in a disposable container
+        run: bash scripts/test-ansible-role-container.sh target/debug/wayexpand
       - name: Daemon smoke test
         run: bash scripts/smoke-daemon.sh
       - name: Daemon E2E scenarios
