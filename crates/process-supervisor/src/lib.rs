@@ -1307,7 +1307,10 @@ mod tests {
             .to_path_buf();
         let dedicated = root_is_dedicated(&root);
         if std::env::var_os("WAYEXPAND_REQUIRE_CGROUP_TEST").is_some() {
-            assert!(dedicated, "test must run as its service cgroup's only process");
+            assert!(
+                dedicated,
+                "test must run as its service cgroup's only process"
+            );
         }
         // Whether or not the kernel let the descendant migrate back to the
         // service cgroup, cleanup must terminate it.
