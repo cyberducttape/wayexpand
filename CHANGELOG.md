@@ -4,6 +4,24 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- GUI polish: status pills never wrap mid-word (the diagnostics "Active
+  route" badge rendered one character per line in narrow windows); the
+  form-field builder now follows the snippet details card instead of sitting
+  above it, with themed card and field styling; picker category pills blend
+  with the highlighted row; picker insert states use the themed card.
+- Refresh the README, GUI guide, and social-preview screenshots in the
+  Terminal Blue color pack from a committed CyberDuctTape sample library
+  (`docs/images/screenshot-library.toml`). `scripts/gui-screenshot.sh` can
+  now capture the quick-insert picker (`WAYEXPAND_GUI_SCREENSHOT_PICKER=1`).
+- Fix: a missing `/etc/wayexpand/policy.toml` no longer discards the user's
+  embedded `[organization]` policy. The secure control-socket defaults are
+  merged into it instead of replacing it.
+- Fix: zeroizing text and command/form output buffers no longer leave unwiped
+  copies in freed memory when they grow. Form helper output is now zeroized.
+- Fix: one command cgroup that cannot be removed no longer starves the
+  cleanup reaper or blocks the thread tearing down a command once the reaper
+  queue is full.
+
 - Zeroize captured command stdout on timeout, cancellation, output-limit,
   incomplete-output, process-I/O, nonzero-exit, and invalid-UTF-8 failures.
   The bounded stdout read buffer is now wiped on every exit, and trailing

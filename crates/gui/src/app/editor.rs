@@ -362,10 +362,6 @@ impl GuiApp {
         let mut detect_app_clicked = false;
         let mut variable_inserted = false;
         let daemon_capabilities = self.daemon_capabilities.clone();
-        ui.collapsing(self.strings.form_builder_title(), |ui| {
-            self.render_form_field_builder(ui, palette);
-        });
-        ui.add_space(6.0);
         egui::Frame::new()
             .fill(palette.surface)
             .stroke(egui::Stroke::new(1.0, palette.border))
@@ -764,7 +760,13 @@ impl GuiApp {
         if variable_inserted {
             self.invalidate_preview();
         }
-        ui.add_space(10.0);
+        // An optional helper for the replacement above, so it follows the
+        // details card instead of pushing the snippet's own fields down.
+        ui.add_space(8.0);
+        ui.collapsing(self.strings.form_builder_title(), |ui| {
+            self.render_form_field_builder(ui, palette);
+        });
+        ui.add_space(6.0);
         ui.horizontal(|ui| {
             ui.label(self.strings.preview_app());
             ui.add(
@@ -790,11 +792,12 @@ impl GuiApp {
     }
 
     fn render_form_field_builder(&mut self, ui: &mut egui::Ui, palette: &Palette) {
-        ui.group(|ui| {
+        theme::card(ui, palette, |ui| {
             ui.horizontal(|ui| {
                 ui.label(self.strings.form_builder_name());
                 ui.add(
                     TextEdit::singleline(&mut self.form_field_name)
+                        .margin(theme::FIELD_MARGIN)
                         .desired_width(110.0)
                         .hint_text("incident_id"),
                 );
@@ -807,12 +810,14 @@ impl GuiApp {
                 ui.label(self.strings.form_builder_default());
                 ui.add(
                     TextEdit::singleline(&mut self.form_field_default)
+                        .margin(theme::FIELD_MARGIN)
                         .desired_width(180.0)
                         .hint_text(self.strings.form_builder_default_hint()),
                 );
                 ui.label(self.strings.form_builder_choices());
                 ui.add(
                     TextEdit::singleline(&mut self.form_field_options)
+                        .margin(theme::FIELD_MARGIN)
                         .desired_width(180.0)
                         .hint_text("Low,Medium,High"),
                 );

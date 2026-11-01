@@ -289,15 +289,27 @@ pub fn section_header(ui: &mut egui::Ui, icon: &str, title: &str) {
 
 /// A small rounded, colored badge (snippet/hotkey counts, status words).
 pub fn pill(ui: &mut egui::Ui, text: impl Into<String>, fg: Color32, bg: Color32) {
+    let text = text.into();
     let background = blend_over(bg, ui.visuals().panel_fill);
     let fg = readable_text_color(fg, background);
-    egui::Frame::new()
-        .fill(background)
-        .corner_radius(CornerRadius::same(255))
-        .inner_margin(Margin::symmetric(9, 3))
-        .show(ui, |ui| {
-            ui.label(egui::RichText::new(text).color(fg).size(12.0).strong());
-        });
+    // A pill is one unbreakable token. Measure it unwrapped and allocate its
+    // full size, so a wrapping row moves it to the next line instead of
+    // squeezing it into a column one character wide.
+    let galley = egui::WidgetText::from(egui::RichText::new(&text).color(fg).size(12.0).strong())
+        .into_galley(
+            ui,
+            Some(egui::TextWrapMode::Extend),
+            f32::INFINITY,
+            TextStyle::Body,
+        );
+    let padding = Vec2::new(9.0, 3.0);
+    let (rect, response) = ui.allocate_exact_size(galley.size() + 2.0 * padding, Sense::hover());
+    if ui.is_rect_visible(rect) {
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(255), background);
+        ui.painter().galley(rect.min + padding, galley, fg);
+    }
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &text));
 }
 
 /// Composite a translucent `foreground` over an opaque `background`.

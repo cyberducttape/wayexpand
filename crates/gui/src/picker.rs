@@ -124,6 +124,8 @@ pub(crate) struct PickerApp {
     focus_requested: bool,
     target_focus: Option<FocusTarget>,
     insert_state: InsertState,
+    /// Debug builds only: capture the window and exit (see `screenshot`).
+    screenshot: Option<crate::screenshot::ScreenshotCapture>,
 }
 
 enum InsertState {
@@ -178,6 +180,7 @@ impl PickerApp {
             copied: None,
             focus_requested: false,
             target_focus,
+            screenshot: None,
             insert_state: InsertState::Ready,
         }
     }
@@ -345,6 +348,13 @@ impl eframe::App for PickerApp {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = root.ctx().clone();
         let palette = self.palette;
+        if let Some(capture) = self.screenshot.as_mut() {
+            // `search` stages a query so the capture shows ranked results.
+            if capture.take_view().as_deref() == Some("search") {
+                self.query = "c".into();
+            }
+            capture.tick(&ctx);
+        }
         self.poll_insert(&ctx);
         self.refresh_results();
         let result_indices = self.result_indices.clone();
@@ -398,7 +408,8 @@ impl eframe::App for PickerApp {
 
                 match &self.insert_state {
                     InsertState::Waiting { trigger, .. } => {
-                        ui.group(|ui| {
+                        theme::card(ui, &palette, |ui| {
+                            ui.set_width(ui.available_width());
                             ui.label(
                                 RichText::new(self.strings.picker_inserting(trigger)).strong(),
                             );
@@ -411,7 +422,8 @@ impl eframe::App for PickerApp {
                         error,
                         text,
                     } => {
-                        ui.group(|ui| {
+                        theme::card(ui, &palette, |ui| {
+                            ui.set_width(ui.available_width());
                             ui.label(
                                 RichText::new(self.strings.picker_insert_failed())
                                     .strong()
@@ -529,11 +541,15 @@ fn picker_row(
                 }
                 if !expansion.category.is_empty() {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // Blend against the row's own fill: `pill` otherwise
+                        // assumes the panel color and draws a dark box on
+                        // the highlighted row.
+                        let row = theme::blend_over(fill, palette.background);
                         theme::pill(
                             ui,
                             &expansion.category,
                             palette.accent,
-                            theme::tint(palette.accent, 30),
+                            theme::blend_over(theme::tint(palette.accent, 56), row),
                         );
                     });
                 }
@@ -630,7 +646,7 @@ pub(crate) fn run(path: PathBuf) -> anyhow::Result<()> {
             } else {
                 egui::ThemePreference::Light
             });
-            Ok(Box::new(PickerApp::new(
+            let mut app = PickerApp::new(
                 config,
                 config_revision,
                 prefs.language,
@@ -639,7 +655,9 @@ pub(crate) fn run(path: PathBuf) -> anyhow::Result<()> {
                 daemon_available,
                 exact_identity_available,
                 target_focus,
-            )))
+            );
+            app.screenshot = crate::screenshot::ScreenshotCapture::from_env();
+            Ok(Box::new(app))
         }),
     )
     .map_err(|error| anyhow::anyhow!("picker failed: {error}"))?;

@@ -19,7 +19,7 @@ pub(crate) struct ScreenshotCapture {
     requested: bool,
     /// `WAYEXPAND_GUI_SCREENSHOT_VIEW`: a screen to open before capturing
     /// (`light`, `settings`, `diagnostics`, `new`, `import`, `search`,
-    /// `preview`).
+    /// `preview`). The `--picker` window understands `search`.
     view: Option<String>,
 }
 

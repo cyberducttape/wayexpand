@@ -10,6 +10,8 @@
 #
 #   WAYEXPAND_GUI_SCREENSHOT_VIEW  screen to open first (see screenshot.rs)
 #   WAYEXPAND_GUI_SCREENSHOT_PACK  color pack code, for example retro_80s_neon
+#   WAYEXPAND_GUI_SCREENSHOT_PICKER=1  capture the quick-insert picker
+#                                  (wayexpand-gui --picker) instead
 #   WAYEXPAND_GUI_SCREENSHOT_DAEMON=1  also run a sandboxed daemon that reads
 #                                  stdin and types nothing, so the header
 #                                  shows a running service
@@ -76,6 +78,9 @@ if [ "\${WAYEXPAND_GUI_SCREENSHOT_DAEMON:-}" = 1 ]; then
     sleep 120 | '$daemon' --source=stdin --backend=none >'$work/daemon.log' 2>&1 &
     sleep 2
 fi
+if [ "\${WAYEXPAND_GUI_SCREENSHOT_PICKER:-}" = 1 ]; then
+    exec '$gui' --picker
+fi
 exec '$gui'
 EOF
 chmod 700 "$session"
@@ -90,6 +95,7 @@ env -i \
     WAYEXPAND_GUI_SCREENSHOT="$work/shot.ppm" \
     WAYEXPAND_GUI_SCREENSHOT_VIEW="${WAYEXPAND_GUI_SCREENSHOT_VIEW:-}" \
     WAYEXPAND_GUI_SCREENSHOT_DAEMON="${WAYEXPAND_GUI_SCREENSHOT_DAEMON:-}" \
+    WAYEXPAND_GUI_SCREENSHOT_PICKER="${WAYEXPAND_GUI_SCREENSHOT_PICKER:-}" \
     QT_QPA_PLATFORM=offscreen \
     timeout 90 dbus-run-session -- \
     kwin_wayland --virtual --no-lockscreen --no-global-shortcuts \
