@@ -2,6 +2,49 @@
 
 Updated: 2026-10-31 (America/Denver; latest evidence collected through 2026-10-31 UTC)
 
+## Post-hardening audit and repairs: 2026-10-31
+
+- Audited the 2026-10-31 hardening series and fixed defects that blocked
+  production use. All fixes are on `main`; hosted CI
+  [41261392088](https://github.com/cyberducttape/wayexpand/actions/runs/41261392088)
+  passed every job on `849e6298` (the first complete pass since
+  `d1e1c988`; earlier runs were cancelled by the integration job's 15-minute
+  limit, now 30).
+- Command snippets, hotkey actions, and broker actions failed in every
+  bundled systemd unit: the pre-exec cgroup escape probe always fired because
+  a delegated subtree is writable by its user. Reproduced with `systemd-run
+  --user -p Delegate=yes -p ReadWritePaths=/sys/fs/cgroup`: a child moved into
+  a sub-cgroup could move itself back (`ESCAPED-BACK`), and the core command
+  tests failed. The probe is replaced by an escapee sweep in dedicated service
+  cgroups. `scripts/test-process-cgroup-containment.sh` now runs each test
+  binary as its unit's only process under the units' sandbox properties; on
+  this host the descendant reported `migrated` and was still terminated, and
+  an expansion command, a hotkey action, and a broker action ran.
+- The input-method backend panicked (`dest is out of bounds`) in
+  `replace_surrounding_range` whenever a replacement grew the surrounding text
+  within its capacity. Fixed with a regression test. The headless input-method
+  lane does not exercise this path, which is why CI did not catch it.
+- Control-socket defaults restored (mutations allowed, verified inserts not
+  required, focus tokens available for verified inserts); detailed live
+  `explain` restored except for read-only sockets; explain no longer reports
+  a stale pause state. Form values, form/command output growth, and broker
+  request parameters are now zeroized. A user's embedded organization policy
+  is kept when a root policy only sets control-socket fields.
+- polkit 127 on this host resolves a `systemd --user` service process to the
+  active session (`pkcheck` succeeded for a user-service subject on an
+  `allow_active`-only action), so broker authorization works for the
+  packaged daemon. A logged-in desktop prompt still needs manual testing.
+- Local verification before pushing `bc31f332`: `cargo test --locked
+  --workspace` (no environment overrides), workspace Clippy debug and release,
+  Rust 1.92 check, `shellcheck scripts/*.sh`, `scripts/smoke-daemon.sh` (5
+  consecutive passes), `SOAK_SECONDS=60 scripts/soak-daemon.sh`,
+  `scripts/test-release.sh`, `scripts/test-kwin-e2e.sh` (15 passed, KWin
+  6.6.6 headless), and 45-second `engine_sequence`, `matcher`, and
+  `config_parse` fuzz runs without findings.
+- Still open and not addressable in code: compositor certification on real
+  desktops, physical-input and hardware lifecycle tests, the 72-hour soak,
+  and protecting `main` with required checks (a repository setting).
+
 ## Command stdout secret cleanup: 2026-10-31
 
 - Captured stdout now stays in `Zeroizing<Vec<u8>>` through process completion.
