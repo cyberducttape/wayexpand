@@ -1,0 +1,162 @@
+hotkey = []
+
+[[expansion]]
+id = "b8ee69e1-95ab-4e40-b2c4-5316a9349fc9"
+trigger = ";sig"
+replacement = """
+Best regards,
+Alex Morgan
+Platform Engineering · CyberDuctTape"""
+description = "Email signature"
+tags = [
+    "email",
+    "signature",
+]
+category = "Email"
+app_filter = []
+match_mode = "immediate"
+enabled = true
+propagate_case = false
+
+[[expansion]]
+id = "9855f0e7-6d20-451a-a813-be3608c337df"
+trigger = ";ty"
+replacement = "Thanks for reaching out! "
+description = "Support reply opener"
+tags = []
+category = "Support"
+app_filter = []
+match_mode = "immediate"
+enabled = true
+propagate_case = false
+
+[[expansion]]
+id = "44b8a0e2-705d-428b-bf2b-23c22969750c"
+trigger = ";meet"
+replacement = "https://meet.cyberducttape.dev/platform-standup"
+description = "Meeting link"
+tags = []
+category = "Email"
+app_filter = []
+match_mode = "immediate"
+enabled = true
+propagate_case = false
+
+[[expansion]]
+id = "79356b46-57bd-4ba3-95f4-701d2b9c4a72"
+trigger = ";addr"
+replacement = """
+CyberDuctTape
+1200 Wayland Way, Suite 42
+Denver, CO 80202"""
+description = "Office address"
+tags = []
+category = "Personal"
+app_filter = []
+match_mode = "immediate"
+enabled = true
+propagate_case = false
+
+[[expansion]]
+id = "b60c63e4-203e-48ae-9e82-a25e8b3936f6"
+trigger = ";date"
+replacement = "{{date}}"
+description = "Today's date"
+tags = []
+category = "Dates"
+app_filter = []
+match_mode = "immediate"
+enabled = true
+propagate_case = false
+
+[[expansion]]
+id = "d700efce-b8f8-4ff6-96f2-de41c647cdef"
+trigger = ";due"
+replacement = "{{date+7d}}"
+description = "One week from today"
+tags = []
+category = "Dates"
+app_filter = []
+match_mode = "immediate"
+enabled = true
+propagate_case = false
+
+[[expansion]]
+id = "a6a39f8b-7fc9-4058-9c95-fa77f183a93d"
+trigger = ";bug"
+replacement = """
+**Steps to reproduce**
+1. {{cursor}}
+
+**Expected**
+
+**Actual**
+"""
+description = "Bug report template"
+tags = []
+category = "Development"
+app_filter = []
+match_mode = "immediate"
+enabled = true
+propagate_case = false
+
+[[expansion]]
+id = "10e64cbc-c960-4091-9bcc-2c61eab1c4bc"
+trigger = ";lgtm"
+replacement = "LGTM — thanks! Merging once CI is green."
+description = "Code review approval"
+tags = []
+category = "Development"
+app_filter = []
+match_mode = "immediate"
+enabled = false
+propagate_case = false
+
+[[expansion]]
+id = "b46f70db-8f18-49a6-8d9f-3a9dda52dd1e"
+trigger = ";gh"
+replacement = "https://github.com/cyberducttape/wayexpand"
+description = "WayExpand repository"
+tags = []
+category = "Development"
+app_filter = []
+match_mode = "immediate"
+enabled = true
+propagate_case = false
+
+[[expansion]]
+id = "010dd36e-acb5-46e1-b816-7fcaca8b9de4"
+trigger = ";oncall"
+replacement = "Paging the CyberDuctTape on-call: ops@cyberducttape.dev"
+description = "On-call contact"
+tags = []
+category = "Ops"
+app_filter = []
+match_mode = "immediate"
+enabled = true
+propagate_case = false
+
+[settings]
+max_buffer_chars = 128
+font_scale = "normal"
+libei_token_persistence = true
+fcitx5_direct_commit = false
+
+[organization]
+safe_mode = false
+disable_commands = false
+disable_hotkeys = false
+require_absolute_commands = false
+disable_title_matching = false
+allow_weak_app_filters = false
+require_atomic_replace = false
+require_sensitive_focus = false
+require_composition_aware = false
+max_replacement_size = 0
+allowed_backends = []
+allowed_packs = []
+require_signed_packs = false
+pack_signers_file = "/etc/wayexpand/pack-signers"
+disable_clipboard = false
+disable_template_env = false
+audit_prefix = "wayexpand-policy"

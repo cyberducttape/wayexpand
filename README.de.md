@@ -15,7 +15,7 @@ automatisierte End-to-End-Zertifizierung freigegeben. Prüfen Sie vor dem
 produktiven Einsatz `wayexpand doctor` und die
 [Support-Matrix](docs/SUPPORT_MATRIX.md).
 
-![WayExpand-Editor im Farbschema „Retro 80s Neon“ mit Matcher-Vorschau: aus „Hi Jordan, ;ty …“ wird eine vollständige Support-Antwort](docs/images/wayexpand-editor-try-it-live.png)
+![WayExpand-Editor im Farbschema „Terminal Blue“ mit Matcher-Vorschau: aus „Hi Jordan, ;ty …“ wird eine vollständige Support-Antwort](docs/images/wayexpand-editor-try-it-live.png)
 
 ### Das Besondere
 
@@ -220,4 +220,5 @@ Beiträge und Fehlerberichte:
 
 ## Lizenz
 
-[MIT](LICENSE)
+[MIT](LICENSE). WayExpand wird von
+[CyberDuctTape](https://github.com/cyberducttape) entwickelt und gepflegt.

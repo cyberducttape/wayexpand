@@ -505,10 +505,23 @@ Potential color packs for future releases:
 ## Screenshots
 
 The first-run screen and the editor with the Matcher preview, both in the
-Retro 80s Neon color pack. `scripts/gui-screenshot.sh` renders the same
-screens from a debug build inside a private headless KWin.
+Terminal Blue color pack. `scripts/gui-screenshot.sh` renders the same
+screens from a debug build inside a private headless KWin. The sample library
+is [`images/screenshot-library.toml`](images/screenshot-library.toml), with
+CyberDuctTape as the example organization:
 
-![WayExpand's first-run screen with three steps: Turn on WayExpand, Add your first snippet, Try it](images/wayexpand-first-run.png)
+```sh
+export WAYEXPAND_GUI_SCREENSHOT_PACK=terminal_blue
+WAYEXPAND_GUI_SCREENSHOT_DAEMON=1 WAYEXPAND_GUI_SCREENSHOT_VIEW=preview \
+    scripts/gui-screenshot.sh docs/images/screenshot-library.toml \
+    docs/images/wayexpand-editor-try-it-live.png 1180x780
+WAYEXPAND_GUI_SCREENSHOT_DAEMON=1 WAYEXPAND_GUI_SCREENSHOT_PICKER=1 \
+    scripts/gui-screenshot.sh docs/images/screenshot-library.toml \
+    docs/images/wayexpand-quick-insert-picker.png 1180x780
+scripts/make-social-preview.sh
+```
+
+![WayExpand's first-run screen with four steps: Turn on WayExpand, Verify this desktop session, Add your first snippet, Check the Matcher preview](images/wayexpand-first-run.png)
 
 ![WayExpand's editor with the Matcher preview expanding a support reply](images/wayexpand-editor-try-it-live.png)
 

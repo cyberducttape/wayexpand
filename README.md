@@ -12,7 +12,7 @@ signature. Type `;ty` and get your support reply — with the cursor waiting
 where you need to keep typing. Dates, addresses, templates, team snippets:
 local, offline, no account, no telemetry.
 
-![WayExpand's editor in the Retro 80s Neon color pack, with the Matcher preview: typing "Hi Jordan, ;ty …" expanded into a full support reply, "1 expansion · 22 keystrokes saved"](docs/images/wayexpand-editor-try-it-live.png)
+![WayExpand's editor in the Terminal Blue color pack, with the Matcher preview: typing "Hi Jordan, ;ty …" expanded into a full support reply, "1 expansion · 22 keystrokes saved"](docs/images/wayexpand-editor-try-it-live.png)
 
 ### What makes it different
 
@@ -27,7 +27,7 @@ local, offline, no account, no telemetry.
   tracking (currently KDE Plasma); elsewhere, or without the service, Enter
   copies it to the clipboard. No trigger to remember.
 
-  ![The quick-insert picker in the Retro 80s Neon color pack: a search box above the snippet list, each entry showing its trigger, description, category, and a preview](docs/images/wayexpand-quick-insert-picker.png)
+  ![The quick-insert picker in the Terminal Blue color pack: a search box above the snippet list, each entry showing its trigger, description, category, and a preview](docs/images/wayexpand-quick-insert-picker.png)
 
 - **Whole config files, filled in.** `wayexpand new playbook` asks for the
   host group and package and writes a ready Ansible playbook. Dockerfiles,
@@ -100,14 +100,16 @@ packages and the Ubuntu PPA's status.
 
 ## Your first minute
 
-![WayExpand's first-run screen in the Retro 80s Neon color pack with three steps: Turn on WayExpand, Add your first snippet, Try it](docs/images/wayexpand-first-run.png)
+![WayExpand's first-run screen in the Terminal Blue color pack with four steps: Turn on WayExpand, Verify this desktop session, Add your first snippet, Check the Matcher preview](docs/images/wayexpand-first-run.png)
 
 1. **Turn on WayExpand** — one click in the GUI, or `wayexpand setup` in a
    terminal.
-2. **Add a snippet** — *Create test snippet*, write your own, or import Espanso.
-3. **Try it** — type the trigger in *Matcher preview*, then in a normal text
-   field in an app you use. Check *Desktop details* for the capabilities and
-   certification status of the active integration.
+2. **Verify this desktop session** — the GUI checks that the user service is
+   reachable; *Open diagnostics* shows the capabilities and certification
+   status of the active integration.
+3. **Add a snippet** — *Create test snippet*, write your own, or import Espanso.
+4. **Try it** — type the trigger in *Matcher preview*, then in a normal text
+   field in an app you use.
 
 Set up the picker by adding a desktop shortcut (for example <kbd>Super</kbd> +
 <kbd>.</kbd>) that runs `wayexpand-gui --picker`. Scripts can do the same with
@@ -236,4 +238,5 @@ checks, systemd validation, packaging checks, and dependency advisories.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). WayExpand is built and maintained by
+[CyberDuctTape](https://github.com/cyberducttape).

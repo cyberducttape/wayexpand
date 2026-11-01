@@ -39,14 +39,15 @@ convert "$screenshot" -resize 700x \
 convert "$work/rounded.png" \( +clone -background black -shadow 70x18+0+12 \) \
     +swap -background none -layers merge +repage "$work/shot.png"
 
-convert -size 1280x640 gradient:'#121528'-'#24123a' \
+convert -size 1280x640 gradient:'#04101f'-'#0b2a52' \
     \( "$icon" -resize 88x88 \) -geometry +64+150 -composite \
     -font "$bold" -pointsize 64 -fill white -annotate +64+320 'WayExpand' \
-    -font "$regular" -pointsize 28 -fill '#d9d4f2' -annotate +66+372 'Text expansion for Wayland' \
-    -pointsize 22 -fill '#a59fc6' \
+    -font "$regular" -pointsize 28 -fill '#d4e4f7' -annotate +66+372 'Text expansion for Wayland' \
+    -pointsize 22 -fill '#9fb8d6' \
     -annotate +66+420 'Snippets, picker, and config-file templates' \
     -annotate +66+452 'Local · offline · no telemetry' \
-    -font "$mono" -pointsize 20 -fill '#7ee0c3' -annotate +66+520 '$ wayexpand new playbook' \
+    -font "$mono" -pointsize 20 -fill '#5fd7ff' -annotate +66+520 '$ wayexpand new playbook' \
+    -font "$regular" -pointsize 18 -fill '#7f9cc0' -annotate +66+580 'Built by CyberDuctTape' \
     "$work/shot.png" -geometry +520+76 -composite \
     -strip -depth 8 "$output"
 printf 'Wrote %s\n' "$output"
