@@ -51,7 +51,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
-          toolchain: nightly
+          # Rust nightly after 2026-10-30 regressed compiling the locked zbus
+          # dependency (E0391 async-drop query cycle). This date passed all
+          # fuzz targets in the 2026-10-30 verification run.
+          toolchain: nightly-2026-10-30
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config
       - name: Install cargo-fuzz
@@ -61,7 +64,7 @@ jobs:
         env:
           FUZZ_SECONDS: ${{ github.event_name == 'schedule' && '1200' || '60' }}
         run: |
-          cargo +nightly fuzz run "${{ matrix.target }}" -- \
+          cargo +nightly-2026-10-30 fuzz run "${{ matrix.target }}" -- \
             -max_total_time="${FUZZ_SECONDS}" -rss_limit_mb=2048
       - name: Upload crash input
         if: failure()
