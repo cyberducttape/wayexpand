@@ -63,24 +63,12 @@ pub struct CommandCgroup;
 pub type ChildCgroup = CommandCgroup;
 
 impl CommandCgroup {
-    /// Use cgroup containment when the service asks for it with
-    /// `WAYEXPAND_PROCESS_CGROUP=required` (the bundled systemd units do), and
-    /// fail closed if it cannot be set up. Otherwise (unset or `disabled`),
-    /// for example a daemon started by hand or a test run, use process-group
-    /// cleanup, which cannot contain descendants that create a new session.
+    /// Require cgroup containment by default and fail closed if it cannot be
+    /// set up. Process-group-only cleanup is available only through the
+    /// explicit `WAYEXPAND_PROCESS_CGROUP=disabled` compatibility opt-out.
     pub fn prepare(command: &mut Command) -> io::Result<Option<Self>> {
         let configured = std::env::var_os("WAYEXPAND_PROCESS_CGROUP");
         if !cgroup_required(configured.as_deref())? {
-            if configured.is_none() {
-                static NOTICE: std::sync::Once = std::sync::Once::new();
-                NOTICE.call_once(|| {
-                    tracing::info!(
-                        "WAYEXPAND_PROCESS_CGROUP is not set; command descendants are \
-                         cleaned up by process group only (the bundled systemd units \
-                         enable cgroup containment)"
-                    );
-                });
-            }
             return Ok(None);
         }
         Self::prepare_required(command).map(Some)
@@ -352,7 +340,7 @@ fn kill_if_escaped(pid: u32, me: u32, expected_cgroup: &str) {
 }
 
 /// How commands started by this process are contained, for diagnostics:
-/// `cgroup` (required, fail-closed), `process-group` (unset or `disabled`),
+/// `cgroup` (required, fail-closed), `process-group` (explicitly disabled),
 /// or `invalid` when `WAYEXPAND_PROCESS_CGROUP` has an unknown value, in
 /// which case every command fails to start.
 pub fn containment_mode() -> &'static str {
@@ -363,9 +351,24 @@ pub fn containment_mode() -> &'static str {
     }
 }
 
+/// Configured child-process guarantee for diagnostics and `doctor --json`.
+/// This describes policy; successful command startup additionally verifies
+/// that the required cgroup can actually be created.
+pub fn containment_policy_mode() -> &'static str {
+    containment_policy(std::env::var_os("WAYEXPAND_PROCESS_CGROUP").as_deref())
+}
+
+fn containment_policy(configured: Option<&std::ffi::OsStr>) -> &'static str {
+    match cgroup_required(configured) {
+        Ok(true) => "required-cgroup",
+        Ok(false) => "process-group-compatibility",
+        Err(_) => "invalid",
+    }
+}
+
 fn cgroup_required(configured: Option<&std::ffi::OsStr>) -> io::Result<bool> {
     match configured {
-        None => Ok(false),
+        None => Ok(true),
         Some(value) if value == "required" => Ok(true),
         Some(value) if value == "disabled" => Ok(false),
         Some(_) => Err(io::Error::new(
@@ -869,13 +872,18 @@ mod tests {
     static KILL_FAILURE_COUNTER_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
-    fn process_containment_is_required_only_when_requested() {
-        assert!(!cgroup_required(None).expect("unset falls back to process groups"));
+    fn process_containment_requires_cgroups_unless_compatibility_is_explicit() {
+        assert!(cgroup_required(None).expect("unset defaults to required cgroup containment"));
         assert!(cgroup_required(Some(std::ffi::OsStr::new("required")))
             .expect("required policy is valid"));
         assert!(!cgroup_required(Some(std::ffi::OsStr::new("disabled")))
             .expect("explicit compatibility opt-out is valid"));
         assert!(cgroup_required(Some(std::ffi::OsStr::new("typo"))).is_err());
+        assert_eq!(containment_policy(None), "required-cgroup");
+        assert_eq!(
+            containment_policy(Some(std::ffi::OsStr::new("disabled"))),
+            "process-group-compatibility"
+        );
     }
 
     #[test]

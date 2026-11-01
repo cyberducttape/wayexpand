@@ -98,6 +98,10 @@ session_env=(
     XDG_CONFIG_HOME="$work/home/.config"
     XDG_CACHE_HOME="$work/home/.cache"
     XDG_CURRENT_DESKTOP=sway
+    # This unmanaged test session has no delegated cgroup; select the
+    # compatibility path explicitly. Dedicated cgroup integration tests cover
+    # the production required mode.
+    WAYEXPAND_PROCESS_CGROUP=disabled
 )
 # A sway unpacked outside the system library path (see
 # docs/INTEGRATION_TESTING.md) needs its libraries.

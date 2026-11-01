@@ -48,9 +48,10 @@ The values are defined in `crates/core/src/limits.rs`.
 
 Invalid values are rejected before a configuration becomes active. Runtime
 command execution is additionally bounded by the configured timeout. Bundled
-systemd units require delegated cgroup v2 containment, which also terminates
-descendants that call `setsid()`; cleanup also kills descendants that moved
-themselves back into the dedicated service cgroup. Launches without
-`WAYEXPAND_PROCESS_CGROUP=required` (for example a daemon started by hand) use
-process-group cleanup; that compatibility mode cannot contain new sessions. Neither mechanism is a
-privilege sandbox; commands remain trusted executable content.
+Commands require delegated cgroup v2 containment by default, including when
+WayExpand is launched by hand. It terminates descendants that call `setsid()`;
+cleanup also kills descendants that moved themselves back into the dedicated
+service cgroup. Set `WAYEXPAND_PROCESS_CGROUP=disabled` to explicitly select
+weaker process-group cleanup for compatibility; that mode cannot contain new
+sessions. The selected policy is shown in `wayexpand doctor --json`. Neither
+mechanism is a privilege sandbox; commands remain trusted executable content.
