@@ -493,7 +493,7 @@ impl Config {
         &mut self,
         policy: &OrganizationPolicy,
     ) -> Result<(), ConfigError> {
-        if policy.is_active() {
+        if policy.governs_expansion() {
             // Validate the administrator input before projecting audit-only
             // values away. Invalid policy files must remain fatal even when
             // safe_mode is disabled.
@@ -501,6 +501,15 @@ impl Config {
             candidate.organization = policy.clone();
             candidate.validate()?;
             self.organization = policy.effective_enforcement_policy();
+        } else {
+            // A policy that only carries the control-socket fields (including
+            // the secure defaults used when no policy file exists) must not
+            // discard the user's own embedded policy. The stricter setting of
+            // the two wins for each control-socket field.
+            self.organization.require_verified_insert_target |=
+                policy.require_verified_insert_target;
+            self.organization.disable_control_socket_mutations |=
+                policy.disable_control_socket_mutations;
         }
         self.validate()
     }

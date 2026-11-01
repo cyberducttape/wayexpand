@@ -1139,3 +1139,25 @@ fn validated_snapshot_retains_the_config_and_normalized_ids() {
         "a0000000-0000-4000-8000-000000000001"
     );
 }
+
+#[test]
+fn default_control_socket_policy_preserves_user_embedded_policy() {
+    let mut config = Config::parse(
+        r#"
+        [organization]
+        disable_clipboard = true
+
+        [[expansion]]
+        trigger = ":ok"
+        replacement = "ok"
+        "#,
+    )
+    .unwrap();
+    // What the root loader returns when /etc/wayexpand/policy.toml is absent.
+    let policy = OrganizationPolicy::secure_control_defaults();
+
+    config.apply_administrator_policy(&policy).unwrap();
+    assert!(config.organization.disable_clipboard);
+    assert!(config.organization.require_verified_insert_target);
+    assert!(config.organization.disable_control_socket_mutations);
+}

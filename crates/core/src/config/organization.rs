@@ -194,6 +194,19 @@ impl OrganizationPolicy {
     }
 
     /// Check if any policies are active
+    /// Whether this policy constrains anything beyond the daemon control
+    /// socket. The root loader always sets the control-socket fields, so
+    /// they alone do not make an administrator policy authoritative over a
+    /// user's embedded expansion policy.
+    pub fn governs_expansion(&self) -> bool {
+        Self {
+            require_verified_insert_target: false,
+            disable_control_socket_mutations: false,
+            ..self.clone()
+        }
+        .is_active()
+    }
+
     pub fn is_active(&self) -> bool {
         self.safe_mode
             || self.disable_commands
