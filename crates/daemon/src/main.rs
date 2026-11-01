@@ -9,6 +9,7 @@ mod events;
 mod failure_trace;
 mod focus;
 mod input_loop;
+mod keyboard_layout;
 mod latency;
 mod output_connect;
 mod output_health;

@@ -96,6 +96,11 @@ pub struct KeyboardLayoutSnapshot {
 /// fail closed.
 pub trait KeyboardLayoutProvider: Send {
     fn snapshot(&mut self) -> Option<KeyboardLayoutSnapshot>;
+
+    /// Whether a current trusted snapshot is available without blocking.
+    fn is_available(&self) -> bool {
+        false
+    }
 }
 
 struct UnavailableLayoutProvider;
@@ -922,7 +927,10 @@ impl InputSource for EvdevSource {
     }
 
     fn capabilities(&self) -> InputSourceCapabilities {
-        InputSourceCapabilities::EVDEV
+        InputSourceCapabilities {
+            layout_aware: self.layout_provider.is_available(),
+            ..InputSourceCapabilities::EVDEV
+        }
     }
 
     fn next_event(&mut self) -> Result<InputEvent, InputSourceError> {

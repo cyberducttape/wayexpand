@@ -339,15 +339,19 @@ that evdev has acquired field awareness. Use `--source=input-method` when
 password-field protection is required.
 
 **Keyboard-layout synchronization:**
-The evdev source requires a compositor-supplied active-keymap provider before
-it translates keys for matching or hotkeys. No current compositor route
-provides that contract, so evdev leaves native typing intact but refuses
+The evdev source requires a fresh compositor-supplied active-keymap snapshot
+before it translates keys for matching or hotkeys. On KDE Plasma, the daemon
+tracks KWin's active layout and layout list over the session D-Bus interface
+`org.kde.KeyboardLayouts`; XKB model, variant, and options come from the
+session's XKB environment and `kxkbrc`. A bounded worker polls independently
+of the input loop. If KWin stops answering, returns an unknown layout, or the
+snapshot becomes stale, evdev leaves native typing intact and refuses
 layout-dependent matching rather than guessing from a startup keymap.
 `wayexpand status` and `wayexpand doctor --json` report
-`capture_layout_state=unavailable`; choose a route with active layout
-tracking to use matching and hotkeys. The provider API resets matcher and XKB
-composition state on every keymap generation change and preserves held
-modifiers across the transition.
+`capture_layout_state=tracked` only while the snapshot is fresh, otherwise
+`unavailable`. Each layout generation resets matcher and XKB composition
+state and replays held modifiers into the new keymap. Other compositors need
+their own trustworthy provider before evdev matching can be enabled.
 
 **Non-exclusive capture and rapid typing:**
 The focused application receives evdev key events independently of WayExpand.
