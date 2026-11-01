@@ -116,12 +116,13 @@ replacement = """---
   vars:
     packages:
       - {{field:package=nginx}}
+    package_state: {{choice:state=present|latest|absent}}
 
   tasks:
     - name: Install packages
       ansible.builtin.package:
         name: "{{{{ item }}}}"
-        state: {{choice:state=present|latest|absent}}
+        state: "{{{{ package_state }}}}"
       loop: "{{{{ packages }}}}"
 
     - name: Enable and start {{field:service=nginx}}
@@ -129,28 +130,30 @@ replacement = """---
         name: {{field:service=nginx}}
         state: started
         enabled: true
+      when: package_state != 'absent'
 """
 
 [[expansion]]
 trigger = ";;ansible-role"
-output_file = "roles/main.yml"
-description = "Ansible role tasks file with a templated config and handler notify"
+output_file = "roles/{{field:role=nginx}}"
+description = "Complete Ansible role with tasks, handler, defaults, and template"
 category = "DevOps"
 tags = ["ansible"]
 replacement = """---
-- name: Install {{field:package}}
+# Role {{field:role=nginx}} defaults: port {{field:port=80}}, host {{field:hostname=localhost}}, owner {{field:owner=root}}, group {{field:group=root}}
+- name: "Install {{field:package=nginx}}"
   ansible.builtin.package:
-    name: {{field:package}}
+    name: "{{field:package=nginx}}"
     state: present
 
-- name: Configure {{field:package}}
+- name: "Configure {{field:service=nginx}}"
   ansible.builtin.template:
-    src: {{field:template=config.j2}}
-    dest: {{field:destination}}
-    owner: root
-    group: root
+    src: default.conf.j2
+    dest: "{{field:destination=/etc/nginx/conf.d/default.conf}}"
+    owner: "{{field:owner=root}}"
+    group: "{{field:group=root}}"
     mode: "0644"
-  notify: Restart {{field:package}}
+  notify: Restart {{field:service=nginx}}
 """
 
 [[expansion]]
