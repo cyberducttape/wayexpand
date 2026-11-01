@@ -5,6 +5,7 @@
 pub const CONTROL_STATUS_SCHEMA: u32 = 15;
 
 pub use limits::{CommandLimits, COMMAND_LIMITS, CONTROL_MAX_RESPONSE_BYTES};
+pub use wayexpand_process_supervisor::containment_mode as command_containment_mode;
 
 #[cfg(not(unix))]
 compile_error!("wayexpand-core currently requires a Unix target");

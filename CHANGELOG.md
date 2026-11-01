@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Daemon status reports `command_containment` (`cgroup`, `process-group`, or
+  `invalid`), and `wayexpand doctor` prints it, so a daemon started by hand
+  without cgroup containment is visible.
+
 - Fix: the input-method backend panicked ("dest is out of bounds") when an
   expansion's replacement was longer than its trigger and the tracked
   surrounding text had spare capacity, which is the common case. The

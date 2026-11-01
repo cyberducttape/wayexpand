@@ -95,6 +95,7 @@ fn daemon_status_body_matches_documented_stable_contract() {
             "clipboard_reads_in_flight",
             "clipboard_reads_total",
             "clipboard_worker_threads",
+            "command_containment",
             "command_failure_total",
             "command_in_flight",
             "command_queue_depth",

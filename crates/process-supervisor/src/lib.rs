@@ -351,6 +351,18 @@ fn kill_if_escaped(pid: u32, me: u32, expected_cgroup: &str) {
     }
 }
 
+/// How commands started by this process are contained, for diagnostics:
+/// `cgroup` (required, fail-closed), `process-group` (unset or `disabled`),
+/// or `invalid` when `WAYEXPAND_PROCESS_CGROUP` has an unknown value, in
+/// which case every command fails to start.
+pub fn containment_mode() -> &'static str {
+    match cgroup_required(std::env::var_os("WAYEXPAND_PROCESS_CGROUP").as_deref()) {
+        Ok(true) => "cgroup",
+        Ok(false) => "process-group",
+        Err(_) => "invalid",
+    }
+}
+
 fn cgroup_required(configured: Option<&std::ffi::OsStr>) -> io::Result<bool> {
     match configured {
         None => Ok(false),
