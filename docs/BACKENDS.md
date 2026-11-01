@@ -333,14 +333,15 @@ that evdev has acquired field awareness. Use `--source=input-method` when
 password-field protection is required.
 
 **Keyboard-layout synchronization:**
-The evdev source creates a local XKB state when it starts. It does not receive
-the compositor's active-layout notifications, so changing layouts in the
-desktop session can desynchronize trigger interpretation until the evdev
-service is restarted. `wayexpand status` and `wayexpand doctor --json` expose
-this conservatively as `capture_layout_aware=false`; that is a capability
-statement, not evidence that the current layout matches the compositor.
-Avoid evdev for workflows that require layout-switch correctness, or restart
-it after changing the desktop layout and certify the target layout explicitly.
+The evdev source requires a compositor-supplied active-keymap provider before
+it translates keys for matching or hotkeys. No current compositor route
+provides that contract, so evdev leaves native typing intact but refuses
+layout-dependent matching rather than guessing from a startup keymap.
+`wayexpand status` and `wayexpand doctor --json` report
+`capture_layout_state=unavailable`; choose a route with active layout
+tracking to use matching and hotkeys. The provider API resets matcher and XKB
+composition state on every keymap generation change and preserves held
+modifiers across the transition.
 
 **Non-exclusive capture and rapid typing:**
 The focused application receives evdev key events independently of WayExpand.
@@ -373,21 +374,17 @@ or guarantee that overlapping text is intact. See
 boundary and the risks of a future exclusive proxy.
 
 **Keyboard layout handling:**
-The evdev source uses the system XKB keymap (typically loaded at session start).
-If the active layout changes during a session, the mapper continues using the
-original layout until the daemon is restarted. For fixed-layout deployments,
-this is not an issue. For multi-layout switchers, consider:
-
-- Restarting the daemon after switching layouts: `systemctl --user restart wayexpand-evdev.service`
-- Using input-method-v2 instead, which learns layout changes from the compositor
-- Using only ASCII triggers and replacements (no layout-dependent characters)
+Evdev matching and hotkeys stay disabled until a compositor-specific provider
+can identify and track the active layout. Restarting the daemon does not make
+the current evdev route layout-aware. Use a route that tracks compositor
+layout changes instead.
 
 **Hotplug and layout limitations:**
 Device discovery refreshes every five seconds, so a newly attached keyboard
-may take up to that long to enter the capture set. Evdev also creates a local
-XKB snapshot rather than consuming the compositor's live keymap; runtime
-layout switching, AltGr, Compose/dead keys, and multiple-keyboard state are
-therefore compatibility limitations. This is a fallback path, not an
+may take up to that long to enter the capture set. Evdev's provider boundary
+currently has no compositor implementation; layout-dependent matching,
+AltGr, Compose/dead keys, and hotkeys are therefore unavailable on this route.
+This is a fallback path, not an
 authoritative desktop keyboard integration.
 
 **Probe detection is deliberately conservative about device identity:**
