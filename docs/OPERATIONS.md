@@ -165,15 +165,19 @@ before `exec`; timeout, cancellation, normal completion, and worker teardown
 kill that cgroup with `cgroup.kill`, then also clean up its process group.
 This catches descendants that fork and call `setsid()`. Managed services fail
 command startup closed if delegation or Linux `cgroup.kill` support is missing.
-Before exec, the child also probes whether it can move itself back into the
-service cgroup. If that migration is permitted, spawn is rejected before the
-configured program runs; the supervisor cannot safely contain commands in a
-delegation writable by those commands.
+A delegated subtree is writable by the user it runs as, so a command can
+deliberately move itself out of its command cgroup; the kernel cannot prevent
+that for same-user processes. When the service cgroup holds only the daemon
+(as under the bundled units), every command cleanup therefore also kills
+processes that moved back into the service cgroup and removes cgroups the
+daemon did not create there. A command that moves itself elsewhere in the
+user's cgroup tree is not contained; containment guards against accidental
+leaks such as background `setsid` daemons, not against hostile commands.
 This requires unified cgroup v2 with `cgroup.kill` support (Linux 5.14 or newer)
 and a delegated subtree. The bundled units use systemd delegation; another
 launcher must provide an equivalent subtree and permissions. The bundled units
 set `WAYEXPAND_PROCESS_CGROUP=required`; with it, command startup fails closed
-if cgroup setup or the child migration check fails. When the variable is unset
+if cgroup setup fails. When the variable is unset
 or `disabled` (for example a daemon started by hand), commands use the weaker
 process-group cleanup, which cannot contain a descendant that creates a new
 session. Cgroup

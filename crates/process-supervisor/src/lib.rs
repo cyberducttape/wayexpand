@@ -98,7 +98,14 @@ impl CommandCgroup {
             next_scope_id()
         );
         let path = parent.join(name);
-        std::fs::create_dir(&path)?;
+        record_root_dedication(&parent);
+        // Register before creating, so a concurrent sweep never mistakes this
+        // cgroup for one an escaped process created.
+        active_cgroups().insert(path.clone());
+        if let Err(error) = std::fs::create_dir(&path) {
+            active_cgroups().remove(&path);
+            return Err(error);
+        }
         let procs_path = path.join("cgroup.procs");
         let procs = match std::fs::OpenOptions::new().write(true).open(&procs_path) {
             Ok(file) => file,
@@ -108,22 +115,15 @@ impl CommandCgroup {
             }
         };
         let procs_fd = procs.as_raw_fd();
-        // Do not pass the writable parent control-file descriptor to the
-        // child: that would grant it a permission the eventual executable
-        // may not have. The pre-exec check opens the path itself using the
-        // child's actual credentials and filesystem restrictions.
-        use std::os::unix::ffi::OsStrExt;
-        let parent_procs_path =
-            match std::ffi::CString::new(parent.join("cgroup.procs").as_os_str().as_bytes()) {
-                Ok(path) => path,
-                Err(error) => {
-                    remove_new_empty_cgroup(&path);
-                    return Err(io::Error::new(io::ErrorKind::InvalidData, error));
-                }
-            };
-        // SAFETY: the child callback uses only getpid, write, open, and close
-        // syscalls and performs no allocation or locking. The path bytes are
-        // prepared before fork.
+        // A command runs with the daemon's UID, and a delegated subtree is
+        // writable by that UID, so the kernel lets a command migrate itself
+        // back to the service cgroup (or elsewhere in the user's tree). That
+        // cannot be prevented here; refusing such commands would refuse every
+        // command under the bundled units. Commands are trusted executable
+        // content: containment targets accidental leaks such as `setsid`
+        // daemons, and cleanup also sweeps the service cgroup for escapees.
+        // SAFETY: the child callback uses only getpid and write, performs no
+        // allocation or locking, and the descriptor stays open until exec.
         unsafe {
             command.pre_exec(move || {
                 let mut digits = [0u8; 20];
@@ -144,47 +144,6 @@ impl CommandCgroup {
                 }
                 if written as usize != bytes.len() {
                     return Err(io::Error::from(io::ErrorKind::WriteZero));
-                }
-
-                // cgroup v2 requires write access to the common ancestor's
-                // cgroup.procs when moving between child cgroups or back to
-                // the service root. Probe through a fresh open as the actual
-                // command process. If it can migrate, abort before exec; if
-                // access is denied, the command cannot use this escape path.
-                let parent_fd =
-                    libc::open(parent_procs_path.as_ptr(), libc::O_WRONLY | libc::O_CLOEXEC);
-                if parent_fd >= 0 {
-                    let written = libc::write(parent_fd, bytes.as_ptr().cast(), bytes.len());
-                    let write_error = (written < 0).then(io::Error::last_os_error);
-                    let close_result = libc::close(parent_fd);
-                    if written >= 0 {
-                        // `Command::spawn` transports only errno from
-                        // pre_exec back to the parent, so use a real errno
-                        // rather than a custom io::Error kind/message.
-                        return Err(io::Error::from_raw_os_error(libc::EACCES));
-                    }
-                    if let Some(error) = write_error {
-                        if !matches!(
-                            error.raw_os_error(),
-                            Some(libc::EACCES)
-                                | Some(libc::EPERM)
-                                | Some(libc::EROFS)
-                                | Some(libc::EINVAL)
-                        ) {
-                            return Err(error);
-                        }
-                    }
-                    if close_result != 0 {
-                        return Err(io::Error::last_os_error());
-                    }
-                } else {
-                    let error = io::Error::last_os_error();
-                    if !matches!(
-                        error.raw_os_error(),
-                        Some(libc::EACCES) | Some(libc::EPERM) | Some(libc::EROFS)
-                    ) {
-                        return Err(error);
-                    }
                 }
                 Ok(())
             });
@@ -214,7 +173,14 @@ impl CommandCgroup {
     fn kill_and_remove(&mut self) -> io::Result<()> {
         #[cfg(target_os = "linux")]
         {
-            cleanup_cgroup(&self.path, &mut self.cleanup)
+            let result = cleanup_cgroup(&self.path, &mut self.cleanup);
+            if self.cleanup.removed {
+                active_cgroups().remove(&self.path);
+            }
+            if let Some(root) = self.path.parent() {
+                sweep_escaped_processes(root);
+            }
+            result
         }
         #[cfg(not(target_os = "linux"))]
         {
@@ -236,6 +202,152 @@ impl Drop for CommandCgroup {
                 });
             }
         }
+    }
+}
+
+/// Command cgroups this process created and has not yet removed.
+#[cfg(target_os = "linux")]
+fn active_cgroups() -> std::sync::MutexGuard<'static, std::collections::HashSet<PathBuf>> {
+    static ACTIVE: OnceLock<std::sync::Mutex<std::collections::HashSet<PathBuf>>> = OnceLock::new();
+    ACTIVE
+        .get_or_init(std::sync::Mutex::default)
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Service cgroups that held only this process and its direct children when
+/// the first command cgroup was created under them. Escapee sweeps run only
+/// there: in a shared cgroup (for example a daemon started by hand from a
+/// shell with containment required) other members are not ours to kill.
+#[cfg(target_os = "linux")]
+fn dedicated_roots() -> std::sync::MutexGuard<'static, std::collections::HashMap<PathBuf, bool>> {
+    static ROOTS: OnceLock<std::sync::Mutex<std::collections::HashMap<PathBuf, bool>>> =
+        OnceLock::new();
+    ROOTS
+        .get_or_init(std::sync::Mutex::default)
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+#[cfg(target_os = "linux")]
+fn record_root_dedication(root: &std::path::Path) {
+    if dedicated_roots().contains_key(root) {
+        return;
+    }
+    let me = std::process::id();
+    let dedicated = std::fs::read_to_string(root.join("cgroup.procs")).is_ok_and(|procs| {
+        procs
+            .lines()
+            .filter_map(|line| line.trim().parse::<u32>().ok())
+            .all(|pid| pid == me || parent_pid(pid).is_none_or(|parent| parent == me))
+    });
+    if !dedicated {
+        tracing::warn!(
+            cgroup = %root.display(),
+            "the service cgroup is shared with other processes; command descendants that \
+             leave their command cgroup will not be swept"
+        );
+    }
+    dedicated_roots()
+        .entry(root.to_path_buf())
+        .or_insert(dedicated);
+}
+
+#[cfg(target_os = "linux")]
+fn root_is_dedicated(root: &std::path::Path) -> bool {
+    dedicated_roots().get(root).copied().unwrap_or(false)
+}
+
+#[cfg(target_os = "linux")]
+fn parent_pid(pid: u32) -> Option<u32> {
+    std::fs::read_to_string(format!("/proc/{pid}/status"))
+        .ok()?
+        .lines()
+        .find_map(|line| line.strip_prefix("PPid:"))
+        .and_then(|value| value.trim().parse().ok())
+}
+
+/// Kill processes that moved themselves out of their command cgroup into the
+/// service cgroup `root`, and cgroups under `root` that this process did not
+/// create. Only this process and its direct children belong in `root`: the
+/// supervisor kills and reaps each command's own process itself, so a
+/// direct child is never an escapee, while helpers such as the form window
+/// or `pkcheck` are direct children that must survive.
+#[cfg(target_os = "linux")]
+fn sweep_escaped_processes(root: &std::path::Path) {
+    if !root_is_dedicated(root) {
+        return;
+    }
+    let Ok(relative) = root.strip_prefix("/sys/fs/cgroup") else {
+        return;
+    };
+    let expected = format!("0::/{}", relative.display());
+    let me = std::process::id();
+    if let Ok(procs) = std::fs::read_to_string(root.join("cgroup.procs")) {
+        for pid in procs
+            .lines()
+            .filter_map(|line| line.trim().parse::<u32>().ok())
+        {
+            if pid == me {
+                continue;
+            }
+            kill_if_escaped(pid, me, &expected);
+        }
+    }
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if !entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            continue;
+        }
+        let path = entry.path();
+        if active_cgroups().contains(&path) {
+            continue;
+        }
+        let mut state = CleanupState::default();
+        if let Err(error) = cleanup_cgroup(&path, &mut state) {
+            tracing::warn!(%error, cgroup = %path.display(), "could not remove a stray cgroup under the service cgroup");
+        } else {
+            tracing::warn!(cgroup = %path.display(), "removed a cgroup created by a command under the service cgroup");
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn kill_if_escaped(pid: u32, me: u32, expected_cgroup: &str) {
+    let Ok(pid_t) = libc::pid_t::try_from(pid) else {
+        return;
+    };
+    // Pin the process first, then confirm through /proc that it is still in
+    // the service cgroup and not our child. If the PID was reused after the
+    // pidfd was opened, the signal targets the exited process and fails.
+    // SAFETY: pidfd_open has no memory-safety preconditions.
+    let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid_t, 0) };
+    if fd < 0 {
+        return;
+    }
+    // SAFETY: the kernel returned a new descriptor that nothing else owns.
+    let fd = unsafe { OwnedFd::from_raw_fd(fd as std::os::fd::RawFd) };
+    let in_root = std::fs::read_to_string(format!("/proc/{pid}/cgroup"))
+        .is_ok_and(|cgroup| cgroup.lines().any(|line| line == expected_cgroup));
+    let parent = parent_pid(pid);
+    if !in_root || parent.is_none_or(|parent| parent == me) {
+        return;
+    }
+    tracing::warn!(
+        pid,
+        "killing a command descendant that left its command cgroup"
+    );
+    // SAFETY: the descriptor is a valid pidfd; the info pointer may be null.
+    unsafe {
+        libc::syscall(
+            libc::SYS_pidfd_send_signal,
+            fd.as_raw_fd(),
+            libc::SIGKILL,
+            std::ptr::null::<libc::siginfo_t>(),
+            0,
+        );
     }
 }
 
@@ -264,6 +376,7 @@ fn cleanup_cgroup(path: &std::path::Path, state: &mut CleanupState) -> io::Resul
 
 #[cfg(target_os = "linux")]
 fn remove_new_empty_cgroup(path: &std::path::Path) {
+    active_cgroups().remove(path);
     match std::fs::remove_dir(path) {
         Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
@@ -423,7 +536,10 @@ fn retry_pending(
     cleanup: &mut impl FnMut(&std::path::Path, &mut CleanupState) -> io::Result<()>,
 ) {
     pending.retain_mut(|job| match cleanup(&job.path, &mut job.state) {
-        Ok(()) => false,
+        Ok(()) => {
+            active_cgroups().remove(&job.path);
+            false
+        }
         Err(error) => {
             if !job.logged {
                 job.logged = true;
@@ -1130,7 +1246,7 @@ mod tests {
 
     #[test]
     #[cfg(target_os = "linux")]
-    fn delegated_cgroup_rejects_or_terminates_new_session_parent_migration() {
+    fn delegated_cgroup_terminates_new_session_parent_migration() {
         let marker = std::env::temp_dir().join(format!(
             "wayexpand-cgroup-child-started-{}-{}",
             std::process::id(),
@@ -1159,25 +1275,7 @@ mod tests {
                 return;
             }
         };
-        let child = match command.spawn() {
-            Ok(child) => child,
-            Err(error) if error.raw_os_error() == Some(libc::EACCES) => {
-                assert!(
-                    !marker.exists(),
-                    "the command ran despite a writable service cgroup.procs"
-                );
-                return;
-            }
-            Err(error) => panic!("spawn guarded test child: {error}"),
-        };
-        assert!(marker.exists(), "test command did not start");
-        assert!(
-            nested_marker.exists(),
-            "test command could not create its nested cgroup"
-        );
-        let nested_cgroup =
-            std::fs::read_to_string(&nested_marker).expect("read nested cgroup path");
-        let nested_cgroup = std::path::PathBuf::from(nested_cgroup.trim());
+        let child = command.spawn().expect("spawn contained test child");
         let mut supervisor = ChildSupervisor::new_with_cgroup(child, cgroup);
         let mut stdout =
             std::io::BufReader::new(supervisor.take_stdout().expect("capture escaped PID"));
@@ -1195,16 +1293,33 @@ mod tests {
             .read_line(&mut escaped_pid)
             .expect("read descendant PID");
         let escaped_pid = escaped_pid.trim().parse::<u32>().expect("valid PID");
+        // The markers are written before the descendant prints its PID.
+        assert!(marker.exists(), "test command did not start");
+        let nested_cgroup = std::fs::read_to_string(&nested_marker)
+            .expect("test command could not create its nested cgroup");
+        let nested_cgroup = std::path::PathBuf::from(nested_cgroup.trim());
 
+        eprintln!("descendant parent-cgroup migration: {migration}");
+        let root = nested_cgroup
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("command cgroup has a service parent")
+            .to_path_buf();
+        let dedicated = root_is_dedicated(&root);
+        if std::env::var_os("WAYEXPAND_REQUIRE_CGROUP_TEST").is_some() {
+            assert!(dedicated, "test must run as its service cgroup's only process");
+        }
+        // Whether or not the kernel let the descendant migrate back to the
+        // service cgroup, cleanup must terminate it.
         let _ = supervisor.reap().expect("kill cgroup and reap command");
-        if migration == "migrated" {
-            // The test deliberately cleans up if the kernel permits the
-            // migration, then fails below. Production pre-exec probing must
-            // prevent the configured command from reaching this point.
-            // SAFETY: this PID was emitted by the child test process.
+        if migration == "migrated" && !dedicated {
+            // A shared cgroup (for example a terminal scope) is never swept,
+            // so an escapee there is out of reach by design. Clean it up.
+            // SAFETY: the PID was printed by this test's own descendant.
             unsafe {
                 libc::kill(escaped_pid as libc::pid_t, libc::SIGKILL);
             }
+            eprintln!("skipping escapee assertion: the service cgroup is shared");
         }
         let deadline = std::time::Instant::now() + Duration::from_secs(1);
         while !process_is_gone_or_zombie(escaped_pid) && std::time::Instant::now() < deadline {
@@ -1221,9 +1336,5 @@ mod tests {
         );
         let _ = std::fs::remove_file(marker);
         let _ = std::fs::remove_file(nested_marker);
-        assert_eq!(
-            migration, "denied",
-            "a running command could migrate itself to the service cgroup"
-        );
     }
 }

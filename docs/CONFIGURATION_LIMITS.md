@@ -49,9 +49,8 @@ The values are defined in `crates/core/src/limits.rs`.
 Invalid values are rejected before a configuration becomes active. Runtime
 command execution is additionally bounded by the configured timeout. Bundled
 systemd units require delegated cgroup v2 containment, which also terminates
-descendants that call `setsid()`. Before executing a command, the supervisor
-checks whether that process could migrate into its service cgroup and refuses
-the command if migration is permitted. Launches without
+descendants that call `setsid()`; cleanup also kills descendants that moved
+themselves back into the dedicated service cgroup. Launches without
 `WAYEXPAND_PROCESS_CGROUP=required` (for example a daemon started by hand) use
 process-group cleanup; that compatibility mode cannot contain new sessions. Neither mechanism is a
 privilege sandbox; commands remain trusted executable content.

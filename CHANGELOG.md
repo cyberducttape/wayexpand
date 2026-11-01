@@ -4,6 +4,17 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Fix: command snippets and broker actions failed in every bundled systemd
+  service. The pre-exec probe that refused commands able to migrate out of
+  their cgroup always fired, because a delegated subtree is writable by its
+  user and `ReadWritePaths=/sys/fs/cgroup` exposes it to commands. The probe
+  is removed. Instead, when the service cgroup holds only the daemon, command
+  cleanup kills processes that moved themselves back into it (pinned with a
+  pidfd and never the daemon's own direct children) and removes cgroups the
+  daemon did not create. `scripts/test-process-cgroup-containment.sh` now runs
+  under the units' sandbox properties and checks both an escaping `setsid`
+  descendant and an ordinary command.
+
 - The daemon control socket is usable again without an administrator policy:
   `disable_control_socket_mutations` and `require_verified_insert_target`
   default to `false`, as before, so `wayexpand pause/resume/reload/stop`,
