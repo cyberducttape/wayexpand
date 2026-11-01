@@ -372,10 +372,15 @@ jobs:
         env:
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
+          # A pull_request run checks out GitHub's synthetic test merge
+          # (refs/pull/N/merge), authored under the owner's noreply address.
+          # It never lands on main, so check the pull request's own commits.
+          head=HEAD
           if [ "$GITHUB_EVENT_NAME" = push ]; then
             base='${{ github.event.before }}'
           elif [ "$GITHUB_EVENT_NAME" = pull_request ]; then
             base='${{ github.event.pull_request.base.sha }}'
+            head='${{ github.event.pull_request.head.sha }}'
           else
             base=''
           fi
@@ -384,14 +389,14 @@ jobs:
             && git cat-file -e "$base^{commit}" 2>/dev/null; then
             if [ "$GITHUB_EVENT_NAME" = pull_request ] \
               && [ "${PR_AUTHOR:-}" = 'dependabot[bot]' ]; then
-              bash scripts/check-commit-identity.sh --allow-dependabot "$base..HEAD"
+              bash scripts/check-commit-identity.sh --allow-dependabot "$base..$head"
             elif [ "$GITHUB_EVENT_NAME" = push ]; then
               # Merging a Dependabot PR in the web UI lands its commits and
               # the owner's merge commit; both must carry GitHub's pinned
               # web-flow signature.
               bash scripts/check-commit-identity.sh --allow-dependabot --allow-web-merges "$base..HEAD"
             else
-              bash scripts/check-commit-identity.sh "$base..HEAD"
+              bash scripts/check-commit-identity.sh "$base..$head"
             fi
           else
             # Dispatched and scheduled runs (releases, experimental builds)
