@@ -9,7 +9,8 @@ if ! command -v systemd-run >/dev/null 2>&1; then
 fi
 
 unit="wayexpand-cgroup-test-$$"
-repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+repo_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+# shellcheck disable=SC2016 # $1 is expanded by the inner shell.
 systemd-run --user --wait --pipe --collect --unit="$unit" \
     -p Delegate=yes \
     -p ProtectControlGroups=no \

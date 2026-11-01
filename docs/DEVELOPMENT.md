@@ -190,10 +190,10 @@ settings are part of the supported service contract.
 
 ```sh
 cargo build --locked --workspace
-WAYEXPAND_PROCESS_CGROUP=disabled cargo test --locked --workspace
+cargo test --locked --workspace
 
 # Test a specific crate or test
-WAYEXPAND_PROCESS_CGROUP=disabled cargo test --locked -p wayexpand-core app_filter
+cargo test --locked -p wayexpand-core app_filter
 ```
 
 ### Release build
@@ -259,8 +259,8 @@ preview*.
 
 **Pre-release checks:**
 ```sh
-WAYEXPAND_PROCESS_CGROUP=disabled cargo test --locked --workspace
-WAYEXPAND_PROCESS_CGROUP=disabled cargo test --locked --release --workspace
+cargo test --locked --workspace
+cargo test --locked --release --workspace
 cargo clippy --locked --workspace --all-targets -- -D warnings
 cargo build --locked --release --workspace
 git diff --check  # No trailing whitespace
@@ -365,7 +365,7 @@ impl InputSource for MyBackend {
 
 CI runs on every PR:
 - **Formatting:** `cargo fmt --all -- --check`
-- **Tests:** `WAYEXPAND_PROCESS_CGROUP=disabled cargo test --locked --workspace`
+- **Tests:** `cargo test --locked --workspace`
 - **Linting:** `cargo clippy --locked --workspace --all-targets -- -D warnings` (both debug and release)
 - **Shell scripts:** `shellcheck scripts/*.sh`
 - **Integration tests:** `scripts/smoke-daemon.sh`, `scripts/test-doctor.sh`, etc.

@@ -63,12 +63,24 @@ pub struct CommandCgroup;
 pub type ChildCgroup = CommandCgroup;
 
 impl CommandCgroup {
-    /// Require cgroup containment by default. Setting
-    /// `WAYEXPAND_PROCESS_CGROUP=disabled` explicitly opts into process-group
+    /// Use cgroup containment when the service asks for it with
+    /// `WAYEXPAND_PROCESS_CGROUP=required` (the bundled systemd units do), and
+    /// fail closed if it cannot be set up. Otherwise (unset or `disabled`),
+    /// for example a daemon started by hand or a test run, use process-group
     /// cleanup, which cannot contain descendants that create a new session.
     pub fn prepare(command: &mut Command) -> io::Result<Option<Self>> {
         let configured = std::env::var_os("WAYEXPAND_PROCESS_CGROUP");
         if !cgroup_required(configured.as_deref())? {
+            if configured.is_none() {
+                static NOTICE: std::sync::Once = std::sync::Once::new();
+                NOTICE.call_once(|| {
+                    tracing::info!(
+                        "WAYEXPAND_PROCESS_CGROUP is not set; command descendants are \
+                         cleaned up by process group only (the bundled systemd units \
+                         enable cgroup containment)"
+                    );
+                });
+            }
             return Ok(None);
         }
         Self::prepare_required(command).map(Some)
@@ -229,7 +241,7 @@ impl Drop for CommandCgroup {
 
 fn cgroup_required(configured: Option<&std::ffi::OsStr>) -> io::Result<bool> {
     match configured {
-        None => Ok(true),
+        None => Ok(false),
         Some(value) if value == "required" => Ok(true),
         Some(value) if value == "disabled" => Ok(false),
         Some(_) => Err(io::Error::new(
@@ -729,8 +741,8 @@ mod tests {
     static KILL_FAILURE_COUNTER_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
-    fn process_containment_is_required_unless_explicitly_disabled() {
-        assert!(cgroup_required(None).expect("default policy is valid"));
+    fn process_containment_is_required_only_when_requested() {
+        assert!(!cgroup_required(None).expect("unset falls back to process groups"));
         assert!(cgroup_required(Some(std::ffi::OsStr::new("required")))
             .expect("required policy is valid"));
         assert!(!cgroup_required(Some(std::ffi::OsStr::new("disabled")))

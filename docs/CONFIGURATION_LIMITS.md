@@ -51,7 +51,7 @@ command execution is additionally bounded by the configured timeout. Bundled
 systemd units require delegated cgroup v2 containment, which also terminates
 descendants that call `setsid()`. Before executing a command, the supervisor
 checks whether that process could migrate into its service cgroup and refuses
-the command if migration is permitted. Unmanaged launches use process-group
-cleanup only when `WAYEXPAND_PROCESS_CGROUP=disabled` is explicitly set; that
-compatibility mode cannot contain new sessions. Neither mechanism is a
+the command if migration is permitted. Launches without
+`WAYEXPAND_PROCESS_CGROUP=required` (for example a daemon started by hand) use
+process-group cleanup; that compatibility mode cannot contain new sessions. Neither mechanism is a
 privilege sandbox; commands remain trusted executable content.
