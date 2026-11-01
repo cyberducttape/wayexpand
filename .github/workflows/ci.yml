@@ -445,10 +445,17 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config
+      - name: Install Ansible for generated role regression
+        run: |
+          python3 -m venv "$RUNNER_TEMP/wayexpand-ansible"
+          "$RUNNER_TEMP/wayexpand-ansible/bin/pip" install --disable-pip-version-check ansible-core==2.21.5
+          echo "$RUNNER_TEMP/wayexpand-ansible/bin" >> "$GITHUB_PATH"
       - name: Generate vendored dependencies (offline builds)
         run: mkdir -p .cargo && cargo vendor vendor/ > .cargo/config.toml && echo "vendor/" >> .gitignore
       - name: Build binaries
         run: cargo build --locked --workspace
+      - name: Ansible role syntax and idempotence regression
+        run: cargo test --locked -p wayexpand ansible_role_builtin_renders_the_conventional_role_tree
       - name: Daemon smoke test
         run: bash scripts/smoke-daemon.sh
       - name: Daemon E2E scenarios
