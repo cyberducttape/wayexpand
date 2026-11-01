@@ -53,6 +53,7 @@ struct CleanupState {
 struct ReaperJob {
     path: PathBuf,
     state: CleanupState,
+    logged: bool,
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -219,6 +220,7 @@ impl Drop for CommandCgroup {
                 enqueue_reaper(ReaperJob {
                     path: self.path.clone(),
                     state: self.cleanup,
+                    logged: false,
                 });
             }
         }
@@ -261,6 +263,7 @@ fn remove_new_empty_cgroup(path: &std::path::Path) {
                     kill_confirmed: true,
                     ..CleanupState::default()
                 },
+                logged: false,
             });
         }
     }
@@ -351,11 +354,7 @@ fn cleanup_reaper_sender() -> io::Result<&'static std::sync::mpsc::SyncSender<Re
         let (sender, receiver) = std::sync::mpsc::sync_channel::<ReaperJob>(REAPER_QUEUE_CAPACITY);
         std::thread::Builder::new()
             .name("wayexpand-cgroup-reaper".into())
-            .spawn(move || {
-                while let Ok(mut job) = receiver.recv() {
-                    retry_cleanup(&mut job, cleanup_cgroup);
-                }
-            })
+            .spawn(move || run_reaper(&receiver, cleanup_cgroup))
             .map(|_| sender)
             .map_err(|error| error.to_string())
     });
@@ -365,39 +364,83 @@ fn cleanup_reaper_sender() -> io::Result<&'static std::sync::mpsc::SyncSender<Re
 }
 
 #[cfg(target_os = "linux")]
-fn retry_cleanup(
-    job: &mut ReaperJob,
+const REAPER_RETRY_MIN: std::time::Duration = std::time::Duration::from_millis(25);
+#[cfg(target_os = "linux")]
+const REAPER_RETRY_MAX: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Retry every outstanding cgroup in turn. One cgroup that cannot be removed
+/// (for example a task stuck in uninterruptible sleep) must not starve later
+/// jobs or let the bounded queue fill, which would make enqueueing fail.
+#[cfg(target_os = "linux")]
+fn run_reaper(
+    receiver: &std::sync::mpsc::Receiver<ReaperJob>,
     mut cleanup: impl FnMut(&std::path::Path, &mut CleanupState) -> io::Result<()>,
 ) {
-    let mut delay = std::time::Duration::from_millis(25);
+    use std::sync::mpsc::RecvTimeoutError;
+    let mut pending: Vec<ReaperJob> = Vec::new();
+    let mut delay = REAPER_RETRY_MIN;
     loop {
-        match cleanup(&job.path, &mut job.state) {
-            Ok(()) => return,
-            Err(error) => {
-                tracing::error!(
-                    %error,
-                    cgroup = %job.path.display(),
-                    "command cgroup cleanup retry failed"
-                );
-                std::thread::sleep(delay);
-                delay = (delay * 2).min(std::time::Duration::from_secs(2));
+        let received = if pending.is_empty() {
+            receiver.recv().map_err(|_| RecvTimeoutError::Disconnected)
+        } else {
+            receiver.recv_timeout(delay)
+        };
+        match received {
+            Ok(job) => {
+                pending.push(job);
+                pending.extend(receiver.try_iter());
+                delay = REAPER_RETRY_MIN;
             }
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) if pending.is_empty() => return,
+            Err(RecvTimeoutError::Disconnected) => std::thread::sleep(delay),
+        }
+        let before = pending.len();
+        retry_pending(&mut pending, &mut cleanup);
+        if pending.len() == before {
+            delay = (delay * 2).min(REAPER_RETRY_MAX);
         }
     }
 }
 
+/// Make one cleanup attempt for each job, keeping those that still fail.
+/// Failures are logged once per job, on the first retry, to avoid log floods.
+#[cfg(target_os = "linux")]
+fn retry_pending(
+    pending: &mut Vec<ReaperJob>,
+    cleanup: &mut impl FnMut(&std::path::Path, &mut CleanupState) -> io::Result<()>,
+) {
+    pending.retain_mut(|job| match cleanup(&job.path, &mut job.state) {
+        Ok(()) => false,
+        Err(error) => {
+            if !job.logged {
+                job.logged = true;
+                tracing::error!(
+                    %error,
+                    cgroup = %job.path.display(),
+                    "command cgroup cleanup retry failed; continuing to retry"
+                );
+            }
+            true
+        }
+    });
+}
+
 #[cfg(target_os = "linux")]
 fn enqueue_reaper(job: ReaperJob) {
+    use std::sync::mpsc::TrySendError;
     match cleanup_reaper_sender() {
-        Ok(sender) => {
-            if let Err(error) = sender.send(job) {
-                let mut job = error.0;
-                // The singleton worker should live as long as this process.
-                // If it exits unexpectedly, preserve the cleanup effort with
-                // the same retry policy on the dropping thread.
-                retry_cleanup(&mut job, cleanup_cgroup);
+        // Never block the dropping thread: it may be a daemon worker on the
+        // keyboard path.
+        Ok(sender) => match sender.try_send(job) {
+            Ok(()) => {}
+            Err(TrySendError::Full(job) | TrySendError::Disconnected(job)) => {
+                tracing::error!(
+                    cgroup = %job.path.display(),
+                    "command cgroup cleanup queue unavailable; the cgroup is left for the service manager"
+                );
             }
-        }
+        },
         Err(error) => {
             tracing::error!(%error, "could not start cgroup cleanup reaper");
         }
@@ -812,12 +855,17 @@ mod tests {
     #[test]
     #[cfg(target_os = "linux")]
     fn cleanup_reaper_retries_a_transient_cgroup_failure() {
-        let mut job = ReaperJob {
-            path: std::path::PathBuf::from("synthetic-cgroup"),
-            state: CleanupState::default(),
-        };
+        let (sender, receiver) = std::sync::mpsc::sync_channel(4);
+        sender
+            .send(ReaperJob {
+                path: std::path::PathBuf::from("synthetic-cgroup"),
+                state: CleanupState::default(),
+                logged: false,
+            })
+            .unwrap();
+        drop(sender);
         let mut attempts = 0;
-        retry_cleanup(&mut job, |_, state| {
+        run_reaper(&receiver, |_, state| {
             attempts += 1;
             if attempts == 1 {
                 return Err(io::Error::from(io::ErrorKind::Interrupted));
@@ -828,7 +876,28 @@ mod tests {
             Ok(())
         });
         assert_eq!(attempts, 2);
-        assert!(job.state.removed);
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn a_stuck_cgroup_does_not_starve_later_cleanup_jobs() {
+        let job = |name: &str| ReaperJob {
+            path: std::path::PathBuf::from(name),
+            state: CleanupState::default(),
+            logged: false,
+        };
+        let mut pending = vec![job("stuck"), job("healthy")];
+        let mut cleanup = |path: &std::path::Path, state: &mut CleanupState| {
+            if path == std::path::Path::new("stuck") {
+                return Err(io::Error::from(io::ErrorKind::ResourceBusy));
+            }
+            state.removed = true;
+            Ok(())
+        };
+        retry_pending(&mut pending, &mut cleanup);
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].path, std::path::Path::new("stuck"));
+        assert!(pending[0].logged);
     }
 
     #[test]
