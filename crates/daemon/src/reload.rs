@@ -1317,9 +1317,26 @@ mod tests {
         let mut config =
             ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
         write_config(&path, &config_text("first"));
-        config.reload_now();
+
+        // Hand the reactor a completed first-generation build that has not
+        // been collected yet. This makes the reload overlap deterministic:
+        // the next request must queue a rebuild instead of racing a worker
+        // thread that might finish before the second edit.
+        let stale_build = build_config(&path, false, &config.policy)
+            .unwrap_or_else(|_| panic!("fixture configuration must build"));
+        let requested_stamp = file_stamp(&path);
+        let (sender, result) = mpsc::sync_channel(1);
+        assert!(sender.send(Ok(stale_build)).is_ok());
+        config.in_flight = Some(InFlightReload {
+            result,
+            path: path.clone(),
+            current: requested_stamp,
+            fleet_signature: 0,
+        });
+
         write_config(&path, &config_text("second"));
         config.reload_now();
+        assert!(config.rebuild_after_in_flight);
         config.finish_pending_reload();
         let result = config
             .engine
