@@ -322,6 +322,12 @@ impl ControlServer {
                         continue;
                     }
                     let active_requests = Arc::clone(&active_requests_for_listener);
+                    // Keep a spare descriptor so a transient thread-resource
+                    // failure can still return the same bounded busy response
+                    // as request-pool saturation. `spawn` consumes its
+                    // closure on failure, which would otherwise drop the only
+                    // stream and leave clients with a broken pipe.
+                    let busy_stream = stream.try_clone().ok();
                     let worker = thread::Builder::new()
                         .name("wayexpand-control-request".into())
                         .spawn(move || {
@@ -333,7 +339,10 @@ impl ControlServer {
                         });
                     if let Err(error) = worker {
                         active_requests_for_listener.fetch_sub(1, Ordering::AcqRel);
-                        warn!(%error, "could not start control request worker; dropping request");
+                        warn!(%error, "could not start control request worker");
+                        if let Some(stream) = busy_stream {
+                            reject_busy(stream, &rejected_for_listener);
+                        }
                     }
                     if stop_flag.load(Ordering::Acquire) {
                         break;
