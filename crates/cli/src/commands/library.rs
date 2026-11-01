@@ -455,15 +455,17 @@ fn permitted_catalog_paths(entries: &[TreeEntry]) -> Result<Vec<String>> {
             continue;
         };
         let parts: Vec<_> = relative.split('/').collect();
-        if parts.len() == 2
-            && wayexpand_core::is_valid_pack_id(parts[0])
-            && matches!(parts[1], "wayexpand-pack.toml" | "wayexpand-pack.sig")
+        let valid = (has_root_manifest
+            && matches!(relative, "wayexpand-pack.toml" | "wayexpand-pack.sig"))
+            || parts.len() == 2
+                && wayexpand_core::is_valid_pack_id(parts[0])
+                && matches!(parts[1], "wayexpand-pack.toml" | "wayexpand-pack.sig")
             || parts.len() == 3
                 && wayexpand_core::is_valid_pack_id(parts[0])
                 && parts[1] == "snippets"
                 && parts[2].ends_with(".toml")
-                && parts[2].len() > 5
-        {
+                && parts[2].len() > 5;
+        if valid {
             paths.push(entry.path.clone());
         }
     }
@@ -816,6 +818,30 @@ mod tests {
             fs::read_dir(&root).unwrap().next().is_none(),
             "staging data must be cleaned"
         );
+    }
+
+    #[test]
+    fn add_checks_out_only_the_root_pack_catalog_paths() {
+        let tree = TestTree::new("root-pack");
+        let repository = source_repository(&tree.0, false);
+        let root_pack = repository.join("packs/linux-administration");
+        let copied_pack = tree.0.join("copied-pack");
+        copy_tree(&root_pack, &copied_pack);
+        git(&repository, &["rm", "-qr", "packs"]);
+        fs::write(repository.join("wayexpand-pack.toml"), "catalog = true\n").unwrap();
+        copy_tree(&copied_pack, &repository.join("linux-administration"));
+        git(&repository, &["add", "--all"]);
+        git(
+            &repository,
+            &["commit", "--quiet", "-m", "root pack layout"],
+        );
+        let root = tree.0.join("libraries");
+        let remote = format!("file://{}", repository.display());
+        let (path, _, _, count) =
+            add_repository_at(&root, &remote, "rootpack", Some("main")).unwrap();
+        assert_eq!(count, 1);
+        assert!(path.join("wayexpand-pack.toml").is_file());
+        assert!(!path.join("packs").exists());
     }
 
     #[test]
