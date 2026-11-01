@@ -1149,6 +1149,10 @@ mod tests {
 
     #[test]
     fn ansible_role_builtin_renders_the_conventional_role_tree() {
+        let ansible_available = Command::new("ansible-playbook")
+            .arg("--version")
+            .output()
+            .is_ok_and(|out| out.status.success());
         let builtins = builtin_templates();
         let role = builtins
             .expansion
@@ -1156,7 +1160,7 @@ mod tests {
             .find(|snippet| snippet.trigger == ANSIBLE_ROLE_TRIGGER)
             .unwrap();
         let fields = form_fields(&role.replacement).unwrap();
-        let values: HashMap<String, String> = fields
+        let mut values: HashMap<String, String> = fields
             .iter()
             .map(|field| {
                 (
@@ -1167,6 +1171,27 @@ mod tests {
                 )
             })
             .collect();
+        let managed_file = std::env::temp_dir().join(format!(
+            "wayexpand-ansible-managed-{}-{}.conf",
+            std::process::id(),
+            getrandom::u64().unwrap()
+        ));
+        if ansible_available {
+            let owner = Command::new("id").arg("-un").output().unwrap();
+            let group = Command::new("id").arg("-gn").output().unwrap();
+            values.insert(
+                "field:destination".into(),
+                managed_file.to_string_lossy().into_owned(),
+            );
+            values.insert(
+                "field:owner".into(),
+                String::from_utf8(owner.stdout).unwrap().trim().into(),
+            );
+            values.insert(
+                "field:group".into(),
+                String::from_utf8(group.stdout).unwrap().trim().into(),
+            );
+        }
         let context = TemplateContext {
             fields: Arc::new(values.into()),
             ..builtins.template_context(None)
@@ -1196,12 +1221,9 @@ mod tests {
         assert!(template_text.contains("{{ nginx_listen_port }}"));
 
         // On developer machines with Ansible installed, syntax-check the
-        // generated role through a real playbook include as part of this test.
-        if Command::new("ansible-playbook")
-            .arg("--version")
-            .output()
-            .is_ok_and(|out| out.status.success())
-        {
+        // generated role and run it twice. Package and service actions are
+        // replaced with debug tasks so this test never changes the host.
+        if ansible_available {
             let project = root.with_file_name(format!(
                 "wayexpand-ansible-project-{}",
                 getrandom::u64().unwrap()
@@ -1212,7 +1234,7 @@ mod tests {
             fs::write(
                 project.join("site.yml"),
                 format!(
-                    "---\n- hosts: localhost\n  connection: local\n  roles:\n    - {role_name}\n"
+                    "---\n- hosts: localhost\n  connection: local\n  become: false\n  roles:\n    - {role_name}\n"
                 ),
             )
             .unwrap();
@@ -1226,7 +1248,51 @@ mod tests {
                 "ansible-playbook syntax-check failed: {}",
                 String::from_utf8_lossy(&check.stderr)
             );
+            let tasks_path = project.join("roles/example/tasks/main.yml");
+            let tasks = fs::read_to_string(&tasks_path).unwrap().replace(
+                "  ansible.builtin.package:\n    name: \"nginx\"\n    state: present",
+                "  ansible.builtin.debug:\n    msg: \"package task test double\"",
+            );
+            fs::write(tasks_path, tasks).unwrap();
+            let handler_path = project.join("roles/example/handlers/main.yml");
+            let handler = fs::read_to_string(&handler_path).unwrap().replace(
+                "  ansible.builtin.service:\n    name: \"nginx\"\n    state: restarted",
+                "  ansible.builtin.debug:\n    msg: \"service task test double\"",
+            );
+            fs::write(handler_path, handler).unwrap();
+
+            let first = Command::new("ansible-playbook")
+                .args(["-i", "localhost,", "site.yml"])
+                .current_dir(&project)
+                .output()
+                .unwrap();
+            assert!(
+                first.status.success(),
+                "first role run failed: {}",
+                String::from_utf8_lossy(&first.stderr)
+            );
+            assert!(
+                String::from_utf8_lossy(&first.stdout).contains("changed=1"),
+                "first run should apply the template once: {}",
+                String::from_utf8_lossy(&first.stdout)
+            );
+            let second = Command::new("ansible-playbook")
+                .args(["-i", "localhost,", "site.yml"])
+                .current_dir(&project)
+                .output()
+                .unwrap();
+            assert!(
+                second.status.success(),
+                "second role run failed: {}",
+                String::from_utf8_lossy(&second.stderr)
+            );
+            assert!(
+                String::from_utf8_lossy(&second.stdout).contains("changed=0"),
+                "second role run should be idempotent: {}",
+                String::from_utf8_lossy(&second.stdout)
+            );
             fs::remove_dir_all(project).unwrap();
+            let _ = fs::remove_file(managed_file);
         } else {
             fs::remove_dir_all(root).unwrap();
         }
