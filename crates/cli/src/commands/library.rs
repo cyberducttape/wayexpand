@@ -16,6 +16,52 @@ use std::{
 
 const MAX_TREE_ENTRIES: usize = 4096;
 const MAX_TREE_OUTPUT: usize = 128 * 1024;
+const MAX_BLOB_BYTES: u64 = 1024 * 1024;
+const MAX_CHECKOUT_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_NETWORK_BYTES: u64 = 128 * 1024 * 1024;
+const MAX_INTAKE_SECONDS: u64 = 60;
+
+struct LibraryBudgets {
+    blob_bytes: u64,
+    checkout_bytes: u64,
+    network_bytes: u64,
+    cpu_seconds: u64,
+}
+
+impl LibraryBudgets {
+    fn from_environment() -> Result<Self> {
+        fn value(name: &str, default: u64, ceiling: u64) -> Result<u64> {
+            let Ok(raw) = std::env::var(name) else {
+                return Ok(default);
+            };
+            let parsed: u64 = raw
+                .parse()
+                .with_context(|| format!("{name} must be a positive integer"))?;
+            if parsed == 0 || parsed > ceiling {
+                bail!("{name} must be between 1 and {ceiling}");
+            }
+            Ok(parsed)
+        }
+        Ok(Self {
+            blob_bytes: value(
+                "WAYEXPAND_LIBRARY_MAX_BLOB_BYTES",
+                MAX_BLOB_BYTES,
+                MAX_BLOB_BYTES,
+            )?,
+            checkout_bytes: value(
+                "WAYEXPAND_LIBRARY_MAX_CHECKOUT_BYTES",
+                MAX_CHECKOUT_BYTES,
+                MAX_CHECKOUT_BYTES,
+            )?,
+            network_bytes: value(
+                "WAYEXPAND_LIBRARY_MAX_NETWORK_BYTES",
+                MAX_NETWORK_BYTES,
+                MAX_NETWORK_BYTES,
+            )?,
+            cpu_seconds: value("WAYEXPAND_LIBRARY_MAX_CPU_SECONDS", 30, MAX_INTAKE_SECONDS)?,
+        })
+    }
+}
 
 pub(crate) fn library_command(args: Args) -> Result<()> {
     const USAGE: &str = "usage: wayexpand library add <git-url> [--name NAME] [--branch BRANCH] [--json]\n       wayexpand library list [--json]\n       wayexpand library path <name>\n       wayexpand library search <name> [query] [--json]\n       wayexpand library remove <name>";
@@ -149,6 +195,12 @@ fn add_repository_at(
         ))
     })?;
     let cleanup = StagedRepository(stage.clone());
+    let budgets = LibraryBudgets::from_environment()?;
+    let git_limits = |max_file_size| sync::GitResourceLimits {
+        timeout: std::time::Duration::from_secs(MAX_INTAKE_SECONDS),
+        max_file_size,
+        cpu_seconds: budgets.cpu_seconds,
+    };
 
     let mut clone = vec![
         "-c",
@@ -176,36 +228,83 @@ fn add_repository_at(
         .to_str()
         .ok_or_else(|| config_error("library path is not UTF-8"))?;
     clone.push(stage_text);
-    let output = sync::git_library_output(root, &clone)?;
+    let output =
+        sync::git_library_output_bounded(root, &clone, None, git_limits(budgets.network_bytes))?;
     if !output.status.success() {
         bail!(
             "could not clone library source: {}",
             sync::redact_library_diagnostic(String::from_utf8_lossy(&output.stderr).trim())
         );
     }
+    if String::from_utf8_lossy(&output.stderr).contains("filtering not recognized") {
+        bail!("library server did not honor the filtered clone request");
+    }
 
-    validate_repository_tree(&stage)?;
+    let entries = validate_repository_tree(&stage, git_limits(budgets.network_bytes))?;
     let revision = sync::git_library_ok(&stage, &["rev-parse", "HEAD"])?;
     validate_object_id(&revision)?;
     let selected_branch = sync::git_library_ok(&stage, &["branch", "--show-current"])?;
     if selected_branch.is_empty() || selected_branch == "HEAD" {
         bail!("library clone did not select a branch; use --branch to pin one");
     }
-    sync::git_library_ok(
+    // Fetch only blobs below the individual limit. A server that ignores the
+    // filter is rejected, and RLIMIT_FSIZE bounds any pack it writes.
+    let already_downloaded = repository_pack_bytes(&stage)?;
+    if already_downloaded >= budgets.network_bytes {
+        bail!("library download exhausts the network budget before blob inspection");
+    }
+    let remaining_network = budgets.network_bytes - already_downloaded;
+    let filter = format!("--filter=blob:limit={}", budgets.blob_bytes);
+    let fetch = [
+        "-c",
+        "protocol.version=2",
+        "fetch",
+        "--quiet",
+        "--no-tags",
+        "--no-recurse-submodules",
+        "--refetch",
+        filter.as_str(),
+        "origin",
+        revision.as_str(),
+    ];
+    let output =
+        sync::git_library_output_bounded(&stage, &fetch, None, git_limits(remaining_network))?;
+    if !output.status.success()
+        || String::from_utf8_lossy(&output.stderr).contains("filtering not recognized")
+    {
+        bail!(
+            "library bounded blob fetch failed: {}",
+            sync::redact_library_diagnostic(String::from_utf8_lossy(&output.stderr).trim())
+        );
+    }
+    if repository_pack_bytes(&stage)? > budgets.network_bytes {
+        bail!("library download exceeds the network budget");
+    }
+    validate_fetched_blob_sizes(
         &stage,
-        &[
-            "-c",
-            "core.hooksPath=/dev/null",
-            "-c",
-            "core.attributesFile=/dev/null",
-            "checkout",
-            "--quiet",
-            "-B",
-            &selected_branch,
-            "--force",
-            &revision,
-        ],
+        &entries,
+        &budgets,
+        git_limits(budgets.network_bytes),
     )?;
+    let catalog_paths = permitted_catalog_paths(&entries)?;
+    if catalog_paths.is_empty() {
+        bail!("repository contains no catalog files");
+    }
+    let mut checkout = vec!["checkout", "--quiet", "--force", &revision, "--"];
+    let pathspecs: Vec<String> = catalog_paths
+        .iter()
+        .map(|path| format!(":(literal){path}"))
+        .collect();
+    checkout.extend(pathspecs.iter().map(String::as_str));
+    let output = sync::git_library_output_bounded_no_lazy_fetch(
+        &stage,
+        &checkout,
+        None,
+        git_limits(budgets.blob_bytes),
+    )?;
+    if !output.status.success() {
+        bail!("could not check out the permitted WayExpand catalog paths");
+    }
     let catalog = config::scan_pack_catalog(&stage)?;
     if catalog.packs.is_empty() {
         bail!("repository contains no valid WayExpand packs");
@@ -218,23 +317,35 @@ fn add_repository_at(
     Ok((target, revision, selected_branch, pack_count))
 }
 
-fn validate_repository_tree(repository: &Path) -> Result<()> {
-    let output =
-        sync::git_library_output(repository, &["ls-tree", "-r", "-z", "--full-tree", "HEAD"])?;
+#[derive(Clone)]
+struct TreeEntry {
+    oid: String,
+    path: String,
+}
+
+fn validate_repository_tree(
+    repository: &Path,
+    limits: sync::GitResourceLimits,
+) -> Result<Vec<TreeEntry>> {
+    let output = sync::git_library_output_bounded(
+        repository,
+        &["ls-tree", "-r", "-z", "--full-tree", "HEAD"],
+        None,
+        limits,
+    )?;
     if !output.status.success() {
         bail!("could not inspect library tree before checkout");
     }
     if output.stdout.len() > MAX_TREE_OUTPUT {
         bail!("library Git tree exceeds the {MAX_TREE_OUTPUT}-byte inspection limit");
     }
-    let mut entries = 0usize;
+    let mut entries = Vec::new();
     for record in output
         .stdout
         .split(|byte| *byte == 0)
         .filter(|record| !record.is_empty())
     {
-        entries += 1;
-        if entries > MAX_TREE_ENTRIES {
+        if entries.len() >= MAX_TREE_ENTRIES {
             bail!("library contains more than {MAX_TREE_ENTRIES} files");
         }
         let separator = record
@@ -249,6 +360,10 @@ fn validate_repository_tree(repository: &Path) -> Result<()> {
         if object_type != b"blob" || !matches!(mode, b"100644" | b"100755") {
             bail!("library contains a symlink, submodule, or non-file Git entry");
         }
+        let oid = fields.next().unwrap_or_default();
+        if !matches!(oid.len(), 40 | 64) || !oid.iter().all(u8::is_ascii_hexdigit) {
+            bail!("library contains an invalid Git object ID");
+        }
         if path.is_empty()
             || path[0] == b'/'
             || path
@@ -258,8 +373,117 @@ fn validate_repository_tree(repository: &Path) -> Result<()> {
         {
             bail!("library contains a path that is unsafe to check out");
         }
+        let path = std::str::from_utf8(path).context("library paths must be UTF-8")?;
+        entries.push(TreeEntry {
+            oid: String::from_utf8(oid.to_vec()).unwrap(),
+            path: path.to_owned(),
+        });
+    }
+    Ok(entries)
+}
+
+fn validate_fetched_blob_sizes(
+    repository: &Path,
+    entries: &[TreeEntry],
+    budgets: &LibraryBudgets,
+    limits: sync::GitResourceLimits,
+) -> Result<()> {
+    let mut input = Vec::with_capacity(entries.len() * 42);
+    for entry in entries {
+        input.extend_from_slice(entry.oid.as_bytes());
+        input.push(b'\n');
+    }
+    let output = sync::git_library_output_bounded_no_lazy_fetch(
+        repository,
+        &[
+            "cat-file",
+            "--batch-check=%(objectname) %(objecttype) %(objectsize)",
+        ],
+        Some(input),
+        limits,
+    )?;
+    if !output.status.success() {
+        bail!("could not inspect fetched library blob sizes");
+    }
+    let mut aggregate = 0u64;
+    let records: Vec<_> = output
+        .stdout
+        .split(|b| *b == b'\n')
+        .filter(|r| !r.is_empty())
+        .collect();
+    if records.len() != entries.len() {
+        bail!("library blob size inventory was incomplete");
+    }
+    for record in records {
+        let line = std::str::from_utf8(record).context("Git returned invalid blob metadata")?;
+        let fields: Vec<_> = line.split(' ').collect();
+        if fields.len() != 3 || fields[1] != "blob" {
+            bail!("library contains an oversized or unavailable blob");
+        }
+        let size: u64 = fields[2]
+            .parse()
+            .context("Git returned invalid blob size")?;
+        if size > budgets.blob_bytes {
+            bail!(
+                "library contains a blob exceeding the {}-byte limit",
+                budgets.blob_bytes
+            );
+        }
+        aggregate = aggregate
+            .checked_add(size)
+            .ok_or_else(|| anyhow::anyhow!("library aggregate size overflow"))?;
+        if aggregate > budgets.checkout_bytes {
+            bail!(
+                "library exceeds the {}-byte aggregate checkout limit",
+                budgets.checkout_bytes
+            );
+        }
     }
     Ok(())
+}
+
+fn permitted_catalog_paths(entries: &[TreeEntry]) -> Result<Vec<String>> {
+    let has_root_manifest = entries.iter().any(|e| e.path == "wayexpand-pack.toml");
+    let prefix = if !has_root_manifest && entries.iter().any(|e| e.path.starts_with("packs/")) {
+        "packs/"
+    } else {
+        ""
+    };
+    let mut paths = Vec::new();
+    for entry in entries {
+        let Some(relative) = entry.path.strip_prefix(prefix) else {
+            continue;
+        };
+        let parts: Vec<_> = relative.split('/').collect();
+        let valid = (has_root_manifest
+            && matches!(relative, "wayexpand-pack.toml" | "wayexpand-pack.sig"))
+            || parts.len() == 2
+                && wayexpand_core::is_valid_pack_id(parts[0])
+                && matches!(parts[1], "wayexpand-pack.toml" | "wayexpand-pack.sig")
+            || parts.len() == 3
+                && wayexpand_core::is_valid_pack_id(parts[0])
+                && parts[1] == "snippets"
+                && parts[2].ends_with(".toml")
+                && parts[2].len() > 5;
+        if valid {
+            paths.push(entry.path.clone());
+        }
+    }
+    Ok(paths)
+}
+
+fn repository_pack_bytes(repository: &Path) -> Result<u64> {
+    let mut total = 0u64;
+    let packs = repository.join(".git/objects/pack");
+    for entry in fs::read_dir(packs).context("could not inspect Git pack storage")? {
+        let entry = entry?;
+        if entry.path().extension().is_some_and(|ext| ext == "pack") {
+            total = total
+                .checked_add(entry.metadata()?.len())
+                .ok_or_else(|| anyhow::anyhow!("Git pack size overflow"))?;
+        }
+    }
+    Ok(total)
 }
 
 fn validate_remote(remote: &str) -> Result<()> {
@@ -523,6 +747,7 @@ mod tests {
             &repository,
             &["config", "user.email", "test@example.invalid"],
         );
+        git(&repository, &["config", "uploadpack.allowFilter", "true"]);
         git(&repository, &["add", "--all"]);
         git(&repository, &["commit", "--quiet", "-m", "catalog"]);
         repository
@@ -565,6 +790,58 @@ mod tests {
             .expect_err("symlink tree entries must be rejected");
         assert!(error.to_string().contains("symlink"));
         assert!(fs::read_dir(&root).unwrap().next().is_none());
+    }
+
+    #[test]
+    fn add_rejects_oversized_blob_before_checkout_and_cleans_staging() {
+        let tree = TestTree::new("oversized-blob");
+        let repository = source_repository(&tree.0, false);
+        // A small tree listing and a valid catalog, with one unrelated blob
+        // that exceeds the default per-blob ceiling.
+        fs::write(
+            repository.join("unrelated.bin"),
+            vec![0x5a; (MAX_BLOB_BYTES + 1) as usize],
+        )
+        .unwrap();
+        git(&repository, &["add", "unrelated.bin"]);
+        git(&repository, &["commit", "--quiet", "-m", "oversized blob"]);
+        let root = tree.0.join("libraries");
+        let remote = format!("file://{}", repository.display());
+        let error = add_repository_at(&root, &remote, "oversized", Some("main"))
+            .expect_err("oversized blobs must be rejected before materialization");
+        assert!(
+            error.to_string().contains("oversized") || error.to_string().contains("blob"),
+            "{error:#}"
+        );
+        assert!(!root.join("oversized").exists());
+        assert!(
+            fs::read_dir(&root).unwrap().next().is_none(),
+            "staging data must be cleaned"
+        );
+    }
+
+    #[test]
+    fn add_checks_out_only_the_root_pack_catalog_paths() {
+        let tree = TestTree::new("root-pack");
+        let repository = source_repository(&tree.0, false);
+        let root_pack = repository.join("packs/linux-administration");
+        let copied_pack = tree.0.join("copied-pack");
+        copy_tree(&root_pack, &copied_pack);
+        git(&repository, &["rm", "-qr", "packs"]);
+        fs::write(repository.join("wayexpand-pack.toml"), "catalog = true\n").unwrap();
+        copy_tree(&copied_pack, &repository.join("linux-administration"));
+        git(&repository, &["add", "--all"]);
+        git(
+            &repository,
+            &["commit", "--quiet", "-m", "root pack layout"],
+        );
+        let root = tree.0.join("libraries");
+        let remote = format!("file://{}", repository.display());
+        let (path, _, _, count) =
+            add_repository_at(&root, &remote, "rootpack", Some("main")).unwrap();
+        assert_eq!(count, 1);
+        assert!(path.join("wayexpand-pack.toml").is_file());
+        assert!(!path.join("packs").exists());
     }
 
     #[test]

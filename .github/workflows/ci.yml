@@ -22,6 +22,10 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  # Hosted test jobs do not run inside a delegated systemd cgroup. Select the
+  # compatibility mode explicitly there; dedicated containment integration
+  # tests override this with WAYEXPAND_PROCESS_CGROUP=required.
+  WAYEXPAND_PROCESS_CGROUP: disabled
   # Several tests exercise process-wide desktop/configuration state and
   # bounded worker resources. Keep CI deterministic across hosted runners;
   # coverage is unchanged.
