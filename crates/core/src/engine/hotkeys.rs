@@ -91,12 +91,16 @@ impl ExpansionEngine {
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         configure_process_group(&mut command);
+        // Hotkey actions get the same per-command cgroup as expansion
+        // commands, so descendants that call setsid() are also cleaned up.
+        let cgroup = wayexpand_process_supervisor::ChildCgroup::prepare(&mut command)
+            .map_err(HotkeyError::Spawn)?;
         let child = command.spawn().map_err(HotkeyError::Spawn)?;
         // The supervisor observes exit with waitid(WNOWAIT) on Linux, so the
         // leader stays a zombie and its PGID cannot be recycled until the
         // group kill below has run. Dropping it kills and reaps the group on
         // every early return.
-        let mut guard = ChildSupervisor::new(child);
+        let mut guard = ChildSupervisor::new_with_cgroup(child, cgroup);
         let deadline = Instant::now() + Duration::from_millis(result.command.timeout_ms);
         loop {
             if shutdown.is_some_and(|flag| flag.load(Ordering::Acquire)) {

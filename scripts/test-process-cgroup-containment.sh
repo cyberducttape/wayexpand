@@ -53,4 +53,5 @@ run_contained() {
 run_contained escape "$supervisor" \
     tests::delegated_cgroup_terminates_new_session_parent_migration
 run_contained command "$core" engine::tests::commands_execute_when_not_disabled
+run_contained hotkey "$core" engine::tests::hotkey_actions_use_direct_execution_and_timeout
 run_contained broker "$broker" executor::tests::executor_timeout_kills_process

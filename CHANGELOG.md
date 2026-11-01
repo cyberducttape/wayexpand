@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Hotkey actions now run in their own command cgroup too, like expansion
+  commands and broker actions, so their `setsid` descendants are cleaned up.
+
 - Fix: command snippets and broker actions failed in every bundled systemd
   service. The pre-exec probe that refused commands able to migrate out of
   their cgroup always fired, because a delegated subtree is writable by its
