@@ -86,6 +86,7 @@ fn daemon_status_body_matches_documented_stable_contract() {
             "capture_exclusive",
             "capture_key_passthrough",
             "capture_layout_aware",
+            "capture_layout_state",
             "capture_local_compose_aware",
             "capture_reliable_key_state",
             "capture_sensitive_focus",
@@ -170,7 +171,7 @@ fn daemon_status_body_matches_documented_stable_contract() {
         "daemon status body fields no longer match docs/COMPATIBILITY.md's documented Stable contract"
     );
     assert!(body.starts_with(&format!(
-        "source=input-method\nbackend=input-method-v2\nroute_id=input-method-v2\nbackend_mode=unknown\nstatus_schema=15\ndaemon_commit={}\nstate=connected\npaused=false\n",
+        "source=input-method\nbackend=input-method-v2\nroute_id=input-method-v2\nbackend_mode=unknown\nstatus_schema=16\ndaemon_commit={}\nstate=connected\npaused=false\n",
         super::build_info::COMMIT
     )));
     for field in [

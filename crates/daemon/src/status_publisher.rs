@@ -328,6 +328,7 @@ mod tests {
             "capture_composition_aware",
             "capture_local_compose_aware",
             "capture_layout_aware",
+            "capture_layout_state",
             "window_tracker_connected",
             "window_identity_exact",
             "inject_atomic_replace",

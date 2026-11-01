@@ -396,6 +396,7 @@ fn doctor_reports_current_session_capabilities_separately_with_recovery_steps() 
         "capture_exclusive": false,
         "capture_reliable_key_state": true,
         "capture_layout_aware": false,
+        "capture_layout_state": "unavailable",
         "capture_sensitive_focus": false,
         "window_tracker_connected": true,
         "window_identity_exact": true,
@@ -410,6 +411,7 @@ fn doctor_reports_current_session_capabilities_separately_with_recovery_steps() 
     assert_eq!(report["capture_source"], "evdev");
     assert_eq!(report["injection_backend"], "libei");
     assert_eq!(report["capture"]["status"], "active-shared");
+    assert_eq!(report["capture"]["layout_state"], "unavailable");
     assert_eq!(report["injection"]["status"], "active");
     assert_eq!(report["focus_tracking"]["status"], "exact-window-tracked");
     assert_eq!(report["password_field_protection"]["status"], "unavailable");
@@ -574,7 +576,7 @@ fn status_json_matches_documented_stable_contract() {
          backend=input-method-v2\n\
          route_id=input-method-v2\n\
          backend_mode=unknown\n\
-         status_schema=15\n\
+         status_schema=16\n\
          daemon_commit=test-commit\n\
          state=connected\n\
          paused=false\n\
@@ -587,6 +589,7 @@ fn status_json_matches_documented_stable_contract() {
          capture_composition_aware=false\n\
          capture_local_compose_aware=true\n\
          capture_layout_aware=true\n\
+         capture_layout_state=tracked\n\
          window_tracker_connected=false\n\
          window_identity_exact=false\n\
          inject_atomic_replace=true\n\
@@ -660,7 +663,7 @@ fn status_json_matches_documented_stable_contract() {
     let contract: serde_json::Value =
         serde_json::from_str(include_str!("../../../tests/contracts/status-json.json"))
             .expect("status contract fixture must be valid JSON");
-    assert_eq!(contract["schema_version"], 10);
+    assert_eq!(contract["schema_version"], 11);
     assert_eq!(contract["daemon_control_schema"], CONTROL_STATUS_SCHEMA);
     assert_ne!(
         contract["schema_version"],
@@ -785,6 +788,7 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "capture_composition_aware",
             "capture_local_compose_aware",
             "capture_layout_aware",
+            "capture_layout_state",
             "window_tracker_connected",
             "window_identity_exact",
             "inject_atomic_replace",
