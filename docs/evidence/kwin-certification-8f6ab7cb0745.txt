@@ -1,0 +1,81 @@
+# wayexpand KWin certification store
+schema=1
+commit=8f6ab7cb0745
+source_tree_state=clean
+kwin_version=6.6.6
+capture=stdin
+output_backend=libei
+backend_mode=ei_keyboard keysym fallback (12ms key pacing)
+generated_at_unix=1793505907
+cell multiline-rapid|us|gtk3-textview pass text=zany$quizok$ cursor=11
+cell focus-cross-window|us|gtk3-textview pass target: text=only here$ cursor=9; other: text=;only$ cursor=5
+cell focus-change-during-expansion|us|gtk3-textview pass target: text=;slow$ cursor=5; other: text=$ cursor=0
+cell target-closes-during-expansion|us|gtk3-textview pass other: text=$ cursor=0
+cell config-reload|us|gtk3-textview pass text=zany quiz$ cursor=9
+cell daemon-restart|us|gtk3-textview pass text=zany quizzany quiz$ cursor=18
+cell daemon-restart-during-typing|us|gtk3-textview pass text=;zqzany quiz$ cursor=12
+cell failed-insertion|us|gtk3-textview pass route refused and left the trigger intact; text=;far$ cursor=4
+cell unicode-combining|us|gtk3-textview unverified route refused combining marks cleanly; insertion not demonstrated; text=;acc$ cursor=4
+cell command-timeout|us|gtk3-textview pass text=;hangzany quiz$ cursor=14
+cell expansion-cancellation|us|gtk3-textview pass text=;slowx$ cursor=6
+cell text-editor-client|us|gtk3-textview pass text=azany quizb$ cursor=10
+cell multiline-rapid|us|qt6-plaintextedit pass text=zany$quizok$ cursor=11
+cell focus-cross-window|us|qt6-plaintextedit pass target: text=only here$ cursor=9; other: text=;only$ cursor=5
+cell focus-change-during-expansion|us|qt6-plaintextedit pass target: text=;slow$ cursor=5; other: text=$ cursor=0
+cell target-closes-during-expansion|us|qt6-plaintextedit pass other: text=$ cursor=0
+cell config-reload|us|qt6-plaintextedit pass text=zany quiz$ cursor=9
+cell daemon-restart|us|qt6-plaintextedit pass text=zany quizzany quiz$ cursor=18
+cell daemon-restart-during-typing|us|qt6-plaintextedit pass text=;zqzany quiz$ cursor=12
+cell failed-insertion|us|qt6-plaintextedit pass route refused and left the trigger intact; text=;far$ cursor=4
+cell unicode-combining|us|qt6-plaintextedit unverified route refused combining marks cleanly; insertion not demonstrated; text=;acc$ cursor=4
+cell command-timeout|us|qt6-plaintextedit pass text=;hangzany quiz$ cursor=14
+cell expansion-cancellation|us|qt6-plaintextedit pass text=;slowx$ cursor=6
+cell text-editor-client|us|qt6-plaintextedit pass text=azany quizb$ cursor=10
+cell multiline-rapid|us|terminal-konsole pass text=zany$quizok$ cursor=11
+cell focus-cross-window|us|terminal-konsole pass target: text=only here$ cursor=9; other: text=;only$ cursor=5
+cell focus-change-during-expansion|us|terminal-konsole pass target: text=;slow$ cursor=5; other: text=$ cursor=0
+cell target-closes-during-expansion|us|terminal-konsole pass other: text=$ cursor=0
+cell config-reload|us|terminal-konsole pass text=zany quiz$ cursor=9
+cell daemon-restart|us|terminal-konsole pass text=zany quizzany quiz$ cursor=18
+cell daemon-restart-during-typing|us|terminal-konsole pass text=;zqzany quiz$ cursor=12
+cell failed-insertion|us|terminal-konsole pass route refused and left the trigger intact; text=;far$ cursor=4
+cell unicode-combining|us|terminal-konsole unverified route refused combining marks cleanly; insertion not demonstrated; text=;acc$ cursor=4
+cell command-timeout|us|terminal-konsole pass text=;hangzany quiz$ cursor=14
+cell expansion-cancellation|us|terminal-konsole pass text=;slowx$ cursor=6
+cell text-editor-client|us|terminal-konsole pass text=azany quizb$ cursor=10
+cell multiline-rapid|us|password-field unverified single-line client cannot hold a multi-line replacement
+cell focus-cross-window|us|password-field pass target: text=only here$ cursor=9; other: text=;only$ cursor=5
+cell focus-change-during-expansion|us|password-field pass target: text=;slow$ cursor=5; other: text=$ cursor=0
+cell target-closes-during-expansion|us|password-field pass other: text=$ cursor=0
+cell config-reload|us|password-field pass text=zany quiz$ cursor=9
+cell daemon-restart|us|password-field pass text=zany quizzany quiz$ cursor=18
+cell daemon-restart-during-typing|us|password-field pass text=;zqzany quiz$ cursor=12
+cell failed-insertion|us|password-field pass route refused and left the trigger intact; text=;far$ cursor=4
+cell unicode-combining|us|password-field unverified route refused combining marks cleanly; insertion not demonstrated; text=;acc$ cursor=4
+cell command-timeout|us|password-field pass text=;hangzany quiz$ cursor=14
+cell expansion-cancellation|us|password-field pass text=;slowx$ cursor=6
+cell text-editor-client|us|password-field pass text=azany quizb$ cursor=10
+cell multiline-rapid|us|text-editor-gedit pass text=zany$quizok$ cursor=11
+cell focus-cross-window|us|text-editor-gedit pass target: text=only here$ cursor=9; other: text=;only$ cursor=5
+cell focus-change-during-expansion|us|text-editor-gedit pass target: text=;slow$ cursor=5; other: text=$ cursor=0
+cell target-closes-during-expansion|us|text-editor-gedit pass other: text=$ cursor=0
+cell config-reload|us|text-editor-gedit pass text=zany quiz$ cursor=9
+cell daemon-restart|us|text-editor-gedit pass text=zany quizzany quiz$ cursor=18
+cell daemon-restart-during-typing|us|text-editor-gedit pass text=;zqzany quiz$ cursor=12
+cell failed-insertion|us|text-editor-gedit pass route refused and left the trigger intact; text=;far$ cursor=4
+cell unicode-combining|us|text-editor-gedit unverified route refused combining marks cleanly; insertion not demonstrated; text=;acc$ cursor=4
+cell command-timeout|us|text-editor-gedit pass text=;hangzany quiz$ cursor=14
+cell expansion-cancellation|us|text-editor-gedit pass text=;slowx$ cursor=6
+cell text-editor-client|us|text-editor-gedit pass text=azany quizb$ cursor=10
+cell multiline-rapid|us|qt6-editor-kate pass text=zany$quizok$ cursor=11
+cell focus-cross-window|us|qt6-editor-kate pass target: text=only here$ cursor=9; other: text=;only$ cursor=5
+cell focus-change-during-expansion|us|qt6-editor-kate pass target: text=;slow$ cursor=5; other: text=$ cursor=0
+cell target-closes-during-expansion|us|qt6-editor-kate pass other: text=$ cursor=0
+cell config-reload|us|qt6-editor-kate pass text=zany quiz$ cursor=9
+cell daemon-restart|us|qt6-editor-kate pass text=zany quizzany quiz$ cursor=18
+cell daemon-restart-during-typing|us|qt6-editor-kate pass text=;zqzany quiz$ cursor=12
+cell failed-insertion|us|qt6-editor-kate pass route refused and left the trigger intact; text=;far$ cursor=4
+cell unicode-combining|us|qt6-editor-kate unverified route refused combining marks cleanly; insertion not demonstrated; text=;acc$ cursor=4
+cell command-timeout|us|qt6-editor-kate pass text=;hangzany quiz$ cursor=14
+cell expansion-cancellation|us|qt6-editor-kate pass text=;slowx$ cursor=6
+cell text-editor-client|us|qt6-editor-kate pass text=azany quizb$ cursor=10
