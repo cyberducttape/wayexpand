@@ -26,6 +26,11 @@ session evidence; unit tests alone do not satisfy them.
 
 ## Correctness
 
+- [x] Keep automatic typing unavailable on unverified routes by default: the
+      trigger remains intact when the daemon refuses, and Quick Picker offers
+      clipboard/manual paste unless it has both exact target identity and an
+      atomic or verified-surrounding replacement contract. Unit tests cover the
+      refusal boundary and fail-closed picker routing.
 - [ ] Pass a compositor-specific integration matrix. See
       [CERTIFICATION_MATRIX](CERTIFICATION_MATRIX.md).
 - [ ] Record zero unintended deletions, duplicate insertions, or wrong-window
