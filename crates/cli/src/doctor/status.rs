@@ -554,15 +554,18 @@ pub(crate) fn print_output_health_diagnostics() -> bool {
         println!("Injection mode: {mode}");
     }
     match snapshot["command_containment"].as_str() {
-        Some("cgroup") => println!("Command containment: per-command cgroup"),
+        Some("cgroup") => println!("Command containment: required per-command cgroup"),
         Some("process-group") => println!(
-            "Command containment: process group only (descendants that call setsid() can \
-             outlive a command; the bundled systemd units use cgroups)"
+            "Command containment: explicit process-group compatibility mode (descendants \
+             that call setsid() can outlive a command)"
         ),
         Some("invalid") => println!(
             "Command containment: invalid WAYEXPAND_PROCESS_CGROUP value; commands will not start"
         ),
         _ => {}
+    }
+    if let Some(mode) = snapshot["command_containment_mode"].as_str() {
+        println!("Command containment policy: {mode}");
     }
     if let Some(detail) = route["backend_mode"].as_str() {
         if Some(detail) != route["insertion_mode"].as_str() {

@@ -173,8 +173,8 @@ What's implemented:
   - Environment variable filtering with strict mode
   - Deadline-aware delegated cgroup v2 termination (including new sessions),
     with process-group cleanup as a secondary mechanism; cgroup containment
-    is required (fail-closed) when `WAYEXPAND_PROCESS_CGROUP=required`, as
-    in the packaged unit, and otherwise falls back to process groups
+    is required (fail-closed) by default and by the packaged unit.
+    `WAYEXPAND_PROCESS_CGROUP=disabled` is the explicit compatibility opt-out
   - Bounded output capture (stdout/stderr) with exit code tracking
   - Bounded concurrent execution (16 actions per broker process)
 

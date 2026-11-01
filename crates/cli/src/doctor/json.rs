@@ -140,6 +140,8 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
                     "compatible": status_schema_compatible(&snapshot),
                     "commit_matches": crate::doctor::status::daemon_commit_matches(daemon_commit),
                     "daemon_commit": daemon_commit,
+                    "command_containment": snapshot.get("command_containment"),
+                    "command_containment_mode": snapshot.get("command_containment_mode"),
                     "status_schema": snapshot.get("status_schema"),
                     "state": snapshot.get("state"),
                     "source": snapshot.get("source"),

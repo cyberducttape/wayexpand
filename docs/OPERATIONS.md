@@ -176,11 +176,11 @@ leaks such as background `setsid` daemons, not against hostile commands.
 This requires unified cgroup v2 with `cgroup.kill` support (Linux 5.14 or newer)
 and a delegated subtree. The bundled units use systemd delegation; another
 launcher must provide an equivalent subtree and permissions. The bundled units
-set `WAYEXPAND_PROCESS_CGROUP=required`; with it, command startup fails closed
-if cgroup setup fails. When the variable is unset
-or `disabled` (for example a daemon started by hand), commands use the weaker
-process-group cleanup, which cannot contain a descendant that creates a new
-session. Cgroup
+set `WAYEXPAND_PROCESS_CGROUP=required`; this is also the default when the
+variable is unset. Command startup fails closed if cgroup setup fails. Set the
+variable to `disabled` to explicitly select weaker process-group cleanup, which
+cannot contain a descendant that creates a new session. `wayexpand doctor --json`
+reports both the configured policy and cleanup mechanism. Cgroup
 containment limits lifetime, not privilege:
 commands remain trusted user-configured programs and rely on the surrounding
 systemd sandbox for filesystem and network restrictions.
