@@ -1,19 +1,17 @@
 //! Insertion assurance: what an output route can promise before it erases.
 //!
-//! Verified routes (input-method-v2, IBus) check the target's own text before
-//! deleting and are bound to the focused text field by their protocol.
-//! Keystroke routes (libei, wlroots virtual keyboard) type Backspaces into
-//! whatever has focus, so they cannot verify what they erase. This module is
-//! the single gate for those routes:
+//! Target-verified routes (input-method-v2, IBus) check the target's text
+//! before deleting. Atomic routes also avoid the erase/insert gap. Routes
+//! without target verification require explicit compatibility consent:
 //!
-//! - they never erase unless the user enabled `compatibility_mode`;
+//! - unverified routes never erase unless the user enabled `compatibility_mode`;
 //! - a focus change detected between matching and typing always refuses;
 //! - focus that no tracker can confirm refuses unless the user accepted
 //!   `untracked-focus`.
 //!
-//! Refusals happen before the first keystroke, so the transaction is "not
-//! applied" and nothing is retried. Every refusal is counted and published
-//! in daemon status so users can see why an expansion did not happen.
+//! Refusals happen before the first keystroke. Every refusal is counted and
+//! published in daemon status so the original trigger remains available for
+//! manual recovery.
 
 use std::sync::{
     atomic::{AtomicU64, AtomicU8, Ordering},
@@ -49,7 +47,7 @@ impl Refusal {
     fn message(self) -> &'static str {
         match self {
             Self::CompatibilityModeOff => {
-                "refused: this keystroke route cannot verify what it erases and compatibility_mode is off"
+                "refused: this route cannot verify the trigger at the target; compatibility_mode is off"
             }
             Self::FocusChanged => {
                 "refused: the focused window changed after the trigger was typed"
@@ -202,7 +200,7 @@ impl GuardState {
     }
 
     /// Decide whether an output may start. Outputs that erase nothing, and
-    /// routes that verify erasure, are never refused here.
+    /// routes that verify the target's surrounding text are never refused here.
     pub(crate) fn decide(
         &self,
         capabilities: &InjectorCapabilities,
@@ -402,6 +400,7 @@ mod tests {
             InjectorCapabilities {
                 insertion_mode: "test keystrokes",
                 full_unicode: true,
+                atomic_replace: self.guarantee == ReplacementGuarantee::Atomic,
                 replacement_guarantee: self.guarantee,
                 ..InjectorCapabilities::default()
             }
@@ -638,6 +637,7 @@ mod tests {
             ..InjectorCapabilities::default()
         };
         let atomic = InjectorCapabilities {
+            atomic_replace: true,
             replacement_guarantee: ReplacementGuarantee::Atomic,
             ..InjectorCapabilities::default()
         };
