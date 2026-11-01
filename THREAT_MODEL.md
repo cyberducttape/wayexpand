@@ -30,7 +30,7 @@ This document is the short security map. For deeper details, see
 | Unsafe config reload | Yes | Reloads parse and validate before replacing the live configuration. Bad reloads fail closed. |
 | Malicious trigger shell injection | Yes | Command snippets execute a program and argument vector directly; WayExpand does not use `sh -c`. |
 | Unbounded command output | Yes | Command stdout is UTF-8 checked and capped; stderr is discarded; stdin is null. |
-| Slow or stuck command | Mostly | Direct commands have timeouts and process-group cleanup. This is resource cleanup, not service/cgroup containment. |
+| Slow or stuck command | Mostly | Commands, hotkey actions, and broker actions have timeouts and process-group cleanup; under the bundled units each also runs in its own delegated cgroup, so `setsid()` descendants are killed too. This is lifetime cleanup, not a privilege boundary: a same-UID command can deliberately leave its cgroup. |
 | Direct command snippet side effects | Partially | Direct commands run as the desktop user under the hardened systemd unit. Treat command-enabled config as executable content; this is not a service/cgroup containment boundary. |
 | Named-action side effects | Partially | The Action Broker restricts actions to configured executables and requests fresh, action-specific active-session polkit authentication for each invocation. Missing policy/agent or denied consent fails closed. This is a user-consent gate, not an OS sandbox or proof that the requester is WayExpand. |
 | PATH surprises in command snippets | Partially | Organization policy can require absolute command paths. Without that policy, relative program names resolve through the daemon's environment. |

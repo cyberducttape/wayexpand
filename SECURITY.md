@@ -262,7 +262,8 @@ WayExpand through the socket can set
 `[organization] safe_mode = true` and
 `disable_control_socket_mutations = true`; this denies socket-based insert,
 pause/resume, reload, stop, and usage-stat clearing while leaving read-only
-status, focus, and explain requests available. It does not defend against
+status and focus requests available and reduces explain answers to a
+match/expand summary. It does not defend against
 malicious code with the same UID using other user-session privileges such as
 `systemctl --user`, editing user-owned configuration, or controlling the
 desktop session.
