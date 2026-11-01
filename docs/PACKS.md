@@ -45,6 +45,16 @@ wayexpand library search wayexpand-packs kubernetes
 wayexpand library path wayexpand-packs
 ```
 
+Library intake uses a filtered Git fetch and checks object sizes before it
+checks out catalog files. Its default ceilings are 1 MiB per blob, 64 MiB for
+the complete repository tree, and 128 MiB of Git pack data; Git work is also
+limited to 30 CPU seconds and 60 seconds elapsed time per operation. Operators
+can lower these limits with `WAYEXPAND_LIBRARY_MAX_BLOB_BYTES`,
+`WAYEXPAND_LIBRARY_MAX_CHECKOUT_BYTES`, `WAYEXPAND_LIBRARY_MAX_NETWORK_BYTES`,
+and `WAYEXPAND_LIBRARY_MAX_CPU_SECONDS`. These settings cannot raise the
+built-in ceilings. Sources that do not honor Git's partial clone filters are
+rejected.
+
 Adding a source does not install or activate packs. Search uses the same
 configured signer policy as `pack search`; inspect the candidate, review its
 diff and capability disclosures, and explicitly install the selected pack.
