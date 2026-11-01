@@ -38,7 +38,7 @@ complete right-to-left editing experience.
 | Global hotkeys | Experimental | Backend capture and action tests |
 | Focused-window tracking (`app_filter`) | Supported by the KDE/KWin path; awaiting independent certification | KWin tracker exists; wlroots and GNOME paths explicitly report application filters unavailable rather than guessing |
 | Key pass-through | Experimental | libei-assisted lifecycle-aware press/release pass-through exists for input-method-v2; modifier chords, repetition, reconnect, and compositor/client behavior still require certification |
-| Runtime keyboard-layout switching | Route-dependent | input-method-v2 and IBus expose layout-aware input paths; evdev uses a startup-only local XKB snapshot and must be restarted after layout changes |
+| Runtime keyboard-layout switching | Route-dependent | input-method-v2 and IBus expose layout-aware input paths; evdev reports layout unavailable and refuses layout-dependent matching and hotkeys until a compositor provider exists |
 | External preedit/IME composition | **Not supported** | ⚠️ Affects CJK and active Fcitx/IBus/Rime composition (see below) |
 
 ## Desktop coverage

@@ -1,6 +1,6 @@
 {
-  "schema_version": 10,
-  "daemon_control_schema": 15,
+  "schema_version": 11,
+  "daemon_control_schema": 16,
   "fields": {
     "response": "string",
     "source": "string",
@@ -16,6 +16,7 @@
     "capture_composition_aware": "boolean",
     "capture_local_compose_aware": "boolean",
     "capture_layout_aware": "boolean",
+    "capture_layout_state": "string",
     "window_tracker_connected": "boolean",
     "window_identity_exact": "boolean",
     "inject_atomic_replace": "boolean",

@@ -14,6 +14,10 @@
 //!   `InputEvent::FocusChanged { sensitive: true }` -- matching is never
 //!   suspended in password fields. Deploy it only where that tradeoff is
 //!   acceptable, and see `docs/SECURITY.md`.
+//! - **No active-layout provider.** The evdev source refuses to translate
+//!   keys for matching or hotkeys while the compositor layout is unknown.
+//!   Native typing remains untouched, and physical key state is still tracked
+//!   for output interruption safety.
 //! - **Requires explicit `/dev/input` authorization.** The installer defaults
 //!   to active-seat logind/uaccess ACLs; `--access=input-group` remains an
 //!   explicitly selected legacy fallback with broader permanent visibility.
@@ -59,7 +63,7 @@ use thiserror::Error;
 use wayexpand_backend_input_method::{key_action, key_action_and_update, key_chord, KeyAction};
 use wayexpand_core::{InputEvent, InputSource, InputSourceCapabilities, InputSourceError};
 use wayland_client::protocol::wl_keyboard::KeyState;
-use xkbcommon_rs::{xkb_state::KeyDirection, Context, Keymap, State};
+use xkbcommon_rs::{xkb_keymap::RuleNames, xkb_state::KeyDirection, Context, Keymap, State};
 
 const SOURCE_NAME: &str = "evdev";
 const POLL_TIMEOUT: Duration = Duration::from_millis(500);
@@ -74,6 +78,33 @@ const MAX_PENDING_EVENTS: usize = 4096;
 /// kernel ring buffer and device adapter retain any remaining events for the
 /// next turn; no event batch is silently truncated.
 const MAX_RAW_EVENTS_PER_SLICE: usize = 128;
+
+/// A compositor supplied keymap snapshot. `generation` must change whenever
+/// the effective layout changes, including while modifiers are held.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyboardLayoutSnapshot {
+    pub generation: u64,
+    pub rules: Option<String>,
+    pub model: Option<String>,
+    pub layout: Option<String>,
+    pub variant: Option<String>,
+    pub options: Option<String>,
+}
+
+/// Supplies the active compositor keymap to raw evdev capture. Returning
+/// `None` means the active layout cannot be established and matching must
+/// fail closed.
+pub trait KeyboardLayoutProvider: Send {
+    fn snapshot(&mut self) -> Option<KeyboardLayoutSnapshot>;
+}
+
+struct UnavailableLayoutProvider;
+
+impl KeyboardLayoutProvider for UnavailableLayoutProvider {
+    fn snapshot(&mut self) -> Option<KeyboardLayoutSnapshot> {
+        None
+    }
+}
 
 static INPUT_QUEUE_OVERFLOWS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -128,6 +159,9 @@ impl EvdevError {
 pub struct EvdevSource {
     devices: Vec<Box<dyn device::KeyboardDeviceAccess>>,
     state: State,
+    layout_provider: Box<dyn KeyboardLayoutProvider>,
+    layout_generation: Option<u64>,
+    layout_available: bool,
     pending: VecDeque<InputEvent>,
     /// Reused storage for one device's raw batch. The cursor lets a large
     /// batch be translated over multiple scheduling slices without copying
@@ -160,6 +194,15 @@ pub struct EvdevSource {
 
 impl EvdevSource {
     pub fn connect() -> Result<Self, EvdevError> {
+        Self::connect_with_layout_provider(Box::new(UnavailableLayoutProvider))
+    }
+
+    /// Connect using a compositor-specific layout source. Compositors without
+    /// a trustworthy active-keymap API use the unavailable provider, which
+    /// leaves native key delivery alone but disables evdev matching.
+    pub fn connect_with_layout_provider(
+        layout_provider: Box<dyn KeyboardLayoutProvider>,
+    ) -> Result<Self, EvdevError> {
         // Install the topology watch before discovery. If a keyboard appears
         // during discovery, either the scan sees it or inotify reports it.
         let topology_watch = create_topology_watch(Path::new("/dev/input"))
@@ -179,8 +222,9 @@ impl EvdevSource {
             .map_err(|error| EvdevError::Keymap(error.to_string()))?;
         tracing::warn!(
             "evdev capture active: no per-field sensitive-content signal is available, so \
-             matching is never suspended in password or other sensitive fields; the XKB state is \
-             a local snapshot and does not track compositor layout switching (docs/SECURITY.md)"
+             matching is never suspended in password or other sensitive fields; \
+             no compositor keyboard-layout provider is available; layout-dependent matching and \
+             hotkeys are disabled rather than translated with a guessed startup keymap (docs/SECURITY.md)"
         );
         let devices: Vec<Box<dyn device::KeyboardDeviceAccess>> = discovery
             .keyboards
@@ -191,6 +235,9 @@ impl EvdevSource {
         Ok(Self {
             devices,
             state: State::new(keymap),
+            layout_provider,
+            layout_generation: None,
+            layout_available: false,
             pending: VecDeque::new(),
             raw_events: Vec::new(),
             raw_event_cursor: 0,
@@ -506,6 +553,9 @@ impl EvdevSource {
         };
         let keycode = u32::from(key_code.code());
         if value == 2 {
+            if !self.refresh_layout() {
+                return;
+            }
             let action = key_action(&self.state, keycode);
             self.queue_action(action);
             return;
@@ -515,6 +565,7 @@ impl EvdevSource {
             1 => KeyState::Pressed,
             _ => return,
         };
+        let layout_available = self.refresh_layout();
         if self.pressed.len() <= device_index {
             self.pressed.resize_with(device_index + 1, HashSet::new);
         }
@@ -526,6 +577,15 @@ impl EvdevSource {
                 self.pressed[device_index].remove(&keycode);
             }
         }
+        // Keep physical key ownership for output-interruption safety even
+        // when no trustworthy layout is available. Do not infer characters,
+        // delimiters, or hotkeys from a startup-only keymap.
+        if !layout_available {
+            if key_state == KeyState::Pressed {
+                self.queue_event(InputEvent::Reset);
+            }
+            return;
+        }
         if key_state == KeyState::Pressed {
             if let Some(chord) = key_chord(&self.state, keycode) {
                 self.queue_event(InputEvent::Key(chord));
@@ -533,6 +593,66 @@ impl EvdevSource {
         }
         let action = key_action_and_update(&mut self.state, keycode, key_state);
         self.queue_action(action);
+    }
+
+    fn refresh_layout(&mut self) -> bool {
+        let Some(snapshot) = self.layout_provider.snapshot() else {
+            if self.layout_available {
+                self.layout_available = false;
+                self.layout_generation = None;
+                self.queue_event(InputEvent::Reset);
+            }
+            return false;
+        };
+        if self.layout_generation == Some(snapshot.generation) {
+            return true;
+        }
+        let context = match Context::new(0) {
+            Ok(context) => context,
+            Err(error) => {
+                tracing::warn!(%error, "cannot initialize compositor keyboard layout; disabling evdev matching");
+                self.layout_available = false;
+                self.queue_event(InputEvent::Reset);
+                return false;
+            }
+        };
+        let keymap = match Keymap::new_from_names(
+            context,
+            Some(RuleNames {
+                rules: snapshot.rules,
+                model: snapshot.model,
+                layout: snapshot.layout,
+                variant: snapshot.variant,
+                options: snapshot.options,
+            }),
+            0,
+        ) {
+            Ok(keymap) => keymap,
+            Err(error) => {
+                tracing::warn!(%error, "cannot load compositor keyboard layout; disabling evdev matching");
+                self.layout_available = false;
+                self.queue_event(InputEvent::Reset);
+                return false;
+            }
+        };
+        self.state = State::new(keymap);
+        let mut held_keys = self
+            .pressed
+            .iter()
+            .flat_map(|keys| keys.iter().copied())
+            .collect::<Vec<_>>();
+        held_keys.sort_unstable();
+        for keycode in held_keys {
+            if let Some(xkb_keycode) = keycode.checked_add(8) {
+                self.state.update_key(xkb_keycode, KeyDirection::Down);
+            }
+        }
+        self.layout_generation = Some(snapshot.generation);
+        self.layout_available = true;
+        // A layout switch invalidates partially composed characters and any
+        // trigger assembled under the previous keymap.
+        self.queue_event(InputEvent::Reset);
+        true
     }
 
     fn queue_action(&mut self, action: Option<KeyAction>) {
@@ -975,9 +1095,95 @@ mod tests {
         }
     }
 
+    struct TestLayoutProvider;
+
+    impl KeyboardLayoutProvider for TestLayoutProvider {
+        fn snapshot(&mut self) -> Option<KeyboardLayoutSnapshot> {
+            Some(KeyboardLayoutSnapshot {
+                generation: 1,
+                rules: None,
+                model: None,
+                layout: None,
+                variant: None,
+                options: None,
+            })
+        }
+    }
+
+    struct MutableLayoutProvider(Arc<Mutex<Option<KeyboardLayoutSnapshot>>>);
+
+    impl KeyboardLayoutProvider for MutableLayoutProvider {
+        fn snapshot(&mut self) -> Option<KeyboardLayoutSnapshot> {
+            self.0.lock().unwrap().clone()
+        }
+    }
+
     fn test_state() -> State {
         let keymap = Keymap::new_from_names(Context::new(0).unwrap(), None, 0).unwrap();
         State::new(keymap)
+    }
+
+    fn source_with_provider(provider: Box<dyn KeyboardLayoutProvider>) -> EvdevSource {
+        EvdevSource {
+            devices: Vec::new(),
+            state: test_state(),
+            layout_provider: provider,
+            layout_generation: None,
+            layout_available: false,
+            pending: VecDeque::new(),
+            raw_events: Vec::new(),
+            raw_event_cursor: 0,
+            raw_event_device: None,
+            pending_lost_devices: Vec::new(),
+            pressed: vec![HashSet::new()],
+            last_device_refresh: Instant::now(),
+            wake: None,
+            topology_watch: None,
+            topology_refresh_pending: false,
+        }
+    }
+
+    #[test]
+    fn unavailable_layout_provider_fails_closed_but_tracks_physical_keys() {
+        let mut source = source_with_provider(Box::new(UnavailableLayoutProvider));
+        source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 1));
+        assert_eq!(source.take_pending_events(), vec![InputEvent::Reset]);
+        assert!(source.keys_held());
+        source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 0));
+        assert!(!source.keys_held());
+        assert!(source.take_pending_events().is_empty());
+    }
+
+    #[test]
+    fn layout_generation_change_resets_matcher_and_replays_held_modifiers() {
+        let snapshot = Arc::new(Mutex::new(Some(KeyboardLayoutSnapshot {
+            generation: 1,
+            rules: None,
+            model: None,
+            layout: Some("us".into()),
+            variant: None,
+            options: None,
+        })));
+        let mut source =
+            source_with_provider(Box::new(MutableLayoutProvider(Arc::clone(&snapshot))));
+        source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 42, 1));
+        source.take_pending_events();
+        *snapshot.lock().unwrap() = Some(KeyboardLayoutSnapshot {
+            generation: 2,
+            rules: None,
+            model: None,
+            layout: Some("de".into()),
+            variant: None,
+            options: None,
+        });
+        source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 21, 1));
+        let events = source.take_pending_events();
+        assert_eq!(events.first(), Some(&InputEvent::Reset));
+        assert!(
+            events.contains(&InputEvent::TextChar('Z')),
+            "events: {events:?}"
+        );
+        source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 42, 0));
     }
 
     #[test]
@@ -1120,6 +1326,9 @@ mod tests {
                 events: Arc::clone(&events),
             })],
             state: test_state(),
+            layout_provider: Box::new(TestLayoutProvider),
+            layout_generation: Some(1),
+            layout_available: true,
             pending: VecDeque::new(),
             raw_events: Vec::new(),
             raw_event_cursor: 0,
@@ -1169,6 +1378,9 @@ mod tests {
                 events,
             })],
             state: test_state(),
+            layout_provider: Box::new(TestLayoutProvider),
+            layout_generation: Some(1),
+            layout_available: true,
             pending: VecDeque::new(),
             raw_events: Vec::new(),
             raw_event_cursor: 0,
@@ -1262,6 +1474,9 @@ mod tests {
                 events,
             })],
             state: test_state(),
+            layout_provider: Box::new(TestLayoutProvider),
+            layout_generation: Some(1),
+            layout_available: true,
             pending: VecDeque::new(),
             raw_events: Vec::new(),
             raw_event_cursor: 0,
@@ -1303,6 +1518,9 @@ mod tests {
                 events: Arc::new(Mutex::new(Vec::new())),
             })],
             state: test_state(),
+            layout_provider: Box::new(TestLayoutProvider),
+            layout_generation: Some(1),
+            layout_available: true,
             pending: VecDeque::new(),
             raw_events: (0..MAX_RAW_EVENTS_PER_SLICE * 4)
                 .map(|_| evdev::InputEvent::new(evdev::EventType::SYNCHRONIZATION.0, 0, 0))
@@ -1343,6 +1561,9 @@ mod tests {
                 events,
             })],
             state: test_state(),
+            layout_provider: Box::new(TestLayoutProvider),
+            layout_generation: Some(1),
+            layout_available: true,
             pending: VecDeque::new(),
             raw_events: Vec::new(),
             raw_event_cursor: 0,
@@ -1384,6 +1605,9 @@ mod tests {
                 events,
             })],
             state: test_state(),
+            layout_provider: Box::new(TestLayoutProvider),
+            layout_generation: Some(1),
+            layout_available: true,
             pending: VecDeque::new(),
             raw_events: Vec::new(),
             raw_event_cursor: 0,
@@ -1441,6 +1665,9 @@ mod tests {
                 }),
             ],
             state: test_state(),
+            layout_provider: Box::new(TestLayoutProvider),
+            layout_generation: Some(1),
+            layout_available: true,
             pending: VecDeque::new(),
             raw_events: Vec::new(),
             raw_event_cursor: 0,
@@ -1474,6 +1701,9 @@ mod tests {
         let mut source = EvdevSource {
             devices: Vec::new(),
             state: std::mem::replace(state, test_state()),
+            layout_provider: Box::new(TestLayoutProvider),
+            layout_generation: Some(1),
+            layout_available: true,
             pending: VecDeque::new(),
             raw_events: Vec::new(),
             raw_event_cursor: 0,
@@ -1522,6 +1752,9 @@ mod tests {
         let mut source = EvdevSource {
             devices: Vec::new(),
             state: std::mem::replace(&mut state, test_state()),
+            layout_provider: Box::new(TestLayoutProvider),
+            layout_generation: Some(1),
+            layout_available: true,
             pending: VecDeque::new(),
             raw_events: Vec::new(),
             raw_event_cursor: 0,
@@ -1545,6 +1778,9 @@ mod tests {
         let mut source = EvdevSource {
             devices: Vec::new(),
             state: std::mem::replace(&mut state, test_state()),
+            layout_provider: Box::new(TestLayoutProvider),
+            layout_generation: Some(1),
+            layout_available: true,
             pending: VecDeque::new(),
             raw_events: Vec::new(),
             raw_event_cursor: 0,
@@ -1566,6 +1802,9 @@ mod tests {
         let mut source = EvdevSource {
             devices: Vec::new(),
             state: std::mem::replace(&mut state, test_state()),
+            layout_provider: Box::new(TestLayoutProvider),
+            layout_generation: Some(1),
+            layout_available: true,
             pending: VecDeque::new(),
             raw_events: Vec::new(),
             raw_event_cursor: 0,
@@ -1600,6 +1839,9 @@ mod tests {
         let mut source = EvdevSource {
             devices: Vec::new(),
             state: test_state(),
+            layout_provider: Box::new(TestLayoutProvider),
+            layout_generation: Some(1),
+            layout_available: true,
             pending: VecDeque::new(),
             raw_events: Vec::new(),
             raw_event_cursor: 0,
@@ -1650,6 +1892,9 @@ mod tests {
             let mut source = EvdevSource {
                 devices: Vec::new(),
                 state: test_state(),
+                layout_provider: Box::new(TestLayoutProvider),
+                layout_generation: Some(1),
+                layout_available: true,
                 pending: VecDeque::new(),
                 raw_events: Vec::new(),
                 raw_event_cursor: 0,
@@ -1714,6 +1959,9 @@ mod tests {
         let mut source = EvdevSource {
             devices: Vec::new(),
             state: test_state(),
+            layout_provider: Box::new(TestLayoutProvider),
+            layout_generation: Some(1),
+            layout_available: true,
             pending: VecDeque::from([InputEvent::Text("a".into())]),
             raw_events: Vec::new(),
             raw_event_cursor: 0,
@@ -1737,6 +1985,9 @@ mod tests {
         let mut source = EvdevSource {
             devices: Vec::new(),
             state: std::mem::replace(&mut state, test_state()),
+            layout_provider: Box::new(TestLayoutProvider),
+            layout_generation: Some(1),
+            layout_available: true,
             pending: VecDeque::new(),
             raw_events: Vec::new(),
             raw_event_cursor: 0,
@@ -1759,6 +2010,9 @@ mod tests {
         let mut source = EvdevSource {
             devices: Vec::new(),
             state: test_state(),
+            layout_provider: Box::new(TestLayoutProvider),
+            layout_generation: Some(1),
+            layout_available: true,
             pending: VecDeque::new(),
             raw_events: Vec::new(),
             raw_event_cursor: 0,
@@ -1791,6 +2045,9 @@ mod tests {
         let mut source = EvdevSource {
             devices: Vec::new(),
             state: test_state(),
+            layout_provider: Box::new(TestLayoutProvider),
+            layout_generation: Some(1),
+            layout_available: true,
             pending: VecDeque::new(),
             raw_events: Vec::new(),
             raw_event_cursor: 0,
@@ -1811,6 +2068,9 @@ mod tests {
         let mut source = EvdevSource {
             devices: Vec::new(),
             state: test_state(),
+            layout_provider: Box::new(TestLayoutProvider),
+            layout_generation: Some(1),
+            layout_available: true,
             pending: VecDeque::new(),
             raw_events: Vec::new(),
             raw_event_cursor: 0,
@@ -1833,6 +2093,9 @@ mod tests {
         let mut source = EvdevSource {
             devices: Vec::new(),
             state: test_state(),
+            layout_provider: Box::new(TestLayoutProvider),
+            layout_generation: Some(1),
+            layout_available: true,
             pending: VecDeque::new(),
             raw_events: Vec::new(),
             raw_event_cursor: 0,
