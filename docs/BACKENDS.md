@@ -108,6 +108,12 @@ Settings > Engine in the GUI):
 keystroke_max_chars = 1000   # about 12 seconds of typing
 ```
 
+The editor preview estimates paced-keyboard insertion time from the active
+route's reported throughput. For long configuration files and runbooks, use the
+preview's Copy action or `wayexpand new` to write a file instead of typing the
+content through the virtual keyboard. The estimate is advisory; it does not
+make an unverified or non-atomic route safe for automatic replacement.
+
 Raising it trades speed for reach: anything you type while a long
 replacement is being typed is mixed into it, and a focus change or the
 insertion timeout stops it partway. A changed limit applies to the running

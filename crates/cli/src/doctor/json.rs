@@ -186,6 +186,19 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
         }),
     };
     let production_readiness = production_readiness(&daemon);
+    let cleanup_degraded = daemon["command_cleanup_degraded"]
+        .as_bool()
+        .unwrap_or(false);
+    let command_cleanup = serde_json::json!({
+        "pending_jobs": daemon.get("command_cleanup_pending_jobs"),
+        "failed_attempts": daemon.get("command_cleanup_failed_attempts"),
+        "degraded": cleanup_degraded,
+        "detail": if cleanup_degraded {
+            "Command execution is refused until stale cgroup cleanup is resolved and the daemon is restarted."
+        } else {
+            "Cgroup cleanup reaper is within its configured backlog limit."
+        },
+    });
     let healthy = config_ok
         && policy_ok
         && display_session_available()
@@ -193,7 +206,8 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
         && socket_valid
         && broker["healthy"].as_bool().unwrap_or(false)
         && daemon["output"]["health"].as_str() != Some("stalled")
-        && daemon["insertion"]["assurance"].as_str() != Some("blocked");
+        && daemon["insertion"]["assurance"].as_str() != Some("blocked")
+        && !cleanup_degraded;
     println!(
         "{}",
         serde_json::json!({
@@ -214,6 +228,7 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
                 "valid": socket_valid,
             },
             "daemon": daemon,
+            "command_cleanup": command_cleanup,
             "production_readiness": production_readiness,
             "action_broker": broker,
             "ibus": {

@@ -544,6 +544,16 @@ pub(crate) fn print_output_health_diagnostics() -> bool {
         print_session_capabilities(&serde_json::Value::Null);
         return true;
     };
+    let cleanup_degraded = snapshot["command_cleanup_degraded"]
+        .as_bool()
+        .unwrap_or(false);
+    if cleanup_degraded {
+        println!(
+            "Command cleanup: DEGRADED ({} pending jobs, {} failed attempts); resolve stale cgroup cleanup and restart the daemon before running commands.",
+            snapshot["command_cleanup_pending_jobs"].as_u64().unwrap_or(0),
+            snapshot["command_cleanup_failed_attempts"].as_u64().unwrap_or(0)
+        );
+    }
     let route = runtime_route_summary(&snapshot);
     print_session_capabilities(&snapshot);
     if let (Some(source), Some(backend)) = (
@@ -625,7 +635,7 @@ pub(crate) fn print_output_health_diagnostics() -> bool {
     let insertion_ok = insertion["assurance"].as_str() != Some("blocked");
     let output = output_health_from_status(&snapshot);
     let Some(health) = output["health"].as_str() else {
-        return insertion_ok;
+        return insertion_ok && !cleanup_degraded;
     };
     println!(
         "Output route: {health} ({} uncertain transaction(s) since start)",
@@ -644,7 +654,7 @@ pub(crate) fn print_output_health_diagnostics() -> bool {
         );
         return false;
     }
-    insertion_ok && matches!(daemon_status, "current" | "unverified")
+    insertion_ok && !cleanup_degraded && matches!(daemon_status, "current" | "unverified")
 }
 
 fn print_session_capabilities(snapshot: &serde_json::Value) {

@@ -43,6 +43,15 @@ fn input_method_injection_capabilities(
 }
 
 impl Daemon {
+    /// Refresh the diagnostic status at a bounded cadence on ordinary input
+    /// turns. Event handling and output failures use `publish_status` directly
+    /// so important transitions remain immediate.
+    pub(crate) fn publish_status_if_due(&mut self, metrics: CommandMetrics) {
+        if self.status_publisher.reactor_refresh_due() {
+            self.publish_status(metrics);
+        }
+    }
+
     /// Apply window, pause, reload, and stop transitions; report hotkey results and worker failures. Breaks when the daemon should stop.
     pub(crate) fn maintain(&mut self) -> Result<ControlFlow<(), CommandMetrics>> {
         self.config.engine.expire_command_cache();
