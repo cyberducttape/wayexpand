@@ -98,8 +98,8 @@ pub(crate) struct FocusTarget {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct FocusInfo {
     target: Option<FocusTarget>,
-    daemon_available: bool,
-    exact_identity_available: bool,
+    atomic_replace_available: bool,
+    verified_replace_available: bool,
 }
 
 pub(crate) struct PickerApp {
@@ -118,8 +118,7 @@ pub(crate) struct PickerApp {
     palette: Palette,
     query: String,
     selected: usize,
-    daemon_available: bool,
-    exact_identity_available: bool,
+    safe_direct_insert: bool,
     copied: Option<String>,
     focus_requested: bool,
     target_focus: Option<FocusTarget>,
@@ -150,8 +149,7 @@ impl PickerApp {
         language: Language,
         colorpack: ColorPack,
         dark: bool,
-        daemon_available: bool,
-        exact_identity_available: bool,
+        safe_direct_insert: bool,
         target_focus: Option<FocusTarget>,
     ) -> Self {
         Self {
@@ -175,8 +173,7 @@ impl PickerApp {
             palette: Palette::for_pack(colorpack, dark),
             query: String::new(),
             selected: 0,
-            daemon_available,
-            exact_identity_available,
+            safe_direct_insert,
             copied: None,
             focus_requested: false,
             target_focus,
@@ -202,7 +199,9 @@ impl PickerApp {
             .expansion
             .iter()
             .enumerate()
-            .filter(|(_, expansion)| picker_expansion_is_eligible(expansion, self.daemon_available))
+            .filter(|(_, expansion)| {
+                picker_expansion_is_eligible(expansion, self.safe_direct_insert)
+            })
             .filter_map(|(index, _)| {
                 score_normalized(
                     &query,
@@ -218,7 +217,7 @@ impl PickerApp {
     }
 
     fn choose(&mut self, ctx: &egui::Context, expansion: &ExpansionConfig) {
-        if self.daemon_available {
+        if self.safe_direct_insert {
             let Some(target_focus) = self.target_focus.clone() else {
                 self.insert_state = InsertState::Failed {
                     trigger: expansion.trigger.clone(),
@@ -481,7 +480,7 @@ impl eframe::App for PickerApp {
 
                 ui.separator();
                 ui.horizontal(|ui| {
-                    let (text, color) = match (&self.copied, self.daemon_available) {
+                    let (text, color) = match (&self.copied, self.safe_direct_insert) {
                         (Some(trigger), _) => {
                             (self.strings.picker_copied(trigger), palette.success)
                         }
@@ -490,11 +489,7 @@ impl eframe::App for PickerApp {
                             palette.muted,
                         ),
                         (None, false) => (
-                            if self.exact_identity_available {
-                                self.strings.picker_footer_clipboard().to_owned()
-                            } else {
-                                self.strings.picker_footer_identity_unavailable().to_owned()
-                            },
+                            self.strings.picker_footer_clipboard().to_owned(),
                             palette.warning,
                         ),
                     };
@@ -618,7 +613,7 @@ pub(crate) fn run(path: PathBuf) -> anyhow::Result<()> {
     let focus_info = crate::runtime::control_command(wayexpand_core::DaemonOperation::Focus)
         .ok()
         .and_then(|response| focus_target_from_response(&response));
-    let (target_focus, daemon_available, exact_identity_available) = picker_focus_state(focus_info);
+    let (target_focus, safe_direct_insert) = picker_focus_state(focus_info);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("WayExpand — Insert snippet")
@@ -652,8 +647,7 @@ pub(crate) fn run(path: PathBuf) -> anyhow::Result<()> {
                 prefs.language,
                 prefs.colorpack,
                 dark,
-                daemon_available,
-                exact_identity_available,
+                safe_direct_insert,
                 target_focus,
             );
             app.screenshot = crate::screenshot::ScreenshotCapture::from_env();
@@ -664,23 +658,26 @@ pub(crate) fn run(path: PathBuf) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn picker_focus_state(focus_info: Option<FocusInfo>) -> (Option<FocusTarget>, bool, bool) {
+fn picker_focus_state(focus_info: Option<FocusInfo>) -> (Option<FocusTarget>, bool) {
     focus_info
         .map(|info| {
-            let daemon_available = info.daemon_available && info.target.is_some();
-            (info.target, daemon_available, info.exact_identity_available)
+            let safe_direct_insert = (info.atomic_replace_available
+                || info.verified_replace_available)
+                && info.target.is_some();
+            (info.target, safe_direct_insert)
         })
         // A missing or malformed focus response proves neither daemon
         // availability nor exact window identity. Keep the picker honest in
         // clipboard-only mode instead of presenting a false guarantee.
-        .unwrap_or((None, false, false))
+        .unwrap_or((None, false))
 }
 
-fn picker_expansion_is_eligible(expansion: &ExpansionConfig, daemon_available: bool) -> bool {
+fn picker_expansion_is_eligible(expansion: &ExpansionConfig, safe_direct_insert: bool) -> bool {
     expansion.enabled
         && expansion.command.is_none()
         && form_fields(&expansion.replacement).is_ok_and(|fields| fields.is_empty())
-        && (daemon_available || !template_variables(&expansion.replacement).contains(&"clipboard"))
+        && (safe_direct_insert
+            || !template_variables(&expansion.replacement).contains(&"clipboard"))
 }
 
 fn focus_target_from_response(response: &str) -> Option<FocusInfo> {
@@ -692,8 +689,8 @@ fn focus_target_from_response(response: &str) -> Option<FocusInfo> {
                 generation,
                 token: token.to_owned(),
             }),
-        daemon_available: true,
-        exact_identity_available: focus.exact_identity,
+        atomic_replace_available: focus.atomic_replace,
+        verified_replace_available: focus.verified_replace,
     })
 }
 
@@ -757,25 +754,25 @@ mod tests {
     fn focus_target_parser_fails_closed_for_missing_or_empty_tokens() {
         assert_eq!(
             focus_target_from_response(
-                "focus_generation=4\nfocus_token=abcd\nfocus_identity=exact\n",
+                "focus_generation=4\nfocus_token=abcd\nfocus_identity=exact\natomic_replace=true\nverified_replace=true\n",
             ),
             Some(FocusInfo {
                 target: Some(FocusTarget {
                     generation: 4,
                     token: "abcd".into(),
                 }),
-                daemon_available: true,
-                exact_identity_available: true,
+                atomic_replace_available: true,
+                verified_replace_available: true,
             })
         );
         assert_eq!(
             focus_target_from_response(
-                "focus_generation=4\nfocus_token=\nfocus_identity=unavailable\n",
+                "focus_generation=4\nfocus_token=\nfocus_identity=unavailable\natomic_replace=false\nverified_replace=false\n",
             ),
             Some(FocusInfo {
                 target: None,
-                daemon_available: true,
-                exact_identity_available: false,
+                atomic_replace_available: false,
+                verified_replace_available: false,
             })
         );
         assert_eq!(focus_target_from_response("running\n"), None);
@@ -783,7 +780,31 @@ mod tests {
 
     #[test]
     fn missing_focus_response_does_not_claim_exact_identity() {
-        assert_eq!(picker_focus_state(None), (None, false, false));
+        assert_eq!(picker_focus_state(None), (None, false));
+    }
+
+    #[test]
+    fn picker_uses_automatic_insertion_only_for_verified_exact_targets() {
+        let focus = focus_target_from_response(
+            "focus_generation=4\nfocus_token=abcd\nfocus_identity=exact\natomic_replace=false\nverified_replace=true\n",
+        )
+        .unwrap();
+        assert_eq!(
+            picker_focus_state(Some(focus)),
+            (
+                Some(FocusTarget {
+                    generation: 4,
+                    token: "abcd".into(),
+                }),
+                true
+            )
+        );
+
+        let unverified = focus_target_from_response(
+            "focus_generation=4\nfocus_token=abcd\nfocus_identity=exact\natomic_replace=false\nverified_replace=false\n",
+        )
+        .unwrap();
+        assert!(!picker_focus_state(Some(unverified)).1);
     }
 
     #[test]

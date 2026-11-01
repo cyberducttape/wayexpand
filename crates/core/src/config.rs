@@ -179,10 +179,11 @@ pub struct Settings {
     /// machine.
     #[serde(default = "default_usage_stats", skip_serializing_if = "is_true")]
     pub usage_stats: bool,
-    /// Whether keystroke-synthesis routes may erase text they cannot verify.
-    /// Off by default: only routes that check the target's own text before
-    /// erasing (input-method-v2, IBus) replace triggers. Omitted when off so
-    /// saved configs still load in older readers.
+    /// Whether non-atomic routes may replace triggers automatically.
+    /// Off by default: atomic routes and routes that verify target surrounding
+    /// text may replace triggers; unverified routes leave the trigger intact
+    /// for manual recovery. Omitted when off so saved configs still load in
+    /// older readers.
     #[serde(skip_serializing_if = "CompatibilityMode::is_off")]
     pub compatibility_mode: CompatibilityMode,
     /// Longest replacement, in characters, that a paced keystroke route (the
@@ -209,14 +210,12 @@ fn is_default_keystroke_max_chars(value: &usize) -> bool {
     *value == DEFAULT_KEYSTROKE_MAX_CHARS
 }
 
-/// Consent for replacement on routes that type keystrokes without seeing the
-/// target's text (evdev capture with libei or wlroots output). Their
-/// Backspaces cannot be checked against the trigger, so they never erase
-/// unless the user opts in here.
+/// Explicit consent for automatic replacement on unverified routes, such as
+/// those that type keystrokes without seeing the target's text.
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum CompatibilityMode {
-    /// Keystroke routes never erase: typed triggers are refused there.
+    /// Unverified routes never replace: typed triggers remain for manual use.
     #[default]
     Off,
     /// Erase with keystrokes only while a window tracker confirms, right

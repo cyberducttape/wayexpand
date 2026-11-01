@@ -76,13 +76,19 @@ real-session evidence with `certification_scope: production` exists.
 Replacement assurance is an explicit route property and a live status. The
 route table's `verified` label means the protocol validates target text before
 deletion; it does not by itself mean the erase and insert form one atomic
-transaction. `unverified` is the baseline for keystroke routes. When a compositor
-tracker confirms the exact focused window, live status refines that to
+transaction. Atomic replacement or a verified surrounding-text contract is
+required for automatic replacement by default. With `compatibility_mode=off`,
+an unverified route refuses before erasing and leaves the trigger available
+for recovery. The Quick Picker copies snippets to the clipboard for manual
+paste unless the daemon reports a verified route and exact target identity.
+`unverified` is the baseline for keystroke routes. When
+a compositor tracker confirms the exact focused window, live status refines that to
 `focus-tracked-best-effort`: focus is checked, but the route still cannot
 confirm the cursor or text being erased. If focus is unconfirmed, untracked
 replacement is labeled `unverified` and requires explicit consent. With
-`compatibility_mode=off`, typed replacement on keystroke routes is refused
-before the first keystroke and status says `blocked`. See
+`compatibility_mode` explicitly enabled, non-atomic replacement remains an
+experimental compatibility mode and is not production-certified. Status says
+`blocked` while the route is refused. See
 [Insertion guarantees](../SECURITY.md#insertion-guarantees).
 
 Keyboard-layout evidence is mandatory for certification: `us`, `de`, `fr`, an
