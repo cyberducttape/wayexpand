@@ -389,7 +389,9 @@ jobs:
             && git cat-file -e "$base^{commit}" 2>/dev/null; then
             if [ "$GITHUB_EVENT_NAME" = pull_request ] \
               && [ "${PR_AUTHOR:-}" = 'dependabot[bot]' ]; then
-              bash scripts/check-commit-identity.sh --allow-dependabot "$base..$head"
+              # The owner may merge the bot branch in GitHub's UI, adding a
+              # web-flow-signed merge commit to the PR's commit range.
+              bash scripts/check-commit-identity.sh --allow-dependabot --allow-web-merges "$base..$head"
             elif [ "$GITHUB_EVENT_NAME" = push ]; then
               # Merging a Dependabot PR in the web UI lands its commits and
               # the owner's merge commit; both must carry GitHub's pinned
