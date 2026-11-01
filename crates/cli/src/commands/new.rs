@@ -10,7 +10,10 @@ use std::{
     collections::HashMap,
     io::{BufRead, IsTerminal, Read},
     os::fd::AsRawFd,
-    os::unix::{ffi::OsStrExt, fs::OpenOptionsExt},
+    os::unix::{
+        ffi::OsStrExt,
+        fs::{OpenOptionsExt, PermissionsExt},
+    },
     process::{Command, ExitStatus, Stdio},
     sync::Arc,
     thread,
@@ -26,7 +29,7 @@ use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
 use super::Args;
 use crate::*;
 
-const USAGE: &str = "usage: wayexpand new [<name> [--set NAME=VALUE]... [-o FILE|--stdout] [--gui] [--force]] [--show NAME] [--json] [--config FILE]";
+const USAGE: &str = "usage: wayexpand new [<name> [--set NAME=VALUE]... [-o PATH|--stdout] [--gui] [--force]] [--show NAME] [--json] [--config FILE]";
 
 /// Templates that ship with WayExpand. A snippet in the user's configuration
 /// with the same name takes precedence.
@@ -60,6 +63,21 @@ fn load_user_config(path: &Path, explicit: bool) -> Result<Config> {
 /// Bytes in one value given with `--set` or typed at a prompt.
 const MAX_VALUE_BYTES: usize = 64 * 1024;
 const GENERATED_FILE_MODE: u32 = 0o600;
+const ANSIBLE_ROLE_TRIGGER: &str = ";;ansible-role";
+const ANSIBLE_ROLE_COMPANIONS: [(&str, &str); 3] = [
+    (
+        "handlers/main.yml",
+        "---\n- name: \"Restart {{field:service=nginx}}\"\n  ansible.builtin.service:\n    name: \"{{field:service=nginx}}\"\n    state: restarted\n",
+    ),
+    (
+        "defaults/main.yml",
+        "---\nnginx_listen_port: \"{{field:port=80}}\"\nserver_name: \"{{field:hostname=localhost}}\"\n",
+    ),
+    (
+        "templates/default.conf.j2",
+        "server {\n    listen {{{{ nginx_listen_port }}}};\n    server_name {{{{ server_name }}}};\n\n    location / {\n        try_files $uri $uri/ =404;\n    }\n}\n",
+    ),
+];
 const FORM_HELPER_TIMEOUT: Duration = Duration::from_secs(600);
 // A killed descendant may need scheduler time to close its inherited pipe.
 // Keep that cleanup bounded, but leave enough room for loaded CI and desktops.
@@ -128,7 +146,7 @@ pub(crate) fn new_command(args: Args) -> Result<()> {
     if to_stdout && output.is_some() {
         usage_bail!("use either --stdout or -o FILE, not both");
     }
-    let (snippet, _) = find_template(&layers, &name)?;
+    let (snippet, source) = find_template(&layers, &name)?;
     if snippet.command.is_some() {
         usage_bail!(
             "{} runs a command; only text snippets can be written with `wayexpand new`",
@@ -174,6 +192,31 @@ pub(crate) fn new_command(args: Args) -> Result<()> {
     let (rendered, _) = render_template_with_cursor(&snippet.replacement, &context)
         .map_err(|error| config_error(format!("{}: {error}", snippet.trigger)))?;
 
+    let is_ansible_role = source == Source::BuiltIn && snippet.trigger == ANSIBLE_ROLE_TRIGGER;
+    if is_ansible_role {
+        if to_stdout {
+            usage_bail!("ansible-role generates a directory; use -o DIR to choose its location");
+        }
+        let default_directory = snippet
+            .output_file
+            .as_deref()
+            .context("the built-in ansible role has no output directory")?;
+        let (default_directory, _) = render_template_with_cursor(default_directory, &context)
+            .map_err(|error| {
+                config_error(format!("{} output directory: {error}", snippet.trigger))
+            })?;
+        let directory = output.as_deref().unwrap_or(&default_directory);
+        if directory == "-" {
+            usage_bail!("ansible-role writes a directory and cannot use -o -");
+        }
+        validate_role_output_directory(Path::new(directory))?;
+
+        let files = render_ansible_role_files(rendered, &context)?;
+        write_scaffold_directory(Path::new(directory), &files, force)?;
+        eprintln!("Wrote Ansible role to {directory}");
+        return Ok(());
+    }
+
     let destination = if to_stdout {
         None
     } else {
@@ -192,6 +235,19 @@ pub(crate) fn new_command(args: Args) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn render_ansible_role_files(
+    tasks: String,
+    context: &TemplateContext,
+) -> Result<Vec<(String, Vec<u8>)>> {
+    let mut files = vec![("tasks/main.yml".into(), tasks.into_bytes())];
+    for (relative_path, template) in ANSIBLE_ROLE_COMPANIONS {
+        let (contents, _) = render_template_with_cursor(template, context)
+            .map_err(|error| config_error(format!("{}: {error}", relative_path)))?;
+        files.push((relative_path.into(), contents.into_bytes()));
+    }
+    Ok(files)
 }
 
 /// A snippet as TOML to paste into a configuration, without its id (one is
@@ -670,6 +726,187 @@ fn run_form_helper_process(
     }
 }
 
+fn validate_role_output_directory(path: &Path) -> Result<()> {
+    use std::path::Component;
+    if path.as_os_str().is_empty()
+        || path.as_os_str().as_bytes().contains(&0)
+        || path
+            .components()
+            .any(|component| matches!(component, Component::ParentDir))
+    {
+        usage_bail!("Ansible role output directory must not contain '..' or NUL");
+    }
+    Ok(())
+}
+
+fn write_scaffold_directory(
+    destination: &Path,
+    files: &[(String, Vec<u8>)],
+    force: bool,
+) -> Result<()> {
+    use std::path::Component;
+
+    let parent = destination
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    fs::create_dir_all(parent).with_context(|| format!("could not create {}", parent.display()))?;
+    let staging = temporary_output_path(
+        destination,
+        destination
+            .file_name()
+            .context("Ansible role output path has no final directory name")?,
+    )?;
+    let result = (|| -> Result<()> {
+        fs::create_dir(&staging)
+            .with_context(|| format!("could not create staging directory {}", staging.display()))?;
+        fs::set_permissions(&staging, fs::Permissions::from_mode(0o700))?;
+
+        for (relative, contents) in files {
+            let relative_path = Path::new(relative);
+            if relative_path.as_os_str().is_empty()
+                || !relative_path
+                    .components()
+                    .all(|component| matches!(component, Component::Normal(_)))
+            {
+                bail!("unsafe path in Ansible role scaffold: {relative:?}");
+            }
+            let target = staging.join(relative_path);
+            let file_parent = target
+                .parent()
+                .context("role file has no parent directory")?;
+            fs::create_dir_all(file_parent)?;
+            for ancestor in relative_path.parent().into_iter().flat_map(Path::ancestors) {
+                if !ancestor.as_os_str().is_empty() && ancestor != Path::new(".") {
+                    fs::set_permissions(staging.join(ancestor), fs::Permissions::from_mode(0o700))?;
+                }
+            }
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(GENERATED_FILE_MODE)
+                .open(&target)
+                .with_context(|| format!("could not create {}", target.display()))?;
+            file.write_all(contents)?;
+            file.sync_all()?;
+        }
+
+        // Sync directories from the leaves inward so every generated entry is
+        // durable before the staging directory becomes visible at its final path.
+        let mut directories = vec![staging.clone()];
+        for (relative, _) in files {
+            let mut current = staging.join(relative).parent().map(Path::to_path_buf);
+            while let Some(directory) = current {
+                if (directory == staging || directory.starts_with(&staging))
+                    && !directories.contains(&directory)
+                {
+                    directories.push(directory.clone());
+                }
+                if directory == staging {
+                    break;
+                }
+                current = directory.parent().map(Path::to_path_buf);
+            }
+        }
+        directories.sort_by_key(|directory| std::cmp::Reverse(directory.components().count()));
+        for directory in directories {
+            fs::File::open(directory)?.sync_all()?;
+        }
+
+        match fs::symlink_metadata(destination) {
+            Ok(_metadata) if !force => {
+                bail!(
+                    "{} already exists; add --force to replace it",
+                    destination.display()
+                );
+            }
+            Ok(metadata) if !metadata.file_type().is_dir() => {
+                bail!("{} exists and is not a directory", destination.display());
+            }
+            Ok(_) => {
+                exchange_directories(&staging, destination).with_context(|| {
+                    format!("could not atomically replace {}", destination.display())
+                })?;
+                fs::remove_dir_all(&staging).with_context(|| {
+                    format!("could not remove replaced role at {}", staging.display())
+                })?;
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                rename_directory_without_replacement(&staging, destination).with_context(|| {
+                    format!("could not publish role at {}", destination.display())
+                })?;
+            }
+            Err(error) => return Err(error.into()),
+        }
+        sync_parent_directory(destination)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_dir_all(&staging);
+    }
+    result
+}
+
+fn rename_directory_without_replacement(from: &Path, to: &Path) -> io::Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    let from_c = std::ffi::CString::new(from.as_os_str().as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "source path contains NUL"))?;
+    let to_c = std::ffi::CString::new(to.as_os_str().as_bytes()).map_err(|_| {
+        io::Error::new(io::ErrorKind::InvalidInput, "destination path contains NUL")
+    })?;
+    let result = unsafe {
+        libc::renameat2(
+            libc::AT_FDCWD,
+            from_c.as_ptr(),
+            libc::AT_FDCWD,
+            to_c.as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    };
+    if result == 0 {
+        return Ok(());
+    }
+    let error = io::Error::last_os_error();
+    if matches!(
+        error.raw_os_error(),
+        Some(libc::ENOSYS | libc::EINVAL | libc::EOPNOTSUPP)
+    ) {
+        if fs::symlink_metadata(to).is_ok() {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "destination already exists",
+            ));
+        }
+        fs::rename(from, to)
+    } else {
+        Err(error)
+    }
+}
+
+fn exchange_directories(staging: &Path, destination: &Path) -> io::Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    let staging_c = std::ffi::CString::new(staging.as_os_str().as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "staging path contains NUL"))?;
+    let destination_c =
+        std::ffi::CString::new(destination.as_os_str().as_bytes()).map_err(|_| {
+            io::Error::new(io::ErrorKind::InvalidInput, "destination path contains NUL")
+        })?;
+    let result = unsafe {
+        libc::renameat2(
+            libc::AT_FDCWD,
+            staging_c.as_ptr(),
+            libc::AT_FDCWD,
+            destination_c.as_ptr(),
+            libc::RENAME_EXCHANGE,
+        )
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
 /// Write `contents` to `path`, creating missing parent directories. An
 /// existing file is never replaced without `force`; with it, the new file is
 /// written beside the old one and renamed over it, so a failure leaves the
@@ -858,6 +1095,141 @@ mod tests {
                 .to_string_lossy()
                 .contains("wayexpand-new")));
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn scaffold_directories_publish_atomically_and_replace_as_a_unit() {
+        let root = std::env::temp_dir().join(format!(
+            "wayexpand-scaffold-test-{}-{}",
+            std::process::id(),
+            getrandom::u64().unwrap()
+        ));
+        let role = root.join("roles/example");
+        let files = vec![
+            ("tasks/main.yml".into(), b"---\n- name: task\n".to_vec()),
+            (
+                "handlers/main.yml".into(),
+                b"---\n- name: handler\n".to_vec(),
+            ),
+        ];
+
+        write_scaffold_directory(&role, &files, false).unwrap();
+        assert_eq!(
+            fs::read(role.join("tasks/main.yml")).unwrap(),
+            b"---\n- name: task\n"
+        );
+        assert_eq!(
+            fs::metadata(&role).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+
+        let invalid = vec![
+            ("tasks/main.yml".into(), b"new main".to_vec()),
+            ("../escape".into(), b"must not publish".to_vec()),
+        ];
+        assert!(write_scaffold_directory(&role, &invalid, true).is_err());
+        assert_eq!(
+            fs::read(role.join("tasks/main.yml")).unwrap(),
+            b"---\n- name: task\n",
+            "a failed staging operation must preserve the existing complete role"
+        );
+        assert!(
+            fs::read_dir(root.join("roles")).unwrap().all(|entry| !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains("wayexpand-new")),
+            "failed staging directories must be cleaned up"
+        );
+
+        write_scaffold_directory(&role, &files, true).unwrap();
+        assert!(role.join("handlers/main.yml").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn ansible_role_builtin_renders_the_conventional_role_tree() {
+        let builtins = builtin_templates();
+        let role = builtins
+            .expansion
+            .iter()
+            .find(|snippet| snippet.trigger == ANSIBLE_ROLE_TRIGGER)
+            .unwrap();
+        let fields = form_fields(&role.replacement).unwrap();
+        let values: HashMap<String, String> = fields
+            .iter()
+            .map(|field| {
+                (
+                    field.key.clone(),
+                    default_value(field)
+                        .unwrap()
+                        .unwrap_or_else(|| "value".into()),
+                )
+            })
+            .collect();
+        let context = TemplateContext {
+            fields: Arc::new(values.into()),
+            ..builtins.template_context(None)
+        };
+        let (tasks, _) = render_template_with_cursor(&role.replacement, &context).unwrap();
+        let files = render_ansible_role_files(tasks, &context).unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "wayexpand-ansible-role-test-{}-{}",
+            std::process::id(),
+            getrandom::u64().unwrap()
+        ));
+        write_scaffold_directory(&root, &files, false).unwrap();
+
+        for path in [
+            "tasks/main.yml",
+            "handlers/main.yml",
+            "defaults/main.yml",
+            "templates/default.conf.j2",
+        ] {
+            assert!(root.join(path).is_file(), "missing role file {path}");
+        }
+        let task_text = fs::read_to_string(root.join("tasks/main.yml")).unwrap();
+        assert!(task_text.contains("notify: Restart nginx"));
+        let handler_text = fs::read_to_string(root.join("handlers/main.yml")).unwrap();
+        assert!(handler_text.contains("state: restarted"));
+        let template_text = fs::read_to_string(root.join("templates/default.conf.j2")).unwrap();
+        assert!(template_text.contains("{{ nginx_listen_port }}"));
+
+        // On developer machines with Ansible installed, syntax-check the
+        // generated role through a real playbook include as part of this test.
+        if Command::new("ansible-playbook")
+            .arg("--version")
+            .output()
+            .is_ok_and(|out| out.status.success())
+        {
+            let project = root.with_file_name(format!(
+                "wayexpand-ansible-project-{}",
+                getrandom::u64().unwrap()
+            ));
+            fs::create_dir_all(project.join("roles")).unwrap();
+            let role_name = "example";
+            fs::rename(&root, project.join("roles").join(role_name)).unwrap();
+            fs::write(
+                project.join("site.yml"),
+                format!(
+                    "---\n- hosts: localhost\n  connection: local\n  roles:\n    - {role_name}\n"
+                ),
+            )
+            .unwrap();
+            let check = Command::new("ansible-playbook")
+                .args(["--syntax-check", "-i", "localhost,", "site.yml"])
+                .current_dir(&project)
+                .output()
+                .unwrap();
+            assert!(
+                check.status.success(),
+                "ansible-playbook syntax-check failed: {}",
+                String::from_utf8_lossy(&check.stderr)
+            );
+            fs::remove_dir_all(project).unwrap();
+        } else {
+            fs::remove_dir_all(root).unwrap();
+        }
     }
 
     const PLAYBOOK: &str = r#"
