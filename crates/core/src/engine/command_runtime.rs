@@ -357,6 +357,19 @@ pub(super) fn run_command_unix(
     command_output_text(bytes)
 }
 
+/// Appends to a zeroizing accumulator. `Vec::extend_from_slice` would free
+/// the previous allocation unwiped whenever it grows, so growth copies into a
+/// larger buffer and wipes the old one first.
+fn extend_zeroizing(bytes: &mut Zeroizing<Vec<u8>>, data: &[u8]) {
+    let needed = bytes.len().saturating_add(data.len());
+    if needed > bytes.capacity() {
+        let mut grown = Vec::with_capacity(needed.max(bytes.capacity().saturating_mul(2)));
+        grown.extend_from_slice(bytes);
+        drop(Zeroizing::new(std::mem::replace(&mut **bytes, grown)));
+    }
+    bytes.extend_from_slice(data);
+}
+
 /// Trims line endings while the bytes are still in their zeroizing owner,
 /// validates UTF-8 without consuming that owner, then transfers the same
 /// allocation into the successful result. Error paths retain RAII wiping.
@@ -505,7 +518,7 @@ fn read_available_stdout(
         match stdout.read(&mut buffer[..]) {
             Ok(0) => return Ok(true),
             Ok(count) => {
-                bytes.extend_from_slice(&buffer[..count]);
+                extend_zeroizing(bytes, &buffer[..count]);
                 if bytes.len() > MAX_COMMAND_OUTPUT_BYTES {
                     return Err(CommandError::OutputTooLarge);
                 }
@@ -619,18 +632,19 @@ const FORM_OUTPUT_READS_PER_DRAIN: usize = 64;
 #[cfg(unix)]
 fn read_available_form_output(
     stdout: &mut ChildStdout,
-    bytes: &mut Vec<u8>,
+    bytes: &mut Zeroizing<Vec<u8>>,
     shutdown: Option<&AtomicBool>,
 ) -> Result<bool, CommandError> {
-    let mut buffer = [0_u8; 8192];
+    // Form output carries the values the user typed into the form.
+    let mut buffer = Zeroizing::new([0_u8; 8192]);
     for _ in 0..FORM_OUTPUT_READS_PER_DRAIN {
         if shutdown.is_some_and(|flag| flag.load(Ordering::Acquire)) {
             return Err(CommandError::StaleInput);
         }
-        match stdout.read(&mut buffer) {
+        match stdout.read(&mut buffer[..]) {
             Ok(0) => return Ok(true),
             Ok(count) => {
-                bytes.extend_from_slice(&buffer[..count]);
+                extend_zeroizing(bytes, &buffer[..count]);
                 if bytes.len() > MAX_FORM_OUTPUT_BYTES {
                     return Err(CommandError::OutputTooLarge);
                 }
@@ -765,7 +779,7 @@ pub(super) fn run_form_helper(
         terminate_form_helper(&mut guard, transient_unit.as_deref());
         return Err(error);
     }
-    let mut bytes = Vec::new();
+    let mut bytes = Zeroizing::new(Vec::new());
     let mut stdout_eof = false;
     let deadline = Instant::now() + FORM_TIMEOUT;
     let status = loop {

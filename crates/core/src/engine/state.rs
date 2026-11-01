@@ -30,11 +30,28 @@ impl SensitiveText {
     }
 
     pub fn push(&mut self, character: char) {
+        self.reserve_zeroizing(character.len_utf8());
         self.0.push(character);
     }
 
     pub fn push_str(&mut self, value: &str) {
+        self.reserve_zeroizing(value.len());
         self.0.push_str(value);
+    }
+
+    /// Grow without letting the allocator free an unwiped copy. A plain
+    /// `String::push_str` reallocation releases the old buffer as-is, which
+    /// would leave plaintext behind in freed heap memory.
+    fn reserve_zeroizing(&mut self, additional: usize) {
+        let needed = self.0.len().saturating_add(additional);
+        if needed <= self.0.capacity() {
+            return;
+        }
+        let mut grown = String::with_capacity(needed.max(self.0.capacity().saturating_mul(2)));
+        grown.push_str(&self.0);
+        // Dropping the Zeroizing wrapper wipes the old allocation, including
+        // its spare capacity, before it is released.
+        drop(Zeroizing::new(std::mem::replace(&mut *self.0, grown)));
     }
 
     pub fn pop(&mut self) -> Option<char> {
@@ -109,6 +126,16 @@ mod sensitive_text_tests {
         assert_ne!(value.as_ptr(), clone.as_ptr());
         assert_eq!(format!("{value:?}"), "[REDACTED]");
         assert!(!format!("{value:?}").contains("transient replacement secret"));
+    }
+
+    #[test]
+    fn growth_preserves_content_and_keeps_capacity_ahead_of_length() {
+        let mut value = SensitiveText::new(String::with_capacity(2));
+        value.push_str("ab");
+        value.push('c');
+        value.push_str("defghijklmnop");
+        assert_eq!(value.as_str(), "abcdefghijklmnop");
+        assert!(value.capacity() >= value.len());
     }
 
     #[test]
