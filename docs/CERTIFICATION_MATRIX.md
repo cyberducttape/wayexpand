@@ -46,6 +46,28 @@ availability claims, and no target is certified without reviewed evidence.
 ## Current evidence
 
 The latest exact-head structured smoke report is
+[`doctor-certify-8f6ab7cb0745.json`](evidence/doctor-certify-8f6ab7cb0745.json),
+bound to clean commit `8f6ab7cb0745` on private KWin 6.6.6. It records thirteen
+checks passed, five not tested, and latency measured. The route used stdin-
+simulated capture and libei keysym fallback; physical capture, overlap and
+hotplug during output, Unicode insertion, and suspend/resume remain untested.
+Twenty injector samples per size measured p95 12.865 ms (small), 779.381 ms
+(medium), and 3.130 s (large). This remains partial compatibility evidence,
+not route certification.
+
+The latest focused private KWin real-client run is preserved in
+[`kwin-certification-8f6ab7cb0745.txt`](evidence/kwin-certification-8f6ab7cb0745.txt).
+It tested clean commit `8f6ab7cb0745` on private headless KWin 6.6.6 with the
+`us` layout across GTK TextView, Qt PlainTextEdit, Konsole, a synthetic password
+field, Gedit, and Kate. Sixty-six cases passed and six combining-mark cases
+were explicitly unverified; no cases failed. The run exercised output, focus
+filtering, focus changes, target closure, reload, and daemon restart. Capture
+was simulated over stdin. The synthetic password-field client does not prove
+sensitive-field detection, and physical capture, input overlap, keyboard
+hotplug, other layouts, suspend/resume, and long-running stability remain
+untested. This evidence does not certify a production route.
+
+The latest exact-head structured smoke report is
 [`doctor-certify-e54af849.json`](evidence/doctor-certify-e54af849.json), bound
 to clean commit `e54af8492ef4` on private KWin 6.6.6. Output, focus,
 configuration reload, restart, unsupported-Unicode refusal, and the default

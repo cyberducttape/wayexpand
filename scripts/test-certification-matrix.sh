@@ -33,6 +33,8 @@ gate_test="$project_dir/scripts/test-production-certification-gate.sh"
 [ -x "$gate_script" ]
 [ -x "$gate_test" ]
 grep -F -- 'runner-preflight:' "$workflow" >/dev/null
+grep -F -- 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' "$workflow" >/dev/null
+grep -F -- "ref: \${{ inputs.checkout_ref || github.ref }}" "$workflow" >/dev/null
 grep -F -- 'needs: runner-preflight' "$workflow" >/dev/null
 grep -F -- 'gh api --paginate --slurp' "$workflow" >/dev/null
 grep -F -- 'CERTIFICATION_RUNNER_TOKEN' "$workflow" >/dev/null
@@ -50,7 +52,7 @@ grep -F -- 'if: always()' "$workflow" >/dev/null
 grep -F -- 'schedule:' "$workflow" >/dev/null
 grep -F -- '30 3 * * 1' "$workflow" >/dev/null
 grep -F -- 'require_production:' "$workflow" >/dev/null
-grep -F -- "REQUIRE_PRODUCTION: \${{ inputs.require_production }}" "$workflow" >/dev/null
+grep -F -- "REQUIRE_PRODUCTION: \${{ inputs.require_production == true }}" "$workflow" >/dev/null
 grep -F -- 'scripts/check-production-certification.sh' "$workflow" >/dev/null
 grep -F -- 'GITHUB_STEP_SUMMARY' "$gate_script" >/dev/null
 grep -F -- 'Compatibility jobs will still be selected when their real-session runners are online.' "$gate_script" >/dev/null
