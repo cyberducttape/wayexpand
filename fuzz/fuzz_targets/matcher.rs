@@ -99,10 +99,10 @@ fuzz_target!(|data: &[u8]| {
         for result in engine.process(event) {
             assert!(!result.matched_text.is_empty());
             assert!(
-                typed.ends_with(&result.matched_text)
+                typed.ends_with(result.matched_text.as_str())
                     || result.reinsert_after.is_some_and(|delimiter| typed
                         .strip_suffix(delimiter)
-                        .is_some_and(|before| before.ends_with(&result.matched_text))),
+                        .is_some_and(|before| before.ends_with(result.matched_text.as_str()))),
                 "match {:?} erases text that was not typed ({typed:?})",
                 result.matched_text
             );
