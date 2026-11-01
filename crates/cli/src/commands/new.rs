@@ -978,6 +978,50 @@ replacement = "Regards"
     }
 
     #[test]
+    fn playbook_service_tasks_follow_the_selected_package_state() {
+        let builtins = builtin_templates();
+        let playbook = builtins
+            .expansion
+            .iter()
+            .find(|snippet| snippet.trigger == ";;playbook")
+            .unwrap();
+        let fields = form_fields(&playbook.replacement).unwrap();
+
+        for state in ["present", "latest", "absent"] {
+            let mut values: HashMap<String, String> = fields
+                .iter()
+                .map(|field| {
+                    (
+                        field.key.clone(),
+                        default_value(field)
+                            .unwrap()
+                            .unwrap_or_else(|| "value".into()),
+                    )
+                })
+                .collect();
+            values.insert("choice:state".into(), state.into());
+            let (rendered, _) = render_template_with_cursor(
+                &playbook.replacement,
+                &TemplateContext {
+                    fields: Arc::new(values.into()),
+                    ..builtins.template_context(None)
+                },
+            )
+            .unwrap();
+
+            assert!(rendered.contains(&format!("package_state: {state}")));
+            assert!(rendered.contains("state: \"{{ package_state }}\""));
+            assert!(rendered.contains("when: package_state != 'absent'"));
+            if state == "absent" {
+                assert!(
+                    rendered.contains("state: started\n        enabled: true\n      when: package_state != 'absent'"),
+                    "service start must be skipped when the package is removed: {rendered}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn a_shown_template_is_a_valid_snippet_without_an_id() {
         let builtins = builtin_templates();
         let layers = [(&builtins, Source::BuiltIn)];

@@ -116,12 +116,13 @@ replacement = """---
   vars:
     packages:
       - {{field:package=nginx}}
+    package_state: {{choice:state=present|latest|absent}}
 
   tasks:
     - name: Install packages
       ansible.builtin.package:
         name: "{{{{ item }}}}"
-        state: {{choice:state=present|latest|absent}}
+        state: "{{{{ package_state }}}}"
       loop: "{{{{ packages }}}}"
 
     - name: Enable and start {{field:service=nginx}}
@@ -129,6 +130,7 @@ replacement = """---
         name: {{field:service=nginx}}
         state: started
         enabled: true
+      when: package_state != 'absent'
 """
 
 [[expansion]]
