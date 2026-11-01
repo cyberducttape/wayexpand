@@ -38,6 +38,9 @@ jobs:
     outputs:
       matrix: ${{ steps.runners.outputs.matrix }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
       # Production-required compositors must have an online runner. Optional
       # ones are certified only when their runner is online: a matrix entry
       # without any runner would wait in the queue until GitHub cancels it,

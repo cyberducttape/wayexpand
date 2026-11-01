@@ -33,6 +33,8 @@ gate_test="$project_dir/scripts/test-production-certification-gate.sh"
 [ -x "$gate_script" ]
 [ -x "$gate_test" ]
 grep -F -- 'runner-preflight:' "$workflow" >/dev/null
+grep -F -- 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' "$workflow" >/dev/null
+grep -F -- 'ref: ${{ inputs.checkout_ref || github.ref }}' "$workflow" >/dev/null
 grep -F -- 'needs: runner-preflight' "$workflow" >/dev/null
 grep -F -- 'gh api --paginate --slurp' "$workflow" >/dev/null
 grep -F -- 'CERTIFICATION_RUNNER_TOKEN' "$workflow" >/dev/null
