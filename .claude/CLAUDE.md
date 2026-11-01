@@ -22,8 +22,8 @@ crates.io and does not require `vendor/`.
 **Standard development:**
 ```sh
 cargo build --locked --workspace
-cargo test --locked --workspace
-cargo test --locked -p wayexpand-core app_filter      # tests whose name contains "app_filter"
+WAYEXPAND_PROCESS_CGROUP=disabled cargo test --locked --workspace   # commands require a delegated cgroup unless disabled (CI sets this)
+WAYEXPAND_PROCESS_CGROUP=disabled cargo test --locked -p wayexpand-core app_filter      # tests whose name contains "app_filter"
 cargo fmt --all -- --check
 cargo clippy --locked --workspace --all-targets -- -D warnings   # CI also runs this with --release
 ```
