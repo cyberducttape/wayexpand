@@ -198,14 +198,29 @@ pub fn import_autokey(
         })?;
         match convert_phrase(&relative, phrase, &metadata, mode, &mut report)? {
             Some(expansion) => {
-                for trigger in std::iter::once(&expansion.trigger).chain(&expansion.aliases) {
-                    if !triggers.insert(trigger.clone()) {
+                let duplicate = std::iter::once(&expansion.trigger)
+                    .chain(&expansion.aliases)
+                    .find(|trigger| triggers.contains(*trigger));
+                if let Some(trigger) = duplicate {
+                    if mode == AutoKeyImportMode::Strict {
                         return Err(AutoKeyImportError::DuplicateTrigger {
                             path: relative.clone(),
                             trigger: trigger.clone(),
                         });
                     }
+                    report.unsupported += 1;
+                    report.warnings.push(AutoKeyImportWarning {
+                        entry: relative,
+                        reason: format!(
+                            "duplicate AutoKey abbreviation {trigger:?}; skipped to avoid ambiguous matching"
+                        ),
+                    });
+                    continue;
                 }
+                triggers.extend(
+                    std::iter::once(expansion.trigger.clone())
+                        .chain(expansion.aliases.iter().cloned()),
+                );
                 config.expansion.push(expansion);
                 report.imported += 1;
             }
@@ -285,6 +300,11 @@ fn convert_phrase(
     // WayExpand semantics. Other known dynamic macros may read files, run
     // scripts, or execute commands, so preserve no behavior that would
     // silently broaden the imported snippet's authority.
+    // AutoKey phrases are plain text except for AutoKey's own macros. Escape
+    // WayExpand's template delimiters so imported infrastructure text such as
+    // `{{ticket.requester.name}}` remains literal and cannot be evaluated as
+    // an unintended WayExpand variable.
+    phrase = phrase.replace("{{", "{{{{").replace("}}", "}}}}");
     phrase = phrase.replace("<cursor>", "{{cursor}}");
     for macro_name in ["date", "file", "script", "system"] {
         if contains_autokey_macro(&phrase, macro_name) {
@@ -368,6 +388,17 @@ fn collect_phrase_files(
     for entry in fs::read_dir(directory).map_err(|source| io_error(directory, source))? {
         let entry = entry.map_err(|source| io_error(directory, source))?;
         let path = entry.path();
+        // macOS may add AppleDouble resource-fork files when a folder is
+        // copied to a filesystem that cannot store those forks. They are
+        // metadata, not AutoKey phrases, even when the original has a .txt
+        // suffix (for example, `._greeting.txt`).
+        if entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| name.starts_with("._"))
+        {
+            continue;
+        }
         let metadata = fs::symlink_metadata(&path).map_err(|source| io_error(&path, source))?;
         if metadata.file_type().is_symlink() {
             continue;
@@ -387,10 +418,18 @@ fn collect_phrase_files(
 
 fn metadata_path(phrase: &Path) -> PathBuf {
     let stem = phrase.file_stem().unwrap_or_default().to_string_lossy();
-    phrase
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join(format!(".{stem}.json"))
+    let parent = phrase.parent().unwrap_or_else(|| Path::new("."));
+    let hidden_sidecar = parent.join(format!(".{stem}.json"));
+    // AutoKey data sets commonly use a JSON file with the same basename as
+    // the phrase (`greeting.txt` + `greeting.json`). Keep accepting the hidden
+    // sidecar form as well, which is used by other exports and older imports.
+    match fs::symlink_metadata(&hidden_sidecar) {
+        Ok(_) => hidden_sidecar,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            parent.join(format!("{stem}.json"))
+        }
+        Err(_) => hidden_sidecar,
+    }
 }
 
 fn read_bounded_file(path: &Path, maximum: usize) -> Result<String, AutoKeyImportError> {
@@ -508,6 +547,64 @@ mod tests {
         assert_eq!(expansion.category, "Support");
         assert_eq!(expansion.match_mode, MatchMode::WordBoundary);
         assert!(expansion.propagate_case);
+    }
+
+    #[test]
+    fn imports_autokey_same_basename_json_sidecars() {
+        let directory = TestDirectory::new();
+        fs::write(directory.0.join("_LAneeded.txt"), "Useful text").unwrap();
+        fs::write(directory.0.join("_LAneeded.json"), metadata(&[";needed"])).unwrap();
+
+        let imported = import_autokey(&directory.0, AutoKeyImportMode::Strict).unwrap();
+        assert_eq!(imported.report.imported, 1);
+        assert_eq!(imported.config.expansion[0].trigger, ";needed");
+        assert_eq!(imported.config.expansion[0].replacement, "Useful text");
+    }
+
+    #[test]
+    fn preserves_non_wayexpand_template_syntax_as_literal_text() {
+        let directory = TestDirectory::new();
+        directory.phrase(
+            "ticket.txt",
+            "{{ticket.requester.name}} <cursor>",
+            &metadata(&[";ticket"]),
+        );
+
+        let imported = import_autokey(&directory.0, AutoKeyImportMode::Strict).unwrap();
+        assert_eq!(
+            imported.config.expansion[0].replacement,
+            "{{{{ticket.requester.name}}}} {{cursor}}"
+        );
+    }
+
+    #[test]
+    fn permissive_import_reports_and_skips_duplicate_triggers() {
+        let directory = TestDirectory::new();
+        directory.phrase("first.txt", "First", &metadata(&[";same"]));
+        directory.phrase("second.txt", "Second", &metadata(&[";same"]));
+
+        let imported = import_autokey(&directory.0, AutoKeyImportMode::Permissive).unwrap();
+        assert_eq!(imported.report.imported, 1);
+        assert_eq!(imported.report.unsupported, 1);
+        assert_eq!(imported.config.expansion[0].replacement, "First");
+        assert!(imported.report.warnings[0]
+            .reason
+            .contains("duplicate AutoKey abbreviation"));
+        assert!(matches!(
+            import_autokey(&directory.0, AutoKeyImportMode::Strict),
+            Err(AutoKeyImportError::DuplicateTrigger { .. })
+        ));
+    }
+
+    #[test]
+    fn directory_import_skips_appledouble_phrase_files() {
+        let directory = TestDirectory::new();
+        directory.phrase("greeting.txt", "Hello", &metadata(&[";hello"]));
+        fs::write(directory.0.join("._greeting.txt"), "resource fork").unwrap();
+
+        let imported = import_autokey(&directory.0, AutoKeyImportMode::Strict).unwrap();
+        assert_eq!(imported.report.imported, 1);
+        assert_eq!(imported.config.expansion[0].trigger, ";hello");
     }
 
     #[test]
