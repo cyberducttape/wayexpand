@@ -225,6 +225,30 @@ The build peak is the temporary insertion structure, released before
 cargo run --locked --release -p wayexpand-core --example matcher_memory
 ```
 
+### High-fanout trie construction: 2026-11-01
+
+The builder was additionally tested with 10,000 snippets (the configured
+per-configuration maximum), each sharing a leading `:` and branching on a
+distinct Unicode scalar. This exercises a single high-fanout node in both the
+forward and reverse tries. The measured operation is engine construction;
+configuration parsing and cloning are outside the timed section. On the same
+host, the sorted-`Vec` builder measured 44.80 ms (95% interval 44.72–44.86 ms).
+After changing the temporary builder to hash edges and sort once while
+freezing, it measured 33.59 ms (31.75–36.47 ms), about 25% faster. This is one
+host and one workload, so it demonstrates the adversarial case rather than a
+general construction speedup. The frozen matcher still stores contiguous,
+sorted edge runs and uses binary search at runtime.
+
+Reproduce with:
+
+```sh
+cargo bench --locked -p wayexpand-core --bench matcher --no-run
+bench_binary=$(find target/release/deps -maxdepth 1 -type f -perm -111 \
+  -name 'matcher-*' -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)
+"$bench_binary" --bench matcher_construction_amplified/high_fanout_10000 \
+  --sample-size 10 --warm-up-time 1 --measurement-time 2
+```
+
 ## Configuration editing
 
 The GUI keeps in-progress edits in a small draft. On explicit save it clones

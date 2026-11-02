@@ -40,6 +40,22 @@ fn adversarial_config_text(count: usize) -> String {
     text
 }
 
+fn high_fanout_config(count: usize) -> Config {
+    let mut text = String::with_capacity(count * 80);
+    for index in 0..count {
+        // Every trigger shares its first character, then branches to a unique
+        // CJK scalar. This puts the maximum supported snippet count at one
+        // high-fanout trie node without relying on case or normalization
+        // amplification.
+        let branch = char::from_u32(0x4e00 + index as u32)
+            .expect("benchmark branch should be a valid Unicode scalar");
+        text.push_str(&format!(
+            "[[expansion]]\ntrigger = \":{branch}x\"\nreplacement = \"value\"\n\n"
+        ));
+    }
+    Config::parse(&text).expect("high-fanout benchmark configuration should validate")
+}
+
 fn bench_matcher(c: &mut Criterion) {
     let mut group = c.benchmark_group("matcher_latency");
 
@@ -129,6 +145,20 @@ fn bench_matcher_construction(c: &mut Criterion) {
             },
         );
     }
+
+    let high_fanout = high_fanout_config(10_000);
+    group.bench_function("high_fanout_10000", |bench| {
+        bench.iter_batched(
+            || high_fanout.clone(),
+            |config| {
+                black_box(
+                    ExpansionEngine::new(config)
+                        .expect("high-fanout benchmark engine should initialize"),
+                );
+            },
+            BatchSize::SmallInput,
+        );
+    });
 
     group.finish();
 }
