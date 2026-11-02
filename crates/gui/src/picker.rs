@@ -99,7 +99,6 @@ pub(crate) struct FocusTarget {
 struct FocusInfo {
     target: Option<FocusTarget>,
     atomic_replace_available: bool,
-    verified_replace_available: bool,
 }
 
 pub(crate) struct PickerApp {
@@ -661,9 +660,11 @@ pub(crate) fn run(path: PathBuf) -> anyhow::Result<()> {
 fn picker_focus_state(focus_info: Option<FocusInfo>) -> (Option<FocusTarget>, bool) {
     focus_info
         .map(|info| {
-            let safe_direct_insert = (info.atomic_replace_available
-                || info.verified_replace_available)
-                && info.target.is_some();
+            // A target-verification signal alone does not prevent concurrent
+            // input from interleaving between erase and insert. Keep picker
+            // output on the clipboard/manual-paste path until replacement is
+            // atomic or a non-atomic route is certified end to end.
+            let safe_direct_insert = info.atomic_replace_available && info.target.is_some();
             (info.target, safe_direct_insert)
         })
         // A missing or malformed focus response proves neither daemon
@@ -690,7 +691,6 @@ fn focus_target_from_response(response: &str) -> Option<FocusInfo> {
                 token: token.to_owned(),
             }),
         atomic_replace_available: focus.atomic_replace,
-        verified_replace_available: focus.verified_replace,
     })
 }
 
@@ -762,7 +762,6 @@ mod tests {
                     token: "abcd".into(),
                 }),
                 atomic_replace_available: true,
-                verified_replace_available: true,
             })
         );
         assert_eq!(
@@ -772,7 +771,6 @@ mod tests {
             Some(FocusInfo {
                 target: None,
                 atomic_replace_available: false,
-                verified_replace_available: false,
             })
         );
         assert_eq!(focus_target_from_response("running\n"), None);
@@ -784,7 +782,13 @@ mod tests {
     }
 
     #[test]
-    fn picker_uses_automatic_insertion_only_for_verified_exact_targets() {
+    fn picker_uses_direct_insertion_only_for_atomic_exact_targets() {
+        let atomic = focus_target_from_response(
+            "focus_generation=4\nfocus_token=abcd\nfocus_identity=exact\natomic_replace=true\nverified_replace=true\n",
+        )
+        .unwrap();
+        assert!(picker_focus_state(Some(atomic)).1);
+
         let focus = focus_target_from_response(
             "focus_generation=4\nfocus_token=abcd\nfocus_identity=exact\natomic_replace=false\nverified_replace=true\n",
         )
@@ -796,7 +800,7 @@ mod tests {
                     generation: 4,
                     token: "abcd".into(),
                 }),
-                true
+                false
             )
         );
 
