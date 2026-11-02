@@ -4,6 +4,15 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Fail closed on automatic text replacement unless the active route provides
+  an atomic replacement contract. Quick Picker keeps clipboard/manual paste
+  unless the target and route meet the atomic requirements; the explicit
+  compatibility override remains experimental.
+- Track evdev keyboard layouts on Hyprland using a bounded compositor-socket
+  provider that cross-checks the active layout group with reported XKB
+  settings. Evdev matching remains disabled on Sway when the effective XKB
+  configuration cannot be verified.
+
 - Daemon status reports `command_containment` (`cgroup`, `process-group`, or
   `invalid`), and `wayexpand doctor` prints it, so a daemon started by hand
   without cgroup containment is visible.
