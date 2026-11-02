@@ -589,8 +589,7 @@ pub(crate) fn schema_command(mut args: Args) -> Result<()> {
 }
 
 pub(crate) fn import_command(mut args: Args) -> Result<()> {
-    const USAGE: &str =
-        "usage: wayexpand import <espanso|autokey> <file-or-directory> [--strict] [--report-json]";
+    const USAGE: &str = "usage: wayexpand import <espanso|autokey> <file-or-directory> [--strict] [--report-json] [--add [--config PATH]]";
     let format = args.next().ok_or_else(|| usage_error(USAGE))?;
     let source = args.next().ok_or_else(|| usage_error(USAGE))?;
     if format != "espanso" && format != "autokey" {
@@ -598,13 +597,27 @@ pub(crate) fn import_command(mut args: Args) -> Result<()> {
     }
     let mut strict = false;
     let mut report_json = false;
-    for option in args {
+    let mut add_to_active_library = false;
+    let mut destination = None;
+    let mut options = args.collect::<Vec<_>>().into_iter();
+    while let Some(option) = options.next() {
         match option.as_str() {
             "--strict" => strict = true,
             "--report-json" => report_json = true,
+            "--add" | "--merge" => add_to_active_library = true,
+            "--config" => {
+                let path = options
+                    .next()
+                    .ok_or_else(|| usage_error("--config requires a destination path"))?;
+                destination = Some(PathBuf::from(path));
+            }
             _ => usage_bail!("{USAGE}"),
         }
     }
+    if destination.is_some() && !add_to_active_library {
+        usage_bail!("--config can only be used with --add");
+    }
+    let destination = destination.unwrap_or_else(default_config_path);
     match format.as_str() {
         "espanso" => {
             let mode = if strict {
@@ -613,6 +626,37 @@ pub(crate) fn import_command(mut args: Args) -> Result<()> {
                 wayexpand_core::EspansoImportMode::Permissive
             };
             let imported = wayexpand_core::import_espanso_with_mode(Path::new(&source), mode)?;
+            if add_to_active_library {
+                if !report_json {
+                    eprintln!(
+                        "Espanso migration: {} fully migrated, {} migrated with warnings, {} unsupported",
+                        imported.report.fully_migrated,
+                        imported.report.migrated_with_warnings,
+                        imported.report.unsupported
+                    );
+                    for warning in &imported.report.warnings {
+                        for detail in &warning.details {
+                            eprintln!("warning: {}: {detail}", warning.trigger);
+                        }
+                    }
+                    for unsupported in &imported.report.unsupported_matches {
+                        eprintln!(
+                            "unsupported: {}: {}",
+                            unsupported.trigger, unsupported.reason
+                        );
+                    }
+                }
+                let report =
+                    crate::commands::import_add::add_to_library(&destination, &imported.config)?;
+                print_import_add_report(
+                    format.as_str(),
+                    serde_json::to_value(&imported.report)?,
+                    report,
+                    report_json,
+                    &destination,
+                )?;
+                return Ok(());
+            }
             if report_json {
                 eprintln!("{}", serde_json::to_string(&imported.report)?);
             } else {
@@ -643,6 +687,27 @@ pub(crate) fn import_command(mut args: Args) -> Result<()> {
                 wayexpand_core::AutoKeyImportMode::Permissive
             };
             let imported = wayexpand_core::import_autokey(Path::new(&source), mode)?;
+            if add_to_active_library {
+                if !report_json {
+                    eprintln!(
+                        "AutoKey import: {} phrases imported, {} unsupported",
+                        imported.report.imported, imported.report.unsupported
+                    );
+                    for warning in &imported.report.warnings {
+                        eprintln!("unsupported: {}: {}", warning.entry, warning.reason);
+                    }
+                }
+                let report =
+                    crate::commands::import_add::add_to_library(&destination, &imported.config)?;
+                print_import_add_report(
+                    format.as_str(),
+                    serde_json::to_value(&imported.report)?,
+                    report,
+                    report_json,
+                    &destination,
+                )?;
+                return Ok(());
+            }
             if report_json {
                 eprintln!("{}", serde_json::to_string(&imported.report)?);
             } else {
@@ -657,6 +722,63 @@ pub(crate) fn import_command(mut args: Args) -> Result<()> {
             print!("{}", toml::to_string_pretty(&imported.config)?);
         }
         _ => unreachable!("format validated above"),
+    }
+    Ok(())
+}
+
+fn print_import_add_report(
+    format: &str,
+    import_report: serde_json::Value,
+    report: crate::commands::import_add::ImportAddReport,
+    report_json: bool,
+    destination: &Path,
+) -> Result<()> {
+    let saved = report.backup_path.is_some();
+    if report_json {
+        eprintln!(
+            "{}",
+            serde_json::json!({
+                "format": format,
+                "destination": destination.display().to_string(),
+                "saved": saved,
+                "import": import_report,
+                "added": report.added,
+                "identical_duplicates": report.identical_duplicates,
+                "conflicts_kept": report.conflicts_kept,
+                "expansions_tested": report.expansions_tested,
+                "trigger_checks": report.trigger_checks,
+                "form_checks": report.form_checks,
+                "command_checks_not_executed": report.command_checks_not_executed,
+                "app_filters_not_exercised": report.app_filters_not_exercised,
+                "backup": report.backup_path,
+                "daemon_reload_confirmed": report.daemon_reload_confirmed,
+            })
+        );
+    } else {
+        eprintln!(
+            "Import add: {} added, {} identical duplicates ignored, {} trigger conflicts kept",
+            report.added, report.identical_duplicates, report.conflicts_kept
+        );
+        eprintln!(
+            "Smoke tests: {} expansions verified across {} trigger checks, {} forms recognized, {} command-backed expansions matched but not executed, {} app filters not exercised",
+            report.expansions_tested,
+            report.trigger_checks,
+            report.form_checks,
+            report.command_checks_not_executed,
+            report.app_filters_not_exercised
+        );
+        if let Some(backup) = report.backup_path {
+            eprintln!("Previous library backed up to {backup}");
+            eprintln!("Added expansions to {}", destination.display());
+            if report.daemon_reload_confirmed == Some(false) {
+                eprintln!("warning: the daemon did not confirm reload; run `wayexpand reload` if changes are not active yet");
+            }
+        } else {
+            eprintln!(
+                "No library changes were needed at {}",
+                destination.display()
+            );
+        }
     }
     Ok(())
 }

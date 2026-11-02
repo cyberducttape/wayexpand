@@ -238,8 +238,8 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "Create a non-overwriting config backup",
             ),
             (
-                "import <espanso|autokey> <file-or-directory> [--strict] [--report-json]",
-                "Convert supported Espanso matches or AutoKey phrases to TOML",
+                "import <espanso|autokey> <file-or-directory> [--strict] [--report-json] [--add [--config PATH]]",
+                "Convert to TOML, or merge into a library after smoke-testing imported triggers",
             ),
             (
                 "pack search|inspect|diff|install|outdated|update|lock|sync|list|path|remove|rollback|import|verify|sign ...",

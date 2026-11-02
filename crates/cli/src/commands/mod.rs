@@ -2,6 +2,7 @@
 
 pub(crate) mod config;
 pub(crate) mod daemon;
+pub(crate) mod import_add;
 pub(crate) mod library;
 pub(crate) mod metrics;
 pub(crate) mod new;

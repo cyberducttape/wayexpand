@@ -188,6 +188,20 @@ a security sandbox. See [SECURITY.md](SECURITY.md) and the
 wayexpand import espanso ~/.config/espanso > imported.toml
 ```
 
+To add imported expansions directly to the active library, use `--add`:
+
+```sh
+wayexpand import autokey ~/.config/autokey/data/HotKeys --add --report-json
+```
+
+`--add` merges with the existing library, keeps existing trigger conflicts,
+tests every added trigger and alias through the matcher and template renderer,
+then saves atomically with a backup. Forms are checked for trigger recognition
+but need user values; command-backed expansions are matched but never
+executed; application filters are not tested without a focused window. A
+failed validation or smoke test leaves the active library unchanged. Use
+`--config PATH` with `--add` to target a different library.
+
 `--strict` rejects entries whose Espanso semantics cannot be preserved, and
 `--report-json` writes a machine-readable migration report to stderr. Directory
 imports include nested match files. Supported dynamic variables and basic

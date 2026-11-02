@@ -1,15 +1,31 @@
 # Migrating from AutoKey
 
-WayExpand can import AutoKey's static phrase files. AutoKey stores phrase text
-in a `.txt` file and its settings in a hidden sibling JSON file, such as
-`greeting.txt` and `.greeting.json`. Import writes TOML to standard output and
-does not modify the source tree.
+WayExpand can import AutoKey's static phrase files. Phrase text is stored in a
+`.txt` file with a sibling JSON settings file. Both `greeting.txt` with
+`.greeting.json` and `greeting.txt` with `greeting.json` are accepted. On
+duplicate triggers, permissive mode keeps the first sorted phrase and reports
+later conflicts as unsupported; strict mode rejects the import. macOS
+AppleDouble files (`._*`) are ignored during directory imports. Import writes
+TOML to standard output and does not modify the source tree.
 
 ```sh
 wayexpand import autokey "$HOME/.config/autokey/data/My Phrases" \
   --report-json > imported.toml 2> import-report.json
 wayexpand validate imported.toml
 ```
+
+To merge the imported phrases into the active library, test each added
+trigger and alias, and save with an automatic backup:
+
+```sh
+wayexpand import autokey "$HOME/.config/autokey/data/My Phrases" \
+  --add --report-json
+```
+
+The smoke test exercises matching and template rendering without inserting
+text into applications. Interactive forms are only checked for trigger
+recognition; command-backed snippets are never executed, and application
+filters require a live target application to verify.
 
 For one phrase pair, pass its `.txt` file instead of the directory.
 
