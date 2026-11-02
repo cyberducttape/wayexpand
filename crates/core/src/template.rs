@@ -436,9 +436,13 @@ pub fn form_fields(template: &str) -> Result<Vec<FormField>, TemplateError> {
     // Whether each field so far comes only from bare references.
     let mut bare_only: Vec<bool> = Vec::new();
     for name in template_variables(template) {
-        if let Some(field) = parse_form_field(name) {
+        let shellq_field = name
+            .strip_prefix("shellq:")
+            .map(|spec| format!("field:{spec}"));
+        let field_name = shellq_field.as_deref().unwrap_or(name);
+        if let Some(field) = parse_form_field(field_name) {
             let field = field?;
-            let bare = is_bare_form_field_reference(name);
+            let bare = is_bare_form_field_reference(field_name);
             match fields.iter().position(|existing| existing.key == field.key) {
                 None => {
                     fields.push(field);
@@ -469,6 +473,7 @@ pub fn form_fields(template: &str) -> Result<Vec<FormField>, TemplateError> {
 }
 
 fn is_bare_form_field_reference(name: &str) -> bool {
+    let name = name.strip_prefix("shellq:").unwrap_or(name);
     ["field:", "prompt:", "datefield:"]
         .iter()
         .filter_map(|prefix| name.strip_prefix(prefix))
@@ -823,6 +828,7 @@ enum Variable {
     Clipboard,
     Cursor,
     Field(FormField),
+    ShellQuotedField(FormField),
     Env(String),
     Snippet(String),
     Uuid,
@@ -854,6 +860,12 @@ fn parse_variable(name: &str) -> Result<Variable, TemplateError> {
                 || other.starts_with("datefield:") =>
         {
             Variable::Field(parse_form_field(other).expect("prefix checked")?)
+        }
+        other if other.starts_with("shellq:") => {
+            let field = format!("field:{}", &other["shellq:".len()..]);
+            Variable::ShellQuotedField(
+                parse_form_field(&field).expect("the shellq field prefix is present")?,
+            )
         }
         other if other.starts_with("env:") => {
             Variable::Env(other["env:".len()..].trim().to_owned())
@@ -892,6 +904,12 @@ fn parse_variable(name: &str) -> Result<Variable, TemplateError> {
             }
         },
     })
+}
+
+/// Quote one form value as a single POSIX shell word. This only makes the
+/// value safe to place in a command line; it does not authorize execution.
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 /// The value of one variable. `name` is its source text, for errors.
@@ -957,6 +975,19 @@ fn evaluate<'a>(
                 RenderValue::Borrowed(value)
             }
             None if context.validating => RenderValue::Borrowed(""),
+            None => return Err(TemplateError::FieldValueMissing),
+        },
+        Variable::ShellQuotedField(field) => match context.fields.get(&field.key) {
+            Some(value) => {
+                field
+                    .validate_value(value)
+                    .map_err(|_| TemplateError::InvalidField)?;
+                if value.contains('\n') || value.contains('\t') {
+                    return Err(TemplateError::InvalidField);
+                }
+                RenderValue::owned(shell_quote(value))
+            }
+            None if context.validating => RenderValue::Borrowed("''"),
             None => return Err(TemplateError::FieldValueMissing),
         },
         Variable::Env(variable) => {
@@ -1870,6 +1901,42 @@ mod tests {
         state: latest
       loop: [nginx]"#
         );
+    }
+
+    #[test]
+    fn shell_quoted_form_values_are_discovered_and_cannot_break_out_of_the_shell_word() {
+        let template = "curl {{shellq:domain=example.net|required|max=253}} {{shellq:domain}}";
+        let fields = form_fields(template).unwrap();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].key, "field:domain");
+        assert!(fields[0].required);
+
+        let values = [(
+            "field:domain".to_owned(),
+            "example.net'; touch /tmp/should-not-run; echo '".to_owned(),
+        )]
+        .into_iter()
+        .collect();
+        let context = TemplateContext {
+            fields: Arc::new(values),
+            ..TemplateContext::default()
+        };
+        assert_eq!(
+            render_template(template, &context).unwrap(),
+            "curl 'example.net'\\''; touch /tmp/should-not-run; echo '\\''' 'example.net'\\''; touch /tmp/should-not-run; echo '\\'''"
+        );
+
+        let values = [("field:domain".to_owned(), "example.net\nwhoami".to_owned())]
+            .into_iter()
+            .collect();
+        let context = TemplateContext {
+            fields: Arc::new(values),
+            ..TemplateContext::default()
+        };
+        assert!(matches!(
+            render_template(template, &context),
+            Err(TemplateError::InvalidField)
+        ));
     }
 
     #[test]

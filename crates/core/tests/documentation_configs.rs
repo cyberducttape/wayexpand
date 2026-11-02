@@ -29,6 +29,33 @@ fn published_executable_toml_examples_parse_as_config() {
 }
 
 #[test]
+fn sysadmin_diagnostic_pack_is_valid_and_insert_only() {
+    let source = include_str!("../../../packs/sysadmin-diagnostics/snippets/diagnostics.toml");
+    let config = Config::parse(source).expect("sysadmin diagnostic snippets should validate");
+    let triggers: Vec<_> = config
+        .expansion
+        .iter()
+        .map(|expansion| expansion.trigger.as_str())
+        .collect();
+    assert_eq!(
+        triggers,
+        [
+            ";tlscheck",
+            ";svcdiag",
+            ";portcheck",
+            ";httpcheck",
+            ";pathcheck",
+            ";sshcheck"
+        ]
+    );
+    assert!(config.expansion.iter().all(|expansion| {
+        expansion.command.is_none()
+            && wayexpand_core::form_fields(&expansion.replacement)
+                .is_ok_and(|fields| !fields.is_empty())
+    }));
+}
+
+#[test]
 fn ensure_user_config_creates_a_private_config_on_first_run() {
     let root = std::env::temp_dir().join(format!(
         "wayexpand-first-run-{}-{}",

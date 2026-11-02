@@ -1,0 +1,41 @@
+[[expansion]]
+trigger = ";tlscheck"
+description = "Inspect the presented TLS certificate, names, validity dates, and chain for a domain and port"
+category = "Sysadmin diagnostics"
+tags = ["tls", "certificate", "network"]
+replacement = "openssl s_client -connect {{shellq:domain=example.com|required|max=253}}:{{shellq:port=443|required|max=5}} -servername {{shellq:domain}} -verify_return_error -showcerts </dev/null 2>/dev/null | openssl x509 -noout -subject -issuer -dates -ext subjectAltName"
+
+[[expansion]]
+trigger = ";svcdiag"
+description = "Show service status and recent journal entries for a systemd unit"
+category = "Sysadmin diagnostics"
+tags = ["systemd", "journalctl", "service"]
+replacement = "systemctl status {{shellq:service=nginx.service|required|max=256}} --no-pager; journalctl -u {{shellq:service}} --since {{shellq:since=1 hour ago|required|max=80}} -n {{shellq:lines=100|required|max=5}} --no-pager"
+
+[[expansion]]
+trigger = ";portcheck"
+description = "Check remote TCP connectivity and show a matching local listening socket"
+category = "Sysadmin diagnostics"
+tags = ["network", "ports", "diagnostics"]
+replacement = "nc -vz -w 3 {{shellq:host=host.example.net|required|max=253}} {{shellq:port=443|required|max=5}}; sudo ss -ltnp 'sport = :'{{shellq:port}}"
+
+[[expansion]]
+trigger = ";httpcheck"
+description = "Inspect HTTP response headers and request timing for a domain and path"
+category = "Sysadmin diagnostics"
+tags = ["http", "web", "network"]
+replacement = "curl --connect-timeout 5 --max-time 15 -sS -o /dev/null -D - -w '\\nstatus=%{http_code} connect=%{time_connect}s ttfb=%{time_starttransfer}s total=%{time_total}s\\n' {{choice:scheme=https|http}}://{{shellq:domain=example.com|required|max=253}}{{shellq:path=/health|required|max=2048}}"
+
+[[expansion]]
+trigger = ";pathcheck"
+description = "Inspect path permissions, metadata, and the mounted filesystem"
+category = "Sysadmin diagnostics"
+tags = ["filesystem", "permissions", "diagnostics"]
+replacement = "namei -l {{shellq:path=/var/log|required|max=4096}}; stat -- {{shellq:path}}; findmnt --target {{shellq:path}}"
+
+[[expansion]]
+trigger = ";sshcheck"
+description = "Insert a read-only SSH identity and uptime check for review"
+category = "Sysadmin diagnostics"
+tags = ["ssh", "host", "diagnostics"]
+replacement = "ssh {{shellq:user=admin|required|max=64}}@{{shellq:host=host.example.net|required|max=253}} 'hostname -f; uptime'"
