@@ -14,6 +14,19 @@ wayexpand import autokey "$HOME/.config/autokey/data/My Phrases" \
 wayexpand validate imported.toml
 ```
 
+To merge the imported phrases into the active library, test each added
+trigger and alias, and save with an automatic backup:
+
+```sh
+wayexpand import autokey "$HOME/.config/autokey/data/My Phrases" \
+  --add --report-json
+```
+
+The smoke test exercises matching and template rendering without inserting
+text into applications. Interactive forms are only checked for trigger
+recognition; command-backed snippets are never executed, and application
+filters require a live target application to verify.
+
 For one phrase pair, pass its `.txt` file instead of the directory.
 
 The importer supports abbreviations and aliases, immediate versus
