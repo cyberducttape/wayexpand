@@ -1,9 +1,9 @@
 //! Compositor-backed XKB layout state for raw evdev capture.
 //!
-//! KDE exposes the active XKB group over its session D-Bus interface. The
-//! provider cross-checks that group and layout list against KWin's xkb config
-//! and publishes snapshots from a worker so the input reactor never performs
-//! D-Bus or filesystem I/O.
+//! KDE exposes the active XKB group and layout list over session D-Bus. The
+//! provider cross-checks them against KWin's config, or systemd-localed's
+//! keyboard properties when KWin has no per-user config, and publishes
+//! snapshots from a worker so the input reactor never performs I/O.
 
 use std::{
     collections::hash_map::DefaultHasher,
@@ -123,11 +123,30 @@ fn layout_worker(shared: Arc<SharedSnapshot>, stopping: Arc<AtomicBool>) {
                         continue;
                     }
                 };
+                let locale_connection = connect_locale1().ok();
+                let locale_proxy = locale_connection.as_ref().and_then(|connection| {
+                    Proxy::new(
+                        connection,
+                        "org.freedesktop.locale1",
+                        "/org/freedesktop/locale1",
+                        "org.freedesktop.locale1",
+                    )
+                    .ok()
+                });
+                let config = match read_layout_config(locale_proxy.as_ref()) {
+                    Ok(config) => config,
+                    Err(error) => {
+                        tracing::debug!(%error, "no trustworthy KDE keyboard layout configuration is available");
+                        publish_snapshot(&shared, None);
+                        sleep_or_stop(&stopping, UNAVAILABLE_RETRY_INTERVAL);
+                        continue;
+                    }
+                };
                 loop {
                     if stopping.load(Ordering::Acquire) {
                         return;
                     }
-                    match query_snapshot(&proxy) {
+                    match query_snapshot(&proxy, &config) {
                         Ok(snapshot) => {
                             publish_snapshot(&shared, Some(snapshot));
                             sleep_or_stop(&stopping, LAYOUT_POLL_INTERVAL);
@@ -174,19 +193,68 @@ fn connect_kwin() -> zbus::Result<Connection> {
     Builder::session()?.method_timeout(DBUS_TIMEOUT).build()
 }
 
-fn query_snapshot(proxy: &Proxy<'_>) -> anyhow::Result<KeyboardLayoutSnapshot> {
+fn connect_locale1() -> zbus::Result<Connection> {
+    Builder::system()?.method_timeout(DBUS_TIMEOUT).build()
+}
+
+fn read_layout_config(locale_proxy: Option<&Proxy<'_>>) -> anyhow::Result<KwinLayoutConfig> {
     let config_path = kde_keyboard_config_path()?;
-    let config_contents = fs::read_to_string(&config_path)?;
-    let config = parse_kwin_layout_config(&config_contents)
-        .ok_or_else(|| anyhow::anyhow!("KWin layout config is incomplete or unsupported"))?;
+    match fs::read_to_string(&config_path) {
+        Ok(contents) => parse_kwin_layout_config(&contents)
+            .ok_or_else(|| anyhow::anyhow!("KWin layout config is incomplete or unsupported")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => locale_proxy
+            .ok_or_else(|| {
+                anyhow::anyhow!("KWin config is absent and systemd-localed is unavailable")
+            })
+            .and_then(locale1_layout_config),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn locale1_layout_config(proxy: &Proxy<'_>) -> anyhow::Result<KwinLayoutConfig> {
+    let model: String = proxy.get_property("X11Model")?;
+    let layout_list: String = proxy.get_property("X11Layout")?;
+    let variant_list: String = proxy.get_property("X11Variant")?;
+    let options_list: String = proxy.get_property("X11Options")?;
+    let layouts = layout_list
+        .split(',')
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let variants = if variant_list.is_empty() {
+        vec![String::new(); layouts.len()]
+    } else {
+        variant_list.split(',').map(str::to_owned).collect()
+    };
+    let model = if model.is_empty() { "pc105" } else { &model }.to_owned();
+    if layouts.is_empty()
+        || variants.len() != layouts.len()
+        || !valid_xkb_name(&model)
+        || layouts.iter().any(|layout| !valid_xkb_name(layout))
+        || variants.iter().any(|variant| !valid_variant(variant))
+        || !valid_options(&options_list)
+    {
+        anyhow::bail!("systemd-localed keyboard properties are incomplete or unsupported");
+    }
+    Ok(KwinLayoutConfig {
+        model,
+        layouts,
+        variants,
+        options: (!options_list.is_empty()).then_some(options_list),
+    })
+}
+
+fn query_snapshot(
+    proxy: &Proxy<'_>,
+    config: &KwinLayoutConfig,
+) -> anyhow::Result<KeyboardLayoutSnapshot> {
     let current_group: u32 = proxy.call("getLayout", &())?;
     let effective_layouts: Vec<(String, String, String)> = proxy.call("getLayoutsList", &())?;
     let effective_layouts = effective_layouts
         .into_iter()
-        .map(|(layout, _, _)| layout)
+        .map(|(layout, variant, _)| (layout, variant))
         .collect::<Vec<_>>();
     snapshot_for_config(
-        config,
+        config.clone(),
         effective_layouts,
         current_group,
         rules_from_environment(),
@@ -199,12 +267,18 @@ fn rules_from_environment() -> Option<String> {
 
 fn snapshot_for_config(
     config: KwinLayoutConfig,
-    effective_layouts: Vec<String>,
+    effective_layouts: Vec<(String, String)>,
     current_group: u32,
     rules: Option<String>,
 ) -> anyhow::Result<KeyboardLayoutSnapshot> {
-    if effective_layouts != config.layouts || current_group as usize >= config.layouts.len() {
-        anyhow::bail!("KWin's active layout list differs from kxkbrc");
+    let configured_layouts = config
+        .layouts
+        .iter()
+        .cloned()
+        .zip(config.variants.iter().cloned())
+        .collect::<Vec<_>>();
+    if effective_layouts != configured_layouts || current_group as usize >= config.layouts.len() {
+        anyhow::bail!("KWin's active layout list differs from the trusted keyboard configuration");
     }
     let generation =
         layout_generation(&config, &effective_layouts, current_group, rules.as_deref());
@@ -221,7 +295,7 @@ fn snapshot_for_config(
 
 fn layout_generation(
     config: &KwinLayoutConfig,
-    layouts: &[String],
+    layouts: &[(String, String)],
     active_group: u32,
     rules: Option<&str>,
 ) -> u64 {
@@ -382,8 +456,23 @@ mod tests {
             "[Layout]\nModel=pc105\nLayoutList=us,de\nVariantList=,nodeadkeys\n",
         )
         .unwrap();
-        assert!(snapshot_for_config(config.clone(), vec!["us".into()], 0, None).is_err());
-        assert!(snapshot_for_config(config, vec!["us".into(), "de".into()], 2, None).is_err());
+        assert!(
+            snapshot_for_config(config.clone(), vec![("us".into(), "".into())], 0, None).is_err()
+        );
+        assert!(snapshot_for_config(
+            config.clone(),
+            vec![("us".into(), "".into()), ("de".into(), "".into())],
+            2,
+            None
+        )
+        .is_err());
+        assert!(snapshot_for_config(
+            config,
+            vec![("us".into(), "".into()), ("de".into(), "".into())],
+            0,
+            None
+        )
+        .is_err());
     }
 
     #[test]
@@ -392,10 +481,41 @@ mod tests {
             "[Layout]\nModel=pc105\nLayoutList=us,de\nVariantList=,nodeadkeys\n",
         )
         .unwrap();
-        let layouts = vec!["us".into(), "de".into()];
+        let layouts = vec![("us".into(), "".into()), ("de".into(), "nodeadkeys".into())];
+        let config = KwinLayoutConfig {
+            variants: vec!["".into(), "nodeadkeys".into()],
+            ..config
+        };
         let first = snapshot_for_config(config.clone(), layouts.clone(), 0, None).unwrap();
         let second = snapshot_for_config(config, layouts, 1, None).unwrap();
         assert_ne!(first.generation, second.generation);
         assert_eq!(second.group, 1);
+    }
+
+    #[test]
+    #[ignore = "requires a live KDE session and systemd-localed"]
+    fn live_kwin_layout_agrees_with_trusted_keyboard_configuration() {
+        let connection = connect_kwin().unwrap();
+        let proxy = Proxy::new(
+            &connection,
+            "org.kde.keyboard",
+            "/Layouts",
+            "org.kde.KeyboardLayouts",
+        )
+        .unwrap();
+        let locale_connection = connect_locale1().ok();
+        let locale_proxy = locale_connection.as_ref().and_then(|connection| {
+            Proxy::new(
+                connection,
+                "org.freedesktop.locale1",
+                "/org/freedesktop/locale1",
+                "org.freedesktop.locale1",
+            )
+            .ok()
+        });
+        let config = read_layout_config(locale_proxy.as_ref()).unwrap();
+        let snapshot = query_snapshot(&proxy, &config).unwrap();
+        assert_eq!(snapshot.group, 0);
+        assert_eq!(snapshot.layout.as_deref(), Some("us"));
     }
 }

@@ -341,7 +341,8 @@ password-field protection is required.
 **Keyboard-layout synchronization:**
 The evdev source translates keys only when it has a current compositor layout
 snapshot. KDE's provider reads the active group from KWin and cross-checks its
-effective layout list against the configured XKB layout and variant list.
+effective layout and variant list against `kxkbrc`, or systemd-localed keyboard
+properties when no per-user KDE layout file exists.
 Layout changes rebuild XKB state, reset the matcher, and replay held
 modifiers. `wayexpand status` reports `capture_layout_state=tracked` while
 that contract is available; missing or inconsistent state is reported as
@@ -380,11 +381,12 @@ boundary and the risks of a future exclusive proxy.
 
 **Keyboard layout handling:**
 On KDE Plasma, evdev obtains the active XKB group from KWin's keyboard-layout
-D-Bus interface and cross-checks the configured layouts and variants against
-KWin's `kxkbrc`. Layout changes reset matcher state and replay held modifiers
-under the new group. If KWin's active layout list and local configuration do
-not agree, matching and hotkeys stay disabled. Other compositors currently
-have no evdev layout provider and also fail closed.
+D-Bus interface and cross-checks KWin's effective layouts and variants
+against `kxkbrc`, or systemd-localed keyboard properties when `kxkbrc` is
+absent. Layout changes reset matcher state and replay held modifiers under the
+new group. If KWin's active layout list and local configuration do not agree,
+matching and hotkeys stay disabled. Other compositors currently have no
+evdev layout provider and also fail closed.
 
 **Hotplug and layout limitations:**
 Device discovery refreshes every five seconds, so a newly attached keyboard
