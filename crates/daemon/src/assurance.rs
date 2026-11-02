@@ -100,7 +100,7 @@ impl Assurance {
     ) -> Self {
         match capabilities {
             None => Self::Unavailable,
-            Some(capabilities) if verifies_erasure(capabilities) => Self::Verified,
+            Some(capabilities) if has_atomic_replacement_contract(capabilities) => Self::Verified,
             Some(_) if mode == CompatibilityMode::Off => Self::Blocked,
             Some(_) => match focus {
                 FocusCheck::Unchanged => Self::FocusTrackedBestEffort,
@@ -134,8 +134,13 @@ impl Assurance {
     }
 }
 
-fn verifies_erasure(capabilities: &InjectorCapabilities) -> bool {
-    capabilities.replacement_guarantee >= ReplacementGuarantee::VerifiedSurroundingText
+fn has_atomic_replacement_contract(capabilities: &InjectorCapabilities) -> bool {
+    // A surrounding-text check proves which text the backend intends to
+    // erase, but it does not make the erase and insertion atomic. Until a
+    // non-atomic route passes the real-session target-integrity gate, only an
+    // atomic replacement contract is sufficient for automatic replacement.
+    capabilities.atomic_replace
+        && capabilities.replacement_guarantee == ReplacementGuarantee::Atomic
 }
 
 /// The reactor's view of consent and focus, shared with output threads.
@@ -206,7 +211,7 @@ impl GuardState {
         capabilities: &InjectorCapabilities,
         erases: bool,
     ) -> Result<(), Refusal> {
-        if !erases || verifies_erasure(capabilities) {
+        if !erases || has_atomic_replacement_contract(capabilities) {
             return Ok(());
         }
         let mode = self.mode();
@@ -554,10 +559,16 @@ mod tests {
     }
 
     #[test]
-    fn verified_routes_and_insert_only_output_are_never_refused() {
+    fn non_atomic_verified_routes_are_blocked_but_atomic_and_insert_only_are_allowed() {
         let guard = Arc::new(GuardState::default());
         let (mut verified, typed) = guarded(&guard, ReplacementGuarantee::VerifiedSurroundingText);
-        assert!(ExpansionEngine::apply(verified.as_mut(), &expansion(":sig")).is_applied());
+        let outcome = ExpansionEngine::apply(verified.as_mut(), &expansion(":sig"));
+        assert!(refused_before_typing(&outcome), "{outcome}");
+        assert!(typed.lock().unwrap().is_empty());
+
+        let guard = Arc::new(GuardState::default());
+        let (mut atomic, typed) = guarded(&guard, ReplacementGuarantee::Atomic);
+        assert!(ExpansionEngine::apply(atomic.as_mut(), &expansion(":sig")).is_applied());
         assert_eq!(typed.lock().unwrap().len(), 2);
 
         // Inserting without erasing cannot delete unverified text.
