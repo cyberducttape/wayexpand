@@ -202,7 +202,7 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "Print the stable configuration schema for authoring tools",
             ),
             (
-                "new [<name> [--set NAME=VALUE]... [-o FILE|--stdout] [--gui] [--force]]",
+                "new [<name> [--set NAME=VALUE]... [-o FILE|--stdout] [--gui] [--force] [--validate]]",
                 "Fill in a file template (Dockerfile, playbook...) and write it",
             ),
             (
