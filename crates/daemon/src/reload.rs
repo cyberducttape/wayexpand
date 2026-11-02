@@ -55,6 +55,12 @@ pub struct ReloadableConfig {
     commands_restricted: bool,
     /// When to try again after command workers failed to start.
     worker_retry_at: Option<Instant>,
+    /// Old engines with live command workers are dropped by this reaper so
+    /// their cooperative shutdown joins never run on the input reactor.
+    retired_engine_sender: mpsc::Sender<RetiredEngine>,
+    /// Completion of the currently retiring runtime. New workers wait until
+    /// the old ones have exited, preserving the per-daemon worker limit.
+    retiring_runtime: Option<Receiver<()>>,
 }
 
 /// A configuration read, validated, and turned into a matcher off the
@@ -87,6 +93,12 @@ enum BuildFailure {
 }
 
 type BuildResult = Result<BuiltConfig, BuildFailure>;
+
+struct RetiredEngine {
+    engine: ExpansionEngine,
+    finished: mpsc::SyncSender<()>,
+    waker: Option<crate::waker::Waker>,
+}
 
 fn build_config(path: &Path, fleet: bool, policy: &OrganizationPolicy) -> BuildResult {
     for attempt in 0..MAX_CONSISTENCY_ATTEMPTS {
@@ -342,6 +354,18 @@ impl ReloadableConfig {
             .validate_snapshot()
             .map_err(|error| anyhow::anyhow!("invalid configuration: {error}"))?;
         let engine = ExpansionEngine::from_validated(Arc::new(snapshot));
+        let (retired_engine_sender, retired_engine_receiver) = mpsc::channel::<RetiredEngine>();
+        thread::Builder::new()
+            .name("wayexpand-engine-reaper".into())
+            .spawn(move || {
+                while let Ok(retired) = retired_engine_receiver.recv() {
+                    drop(retired.engine);
+                    let _ = retired.finished.send(());
+                    if let Some(waker) = retired.waker {
+                        waker.wake();
+                    }
+                }
+            })?;
         let watch_dirty = Arc::new(AtomicBool::new(false));
         let watcher = start_config_watcher(&path, fleet, Arc::clone(&watch_dirty));
         Ok(Self {
@@ -363,6 +387,8 @@ impl ReloadableConfig {
             async_workers: false,
             commands_restricted: false,
             worker_retry_at: None,
+            retired_engine_sender,
+            retiring_runtime: None,
         })
     }
 
@@ -388,6 +414,17 @@ impl ReloadableConfig {
             // Not a daemon host: commands keep whatever state was inherited.
             return true;
         }
+        if let Some(retiring) = &self.retiring_runtime {
+            match retiring.try_recv() {
+                Ok(()) | Err(TryRecvError::Disconnected) => self.retiring_runtime = None,
+                Err(TryRecvError::Empty) => {
+                    self.engine
+                        .set_commands_disabled(self.commands_restricted || self.async_workers);
+                    self.worker_retry_at = None;
+                    return false;
+                }
+            }
+        }
         let running = self.engine.enable_async_commands();
         self.worker_retry_at = (!running).then(|| Instant::now() + WORKER_RETRY_INTERVAL);
         self.engine
@@ -396,6 +433,12 @@ impl ReloadableConfig {
     }
 
     fn retry_async_workers(&mut self) {
+        if self.retiring_runtime.is_some() {
+            if self.ensure_async_workers() {
+                info!("command workers restarted after old runtime shutdown");
+            }
+            return;
+        }
         if self
             .worker_retry_at
             .is_some_and(|retry_at| Instant::now() >= retry_at)
@@ -624,13 +667,36 @@ impl ReloadableConfig {
                 // A host that enabled workers on the engine directly wants
                 // them after the reload too.
                 self.async_workers |= self.engine.async_commands_enabled();
-                // Stop the old command workers before starting new ones, so
-                // a reload never holds two sets of threads against the
-                // unit's task limit.
-                drop(std::mem::replace(&mut self.engine, engine));
+                // The old runtime's Drop joins its command and hotkey workers.
+                // Hand it to a reaper so a blocked cancellation cannot stall
+                // this input-reactor turn. New workers remain disabled until
+                // the reaper confirms the old set has exited.
+                let old_engine = std::mem::replace(&mut self.engine, engine);
+                let old_runtime_enabled = old_engine.async_commands_enabled();
+                self.async_workers |= old_runtime_enabled;
+                if old_runtime_enabled {
+                    let (finished, completion) = mpsc::sync_channel(1);
+                    self.retiring_runtime = Some(completion);
+                    let retired = RetiredEngine {
+                        engine: old_engine,
+                        finished,
+                        waker: self.waker.clone(),
+                    };
+                    if let Err(error) = self.retired_engine_sender.send(retired) {
+                        // The reaper only exits when ReloadableConfig is
+                        // dropped. A disconnected channel therefore means a
+                        // broken reaper; keep teardown correct and surface
+                        // the exceptional synchronous fallback.
+                        warn!("engine reaper stopped unexpectedly; disposing old engine inline");
+                        drop(error.0.engine);
+                        let _ = error.0.finished.send(());
+                    }
+                } else {
+                    drop(old_engine);
+                }
                 if !self.ensure_async_workers() {
                     warn!(
-                        "command workers could not restart after configuration reload; command-backed actions are disabled until they start (retried every 30 s)"
+                        "command workers could not restart after configuration reload; command-backed actions are disabled until old workers exit or a retry succeeds"
                     );
                 }
                 self.stamp = stable_stamp;
@@ -875,6 +941,16 @@ mod tests {
 
     fn config_text(replacement: &str) -> String {
         format!("[[expansion]]\ntrigger = \":x\"\nreplacement = {replacement:?}\n")
+    }
+
+    fn wait_for_command_workers(config: &mut ReloadableConfig) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !config.engine.async_commands_enabled() {
+            assert!(Instant::now() < deadline, "command workers did not restart");
+            config.retry_async_workers();
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert!(!config.engine.commands_disabled());
     }
 
     #[test]
@@ -1204,6 +1280,7 @@ mod tests {
             write_config(&path, &config_text(replacement));
             config.reload_now();
             config.finish_pending_reload();
+            wait_for_command_workers(&mut config);
             assert!(config.engine.async_commands_enabled(), "{replacement}");
             assert!(!config.engine.commands_disabled(), "{replacement}");
         }
@@ -1231,6 +1308,7 @@ mod tests {
         write_config(&path, &config_text("new"));
         config.reload_now();
         config.finish_pending_reload();
+        wait_for_command_workers(&mut config);
         assert!(config.engine.async_commands_enabled());
         assert!(!config.engine.commands_disabled());
         let _ = fs::remove_file(path);
@@ -1248,6 +1326,15 @@ mod tests {
         config.reload_now();
         config.finish_pending_reload();
         assert!(config.engine.commands_disabled());
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !config.engine.async_commands_enabled() {
+            assert!(
+                Instant::now() < deadline,
+                "restricted workers did not restart"
+            );
+            config.retry_async_workers();
+            thread::sleep(Duration::from_millis(2));
+        }
         assert!(config.engine.async_commands_enabled());
         let _ = fs::remove_file(path);
     }
@@ -1649,11 +1736,13 @@ mod tests {
         // The old engine's command must never deliver into the new engine.
         let quiet = std::time::Instant::now() + Duration::from_millis(600);
         while std::time::Instant::now() < quiet {
+            config.retry_async_workers();
             assert!(config.engine.drain_completed_commands().is_empty());
             std::thread::sleep(Duration::from_millis(20));
         }
 
         // The reloaded engine still runs commands.
+        wait_for_command_workers(&mut config);
         assert!(config
             .engine
             .process(InputEvent::Text(":slow".into()))
@@ -1670,6 +1759,57 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         };
         assert_eq!(completed.insert, "command-output");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn reload_does_not_wait_for_a_blocked_command_worker_on_the_reactor() {
+        let slow = "[[expansion]]\ntrigger = \":slow\"\nreplacement = \"\"\n\
+                    [expansion.command]\nprogram = \"/bin/sh\"\n\
+                    args = [\"-c\", \"sleep 10; printf stale-output\"]\ntimeout_ms = 5000\n";
+        let path = temporary_config();
+        write_config(&path, &format!("{slow}{}", config_text("before")));
+        let mut config =
+            ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
+        assert!(config.start_async_workers(false));
+        assert!(config
+            .engine
+            .process(InputEvent::Text(":slow".into()))
+            .is_empty());
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while config.engine.command_metrics().command_in_flight == 0 {
+            assert!(Instant::now() < deadline, "blocked command did not start");
+            thread::sleep(Duration::from_millis(2));
+        }
+
+        write_config(&path, &config_text("reloaded"));
+        config.reload_now();
+        let mut slowest_reactor_turn = Duration::ZERO;
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while config.in_flight.is_some() {
+            let turn_started = Instant::now();
+            config.collect_reload();
+            slowest_reactor_turn = slowest_reactor_turn.max(turn_started.elapsed());
+            assert!(Instant::now() < deadline, "reload did not finish");
+            if config.in_flight.is_some() {
+                thread::sleep(Duration::from_millis(1));
+            }
+        }
+        assert!(
+            slowest_reactor_turn < Duration::from_millis(150),
+            "reload application blocked the input reactor for {slowest_reactor_turn:?}"
+        );
+
+        let input_started = Instant::now();
+        let typed = config.engine.process(InputEvent::Text(":x".into()));
+        assert!(
+            input_started.elapsed() < Duration::from_millis(150),
+            "input processing waited for old worker teardown"
+        );
+        assert_eq!(typed[0].insert, "reloaded");
+        wait_for_command_workers(&mut config);
+        assert!(config.engine.drain_completed_commands().is_empty());
         let _ = fs::remove_file(path);
     }
 
