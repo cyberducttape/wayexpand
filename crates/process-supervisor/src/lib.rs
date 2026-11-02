@@ -80,6 +80,13 @@ impl CommandCgroup {
     pub fn prepare_required(command: &mut Command) -> io::Result<Self> {
         let parent = delegated_cgroup_path()?;
         cleanup_reaper_sender()?;
+        if REAPER_DEGRADED.load(Ordering::Acquire)
+            || REAPER_OUTSTANDING.load(Ordering::Acquire) >= REAPER_MAX_OUTSTANDING
+        {
+            return Err(io::Error::other(
+                "command cleanup is degraded because the cgroup reaper reached its bounded backlog; inspect wayexpand doctor and resolve stale command cgroups before retrying",
+            ));
+        }
         let name = format!(
             "wayexpand-command-{}-{}",
             std::process::id(),
@@ -483,6 +490,39 @@ fn remove_empty_nested_cgroups(path: &std::path::Path) -> io::Result<()> {
 
 #[cfg(target_os = "linux")]
 const REAPER_QUEUE_CAPACITY: usize = 32;
+#[cfg(target_os = "linux")]
+const REAPER_MAX_OUTSTANDING: usize = 128;
+#[cfg(target_os = "linux")]
+static REAPER_OUTSTANDING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+#[cfg(target_os = "linux")]
+static REAPER_FAILURES: AtomicU64 = AtomicU64::new(0);
+#[cfg(target_os = "linux")]
+static REAPER_DEGRADED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Current cgroup cleanup health, suitable for `doctor` diagnostics.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CleanupHealth {
+    pub pending_jobs: usize,
+    pub failed_attempts: u64,
+    pub degraded: bool,
+}
+
+pub fn cleanup_health() -> CleanupHealth {
+    #[cfg(target_os = "linux")]
+    {
+        let pending_jobs = REAPER_OUTSTANDING.load(Ordering::Acquire);
+        CleanupHealth {
+            pending_jobs,
+            failed_attempts: REAPER_FAILURES.load(Ordering::Relaxed),
+            degraded: REAPER_DEGRADED.load(Ordering::Acquire)
+                || pending_jobs >= REAPER_MAX_OUTSTANDING,
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        CleanupHealth::default()
+    }
+}
 
 #[cfg(target_os = "linux")]
 static CLEANUP_REAPER: OnceLock<Result<std::sync::mpsc::SyncSender<ReaperJob>, String>> =
@@ -494,7 +534,7 @@ fn cleanup_reaper_sender() -> io::Result<&'static std::sync::mpsc::SyncSender<Re
         let (sender, receiver) = std::sync::mpsc::sync_channel::<ReaperJob>(REAPER_QUEUE_CAPACITY);
         std::thread::Builder::new()
             .name("wayexpand-cgroup-reaper".into())
-            .spawn(move || run_reaper(&receiver, cleanup_cgroup))
+            .spawn(move || run_reaper(&receiver, cleanup_cgroup, true))
             .map(|_| sender)
             .map_err(|error| error.to_string())
     });
@@ -515,6 +555,7 @@ const REAPER_RETRY_MAX: std::time::Duration = std::time::Duration::from_secs(2);
 fn run_reaper(
     receiver: &std::sync::mpsc::Receiver<ReaperJob>,
     mut cleanup: impl FnMut(&std::path::Path, &mut CleanupState) -> io::Result<()>,
+    tracked: bool,
 ) {
     use std::sync::mpsc::RecvTimeoutError;
     let mut pending: Vec<ReaperJob> = Vec::new();
@@ -536,7 +577,10 @@ fn run_reaper(
             Err(RecvTimeoutError::Disconnected) => std::thread::sleep(delay),
         }
         let before = pending.len();
-        retry_pending(&mut pending, &mut cleanup);
+        let removed = retry_pending(&mut pending, &mut cleanup, tracked);
+        if tracked && removed > 0 {
+            REAPER_OUTSTANDING.fetch_sub(removed, Ordering::AcqRel);
+        }
         if pending.len() == before {
             delay = (delay * 2).min(REAPER_RETRY_MAX);
         }
@@ -549,13 +593,19 @@ fn run_reaper(
 fn retry_pending(
     pending: &mut Vec<ReaperJob>,
     cleanup: &mut impl FnMut(&std::path::Path, &mut CleanupState) -> io::Result<()>,
-) {
+    tracked: bool,
+) -> usize {
+    let mut removed = 0;
     pending.retain_mut(|job| match cleanup(&job.path, &mut job.state) {
         Ok(()) => {
             active_cgroups().remove(&job.path);
+            removed += 1;
             false
         }
         Err(error) => {
+            if tracked {
+                REAPER_FAILURES.fetch_add(1, Ordering::Relaxed);
+            }
             if !job.logged {
                 job.logged = true;
                 tracing::error!(
@@ -567,17 +617,26 @@ fn retry_pending(
             true
         }
     });
+    removed
 }
 
 #[cfg(target_os = "linux")]
 fn enqueue_reaper(job: ReaperJob) {
     use std::sync::mpsc::TrySendError;
+    let reserved = reserve_reaper_slot(&REAPER_OUTSTANDING);
+    if !reserved {
+        REAPER_DEGRADED.store(true, Ordering::Release);
+        tracing::error!(cgroup = %job.path.display(), "command cgroup reaper reached its bounded backlog; refusing further command execution");
+        return;
+    }
     match cleanup_reaper_sender() {
         // Never block the dropping thread: it may be a daemon worker on the
         // keyboard path.
         Ok(sender) => match sender.try_send(job) {
             Ok(()) => {}
             Err(TrySendError::Full(job) | TrySendError::Disconnected(job)) => {
+                REAPER_OUTSTANDING.fetch_sub(1, Ordering::AcqRel);
+                REAPER_DEGRADED.store(true, Ordering::Release);
                 tracing::error!(
                     cgroup = %job.path.display(),
                     "command cgroup cleanup queue unavailable; the cgroup is left for the service manager"
@@ -585,9 +644,20 @@ fn enqueue_reaper(job: ReaperJob) {
             }
         },
         Err(error) => {
+            REAPER_OUTSTANDING.fetch_sub(1, Ordering::AcqRel);
+            REAPER_DEGRADED.store(true, Ordering::Release);
             tracing::error!(%error, "could not start cgroup cleanup reaper");
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+fn reserve_reaper_slot(pending: &std::sync::atomic::AtomicUsize) -> bool {
+    pending
+        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+            (count < REAPER_MAX_OUTSTANDING).then_some(count + 1)
+        })
+        .is_ok()
 }
 
 #[cfg(target_os = "linux")]
@@ -1013,16 +1083,20 @@ mod tests {
             .unwrap();
         drop(sender);
         let mut attempts = 0;
-        run_reaper(&receiver, |_, state| {
-            attempts += 1;
-            if attempts == 1 {
-                return Err(io::Error::from(io::ErrorKind::Interrupted));
-            }
-            state.kill_requested = true;
-            state.kill_confirmed = true;
-            state.removed = true;
-            Ok(())
-        });
+        run_reaper(
+            &receiver,
+            |_, state| {
+                attempts += 1;
+                if attempts == 1 {
+                    return Err(io::Error::from(io::ErrorKind::Interrupted));
+                }
+                state.kill_requested = true;
+                state.kill_confirmed = true;
+                state.removed = true;
+                Ok(())
+            },
+            false,
+        );
         assert_eq!(attempts, 2);
     }
 
@@ -1042,10 +1116,41 @@ mod tests {
             state.removed = true;
             Ok(())
         };
-        retry_pending(&mut pending, &mut cleanup);
+        let removed = retry_pending(&mut pending, &mut cleanup, false);
+        assert_eq!(removed, 1);
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].path, std::path::Path::new("stuck"));
         assert!(pending[0].logged);
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn reaper_backlog_reservations_are_bounded() {
+        let outstanding = std::sync::atomic::AtomicUsize::new(0);
+        let accepted = (0..400)
+            .filter(|_| reserve_reaper_slot(&outstanding))
+            .count();
+        assert_eq!(accepted, REAPER_MAX_OUTSTANDING);
+        assert_eq!(outstanding.load(Ordering::Acquire), REAPER_MAX_OUTSTANDING);
+        assert!(!reserve_reaper_slot(&outstanding));
+
+        let mut jobs = (0..REAPER_MAX_OUTSTANDING)
+            .map(|index| ReaperJob {
+                path: std::path::PathBuf::from(format!("permanent-{index}")),
+                state: CleanupState::default(),
+                logged: true,
+            })
+            .collect::<Vec<_>>();
+        let mut attempts = 0;
+        for _ in 0..4 {
+            let mut fail_permanently = |_: &std::path::Path, _: &mut CleanupState| {
+                attempts += 1;
+                Err(io::Error::from(io::ErrorKind::PermissionDenied))
+            };
+            assert_eq!(retry_pending(&mut jobs, &mut fail_permanently, false), 0);
+            assert_eq!(jobs.len(), REAPER_MAX_OUTSTANDING);
+        }
+        assert_eq!(attempts, REAPER_MAX_OUTSTANDING * 4);
     }
 
     #[test]

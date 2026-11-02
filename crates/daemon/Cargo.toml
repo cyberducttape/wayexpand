@@ -21,6 +21,7 @@ tracing-subscriber.workspace = true
 signal-hook.workspace = true
 rustix = { workspace = true, features = ["process", "fs", "event", "net", "pipe"] }
 wayexpand-core = { path = "../core" }
+wayexpand-process-supervisor = { path = "../process-supervisor" }
 wayexpand-backend-wlroots = { path = "../backend-wlroots" }
 wayexpand-backend-libei = { path = "../backend-libei" }
 wayexpand-backend-input-method = { path = "../backend-input-method" }

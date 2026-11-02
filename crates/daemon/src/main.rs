@@ -593,7 +593,7 @@ fn main() -> Result<()> {
         if daemon.handle_insert_request()? || daemon.pending_output.is_some() {
             continue;
         }
-        daemon.publish_status(metrics);
+        daemon.publish_status_if_due(metrics);
         daemon.recover_output()?;
         daemon.declare_form_replacement_guarantee();
         daemon.publish_explain_snapshot();

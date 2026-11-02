@@ -935,9 +935,13 @@ fn write_output(path: &Path, contents: &[u8], force: bool) -> Result<()> {
             .create_new(true)
             .mode(GENERATED_FILE_MODE)
             .open(&temporary)?;
-        if let Ok(existing) = fs::metadata(path) {
-            // Keep an executable script executable when it is replaced.
-            file.set_permissions(existing.permissions())?;
+        if let Ok(existing) = fs::symlink_metadata(path) {
+            // Keep only the owner's execute bit on regular files. Generated
+            // content stays private even when replacing a broadly readable file.
+            if existing.file_type().is_file() {
+                let mode = existing.permissions().mode() & 0o100;
+                file.set_permissions(fs::Permissions::from_mode(GENERATED_FILE_MODE | mode))?;
+            }
         }
         file.write_all(contents)?;
         file.sync_all()?;
@@ -1094,6 +1098,45 @@ mod tests {
                 .file_name()
                 .to_string_lossy()
                 .contains("wayexpand-new")));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn forced_regeneration_keeps_only_owner_executable_bit() {
+        let root = std::env::temp_dir().join(format!(
+            "wayexpand-new-mode-test-{}-{}",
+            std::process::id(),
+            getrandom::u64().unwrap()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        for (old_mode, expected) in [
+            (0o600, 0o600),
+            (0o644, 0o600),
+            (0o666, 0o600),
+            (0o755, 0o700),
+        ] {
+            let path = root.join(format!("mode-{old_mode:o}"));
+            fs::write(&path, b"old").unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(old_mode)).unwrap();
+            write_output(&path, b"new", true).unwrap();
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                expected
+            );
+        }
+
+        let target = root.join("target");
+        let link = root.join("link");
+        fs::write(&target, b"target").unwrap();
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o666)).unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        write_output(&link, b"replacement", true).unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"target");
+        assert_eq!(fs::read(&link).unwrap(), b"replacement");
+        assert_eq!(
+            fs::metadata(&link).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
