@@ -289,8 +289,8 @@ Still open:
       against a per-action schema, replace complete fixed argv slots, and
       accept values from required named forms. Parameterized actions refuse
       shell and language-interpreter executables; no free-form interpolation.
-- [ ] Compositor-specific keyboard-layout providers for evdev capture (until
-      implemented, the route fails closed and disables layout-dependent matching).
+- [ ] Extend evdev keyboard-layout providers beyond KDE/KWin and certify layout
+      switching, modifiers, Unicode, and active-application policy on real desktops.
 - [ ] Real external IME/preedit cooperation (see section 6).
 
 ## Maintainability
