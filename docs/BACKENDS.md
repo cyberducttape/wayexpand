@@ -339,15 +339,14 @@ that evdev has acquired field awareness. Use `--source=input-method` when
 password-field protection is required.
 
 **Keyboard-layout synchronization:**
-The evdev source requires a compositor-supplied active-keymap provider before
-it translates keys for matching or hotkeys. No current compositor route
-provides that contract, so evdev leaves native typing intact but refuses
-layout-dependent matching rather than guessing from a startup keymap.
-`wayexpand status` and `wayexpand doctor --json` report
-`capture_layout_state=unavailable`; choose a route with active layout
-tracking to use matching and hotkeys. The provider API resets matcher and XKB
-composition state on every keymap generation change and preserves held
-modifiers across the transition.
+The evdev source translates keys only when it has a current compositor layout
+snapshot. KDE's provider reads the active group from KWin and cross-checks its
+effective layout list against the configured XKB layout and variant list.
+Layout changes rebuild XKB state, reset the matcher, and replay held
+modifiers. `wayexpand status` reports `capture_layout_state=tracked` while
+that contract is available; missing or inconsistent state is reported as
+`unavailable` and disables layout-dependent matching and hotkeys. Other
+compositors do not yet have evdev providers.
 
 **Non-exclusive capture and rapid typing:**
 The focused application receives evdev key events independently of WayExpand.
@@ -380,17 +379,18 @@ or guarantee that overlapping text is intact. See
 boundary and the risks of a future exclusive proxy.
 
 **Keyboard layout handling:**
-Evdev matching and hotkeys stay disabled until a compositor-specific provider
-can identify and track the active layout. Restarting the daemon does not make
-the current evdev route layout-aware. Use a route that tracks compositor
-layout changes instead.
+On KDE Plasma, evdev obtains the active XKB group from KWin's keyboard-layout
+D-Bus interface and cross-checks the configured layouts and variants against
+KWin's `kxkbrc`. Layout changes reset matcher state and replay held modifiers
+under the new group. If KWin's active layout list and local configuration do
+not agree, matching and hotkeys stay disabled. Other compositors currently
+have no evdev layout provider and also fail closed.
 
 **Hotplug and layout limitations:**
 Device discovery refreshes every five seconds, so a newly attached keyboard
-may take up to that long to enter the capture set. Evdev's provider boundary
-currently has no compositor implementation; layout-dependent matching,
-AltGr, Compose/dead keys, and hotkeys are therefore unavailable on this route.
-This is a fallback path, not an
+may take up to that long to enter the capture set. On KDE, the XKB keymap is
+rebuilt when KWin reports an active-group or configured-layout change. Compose
+and dead-key sequences are not tracked by evdev. This is a fallback path, not an
 authoritative desktop keyboard integration.
 
 **Probe detection is deliberately conservative about device identity:**

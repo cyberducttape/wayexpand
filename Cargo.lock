@@ -4564,6 +4564,7 @@ dependencies = [
  "wayexpand-process-supervisor",
  "wayland-client",
  "wayland-protocols",
+ "zbus",
  "zeroize",
 ]
 

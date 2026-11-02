@@ -245,7 +245,7 @@ impl Daemon {
             if self.waiting_for_input_retry(poll_interval) {
                 return Ok(Step::Next);
             }
-            match EvdevSource::connect() {
+            match EvdevSource::connect_with_layout_provider(crate::evdev_layout::provider()) {
                 Ok(source) => {
                     let mut source = source;
                     source.set_wake_fd(Some(self.waker.fd()));
