@@ -521,7 +521,7 @@ side never counts as a match (`commit_matches` is then `false`).
   "backend": "input-method-v2",
   "route_id": "input-method-v2",
   "backend_mode": "unknown",
-  "status_schema": 15,
+  "status_schema": 17,
   "daemon_commit": "example-commit",
   "state": "connected",
   "paused": false,
@@ -616,7 +616,7 @@ side never counts as a match (`commit_matches` is then `false`).
 - `backend` (string): Active output backend (`"input-method-v2"`, `"wlroots-virtual-keyboard"`, `"libei"`, ...)
 - `route_id` (string): Canonical capture/injection route ID from the shared route catalog; `"stdin-test"` identifies the stdin harness, and `"unknown"` means the active pair has no catalog entry. Consumers should use this field instead of reconstructing route identity from `source` and `backend`.
 - `backend_mode` (string): Negotiated backend capability detail. Libei reports either `"ei_text (UTF-8 insertion)"` or `"ei_keyboard keysym fallback (12ms key pacing)"`; it is `"unknown"` before a backend has negotiated a mode or for backends without submodes.
-- `status_schema` (integer): Version of the daemon status contract. Certification requires a matching schema before treating runtime capabilities as current; missing or different values mean the daemon should be restarted/updated. Schema 11 adds canonical `route_id`; schema 12 adds usage-event recorded, persisted, and dropped counters; schema 13 adds precise `replacement_assurance`; schema 14 adds matcher-latency dropped-sample reporting; schema 15 adds aggregate and per-mode output-latency dropped-sample reporting; schema 16 adds capture_layout_state.
+- `status_schema` (integer): Version of the daemon status contract. Certification requires a matching schema before treating runtime capabilities as current; missing or different values mean the daemon should be restarted/updated. Schema 11 adds canonical `route_id`; schema 12 adds usage-event recorded, persisted, and dropped counters; schema 13 adds precise `replacement_assurance`; schema 14 adds matcher-latency dropped-sample reporting; schema 15 adds aggregate and per-mode output-latency dropped-sample reporting; schema 16 adds capture_layout_state; schema 17 adds command cgroup cleanup health.
 - `state` (string): Backend connection state (e.g. `"connected"`, `"reconnecting"`)
 - `paused` (bool): Whether expansion matching is currently disabled
 - `config` (string): Path to the active configuration file
@@ -677,6 +677,9 @@ side never counts as a match (`commit_matches` is then `false`).
 - `output_last_unsupported` (string): Cause of the most recent of those: `unicode`, `too-long`, `cursor`, or `none`. Added in 1.3.x without a schema change.
 - `command_containment` (string): Selected cleanup mechanism: `cgroup` or `process-group`; `invalid` means an unrecognized `WAYEXPAND_PROCESS_CGROUP` value and command startup fails.
 - `command_containment_mode` (string): Configured policy: `required-cgroup` (the default and bundled systemd mode), `process-group-compatibility` (only when `WAYEXPAND_PROCESS_CGROUP=disabled` is explicitly set), or `invalid`. Required cgroup setup fails closed for each command if the delegated cgroup is unavailable. Added additively without changing the status schema.
+- `command_cleanup_pending_jobs` (integer): Bounded count of outstanding per-command cgroup cleanup jobs in the daemon.
+- `command_cleanup_failed_attempts` (integer): Number of failed asynchronous cgroup cleanup attempts since daemon start.
+- `command_cleanup_degraded` (boolean): `true` when cleanup reaches the backlog limit; new command-backed work is refused until stale cgroups are resolved and the daemon restarts.
 - `recent_expansion_failures` (array): Up to eight content-free transaction traces from this daemon session. Each record has a timestamp, backend, trigger-recognition marker, output-admission result, backend-selection marker, erase acknowledgement, insertion-attempt marker, `transaction_phases`, and completion result. `transaction_phases` records the ordered lifecycle (`prepared`, optionally `validated` and `applying`, then `committed`, `failed`, or `uncertain`). An uncertain transaction is terminal and is never automatically replayed. Output admission does not itself claim that the focused client was verified; consult `focus_assurance` for that route-level guarantee. It never contains trigger text, replacement text, clipboard contents, or raw key events. Added additively without changing the status schema.
 - `output_reconnect_total` (integer): Output routes reconnected since daemon start, after the first connection was lost. Steady growth means the route keeps dropping (portal revoked, compositor restarting). Added in 1.2.x without a schema change.
 - `input_reconnect_total` (integer): Input sources (input-method or evdev) reconnected since daemon start. Added in 1.2.x without a schema change.

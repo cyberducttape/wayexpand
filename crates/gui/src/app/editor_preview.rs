@@ -1,5 +1,9 @@
 use crate::*;
 
+pub(crate) fn estimated_key_event_latency_ms(chars: usize, chars_per_second: u32) -> Option<u128> {
+    (chars_per_second > 0).then(|| (chars as u128 * 1_000).div_ceil(chars_per_second as u128))
+}
+
 impl GuiApp {
     /// Live preview of the draft, including the command preview runner.
     pub(crate) fn render_preview_section(&mut self, ui: &mut egui::Ui, palette: &Palette) {
@@ -100,6 +104,30 @@ impl GuiApp {
                 .inner_margin(egui::Margin::symmetric(12, 10))
                 .show(ui, |ui| match preview_result {
                     Ok(preview_text) => {
+                        if let Some(capabilities) = self.daemon_capabilities.as_ref() {
+                            if capabilities
+                                .injection_mode
+                                .is_some_and(|mode| mode.contains("keysym fallback"))
+                            {
+                                if let Some(rate) = capabilities
+                                    .injection_throughput_chars_per_sec
+                                    .filter(|rate| *rate > 0)
+                                {
+                                    let chars = preview_text.chars().count();
+                                    let millis = estimated_key_event_latency_ms(chars, rate)
+                                        .expect("the throughput was filtered to a positive rate");
+                                    if millis >= 500 {
+                                        ui.colored_label(
+                                            palette.warning,
+                                            format!(
+                                                "Estimated insertion time: {:.1}s via paced keyboard events. For long configuration text, use Copy or `wayexpand new` to generate a file.",
+                                                millis as f64 / 1_000.0
+                                            ),
+                                        );
+                                    }
+                                }
+                            }
+                        }
                         ui.horizontal(|ui| {
                             ui.label(RichText::new(&preview_text).monospace());
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
@@ -212,5 +240,17 @@ impl GuiApp {
                 }
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::estimated_key_event_latency_ms;
+
+    #[test]
+    fn fallback_latency_estimate_scales_with_rendered_characters() {
+        assert_eq!(estimated_key_event_latency_ms(250, 83), Some(3_013));
+        assert_eq!(estimated_key_event_latency_ms(5_000, 83), Some(60_241));
+        assert_eq!(estimated_key_event_latency_ms(20, 0), None);
     }
 }
