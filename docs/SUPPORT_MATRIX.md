@@ -76,11 +76,14 @@ real-session evidence with `certification_scope: production` exists.
 Replacement assurance is an explicit route property and a live status. The
 route table's `verified` label means the protocol validates target text before
 deletion; it does not by itself mean the erase and insert form one atomic
-transaction. Atomic replacement or a verified surrounding-text contract is
-required for automatic replacement by default. With `compatibility_mode=off`,
-an unverified route refuses before erasing and leaves the trigger available
-for recovery. The Quick Picker copies snippets to the clipboard for manual
-paste unless the daemon reports a verified route and exact target identity.
+transaction. Automatic replacement requires an atomic contract by default.
+Non-atomic routes, including routes that verify surrounding text, are blocked
+by default until they pass the real-session target-integrity gate.
+`compatibility_mode` remains an explicit experimental override for typed
+triggers; it does not affect Quick Picker, which copies snippets to the
+clipboard for manual paste unless the daemon reports an atomic route and exact
+target identity. With `compatibility_mode=off`, an unverified route refuses
+before erasing and leaves the trigger available for recovery.
 `unverified` is the baseline for keystroke routes. When
 a compositor tracker confirms the exact focused window, live status refines that to
 `focus-tracked-best-effort`: focus is checked, but the route still cannot
