@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 /// Sentinel for a node that ends no trigger.
 const NO_VALUE: u32 = u32::MAX;
 
@@ -69,51 +71,65 @@ struct Edge {
 
 /// Mutable trie used only while inserting; frozen into a [`Trie`].
 struct TrieBuilder {
-    /// Per node: children sorted by character, and the trigger index.
-    nodes: Vec<(Vec<(char, u32)>, u32)>,
+    /// Unsorted build-time edges. The frozen trie remains a compact arena;
+    /// hashing avoids repeated shifts at high-fanout nodes.
+    children: HashMap<(usize, char), usize>,
+    values: Vec<u32>,
 }
 
 impl TrieBuilder {
     fn new() -> Self {
         Self {
-            nodes: vec![(Vec::new(), NO_VALUE)],
+            children: HashMap::new(),
+            values: vec![NO_VALUE],
         }
     }
 
     fn insert(&mut self, characters: impl Iterator<Item = char>, value: u32) {
         let mut node = 0usize;
         for character in characters {
-            let next = self.nodes.len() as u32;
-            let children = &mut self.nodes[node].0;
-            node = match children.binary_search_by_key(&character, |&(c, _)| c) {
-                Ok(position) => children[position].1 as usize,
-                Err(position) => {
-                    children.insert(position, (character, next));
-                    self.nodes.push((Vec::new(), NO_VALUE));
-                    next as usize
-                }
-            };
+            if let Some(&target) = self.children.get(&(node, character)) {
+                node = target;
+            } else {
+                let target = self.values.len();
+                self.values.push(NO_VALUE);
+                self.children.insert((node, character), target);
+                node = target;
+            }
         }
         if value != NO_VALUE {
-            self.nodes[node].1 = value;
+            self.values[node] = value;
         }
     }
 
     fn freeze(self) -> Trie {
-        let edge_total = self.nodes.iter().map(|(children, _)| children.len()).sum();
-        let mut nodes = Vec::with_capacity(self.nodes.len());
-        let mut edges = Vec::with_capacity(edge_total);
-        for (children, value) in self.nodes {
+        let mut sorted_edges: Vec<_> = self
+            .children
+            .into_iter()
+            .map(|((source, character), target)| (source, character, target))
+            .collect();
+        sorted_edges.sort_unstable_by_key(|&(source, character, _)| (source, character));
+        let mut nodes = Vec::with_capacity(self.values.len());
+        let mut edges = Vec::with_capacity(sorted_edges.len());
+        let mut edge_index = 0;
+        for (source, value) in self.values.into_iter().enumerate() {
+            let start = edge_index;
+            while sorted_edges
+                .get(edge_index)
+                .is_some_and(|(edge_source, _, _)| *edge_source == source)
+            {
+                let (_, character, target) = sorted_edges[edge_index];
+                edges.push(Edge {
+                    character,
+                    target: target as u32,
+                });
+                edge_index += 1;
+            }
             nodes.push(Node {
-                first_edge: edges.len() as u32,
-                edge_count: children.len() as u32,
+                first_edge: start as u32,
+                edge_count: (edge_index - start) as u32,
                 value,
             });
-            edges.extend(
-                children
-                    .into_iter()
-                    .map(|(character, target)| Edge { character, target }),
-            );
         }
         Trie { nodes, edges }
     }

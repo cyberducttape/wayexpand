@@ -38,6 +38,14 @@ pub struct AutoKeyImport {
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize)]
 pub struct AutoKeyImportReport {
     pub imported: usize,
+    /// Entries that could not be imported. Retained separately from
+    /// `unsupported` so reports describe I/O and malformed metadata too.
+    pub skipped: usize,
+    /// Skipped entries that need an operator to review or repair source
+    /// behavior before retrying migration.
+    pub needs_review: usize,
+    /// Legacy count of entries skipped because their AutoKey behavior cannot
+    /// be represented by WayExpand.
     pub unsupported: usize,
     pub warnings: Vec<AutoKeyImportWarning>,
 }
@@ -46,6 +54,7 @@ pub struct AutoKeyImportReport {
 pub struct AutoKeyImportWarning {
     pub entry: String,
     pub reason: String,
+    pub remediation: String,
 }
 
 #[derive(Debug, Error)]
@@ -175,7 +184,24 @@ pub fn import_autokey(
                 .to_string_lossy()
                 .into_owned()
         };
-        let phrase = read_bounded_file(&phrase_path, MAX_CONFIG_BYTES)?;
+        let phrase = match read_bounded_file(&phrase_path, MAX_CONFIG_BYTES) {
+            Ok(phrase) => phrase,
+            Err(error) => {
+                if mode == AutoKeyImportMode::Strict {
+                    return Err(error);
+                }
+                report.skipped += 1;
+                report.unsupported += 1;
+                report.needs_review += 1;
+                report.warnings.push(AutoKeyImportWarning {
+                    entry: relative,
+                    reason: error.to_string(),
+                    remediation: "Restore or repair this phrase file, then retry the import."
+                        .into(),
+                });
+                continue;
+            }
+        };
         total_bytes = total_bytes.saturating_add(phrase.len());
         if total_bytes > MAX_CONFIG_BYTES {
             return Err(AutoKeyImportError::TooLarge {
@@ -183,19 +209,59 @@ pub fn import_autokey(
             });
         }
         let sidecar = metadata_path(&phrase_path);
-        let metadata_bytes = read_bounded_file(&sidecar, MAX_METADATA_BYTES)?;
+        let metadata_bytes = match read_bounded_file(&sidecar, MAX_METADATA_BYTES) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                if mode == AutoKeyImportMode::Strict {
+                    return Err(error);
+                }
+                report.skipped += 1;
+                report.unsupported += 1;
+                report.needs_review += 1;
+                report.warnings.push(AutoKeyImportWarning {
+                    entry: sidecar
+                        .strip_prefix(path)
+                        .unwrap_or(&sidecar)
+                        .to_string_lossy()
+                        .into_owned(),
+                    reason: error.to_string(),
+                    remediation: "Restore the matching AutoKey JSON sidecar or remove the orphaned phrase file."
+                        .into(),
+                });
+                continue;
+            }
+        };
         total_bytes = total_bytes.saturating_add(metadata_bytes.len());
         if total_bytes > MAX_CONFIG_BYTES {
             return Err(AutoKeyImportError::TooLarge {
                 maximum: MAX_CONFIG_BYTES,
             });
         }
-        let metadata: PhraseMetadata = serde_json::from_str(&metadata_bytes).map_err(|source| {
-            AutoKeyImportError::Metadata {
-                path: sidecar.display().to_string(),
-                source,
+        let metadata: PhraseMetadata = match serde_json::from_str(&metadata_bytes) {
+            Ok(metadata) => metadata,
+            Err(source) => {
+                let error = AutoKeyImportError::Metadata {
+                    path: sidecar.display().to_string(),
+                    source,
+                };
+                if mode == AutoKeyImportMode::Strict {
+                    return Err(error);
+                }
+                report.skipped += 1;
+                report.unsupported += 1;
+                report.needs_review += 1;
+                report.warnings.push(AutoKeyImportWarning {
+                    entry: sidecar
+                        .strip_prefix(path)
+                        .unwrap_or(&sidecar)
+                        .to_string_lossy()
+                        .into_owned(),
+                    reason: error.to_string(),
+                    remediation: "Fix the sidecar JSON syntax and retry the import.".into(),
+                });
+                continue;
             }
-        })?;
+        };
         match convert_phrase(&relative, phrase, &metadata, mode, &mut report)? {
             Some(expansion) => {
                 let duplicate = std::iter::once(&expansion.trigger)
@@ -209,11 +275,15 @@ pub fn import_autokey(
                         });
                     }
                     report.unsupported += 1;
+                    report.skipped += 1;
+                    report.needs_review += 1;
                     report.warnings.push(AutoKeyImportWarning {
                         entry: relative,
                         reason: format!(
                             "duplicate AutoKey abbreviation {trigger:?}; skipped to avoid ambiguous matching"
                         ),
+                        remediation: "Rename the duplicate abbreviation or merge the two phrases manually."
+                            .into(),
                     });
                     continue;
                 }
@@ -224,7 +294,11 @@ pub fn import_autokey(
                 config.expansion.push(expansion);
                 report.imported += 1;
             }
-            None => report.unsupported += 1,
+            None => {
+                report.unsupported += 1;
+                report.skipped += 1;
+                report.needs_review += 1;
+            }
         }
     }
     config.validate()?;
@@ -373,7 +447,10 @@ fn unsupported(
     report.warnings.push(AutoKeyImportWarning {
         entry: entry.to_owned(),
         reason: reason.to_owned(),
+        remediation: "Review this entry and convert its unsupported AutoKey behavior manually."
+            .into(),
     });
+    report.needs_review += 1;
     Ok(None)
 }
 
@@ -559,6 +636,28 @@ mod tests {
         assert_eq!(imported.report.imported, 1);
         assert_eq!(imported.config.expansion[0].trigger, ";needed");
         assert_eq!(imported.config.expansion[0].replacement, "Useful text");
+    }
+
+    #[test]
+    fn permissive_import_skips_missing_and_malformed_sidecars_and_continues() {
+        let directory = TestDirectory::new();
+        fs::write(directory.0.join("missing.txt"), "no metadata").unwrap();
+        fs::write(directory.0.join("broken.txt"), "bad metadata").unwrap();
+        fs::write(directory.0.join(".broken.json"), "{").unwrap();
+        directory.phrase("valid.txt", "valid phrase", &metadata(&[";valid"]));
+
+        let imported = import_autokey(&directory.0, AutoKeyImportMode::Permissive).unwrap();
+        assert_eq!(imported.report.imported, 1);
+        assert_eq!(imported.report.skipped, 2);
+        assert_eq!(imported.report.needs_review, 2);
+        assert_eq!(imported.report.warnings.len(), 2);
+        assert!(imported.report.warnings[0].entry.contains("json"));
+        assert!(!imported.report.warnings[0].remediation.is_empty());
+        assert!(imported.report.warnings[1].entry.contains("json"));
+        assert!(matches!(
+            import_autokey(&directory.0, AutoKeyImportMode::Strict),
+            Err(AutoKeyImportError::Metadata { .. })
+        ));
     }
 
     #[test]
