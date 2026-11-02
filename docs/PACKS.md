@@ -15,9 +15,22 @@ offline. Install only the libraries you want.
 | `ansible` | Playbook, inventory, and role starters with syntax checks |
 | `nginx` | Configuration checks, request probes, and server-block starters |
 | `git` | Review-first Git commands and collaborative workflow templates |
-| `customer-support` | Status updates, maintenance notices, and support replies |
+| `customer-support` | Acknowledgements, status updates, maintenance notices, ticket resolutions |
 | `developer` | SQL, shell, and Markdown starters |
-| `ops-triage` | Read-only first-response checks (TLS expiry, disk, memory, sockets, DNS, HTTP, nginx, firewall, failed units) and on-call timeline and handoff notes |
+| `ops-triage` | Read-only first-response checks, an HTTP 503 checklist, and structured escalation, runbook, change-record, timeline, and handoff notes |
+
+For a review-first HTTP 503 workflow, install `ops-triage` and type `;http503`.
+The form asks for the target host, port, request path, and service unit, then
+inserts the checklist and diagnostic commands as text. Review each command and
+its target before running it. The sequence checks DNS, makes a bounded HTTP
+request without printing a response body, reads systemd status and journal
+entries, and optionally validates Nginx configuration; it does not restart a
+service or modify configuration. Redact credentials and customer data before
+sharing command output.
+
+The same pack provides `;escalation`, `;runbook`, and `;change-record` forms.
+The customer-support pack provides `;;ticket-resolution` in addition to
+acknowledgement and status-update replies.
 
 Install and inspect a pack locally:
 

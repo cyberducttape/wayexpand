@@ -304,15 +304,24 @@ Infrastructure fields can declare a shared constraint with
 hostname, host-and-port, port, positive-integer, Linux-user, absolute-path,
 YAML-string, Ansible host-pattern, Compose service-name, container-image,
 systemd-executable, and single-line checks where each value is used. These
-checks prevent common malformed values and syntax breakouts; they do not
+checks (including `shell-single-quoted` for safe shell arguments) prevent
+common malformed values and syntax breakouts; they do not
 replace validation by the target tool.
 
 Available text-field types are `dns-label`, `hostname`, `host-port`, `port`,
 `positive-integer`, `linux-user`, `ansible-role-name`, `absolute-path`,
 `yaml-string`, `ansible-host-pattern`, `compose-service`, `container-image`,
-`systemd-executable`, and `single-line`. For example,
+`systemd-executable`, `single-line`, and `shell-single-quoted`. For example,
 `{{field:port=443|required|max=5|validate=port}}` accepts only a decimal port
 from 1 through 65535.
+
+The optional `ops-triage` and `customer-support` packs provide standardized
+operational notes and replies. In particular, `;http503` inserts a host- and
+service-specific, read-only diagnostic checklist. It produces commands for
+the operator to inspect and run; WayExpand does not execute them. See
+[`PACKS.md`](PACKS.md#optional-sysadmin-and-developer-libraries) for the pack
+install instructions and the included escalation, runbook, change-record,
+and ticket-resolution forms.
 
 Generate the requested artifacts with explicit values and, when the target
 validator is installed, ask `--validate` to check the staged output before it

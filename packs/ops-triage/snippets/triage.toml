@@ -69,6 +69,106 @@ tags = ["systemd", "diagnostics"]
 replacement = "systemctl --failed --no-pager && journalctl -p err -b --no-pager -n {{field:lines=50}}"
 
 [[expansion]]
+trigger = ";http503"
+description = "Review-first HTTP 503 diagnostic checklist and read-only command sequence"
+category = "Operations triage"
+tags = ["http", "incident", "diagnostics", "read-only"]
+replacement = """HTTP 503 first-response checklist (review each command before running)
+
+1. Confirm the affected URL, start time, scope, and whether the failure is persistent.
+2. Check DNS and the HTTP response from this host:
+   getent ahosts '{{field:host=example.net|validate=hostname|required|max=253}}'
+   curl -sS -D - -o /dev/null --connect-timeout 5 --max-time 15 '{{choice:scheme=https|http}}://{{field:host}}:{{field:port=443|validate=port|required|max=5}}/{{field:path=health|validate=shell-single-quoted|required|max=1024}}'
+3. Check service health and recent logs (adapt the unit name for the deployment):
+   systemctl status '{{field:service=nginx.service|validate=shell-single-quoted|required|max=128}}' --no-pager
+   journalctl -u '{{field:service}}' --since='15 minutes ago' --no-pager -n 100
+4. Check listening sockets and, for Nginx deployments, validate config without reloading:
+   sudo ss -ltnp
+   sudo nginx -t
+5. Compare proxy and upstream health, recent deploys, capacity, and dependency status. Record evidence and escalate before making changes.
+
+These commands inspect state; they do not restart services or change configuration. Redact credentials, tokens, and customer data before sharing output.
+"""
+
+[[expansion]]
+trigger = ";escalation"
+description = "Structured on-call escalation with impact, evidence, and requested action"
+category = "On-call notes"
+tags = ["incident", "handoff", "escalation"]
+replacement = """Escalation — {{datefield:reported_at=today|required}}
+Incident/ticket: {{field:reference|required|max=128}}
+Severity: {{choice:severity=SEV3|SEV2|SEV1|required}}
+Service/environment: {{field:service and environment|required|max=256}}
+Impact and scope: {{field:impact|required|min=10|max=2000}}
+Started / last known good: {{field:time window|required|max=256}}
+Evidence and relevant dashboards/logs: {{field:evidence|required|max=2000}}
+Actions taken and results: {{field:actions taken|required|max=2000}}
+Current risk or customer impact: {{field:risk|required|max=1000}}
+Requested help / decision: {{field:request|required|min=5|max=1000}}
+Owner and next update: {{field:owner and next update|required|max=256}}
+"""
+
+[[expansion]]
+trigger = ";runbook"
+description = "Operational runbook outline with prerequisites, verification, rollback, and escalation"
+category = "Operations documentation"
+tags = ["runbook", "operations", "documentation"]
+replacement = """# {{field:procedure|required|min=3|max=160}}
+
+Owner: {{field:team or owner|required|max=128}}
+Last reviewed: {{datefield:reviewed=today|required}}
+Applies to: {{field:service and environments|required|max=256}}
+
+## Purpose and expected outcome
+{{field:purpose and success criteria|required|min=10|max=1000}}
+
+## Safety and prerequisites
+- Required access/approvals: {{field:access and approvals|required|max=512}}
+- User impact and stop conditions: {{field:impact and stop conditions|required|max=512}}
+- Confirm the target environment before running any command.
+
+## Diagnosis
+{{field:read-only checks and expected results|required|max=2000}}
+
+## Procedure
+1. {{field:step 1|required|max=1000}}
+2. {{field:step 2|required|max=1000}}
+3. Verify the outcome: {{field:verification|required|max=1000}}
+
+## Rollback
+{{field:rollback steps and verification|required|max=1500}}
+
+## Escalation and references
+Escalate to: {{field:team or contact|required|max=256}}
+References: {{field:dashboards, tickets, or documentation|max=1000}}
+"""
+
+[[expansion]]
+trigger = ";change-record"
+description = "Reviewable change record with risk, validation, rollback, and approval"
+category = "Change management"
+tags = ["change", "approval", "documentation"]
+replacement = """Change record — {{field:change ID|required|max=128}}
+Title: {{field:summary|required|min=5|max=200}}
+Requester / owner: {{field:owner|required|max=128}}
+Environment and affected services: {{field:scope|required|max=512}}
+Planned window and timezone: {{field:window|required|max=256}}
+Risk and expected impact: {{field:risk and impact|required|max=1000}}
+
+Implementation plan:
+{{field:steps|required|min=10|max=2000}}
+
+Validation and success criteria:
+{{field:checks|required|min=5|max=1500}}
+
+Rollback trigger and procedure:
+{{field:rollback|required|min=5|max=1500}}
+
+Approver: {{field:approver|required|max=128}}
+Communication / ticket links: {{field:references|max=1000}}
+"""
+
+[[expansion]]
 trigger = ";;incident-entry"
 description = "Timestamped incident timeline entry"
 category = "On-call notes"

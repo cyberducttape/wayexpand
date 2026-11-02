@@ -162,6 +162,7 @@ pub enum FormFieldValidation {
     ComposeService,
     ContainerImage,
     SingleLine,
+    ShellSingleQuoted,
 }
 
 impl FormFieldValidation {
@@ -181,6 +182,7 @@ impl FormFieldValidation {
             "compose-service" => Self::ComposeService,
             "container-image" => Self::ContainerImage,
             "single-line" => Self::SingleLine,
+            "shell-single-quoted" => Self::ShellSingleQuoted,
             _ => return None,
         })
     }
@@ -201,6 +203,7 @@ impl FormFieldValidation {
             Self::ComposeService => "Docker Compose service name",
             Self::ContainerImage => "container image reference",
             Self::SingleLine => "single-line value",
+            Self::ShellSingleQuoted => "single-line value safe inside shell single quotes",
         }
     }
 
@@ -273,6 +276,12 @@ impl FormFieldValidation {
                     && !value.contains("..")
             }
             Self::SingleLine => !value.chars().any(char::is_control),
+            Self::ShellSingleQuoted => {
+                !value.is_empty()
+                    && !value
+                        .chars()
+                        .any(|character| character.is_control() || character == '\'')
+            }
         }
     }
 }
@@ -2078,7 +2087,7 @@ mod tests {
     #[test]
     fn typed_infrastructure_fields_validate_names_ports_and_syntax_safe_values() {
         let fields = form_fields(
-            "{{field:domain=example.com|required|validate=hostname}} {{field:service=api|required|validate=dns-label}} {{field:endpoint=127.0.0.1:8080|required|validate=host-port}} {{field:port=443|required|validate=port}} {{field:replicas=2|required|validate=positive-integer}} {{field:image=nginx:stable|required|validate=container-image}} {{field:description=API service|required|validate=single-line}} {{field:yaml=nginx|required|validate=yaml-string}}",
+            "{{field:domain=example.com|required|validate=hostname}} {{field:service=api|required|validate=dns-label}} {{field:endpoint=127.0.0.1:8080|required|validate=host-port}} {{field:port=443|required|validate=port}} {{field:replicas=2|required|validate=positive-integer}} {{field:image=nginx:stable|required|validate=container-image}} {{field:description=API service|required|validate=single-line}} {{field:yaml=nginx|required|validate=yaml-string}} {{field:shell=nginx.service|required|validate=shell-single-quoted}}",
         )
         .unwrap();
         let accepted = [
@@ -2090,6 +2099,7 @@ mod tests {
             "registry.example/team/api:v2",
             "API service",
             "nginx",
+            "nginx.service",
         ];
         for (field, value) in fields.iter().zip(accepted) {
             assert!(
@@ -2108,6 +2118,7 @@ mod tests {
             "nginx; touch /tmp/pwn",
             "two\nlines",
             "bad\"\nkey: value",
+            "nginx.service'; reboot; #",
         ]) {
             assert!(
                 field.validate_value(value).is_err(),
