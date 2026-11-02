@@ -1,8 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
 use wayexpand_core::{
-    render_template_with_cursor, Config, ExpansionConfig, ExpansionEngine, InputEvent,
-    OrganizationPolicy, Settings, TemplateContext, WindowContext,
+    Config, ExpansionConfig, ExpansionEngine, InputEvent, OrganizationPolicy, Settings,
+    TemplateContext, WindowContext,
 };
 
 use crate::editor::Draft;
@@ -10,14 +10,16 @@ use crate::editor::Draft;
 /// Render a form snippet with editor-supplied values. This local check does
 /// not launch the form helper or read environment variables or the clipboard.
 pub(crate) fn render_form_template(
-    template: &str,
+    template: &wayexpand_core::CompiledTemplate,
     fields: &HashMap<String, String>,
     snippets: Arc<wayexpand_core::SnippetLibrary>,
 ) -> Result<(String, Option<usize>), String> {
     let mut context = TemplateContext::system();
     context.fields = Arc::new(fields.clone().into());
     context.snippets = snippets;
-    render_template_with_cursor(template, &context).map_err(|error| error.to_string())
+    template
+        .render_with_cursor(&context)
+        .map_err(|error| error.to_string())
 }
 
 /// Return a policy error before a GUI command preview is spawned.

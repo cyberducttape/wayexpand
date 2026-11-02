@@ -651,15 +651,14 @@ fn validate_library_executable_policy(config_path: &Path, allow_executable: bool
 }
 
 fn reject_executable_content(path: &Path, config: &Config) -> Result<()> {
-    if let Some(expansion) = config
+    if config
         .expansion
         .iter()
-        .find(|expansion| expansion.command.is_some())
+        .any(|expansion| expansion.command.is_some())
     {
         bail!(
-            "synced library {} contains command-backed expansion {:?}; executable content is disabled by default. Review the revision and retry with --allow-executable --approved-revision <full-commit>",
+            "synced library {} contains a command-backed expansion; executable content is disabled by default. Review the revision and retry with --allow-executable --approved-revision <full-commit>",
             path.display(),
-            expansion.trigger
         );
     }
     if let Some(hotkey) = config.hotkey.first() {
@@ -1270,6 +1269,10 @@ mod tests {
         let error = validate_library_executable_policy(&config_path, false)
             .expect_err("commands must require explicit approval");
         assert!(error.to_string().contains("executable content is disabled"));
+        assert!(
+            !error.to_string().contains(";run"),
+            "the rejected trigger must not be included in the error"
+        );
 
         std::fs::write(
             &config_path,
