@@ -4561,6 +4561,7 @@ dependencies = [
  "wayexpand-backend-wlroots",
  "wayexpand-build-info",
  "wayexpand-core",
+ "wayexpand-process-supervisor",
  "wayland-client",
  "wayland-protocols",
  "zeroize",

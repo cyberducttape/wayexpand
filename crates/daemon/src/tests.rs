@@ -96,6 +96,9 @@ fn daemon_status_body_matches_documented_stable_contract() {
             "clipboard_reads_in_flight",
             "clipboard_reads_total",
             "clipboard_worker_threads",
+            "command_cleanup_degraded",
+            "command_cleanup_failed_attempts",
+            "command_cleanup_pending_jobs",
             "command_containment",
             "command_containment_mode",
             "command_failure_total",
@@ -171,7 +174,7 @@ fn daemon_status_body_matches_documented_stable_contract() {
         "daemon status body fields no longer match docs/COMPATIBILITY.md's documented Stable contract"
     );
     assert!(body.starts_with(&format!(
-        "source=input-method\nbackend=input-method-v2\nroute_id=input-method-v2\nbackend_mode=unknown\nstatus_schema=16\ndaemon_commit={}\nstate=connected\npaused=false\n",
+        "source=input-method\nbackend=input-method-v2\nroute_id=input-method-v2\nbackend_mode=unknown\nstatus_schema=17\ndaemon_commit={}\nstate=connected\npaused=false\n",
         super::build_info::COMMIT
     )));
     for field in [

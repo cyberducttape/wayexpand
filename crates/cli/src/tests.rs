@@ -576,7 +576,7 @@ fn status_json_matches_documented_stable_contract() {
          backend=input-method-v2\n\
          route_id=input-method-v2\n\
          backend_mode=unknown\n\
-         status_schema=16\n\
+         status_schema=17\n\
          daemon_commit=test-commit\n\
          state=connected\n\
          paused=false\n\
@@ -657,7 +657,10 @@ fn status_json_matches_documented_stable_contract() {
          memory_rss_kib=5\n\
          memory_high_water_kib=6\n\
          command_containment=cgroup\n\
-         command_containment_mode=required-cgroup";
+         command_containment_mode=required-cgroup\n\
+         command_cleanup_pending_jobs=0\n\
+         command_cleanup_failed_attempts=0\n\
+         command_cleanup_degraded=false";
     let value = status_as_json(daemon_response).unwrap();
     let object = value.as_object().expect("status --json returns an object");
     let contract: serde_json::Value =

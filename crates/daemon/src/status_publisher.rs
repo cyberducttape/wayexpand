@@ -5,6 +5,7 @@ use crate::*;
 #[derive(Default)]
 pub(crate) struct StatusPublisher {
     last: Option<StatusSnapshot>,
+    last_reactor_refresh: Option<std::time::Instant>,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -25,6 +26,24 @@ pub(crate) struct StatusSnapshot {
 }
 
 impl StatusPublisher {
+    /// Limit diagnostic serialization on ordinary reactor turns. State
+    /// transitions and output reconnect paths still publish immediately via
+    /// `publish`; this cadence only applies to the periodic refresh.
+    pub(crate) fn reactor_refresh_due(&mut self) -> bool {
+        self.reactor_refresh_due_at(std::time::Instant::now())
+    }
+
+    fn reactor_refresh_due_at(&mut self, now: std::time::Instant) -> bool {
+        if self
+            .last_reactor_refresh
+            .is_some_and(|last| now.duration_since(last) < std::time::Duration::from_secs(1))
+        {
+            return false;
+        }
+        self.last_reactor_refresh = Some(now);
+        true
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn publish(
         &mut self,
@@ -81,6 +100,9 @@ impl StatusPublisher {
             ),
         );
         self.last = Some(snapshot);
+        // A direct state transition also refreshes the periodic cadence so the
+        // next ordinary reactor turn does not rebuild diagnostics twice.
+        self.last_reactor_refresh = Some(std::time::Instant::now());
     }
 }
 
@@ -281,6 +303,15 @@ pub(crate) fn set_daemon_status_with_runtime_capabilities_and_config_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn periodic_reactor_status_refresh_is_bounded_to_one_per_second() {
+        let mut publisher = StatusPublisher::default();
+        let start = std::time::Instant::now();
+        assert!(publisher.reactor_refresh_due_at(start));
+        assert!(!publisher.reactor_refresh_due_at(start + std::time::Duration::from_millis(999)));
+        assert!(publisher.reactor_refresh_due_at(start + std::time::Duration::from_secs(1)));
+    }
 
     #[test]
     fn republishing_restores_status_overwritten_by_a_direct_update() {
