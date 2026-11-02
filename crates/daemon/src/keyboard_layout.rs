@@ -44,6 +44,7 @@ pub(crate) struct KwinKeyboardLayoutProvider {
 }
 
 impl KwinKeyboardLayoutProvider {
+    #[cfg(test)]
     pub(crate) fn wait_for_snapshot(&self, timeout: Duration) -> bool {
         let deadline = Instant::now() + timeout;
         while Instant::now() < deadline {

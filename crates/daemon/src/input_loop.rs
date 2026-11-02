@@ -231,11 +231,7 @@ pub fn connect_evdev_with_retry(
     let backend = wayexpand_backend_selection::injection_status_label(backend_name);
     let mut retry_delay = Duration::from_millis(250);
     loop {
-        let layout_provider = crate::keyboard_layout::KwinKeyboardLayoutProvider::start();
-        if !layout_provider.wait_for_snapshot(Duration::from_secs(2)) {
-            warn!("KWin has not provided a trustworthy active keyboard layout; evdev will leave native typing alone and disable matching until it becomes available");
-        }
-        match EvdevSource::connect_with_layout_provider(Box::new(layout_provider)) {
+        match connect_evdev_source() {
             Ok(source) => {
                 status::set_daemon_status_direct(
                     control,
@@ -269,6 +265,15 @@ pub fn connect_evdev_with_retry(
             }
         }
     }
+}
+
+/// Connect evdev with the compositor layout provider used by both initial
+/// startup and reactor reconnects. Layout discovery stays asynchronous so a
+/// reconnect never blocks the input reactor on D-Bus.
+pub(crate) fn connect_evdev_source(
+) -> std::result::Result<EvdevSource, wayexpand_backend_evdev::EvdevError> {
+    let layout_provider = crate::keyboard_layout::KwinKeyboardLayoutProvider::start();
+    EvdevSource::connect_with_layout_provider(Box::new(layout_provider))
 }
 
 /// Wait for a retry with cancellation support.

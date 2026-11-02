@@ -340,8 +340,9 @@ password-field protection is required.
 
 **Keyboard-layout synchronization:**
 The evdev source requires a fresh compositor-supplied active-keymap snapshot
-before it translates keys for matching or hotkeys. On KDE Plasma, the daemon
-tracks KWin's active layout and layout list over the session D-Bus interface
+before it translates keys for matching or hotkeys. Both initial connection and
+device reconnects use the same provider-aware constructor. On KDE Plasma, the
+daemon tracks KWin's active layout and layout list over the session D-Bus interface
 `org.kde.KeyboardLayouts`; XKB model, variant, and options come from the
 session's XKB environment and `kxkbrc`. A bounded worker polls independently
 of the input loop. If KWin stops answering, returns an unknown layout, or the

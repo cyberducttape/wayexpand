@@ -3,7 +3,8 @@
 //! and output recovery run before it in `main`.
 
 use crate::input_loop::{
-    attach_key_pass_through, check_input_method_policy, key_pass_through_failure,
+    attach_key_pass_through, check_input_method_policy, connect_evdev_source,
+    key_pass_through_failure,
 };
 use crate::output_connect::{BackgroundConnect, ConnectRequest};
 use crate::status_publisher::set_daemon_status_with_config_state;
@@ -245,7 +246,7 @@ impl Daemon {
             if self.waiting_for_input_retry(poll_interval) {
                 return Ok(Step::Next);
             }
-            match EvdevSource::connect() {
+            match connect_evdev_source() {
                 Ok(source) => {
                     let mut source = source;
                     source.set_wake_fd(Some(self.waker.fd()));
