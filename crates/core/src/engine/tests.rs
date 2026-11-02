@@ -65,7 +65,7 @@ fn engine_uses_the_parsed_filters_and_chords_from_validation() {
     assert_eq!(engine.validated.undo_chord, KeyChord::parse("Ctrl+Z").ok());
     assert_eq!(
         engine.validated.hotkeys,
-        [(KeyChord::parse("Ctrl+Alt+M").unwrap(), 0)]
+        std::collections::HashMap::from([(KeyChord::parse("Ctrl+Alt+M").unwrap(), 0)])
     );
 }
 
@@ -549,6 +549,34 @@ fn dispatches_enabled_hotkey_actions_without_side_effects() {
 
     engine.process(InputEvent::PauseChanged(false));
     assert!(engine.process_key(&chord).len() == 1);
+}
+
+#[test]
+fn keyed_hotkey_lookup_selects_the_configured_action() {
+    let config = Config::parse(
+        r#"
+        [[hotkey]]
+        chord = "Ctrl+Shift+P"
+        description = "first action"
+        [hotkey.command]
+        program = "/bin/true"
+
+        [[hotkey]]
+        chord = "Ctrl+Shift+Q"
+        description = "second action"
+        [hotkey.command]
+        program = "/bin/false"
+        "#,
+    )
+    .unwrap();
+    let engine = ExpansionEngine::new(config).unwrap();
+
+    let first = engine.process_key(&KeyChord::parse("Ctrl+Shift+P").unwrap());
+    let second = engine.process_key(&KeyChord::parse("Ctrl+Shift+Q").unwrap());
+    let missing = engine.process_key(&KeyChord::parse("Ctrl+Shift+R").unwrap());
+    assert_eq!(first[0].description, "first action");
+    assert_eq!(second[0].description, "second action");
+    assert!(missing.is_empty());
 }
 
 #[test]
