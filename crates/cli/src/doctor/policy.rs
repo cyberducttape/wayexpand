@@ -67,6 +67,7 @@ pub(crate) fn print_policy_diagnostics_json(
                 "allowed_packs": policy.allowed_packs,
                 "audit_prefix": policy.audit_prefix,
                 "is_active": policy.is_active(),
+                "effective": effective_policy_report(policy),
             })
         }
         Err(error) => {
@@ -81,6 +82,103 @@ pub(crate) fn print_policy_diagnostics_json(
         "path": wayexpand_core::ORGANIZATION_POLICY_PATH,
         "exists": Path::new(wayexpand_core::ORGANIZATION_POLICY_PATH).exists(),
         "policy": policy_json,
+    })
+}
+
+/// Machine-readable policy view for CI and fleet controllers. It deliberately
+/// shows both the configured value and the value consumed by enforcement.
+pub(crate) fn effective_policy_report(policy: &OrganizationPolicy) -> serde_json::Value {
+    let configured = serde_json::to_value(policy).unwrap_or(serde_json::Value::Null);
+    let effective = serde_json::to_value(policy.effective_enforcement_policy())
+        .unwrap_or(serde_json::Value::Null);
+    let mut controls = serde_json::Map::new();
+    let mut audit_only = Vec::new();
+    let mut unsupported = Vec::new();
+
+    if let (Some(configured_fields), Some(effective_fields)) =
+        (configured.as_object(), effective.as_object())
+    {
+        let mut all_fields = configured_fields.clone();
+        for name in [
+            "require_broker_actions",
+            "require_exclusive_capture",
+            "require_verified_insert_target",
+            "disable_control_socket_mutations",
+        ] {
+            all_fields
+                .entry(name)
+                .or_insert(serde_json::Value::Bool(false));
+        }
+        for (name, configured_value) in &all_fields {
+            if matches!(
+                name.as_str(),
+                "safe_mode" | "pack_signers_file" | "audit_prefix"
+            ) {
+                continue;
+            }
+            let effective_value = effective_fields
+                .get(name)
+                .cloned()
+                .unwrap_or(serde_json::Value::Bool(false));
+            let configured_on = match configured_value {
+                serde_json::Value::Bool(value) => *value,
+                serde_json::Value::Number(value) => value.as_u64().unwrap_or(1) != 0,
+                serde_json::Value::String(value) => !value.is_empty(),
+                serde_json::Value::Array(values) => !values.is_empty(),
+                serde_json::Value::Null => false,
+                serde_json::Value::Object(_) => true,
+            };
+            let status = if !configured_on {
+                "not_configured"
+            } else if name == "disable_control_socket_mutations" || policy.safe_mode {
+                "enforced"
+            } else if configured_value == &effective_value {
+                "configured_non_enforcing"
+            } else {
+                "audit_only"
+            };
+            if status == "audit_only" {
+                audit_only.push(name.clone());
+            }
+            if name == "require_composition_aware" && configured_on {
+                // The current desktop input-source contracts do not expose
+                // external IME/preedit state; this requirement cannot be met.
+                unsupported.push(name.clone());
+            }
+            let support = if !configured_on {
+                "not_required"
+            } else if name == "require_composition_aware" {
+                "unsupported"
+            } else if matches!(
+                name.as_str(),
+                "require_atomic_replace"
+                    | "require_exclusive_capture"
+                    | "minimum_replacement_guarantee"
+                    | "require_sensitive_focus"
+            ) {
+                "session_dependent"
+            } else {
+                "supported"
+            };
+            controls.insert(
+                name.clone(),
+                serde_json::json!({
+                    "configured": configured_value,
+                    "effective": effective_value,
+                    "status": status,
+                    "support": support,
+                }),
+            );
+        }
+    }
+
+    serde_json::json!({
+        "mode": if policy.safe_mode { "enforcement" } else { "audit_only" },
+        "safe_mode": policy.safe_mode,
+        "controls": controls,
+        "audit_only_controls": audit_only,
+        "unsupported_controls": unsupported,
+        "capability_assessment": "session_dependent; inspect doctor session_capabilities and route readiness",
     })
 }
 
@@ -148,6 +246,19 @@ pub(crate) fn print_policy_diagnostics() -> bool {
                 "Organization policy: {} (valid)",
                 wayexpand_core::ORGANIZATION_POLICY_PATH
             );
+            println!(
+                "  Enforcement mode: {}",
+                if policy.safe_mode {
+                    "ENFORCEMENT (safe_mode=true)"
+                } else {
+                    "AUDIT ONLY (safe_mode=false; expansion restrictions do not block)"
+                }
+            );
+            if !policy.safe_mode && policy.disable_control_socket_mutations {
+                println!(
+                    "  Control-socket mutation restriction: enforced independently of audit mode"
+                );
+            }
             if policy.is_active() {
                 println!(
                     "  Safe mode: {}",

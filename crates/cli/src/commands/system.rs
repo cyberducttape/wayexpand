@@ -156,6 +156,83 @@ pub(crate) fn doctor_command(args: Args) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn policy_command(mut args: Args) -> Result<()> {
+    if args.next().as_deref() != Some("inspect") {
+        usage_bail!("usage: wayexpand policy inspect [--file PATH] [--json]");
+    }
+    let mut rest: Vec<String> = args.collect();
+    let requested_json = take_json_flag(&mut rest);
+    let policy_path = match rest.iter().position(|argument| argument == "--file") {
+        Some(index) => {
+            rest.remove(index);
+            if index >= rest.len() {
+                usage_bail!("--file requires a policy path");
+            }
+            Some(PathBuf::from(rest.remove(index)))
+        }
+        None => None,
+    };
+    if !rest.is_empty() {
+        usage_bail!("usage: wayexpand policy inspect [--file PATH] [--json]");
+    }
+    let (policy, policy_path, trusted_system_policy) = match policy_path {
+        Some(path) => {
+            let content = fs::read_to_string(&path)
+                .with_context(|| format!("could not read policy file {}", path.display()))?;
+            let policy = wayexpand_core::parse_organization_policy(&content).map_err(|error| {
+                anyhow::anyhow!("invalid policy file {}: {error}", path.display())
+            })?;
+            (policy, path, false)
+        }
+        None => (
+            crate::doctor::policy::load_policy()?,
+            PathBuf::from(wayexpand_core::ORGANIZATION_POLICY_PATH),
+            true,
+        ),
+    };
+    let report = crate::doctor::policy::effective_policy_report(&policy);
+    if requested_json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "path": policy_path,
+                "trusted_system_policy": trusted_system_policy,
+                "policy": report,
+            })
+        );
+    } else {
+        println!("Organization policy: {}", policy_path.display());
+        if !trusted_system_policy {
+            println!("Source file is syntax-inspected only; it is not loaded as the trusted system policy.");
+        }
+        println!("Mode: {}", report["mode"].as_str().unwrap_or("unknown"));
+        let audit_only = report["audit_only_controls"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(serde_json::Value::as_str)
+            .collect::<Vec<_>>();
+        if audit_only.is_empty() {
+            println!("Audit-only controls: none");
+        } else {
+            println!("Audit-only controls: {}", audit_only.join(", "));
+        }
+        let unsupported = report["unsupported_controls"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(serde_json::Value::as_str)
+            .collect::<Vec<_>>();
+        if unsupported.is_empty() {
+            println!("Known unsupported controls: none");
+        } else {
+            println!("Known unsupported controls: {}", unsupported.join(", "));
+        }
+        println!("Capability assessment: {}", report["capability_assessment"]);
+    }
+    Ok(())
+}
+
 pub(crate) fn upgrade_status_command(args: Args) -> Result<()> {
     let mut rest: Vec<String> = args.collect();
     let requested_json = take_json_flag(&mut rest);

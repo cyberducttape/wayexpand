@@ -79,6 +79,9 @@ pub(crate) fn broker_diagnostics(config: Option<&Config>) -> serde_json::Value {
     serde_json::json!({
         "required": required,
         "named_action_count": named_actions,
+        "network_access": "blocked",
+        "network_dependent_actions_supported": false,
+        "network_policy": "packaged systemd broker allows AF_UNIX only and denies IP networking",
         "socket": {
             "path": socket,
             "exists": socket_exists,
@@ -108,6 +111,7 @@ pub(crate) fn print_broker_diagnostics(config: Option<&Config>) -> bool {
     let exists = broker["socket"]["exists"].as_bool().unwrap_or(false);
     let valid = broker["socket"]["valid"].as_bool().unwrap_or(false);
     println!("Action Broker: {} named action(s), service_active={active}, socket={socket}, socket_exists={exists}, socket_valid={valid}", broker["named_action_count"]);
+    println!("  Network access: blocked; network-dependent actions (kubectl, ssh, cloud CLIs, Vault) are unsupported by this broker");
     if broker["audit"]["audit_enabled"].as_bool().unwrap_or(false) {
         let dropped = broker["audit"]["audit_queue_dropped_total"]
             .as_u64()

@@ -20,7 +20,7 @@ use commands::new::new_command;
 use commands::profile::profile_command;
 use commands::system::{
     backend_command, certify_command, doctor_command, explain_backend_command, explain_command,
-    portal_command, setup_command, upgrade_status_command,
+    policy_command, portal_command, setup_command, upgrade_status_command,
 };
 use doctor::backends::{
     print_backend_diagnostics, print_backend_selection_explain, session_description,
@@ -122,6 +122,7 @@ fn run() -> Result<()> {
         Some("edit") => edit_command(args)?,
         Some("setup") => setup_command(args)?,
         Some("doctor") => doctor_command(args)?,
+        Some("policy") => policy_command(args)?,
         Some("upgrade-status") => upgrade_status_command(args)?,
         Some("explain") => explain_command(args)?,
         Some("stats") => stats_command(args)?,
@@ -155,6 +156,10 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
             (
                 "doctor [--json] [config]",
                 "Diagnose configuration, backends and the running daemon",
+            ),
+            (
+                "policy inspect [--file PATH] [--json]",
+                "Show configured and effective organization policy controls",
             ),
             (
                 "doctor --certify [--json]",
