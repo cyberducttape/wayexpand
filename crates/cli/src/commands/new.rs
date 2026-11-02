@@ -8,11 +8,12 @@
 
 use std::{
     collections::HashMap,
+    ffi::OsString,
     io::{BufRead, IsTerminal, Read},
     os::fd::AsRawFd,
     os::unix::{
         ffi::OsStrExt,
-        fs::{OpenOptionsExt, PermissionsExt},
+        fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt},
     },
     process::{Command, ExitStatus, Stdio},
     sync::Arc,
@@ -29,7 +30,7 @@ use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
 use super::Args;
 use crate::*;
 
-const USAGE: &str = "usage: wayexpand new [<name> [--set NAME=VALUE]... [-o PATH|--stdout] [--gui] [--force]] [--show NAME] [--json] [--config FILE]";
+const USAGE: &str = "usage: wayexpand new [<name> [--set NAME=VALUE]... [-o PATH|--stdout] [--gui] [--force] [--validate]] [--show NAME] [--json] [--config FILE]";
 
 /// Templates that ship with WayExpand. A snippet in the user's configuration
 /// with the same name takes precedence.
@@ -64,6 +65,7 @@ fn load_user_config(path: &Path, explicit: bool) -> Result<Config> {
 const MAX_VALUE_BYTES: usize = 64 * 1024;
 const GENERATED_FILE_MODE: u32 = 0o600;
 const ANSIBLE_ROLE_TRIGGER: &str = ";;ansible-role";
+const VALIDATOR_TIMEOUT: Duration = Duration::from_secs(30);
 const ANSIBLE_ROLE_COMPANIONS: [(&str, &str); 3] = [
     (
         "handlers/main.yml",
@@ -88,6 +90,7 @@ pub(crate) fn new_command(args: Args) -> Result<()> {
     let mut rest: Vec<String> = args.collect();
     let requested_json = take_json_flag(&mut rest);
     let force = take_flag(&mut rest, "--force");
+    let validate = take_flag(&mut rest, "--validate");
     let to_stdout = take_flag(&mut rest, "--stdout");
     let gui = take_flag(&mut rest, "--gui");
     let output =
@@ -125,6 +128,7 @@ pub(crate) fn new_command(args: Args) -> Result<()> {
             || to_stdout
             || gui
             || force
+            || validate
             || !assignments.is_empty()
         {
             usage_bail!("{USAGE}");
@@ -134,7 +138,7 @@ pub(crate) fn new_command(args: Args) -> Result<()> {
         return Ok(());
     }
     let Some(name) = rest.into_iter().next() else {
-        if output.is_some() || to_stdout || gui || force || !assignments.is_empty() {
+        if output.is_some() || to_stdout || gui || force || validate || !assignments.is_empty() {
             usage_bail!("{USAGE}");
         }
         print_templates(&layers, requested_json);
@@ -212,6 +216,32 @@ pub(crate) fn new_command(args: Args) -> Result<()> {
         validate_role_output_directory(Path::new(directory))?;
 
         let files = render_ansible_role_files(rendered, &context)?;
+        if validate {
+            let validator = validator_for(&snippet.trigger).ok_or_else(|| {
+                usage_error(format!(
+                    "no registered validator supports template {}",
+                    short_name(&snippet.trigger)
+                ))
+            })?;
+            let role_name = context
+                .fields
+                .get("field:role")
+                .context("Ansible role name was not rendered")?;
+            let workspace = ValidationWorkspace::new()?;
+            let staged_role = workspace
+                .path()
+                .join("roles")
+                .join(validate_role_name(role_name)?);
+            write_scaffold_directory(&staged_role, &files, false)?;
+            validator.validate(
+                workspace.path(),
+                &ValidationTarget::AnsibleRole {
+                    path: staged_role,
+                    name: role_name.to_owned(),
+                },
+            )?;
+            eprintln!("Validated with {}", validator.name());
+        }
         write_scaffold_directory(Path::new(directory), &files, force)?;
         eprintln!("Wrote Ansible role to {directory}");
         return Ok(());
@@ -224,6 +254,19 @@ pub(crate) fn new_command(args: Args) -> Result<()> {
             .or_else(|| snippet.output_file.clone())
             .filter(|file| file != "-")
     };
+    if validate {
+        let validator = validator_for(&snippet.trigger).ok_or_else(|| {
+            usage_error(format!(
+                "no registered validator supports template {}",
+                short_name(&snippet.trigger)
+            ))
+        })?;
+        let relative_path = rendered_output_path(snippet, &context)?;
+        let workspace = ValidationWorkspace::new()?;
+        let staged_path = workspace.write_file(&relative_path, rendered.as_bytes())?;
+        validator.validate(workspace.path(), &ValidationTarget::File(staged_path))?;
+        eprintln!("Validated with {}", validator.name());
+    }
     match destination {
         None => {
             io::stdout().write_all(rendered.as_bytes())?;
@@ -248,6 +291,369 @@ fn render_ansible_role_files(
         files.push((relative_path.into(), contents.into_bytes()));
     }
     Ok(files)
+}
+
+/// Validators are registered in WayExpand and invoked only after an explicit
+/// `--validate`. A template cannot provide a program, shell fragment, or
+/// validator arguments.
+trait ArtifactValidator: Sync {
+    fn name(&self) -> &'static str;
+    fn supports(&self, template_trigger: &str) -> bool;
+    fn validate(&self, workspace: &Path, target: &ValidationTarget) -> Result<()>;
+}
+
+enum ValidationTarget {
+    File(PathBuf),
+    AnsibleRole { path: PathBuf, name: String },
+}
+
+struct AnsibleValidator;
+
+impl ArtifactValidator for AnsibleValidator {
+    fn name(&self) -> &'static str {
+        "ansible-playbook --syntax-check"
+    }
+
+    fn supports(&self, template_trigger: &str) -> bool {
+        matches!(template_trigger, ";;playbook" | ANSIBLE_ROLE_TRIGGER)
+    }
+
+    fn validate(&self, workspace: &Path, target: &ValidationTarget) -> Result<()> {
+        let mut command = Command::new("ansible-playbook");
+        command
+            .args(["--syntax-check", "--inventory", "localhost,"])
+            .current_dir(workspace);
+        let mut roles_path = None;
+        match target {
+            ValidationTarget::File(path) => {
+                command.arg(path);
+            }
+            ValidationTarget::AnsibleRole { path, name } => {
+                if !path.is_dir() {
+                    bail!("staged Ansible role directory is missing");
+                }
+                let wrapper = workspace.join("wayexpand-validation.yml");
+                path.strip_prefix(workspace)
+                    .context("staged role escaped its validation workspace")?;
+                // The role name has already been restricted to a single safe
+                // path component; quote it as YAML data in the wrapper.
+                fs::write(
+                    &wrapper,
+                    format!(
+                        "---\n- hosts: localhost\n  connection: local\n  roles:\n    - name: {name}\n      tasks_from: main\n"
+                    ),
+                )?;
+                let role_search_path = path
+                    .parent()
+                    .context("staged role has no roles directory")?;
+                command.arg(&wrapper);
+                roles_path = Some(role_search_path.to_path_buf());
+            }
+        }
+        prepare_validator_environment(&mut command, workspace);
+        if let Some(roles_path) = roles_path {
+            command.env("ANSIBLE_ROLES_PATH", roles_path);
+        }
+        run_validator_process(command, self.name())
+    }
+}
+
+struct FileCommandValidator {
+    name: &'static str,
+    executable: &'static str,
+    triggers: &'static [&'static str],
+    arguments: fn(&Path) -> Vec<OsString>,
+}
+
+impl ArtifactValidator for FileCommandValidator {
+    fn name(&self) -> &'static str {
+        self.name
+    }
+
+    fn supports(&self, template_trigger: &str) -> bool {
+        self.triggers.contains(&template_trigger)
+    }
+
+    fn validate(&self, workspace: &Path, target: &ValidationTarget) -> Result<()> {
+        let ValidationTarget::File(path) = target else {
+            bail!("{} only validates a single generated file", self.name);
+        };
+        let mut command = Command::new(self.executable);
+        command.args((self.arguments)(path)).current_dir(workspace);
+        prepare_validator_environment(&mut command, workspace);
+        run_validator_process(command, self.name)
+    }
+}
+
+struct NginxValidator;
+
+impl ArtifactValidator for NginxValidator {
+    fn name(&self) -> &'static str {
+        "nginx -t"
+    }
+
+    fn supports(&self, template_trigger: &str) -> bool {
+        template_trigger == ";;nginx-site"
+    }
+
+    fn validate(&self, workspace: &Path, target: &ValidationTarget) -> Result<()> {
+        let ValidationTarget::File(path) = target else {
+            bail!("nginx -t validates a single generated file");
+        };
+        let include = path
+            .to_string_lossy()
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"");
+        let wrapper = workspace.join("wayexpand-nginx-test.conf");
+        fs::write(
+            &wrapper,
+            format!("events {{ worker_connections 16; }}\nhttp {{ include \"{include}\"; }}\n"),
+        )?;
+        let mut command = Command::new("nginx");
+        command
+            .args(["-t", "-c"])
+            .arg(wrapper)
+            .current_dir(workspace);
+        prepare_validator_environment(&mut command, workspace);
+        run_validator_process(command, self.name())
+    }
+}
+
+struct KubeconformValidator;
+
+impl ArtifactValidator for KubeconformValidator {
+    fn name(&self) -> &'static str {
+        "kubeconform -strict -summary"
+    }
+
+    fn supports(&self, template_trigger: &str) -> bool {
+        template_trigger == ";;k8s-deployment"
+    }
+
+    fn validate(&self, workspace: &Path, target: &ValidationTarget) -> Result<()> {
+        let ValidationTarget::File(path) = target else {
+            bail!("kubeconform validates a single generated manifest file");
+        };
+        let mut command = Command::new("kubeconform");
+        command
+            .args(["-strict", "-summary", "-cache"])
+            .arg(workspace.join(".cache/kubeconform"))
+            .arg(path)
+            .current_dir(workspace);
+        prepare_validator_environment(&mut command, workspace);
+        run_validator_process(command, self.name())
+    }
+}
+
+fn file_argument(path: &Path) -> Vec<OsString> {
+    vec![path.as_os_str().to_owned()]
+}
+
+fn compose_arguments(path: &Path) -> Vec<OsString> {
+    ["compose", "-f"]
+        .into_iter()
+        .map(OsString::from)
+        .chain([path.as_os_str().to_owned()])
+        .chain(["config", "--quiet"].into_iter().map(OsString::from))
+        .collect()
+}
+
+fn validator_registry() -> Vec<&'static dyn ArtifactValidator> {
+    static ANSIBLE: AnsibleValidator = AnsibleValidator;
+    static HADOLINT: FileCommandValidator = FileCommandValidator {
+        name: "hadolint",
+        executable: "hadolint",
+        triggers: &[
+            ";;dockerfile",
+            ";;dockerfile-python",
+            ";;dockerfile-node",
+            ";;dockerfile-rust",
+        ],
+        arguments: file_argument,
+    };
+    static COMPOSE: FileCommandValidator = FileCommandValidator {
+        name: "docker compose config",
+        executable: "docker",
+        triggers: &[";;compose"],
+        arguments: compose_arguments,
+    };
+    static SYSTEMD: FileCommandValidator = FileCommandValidator {
+        name: "systemd-analyze verify",
+        executable: "systemd-analyze",
+        triggers: &[";;systemd-service"],
+        arguments: |path| vec!["verify".into(), path.as_os_str().to_owned()],
+    };
+    static ACTIONLINT: FileCommandValidator = FileCommandValidator {
+        name: "actionlint",
+        executable: "actionlint",
+        triggers: &[";;github-actions"],
+        arguments: file_argument,
+    };
+    static NGINX: NginxValidator = NginxValidator;
+    static KUBECONFORM: KubeconformValidator = KubeconformValidator;
+    let validators: [&'static dyn ArtifactValidator; 7] = [
+        &ANSIBLE,
+        &HADOLINT,
+        &COMPOSE,
+        &SYSTEMD,
+        &ACTIONLINT,
+        &NGINX,
+        &KUBECONFORM,
+    ];
+    validators.into_iter().collect()
+}
+
+fn validator_for(template_trigger: &str) -> Option<&'static dyn ArtifactValidator> {
+    validator_registry()
+        .into_iter()
+        .find(|validator| validator.supports(template_trigger))
+}
+
+fn validate_role_name(value: &str) -> Result<&str> {
+    if value.is_empty()
+        || value.len() > 128
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"_-".contains(&byte))
+    {
+        usage_bail!("Ansible role names used with --validate must contain only ASCII letters, digits, '_' or '-'");
+    }
+    Ok(value)
+}
+
+fn rendered_output_path(snippet: &ExpansionConfig, context: &TemplateContext) -> Result<PathBuf> {
+    use std::path::Component;
+
+    let configured = snippet
+        .output_file
+        .as_deref()
+        .context("--validate requires a file template with an output_file")?;
+    let (rendered, _) = render_template_with_cursor(configured, context)
+        .map_err(|error| config_error(format!("{} output path: {error}", snippet.trigger)))?;
+    let path = PathBuf::from(rendered);
+    if path.as_os_str().is_empty()
+        || path
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        usage_bail!("--validate requires a safe relative output path");
+    }
+    Ok(path)
+}
+
+struct ValidationWorkspace(PathBuf);
+
+impl ValidationWorkspace {
+    fn new() -> Result<Self> {
+        let root = std::env::temp_dir();
+        for _ in 0..8 {
+            let path = root.join(format!(
+                "wayexpand-validate-{}-{:016x}",
+                std::process::id(),
+                getrandom::u64().context("could not obtain randomness for validator staging")?
+            ));
+            let mut builder = fs::DirBuilder::new();
+            builder.mode(0o700);
+            match builder.create(&path) {
+                Ok(()) => return Ok(Self(path)),
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(error) => {
+                    return Err(error)
+                        .with_context(|| format!("could not create {}", path.display()))
+                }
+            }
+        }
+        bail!("could not allocate a private validation workspace")
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+
+    fn write_file(&self, relative: &Path, contents: &[u8]) -> Result<PathBuf> {
+        use std::path::Component;
+        if relative.as_os_str().is_empty()
+            || !relative
+                .components()
+                .all(|component| matches!(component, Component::Normal(_)))
+        {
+            usage_bail!("validator staging path is unsafe");
+        }
+        let path = self.0.join(relative);
+        let parent = path
+            .parent()
+            .context("validator output has no parent directory")?;
+        fs::create_dir_all(parent)?;
+        fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(GENERATED_FILE_MODE)
+            .open(&path)
+            .with_context(|| format!("could not stage {} for validation", path.display()))?;
+        file.write_all(contents)?;
+        file.sync_all()?;
+        Ok(path)
+    }
+}
+
+impl Drop for ValidationWorkspace {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn prepare_validator_environment(command: &mut Command, workspace: &Path) {
+    let ansible_tmp = workspace.join(".ansible/tmp");
+    let _ = fs::create_dir_all(&ansible_tmp);
+    command
+        .env_clear()
+        .env(
+            "PATH",
+            std::env::var_os("PATH").unwrap_or_else(|| "/usr/bin:/bin".into()),
+        )
+        .env("HOME", workspace)
+        .env("LANG", "C")
+        .env("LC_ALL", "C")
+        .env("ANSIBLE_CONFIG", "/dev/null")
+        .env("ANSIBLE_LOCAL_TEMP", ansible_tmp)
+        .env("ANSIBLE_NOCOLOR", "1")
+        .env("ANSIBLE_FORKS", "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+}
+
+fn run_validator_process(mut command: Command, validator: &str) -> Result<()> {
+    configure_process_group(&mut command);
+    let child = command
+        .spawn()
+        .with_context(|| format!("could not start validator {validator}"))?;
+    let mut supervisor = ChildSupervisor::new(child);
+    let deadline = Instant::now() + VALIDATOR_TIMEOUT;
+    loop {
+        match supervisor.has_exited() {
+            Ok(true) => break,
+            Ok(false) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
+            Ok(false) => {
+                supervisor.kill_group();
+                let _ = supervisor.reap();
+                bail!("validator {validator} exceeded its 30 second deadline");
+            }
+            Err(error) => {
+                supervisor.kill_group();
+                let _ = supervisor.reap();
+                return Err(error).with_context(|| format!("could not monitor {validator}"));
+            }
+        }
+    }
+    let status = supervisor
+        .reap()
+        .with_context(|| format!("could not reap validator {validator}"))?;
+    if !status.success() {
+        bail!("validator {validator} failed with {status}");
+    }
+    Ok(())
 }
 
 /// A snippet as TOML to paste into a configuration, without its id (one is
@@ -1031,6 +1437,43 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     #[test]
+    fn validator_registry_is_fixed_to_supported_artifact_types() {
+        for trigger in [
+            ";;playbook",
+            ANSIBLE_ROLE_TRIGGER,
+            ";;dockerfile",
+            ";;dockerfile-python",
+            ";;dockerfile-node",
+            ";;dockerfile-rust",
+            ";;compose",
+            ";;systemd-service",
+            ";;github-actions",
+            ";;nginx-site",
+            ";;k8s-deployment",
+        ] {
+            assert!(
+                validator_for(trigger).is_some(),
+                "missing validator for {trigger}"
+            );
+        }
+        assert!(validator_for(";;custom-template").is_none());
+    }
+
+    #[test]
+    fn validator_staging_rejects_paths_that_escape_private_workspace() {
+        let workspace = ValidationWorkspace::new().unwrap();
+        assert!(workspace
+            .write_file(Path::new("../escape.yml"), b"unsafe")
+            .is_err());
+        assert!(!workspace
+            .path()
+            .parent()
+            .unwrap()
+            .join("escape.yml")
+            .exists());
+    }
+
+    #[test]
     fn form_helper_timeout_kills_its_process_group() {
         let mut command = Command::new("sh");
         command
@@ -1281,16 +1724,15 @@ mod tests {
                 ),
             )
             .unwrap();
-            let check = Command::new("ansible-playbook")
-                .args(["--syntax-check", "-i", "localhost,", "site.yml"])
-                .current_dir(&project)
-                .output()
-                .unwrap();
-            assert!(
-                check.status.success(),
-                "ansible-playbook syntax-check failed: {}",
-                String::from_utf8_lossy(&check.stderr)
-            );
+            AnsibleValidator
+                .validate(
+                    &project,
+                    &ValidationTarget::AnsibleRole {
+                        path: project.join("roles/example"),
+                        name: role_name.into(),
+                    },
+                )
+                .expect("registered Ansible role validator should find and check the staged role");
             let tasks_path = project.join("roles/example/tasks/main.yml");
             let tasks = fs::read_to_string(&tasks_path).unwrap().replace(
                 "  ansible.builtin.package:\n    name: \"nginx\"\n    state: present",
