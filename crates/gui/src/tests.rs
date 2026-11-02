@@ -330,6 +330,57 @@ fn editor_preview_keeps_cross_snippet_include_semantics() {
 }
 
 #[test]
+fn editor_form_fields_cache_tracks_replacement_changes() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-form-cache-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    Config::parse("[[expansion]]\ntrigger = ':test'\nreplacement = 'test'")
+        .unwrap()
+        .save_atomic(&path)
+        .unwrap();
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    let mut current_draft = draft();
+    current_draft.replacement = "{{field:operator}}".into();
+    app.draft = Some(current_draft);
+
+    app.refresh_form_fields_cache();
+    let first_template = app
+        .form_fields_cache
+        .as_ref()
+        .expect("form fields should be cached")
+        .0
+        .as_ptr();
+    let first_compiled = &app.form_fields_cache.as_ref().unwrap().2 as *const _;
+    assert_eq!(
+        app.form_fields_cache.as_ref().unwrap().1[0].key,
+        "field:operator"
+    );
+    assert!(app.form_fields_cache.as_ref().unwrap().2.is_ok());
+
+    app.refresh_form_fields_cache();
+    assert_eq!(
+        app.form_fields_cache.as_ref().unwrap().0.as_ptr(),
+        first_template,
+        "an unchanged replacement should reuse its cached template"
+    );
+    assert_eq!(
+        &app.form_fields_cache.as_ref().unwrap().2 as *const _,
+        first_compiled,
+        "an unchanged replacement should reuse its compiled representation"
+    );
+
+    app.draft.as_mut().unwrap().replacement = "{{choice:severity=low|high}}".into();
+    app.refresh_form_fields_cache();
+    assert_eq!(
+        app.form_fields_cache.as_ref().unwrap().1[0].key,
+        "choice:severity"
+    );
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn matcher_playground_uses_the_unsaved_draft_and_explains_it() {
     let path = std::env::temp_dir().join(format!(
         "wayexpand-gui-draft-playground-{}.toml",
