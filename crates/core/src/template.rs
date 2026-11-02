@@ -457,18 +457,18 @@ fn valid_host_port(value: &str) -> bool {
         .is_some_and(|(host, port)| valid_host(host) && valid_port(port))
 }
 
+#[derive(Default)]
+struct ParsedFormAttributes {
+    required: bool,
+    min_chars: Option<usize>,
+    max_chars: Option<usize>,
+    validation: Option<FormFieldValidation>,
+}
+
 fn parse_form_attributes(
     attributes: &[&str],
     allow_length: bool,
-) -> Result<
-    (
-        bool,
-        Option<usize>,
-        Option<usize>,
-        Option<FormFieldValidation>,
-    ),
-    TemplateError,
-> {
+) -> Result<ParsedFormAttributes, TemplateError> {
     let mut required = false;
     let mut min_chars = None;
     let mut max_chars = None;
@@ -500,7 +500,12 @@ fn parse_form_attributes(
     if min_chars.zip(max_chars).is_some_and(|(min, max)| min > max) {
         return Err(TemplateError::InvalidField);
     }
-    Ok((required, min_chars, max_chars, validation))
+    Ok(ParsedFormAttributes {
+        required,
+        min_chars,
+        max_chars,
+        validation,
+    })
 }
 
 fn parse_choice_attributes(attributes: &[&str]) -> Result<(bool, Option<String>), TemplateError> {
@@ -547,7 +552,12 @@ fn parse_form_field(name: &str) -> Option<Result<FormField, TemplateError>> {
             return Some(Err(TemplateError::InvalidField));
         }
         let validation = parse_form_attributes(&attributes, true);
-        let (required, min_chars, max_chars, validation) = match validation {
+        let ParsedFormAttributes {
+            required,
+            min_chars,
+            max_chars,
+            validation,
+        } = match validation {
             Ok(validation) => validation,
             Err(error) => return Some(Err(error)),
         };
@@ -572,11 +582,15 @@ fn parse_form_field(name: &str) -> Option<Result<FormField, TemplateError>> {
         if label.is_empty() || label.chars().count() > 64 {
             return Some(Err(TemplateError::InvalidField));
         }
-        let (required, min_chars, max_chars, validation) =
-            match parse_form_attributes(&attributes, false) {
-                Ok(validation) => validation,
-                Err(error) => return Some(Err(error)),
-            };
+        let ParsedFormAttributes {
+            required,
+            min_chars,
+            max_chars,
+            validation,
+        } = match parse_form_attributes(&attributes, false) {
+            Ok(validation) => validation,
+            Err(error) => return Some(Err(error)),
+        };
         if default != "today" && !valid_iso_date(default) {
             return Some(Err(TemplateError::InvalidField));
         }
