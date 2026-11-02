@@ -231,7 +231,7 @@ pub fn connect_evdev_with_retry(
     let backend = wayexpand_backend_selection::injection_status_label(backend_name);
     let mut retry_delay = Duration::from_millis(250);
     loop {
-        match EvdevSource::connect() {
+        match EvdevSource::connect_with_layout_provider(crate::evdev_layout::provider()) {
             Ok(source) => {
                 status::set_daemon_status_direct(
                     control,

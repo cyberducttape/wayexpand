@@ -84,6 +84,8 @@ const MAX_RAW_EVENTS_PER_SLICE: usize = 128;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeyboardLayoutSnapshot {
     pub generation: u64,
+    /// Active XKB layout group as reported by the compositor.
+    pub group: u32,
     pub rules: Option<String>,
     pub model: Option<String>,
     pub layout: Option<String>,
@@ -221,10 +223,8 @@ impl EvdevSource {
         let keymap = Keymap::new_from_names(context, None, 0)
             .map_err(|error| EvdevError::Keymap(error.to_string()))?;
         tracing::warn!(
-            "evdev capture active: no per-field sensitive-content signal is available, so \
-             matching is never suspended in password or other sensitive fields; \
-             no compositor keyboard-layout provider is available; layout-dependent matching and \
-             hotkeys are disabled rather than translated with a guessed startup keymap (docs/SECURITY.md)"
+            "evdev capture active without per-field sensitive-content protection; matching is \
+             never suspended in password or other sensitive fields (docs/SECURITY.md)"
         );
         let devices: Vec<Box<dyn device::KeyboardDeviceAccess>> = discovery
             .keyboards
@@ -232,7 +232,7 @@ impl EvdevSource {
             .map(|keyboard| Box::new(keyboard) as Box<dyn device::KeyboardDeviceAccess>)
             .collect();
         let pressed = (0..devices.len()).map(|_| HashSet::new()).collect();
-        Ok(Self {
+        let mut source = Self {
             devices,
             state: State::new(keymap),
             layout_provider,
@@ -248,7 +248,14 @@ impl EvdevSource {
             wake: None,
             topology_watch: Some(topology_watch),
             topology_refresh_pending: false,
-        })
+        };
+        if !source.refresh_layout() {
+            tracing::warn!(
+                "no trustworthy compositor keyboard-layout snapshot is available; evdev \
+                 matching and hotkeys are disabled until one becomes available"
+            );
+        }
+        Ok(source)
     }
 
     /// Install a non-blocking eventfd that ends [`Self::next_event_timeout`]
@@ -635,7 +642,12 @@ impl EvdevSource {
                 return false;
             }
         };
+        let locked_modifiers = self
+            .state
+            .serialize_mods(xkbcommon_rs::xkb_state::StateComponent::MODS_LOCKED);
         self.state = State::new(keymap);
+        self.state
+            .update_mask(0, 0, locked_modifiers, 0, 0, snapshot.group as usize);
         let mut held_keys = self
             .pressed
             .iter()
@@ -922,7 +934,10 @@ impl InputSource for EvdevSource {
     }
 
     fn capabilities(&self) -> InputSourceCapabilities {
-        InputSourceCapabilities::EVDEV
+        InputSourceCapabilities {
+            layout_aware: self.layout_available,
+            ..InputSourceCapabilities::EVDEV
+        }
     }
 
     fn next_event(&mut self) -> Result<InputEvent, InputSourceError> {
@@ -1101,6 +1116,7 @@ mod tests {
         fn snapshot(&mut self) -> Option<KeyboardLayoutSnapshot> {
             Some(KeyboardLayoutSnapshot {
                 generation: 1,
+                group: 0,
                 rules: None,
                 model: None,
                 layout: None,
@@ -1158,9 +1174,10 @@ mod tests {
     fn layout_generation_change_resets_matcher_and_replays_held_modifiers() {
         let snapshot = Arc::new(Mutex::new(Some(KeyboardLayoutSnapshot {
             generation: 1,
+            group: 0,
             rules: None,
             model: None,
-            layout: Some("us".into()),
+            layout: Some("us,de".into()),
             variant: None,
             options: None,
         })));
@@ -1170,9 +1187,10 @@ mod tests {
         source.take_pending_events();
         *snapshot.lock().unwrap() = Some(KeyboardLayoutSnapshot {
             generation: 2,
+            group: 1,
             rules: None,
             model: None,
-            layout: Some("de".into()),
+            layout: Some("us,de".into()),
             variant: None,
             options: None,
         });
@@ -1184,6 +1202,41 @@ mod tests {
             "events: {events:?}"
         );
         source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 42, 0));
+    }
+
+    #[test]
+    fn layout_change_preserves_locked_caps_state() {
+        let snapshot = Arc::new(Mutex::new(Some(KeyboardLayoutSnapshot {
+            generation: 1,
+            group: 0,
+            rules: None,
+            model: Some("pc105".into()),
+            layout: Some("us,de".into()),
+            variant: Some(",".into()),
+            options: None,
+        })));
+        let mut source =
+            source_with_provider(Box::new(MutableLayoutProvider(Arc::clone(&snapshot))));
+        source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 58, 1));
+        source.take_pending_events();
+        source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 58, 0));
+        source.take_pending_events();
+
+        *snapshot.lock().unwrap() = Some(KeyboardLayoutSnapshot {
+            generation: 2,
+            group: 1,
+            rules: None,
+            model: Some("pc105".into()),
+            layout: Some("us,de".into()),
+            variant: Some(",".into()),
+            options: None,
+        });
+        source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 21, 1));
+        let events = source.take_pending_events();
+        assert!(
+            events.contains(&InputEvent::TextChar('Z')),
+            "events: {events:?}"
+        );
     }
 
     #[test]
