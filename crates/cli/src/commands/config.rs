@@ -690,11 +690,16 @@ pub(crate) fn import_command(mut args: Args) -> Result<()> {
             if add_to_active_library {
                 if !report_json {
                     eprintln!(
-                        "AutoKey import: {} phrases imported, {} unsupported",
-                        imported.report.imported, imported.report.unsupported
+                        "AutoKey migration: {} imported, {} skipped, {} need review",
+                        imported.report.imported,
+                        imported.report.skipped,
+                        imported.report.needs_review
                     );
                     for warning in &imported.report.warnings {
-                        eprintln!("unsupported: {}: {}", warning.entry, warning.reason);
+                        eprintln!(
+                            "skipped: {}: {} (remediation: {})",
+                            warning.entry, warning.reason, warning.remediation
+                        );
                     }
                 }
                 let report =
@@ -712,11 +717,14 @@ pub(crate) fn import_command(mut args: Args) -> Result<()> {
                 eprintln!("{}", serde_json::to_string(&imported.report)?);
             } else {
                 eprintln!(
-                    "AutoKey import: {} phrases imported, {} unsupported",
-                    imported.report.imported, imported.report.unsupported
+                    "AutoKey migration: {} imported, {} skipped, {} need review",
+                    imported.report.imported, imported.report.skipped, imported.report.needs_review
                 );
                 for warning in &imported.report.warnings {
-                    eprintln!("unsupported: {}: {}", warning.entry, warning.reason);
+                    eprintln!(
+                        "skipped: {}: {} (remediation: {})",
+                        warning.entry, warning.reason, warning.remediation
+                    );
                 }
             }
             print!("{}", toml::to_string_pretty(&imported.config)?);
