@@ -13,6 +13,7 @@ categories.workspace = true
 
 [dependencies]
 serde_json.workspace = true
+serde.workspace = true
 anyhow.workspace = true
 libc.workspace = true
 zeroize.workspace = true
@@ -32,6 +33,7 @@ zbus = { version = "5", default-features = false, features = ["async-io", "block
 notify.workspace = true
 wayland-client.workspace = true
 wayland-protocols = { workspace = true, features = ["client", "staging"] }
+xkbcommon-rs.workspace = true
 
 [build-dependencies]
 wayexpand-build-info = { path = "../build-info" }

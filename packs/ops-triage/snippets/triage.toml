@@ -41,6 +41,20 @@ tags = ["dns", "network"]
 replacement = "resolvectl query {{field:name=example.net}}; dig +short {{field:name}} {{choice:type=A|AAAA|CNAME|MX|TXT}} @{{field:server=1.1.1.1}}"
 
 [[expansion]]
+trigger = ";cloud-context"
+description = "Review the active Kubernetes or cloud CLI identity before an operational command"
+category = "Operations triage"
+tags = ["cloud", "kubernetes", "target-review", "read-only"]
+replacement = """Operator-selected environment: {{choice:environment=development|staging|production;default=staging;required}}
+Expected account, project, or cluster: {{field:expected target|required|max=256}}
+
+This does not infer or select your shell, SSH, container, Kubernetes, or cloud context. Review the expected target, then choose and run the matching read-only identity command in the intended session:
+{{choice:identity command=kubectl config current-context|aws sts get-caller-identity|gcloud config get-value project|az account show --output table;required}}
+
+Compare the result with the expected target before continuing. Cloud identity commands may contact the provider and can reveal account identifiers; inspect output before sharing. WayExpand inserts this text and does not execute it.
+"""
+
+[[expansion]]
 trigger = ";;http-check"
 description = "Status, timing, and headers for one HTTP request, without the body"
 category = "Operations triage"
@@ -67,6 +81,179 @@ description = "List failed systemd units and the most recent errors"
 category = "Operations triage"
 tags = ["systemd", "diagnostics"]
 replacement = "systemctl --failed --no-pager && journalctl -p err -b --no-pager -n {{field:lines=50}}"
+
+[[expansion]]
+trigger = ";http503"
+description = "Review-first HTTP 503 diagnostic checklist and read-only command sequence"
+category = "Operations triage"
+tags = ["http", "incident", "diagnostics", "read-only"]
+replacement = """HTTP 503 first-response checklist (review each command before running)
+
+Operator-selected environment: {{choice:environment=development|staging|production;default=staging;required}}
+Target host (label only; WayExpand does not detect SSH, container, or sudo context): {{field:target host|required|validate=hostname|max=253}}
+Service: {{field:service=nginx.service|validate=shell-single-quoted|required|max=128}}
+Local service port: {{field:port=8080|validate=port|required|max=5}}
+
+Confirm the current terminal is connected to the intended target before running these commands. They run on the machine of the shell where you execute them; the host label above does not connect to or select a host.
+
+1. Confirm the affected URL, start time, scope, and whether the failure is persistent.
+2. Check local service status, recent logs, and listening sockets:
+   systemctl status '{{field:service}}' --no-pager
+   journalctl -u '{{field:service}}' -n 100 --no-pager
+   ss -lntp
+3. Probe the local service port without downloading a response body:
+   curl -sS -I --connect-timeout 3 --max-time 5 'http://127.0.0.1:{{field:port}}'
+4. Check reverse-proxy and upstream errors; for Nginx, validate config without reloading:
+   sudo nginx -t
+5. Compare proxy/upstream health, recent deploys, capacity, and dependency status. Record evidence and escalate before making changes.
+
+These are inserted as editable text and are not executed by WayExpand. The commands inspect state; they do not restart services or change configuration. Redact credentials, tokens, and customer data before sharing output.
+"""
+
+[[expansion]]
+trigger = ";apache-check"
+description = "Review-first Apache service and configuration diagnostics"
+category = "Operations triage"
+tags = ["apache", "http", "read-only"]
+replacement = """Operator-selected environment: {{choice:environment=development|staging|production;default=staging;required}}
+Target host (verify the active shell/SSH session yourself): {{field:target host|required|validate=hostname|max=253}}
+Apache unit: {{choice:service=apache2.service|httpd.service;default=apache2.service;required}}
+
+Review the target and run these read-only checks from the intended host:
+systemctl status '{{field:service}}' --no-pager
+journalctl -u '{{field:service}}' -n 100 --no-pager
+sudo apachectl configtest
+ss -lntp
+
+These commands are inserted as text only. They do not restart Apache or change configuration. Redact sensitive log data before sharing it.
+"""
+
+[[expansion]]
+trigger = ";exim-check"
+description = "Read-only Exim health and queue-count checks"
+category = "Operations triage"
+tags = ["exim", "mail", "read-only"]
+replacement = """Operator-selected environment: {{choice:environment=development|staging|production;default=staging;required}}
+Target host (verify the active shell/SSH session yourself): {{field:target host|required|validate=hostname|max=253}}
+
+Review the target, then run these read-only checks from the intended mail host:
+systemctl status exim --no-pager
+journalctl -u exim -n 100 --no-pager
+exim -bpc
+
+The queue count is safer to share than message contents. Do not paste message bodies, addresses, or delivery logs into a ticket without checking for personal or confidential data. These commands are inserted as text only and do not alter the queue.
+"""
+
+[[expansion]]
+trigger = ";mariadb-check"
+description = "Review-first MariaDB service, socket, and local ping checks"
+category = "Operations triage"
+tags = ["mariadb", "database", "read-only"]
+replacement = """Operator-selected environment: {{choice:environment=development|staging|production;default=staging;required}}
+Target host (verify the active shell/SSH session yourself): {{field:target host|required|validate=hostname|max=253}}
+Service unit: {{field:service=mariadb.service|validate=shell-single-quoted|required|max=128}}
+
+Review the target and confirm the approved account/context before running checks:
+systemctl status '{{field:service}}' --no-pager
+journalctl -u '{{field:service}}' -n 100 --no-pager
+ss -lntp
+mariadb-admin --connect-timeout=5 ping
+
+The client may use credentials from local option files. Do not expose credentials or database contents in shared output. These commands are inserted as text only and do not modify data.
+"""
+
+[[expansion]]
+trigger = ";cpanel-check"
+description = "Review-first cPanel and WHM service status diagnostics"
+category = "Operations triage"
+tags = ["cpanel", "whm", "read-only"]
+replacement = """Operator-selected environment: {{choice:environment=development|staging|production;default=staging;required}}
+Target host (verify the active shell/SSH session yourself): {{field:target host|required|validate=hostname|max=253}}
+
+Confirm the current shell is on the intended cPanel/WHM server and has the required privileges. Review and run these read-only checks:
+systemctl status cpsrvd exim httpd --no-pager
+exim -bpc
+
+WHM also provides a Service Status view; service availability varies with the server profile. Do not share customer account details or mail contents from diagnostic output. These commands are inserted as text only and do not restart services or modify mail.
+"""
+
+[[expansion]]
+trigger = ";escalation"
+description = "Structured on-call escalation with impact, evidence, and requested action"
+category = "On-call notes"
+tags = ["incident", "handoff", "escalation"]
+replacement = """Escalation — {{datefield:reported_at=today|required}}
+Incident/ticket: {{field:reference|required|max=128}}
+Severity: {{choice:severity=SEV3|SEV2|SEV1|required}}
+Service/environment: {{field:service and environment|required|max=256}}
+Impact and scope: {{field:impact|required|min=10|max=2000}}
+Started / last known good: {{field:time window|required|max=256}}
+Evidence and relevant dashboards/logs: {{field:evidence|required|max=2000}}
+Actions taken and results: {{field:actions taken|required|max=2000}}
+Current risk or customer impact: {{field:risk|required|max=1000}}
+Requested help / decision: {{field:request|required|min=5|max=1000}}
+Owner and next update: {{field:owner and next update|required|max=256}}
+"""
+
+[[expansion]]
+trigger = ";runbook"
+description = "Operational runbook outline with prerequisites, verification, rollback, and escalation"
+category = "Operations documentation"
+tags = ["runbook", "operations", "documentation"]
+replacement = """# {{field:procedure|required|min=3|max=160}}
+
+Owner: {{field:team or owner|required|max=128}}
+Last reviewed: {{datefield:reviewed=today|required}}
+Applies to: {{field:service and environments|required|max=256}}
+
+## Purpose and expected outcome
+{{field:purpose and success criteria|required|min=10|max=1000}}
+
+## Safety and prerequisites
+- Required access/approvals: {{field:access and approvals|required|max=512}}
+- User impact and stop conditions: {{field:impact and stop conditions|required|max=512}}
+- Confirm the target environment before running any command.
+
+## Diagnosis
+{{field:read-only checks and expected results|required|max=2000}}
+
+## Procedure
+1. {{field:step 1|required|max=1000}}
+2. {{field:step 2|required|max=1000}}
+3. Verify the outcome: {{field:verification|required|max=1000}}
+
+## Rollback
+{{field:rollback steps and verification|required|max=1500}}
+
+## Escalation and references
+Escalate to: {{field:team or contact|required|max=256}}
+References: {{field:dashboards, tickets, or documentation|max=1000}}
+"""
+
+[[expansion]]
+trigger = ";change-record"
+description = "Reviewable change record with risk, validation, rollback, and approval"
+category = "Change management"
+tags = ["change", "approval", "documentation"]
+replacement = """Change record — {{field:change ID|required|max=128}}
+Title: {{field:summary|required|min=5|max=200}}
+Requester / owner: {{field:owner|required|max=128}}
+Environment and affected services: {{field:scope|required|max=512}}
+Planned window and timezone: {{field:window|required|max=256}}
+Risk and expected impact: {{field:risk and impact|required|max=1000}}
+
+Implementation plan:
+{{field:steps|required|min=10|max=2000}}
+
+Validation and success criteria:
+{{field:checks|required|min=5|max=1500}}
+
+Rollback trigger and procedure:
+{{field:rollback|required|min=5|max=1500}}
+
+Approver: {{field:approver|required|max=128}}
+Communication / ticket links: {{field:references|max=1000}}
+"""
 
 [[expansion]]
 trigger = ";;incident-entry"
