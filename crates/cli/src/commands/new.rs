@@ -613,8 +613,10 @@ fn prepare_validator_environment(command: &mut Command, workspace: &Path) {
             std::env::var_os("PATH").unwrap_or_else(|| "/usr/bin:/bin".into()),
         )
         .env("HOME", workspace)
-        .env("LANG", "C")
-        .env("LC_ALL", "C")
+        // Ansible's Python runtime requires a UTF-8 locale even though the
+        // validator output should otherwise be deterministic.
+        .env("LANG", "C.UTF-8")
+        .env("LC_ALL", "C.UTF-8")
         .env("ANSIBLE_CONFIG", "/dev/null")
         .env("ANSIBLE_LOCAL_TEMP", ansible_tmp)
         .env("ANSIBLE_NOCOLOR", "1")
