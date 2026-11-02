@@ -5,6 +5,7 @@ mod build_info;
 mod clipboard;
 mod control;
 mod counters;
+mod evdev_layout;
 mod events;
 mod failure_trace;
 mod focus;
