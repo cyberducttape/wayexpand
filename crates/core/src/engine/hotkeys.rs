@@ -46,19 +46,17 @@ impl ExpansionEngine {
         if !self.is_capture_enabled() {
             return Vec::new();
         }
-        self.validated
-            .hotkeys
-            .iter()
-            .filter(|(configured, _)| configured.matches(chord))
-            .filter_map(|(_, index)| {
-                let binding: &HotkeyConfig = self.config.hotkey.get(*index)?;
-                Some(HotkeyResult {
-                    chord: chord.clone(),
-                    description: binding.description.clone(),
-                    command: binding.command.clone(),
-                })
-            })
-            .collect()
+        let Some(index) = self.validated.hotkeys.get(chord) else {
+            return Vec::new();
+        };
+        let Some(binding): Option<&HotkeyConfig> = self.config.hotkey.get(*index) else {
+            return Vec::new();
+        };
+        vec![HotkeyResult {
+            chord: chord.clone(),
+            description: binding.description.clone(),
+            command: binding.command.clone(),
+        }]
     }
 
     /// Execute one validated hotkey action without invoking a shell. Output

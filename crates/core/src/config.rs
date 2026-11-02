@@ -622,7 +622,7 @@ pub struct ValidatedConfig {
     pub(crate) compiled_templates: Vec<Option<Arc<crate::CompiledTemplate>>>,
     pub(crate) snippets: Arc<crate::SnippetLibrary>,
     pub(crate) undo_chord: Option<KeyChord>,
-    pub(crate) hotkeys: Vec<(KeyChord, usize)>,
+    pub(crate) hotkeys: HashMap<KeyChord, usize>,
 }
 
 #[derive(Clone)]
@@ -641,7 +641,7 @@ pub(crate) struct ValidatedMetadata {
     pub(crate) compiled_templates: Vec<Option<Arc<crate::CompiledTemplate>>>,
     pub(crate) snippets: Arc<crate::SnippetLibrary>,
     pub(crate) undo_chord: Option<KeyChord>,
-    pub(crate) hotkeys: Vec<(KeyChord, usize)>,
+    pub(crate) hotkeys: HashMap<KeyChord, usize>,
 }
 
 impl ValidatedConfig {

@@ -3,6 +3,7 @@ use crate::*;
 impl GuiApp {
     /// Collapsible editor for a command-backed (dynamic) replacement.
     pub(crate) fn render_command_editor(&mut self, ui: &mut egui::Ui, palette: &Palette) {
+        self.refresh_form_fields_cache();
         ui.collapsing(self.strings.dynamic_command(), |ui| {
             let Some(draft) = self.draft.as_mut() else {
                 ui.label(self.strings.draft_unavailable());
@@ -82,8 +83,11 @@ impl GuiApp {
                             );
                         } else {
                             let parameters = broker_action_parameters(&action_id);
-                            let fields =
-                                wayexpand_core::form_fields(&draft.replacement).unwrap_or_default();
+                            let fields = self
+                                .form_fields_cache
+                                .as_ref()
+                                .map(|(_, fields, _)| fields.as_slice())
+                                .unwrap_or_default();
                             let field_names = fields
                                 .iter()
                                 .map(|field| field.key.as_str())

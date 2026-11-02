@@ -7,7 +7,7 @@
 use std::fmt;
 use thiserror::Error;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Modifiers {
     pub ctrl: bool,
     pub alt: bool,
@@ -15,7 +15,7 @@ pub struct Modifiers {
     pub super_key: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct KeyChord {
     pub modifiers: Modifiers,
     pub key: String,
