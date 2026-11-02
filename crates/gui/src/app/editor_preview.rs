@@ -5,6 +5,25 @@ pub(crate) fn estimated_key_event_latency_ms(chars: usize, chars_per_second: u32
 }
 
 impl GuiApp {
+    pub(crate) fn refresh_form_fields_cache(&mut self) {
+        let Some(replacement) = self.draft.as_ref().map(|draft| draft.replacement.as_str()) else {
+            self.form_fields_cache = None;
+            return;
+        };
+        if self
+            .form_fields_cache
+            .as_ref()
+            .is_some_and(|(cached_template, _, _)| cached_template == replacement)
+        {
+            return;
+        }
+        let template = replacement.to_owned();
+        let fields = wayexpand_core::form_fields(&template).unwrap_or_default();
+        let compiled_template =
+            wayexpand_core::CompiledTemplate::compile(&template).map_err(|error| error.to_string());
+        self.form_fields_cache = Some((template, fields, compiled_template));
+    }
+
     /// Live preview of the draft, including the command preview runner.
     pub(crate) fn render_preview_section(&mut self, ui: &mut egui::Ui, palette: &Palette) {
         ui.add_space(14.0);
@@ -152,14 +171,16 @@ impl GuiApp {
     }
 
     fn render_form_test(&mut self, ui: &mut egui::Ui, palette: &Palette) {
-        let Some(draft) = self.draft.as_ref() else {
+        if self.draft.is_none() {
+            return;
+        }
+        self.refresh_form_fields_cache();
+        let Some((_, fields, compiled_template)) = self.form_fields_cache.as_ref() else {
             return;
         };
-        let fields = match wayexpand_core::form_fields(&draft.replacement) {
-            Ok(fields) if !fields.is_empty() => fields,
-            _ => return,
-        };
-        let template = draft.replacement.clone();
+        if fields.is_empty() {
+            return;
+        }
         let snippets = Arc::clone(&self.preview_library_snippets);
         ui.collapsing(self.strings.form_test_values(), |ui| {
             ui.label(
@@ -210,11 +231,17 @@ impl GuiApp {
                     }
                 });
             }
-            match preview::render_form_template(
-                &template,
-                &self.form_preview_values,
-                Arc::clone(&snippets),
-            ) {
+            let rendered = compiled_template
+                .as_ref()
+                .map_err(Clone::clone)
+                .and_then(|compiled| {
+                    preview::render_form_template(
+                        compiled,
+                        &self.form_preview_values,
+                        Arc::clone(&snippets),
+                    )
+                });
+            match rendered {
                 Ok((rendered, cursor_offset)) => {
                     ui.label(self.strings.form_template_rendered());
                     egui::Frame::new()

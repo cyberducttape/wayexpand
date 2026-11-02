@@ -275,6 +275,13 @@ struct GuiApp {
     /// result) to avoid rebuilding the ExpansionEngine on every repaint. The
     /// revision is O(1), unlike hashing a potentially large draft.
     preview_cache: Option<(u64, String, Result<String, String>)>,
+    /// Parsed form fields and their source template, reused by the preview and
+    /// command contract panels until the replacement text changes.
+    form_fields_cache: Option<(
+        String,
+        Vec<wayexpand_core::FormField>,
+        Result<wayexpand_core::CompiledTemplate, String>,
+    )>,
     reusable_snippet_filter: String,
     reusable_snippet_choices: Option<ReusableSnippetChoices>,
     form_field_name: String,
@@ -602,6 +609,7 @@ impl GuiApp {
             command_preview_cancel: None,
             theme_refresh_pending: false,
             preview_cache: None,
+            form_fields_cache: None,
             reusable_snippet_filter: String::new(),
             reusable_snippet_choices: None,
             form_field_name: "name".into(),

@@ -86,7 +86,7 @@ impl Config {
             });
         }
         let mut hotkeys = Vec::new();
-        let mut parsed_hotkeys = Vec::new();
+        let mut parsed_hotkeys = HashMap::<KeyChord, usize>::new();
         for (index, binding) in self.hotkey.iter().enumerate() {
             let chord =
                 KeyChord::parse(&binding.chord).map_err(|_| ConfigError::InvalidHotkey {
@@ -148,7 +148,7 @@ impl Config {
             }
             if binding.enabled {
                 hotkeys.push((index, chord.to_string()));
-                parsed_hotkeys.push((chord, index));
+                parsed_hotkeys.insert(chord, index);
             }
         }
         hotkeys.sort_unstable_by(|left, right| {
