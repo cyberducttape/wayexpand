@@ -323,6 +323,10 @@ impl ArtifactValidator for AnsibleValidator {
         command
             .args(["--syntax-check", "--inventory", "localhost,"])
             .current_dir(workspace);
+        // Modern Ansible rejects /dev/null as a config because it has no
+        // recognized extension. Use an empty private config to avoid loading
+        // user or system Ansible configuration.
+        fs::write(workspace.join("wayexpand-ansible.cfg"), "[defaults]\n")?;
         let mut roles_path = None;
         match target {
             ValidationTarget::File(path) => {
@@ -617,7 +621,7 @@ fn prepare_validator_environment(command: &mut Command, workspace: &Path) {
         // validator output should otherwise be deterministic.
         .env("LANG", "C.UTF-8")
         .env("LC_ALL", "C.UTF-8")
-        .env("ANSIBLE_CONFIG", "/dev/null")
+        .env("ANSIBLE_CONFIG", workspace.join("wayexpand-ansible.cfg"))
         .env("ANSIBLE_LOCAL_TEMP", ansible_tmp)
         .env("ANSIBLE_NOCOLOR", "1")
         .env("ANSIBLE_FORKS", "1")
