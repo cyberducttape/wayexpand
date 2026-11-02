@@ -133,14 +133,23 @@ Resolve a hotkey without executing its action.
 Preview a replacement. The optional application context is supplied with
 --preview-app APP or --preview-app=APP.
 .TP
-.B new [NAME [--set NAME=VALUE]... [-o PATH|--stdout] [--gui] [--force]] [--show NAME] [--json] [--config FILE]
+.B new [NAME [--set NAME=VALUE]... [-o PATH|--stdout] [--gui] [--force] [--validate]] [--show NAME] [--json] [--config FILE]
 Fill in a file template, such as a Dockerfile or an Ansible playbook, and
 write it to the snippet's output_file in the current directory. The built-in
 ansible-role template writes a complete, atomically published role directory.
 Without NAME,
 list the available templates. Missing values are asked for in the terminal,
 or in the form window with --gui. An existing file is replaced only with
---force. --show prints a template as a snippet to copy.
+--force. --show prints a template as a snippet to copy. --validate explicitly
+runs the registered validator for supported built-in artifact types before
+publishing the result. For example, `wayexpand new playbook --set hosts=webservers
+--set package=nginx --validate` runs `ansible-playbook --syntax-check`; it does
+not execute the playbook. Validators run against a private staging copy, have a
+30-second deadline, and receive a cleared environment with no inherited
+credential variables. Validation failure leaves the destination untouched.
+Each validator must be installed separately; see
+.I docs/ARTIFACT_VALIDATION.md
+for the supported tools and validation boundary.
 .TP
 .B list [--json] [CONFIG]
 List configured expansions and hotkeys.
