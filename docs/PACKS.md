@@ -17,18 +17,24 @@ offline. Install only the libraries you want.
 | `git` | Review-first Git commands and collaborative workflow templates |
 | `customer-support` | Acknowledgements, status updates, maintenance notices, ticket resolutions |
 | `developer` | SQL, shell, and Markdown starters |
-| `ops-triage` | Read-only first-response checks, an HTTP 503 checklist, and structured escalation, runbook, change-record, timeline, and handoff notes |
+| `ops-triage` | Read-only first-response checks for HTTP 503, Apache, Exim, MariaDB, and cPanel/WHM, plus target-context review and structured incident documentation |
 
 For a review-first HTTP 503 workflow, install `ops-triage` and type `;http503`.
-The form asks for the target host, port, request path, and service unit, then
-inserts the checklist and diagnostic commands as text. Review each command and
-its target before running it. The sequence checks DNS, makes a bounded HTTP
-request without printing a response body, reads systemd status and journal
-entries, and optionally validates Nginx configuration; it does not restart a
-service or modify configuration. Redact credentials and customer data before
-sharing command output.
+The form asks for the operator-selected environment, target host, service unit,
+and local service port, then inserts the checklist and diagnostic commands as
+text. Commands run on whichever machine the operator's current shell targets;
+the host label does not connect to or select a host. WayExpand does not inspect
+terminal contents, SSH state, or shell history to infer that target. Review each
+command before manually running it. The sequence reads systemd status and
+journal entries, checks listening sockets, and makes a bounded localhost HTTP
+probe; it does not restart a service or modify configuration. Redact
+credentials and customer data before sharing command output.
 
-The same pack provides `;escalation`, `;runbook`, and `;change-record` forms.
+The same pack provides `;escalation`, `;runbook`, `;change-record`,
+`;apache-check`, `;exim-check`, `;mariadb-check`, `;cpanel-check`, and
+`;cloud-context` forms. Cloud identity commands are explicitly chosen by the
+operator and may contact the cloud provider; review output for account details
+before sharing it.
 The customer-support pack provides `;;ticket-resolution` in addition to
 acknowledgement and status-update replies.
 

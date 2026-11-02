@@ -1,12 +1,12 @@
 format_version = 1
 id = "wayexpand.ops-triage"
-version = "1.1.0"
+version = "1.2.0"
 name = "Operations Triage"
 publisher = "WayExpand project"
-description = "Insert-only diagnostic checks and standardized HTTP 503, escalation, runbook, and change-record templates."
+description = "Insert-only, review-first diagnostics and standardized incident, escalation, runbook, change-record, and target-context templates."
 capabilities = ["forms"]
 
 [review]
 reviewed_by = "WayExpand project review"
 reviewed_at = "2026-11-01"
-summary = "HTTP 503 guidance uses read-only commands and calls for review before execution; runbook, escalation, and change templates capture validation and rollback."
+summary = "Diagnostic commands remain inserted text; target labels are explicit and never inferred from terminal contents, SSH state, or shell history."
