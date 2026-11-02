@@ -1706,7 +1706,7 @@ mod tests {
             assert!(root.join(path).is_file(), "missing role file {path}");
         }
         let task_text = fs::read_to_string(root.join("tasks/main.yml")).unwrap();
-        assert!(task_text.contains("notify: Restart nginx"));
+        assert!(task_text.contains("notify: \"Restart nginx\""));
         let handler_text = fs::read_to_string(root.join("handlers/main.yml")).unwrap();
         assert!(handler_text.contains("state: restarted"));
         let template_text = fs::read_to_string(root.join("templates/default.conf.j2")).unwrap();
@@ -1904,6 +1904,32 @@ replacement = "Regards"
         .unwrap();
         assert!(rendered.contains("name: \"{{ item }}\""));
         assert!(rendered.contains("loop: \"{{ packages }}\""));
+    }
+
+    #[test]
+    fn infrastructure_generators_reject_invalid_field_values() {
+        let builtins = builtin_templates();
+        for (template, field, value) in [
+            ("compose", "service", "api/backend"),
+            ("compose", "host port", "70000"),
+            ("playbook", "hosts", "web servers"),
+            ("playbook", "package", "nginx\n  - name: injected"),
+            ("systemd-service", "command", "api-server"),
+            ("systemd-service", "user", "root;id"),
+            ("nginx-site", "server name", "api.example.net;"),
+            ("nginx-site", "upstream", "127.0.0.1:70000"),
+            ("k8s-deployment", "name", "API"),
+            ("k8s-deployment", "replicas", "many"),
+            ("k8s-deployment", "port", "0"),
+            ("k8s-deployment", "image", "nginx; touch /tmp/pwn"),
+        ] {
+            let (snippet, _) = find_template(&[(&builtins, Source::BuiltIn)], template).unwrap();
+            let fields = form_fields(&snippet.replacement).unwrap();
+            assert!(
+                values_from_assignments(&fields, vec![(field.into(), value.into())]).is_err(),
+                "{template} accepted invalid {field}={value:?}"
+            );
+        }
     }
 
     #[test]
