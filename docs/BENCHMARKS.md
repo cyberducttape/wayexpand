@@ -76,6 +76,47 @@ XKB path now forwards a `TextChar`; multi-scalar text and composed commits
 retain the owned string event. Use the probe as a narrow core regression
 check, not as an end-to-end daemon allocation claim.
 
+## Evdev capture and translation benchmark
+
+The evdev benchmark feeds press/release pairs through a synthetic file
+descriptor and measures the full backend turn: descriptor polling, device
+batch retrieval, XKB translation, and core event queuing. It does not require
+keyboard permissions or a physical device. It does not model kernel driver
+latency, compositor delivery, or a live layout switch.
+
+```sh
+cargo bench --locked -p wayexpand-backend-evdev --features benchmark --bench capture_translate
+```
+
+The poll loop reuses thread-local descriptor and ready/lost-index buffers, so
+the repeated benchmark iterations exercise the warmed path. Use a separate
+real-session soak to measure process idle CPU and compositor layout-switch
+latency; the synthetic benchmark cannot report those values.
+
+### Evdev capture/poll comparison: 2026-11-01
+
+On the KDE Wayland host used for this run, Criterion measured the optimized
+capture/translation path at 9.756 µs (95% interval 9.559–10.125 µs) and the
+benchmark-only copy of the previous allocating path at 9.795 µs (9.744–9.849
+µs), using 20 samples and a 5 s measurement. The intervals overlap; this change
+does not show a detectable latency improvement. Its benefit is reusing the
+descriptor, ready-index, and lost-index allocations on steady-state polls.
+
+The same session's existing daemon was observed making 410 KWin layout method
+calls in 5 s (82/s); a second 7 s capture observed 616 calls from that daemon
+(88/s). During a separate 5.21 s run of the updated isolated provider, D-Bus
+monitoring attributed 10 calls to its unique sender (1.92/s), a 97.7% reduction
+against the 82/s sample. The old daemon stayed active during the new-provider
+sample, so sender identity was used to separate their traffic.
+
+This run did not switch the user's active layout, so compositor signal-to-XKB
+refresh latency was not measured. The event path refreshes immediately on
+`layoutChanged`; the one-second fallback bounds recovery when signals are
+missed. `pidstat` sampled 3–5% CPU for the existing full daemon (4.17% mean)
+and 0–1.98% for the isolated-provider test process (about 1.0% mean). Those
+are not comparable workloads: the first is the full daemon, while the second
+is a test harness. No production CPU reduction claim is made from them.
+
 ## Current-source KWin smoke report (2026-10-27)
 
 The [preserved `doctor --certify` report](evidence/doctor-certify-dfec5c525.json)

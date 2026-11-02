@@ -32,6 +32,8 @@ zbus = { version = "5", default-features = false, features = ["async-io", "block
 notify.workspace = true
 wayland-client.workspace = true
 wayland-protocols = { workspace = true, features = ["client", "staging"] }
+async-io.workspace = true
+futures-lite.workspace = true
 
 [build-dependencies]
 wayexpand-build-info = { path = "../build-info" }

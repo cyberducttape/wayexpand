@@ -2,8 +2,9 @@
 //!
 //! KDE exposes the active XKB group and layout list over session D-Bus. The
 //! provider cross-checks them against KWin's config, or systemd-localed's
-//! keyboard properties when KWin has no per-user config, and publishes
-//! snapshots from a worker so the input reactor never performs I/O.
+//! keyboard properties when KWin has no per-user config. It listens for
+//! KWin layout signals and reconciles with a slower fallback poll; snapshots
+//! are published from a worker so the input reactor never performs I/O.
 
 use std::{
     collections::hash_map::DefaultHasher,
@@ -18,11 +19,14 @@ use std::{
     time::Duration,
 };
 
+use futures_lite::StreamExt;
 use wayexpand_backend_evdev::{KeyboardLayoutProvider, KeyboardLayoutSnapshot};
+#[cfg(test)]
 use zbus::blocking::{connection::Builder, Connection, Proxy};
 
 const DBUS_TIMEOUT: Duration = Duration::from_millis(250);
-const LAYOUT_POLL_INTERVAL: Duration = Duration::from_millis(20);
+const LAYOUT_FALLBACK_POLL_INTERVAL: Duration = Duration::from_secs(1);
+const LAYOUT_STOP_CHECK_INTERVAL: Duration = Duration::from_millis(100);
 const UNAVAILABLE_RETRY_INTERVAL: Duration = Duration::from_millis(500);
 const INITIAL_SNAPSHOT_WAIT: Duration = Duration::from_millis(300);
 
@@ -106,82 +110,203 @@ impl Drop for KwinKeyboardLayoutProvider {
 }
 
 fn layout_worker(shared: Arc<SharedSnapshot>, stopping: Arc<AtomicBool>) {
+    zbus::block_on(layout_worker_async(shared, stopping));
+}
+
+async fn layout_worker_async(shared: Arc<SharedSnapshot>, stopping: Arc<AtomicBool>) {
     while !stopping.load(Ordering::Acquire) {
-        match connect_kwin() {
+        match connect_kwin_async().await {
             Ok(connection) => {
-                let proxy = match Proxy::new(
+                let proxy = match zbus::Proxy::new(
                     &connection,
                     "org.kde.keyboard",
                     "/Layouts",
                     "org.kde.KeyboardLayouts",
-                ) {
+                )
+                .await
+                {
                     Ok(proxy) => proxy,
                     Err(error) => {
                         tracing::debug!(%error, "KWin keyboard-layout interface unavailable");
                         publish_snapshot(&shared, None);
-                        sleep_or_stop(&stopping, UNAVAILABLE_RETRY_INTERVAL);
+                        wait_or_stop(&stopping, UNAVAILABLE_RETRY_INTERVAL).await;
                         continue;
                     }
                 };
-                let locale_connection = connect_locale1().ok();
-                let locale_proxy = locale_connection.as_ref().and_then(|connection| {
-                    Proxy::new(
-                        connection,
-                        "org.freedesktop.locale1",
-                        "/org/freedesktop/locale1",
-                        "org.freedesktop.locale1",
-                    )
-                    .ok()
-                });
-                let config = match read_layout_config(locale_proxy.as_ref()) {
+                let config = match read_layout_config_async().await {
                     Ok(config) => config,
                     Err(error) => {
                         tracing::debug!(%error, "no trustworthy KDE keyboard layout configuration is available");
                         publish_snapshot(&shared, None);
-                        sleep_or_stop(&stopping, UNAVAILABLE_RETRY_INTERVAL);
+                        wait_or_stop(&stopping, UNAVAILABLE_RETRY_INTERVAL).await;
                         continue;
                     }
                 };
+                let mut layout_changed = match proxy.receive_signal("layoutChanged").await {
+                    Ok(stream) => Some(stream),
+                    Err(error) => {
+                        tracing::debug!(%error, "KWin layoutChanged notification unavailable; using fallback polling");
+                        None
+                    }
+                };
+                let mut layout_list_changed = match proxy.receive_signal("layoutListChanged").await
+                {
+                    Ok(stream) => Some(stream),
+                    Err(error) => {
+                        tracing::debug!(%error, "KWin layoutListChanged notification unavailable; using fallback polling");
+                        None
+                    }
+                };
+                let mut refresh_layout_list = true;
                 loop {
                     if stopping.load(Ordering::Acquire) {
                         return;
                     }
-                    match query_snapshot(&proxy, &config) {
+                    match query_snapshot_async(&proxy, &config, refresh_layout_list).await {
                         Ok(snapshot) => {
                             publish_snapshot(&shared, Some(snapshot));
-                            sleep_or_stop(&stopping, LAYOUT_POLL_INTERVAL);
                         }
                         Err(error) => {
                             tracing::debug!(%error, "KWin keyboard layout is unavailable or inconsistent");
                             publish_snapshot(&shared, None);
-                            sleep_or_stop(&stopping, UNAVAILABLE_RETRY_INTERVAL);
                             break;
                         }
                     }
+                    let next_fallback = std::time::Instant::now() + LAYOUT_FALLBACK_POLL_INTERVAL;
+                    loop {
+                        if stopping.load(Ordering::Acquire) {
+                            return;
+                        }
+                        let left =
+                            next_fallback.saturating_duration_since(std::time::Instant::now());
+                        let wait = left.min(LAYOUT_STOP_CHECK_INTERVAL);
+                        let outcome = match (layout_changed.as_mut(), layout_list_changed.as_mut())
+                        {
+                            (Some(layout), Some(list)) => {
+                                futures_lite::future::race(
+                                    async {
+                                        layout
+                                            .next()
+                                            .await
+                                            .map(|_| SignalResult::ActiveGroupChanged)
+                                            .unwrap_or(SignalResult::LayoutClosed)
+                                    },
+                                    futures_lite::future::race(
+                                        async {
+                                            list.next()
+                                                .await
+                                                .map(|_| SignalResult::LayoutListChanged)
+                                                .unwrap_or(SignalResult::ListClosed)
+                                        },
+                                        async {
+                                            async_io::Timer::after(wait).await;
+                                            SignalResult::Timeout
+                                        },
+                                    ),
+                                )
+                                .await
+                            }
+                            (Some(layout), None) => {
+                                futures_lite::future::race(
+                                    async {
+                                        layout
+                                            .next()
+                                            .await
+                                            .map(|_| SignalResult::ActiveGroupChanged)
+                                            .unwrap_or(SignalResult::LayoutClosed)
+                                    },
+                                    async {
+                                        async_io::Timer::after(wait).await;
+                                        SignalResult::Timeout
+                                    },
+                                )
+                                .await
+                            }
+                            (None, Some(list)) => {
+                                futures_lite::future::race(
+                                    async {
+                                        list.next()
+                                            .await
+                                            .map(|_| SignalResult::LayoutListChanged)
+                                            .unwrap_or(SignalResult::ListClosed)
+                                    },
+                                    async {
+                                        async_io::Timer::after(wait).await;
+                                        SignalResult::Timeout
+                                    },
+                                )
+                                .await
+                            }
+                            (None, None) => {
+                                async_io::Timer::after(wait).await;
+                                SignalResult::Timeout
+                            }
+                        };
+                        match outcome {
+                            SignalResult::ActiveGroupChanged => {
+                                refresh_layout_list = false;
+                                break;
+                            }
+                            SignalResult::LayoutListChanged => {
+                                refresh_layout_list = true;
+                                break;
+                            }
+                            SignalResult::LayoutClosed => {
+                                layout_changed = None;
+                                tracing::debug!(
+                                    "KWin layoutChanged stream closed; using fallback polling"
+                                );
+                            }
+                            SignalResult::ListClosed => {
+                                layout_list_changed = None;
+                                tracing::debug!(
+                                    "KWin layoutListChanged stream closed; using fallback polling"
+                                );
+                            }
+                            SignalResult::Timeout if std::time::Instant::now() >= next_fallback => {
+                                refresh_layout_list = true;
+                                break;
+                            }
+                            SignalResult::Timeout => {}
+                        }
+                    }
                 }
+                wait_or_stop(&stopping, UNAVAILABLE_RETRY_INTERVAL).await;
             }
             Err(error) => {
                 tracing::debug!(%error, "could not connect to KWin keyboard-layout service");
                 publish_snapshot(&shared, None);
-                sleep_or_stop(&stopping, UNAVAILABLE_RETRY_INTERVAL);
+                wait_or_stop(&stopping, UNAVAILABLE_RETRY_INTERVAL).await;
             }
         }
     }
 }
 
-fn sleep_or_stop(stopping: &AtomicBool, duration: Duration) {
-    let step = Duration::from_millis(10);
-    let mut remaining = duration;
-    while !remaining.is_zero() && !stopping.load(Ordering::Acquire) {
-        let sleep = remaining.min(step);
-        thread::sleep(sleep);
-        remaining = remaining.saturating_sub(sleep);
+#[derive(Clone, Copy)]
+enum SignalResult {
+    ActiveGroupChanged,
+    LayoutListChanged,
+    LayoutClosed,
+    ListClosed,
+    Timeout,
+}
+
+async fn wait_or_stop(stopping: &AtomicBool, duration: Duration) {
+    let deadline = std::time::Instant::now() + duration;
+    while !stopping.load(Ordering::Acquire) {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            return;
+        }
+        async_io::Timer::after(left.min(LAYOUT_STOP_CHECK_INTERVAL)).await;
     }
 }
 
 fn publish_snapshot(shared: &SharedSnapshot, value: Option<KeyboardLayoutSnapshot>) {
     if let Ok(mut current) = shared.value.lock() {
-        *current = value;
+        if *current != value {
+            *current = value;
+        }
     }
     if let Ok(mut attempted) = shared.first_attempt.lock() {
         *attempted = true;
@@ -189,14 +314,51 @@ fn publish_snapshot(shared: &SharedSnapshot, value: Option<KeyboardLayoutSnapsho
     }
 }
 
+#[cfg(test)]
 fn connect_kwin() -> zbus::Result<Connection> {
     Builder::session()?.method_timeout(DBUS_TIMEOUT).build()
 }
 
+async fn connect_kwin_async() -> zbus::Result<zbus::Connection> {
+    zbus::connection::Builder::session()?
+        .method_timeout(DBUS_TIMEOUT)
+        .build()
+        .await
+}
+
+async fn read_layout_config_async() -> anyhow::Result<KwinLayoutConfig> {
+    let config_path = kde_keyboard_config_path()?;
+    match fs::read_to_string(&config_path) {
+        Ok(contents) => parse_kwin_layout_config(&contents)
+            .ok_or_else(|| anyhow::anyhow!("KWin layout config is incomplete or unsupported")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let connection = zbus::connection::Builder::system()?
+                .method_timeout(DBUS_TIMEOUT)
+                .build()
+                .await?;
+            let proxy = zbus::Proxy::new(
+                &connection,
+                "org.freedesktop.locale1",
+                "/org/freedesktop/locale1",
+                "org.freedesktop.locale1",
+            )
+            .await?;
+            let model: String = proxy.get_property("X11Model").await?;
+            let layouts: String = proxy.get_property("X11Layout").await?;
+            let variants: String = proxy.get_property("X11Variant").await?;
+            let options: String = proxy.get_property("X11Options").await?;
+            locale1_layout_config_values(&model, &layouts, &variants, &options)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+#[cfg(test)]
 fn connect_locale1() -> zbus::Result<Connection> {
     Builder::system()?.method_timeout(DBUS_TIMEOUT).build()
 }
 
+#[cfg(test)]
 fn read_layout_config(locale_proxy: Option<&Proxy<'_>>) -> anyhow::Result<KwinLayoutConfig> {
     let config_path = kde_keyboard_config_path()?;
     match fs::read_to_string(&config_path) {
@@ -211,11 +373,21 @@ fn read_layout_config(locale_proxy: Option<&Proxy<'_>>) -> anyhow::Result<KwinLa
     }
 }
 
+#[cfg(test)]
 fn locale1_layout_config(proxy: &Proxy<'_>) -> anyhow::Result<KwinLayoutConfig> {
     let model: String = proxy.get_property("X11Model")?;
     let layout_list: String = proxy.get_property("X11Layout")?;
     let variant_list: String = proxy.get_property("X11Variant")?;
     let options_list: String = proxy.get_property("X11Options")?;
+    locale1_layout_config_values(&model, &layout_list, &variant_list, &options_list)
+}
+
+fn locale1_layout_config_values(
+    model: &str,
+    layout_list: &str,
+    variant_list: &str,
+    options_list: &str,
+) -> anyhow::Result<KwinLayoutConfig> {
     let layouts = layout_list
         .split(',')
         .map(str::to_owned)
@@ -225,13 +397,13 @@ fn locale1_layout_config(proxy: &Proxy<'_>) -> anyhow::Result<KwinLayoutConfig> 
     } else {
         variant_list.split(',').map(str::to_owned).collect()
     };
-    let model = if model.is_empty() { "pc105" } else { &model }.to_owned();
+    let model = if model.is_empty() { "pc105" } else { model }.to_owned();
     if layouts.is_empty()
         || variants.len() != layouts.len()
         || !valid_xkb_name(&model)
         || layouts.iter().any(|layout| !valid_xkb_name(layout))
         || variants.iter().any(|variant| !valid_variant(variant))
-        || !valid_options(&options_list)
+        || !valid_options(options_list)
     {
         anyhow::bail!("systemd-localed keyboard properties are incomplete or unsupported");
     }
@@ -239,10 +411,11 @@ fn locale1_layout_config(proxy: &Proxy<'_>) -> anyhow::Result<KwinLayoutConfig> 
         model,
         layouts,
         variants,
-        options: (!options_list.is_empty()).then_some(options_list),
+        options: (!options_list.is_empty()).then_some(options_list.to_owned()),
     })
 }
 
+#[cfg(test)]
 fn query_snapshot(
     proxy: &Proxy<'_>,
     config: &KwinLayoutConfig,
@@ -253,6 +426,34 @@ fn query_snapshot(
         .into_iter()
         .map(|(layout, variant, _)| (layout, variant))
         .collect::<Vec<_>>();
+    snapshot_for_config(
+        config.clone(),
+        effective_layouts,
+        current_group,
+        rules_from_environment(),
+    )
+}
+
+async fn query_snapshot_async(
+    proxy: &zbus::Proxy<'_>,
+    config: &KwinLayoutConfig,
+    refresh_layout_list: bool,
+) -> anyhow::Result<KeyboardLayoutSnapshot> {
+    let current_group: u32 = proxy.call("getLayout", &()).await?;
+    let effective_layouts: Vec<(String, String)> = if refresh_layout_list {
+        let layouts: Vec<(String, String, String)> = proxy.call("getLayoutsList", &()).await?;
+        layouts
+            .into_iter()
+            .map(|(layout, variant, _)| (layout, variant))
+            .collect()
+    } else {
+        config
+            .layouts
+            .iter()
+            .cloned()
+            .zip(config.variants.iter().cloned())
+            .collect()
+    };
     snapshot_for_config(
         config.clone(),
         effective_layouts,
@@ -517,5 +718,14 @@ mod tests {
         let snapshot = query_snapshot(&proxy, &config).unwrap();
         assert_eq!(snapshot.group, 0);
         assert_eq!(snapshot.layout.as_deref(), Some("us"));
+    }
+
+    #[test]
+    #[ignore = "manual five-second idle measurement; observe with dbus-monitor and pidstat"]
+    fn live_kwin_layout_provider_idle_measurement() {
+        let mut provider = KwinKeyboardLayoutProvider::new();
+        assert!(provider.snapshot().is_some());
+        thread::sleep(Duration::from_secs(5));
+        assert!(provider.snapshot().is_some());
     }
 }
