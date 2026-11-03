@@ -106,14 +106,20 @@ this boundary under `out_of_scope_capabilities`.
 **Observed limitation: more than one configured layout on KWin's EIS.** With
 two layouts configured (for example `us,de`), KWin 6.6.6 sends libei clients
 a two-layout keymap but never reports which layout is active, not at connect
-and not after a layout switch. The `ei_keyboard` keysym fallback refuses to
-guess, so on the `evdev+libei` route **no replacement is typed at all** while
-several layouts are configured. Nothing is erased, so it fails safe, but the
-route is unusable for those users. Observed in private headless KWin
-sessions on 2026-10-27 (commit `c8c27d86d632`, see
+and not after a layout switch. This reproduced limitation applies to builds
+that rely only on EIS modifier reports. The current daemon also consults the
+compositor's layout provider and accepts its active group only after the
+provider's full XKB map matches the EIS keymap. If the provider is unavailable
+or disagrees, the fallback refuses with a clear diagnostic; WayExpand never
+selects the first layout. The optional Fcitx5 bridge can provide a verified
+Unicode direct-commit route when enabled and available. The original
+limitation was observed in private headless KWin sessions on 2026-10-27
+(commit `c8c27d86d632`, see
 [`evidence/kwin-real-client-c8c27d86d632.txt`](evidence/kwin-real-client-c8c27d86d632.txt)),
-not yet confirmed in a live Plasma session. Single-layout `us`, `de`, `fr`,
-and `us(altgr-intl)` sessions type correctly.
+not yet confirmed in a live Plasma session. The new provider-to-EIS keymap
+agreement path has unit coverage but still needs repeatable live layout-switch
+and physical-keyboard certification before this combination is certified.
+Single-layout `us`, `de`, `fr`, and `us(altgr-intl)` sessions type correctly.
 
 The integration procedure is in
 [`docs/INTEGRATION_TESTING.md`](INTEGRATION_TESTING.md). A passing unit test,
