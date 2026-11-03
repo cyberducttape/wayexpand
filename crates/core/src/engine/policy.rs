@@ -42,7 +42,14 @@ impl ExpansionEngine {
 
     /// Whether keystroke routes may erase text they cannot verify.
     pub fn compatibility_mode(&self) -> crate::CompatibilityMode {
-        self.config.settings.compatibility_mode
+        self.compatibility_mode_override
+            .unwrap_or(self.config.settings.compatibility_mode)
+    }
+
+    /// Set the runtime replacement compatibility decision. Configuration
+    /// reloads replace this value with the newly validated setting.
+    pub fn set_compatibility_mode(&mut self, mode: crate::CompatibilityMode) {
+        self.compatibility_mode_override = Some(mode);
     }
 
     pub fn libei_token_persistence(&self) -> bool {

@@ -80,6 +80,7 @@ pub struct ExpansionEngine {
     /// Runtime-only restrictions supplied by the host (for example command
     /// worker availability) are kept outside the immutable source snapshot.
     runtime_policy: crate::OrganizationPolicy,
+    compatibility_mode_override: Option<crate::CompatibilityMode>,
     /// Compiled app-id globs corresponding positionally to `app_filters`.
     app_filter_globs: Vec<Vec<Option<GlobPattern>>>,
     matcher: Matcher,
@@ -266,6 +267,7 @@ impl ExpansionEngine {
             config,
             validated: Arc::clone(&validated),
             runtime_policy: validated.resolved_policy.clone(),
+            compatibility_mode_override: None,
             app_filter_globs,
             matcher,
             match_scratch: MatchScratch::default(),
