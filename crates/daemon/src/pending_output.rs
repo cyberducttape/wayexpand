@@ -50,9 +50,37 @@ pub(crate) enum OutputJob {
 }
 
 impl OutputJob {
-    fn result(&self) -> &ExpansionResult {
+    fn split_payload(self) -> (Self, ExpansionResult) {
+        fn metadata(result: &ExpansionResult) -> ExpansionResult {
+            ExpansionResult {
+                snippet_id: Arc::clone(&result.snippet_id),
+                trigger: Arc::clone(&result.trigger),
+                matched_text: result.matched_text.clone(),
+                insert: String::new().into(),
+                cursor_offset: result.cursor_offset,
+                reinsert_after: result.reinsert_after,
+                command_backed: result.command_backed,
+                undoable: result.undoable,
+                folded_suffix_chars: result.folded_suffix_chars,
+            }
+        }
+
         match self {
-            Self::Expansion(result) | Self::Undo(result) => result,
+            Self::Expansion(result) => {
+                let pending = metadata(&result);
+                (Self::Expansion(pending), result)
+            }
+            Self::Undo(result) => {
+                let pending = metadata(&result);
+                (Self::Undo(pending), result)
+            }
+        }
+    }
+
+    fn with_result(self, result: ExpansionResult) -> Self {
+        match self {
+            Self::Expansion(_) => Self::Expansion(result),
+            Self::Undo(_) => Self::Undo(result),
         }
     }
 }
@@ -114,23 +142,27 @@ impl Daemon {
         follow_up: Vec<InputEvent>,
     ) -> Result<()> {
         while let Some(job) = queued.pop_front() {
+            let (pending_job, result) = job.split_payload();
             let submitted = match self
                 .output_worker
                 .as_ref()
                 .and_then(OutputWorkerState::submitter)
             {
-                Some(submitter) => submitter.submit(job.result()),
-                None => Err(InjectorError {
-                    backend: self.active_backend,
-                    message: "serialized output worker is no longer available".into(),
-                    retryable: true,
-                }),
+                Some(submitter) => submitter.submit(result),
+                None => Err(Box::new((
+                    InjectorError {
+                        backend: self.active_backend,
+                        message: "serialized output worker is no longer available".into(),
+                        retryable: true,
+                    },
+                    result,
+                ))),
             };
             match submitted {
                 Ok(transaction) => {
                     self.pending_output = Some(PendingOutput {
                         origin,
-                        in_flight: job,
+                        in_flight: pending_job,
                         transaction,
                         queued,
                         follow_up,
@@ -140,9 +172,10 @@ impl Daemon {
                 }
                 // The worker never received the transaction, so nothing was
                 // typed: report it as not applied.
-                Err(source) => {
+                Err(error) => {
+                    let (source, result) = *error;
                     let outcome = wayexpand_core::TransactionOutcome::NotApplied { source };
-                    if !self.complete_job(origin, job, outcome)? {
+                    if !self.complete_job(origin, pending_job.with_result(result), outcome)? {
                         return self.end_failed_batch(origin, follow_up);
                     }
                 }
@@ -219,8 +252,8 @@ impl Daemon {
         };
         // Outcomes reported by the worker were counted when it applied them;
         // only the ones synthesized here still need counting.
-        let outcome = match pending.transaction.outcome.try_recv() {
-            Ok(outcome) => outcome,
+        let (completed_result, outcome) = match pending.transaction.outcome.try_recv() {
+            Ok((result, outcome)) => (Some(result), outcome),
             Err(mpsc::TryRecvError::Disconnected) => {
                 let outcome = wayexpand_core::TransactionOutcome::UnknownPartialFailure {
                     source: InjectorError {
@@ -232,7 +265,7 @@ impl Daemon {
                     },
                 };
                 output_health::note_outcome(&outcome);
-                outcome
+                (None, outcome)
             }
             Err(mpsc::TryRecvError::Empty) => {
                 let remaining = pending
@@ -262,16 +295,17 @@ impl Daemon {
                     });
                 let outcome = wayexpand_core::TransactionOutcome::UnknownPartialFailure { source };
                 output_health::note_outcome(&outcome);
-                outcome
+                (None, outcome)
             }
         };
-        self.resolve_pending_output(outcome)?;
+        self.resolve_pending_output(outcome, completed_result)?;
         Ok(Step::Next)
     }
 
     fn resolve_pending_output(
         &mut self,
         outcome: wayexpand_core::TransactionOutcome,
+        completed_result: Option<ExpansionResult>,
     ) -> Result<()> {
         let Some(PendingOutput {
             origin,
@@ -283,6 +317,10 @@ impl Daemon {
         }) = self.pending_output.take()
         else {
             return Ok(());
+        };
+        let in_flight = match completed_result {
+            Some(result) => in_flight.with_result(result),
+            None => in_flight,
         };
         let completed = self.complete_job(origin, in_flight, outcome)?;
         if physical_input_interrupted {

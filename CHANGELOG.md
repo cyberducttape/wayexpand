@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Move expansion transaction payloads into the serialized output worker and
+  return them with completion, avoiding a second allocation of the full
+  replacement text. Pending reactor state retains only the trigger needed for
+  outcome bookkeeping.
 - Reduce evdev capture polling churn and layout background traffic, while
   retaining compositor layout-change notification with a slower fallback.
 - Add insert-only sysadmin diagnostic templates for TLS, service, port, HTTP,
