@@ -61,6 +61,7 @@ fn run_approved_action(mut args: Vec<String>) -> Result<()> {
         };
         let key = key.trim();
         if key.is_empty()
+            || key.chars().any(char::is_control)
             || parameters
                 .insert(key.to_owned(), value.to_owned())
                 .is_some()
@@ -72,6 +73,12 @@ fn run_approved_action(mut args: Vec<String>) -> Result<()> {
         usage_bail!("{USAGE}");
     }
     let action_id = args.remove(0);
+    if action_id.is_empty()
+        || action_id.len() > wayexpand_broker_client::MAX_ACTION_ID_BYTES
+        || action_id.chars().any(char::is_control)
+    {
+        usage_bail!("action IDs must be non-empty, bounded, and contain no control characters");
+    }
     if approved.as_deref().is_some_and(|value| value != action_id) {
         usage_bail!("--approve-action must exactly match the requested action ID");
     }
@@ -105,9 +112,13 @@ fn run_approved_action(mut args: Vec<String>) -> Result<()> {
     if command.action.is_none() || !command.program.is_empty() {
         bail!("only named Action Broker actions can run in this workflow");
     }
-    print!("Mode: Run Approved Action\nAction ID: {action_id}\nSnippet: {}\nPurpose: {}\nBroker: configured Action Broker (policy validates permissions)\nParameters: {}\n",
-        snippet.trigger,
-        if snippet.description.trim().is_empty() { "(no description)" } else { snippet.description.trim() },
+    let trigger = escape_terminal(&snippet.trigger);
+    let purpose = if snippet.description.trim().is_empty() {
+        "(no description)".to_owned()
+    } else {
+        escape_terminal(snippet.description.trim())
+    };
+    print!("Mode: Run Approved Action\nAction ID: {action_id}\nSnippet: {trigger}\nPurpose: {purpose}\nBroker: configured Action Broker (policy validates permissions)\nParameters: {}\n",
         if parameters.is_empty() { "none".to_owned() } else { parameters.keys().cloned().collect::<Vec<_>>().join(", ") });
     println!("Execution is separate from text insertion. The broker validates the action and its parameter schema.");
     confirm_action(&action_id, approved.as_deref())?;
@@ -159,6 +170,19 @@ fn run_approved_action(mut args: Vec<String>) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn escape_terminal(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| {
+            if character.is_control() {
+                character.escape_default().to_string()
+            } else {
+                character.to_string()
+            }
+        })
+        .collect()
 }
 
 fn confirm_action(action_id: &str, approved: Option<&str>) -> Result<()> {
