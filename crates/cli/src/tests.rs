@@ -132,6 +132,46 @@ fn doctor_policy_json_reports_broker_only_requirement() {
 }
 
 #[test]
+fn effective_policy_report_distinguishes_audit_enforcement_and_unsupported() {
+    let report = crate::doctor::policy::effective_policy_report(&OrganizationPolicy {
+        disable_commands: true,
+        require_composition_aware: true,
+        ..OrganizationPolicy::default()
+    });
+    assert_eq!(report["mode"], "audit_only");
+    assert_eq!(
+        report["controls"]["disable_commands"]["status"],
+        "audit_only"
+    );
+    assert_eq!(report["controls"]["disable_commands"]["effective"], false);
+    assert_eq!(
+        report["controls"]["require_composition_aware"]["status"],
+        "audit_only"
+    );
+    assert_eq!(
+        report["unsupported_controls"][0],
+        "require_composition_aware"
+    );
+}
+
+#[test]
+fn effective_policy_report_marks_safe_mode_and_socket_controls_enforced() {
+    let report = crate::doctor::policy::effective_policy_report(&OrganizationPolicy {
+        safe_mode: true,
+        disable_control_socket_mutations: true,
+        disable_commands: true,
+        ..OrganizationPolicy::default()
+    });
+    assert_eq!(report["mode"], "enforcement");
+    assert_eq!(report["controls"]["disable_commands"]["status"], "enforced");
+    assert_eq!(
+        report["controls"]["disable_control_socket_mutations"]["status"],
+        "enforced"
+    );
+    assert_eq!(report["audit_only_controls"].as_array().unwrap().len(), 0);
+}
+
+#[test]
 fn doctor_policy_json_reports_exclusive_capture_requirement() {
     let policy = OrganizationPolicy {
         safe_mode: true,

@@ -458,6 +458,7 @@ Diagnostic output suitable for health checks and monitoring systems.
 - `policy.policy.minimum_replacement_guarantee` (string|null): Minimum replacement guarantee the selected injector must provide: `"best-effort"`, `"verified"`, or `"atomic"`; null when unset; enforced only when `safe_mode` is true
 - `policy.policy.require_sensitive_focus` (bool): Whether startup requires an input source that reports password/sensitive-field focus; enforced only when `safe_mode` is true
 - `policy.policy.require_composition_aware` (bool): Whether startup requires an input source that reports active external IME/preedit composition; local dead-key/Compose tracking does not satisfy it, and enforcement is active only when `safe_mode` is true
+- `policy.policy.effective` (object): Effective organization-policy view. Each control exposes `configured`, `effective`, and a status (`enforced`, `audit_only`, `configured_non_enforcing`, or `not_configured`); the object also lists known unsupported controls and states when current-session capability assessment is still required
 - `policy.policy.require_verified_insert_target` (bool): Whether explicit inserts must name the exact focused window (`insert --verified` or the picker); enforced only when `safe_mode` is true
 - `policy.policy.disable_control_socket_mutations` (bool): Whether the daemon refuses all state-changing control-socket commands; enforced regardless of `safe_mode`
 - `backends` (array): Available backends

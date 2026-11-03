@@ -35,6 +35,11 @@ by weakening the whole broker service.
 
 The daemon's bounded command worker routes named actions through this socket;
 ordinary `program =` commands retain the existing restricted direct runner.
+WayExpand can still insert a predefined `kubectl` or `ssh` command as text for
+operator review and manual execution. The broker does not execute networked
+operations. A separate operations runner with per-action egress restrictions,
+trusted credential access, confirmation, and privacy-preserving audit is not
+implemented; the packaged broker must not be loosened to emulate one.
 
 An expansion references only the broker action name:
 
