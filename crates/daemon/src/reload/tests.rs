@@ -147,9 +147,9 @@ fn reload_preserves_window_context_for_app_filtered_expansions() {
 
     let path = temporary_config();
     write_config(
-            &path,
-            "[[expansion]]\ntrigger = \":x\"\nreplacement = \"y\"\napp_filter = [\"app_id_exact:org.kde.kate\"]\n",
-        );
+        &path,
+        "[[expansion]]\ntrigger = \":x\"\nreplacement = \"y\"\napp_filter = [\"app_id_exact:org.kde.kate\"]\n",
+    );
     let mut config =
         ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
     config.engine.set_current_window(Some(WindowContext {
@@ -161,9 +161,9 @@ fn reload_preserves_window_context_for_app_filtered_expansions() {
     // Any reload -- including one an unrelated GUI edit would trigger --
     // must not forget the window the user is actually still in.
     write_config(
-            &path,
-            "[[expansion]]\ntrigger = \":x\"\nreplacement = \"z\"\napp_filter = [\"app_id_exact:org.kde.kate\"]\n",
-        );
+        &path,
+        "[[expansion]]\ntrigger = \":x\"\nreplacement = \"z\"\napp_filter = [\"app_id_exact:org.kde.kate\"]\n",
+    );
     config.reload_now();
     config.finish_pending_reload();
     assert!(config.healthy());
@@ -221,13 +221,13 @@ fn non_fleet_load_applies_administrator_absolute_command_policy() {
     write_config(
         &path,
         r#"
-            [[expansion]]
-            trigger = ":cmd"
-            replacement = ""
-            [expansion.command]
-            program = "printf"
-            args = ["ok"]
-            "#,
+        [[expansion]]
+        trigger = ":cmd"
+        replacement = ""
+        [expansion.command]
+        program = "printf"
+        args = ["ok"]
+        "#,
     );
     let policy = OrganizationPolicy {
         safe_mode: true,
@@ -249,13 +249,13 @@ fn non_fleet_audit_policy_allows_relative_command_programs() {
     write_config(
         &path,
         r#"
-            [[expansion]]
-            trigger = ":cmd"
-            replacement = ""
-            [expansion.command]
-            program = "printf"
-            args = ["ok"]
-            "#,
+        [[expansion]]
+        trigger = ":cmd"
+        replacement = ""
+        [expansion.command]
+        program = "printf"
+        args = ["ok"]
+        "#,
     );
     let policy = OrganizationPolicy {
         safe_mode: false,
@@ -742,7 +742,7 @@ fn consistent_load_returns_the_stamp_for_the_loaded_file() {
     let path = temporary_config();
     write_config(&path, &config_text("stable read"));
 
-    let (_config, stamp) = load_consistent(&path).unwrap();
+    let (_config, stamp, _source) = load_consistent(&path).unwrap();
     assert_eq!(stamp, file_stamp(&path));
 
     let _ = fs::remove_file(path);
@@ -797,8 +797,8 @@ fn integrity_fallback_detects_changes_when_no_watch_event_arrives() {
 #[test]
 fn reload_while_a_command_runs_drops_its_result_and_keeps_typing_working() {
     let slow = "[[expansion]]\ntrigger = \":slow\"\nreplacement = \"\"\n\
-                    [expansion.command]\nprogram = \"/bin/sh\"\n\
-                    args = [\"-c\", \"sleep 0.3; printf command-output\"]\ntimeout_ms = 2000\n";
+                [expansion.command]\nprogram = \"/bin/sh\"\n\
+                args = [\"-c\", \"sleep 0.3; printf command-output\"]\ntimeout_ms = 2000\n";
     let path = temporary_config();
     write_config(&path, &format!("{slow}{}", config_text("before")));
     let mut config =
@@ -858,8 +858,8 @@ fn reload_while_a_command_runs_drops_its_result_and_keeps_typing_working() {
 #[test]
 fn reload_does_not_wait_for_a_blocked_command_worker_on_the_reactor() {
     let slow = "[[expansion]]\ntrigger = \":slow\"\nreplacement = \"\"\n\
-                    [expansion.command]\nprogram = \"/bin/sh\"\n\
-                    args = [\"-c\", \"sleep 10; printf stale-output\"]\ntimeout_ms = 5000\n";
+                [expansion.command]\nprogram = \"/bin/sh\"\n\
+                args = [\"-c\", \"sleep 10; printf stale-output\"]\ntimeout_ms = 5000\n";
     let path = temporary_config();
     write_config(&path, &format!("{slow}{}", config_text("before")));
     let mut config =

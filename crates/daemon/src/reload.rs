@@ -575,15 +575,17 @@ fn safe_reload_error(error: &anyhow::Error) -> String {
     "configuration could not be read consistently".into()
 }
 
-fn load_consistent(path: &Path) -> Result<(Config, Option<FileStamp>)> {
+fn load_consistent(path: &Path) -> Result<(Config, Option<FileStamp>, String)> {
     for _attempt in 0..MAX_CONSISTENCY_ATTEMPTS {
         let before = file_stamp(path);
         let content_before = file_content_fingerprint(path);
-        let config = Config::load(path)?;
+        let loaded = Config::load_versioned(path)?;
+        let source = loaded.source().to_owned();
+        let config = loaded.config;
         let after = file_stamp(path);
         let content_after = file_content_fingerprint(path);
         if before == after && content_before == content_after {
-            return Ok((config, after));
+            return Ok((config, after, source));
         }
     }
     anyhow::bail!(
@@ -602,12 +604,13 @@ fn load_for_mode(
     // before and after the full load and retry rather than briefly promoting a
     // mixed snapshot of the library.
     for attempt in 0..MAX_CONSISTENCY_ATTEMPTS {
-        let (mut base, stamp) = load_consistent(path)?;
+        let (mut base, stamp, base_source) = load_consistent(path)?;
         if fleet {
             let before = standard_fleet_content_signature();
             // Kept typed so `safe_reload_error` can report what went wrong.
-            let merged = FleetConfig::load_standard_with_base_and_policy(base, policy)
-                .map_err(anyhow::Error::new)?;
+            let merged =
+                FleetConfig::load_standard_with_base_source_and_policy(base, &base_source, policy)
+                    .map_err(anyhow::Error::new)?;
             let after = standard_fleet_content_signature();
             if before != after {
                 if attempt + 1 == MAX_CONSISTENCY_ATTEMPTS {

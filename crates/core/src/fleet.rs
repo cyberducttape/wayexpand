@@ -19,14 +19,16 @@
 /// that same snippet (including its trigger). Duplicate hotkey chords remain
 /// fail-closed.
 ///
-/// **Settings:** Last layer wins. Pack settings override user settings, which
-/// override organization settings. Within a layer, later files override earlier.
+/// **Settings:** Settings merge field by field. User settings override
+/// organization defaults, and pack settings provide defaults only. Within a
+/// category, later files override earlier. Administrator enforcement remains
+/// in `/etc/wayexpand/policy.toml`.
 ///
 /// **Organization policy:** Security policy is not part of fleet layers. The
 /// daemon loads it exclusively from `/etc/wayexpand/policy.toml`.
 ///
 /// **Base config:** Prepended first (lowest priority for expansions/hotkeys).
-/// Base settings only override if no layer provides settings.
+/// Base settings are user settings and override organization and pack defaults.
 use crate::{Config, ConfigError, OrganizationPolicy};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -97,6 +99,124 @@ fn reject_embedded_policy(config: &Config, path: &Path) -> Result<(), FleetError
         });
     }
     Ok(())
+}
+
+fn setting_fields_from_source(source: &str) -> BTreeSet<String> {
+    toml::from_str::<toml::Value>(source)
+        .ok()
+        .and_then(|document| {
+            document
+                .get("settings")
+                .and_then(toml::Value::as_table)
+                .cloned()
+        })
+        .map(|settings| settings.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
+fn setting_fields_from_non_defaults(settings: &crate::Settings) -> BTreeSet<String> {
+    let defaults = crate::Settings::default();
+    let mut fields = BTreeSet::new();
+    macro_rules! changed { ($($field:ident),+ $(,)?) => {$({
+        if settings.$field != defaults.$field { fields.insert(stringify!($field).to_owned()); }
+    })+}; }
+    changed!(
+        max_buffer_chars,
+        undo_chord,
+        font_scale,
+        libei_token_persistence,
+        fcitx5_direct_commit,
+        template_env,
+        allow_clipboard,
+        clipboard_mode,
+        usage_stats,
+        compatibility_mode,
+        keystroke_max_chars,
+    );
+    fields
+}
+
+fn settings_rank(provenance: &Provenance) -> u8 {
+    match provenance.layer.as_str() {
+        "base" | "user" => 3,
+        "organization" => 2,
+        layer if layer.starts_with("pack:") => 1,
+        _ => 2,
+    }
+}
+
+fn resolve_setting_candidates(
+    candidates: &[SettingCandidate],
+    policy: &OrganizationPolicy,
+) -> (crate::Settings, BTreeMap<String, Provenance>) {
+    let mut ordered: Vec<_> = candidates
+        .iter()
+        .filter(|candidate| settings_source_allowed(&candidate.provenance, policy))
+        .collect();
+    ordered.sort_by_key(|candidate| settings_rank(&candidate.provenance));
+
+    let mut settings = crate::Settings::default();
+    let mut sources = BTreeMap::new();
+    for candidate in ordered {
+        for field in &candidate.fields {
+            // Compatibility consent has a stricter user/admin-only rule and
+            // is resolved separately in apply_base_and_policy.
+            if field == "compatibility_mode" {
+                continue;
+            }
+            macro_rules! copy_field { ($($name:ident),+ $(,)?) => { match field.as_str() {
+                $(stringify!($name) => settings.$name = candidate.settings.$name.clone(),)+
+                _ => continue,
+            }}; }
+            copy_field!(
+                max_buffer_chars,
+                undo_chord,
+                font_scale,
+                libei_token_persistence,
+                fcitx5_direct_commit,
+                template_env,
+                allow_clipboard,
+                clipboard_mode,
+                usage_stats,
+                keystroke_max_chars,
+            );
+            sources.insert(field.clone(), candidate.provenance.clone());
+        }
+    }
+    if let Some(source) = candidates
+        .iter()
+        .filter(|candidate| {
+            matches!(
+                candidate.provenance.layer.as_str(),
+                "base" | "user" | "organization"
+            ) && candidate.settings.compatibility_mode != crate::CompatibilityMode::Off
+        })
+        .max_by_key(|candidate| settings_rank(&candidate.provenance))
+    {
+        settings.compatibility_mode = source.settings.compatibility_mode;
+        sources.insert("compatibility_mode".into(), source.provenance.clone());
+    }
+    for field in [
+        "max_buffer_chars",
+        "undo_chord",
+        "font_scale",
+        "libei_token_persistence",
+        "fcitx5_direct_commit",
+        "template_env",
+        "allow_clipboard",
+        "clipboard_mode",
+        "usage_stats",
+        "compatibility_mode",
+        "keystroke_max_chars",
+    ] {
+        sources
+            .entry(field.to_owned())
+            .or_insert_with(|| Provenance {
+                file: "built-in defaults".into(),
+                layer: "default".into(),
+            });
+    }
+    (settings, sources)
 }
 
 pub(super) fn require_root_owned(path: &Path, metadata: &fs::Metadata) -> Result<(), FleetError> {
@@ -177,9 +297,14 @@ pub struct FleetConfig {
     pub expansions_source: HashMap<String, Provenance>,
     /// Provenance for each hotkey (by chord)
     pub hotkeys_source: HashMap<String, Provenance>,
-    /// Settings candidates in layer order, retaining provenance so pack policy
-    /// can be applied before resolving the last-wins value.
+    /// Settings candidates in layer order, retaining provenance for policy
+    /// filtering and compatibility with existing fleet diagnostics.
     pub settings_sources: Vec<(crate::Settings, Provenance)>,
+    /// Source selected for each effective setting, for fleet diagnostics.
+    pub effective_settings_sources: BTreeMap<String, Provenance>,
+    /// Explicit field assignments, retained so fleet settings can be merged
+    /// by category without treating serde defaults as user choices.
+    setting_candidates: Vec<SettingCandidate>,
     /// Merge statistics
     pub stats: MergeStats,
     /// Administrator policy violations discovered while merging pack sources.
@@ -187,6 +312,13 @@ pub struct FleetConfig {
     /// Directory each loaded pack came from, by pack name, so signatures are
     /// checked against exactly what was loaded.
     pub pack_directories: BTreeMap<String, PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+struct SettingCandidate {
+    settings: crate::Settings,
+    provenance: Provenance,
+    fields: BTreeSet<String>,
 }
 
 /// Statistics about the merge operation.
@@ -257,8 +389,29 @@ impl FleetConfig {
         base: Config,
         policy: &OrganizationPolicy,
     ) -> Result<Self, FleetError> {
+        let fields = setting_fields_from_non_defaults(&base.settings);
+        Self::load_standard_with_base_fields_and_policy(base, fields, policy)
+    }
+
+    /// Load fleet layers using the exact primary-config setting keys. This
+    /// allows an explicit user choice of a serde default to override a pack
+    /// recommendation too.
+    pub fn load_standard_with_base_source_and_policy(
+        base: Config,
+        base_source: &str,
+        policy: &OrganizationPolicy,
+    ) -> Result<Self, FleetError> {
+        let fields = setting_fields_from_source(base_source);
+        Self::load_standard_with_base_fields_and_policy(base, fields, policy)
+    }
+
+    fn load_standard_with_base_fields_and_policy(
+        base: Config,
+        base_fields: BTreeSet<String>,
+        policy: &OrganizationPolicy,
+    ) -> Result<Self, FleetError> {
         let fleet = Self::load_standard()?;
-        let mut merged = Self::apply_base_and_policy(fleet, base, policy)?;
+        let mut merged = Self::apply_base_and_policy_with_fields(fleet, base, base_fields, policy)?;
         merged
             .config
             .apply_administrator_policy(policy)
@@ -286,18 +439,36 @@ impl FleetConfig {
         merger.merge().map(|_| ())
     }
 
+    #[cfg(test)]
     fn apply_base_and_policy(
-        mut fleet: Self,
+        fleet: Self,
         base: Config,
         policy: &OrganizationPolicy,
     ) -> Result<Self, FleetError> {
-        let fleet_settings = fleet
-            .settings_sources
-            .iter()
-            .rev()
-            .find(|(_, provenance)| settings_source_allowed(provenance, policy))
-            .map(|(settings, _)| settings.clone())
-            .unwrap_or_default();
+        let base_fields = setting_fields_from_non_defaults(&base.settings);
+        Self::apply_base_and_policy_with_fields(fleet, base, base_fields, policy)
+    }
+
+    fn apply_base_and_policy_with_fields(
+        mut fleet: Self,
+        base: Config,
+        base_fields: BTreeSet<String>,
+        policy: &OrganizationPolicy,
+    ) -> Result<Self, FleetError> {
+        let mut setting_candidates = fleet.setting_candidates.clone();
+        let base_provenance = Provenance {
+            file: "expansions.toml".into(),
+            layer: "base".into(),
+        };
+        if !base_fields.is_empty() {
+            setting_candidates.push(SettingCandidate {
+                settings: base.settings.clone(),
+                provenance: base_provenance,
+                fields: base_fields,
+            });
+        }
+        let (fleet_settings, effective_settings_sources) =
+            resolve_setting_candidates(&setting_candidates, policy);
         // Consent to unverified keystroke erasure belongs to the user (primary
         // config or user layer) or the administrator (organization layer),
         // never to a curated pack. Unlike other settings it is therefore not
@@ -441,11 +612,10 @@ impl FleetConfig {
                 .insert(hotkey.chord.clone(), (hotkey, provenance));
         }
         let mut merged = merger.merge()?;
-        if !fleet_settings.is_default() {
-            merged.config.settings = fleet_settings;
-        }
+        merged.config.settings = fleet_settings;
         merged.config.settings.compatibility_mode = compatibility_mode;
         fleet.config = merged.config;
+        fleet.effective_settings_sources = effective_settings_sources;
         // These fields are reported alongside the active arrays by the CLI;
         // recompute them after policy filtering and base-layer composition so
         // status output cannot describe entries that are no longer active.
@@ -489,7 +659,7 @@ impl FleetConfig {
 ///
 /// Implements fleet precedence: stable-ID expansion updates and duplicate
 /// triggers with different IDs are handled explicitly; hotkey duplicates fail
-/// closed, while settings follow "last wins".
+/// closed, while settings merge per field by source category.
 ///
 /// Duplicate detection across all loaded layers ensures configuration safety:
 /// accidental trigger collisions are caught early rather than silently masked
@@ -500,7 +670,7 @@ struct ConfigMerger {
     expansions: BTreeMap<String, (crate::ExpansionConfig, Provenance)>,
     expansion_ids: HashMap<String, String>,
     hotkeys: BTreeMap<String, (crate::HotkeyConfig, Provenance)>,
-    settings: Vec<(crate::Settings, Provenance)>,
+    settings: Vec<SettingCandidate>,
     stats: MergeStats,
 }
 
@@ -549,6 +719,16 @@ impl ConfigMerger {
     }
 
     fn add_config(&mut self, config: Config, provenance: Provenance) -> Result<(), FleetError> {
+        let fields = setting_fields_from_non_defaults(&config.settings);
+        self.add_config_with_settings_fields(config, provenance, fields)
+    }
+
+    fn add_config_with_settings_fields(
+        &mut self,
+        config: Config,
+        provenance: Provenance,
+        setting_fields: BTreeSet<String>,
+    ) -> Result<(), FleetError> {
         for expansion in config.expansion {
             self.add_expansion(expansion, provenance.clone())?;
         }
@@ -568,14 +748,12 @@ impl ConfigMerger {
                 .insert(hotkey.chord.clone(), (hotkey, provenance.clone()));
             self.stats.total_hotkeys += 1;
         }
-        if !config.settings.is_default() {
-            if !self.settings.is_empty() {
-                eprintln!(
-                    "warning: settings from {} override previous layer",
-                    provenance.file
-                );
-            }
-            self.settings.push((config.settings, provenance));
+        if !setting_fields.is_empty() {
+            self.settings.push(SettingCandidate {
+                settings: config.settings,
+                provenance,
+                fields: setting_fields,
+            });
         }
         Ok(())
     }
@@ -622,10 +800,12 @@ impl ConfigMerger {
                 layer: layer_name.clone(),
             };
 
-            let config = Config::load(&path).map_err(FleetError::Config)?;
+            let loaded = Config::load_versioned(&path).map_err(FleetError::Config)?;
+            let setting_fields = setting_fields_from_source(loaded.source());
+            let config = loaded.config;
             reject_embedded_policy(&config, &path)?;
             self.stats.total_files_loaded += 1;
-            self.add_config(config, provenance)?;
+            self.add_config_with_settings_fields(config, provenance, setting_fields)?;
         }
 
         self.stats
@@ -660,11 +840,13 @@ impl ConfigMerger {
             .map(|(_, (hotkey_config, _))| hotkey_config)
             .collect();
 
-        let settings_sources = self.settings;
-        let settings = settings_sources
-            .last()
-            .map(|(settings, _)| settings.clone())
-            .unwrap_or_default();
+        let setting_candidates = self.settings;
+        let settings_sources = setting_candidates
+            .iter()
+            .map(|candidate| (candidate.settings.clone(), candidate.provenance.clone()))
+            .collect();
+        let (settings, effective_settings_sources) =
+            resolve_setting_candidates(&setting_candidates, &OrganizationPolicy::default());
 
         let config = Config {
             expansion,
@@ -680,6 +862,8 @@ impl ConfigMerger {
             expansions_source,
             hotkeys_source,
             settings_sources,
+            effective_settings_sources,
+            setting_candidates,
             stats: self.stats,
             policy_violations: Vec::new(),
             pack_directories: BTreeMap::new(),
@@ -1032,28 +1216,28 @@ replacement = "third"
     }
 
     fn add_settings_candidate(merger: &mut ConfigMerger, max_buffer_chars: usize, layer: &str) {
-        merger.settings.push((
-            settings_candidate(max_buffer_chars),
-            Provenance {
+        merger.settings.push(SettingCandidate {
+            settings: settings_candidate(max_buffer_chars),
+            provenance: Provenance {
                 file: "settings.toml".to_string(),
                 layer: layer.to_string(),
             },
-        ));
+            fields: BTreeSet::from(["max_buffer_chars".to_string()]),
+        });
     }
 
     #[test]
     fn only_the_user_or_administrator_can_grant_compatibility_consent() {
-        let consenting = |layer: &str| {
-            (
-                crate::Settings {
-                    compatibility_mode: crate::CompatibilityMode::UntrackedFocus,
-                    ..crate::Settings::default()
-                },
-                Provenance {
-                    file: "settings.toml".to_string(),
-                    layer: layer.to_string(),
-                },
-            )
+        let consenting = |layer: &str| SettingCandidate {
+            settings: crate::Settings {
+                compatibility_mode: crate::CompatibilityMode::UntrackedFocus,
+                ..crate::Settings::default()
+            },
+            provenance: Provenance {
+                file: "settings.toml".to_string(),
+                layer: layer.to_string(),
+            },
+            fields: BTreeSet::from(["compatibility_mode".to_string()]),
         };
         let merged_mode = |layers: &[&str], base: &str| {
             let mut merger = ConfigMerger::new();
