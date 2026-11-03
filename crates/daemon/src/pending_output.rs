@@ -511,6 +511,13 @@ mod tests {
             "gated-test"
         }
 
+        fn capabilities(&self) -> InjectorCapabilities {
+            InjectorCapabilities {
+                replacement_guarantee: wayexpand_core::ReplacementGuarantee::BestEffort,
+                ..InjectorCapabilities::default()
+            }
+        }
+
         fn erase(&mut self, trigger: &str) -> std::result::Result<(), InjectorError> {
             self.erase_started.fetch_add(1, Ordering::AcqRel);
             self.wait_for_gate();

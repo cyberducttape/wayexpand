@@ -8,6 +8,13 @@ All notable changes to WayExpand are documented here.
   return them with completion, avoiding a second allocation of the full
   replacement text. Pending reactor state retains only the trigger needed for
   outcome bookkeeping.
+
+- Resolve fleet settings per field with pack defaults, organization defaults, and user preferences in explicit precedence order; report each effective setting's source in `wayexpand fleet status`.
+
+- Gate IBus replacement through the shared capability admission contract.
+  Non-atomic replacement is refused by default, expansion accounting waits
+  for successful signal emission. Outcomes distinguish fully emitted but
+  unverified text from a possibly partial signal sequence.
 - Reduce evdev capture polling churn and layout background traffic, while
   retaining compositor layout-change notification with a slower fallback.
 - Add insert-only sysadmin diagnostic templates for TLS, service, port, HTTP,

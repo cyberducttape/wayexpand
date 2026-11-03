@@ -14,9 +14,9 @@ use std::{
 
 use tracing::warn;
 use wayexpand_core::{
-    CompletionNotifier, Config, ExpansionEngine, InjectorCapabilities, InputEvent,
-    InputSourceCapabilities, OrganizationPolicy, PendingExpansionDispatch, ReplacementGuarantee,
-    WindowContext, MAX_WINDOW_INSTANCE_ID_BYTES,
+    CompletionNotifier, Config, ExpansionEngine, ExpansionResult, InjectorCapabilities, InputEvent,
+    InputSourceCapabilities, OrganizationPolicy, PendingExpansionDispatch, ReplacementAdmission,
+    ReplacementGuarantee, WindowContext, MAX_WINDOW_INSTANCE_ID_BYTES,
 };
 
 // IBus' public C API defines IBUS_RELEASE_MASK as (1 << 30). The ibus-rs
@@ -128,6 +128,17 @@ pub struct IbusEngineAdapter {
     /// Set when safe-mode policy requires guarantees this route lacks
     /// (for example `require_atomic_replace`). Expansion is then disabled.
     capability_block: Option<String>,
+    pending_output: Option<ExpansionResult>,
+    last_expansion_outcome: Option<IbusExpansionOutcome>,
+}
+
+/// An emitted IBus signal sequence is not confirmation that the target
+/// application applied the edit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IbusExpansionOutcome {
+    EmittedUnverified,
+    /// Output failed after one or more actions may have reached the client.
+    UnknownPartialEmission,
 }
 
 impl IbusEngineAdapter {
@@ -165,6 +176,8 @@ impl IbusEngineAdapter {
             client_capabilities: 0,
             surrounding: None,
             capability_block,
+            pending_output: None,
+            last_expansion_outcome: None,
         }
     }
 
@@ -268,7 +281,11 @@ impl IbusEngineAdapter {
     ) -> Result<usize, E> {
         let mut emitted = 0;
         for result in self.engine.drain_completed_commands() {
-            if !self.enabled || self.capability_block.is_some() {
+            if !self.enabled
+                || self.capability_block.is_some()
+                || injector_capabilities().replacement_admission(self.engine.compatibility_mode())
+                    == ReplacementAdmission::Refused
+            {
                 self.engine.restore_deferred_match(&result.matched_text);
                 continue;
             }
@@ -291,10 +308,12 @@ impl IbusEngineAdapter {
                 continue;
             }
             if let Err(error) = emit(&actions) {
+                self.last_expansion_outcome = Some(IbusExpansionOutcome::UnknownPartialEmission);
                 self.output_failed();
                 return Err(error);
             }
             self.engine.commit_applied_expansion(&result);
+            self.last_expansion_outcome = Some(IbusExpansionOutcome::EmittedUnverified);
             self.record_emitted(&actions);
             emitted += 1;
         }
@@ -377,9 +396,26 @@ impl IbusEngineAdapter {
     /// so an emission error cannot prove the client document is unchanged.
     /// A fresh focus lifecycle is required before matching resumes.
     pub fn output_failed(&mut self) {
+        if self.pending_output.take().is_some() {
+            self.last_expansion_outcome = Some(IbusExpansionOutcome::UnknownPartialEmission);
+        }
         self.output_retired = true;
         self.enabled = false;
         self.reset();
+    }
+
+    /// Complete a synchronous result after the host has emitted every output
+    /// action successfully. This acknowledges signal emission only; IBus
+    /// provides no receipt that the client document applied those signals.
+    pub fn output_succeeded(&mut self) {
+        if let Some(result) = self.pending_output.take() {
+            self.engine.commit_applied_expansion(&result);
+            self.last_expansion_outcome = Some(IbusExpansionOutcome::EmittedUnverified);
+        }
+    }
+
+    pub fn last_expansion_outcome(&self) -> Option<IbusExpansionOutcome> {
+        self.last_expansion_outcome
     }
 
     /// Process an IBus key press. `keyval` is an XKB keysym, as specified by
@@ -529,11 +565,16 @@ impl IbusEngineAdapter {
                         policy_blocked = true;
                         continue;
                     }
+                    if injector_capabilities()
+                        .replacement_admission(self.engine.compatibility_mode())
+                        == ReplacementAdmission::Refused
+                    {
+                        self.engine.restore_deferred_match(&result.matched_text);
+                        policy_blocked = true;
+                        continue;
+                    }
                     actions.extend(replacement);
-                    // The returned IBus actions are the output transaction
-                    // for this synchronous/static result; the service resets
-                    // the engine if emitting them fails.
-                    self.engine.commit_applied_expansion(&result);
+                    self.pending_output = Some(result);
                 }
                 PendingExpansionDispatch::Queued => {
                     // The current key has not reached the client yet. Commit
@@ -583,6 +624,9 @@ mod tests {
     /// Put an adapter in the state ibus-daemon leaves it in for an ordinary
     /// text field: focused, surrounding text supported, free-form content.
     fn focused(mut adapter: IbusEngineAdapter) -> IbusEngineAdapter {
+        adapter
+            .engine
+            .set_compatibility_mode(wayexpand_core::CompatibilityMode::TrackedFocus);
         adapter.focus_in();
         adapter.set_capabilities(IBUS_CAP_SURROUNDING_TEXT);
         adapter.set_content_type(0, 0);
@@ -678,6 +722,13 @@ replacement = "Incident {{field:hostname}}"
         .unwrap();
         let context_path = "/org/freedesktop/IBus/Engine/WayExpand_form_test";
         let mut adapter = IbusEngineAdapter::new(ExpansionEngine::new(config).unwrap());
+        adapter
+            .engine_mut()
+            .set_compatibility_mode(wayexpand_core::CompatibilityMode::TrackedFocus);
+        assert_eq!(
+            adapter.engine().compatibility_mode(),
+            wayexpand_core::CompatibilityMode::TrackedFocus
+        );
         adapter.focus_in_for_context(Some(context_path));
         adapter.set_capabilities(IBUS_CAP_SURROUNDING_TEXT);
         adapter.set_content_type(0, 0);
@@ -752,6 +803,9 @@ replacement = "Incident {{field:hostname}}"
                 }
             }
             self.apply(&result.actions);
+            if result.handled {
+                adapter.output_succeeded();
+            }
             result
         }
 
@@ -786,7 +840,10 @@ replacement = "Incident {{field:hostname}}"
 
     fn adapter() -> IbusEngineAdapter {
         let config: Config = toml::from_str(
-            r#"[[expansion]]
+            r#"[settings]
+compatibility_mode = "tracked-focus"
+
+[[expansion]]
 trigger = ":sig"
 replacement = "signature"
 "#,
@@ -795,6 +852,46 @@ replacement = "signature"
         focused(IbusEngineAdapter::new(
             ExpansionEngine::new(config).unwrap(),
         ))
+    }
+
+    #[test]
+    fn default_policy_refuses_non_atomic_replacement() {
+        let config: Config =
+            toml::from_str("[[expansion]]\ntrigger = \":sig\"\nreplacement = \"signature\"\n")
+                .unwrap();
+        let mut adapter = IbusEngineAdapter::new(ExpansionEngine::new(config).unwrap());
+        adapter.focus_in();
+        adapter.set_capabilities(IBUS_CAP_SURROUNDING_TEXT);
+        adapter.set_content_type(0, 0);
+        let mut client = Client::default();
+        client.type_text(&mut adapter, ":sig");
+        assert_eq!(client.text(), ":sig");
+        assert_eq!(adapter.last_expansion_outcome(), None);
+    }
+
+    #[test]
+    fn failed_signal_sequence_does_not_commit_expansion_accounting() {
+        let mut adapter = adapter();
+        let mut client = Client::default();
+        client.type_text(&mut adapter, ":si");
+        let text = client.text();
+        adapter.set_surrounding_text(&text, 3, 3);
+        let result = adapter.process_key_event('g' as u32, 0, 0);
+        assert!(matches!(
+            result.actions.first(),
+            Some(IbusAction::DeleteSurroundingText { .. })
+        ));
+        // Model the D-Bus failure after DeleteSurroundingText but before
+        // CommitText: the host cannot claim the expansion was applied.
+        let failed_after_delete = result.actions.len() > 1;
+        assert!(failed_after_delete);
+        adapter.output_failed();
+        assert_eq!(
+            adapter.last_expansion_outcome(),
+            Some(IbusExpansionOutcome::UnknownPartialEmission)
+        );
+        let undo = wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap();
+        assert!(adapter.engine().prepare_undo(&undo).is_none());
     }
 
     #[test]
