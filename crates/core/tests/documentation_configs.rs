@@ -53,6 +53,47 @@ fn sysadmin_diagnostic_pack_is_valid_and_insert_only() {
             && wayexpand_core::form_fields(&expansion.replacement)
                 .is_ok_and(|fields| !fields.is_empty())
     }));
+
+    for (trigger, key, accepted, rejected) in [
+        (
+            ";tlscheck",
+            "field:domain",
+            "api.example.net",
+            "-oProxyCommand=touch /tmp/pwn",
+        ),
+        (";tlscheck", "field:port", "443", "22;id"),
+        (
+            ";svcdiag",
+            "field:service",
+            "nginx.service",
+            "-oProxyCommand=touch /tmp/pwn",
+        ),
+        (
+            ";sshcheck",
+            "field:user",
+            "admin",
+            "-oProxyCommand=touch /tmp/pwn",
+        ),
+        (
+            ";sshcheck",
+            "field:host",
+            "host.example.net",
+            "-oProxyCommand=touch /tmp/pwn",
+        ),
+    ] {
+        let expansion = config
+            .expansion
+            .iter()
+            .find(|expansion| expansion.trigger == trigger)
+            .expect("the expected diagnostic expansion should exist");
+        let field = wayexpand_core::form_fields(&expansion.replacement)
+            .unwrap()
+            .into_iter()
+            .find(|field| field.key == key)
+            .expect("the expected validated field should exist");
+        assert!(field.validate_value(accepted).is_ok(), "{trigger} {key}");
+        assert!(field.validate_value(rejected).is_err(), "{trigger} {key}");
+    }
 }
 
 #[test]

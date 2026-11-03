@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Reduce evdev capture polling churn and layout background traffic, while
+  retaining compositor layout-change notification with a slower fallback.
+- Add insert-only sysadmin diagnostic templates for TLS, service, port, HTTP,
+  filesystem, and SSH checks. Form values are validated and shell-quoted so
+  the completed commands can be reviewed before an operator runs them.
 - Fail closed on automatic text replacement unless the active route provides
   an atomic replacement contract. Quick Picker keeps clipboard/manual paste
   unless the target and route meet the atomic requirements; the explicit

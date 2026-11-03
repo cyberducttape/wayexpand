@@ -152,6 +152,7 @@ pub enum FormFieldValidation {
     Hostname,
     HostPort,
     Port,
+    SystemdUnit,
     PositiveInteger,
     LinuxUser,
     AnsibleRoleName,
@@ -172,6 +173,7 @@ impl FormFieldValidation {
             "hostname" => Self::Hostname,
             "host-port" => Self::HostPort,
             "port" => Self::Port,
+            "systemd-unit" => Self::SystemdUnit,
             "positive-integer" => Self::PositiveInteger,
             "linux-user" => Self::LinuxUser,
             "ansible-role-name" => Self::AnsibleRoleName,
@@ -193,6 +195,7 @@ impl FormFieldValidation {
             Self::Hostname => "hostname or IP address",
             Self::HostPort => "hostname or IP address followed by a valid port",
             Self::Port => "port from 1 to 65535",
+            Self::SystemdUnit => "systemd unit name",
             Self::PositiveInteger => "positive integer",
             Self::LinuxUser => "Linux user name",
             Self::AnsibleRoleName => "Ansible role name",
@@ -213,6 +216,14 @@ impl FormFieldValidation {
             Self::Hostname => valid_host(value),
             Self::HostPort => valid_host_port(value),
             Self::Port => valid_port(value),
+            Self::SystemdUnit => {
+                !value.is_empty()
+                    && value.len() <= 255
+                    && value.as_bytes()[0].is_ascii_alphanumeric()
+                    && value
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || b"_.@:-".contains(&byte))
+            }
             Self::PositiveInteger => value.parse::<u32>().is_ok_and(|number| number > 0),
             Self::LinuxUser => {
                 !value.is_empty()
@@ -2168,7 +2179,7 @@ mod tests {
     #[test]
     fn typed_infrastructure_fields_validate_names_ports_and_syntax_safe_values() {
         let fields = form_fields(
-            "{{field:domain=example.com|required|validate=hostname}} {{field:service=api|required|validate=dns-label}} {{field:endpoint=127.0.0.1:8080|required|validate=host-port}} {{field:port=443|required|validate=port}} {{field:replicas=2|required|validate=positive-integer}} {{field:image=nginx:stable|required|validate=container-image}} {{field:description=API service|required|validate=single-line}} {{field:yaml=nginx|required|validate=yaml-string}} {{field:shell=nginx.service|required|validate=shell-single-quoted}}",
+            "{{field:domain=example.com|required|validate=hostname}} {{field:service=api|required|validate=dns-label}} {{field:endpoint=127.0.0.1:8080|required|validate=host-port}} {{field:port=443|required|validate=port}} {{field:replicas=2|required|validate=positive-integer}} {{field:image=nginx:stable|required|validate=container-image}} {{field:description=API service|required|validate=single-line}} {{field:yaml=nginx|required|validate=yaml-string}} {{field:shell=nginx.service|required|validate=shell-single-quoted}} {{field:unit=api@blue.service|required|validate=systemd-unit}}",
         )
         .unwrap();
         let accepted = [
@@ -2181,6 +2192,7 @@ mod tests {
             "API service",
             "nginx",
             "nginx.service",
+            "api@blue.service",
         ];
         for (field, value) in fields.iter().zip(accepted) {
             assert!(
@@ -2200,6 +2212,7 @@ mod tests {
             "two\nlines",
             "bad\"\nkey: value",
             "nginx.service'; reboot; #",
+            "-oProxyCommand=touch /tmp/pwn",
         ]) {
             assert!(
                 field.validate_value(value).is_err(),
