@@ -11,6 +11,9 @@ All notable changes to WayExpand are documented here.
   Context is bound to a local terminal and random shell session, is
   informational, and never authorizes execution or guesses remote destinations
   from shell history or terminal contents.
+
+- Resolve fleet settings per field with pack defaults, organization defaults, and user preferences in explicit precedence order; report each effective setting's source in `wayexpand fleet status`.
+
 - Gate IBus replacement through the shared capability admission contract.
   Non-atomic replacement is refused by default, expansion accounting waits
   for successful signal emission. Outcomes distinguish fully emitted but
