@@ -158,6 +158,7 @@ fn daemon_status_body_matches_documented_stable_contract() {
             "recent_expansion_outcomes",
             "replacement_assurance",
             "route_id",
+            "sandbox_security",
             "source",
             "state",
             "status_schema",

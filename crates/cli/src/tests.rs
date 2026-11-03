@@ -9,7 +9,9 @@ use crate::doctor::policy::{
     absolute_command_policy_diagnostic, composition_policy_diagnostic,
     exclusive_capture_policy_diagnostic, print_policy_diagnostics_json,
 };
-use crate::doctor::status::{runtime_capabilities_from_status, status_schema_compatible};
+use crate::doctor::status::{
+    runtime_capabilities_from_status, status_as_json, status_schema_compatible,
+};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
@@ -527,6 +529,23 @@ fn status_schema_rejects_missing_or_newer_incompatible_daemons() {
     assert!(!status_schema_compatible(
         &serde_json::json!({ "status_schema": "1" })
     ));
+}
+
+#[test]
+fn status_json_parses_optional_effective_sandbox_snapshot() {
+    let status = status_as_json(
+        "running\nsandbox_security={\"pid\":42,\"no_new_privileges\":true,\"address_families\":{\"unix\":\"allowed\"}}\n",
+    )
+    .unwrap();
+    assert_eq!(status["sandbox_security"]["pid"], 42);
+    assert_eq!(
+        status["sandbox_security"]["no_new_privileges"],
+        serde_json::Value::Bool(true)
+    );
+    assert_eq!(
+        status["sandbox_security"]["address_families"]["unix"],
+        "allowed"
+    );
 }
 
 #[test]
