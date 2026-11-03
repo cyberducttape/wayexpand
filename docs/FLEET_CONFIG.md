@@ -65,6 +65,31 @@ table in a fleet layer is rejected. In daemon fleet mode, that root policy's
 `allowed_packs` list is enforced when `safe_mode = true`; with safe mode off,
 disallowed packs are retained and reported as audit-only policy violations.
 
+Example of a restrictive pilot policy (the route must provide every requested
+capability or WayExpand refuses the deployment):
+
+```toml
+[organization]
+safe_mode = true
+disable_commands = true
+disable_hotkeys = true
+require_signed_packs = true
+require_sensitive_focus = true
+minimum_replacement_guarantee = "verified"
+allowed_backends = ["ibus", "input-method-v2"]
+```
+
+Inspect the policy's actual enforcement view with `wayexpand policy inspect`
+or consume `wayexpand policy inspect --json` in deployment CI. CI can validate
+a candidate without installing it using
+`wayexpand policy inspect --file ./policy.toml --json`; this parses and reports
+the file but does not treat it as a trusted deployed policy. The report
+includes configured and effective values, controls that remain audit-only, and
+known unsupported requirements. `doctor --json` and `fleet status --json`
+include the same policy view. A restrictive policy can intentionally refuse to
+start on a compositor whose route lacks a required guarantee; it does not
+upgrade that route's capabilities.
+
 ## Layer Precedence and Conflict Resolution
 
 **Layer Loading Order:** Base config → Organization → User → Packs (base config is prepended and has the lowest priority)

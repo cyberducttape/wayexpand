@@ -15,9 +15,28 @@ offline. Install only the libraries you want.
 | `ansible` | Playbook, inventory, and role starters with syntax checks |
 | `nginx` | Configuration checks, request probes, and server-block starters |
 | `git` | Review-first Git commands and collaborative workflow templates |
-| `customer-support` | Status updates, maintenance notices, and support replies |
+| `customer-support` | Acknowledgements, status updates, maintenance notices, ticket resolutions |
 | `developer` | SQL, shell, and Markdown starters |
-| `ops-triage` | Read-only first-response checks (TLS expiry, disk, memory, sockets, DNS, HTTP, nginx, firewall, failed units) and on-call timeline and handoff notes |
+| `ops-triage` | Read-only first-response checks for HTTP 503, Apache, Exim, MariaDB, and cPanel/WHM, plus target-context review and structured incident documentation |
+
+For a review-first HTTP 503 workflow, install `ops-triage` and type `;http503`.
+The form asks for the operator-selected environment, target host, service unit,
+and local service port, then inserts the checklist and diagnostic commands as
+text. Commands run on whichever machine the operator's current shell targets;
+the host label does not connect to or select a host. WayExpand does not inspect
+terminal contents, SSH state, or shell history to infer that target. Review each
+command before manually running it. The sequence reads systemd status and
+journal entries, checks listening sockets, and makes a bounded localhost HTTP
+probe; it does not restart a service or modify configuration. Redact
+credentials and customer data before sharing command output.
+
+The same pack provides `;escalation`, `;runbook`, `;change-record`,
+`;apache-check`, `;exim-check`, `;mariadb-check`, `;cpanel-check`, and
+`;cloud-context` forms. Cloud identity commands are explicitly chosen by the
+operator and may contact the cloud provider; review output for account details
+before sharing it.
+The customer-support pack provides `;;ticket-resolution` in addition to
+acknowledgement and status-update replies.
 
 Install and inspect a pack locally:
 

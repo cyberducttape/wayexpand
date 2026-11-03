@@ -139,6 +139,151 @@ pub struct FormField {
     /// Text fields may impose a character-count upper bound.
     #[serde(default)]
     pub max_chars: Option<usize>,
+    /// Optional domain constraint shared by terminal prompts, GUI forms and
+    /// template rendering.
+    #[serde(default)]
+    pub validation: Option<FormFieldValidation>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FormFieldValidation {
+    DnsLabel,
+    Hostname,
+    HostPort,
+    Port,
+    PositiveInteger,
+    LinuxUser,
+    AnsibleRoleName,
+    AbsolutePath,
+    SystemdExecutable,
+    YamlString,
+    AnsibleHostPattern,
+    ComposeService,
+    ContainerImage,
+    SingleLine,
+    ShellSingleQuoted,
+}
+
+impl FormFieldValidation {
+    fn parse(value: &str) -> Option<Self> {
+        Some(match value {
+            "dns-label" => Self::DnsLabel,
+            "hostname" => Self::Hostname,
+            "host-port" => Self::HostPort,
+            "port" => Self::Port,
+            "positive-integer" => Self::PositiveInteger,
+            "linux-user" => Self::LinuxUser,
+            "ansible-role-name" => Self::AnsibleRoleName,
+            "absolute-path" => Self::AbsolutePath,
+            "systemd-executable" => Self::SystemdExecutable,
+            "yaml-string" => Self::YamlString,
+            "ansible-host-pattern" => Self::AnsibleHostPattern,
+            "compose-service" => Self::ComposeService,
+            "container-image" => Self::ContainerImage,
+            "single-line" => Self::SingleLine,
+            "shell-single-quoted" => Self::ShellSingleQuoted,
+            _ => return None,
+        })
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::DnsLabel => "DNS label",
+            Self::Hostname => "hostname or IP address",
+            Self::HostPort => "hostname or IP address followed by a valid port",
+            Self::Port => "port from 1 to 65535",
+            Self::PositiveInteger => "positive integer",
+            Self::LinuxUser => "Linux user name",
+            Self::AnsibleRoleName => "Ansible role name",
+            Self::AbsolutePath => "absolute path without parent traversal",
+            Self::SystemdExecutable => "absolute executable path without arguments",
+            Self::YamlString => "single-line YAML string without quote or template syntax",
+            Self::AnsibleHostPattern => "single-line Ansible host pattern",
+            Self::ComposeService => "Docker Compose service name",
+            Self::ContainerImage => "container image reference",
+            Self::SingleLine => "single-line value",
+            Self::ShellSingleQuoted => "single-line value safe inside shell single quotes",
+        }
+    }
+
+    fn accepts(self, value: &str) -> bool {
+        match self {
+            Self::DnsLabel => valid_dns_label(value, false),
+            Self::Hostname => valid_host(value),
+            Self::HostPort => valid_host_port(value),
+            Self::Port => valid_port(value),
+            Self::PositiveInteger => value.parse::<u32>().is_ok_and(|number| number > 0),
+            Self::LinuxUser => {
+                !value.is_empty()
+                    && value.len() <= 32
+                    && (value.as_bytes()[0].is_ascii_alphabetic() || value.as_bytes()[0] == b'_')
+                    && value
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || b"_-".contains(&byte))
+            }
+            Self::AnsibleRoleName => {
+                !value.is_empty()
+                    && value.len() <= 128
+                    && value
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || b"_-".contains(&byte))
+            }
+            Self::AbsolutePath => {
+                let path = std::path::Path::new(value);
+                path.is_absolute()
+                    && !value.chars().any(|character| {
+                        character.is_control() || matches!(character, '"' | '\\' | '{' | '}')
+                    })
+                    && path
+                        .components()
+                        .all(|component| !matches!(component, std::path::Component::ParentDir))
+            }
+            Self::SystemdExecutable => {
+                value.starts_with('/')
+                    && !value.chars().any(char::is_whitespace)
+                    && value
+                        .chars()
+                        .all(|character| !character.is_control() && character != '%')
+            }
+            Self::YamlString => {
+                !value.is_empty()
+                    && value.chars().all(|character| {
+                        !character.is_control() && !matches!(character, '"' | '\\' | '{' | '}')
+                    })
+            }
+            Self::AnsibleHostPattern => {
+                !value.is_empty()
+                    && value.len() <= 512
+                    && value.chars().all(|character| {
+                        character.is_ascii_alphanumeric() || "._-:&!,[]*".contains(character)
+                    })
+            }
+            Self::ComposeService => {
+                !value.is_empty()
+                    && value.len() <= 63
+                    && value
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
+            }
+            Self::ContainerImage => {
+                !value.is_empty()
+                    && value.len() <= 512
+                    && value.as_bytes()[0].is_ascii_alphanumeric()
+                    && value
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || b"._/:@-".contains(&byte))
+                    && !value.contains("..")
+            }
+            Self::SingleLine => !value.chars().any(char::is_control),
+            Self::ShellSingleQuoted => {
+                !value.is_empty()
+                    && !value
+                        .chars()
+                        .any(|character| character.is_control() || character == '\'')
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -174,6 +319,8 @@ pub enum FormValueError {
     ControlCharacter,
     #[error("value exceeds the form size limit")]
     TooLarge,
+    #[error("value must be a valid {0}")]
+    InvalidFormat(&'static str),
 }
 
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
@@ -218,6 +365,11 @@ impl FormField {
                     return Err(FormValueError::TooLong {
                         maximum: self.max_chars.unwrap_or_default(),
                     });
+                }
+                if let Some(validation) = self.validation {
+                    if !validation.accepts(value) {
+                        return Err(FormValueError::InvalidFormat(validation.label()));
+                    }
                 }
             }
             FormFieldKind::Choice { options, .. } => {
@@ -264,13 +416,63 @@ fn valid_iso_date(value: &str) -> bool {
     (1..=days).contains(&day)
 }
 
+fn valid_dns_label(value: &str, allow_uppercase: bool) -> bool {
+    !value.is_empty()
+        && value.len() <= 63
+        && value.as_bytes()[0].is_ascii_alphanumeric()
+        && value.as_bytes()[value.len() - 1].is_ascii_alphanumeric()
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase()
+                || (allow_uppercase && byte.is_ascii_uppercase())
+                || byte.is_ascii_digit()
+                || byte == b'-'
+        })
+}
+
+fn valid_host(value: &str) -> bool {
+    if value.parse::<std::net::IpAddr>().is_ok() {
+        return true;
+    }
+    let hostname = value.strip_suffix('.').unwrap_or(value);
+    !hostname.is_empty()
+        && hostname.len() <= 253
+        && hostname
+            .split('.')
+            .all(|label| valid_dns_label(label, true))
+}
+
+fn valid_port(value: &str) -> bool {
+    value.parse::<u16>().is_ok_and(|port| port > 0)
+}
+
+fn valid_host_port(value: &str) -> bool {
+    if let Some(bracketed) = value.strip_prefix('[') {
+        let Some((address, port)) = bracketed.split_once("]:") else {
+            return false;
+        };
+        return address.parse::<std::net::Ipv6Addr>().is_ok() && valid_port(port);
+    }
+    value
+        .rsplit_once(':')
+        .is_some_and(|(host, port)| valid_host(host) && valid_port(port))
+}
+
+#[derive(Default)]
+struct ParsedFormAttributes {
+    required: bool,
+    min_chars: Option<usize>,
+    max_chars: Option<usize>,
+    validation: Option<FormFieldValidation>,
+}
+
 fn parse_form_attributes(
     attributes: &[&str],
     allow_length: bool,
-) -> Result<(bool, Option<usize>, Option<usize>), TemplateError> {
+) -> Result<ParsedFormAttributes, TemplateError> {
     let mut required = false;
     let mut min_chars = None;
     let mut max_chars = None;
+    let mut validation = None;
     for attribute in attributes {
         let attribute = attribute.trim();
         if attribute == "required" && !required {
@@ -285,6 +487,12 @@ fn parse_form_attributes(
                 return Err(TemplateError::InvalidField);
             }
             max_chars = Some(parse_field_length(value)?);
+        } else if let Some(value) = attribute.strip_prefix("validate=") {
+            if !allow_length || validation.is_some() {
+                return Err(TemplateError::InvalidField);
+            }
+            validation =
+                Some(FormFieldValidation::parse(value).ok_or(TemplateError::InvalidField)?);
         } else {
             return Err(TemplateError::InvalidField);
         }
@@ -292,7 +500,12 @@ fn parse_form_attributes(
     if min_chars.zip(max_chars).is_some_and(|(min, max)| min > max) {
         return Err(TemplateError::InvalidField);
     }
-    Ok((required, min_chars, max_chars))
+    Ok(ParsedFormAttributes {
+        required,
+        min_chars,
+        max_chars,
+        validation,
+    })
 }
 
 fn parse_choice_attributes(attributes: &[&str]) -> Result<(bool, Option<String>), TemplateError> {
@@ -339,7 +552,12 @@ fn parse_form_field(name: &str) -> Option<Result<FormField, TemplateError>> {
             return Some(Err(TemplateError::InvalidField));
         }
         let validation = parse_form_attributes(&attributes, true);
-        let (required, min_chars, max_chars) = match validation {
+        let ParsedFormAttributes {
+            required,
+            min_chars,
+            max_chars,
+            validation,
+        } = match validation {
             Ok(validation) => validation,
             Err(error) => return Some(Err(error)),
         };
@@ -352,6 +570,7 @@ fn parse_form_field(name: &str) -> Option<Result<FormField, TemplateError>> {
             required,
             min_chars,
             max_chars,
+            validation,
         }));
     }
     if let Some(spec) = name.strip_prefix("datefield:") {
@@ -363,7 +582,12 @@ fn parse_form_field(name: &str) -> Option<Result<FormField, TemplateError>> {
         if label.is_empty() || label.chars().count() > 64 {
             return Some(Err(TemplateError::InvalidField));
         }
-        let (required, min_chars, max_chars) = match parse_form_attributes(&attributes, false) {
+        let ParsedFormAttributes {
+            required,
+            min_chars,
+            max_chars,
+            validation,
+        } = match parse_form_attributes(&attributes, false) {
             Ok(validation) => validation,
             Err(error) => return Some(Err(error)),
         };
@@ -379,6 +603,7 @@ fn parse_form_field(name: &str) -> Option<Result<FormField, TemplateError>> {
             required,
             min_chars,
             max_chars,
+            validation,
         }));
     }
     let spec = name.strip_prefix("choice:")?;
@@ -426,6 +651,7 @@ fn parse_form_field(name: &str) -> Option<Result<FormField, TemplateError>> {
         required,
         min_chars: None,
         max_chars: None,
+        validation: None,
     }))
 }
 
@@ -1937,6 +2163,50 @@ mod tests {
             render_template(template, &context),
             Err(TemplateError::InvalidField)
         ));
+    }
+
+    #[test]
+    fn typed_infrastructure_fields_validate_names_ports_and_syntax_safe_values() {
+        let fields = form_fields(
+            "{{field:domain=example.com|required|validate=hostname}} {{field:service=api|required|validate=dns-label}} {{field:endpoint=127.0.0.1:8080|required|validate=host-port}} {{field:port=443|required|validate=port}} {{field:replicas=2|required|validate=positive-integer}} {{field:image=nginx:stable|required|validate=container-image}} {{field:description=API service|required|validate=single-line}} {{field:yaml=nginx|required|validate=yaml-string}} {{field:shell=nginx.service|required|validate=shell-single-quoted}}",
+        )
+        .unwrap();
+        let accepted = [
+            "api.example.com",
+            "api-1",
+            "127.0.0.1:8080",
+            "443",
+            "2",
+            "registry.example/team/api:v2",
+            "API service",
+            "nginx",
+            "nginx.service",
+        ];
+        for (field, value) in fields.iter().zip(accepted) {
+            assert!(
+                field.validate_value(value).is_ok(),
+                "{}: {value}",
+                field.label
+            );
+        }
+
+        for (field, value) in fields.iter().zip([
+            "bad host",
+            "UPPER_case",
+            "127.0.0.1:99999",
+            "0",
+            "two",
+            "nginx; touch /tmp/pwn",
+            "two\nlines",
+            "bad\"\nkey: value",
+            "nginx.service'; reboot; #",
+        ]) {
+            assert!(
+                field.validate_value(value).is_err(),
+                "{}: {value:?}",
+                field.label
+            );
+        }
     }
 
     #[test]

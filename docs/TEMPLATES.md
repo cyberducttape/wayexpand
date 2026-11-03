@@ -312,6 +312,53 @@ name it writes. Typing the trigger still inserts the text as usual.
   `{{clipboard}}` is not available, and command snippets cannot be written to
   a file.
 
+Infrastructure fields can declare a shared constraint with
+`|validate=TYPE`. The constraint runs in the terminal prompt, GUI form,
+`--set` handling, and final renderer. Built-in generators use DNS-label,
+hostname, host-and-port, port, positive-integer, Linux-user, absolute-path,
+YAML-string, Ansible host-pattern, Compose service-name, container-image,
+systemd-executable, and single-line checks where each value is used. These
+checks (including `shell-single-quoted` for safe shell arguments) prevent
+common malformed values and syntax breakouts; they do not
+replace validation by the target tool.
+
+Available text-field types are `dns-label`, `hostname`, `host-port`, `port`,
+`positive-integer`, `linux-user`, `ansible-role-name`, `absolute-path`,
+`yaml-string`, `ansible-host-pattern`, `compose-service`, `container-image`,
+`systemd-executable`, `single-line`, and `shell-single-quoted`. For example,
+`{{field:port=443|required|max=5|validate=port}}` accepts only a decimal port
+from 1 through 65535.
+
+The optional `ops-triage` and `customer-support` packs provide standardized
+operational notes and replies. In particular, `;http503` inserts a host- and
+service-specific, read-only diagnostic checklist. It produces commands for
+the operator to inspect and run; WayExpand does not execute them. See
+[`PACKS.md`](PACKS.md#optional-sysadmin-and-developer-libraries) for the pack
+install instructions and the included escalation, runbook, change-record,
+and ticket-resolution forms.
+
+Generate the requested artifacts with explicit values and, when the target
+validator is installed, ask `--validate` to check the staged output before it
+is written:
+
+```sh
+wayexpand new systemd-service --set description='API service' \
+  --set command=/usr/bin/api --validate -o api.service
+wayexpand new nginx-site --set 'server name=api.example.net' \
+  --set upstream=127.0.0.1:8080 --validate -o api.conf
+wayexpand new playbook --set hosts=webservers --set package=nginx \
+  --set service=nginx --validate -o site.yml
+wayexpand new compose --set service=api --set image=registry.example/api:v2 \
+  --set 'host port=8080' --validate -o compose.yaml
+wayexpand new k8s-deployment --set name=api \
+  --set image=registry.example/api:v2 --validate -o deployment.yaml
+```
+
+The Ansible role generator writes a complete role directory, including its
+tasks, handler, defaults, and Nginx template. See
+[`ARTIFACT_VALIDATION.md`](ARTIFACT_VALIDATION.md) for the fixed validator
+registry. Validation tools run only when `--validate` is explicitly supplied.
+
 WayExpand ships starter templates: `dockerfile`, `dockerfile-python`,
 `dockerfile-node`, `dockerfile-rust`, `compose`, `playbook`, `ansible-role`,
 `inventory`, `systemd-service`, `github-actions`, `nginx-site` and
