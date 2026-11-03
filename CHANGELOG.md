@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Publish a dated, versioned desktop certification snapshot for KDE, GNOME,
+  Sway, and Hyprland. It separates CI/headless results from physical-session
+  evidence and lists the remaining lock, layout, suspend, portal, and soak
+  gates; no route is promoted to production-safe without reviewed evidence.
 - Reduce evdev capture polling churn and layout background traffic, while
   retaining compositor layout-change notification with a slower fallback.
 - Add insert-only sysadmin diagnostic templates for TLS, service, port, HTTP,
