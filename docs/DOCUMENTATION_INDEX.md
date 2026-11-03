@@ -184,6 +184,7 @@ Release history is in [CHANGELOG.md](../CHANGELOG.md).
 
 #### System Administrators
 - [FOR_SYSADMINS.md](FOR_SYSADMINS.md) — all sysadmin needs (30+ snippets)
+- [TERMINAL_CONTEXT.md](TERMINAL_CONTEXT.md) — opt-in shell, SSH, Git, Kubernetes, and container context reporting
 - [FLEET_CONFIG.md](FLEET_CONFIG.md) — multi-machine setup
 - [ORGANIZATION_POLICY.md](ORGANIZATION_POLICY.md) — policy enforcement
 

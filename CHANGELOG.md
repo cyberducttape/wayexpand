@@ -8,6 +8,13 @@ All notable changes to WayExpand are documented here.
   return them with completion, avoiding a second allocation of the full
   replacement text. Pending reactor state retains only the trigger needed for
   outcome bookkeeping.
+- Add opt-in Bash, Zsh, and Fish terminal context reporting. Reports bind to
+  the local terminal device and random shell session, expire quickly, and can
+  include Git root, configured Kubernetes context, explicit environment and
+  container labels, and an SSH destination supplied to `wayexpand-ssh`.
+  Context is bound to a local terminal and random shell session, is
+  informational, and never authorizes execution or guesses remote destinations
+  from shell history or terminal contents.
 - Add `;klogs`, a Kubernetes log form that shows the active kubectl context,
   validates and shell-quotes each value, and previews the exact insert-only
   command. Form dialogs now preview field-only output before insertion.

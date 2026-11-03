@@ -14,6 +14,7 @@ use commands::config::{
     preview_command, schema_command, search_command, set_enabled_command, set_mode_command,
     stats_command, sync_command, test_command, test_hotkey_command, validate_command,
 };
+use commands::context::context_command;
 use commands::daemon::{control_command, insert_command};
 use commands::metrics::metrics_command;
 use commands::new::new_command;
@@ -115,6 +116,7 @@ fn run() -> Result<()> {
         Some("import") => import_command(args)?,
         Some("pack") => pack_command(args)?,
         Some("profile") => profile_command(args)?,
+        Some("context") => context_command(args)?,
         Some("library") => commands::library::library_command(args)?,
         Some("set-enabled") => set_enabled_command(args)?,
         Some("set-mode") => set_mode_command(args)?,
@@ -182,6 +184,19 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
             "status|reload|pause|resume|stop [--json]",
             "Control a running daemon",
         )],
+    ),
+    (
+        "Terminal context",
+        &[
+            (
+                "context integration bash|zsh|fish",
+                "Print an opt-in shell prompt integration",
+            ),
+            (
+                "context report|status|clear",
+                "Report and inspect fresh terminal, remote, project, and runtime context",
+            ),
+        ],
     ),
     (
         "Snippets",

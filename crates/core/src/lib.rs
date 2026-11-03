@@ -30,6 +30,7 @@ mod pack;
 mod paths;
 mod policy;
 mod profiles;
+mod session_context;
 mod store;
 mod template;
 mod template_dynamic;
@@ -86,6 +87,7 @@ pub use policy::{
     ORGANIZATION_POLICY_PATH,
 };
 pub use profiles::{ProfileAssignments, ProfileAssignmentsError};
+pub use session_context::SessionContextReport;
 pub use store::{ConfigSnapshot, ConfigStore, ConfigStoreStatus};
 pub use template::{
     form_fields, render_template, render_template_preview, render_template_with_cursor,
