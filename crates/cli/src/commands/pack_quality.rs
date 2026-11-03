@@ -164,9 +164,9 @@ fn lint_pack(
         &mut checks,
         "test fixture",
         fixture_result.is_ok(),
-        fixture_result
-            .as_deref()
-            .unwrap_or("declared fixture and all expected-output paths are valid"),
+        match &fixture_result {
+            Ok(message) | Err(message) => message,
+        },
     );
     let policy_result = trust.admit(&inspection, true);
     add_check(

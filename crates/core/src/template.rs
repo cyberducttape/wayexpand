@@ -172,6 +172,7 @@ pub enum FormFieldValidation {
     SingleLine,
     ShellSingleQuoted,
     Duration,
+    RelativeTime,
     GitRevision,
     SqlIdentifier,
     Url,
@@ -202,6 +203,7 @@ impl FormFieldValidation {
             "single-line" => Self::SingleLine,
             "shell-single-quoted" => Self::ShellSingleQuoted,
             "duration" => Self::Duration,
+            "relative-time" => Self::RelativeTime,
             "git-revision" => Self::GitRevision,
             "sql-identifier" => Self::SqlIdentifier,
             "url" => Self::Url,
@@ -232,7 +234,8 @@ impl FormFieldValidation {
             Self::KubernetesDuration => "Kubernetes log duration up to 30 days",
             Self::SingleLine => "single-line value",
             Self::ShellSingleQuoted => "single-line value safe inside shell single quotes",
-            Self::Duration => "duration such as 15m or 1 hour ago",
+            Self::Duration => "duration such as 15m or 1h30m, up to 30 days",
+            Self::RelativeTime => "relative time such as 1 hour ago",
             Self::GitRevision => "Git revision or ref without option or shell syntax",
             Self::SqlIdentifier => {
                 "SQL identifier, schema-qualified identifier, or identifier list"
@@ -333,7 +336,8 @@ impl FormFieldValidation {
                         .chars()
                         .any(|character| character.is_control() || character == '\'')
             }
-            Self::Duration => valid_duration(value),
+            Self::Duration => valid_kubernetes_duration(value),
+            Self::RelativeTime => valid_relative_time(value),
             Self::GitRevision => valid_git_revision(value),
             Self::SqlIdentifier => valid_sql_identifier(value),
             Self::Url => valid_http_url(value),
@@ -358,17 +362,12 @@ impl FormFieldValidation {
     }
 }
 
-fn valid_duration(value: &str) -> bool {
-    let compact = value
-        .strip_suffix('s')
-        .or_else(|| value.strip_suffix('m'))
-        .or_else(|| value.strip_suffix('h'));
-    if compact.is_some_and(|number| number.parse::<u32>().is_ok_and(|value| value > 0)) {
-        return true;
-    }
-    let words = value.split_whitespace().collect::<Vec<_>>();
+/// A `journalctl --since`-style relative time such as `1 hour ago`.
+fn valid_relative_time(value: &str) -> bool {
+    let words = value.split(' ').collect::<Vec<_>>();
     matches!(words.as_slice(), [number, unit, "ago"]
-        if number.parse::<u32>().is_ok_and(|value| value > 0)
+        if !number.starts_with('+')
+            && number.parse::<u32>().is_ok_and(|value| value > 0)
             && matches!(*unit, "second" | "seconds" | "minute" | "minutes" | "hour" | "hours" | "day" | "days" | "week" | "weeks"))
 }
 
@@ -1425,7 +1424,10 @@ fn evaluate<'a>(
                 field
                     .validate_value(value)
                     .map_err(|_| TemplateError::InvalidField)?;
-                if value.contains('\n') || value.contains('\t') {
+                // Any control character is refused: a carriage return typed
+                // into a terminal acts as Enter and would run the command
+                // before the operator has reviewed it.
+                if value.chars().any(char::is_control) {
                     return Err(TemplateError::InvalidField);
                 }
                 RenderValue::owned(shell_quote(value))
@@ -1844,6 +1846,21 @@ pub(crate) fn civil_from_days(days_since_epoch: i64) -> (i64, i64, i64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn duration_validators_accept_only_the_syntax_their_tools_understand() {
+        let duration = FormFieldValidation::parse("duration").unwrap();
+        assert!(duration.accepts("15m"));
+        assert!(duration.accepts("1h30m"));
+        assert!(!duration.accepts("1 hour ago"));
+        assert!(!duration.accepts("0s"));
+        let relative = FormFieldValidation::parse("relative-time").unwrap();
+        assert!(relative.accepts("1 hour ago"));
+        assert!(relative.accepts("30 minutes ago"));
+        assert!(!relative.accepts("15m"));
+        assert!(!relative.accepts("+1 hour ago"));
+        assert!(!relative.accepts("1  hour ago"));
+    }
 
     #[test]
     fn dns_subdomain_validator_accepts_valid_names_and_rejects_hostile_values() {
@@ -2379,17 +2396,23 @@ mod tests {
             "curl 'example.net'\\''; touch /tmp/should-not-run; echo '\\''' 'example.net'\\''; touch /tmp/should-not-run; echo '\\'''"
         );
 
-        let values = [("field:domain".to_owned(), "example.net\nwhoami".to_owned())]
-            .into_iter()
-            .collect();
-        let context = TemplateContext {
-            fields: Arc::new(values),
-            ..TemplateContext::default()
-        };
-        assert!(matches!(
-            render_template(template, &context),
-            Err(TemplateError::InvalidField)
-        ));
+        for hostile in [
+            "example.net\nwhoami",
+            "example.net\rwhoami",
+            "example\u{1b}[2K.net",
+        ] {
+            let values = [("field:domain".to_owned(), hostile.to_owned())]
+                .into_iter()
+                .collect();
+            let context = TemplateContext {
+                fields: Arc::new(values),
+                ..TemplateContext::default()
+            };
+            assert!(matches!(
+                render_template(template, &context),
+                Err(TemplateError::InvalidField)
+            ));
+        }
     }
 
     #[test]

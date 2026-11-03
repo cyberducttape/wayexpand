@@ -1477,7 +1477,10 @@ fn write_output(path: &Path, contents: &[u8], force: bool) -> Result<()> {
 }
 
 fn review_file(path: &Path, rendered: &str, force: bool) -> Result<()> {
-    println!("Mode: Generate File\nDestination: {}", path.display());
+    println!(
+        "Mode: Generate File\nDestination: {}",
+        terminal_safe(&path.display().to_string())
+    );
     if path.exists() {
         if !force {
             usage_bail!(
@@ -1505,7 +1508,7 @@ fn review_scaffold(directory: &Path, files: &[(String, Vec<u8>)], force: bool) -
     );
     for (relative, contents) in files {
         let path = directory.join(relative);
-        println!("\nFile: {}", path.display());
+        println!("\nFile: {}", terminal_safe(&path.display().to_string()));
         if path.exists() {
             if !force {
                 usage_bail!(
@@ -1536,10 +1539,10 @@ fn print_review_diff(existing: &str, proposed: &str) {
         return;
     }
     for line in existing.lines().take(500) {
-        println!("-{line}");
+        println!("-{}", terminal_safe(line));
     }
     for line in proposed.lines().take(500) {
-        println!("+{line}");
+        println!("+{}", terminal_safe(line));
     }
     if existing.lines().count() > 500 || proposed.lines().count() > 500 {
         println!("… diff truncated after 500 lines per side");

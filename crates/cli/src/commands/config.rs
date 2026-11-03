@@ -1632,18 +1632,19 @@ fn print_pack_diff(installed: &Path, candidate: &Path) -> Result<()> {
     for name in names {
         match (old_files.get(name), new_files.get(name)) {
             (None, Some(content)) => {
-                println!("--- /dev/null\n+++ {name}");
+                println!("--- /dev/null\n+++ {}", terminal_safe(name));
                 for line in content.lines() {
-                    println!("+{line}");
+                    println!("+{}", terminal_safe(line));
                 }
             }
             (Some(content), None) => {
-                println!("--- {name}\n+++ /dev/null");
+                println!("--- {}\n+++ /dev/null", terminal_safe(name));
                 for line in content.lines() {
-                    println!("-{line}");
+                    println!("-{}", terminal_safe(line));
                 }
             }
             (Some(old), Some(new)) if old != new => {
+                let name = terminal_safe(name);
                 println!("--- {name} (installed)\n+++ {name} (candidate)");
                 let old_lines: Vec<_> = old.lines().collect();
                 let new_lines: Vec<_> = new.lines().collect();
@@ -1659,10 +1660,10 @@ fn print_pack_diff(installed: &Path, candidate: &Path) -> Result<()> {
                     .take_while(|(left, right)| left == right)
                     .count();
                 for line in &old_lines[prefix..old_lines.len().saturating_sub(suffix)] {
-                    println!("-{line}");
+                    println!("-{}", terminal_safe(line));
                 }
                 for line in &new_lines[prefix..new_lines.len().saturating_sub(suffix)] {
-                    println!("+{line}");
+                    println!("+{}", terminal_safe(line));
                 }
             }
             _ => {}

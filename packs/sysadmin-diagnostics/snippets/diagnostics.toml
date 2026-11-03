@@ -10,7 +10,7 @@ trigger = ";svcdiag"
 description = "Show service status and recent journal entries for a systemd unit"
 category = "Sysadmin diagnostics"
 tags = ["systemd", "journalctl", "service"]
-replacement = "systemctl status --no-pager -- {{shellq:service=nginx.service|required|max=255|validate=systemd-unit}}; journalctl -u {{shellq:service}} --since {{shellq:since=1 hour ago|required|max=80|validate=duration}} -n {{shellq:lines=100|required|max=5|validate=positive-integer}} --no-pager"
+replacement = "systemctl status --no-pager -- {{shellq:service=nginx.service|required|max=255|validate=systemd-unit}}; journalctl -u {{shellq:service}} --since {{shellq:since=1 hour ago|required|max=80|validate=relative-time}} -n {{shellq:lines=100|required|max=5|validate=positive-integer}} --no-pager"
 
 [[expansion]]
 trigger = ";portcheck"

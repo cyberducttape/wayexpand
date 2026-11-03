@@ -178,8 +178,8 @@ the character count (text fields only). For example,
 For insert-only shell command templates, `{{shellq:NAME=DEFAULT|required|max=N}}`
 collects a text field and renders it as one POSIX shell-quoted word. Repeat it
 as `{{shellq:NAME}}` to reuse the entered value. Shell-quoted form values reject
-newlines and tabs. The same `min`, `max`, and `validate` constraints available
-on `{{field:...}}` markers can be applied to `{{shellq:...}}` values. Quoting
+control characters such as newlines, carriage returns, and tabs. The same
+`min`, `max`, and `validate` constraints available on `{{field:...}}` markers can be applied to `{{shellq:...}}` values. Quoting
 protects shell word boundaries when an operator later runs the command; it
 does not make the command safe to execute or authorize execution. WayExpand
 inserts the completed command for review and does not press Enter. The form
@@ -342,8 +342,11 @@ Available text-field types are `dns-label`, `hostname`, `host-port`, `port`,
 `positive-integer`, `linux-user`, `ansible-role-name`, `absolute-path`,
 `yaml-string`, `ansible-host-pattern`, `compose-service`, `container-image`,
 `systemd-executable`, `systemd-unit`, `single-line`, and
-`shell-single-quoted`, `duration`, `git-revision`, `sql-identifier`, `url`,
-`url-path`, and `container-name`. The `free_text=true` marker explicitly
+`shell-single-quoted`, `duration`, `relative-time`, `git-revision`,
+`sql-identifier`, `url`, `url-path`, and `container-name`. `duration` accepts
+Go-style durations up to 30 days such as `15m` or `1h30m` (for
+`docker logs --since` or `kubectl --timeout`); `relative-time` accepts
+`journalctl --since` values such as `1 hour ago`. The `free_text=true` marker explicitly
 documents an intentionally unrestricted text field for operational-pack lint.
 For example,
 `{{field:port=443|required|max=5|validate=port}}` accepts only a decimal port

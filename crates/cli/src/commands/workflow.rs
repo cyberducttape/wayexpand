@@ -112,11 +112,11 @@ fn run_approved_action(mut args: Vec<String>) -> Result<()> {
     if command.action.is_none() || !command.program.is_empty() {
         bail!("only named Action Broker actions can run in this workflow");
     }
-    let trigger = escape_terminal(&snippet.trigger);
+    let trigger = terminal_safe(&snippet.trigger);
     let purpose = if snippet.description.trim().is_empty() {
         "(no description)".to_owned()
     } else {
-        escape_terminal(snippet.description.trim())
+        terminal_safe(snippet.description.trim())
     };
     print!("Mode: Run Approved Action\nAction ID: {action_id}\nSnippet: {trigger}\nPurpose: {purpose}\nBroker: configured Action Broker (policy validates permissions)\nParameters: {}\n",
         if parameters.is_empty() { "none".to_owned() } else { parameters.keys().cloned().collect::<Vec<_>>().join(", ") });
@@ -170,19 +170,6 @@ fn run_approved_action(mut args: Vec<String>) -> Result<()> {
         }
     }
     Ok(())
-}
-
-fn escape_terminal(value: &str) -> String {
-    value
-        .chars()
-        .map(|character| {
-            if character.is_control() {
-                character.escape_default().to_string()
-            } else {
-                character.to_string()
-            }
-        })
-        .collect()
 }
 
 fn confirm_action(action_id: &str, approved: Option<&str>) -> Result<()> {

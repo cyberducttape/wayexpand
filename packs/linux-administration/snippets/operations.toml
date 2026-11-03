@@ -3,7 +3,7 @@ trigger = ";;journal-service"
 description = "Inspect recent service logs without following or modifying the unit"
 category = "Linux operations"
 tags = ["systemd", "journalctl"]
-replacement = "journalctl --user -u {{shellq:unit=example.service|required|max=255|validate=systemd-unit}} --since {{shellq:since=1 hour ago|required|max=80|validate=duration}} --no-pager -n {{shellq:lines=100|required|max=5|validate=positive-integer}}"
+replacement = "journalctl --user -u {{shellq:unit=example.service|required|max=255|validate=systemd-unit}} --since {{shellq:since=1 hour ago|required|max=80|validate=relative-time}} --no-pager -n {{shellq:lines=100|required|max=5|validate=positive-integer}}"
 
 [[expansion]]
 trigger = ";;service-status"

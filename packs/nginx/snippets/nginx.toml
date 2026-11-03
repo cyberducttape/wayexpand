@@ -10,7 +10,7 @@ trigger = ";;nginx-service-status"
 description = "Inspect nginx service state and recent unit messages"
 category = "Nginx"
 tags = ["nginx", "systemd", "read-only"]
-replacement = "systemctl status nginx --no-pager && journalctl -u nginx --since {{shellq:since=30 minutes ago|required|max=80|validate=duration}} --no-pager -n {{shellq:lines=100|required|max=5|validate=positive-integer}}"
+replacement = "systemctl status nginx --no-pager && journalctl -u nginx --since {{shellq:since=30 minutes ago|required|max=80|validate=relative-time}} --no-pager -n {{shellq:lines=100|required|max=5|validate=positive-integer}}"
 
 [[expansion]]
 trigger = ";;nginx-http-probe"

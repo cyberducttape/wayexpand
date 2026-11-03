@@ -359,5 +359,21 @@ fn prompt_yes_no(prompt: &str, default: bool) -> Result<bool> {
     Ok(matches!(answer.as_str(), "y" | "yes"))
 }
 
+/// Make untrusted text safe to show in a terminal: control characters other
+/// than tab are shown as escapes so content under review cannot move the
+/// cursor, clear lines, or otherwise hide what it contains.
+pub(crate) fn terminal_safe(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| {
+            if character.is_control() && character != '\t' {
+                character.escape_default().to_string()
+            } else {
+                character.to_string()
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests;
