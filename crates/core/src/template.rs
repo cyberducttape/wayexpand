@@ -439,6 +439,8 @@ fn valid_http_url(value: &str) -> bool {
             .rsplit_once(':')
             .filter(|(_, port)| port.bytes().all(|byte| byte.is_ascii_digit()))
             .is_none_or(|(_, port)| valid_port(port))
+}
+
 fn valid_kubernetes_duration(value: &str) -> bool {
     const MAX_NANOS: u128 = 30 * 24 * 60 * 60 * 1_000_000_000;
     let mut remaining = value;
