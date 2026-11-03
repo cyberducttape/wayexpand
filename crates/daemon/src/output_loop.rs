@@ -628,6 +628,7 @@ fn connect_unguarded_output_backend(
                 persist_portal_token,
                 fcitx5_direct_commit,
                 portal_token_path: portal_token_path_arg.map(Path::to_path_buf),
+                active_layout_provider: Some(crate::evdev_layout::libei_provider()),
             },
             cancellation,
         )
