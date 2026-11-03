@@ -4,7 +4,6 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
-<<<<<<< HEAD
 - Fix the reviewed-pack CI fixture harness to compare interactive-form output
   through validated `pack test` values instead of asking the CLI preview path
   to collect fields it cannot interactively request.
@@ -45,12 +44,17 @@ All notable changes to WayExpand are documented here.
   review screens display maintainer, compatibility, and risk information.
 - Add DNS subdomain validation and apply shell-quoted, typed fields to common
   Kubernetes, container, Nginx, and sysadmin diagnostic arguments.
-=======
+- Add opt-in Bash, Zsh, and Fish terminal context reporting. Reports bind to
+  the local terminal device and random shell session, expire quickly, and can
+  include Git root, configured Kubernetes context, explicit environment and
+  container labels, and an SSH destination supplied to `wayexpand-ssh`.
+  Context is bound to a local terminal and random shell session, is
+  informational, and never authorizes execution or guesses remote destinations
+  from shell history or terminal contents.
 - Add `;klogs`, a Kubernetes log form that shows the active kubectl context,
   validates and shell-quotes each value, and previews the exact insert-only
   command. Form dialogs now preview field-only output before insertion.
 - Add Kubernetes validators for resource names and bounded log durations.
->>>>>>> origin/main
 - Publish a dated, versioned desktop certification snapshot for KDE, GNOME,
   Sway, and Hyprland. It separates CI/headless results from physical-session
   evidence and lists the remaining lock, layout, suspend, portal, and soak

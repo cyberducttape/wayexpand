@@ -1,6 +1,7 @@
 //! One function per `wayexpand` subcommand; `run` dispatches to them.
 
 pub(crate) mod config;
+pub(crate) mod context;
 pub(crate) mod daemon;
 pub(crate) mod import_add;
 pub(crate) mod library;
