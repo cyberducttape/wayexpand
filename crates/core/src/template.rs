@@ -296,13 +296,8 @@ impl FormFieldValidation {
                         .all(|byte| byte.is_ascii_alphanumeric() || b"._/:@-".contains(&byte))
                     && !value.contains("..")
             }
-            Self::KubernetesName => valid_dns_subdomain(value),
             Self::Duration => valid_positive_duration(value),
-            Self::KubernetesName => {
-                !value.is_empty()
-                    && value.len() <= 253
-                    && value.split('.').all(|label| valid_dns_label(label, false))
-            }
+            Self::KubernetesName => valid_dns_subdomain(value),
             Self::KubernetesDuration => valid_kubernetes_duration(value),
             Self::SingleLine => !value.chars().any(char::is_control),
             Self::ShellSingleQuoted => {

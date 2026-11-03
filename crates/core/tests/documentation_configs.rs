@@ -1,7 +1,7 @@
 use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
 use wayexpand_core::{
-    render_template, Config, FormFieldKind, FormFieldValidation, FormValues, TemplateContext,
+    Config, FormFieldKind, FormFieldValidation, FormValues, TemplateContext, render_template,
 };
 
 #[test]
@@ -87,7 +87,10 @@ fn sysadmin_diagnostic_pack_is_valid_and_insert_only() {
         let expansion = config
             .expansion
             .iter()
-            .find(|expansion| expansion.trigger == trigger)
+            .find(|expansion| {
+                expansion.trigger == trigger
+                    || expansion.aliases.iter().any(|alias| alias == trigger)
+            })
             .expect("the expected diagnostic expansion should exist");
         let field = wayexpand_core::form_fields(&expansion.replacement)
             .unwrap()
@@ -136,7 +139,10 @@ fn curated_operations_packs_validate_command_arguments() {
             let expansion = config
                 .expansion
                 .iter()
-                .find(|expansion| expansion.trigger == *trigger)
+                .find(|expansion| {
+                    expansion.trigger == *trigger
+                        || expansion.aliases.iter().any(|alias| alias == *trigger)
+                })
                 .unwrap_or_else(|| panic!("missing curated shell command {trigger}"));
             assert!(
                 !expansion.replacement.contains("{{field:"),
@@ -155,12 +161,22 @@ fn curated_operations_packs_validate_command_arguments() {
             .expect("curated form markers should parse");
         for field in fields {
             if let FormFieldKind::Text { default } = &field.kind {
-                assert!(
-                    field.validate_value(default).is_ok(),
-                    "invalid default in {}: {}",
-                    expansion.trigger,
-                    field.label
-                );
+                let validation = field.validate_value(default);
+                if field.required && default.is_empty() {
+                    assert!(
+                        validation.is_err(),
+                        "required field in {} unexpectedly accepts an empty default: {}",
+                        expansion.trigger,
+                        field.label
+                    );
+                } else {
+                    assert!(
+                        validation.is_ok(),
+                        "invalid default in {}: {}",
+                        expansion.trigger,
+                        field.label
+                    );
+                }
             }
         }
     }
@@ -194,7 +210,7 @@ fn curated_operations_packs_validate_command_arguments() {
             &kubernetes,
             ";;kube-logs",
             "field:since",
-            FormFieldValidation::Duration,
+            FormFieldValidation::KubernetesDuration,
         ),
         (
             &kubernetes,
@@ -284,7 +300,10 @@ fn curated_operations_packs_validate_command_arguments() {
         let expansion = config
             .expansion
             .iter()
-            .find(|expansion| expansion.trigger == trigger)
+            .find(|expansion| {
+                expansion.trigger == trigger
+                    || expansion.aliases.iter().any(|alias| alias == trigger)
+            })
             .unwrap_or_else(|| panic!("missing curated snippet {trigger}"));
         let field = wayexpand_core::form_fields(&expansion.replacement)
             .unwrap()
@@ -352,7 +371,10 @@ fn curated_operations_packs_validate_command_arguments() {
         let expansion = config
             .expansion
             .iter()
-            .find(|expansion| expansion.trigger == trigger)
+            .find(|expansion| {
+                expansion.trigger == trigger
+                    || expansion.aliases.iter().any(|alias| alias == trigger)
+            })
             .unwrap();
         let field = wayexpand_core::form_fields(&expansion.replacement)
             .unwrap()
