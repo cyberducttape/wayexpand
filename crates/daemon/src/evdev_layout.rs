@@ -23,6 +23,7 @@ use std::{
 
 use futures_lite::StreamExt;
 use wayexpand_backend_evdev::{KeyboardLayoutProvider, KeyboardLayoutSnapshot};
+use wayexpand_backend_libei::{ActiveKeyboardLayout, ActiveLayoutProvider};
 use xkbcommon_rs::{xkb_keymap::RuleNames, Context, Keymap};
 #[cfg(test)]
 use zbus::blocking::{connection::Builder, Connection, Proxy};
@@ -36,7 +37,39 @@ const HYPRLAND_SOCKET_TIMEOUT: Duration = Duration::from_millis(100);
 const HYPRLAND_RESPONSE_LIMIT: usize = 256 * 1024;
 const HYPRLAND_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
+static SHARED_PROVIDER: std::sync::OnceLock<Arc<Mutex<Box<dyn KeyboardLayoutProvider>>>> =
+    std::sync::OnceLock::new();
+
 pub(crate) fn provider() -> Box<dyn KeyboardLayoutProvider> {
+    let provider =
+        Arc::clone(SHARED_PROVIDER.get_or_init(|| Arc::new(Mutex::new(create_provider()))));
+    Box::new(SharedLayoutProvider(provider))
+}
+
+pub(crate) fn libei_provider() -> ActiveLayoutProvider {
+    let mut provider = provider();
+    Box::new(move || {
+        provider.snapshot().map(|snapshot| ActiveKeyboardLayout {
+            generation: snapshot.generation,
+            group: snapshot.group,
+            rules: snapshot.rules,
+            model: snapshot.model,
+            layout: snapshot.layout,
+            variant: snapshot.variant,
+            options: snapshot.options,
+        })
+    })
+}
+
+struct SharedLayoutProvider(Arc<Mutex<Box<dyn KeyboardLayoutProvider>>>);
+
+impl KeyboardLayoutProvider for SharedLayoutProvider {
+    fn snapshot(&mut self) -> Option<KeyboardLayoutSnapshot> {
+        self.0.lock().ok()?.snapshot()
+    }
+}
+
+fn create_provider() -> Box<dyn KeyboardLayoutProvider> {
     if env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some() {
         Box::new(HyprlandKeyboardLayoutProvider::new())
     } else if env::var_os("SWAYSOCK").is_some() {

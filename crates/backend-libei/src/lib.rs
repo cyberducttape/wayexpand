@@ -137,11 +137,13 @@ pub enum LibeiError {
     MissingRequiredDevice,
     #[error("could not decode the EIS keyboard keymap: {0}")]
     Keymap(String),
+    #[error("the compositor's active keyboard layout does not match the EIS keymap; expansion was not typed")]
+    LayoutProviderMismatch,
     #[error("the EIS keyboard device is unavailable ({0}); the expansion was not typed")]
     DeviceUnavailable(&'static str),
     #[error(
-        "the EIS keymap has {0} layouts but the server has not reported which one is active; \
-         the ei_keyboard fallback will not guess, so the expansion was not typed"
+        "multiple keyboard layouts detected ({0}). The selected injection route cannot determine \
+         the active layout; expansion is disabled and no text was changed"
     )]
     UnknownActiveLayout(usize),
     #[error(
@@ -209,12 +211,12 @@ struct LibeiSession {
     tab_keycode: u32,
     _portal: Option<PortalKeepalive>,
     fcitx5: Option<fcitx5::Client>,
+    active_layout_provider: Option<ActiveLayoutProvider>,
     /// Run before every paced keysym character; a failure stops typing.
     checkpoint: wayexpand_core::OutputCheckpoint,
 }
 
 /// Controls how the RemoteDesktop portal session is restored.
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibeiOptions {
     pub persist_portal_token: bool,
     /// Enable the optional Fcitx5 exact surrounding-text bridge.
@@ -222,7 +224,23 @@ pub struct LibeiOptions {
     /// Token path selected by the service. `None` keeps the standalone XDG
     /// default used by CLI/library callers.
     pub portal_token_path: Option<PathBuf>,
+    /// Optional compositor-verified active XKB layout, used when EIS omits
+    /// keyboard modifier/layout-group events.
+    pub active_layout_provider: Option<ActiveLayoutProvider>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveKeyboardLayout {
+    pub generation: u64,
+    pub group: u32,
+    pub rules: Option<String>,
+    pub model: Option<String>,
+    pub layout: Option<String>,
+    pub variant: Option<String>,
+    pub options: Option<String>,
+}
+
+pub type ActiveLayoutProvider = Box<dyn FnMut() -> Option<ActiveKeyboardLayout> + Send>;
 
 /// Cooperative cancellation shared by a connection owner and its worker.
 /// Portal requests observe cancellation promptly; protocol setup checks it
@@ -252,6 +270,7 @@ impl Default for LibeiOptions {
             persist_portal_token: true,
             fcitx5_direct_commit: false,
             portal_token_path: None,
+            active_layout_provider: None,
         }
     }
 }
@@ -282,6 +301,13 @@ impl LibeiSession {
     /// or a replaced device must never be typed through with stale
     /// assumptions, so this rebuilds the keysym map or refuses (fail closed).
     fn sync_server_state(&mut self) -> Result<(), LibeiError> {
+        self.sync_server_events()?;
+        self.refresh_keysym_layout()
+    }
+
+    /// Drain EIS state changes without requiring an active group. This is
+    /// also used before the layout-independent Fcitx5 Unicode route.
+    fn sync_server_events(&mut self) -> Result<(), LibeiError> {
         let Self {
             events: pump,
             mode,
@@ -324,6 +350,17 @@ impl LibeiSession {
         })?;
         if let Some(reason) = self.device_unavailable {
             return Err(LibeiError::DeviceUnavailable(reason));
+        }
+        Ok(())
+    }
+
+    fn refresh_keysym_layout(&mut self) -> Result<(), LibeiError> {
+        if let (Some(provider), TextMode::Keysym(typer)) =
+            (&mut self.active_layout_provider, &mut self.mode)
+        {
+            if let Some(snapshot) = provider() {
+                typer.note_external_layout(&snapshot)?;
+            }
         }
         if let TextMode::Keysym(typer) = &mut self.mode {
             typer.refresh()?;
