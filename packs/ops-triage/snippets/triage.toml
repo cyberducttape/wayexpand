@@ -91,14 +91,14 @@ replacement = """HTTP 503 first-response checklist (review each command before r
 
 Operator-selected environment: {{choice:environment=development|staging|production;default=staging;required}}
 Target host (label only; WayExpand does not detect SSH, container, or sudo context): {{field:target host|required|validate=hostname|max=253}}
-Service: {{field:service=nginx.service|validate=shell-single-quoted|required|max=128}}
+Service: {{field:service=nginx.service|validate=systemd-unit|required|max=255}}
 Local service port: {{field:port=8080|validate=port|required|max=5}}
 
 Confirm the current terminal is connected to the intended target before running these commands. They run on the machine of the shell where you execute them; the host label above does not connect to or select a host.
 
 1. Confirm the affected URL, start time, scope, and whether the failure is persistent.
 2. Check local service status, recent logs, and listening sockets:
-   systemctl status '{{field:service}}' --no-pager
+   systemctl status --no-pager -- '{{field:service}}'
    journalctl -u '{{field:service}}' -n 100 --no-pager
    ss -lntp
 3. Probe the local service port without downloading a response body:
@@ -120,7 +120,7 @@ Target host (verify the active shell/SSH session yourself): {{field:target host|
 Apache unit: {{choice:service=apache2.service|httpd.service;default=apache2.service;required}}
 
 Review the target and run these read-only checks from the intended host:
-systemctl status '{{field:service}}' --no-pager
+systemctl status --no-pager -- '{{field:service}}'
 journalctl -u '{{field:service}}' -n 100 --no-pager
 sudo apachectl configtest
 ss -lntp
@@ -151,10 +151,10 @@ category = "Operations triage"
 tags = ["mariadb", "database", "read-only"]
 replacement = """Operator-selected environment: {{choice:environment=development|staging|production;default=staging;required}}
 Target host (verify the active shell/SSH session yourself): {{field:target host|required|validate=hostname|max=253}}
-Service unit: {{field:service=mariadb.service|validate=shell-single-quoted|required|max=128}}
+Service unit: {{field:service=mariadb.service|validate=systemd-unit|required|max=255}}
 
 Review the target and confirm the approved account/context before running checks:
-systemctl status '{{field:service}}' --no-pager
+systemctl status --no-pager -- '{{field:service}}'
 journalctl -u '{{field:service}}' -n 100 --no-pager
 ss -lntp
 mariadb-admin --connect-timeout=5 ping

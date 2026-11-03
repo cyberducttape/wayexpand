@@ -152,6 +152,7 @@ pub enum FormFieldValidation {
     Hostname,
     HostPort,
     Port,
+    SystemdUnit,
     PositiveInteger,
     LinuxUser,
     AnsibleRoleName,
@@ -172,6 +173,7 @@ impl FormFieldValidation {
             "hostname" => Self::Hostname,
             "host-port" => Self::HostPort,
             "port" => Self::Port,
+            "systemd-unit" => Self::SystemdUnit,
             "positive-integer" => Self::PositiveInteger,
             "linux-user" => Self::LinuxUser,
             "ansible-role-name" => Self::AnsibleRoleName,
@@ -193,6 +195,7 @@ impl FormFieldValidation {
             Self::Hostname => "hostname or IP address",
             Self::HostPort => "hostname or IP address followed by a valid port",
             Self::Port => "port from 1 to 65535",
+            Self::SystemdUnit => "systemd unit name",
             Self::PositiveInteger => "positive integer",
             Self::LinuxUser => "Linux user name",
             Self::AnsibleRoleName => "Ansible role name",
@@ -213,6 +216,14 @@ impl FormFieldValidation {
             Self::Hostname => valid_host(value),
             Self::HostPort => valid_host_port(value),
             Self::Port => valid_port(value),
+            Self::SystemdUnit => {
+                !value.is_empty()
+                    && value.len() <= 255
+                    && value.as_bytes()[0].is_ascii_alphanumeric()
+                    && value
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || b"_.@:-".contains(&byte))
+            }
             Self::PositiveInteger => value.parse::<u32>().is_ok_and(|number| number > 0),
             Self::LinuxUser => {
                 !value.is_empty()
@@ -662,9 +673,13 @@ pub fn form_fields(template: &str) -> Result<Vec<FormField>, TemplateError> {
     // Whether each field so far comes only from bare references.
     let mut bare_only: Vec<bool> = Vec::new();
     for name in template_variables(template) {
-        if let Some(field) = parse_form_field(name) {
+        let shellq_field = name
+            .strip_prefix("shellq:")
+            .map(|spec| format!("field:{spec}"));
+        let field_name = shellq_field.as_deref().unwrap_or(name);
+        if let Some(field) = parse_form_field(field_name) {
             let field = field?;
-            let bare = is_bare_form_field_reference(name);
+            let bare = is_bare_form_field_reference(field_name);
             match fields.iter().position(|existing| existing.key == field.key) {
                 None => {
                     fields.push(field);
@@ -695,6 +710,7 @@ pub fn form_fields(template: &str) -> Result<Vec<FormField>, TemplateError> {
 }
 
 fn is_bare_form_field_reference(name: &str) -> bool {
+    let name = name.strip_prefix("shellq:").unwrap_or(name);
     ["field:", "prompt:", "datefield:"]
         .iter()
         .filter_map(|prefix| name.strip_prefix(prefix))
@@ -1049,6 +1065,7 @@ enum Variable {
     Clipboard,
     Cursor,
     Field(FormField),
+    ShellQuotedField(FormField),
     Env(String),
     Snippet(String),
     Uuid,
@@ -1080,6 +1097,12 @@ fn parse_variable(name: &str) -> Result<Variable, TemplateError> {
                 || other.starts_with("datefield:") =>
         {
             Variable::Field(parse_form_field(other).expect("prefix checked")?)
+        }
+        other if other.starts_with("shellq:") => {
+            let field = format!("field:{}", &other["shellq:".len()..]);
+            Variable::ShellQuotedField(
+                parse_form_field(&field).expect("the shellq field prefix is present")?,
+            )
         }
         other if other.starts_with("env:") => {
             Variable::Env(other["env:".len()..].trim().to_owned())
@@ -1118,6 +1141,12 @@ fn parse_variable(name: &str) -> Result<Variable, TemplateError> {
             }
         },
     })
+}
+
+/// Quote one form value as a single POSIX shell word. This only makes the
+/// value safe to place in a command line; it does not authorize execution.
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 /// The value of one variable. `name` is its source text, for errors.
@@ -1183,6 +1212,19 @@ fn evaluate<'a>(
                 RenderValue::Borrowed(value)
             }
             None if context.validating => RenderValue::Borrowed(""),
+            None => return Err(TemplateError::FieldValueMissing),
+        },
+        Variable::ShellQuotedField(field) => match context.fields.get(&field.key) {
+            Some(value) => {
+                field
+                    .validate_value(value)
+                    .map_err(|_| TemplateError::InvalidField)?;
+                if value.contains('\n') || value.contains('\t') {
+                    return Err(TemplateError::InvalidField);
+                }
+                RenderValue::owned(shell_quote(value))
+            }
+            None if context.validating => RenderValue::Borrowed("''"),
             None => return Err(TemplateError::FieldValueMissing),
         },
         Variable::Env(variable) => {
@@ -2099,9 +2141,45 @@ mod tests {
     }
 
     #[test]
+    fn shell_quoted_form_values_are_discovered_and_cannot_break_out_of_the_shell_word() {
+        let template = "curl {{shellq:domain=example.net|required|max=253}} {{shellq:domain}}";
+        let fields = form_fields(template).unwrap();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].key, "field:domain");
+        assert!(fields[0].required);
+
+        let values = [(
+            "field:domain".to_owned(),
+            "example.net'; touch /tmp/should-not-run; echo '".to_owned(),
+        )]
+        .into_iter()
+        .collect();
+        let context = TemplateContext {
+            fields: Arc::new(values),
+            ..TemplateContext::default()
+        };
+        assert_eq!(
+            render_template(template, &context).unwrap(),
+            "curl 'example.net'\\''; touch /tmp/should-not-run; echo '\\''' 'example.net'\\''; touch /tmp/should-not-run; echo '\\'''"
+        );
+
+        let values = [("field:domain".to_owned(), "example.net\nwhoami".to_owned())]
+            .into_iter()
+            .collect();
+        let context = TemplateContext {
+            fields: Arc::new(values),
+            ..TemplateContext::default()
+        };
+        assert!(matches!(
+            render_template(template, &context),
+            Err(TemplateError::InvalidField)
+        ));
+    }
+
+    #[test]
     fn typed_infrastructure_fields_validate_names_ports_and_syntax_safe_values() {
         let fields = form_fields(
-            "{{field:domain=example.com|required|validate=hostname}} {{field:service=api|required|validate=dns-label}} {{field:endpoint=127.0.0.1:8080|required|validate=host-port}} {{field:port=443|required|validate=port}} {{field:replicas=2|required|validate=positive-integer}} {{field:image=nginx:stable|required|validate=container-image}} {{field:description=API service|required|validate=single-line}} {{field:yaml=nginx|required|validate=yaml-string}} {{field:shell=nginx.service|required|validate=shell-single-quoted}}",
+            "{{field:domain=example.com|required|validate=hostname}} {{field:service=api|required|validate=dns-label}} {{field:endpoint=127.0.0.1:8080|required|validate=host-port}} {{field:port=443|required|validate=port}} {{field:replicas=2|required|validate=positive-integer}} {{field:image=nginx:stable|required|validate=container-image}} {{field:description=API service|required|validate=single-line}} {{field:yaml=nginx|required|validate=yaml-string}} {{field:shell=nginx.service|required|validate=shell-single-quoted}} {{field:unit=api@blue.service|required|validate=systemd-unit}}",
         )
         .unwrap();
         let accepted = [
@@ -2114,6 +2192,7 @@ mod tests {
             "API service",
             "nginx",
             "nginx.service",
+            "api@blue.service",
         ];
         for (field, value) in fields.iter().zip(accepted) {
             assert!(
@@ -2133,6 +2212,7 @@ mod tests {
             "two\nlines",
             "bad\"\nkey: value",
             "nginx.service'; reboot; #",
+            "-oProxyCommand=touch /tmp/pwn",
         ]) {
             assert!(
                 field.validate_value(value).is_err(),

@@ -175,6 +175,21 @@ the character count (text fields only). For example,
 `;default=VALUE`, which must be one of its options; for example,
 `{{choice:severity=Low|Medium|High;default=High;required}}`.
 
+For insert-only shell command templates, `{{shellq:NAME=DEFAULT|required|max=N}}`
+collects a text field and renders it as one POSIX shell-quoted word. Repeat it
+as `{{shellq:NAME}}` to reuse the entered value. Shell-quoted form values reject
+newlines and tabs. The same `min`, `max`, and `validate` constraints available
+on `{{field:...}}` markers can be applied to `{{shellq:...}}` values. Quoting
+protects shell word boundaries when an operator later runs the command; it
+does not make the command safe to execute or authorize execution. WayExpand
+inserts the completed command for review and does not press Enter.
+
+```toml
+[[expansion]]
+trigger = ";tlscheck"
+replacement = "openssl s_client -connect {{shellq:domain=example.com|required|max=253}}:{{shellq:port=443|required|max=5}} -servername {{shellq:domain}} -verify_return_error -showcerts </dev/null 2>/dev/null | openssl x509 -noout -subject -issuer -dates -ext subjectAltName"
+```
+
 An incident-response form can collect structured details before inserting a
 ready-to-share update:
 
@@ -311,7 +326,8 @@ replace validation by the target tool.
 Available text-field types are `dns-label`, `hostname`, `host-port`, `port`,
 `positive-integer`, `linux-user`, `ansible-role-name`, `absolute-path`,
 `yaml-string`, `ansible-host-pattern`, `compose-service`, `container-image`,
-`systemd-executable`, `single-line`, and `shell-single-quoted`. For example,
+`systemd-executable`, `systemd-unit`, `single-line`, and
+`shell-single-quoted`. For example,
 `{{field:port=443|required|max=5|validate=port}}` accepts only a decimal port
 from 1 through 65535.
 

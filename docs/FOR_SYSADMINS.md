@@ -119,6 +119,34 @@ For teams with shared machines or controlled environments:
 - [ ] Test on pilot group (10% of machines) before full rollout
 - [ ] Have rollback plan (previous wayexpand version available)
 
+## Reviewable Diagnostic Commands
+
+Install the insert-only diagnostic pack from a WayExpand checkout:
+
+```bash
+wayexpand pack install ./packs/sysadmin-diagnostics
+```
+
+It adds `;tlscheck`, `;svcdiag`, `;portcheck`, `;httpcheck`, `;pathcheck`,
+and `;sshcheck`. Each opens a form for the relevant domain, hostname, service,
+port, or path. The submitted form inserts the completed command into the
+focused terminal. WayExpand does not execute it or press Enter: inspect the
+expanded command in the terminal, edit it if needed, then run it yourself.
+Form values are shell-quoted as individual words. Commands that need elevated
+access show `sudo` for the operator to approve through their normal prompt.
+
+These are read-only diagnostic starting points. For example, `;tlscheck`
+shows the presented certificate subject, issuer, validity dates, subject
+alternative names, and certificate verification result for the entered domain
+and port. `;svcdiag` shows systemd status and recent journal entries;
+`;httpcheck` reports response headers and timing; `;pathcheck` inspects
+permissions and mount information.
+
+Keep the generated command in view and verify the target before execution,
+especially when the terminal is connected to a production host. Forms require
+a route with verified replacement guarantees; unsupported routes leave the
+trigger untouched.
+
 ## Configuration Management
 
 ### Shared Snippet Library
