@@ -628,9 +628,51 @@ fn keysym_typer_refuses_to_guess_the_active_layout_of_a_multi_layout_keymap() {
         typer.refresh(),
         Err(super::LibeiError::UnknownActiveLayout(2))
     ));
+    assert_eq!(
+        super::LibeiError::UnknownActiveLayout(2).to_string(),
+        "multiple keyboard layouts detected (2). The selected injection route cannot determine the active layout; expansion is disabled and no text was changed"
+    );
     // A single-layout keymap has only one possible group.
     let mut single = super::KeysymTyper::build(&layout_keymap("de")).unwrap();
     assert!(single.refresh().is_ok());
+}
+
+#[test]
+fn compositor_layout_snapshot_is_used_only_when_its_compiled_keymap_matches_eis() {
+    let keymap = super::XkbKeymap::new_from_names(
+        super::Context::new(0).unwrap(),
+        Some(xkbcommon_rs::xkb_keymap::RuleNames {
+            rules: None,
+            model: Some("pc105".into()),
+            layout: Some("us,de".into()),
+            variant: Some(",".into()),
+            options: None,
+        }),
+        0,
+    )
+    .unwrap();
+    let mut typer = super::KeysymTyper::build(&keymap).unwrap();
+    let us_y = typer.chars[&'y'].keycode;
+    let snapshot = super::ActiveKeyboardLayout {
+        generation: 1,
+        group: 1,
+        rules: None,
+        model: Some("pc105".into()),
+        layout: Some("us,de".into()),
+        variant: Some(",".into()),
+        options: None,
+    };
+    typer.note_external_layout(&snapshot).unwrap();
+    typer.refresh().unwrap();
+    assert_ne!(typer.chars[&'y'].keycode, us_y);
+
+    let mut mismatch = snapshot;
+    mismatch.generation += 1;
+    mismatch.layout = Some("us,fr".into());
+    assert!(matches!(
+        typer.note_external_layout(&mismatch),
+        Err(super::LibeiError::LayoutProviderMismatch)
+    ));
 }
 
 #[test]

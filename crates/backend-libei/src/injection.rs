@@ -62,19 +62,21 @@ impl LibeiSession {
     }
 
     pub(super) fn preflight_text(&mut self, text: &str) -> Result<(), InjectorError> {
-        // Refresh modifiers/layout before the transaction is classified. If
-        // the active group is unknown, refuse here so the trigger remains
-        // untouched and the engine reports a clean not-applied outcome.
-        self.sync_server_state()
-            .and_then(|()| {
-                validate_text(text)?;
-                self.ensure_representable(text)
-            })
-            .map_err(|error| InjectorError {
-                backend: BACKEND_NAME,
-                message: error.to_string(),
-                retryable: false,
-            })
+        // Refresh device state before classifying. A configured Fcitx5 bridge
+        // is layout-independent, so an EIS server that omits the active
+        // group must not block its verified Unicode commit path.
+        let result = if self.fcitx5.is_some() {
+            validate_text(text)
+        } else {
+            self.sync_server_state()
+                .and_then(|()| validate_text(text))
+                .and_then(|()| self.ensure_representable(text))
+        };
+        result.map_err(|error| InjectorError {
+            backend: BACKEND_NAME,
+            message: error.to_string(),
+            retryable: false,
+        })
     }
 
     pub(super) fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {
@@ -101,11 +103,13 @@ impl LibeiSession {
         // Synchronize before any replacement attempt. In keysym mode this
         // refreshes the layout used by the fallback; the Fcitx5 path itself
         // uses the focused input context rather than this keymap.
-        self.sync_server_state().map_err(|error| InjectorError {
-            backend: BACKEND_NAME,
-            message: error.to_string(),
-            retryable: error.is_retryable(),
-        })?;
+        if self.fcitx5.is_none() {
+            self.sync_server_events().map_err(|error| InjectorError {
+                backend: BACKEND_NAME,
+                message: error.to_string(),
+                retryable: error.is_retryable(),
+            })?;
+        }
         validate_text(text).map_err(|error| InjectorError {
             backend: BACKEND_NAME,
             message: error.to_string(),
@@ -119,7 +123,13 @@ impl LibeiSession {
             })?;
             match client.replace(trigger, text) {
                 fcitx5::ReplaceResult::Committed => return Ok(()),
-                fcitx5::ReplaceResult::FallbackAllowed(_) => {}
+                fcitx5::ReplaceResult::FallbackAllowed(_) => {
+                    self.sync_server_state().map_err(|error| InjectorError {
+                        backend: BACKEND_NAME,
+                        message: error.to_string(),
+                        retryable: error.is_retryable(),
+                    })?;
+                }
                 fcitx5::ReplaceResult::Blocked(message) => {
                     return Err(InjectorError {
                         backend: BACKEND_NAME,
@@ -139,7 +149,8 @@ impl LibeiSession {
         // Only the ordinary libei route needs the active-keymap check. Do it
         // after the optional direct commit attempt so a keysym-only EIS
         // device can still commit Unicode through Fcitx5.
-        self.ensure_representable(text)
+        self.refresh_keysym_layout()
+            .and_then(|()| self.ensure_representable(text))
             .map_err(|error| InjectorError {
                 backend: BACKEND_NAME,
                 message: error.to_string(),
