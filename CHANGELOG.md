@@ -18,6 +18,7 @@ All notable changes to WayExpand are documented here.
   review screens display maintainer, compatibility, and risk information.
 - Add DNS subdomain validation and apply shell-quoted, typed fields to common
   Kubernetes, container, Nginx, and sysadmin diagnostic arguments.
+- Resolve fleet settings per field with pack defaults, organization defaults, and user preferences in explicit precedence order; report each effective setting's source in `wayexpand fleet status`.
 - Gate IBus replacement through the shared capability admission contract.
   Non-atomic replacement is refused by default, expansion accounting waits
   for successful signal emission. Outcomes distinguish fully emitted but

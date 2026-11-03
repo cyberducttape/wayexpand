@@ -455,7 +455,9 @@ pub(crate) fn validate_command(args: Args) -> Result<()> {
         .map(PathBuf::from)
         .unwrap_or_else(default_config_path);
     let policy = load_policy()?;
-    let config = Config::load(&path).map_err(|error| config_load_error(&path, error))?;
+    let loaded = Config::load_versioned(&path).map_err(|error| config_load_error(&path, error))?;
+    let base_source = loaded.source().to_owned();
+    let config = loaded.config;
     Config::validate_library_files(&path).map_err(|error| {
         config_error(format!(
             "library configuration invalid: {}",
@@ -464,7 +466,8 @@ pub(crate) fn validate_command(args: Args) -> Result<()> {
     })?;
     let (config, policy_violations) = if merged {
         let fleet =
-            FleetConfig::load_standard_with_base_and_policy(config, &policy).map_err(|error| {
+            FleetConfig::load_standard_with_base_source_and_policy(config, &base_source, &policy)
+                .map_err(|error| {
                 config_error(format!(
                     "fleet configuration invalid: {}",
                     error.safe_summary()
@@ -2468,16 +2471,19 @@ pub(crate) fn fleet_command(mut args: Args) -> Result<()> {
                 usage_bail!("usage: wayexpand fleet status [--json]");
             }
             let path = default_config_path();
-            let base = Config::load(&path).map_err(|error| config_load_error(&path, error))?;
+            let loaded =
+                Config::load_versioned(&path).map_err(|error| config_load_error(&path, error))?;
+            let base_source = loaded.source().to_owned();
+            let base = loaded.config;
             let policy = load_policy()?;
-            let fleet = FleetConfig::load_standard_with_base_and_policy(base, &policy).map_err(
-                |error| {
-                    config_error(format!(
-                        "fleet configuration invalid: {}",
-                        error.safe_summary()
-                    ))
-                },
-            )?;
+            let fleet =
+                FleetConfig::load_standard_with_base_source_and_policy(base, &base_source, &policy)
+                    .map_err(|error| {
+                        config_error(format!(
+                            "fleet configuration invalid: {}",
+                            error.safe_summary()
+                        ))
+                    })?;
             for violation in &fleet.policy_violations {
                 eprintln!("policy warning: {violation}");
             }
@@ -2490,6 +2496,10 @@ pub(crate) fn fleet_command(mut args: Args) -> Result<()> {
                         "expansion_count": fleet.stats.total_expansions,
                         "hotkey_count": fleet.stats.total_hotkeys,
                         "layers": fleet.stats.layers_applied,
+                        "effective_settings": fleet.effective_settings_sources.iter().map(|(name, source)| serde_json::json!({
+                            "name": name,
+                            "source": source,
+                        })).collect::<Vec<_>>(),
                         "policy_violations": fleet.policy_violations,
                         "organization_policy": crate::doctor::policy::effective_policy_report(&policy),
                         "expansions": fleet.config.expansion.iter().map(|expansion| serde_json::json!({
@@ -2520,6 +2530,9 @@ pub(crate) fn fleet_command(mut args: Args) -> Result<()> {
                 }
                 for violation in &fleet.policy_violations {
                     println!("Policy violation: {violation}");
+                }
+                for (name, source) in &fleet.effective_settings_sources {
+                    println!("Setting {name}: {} ({})", source.layer, source.file);
                 }
                 for layer in fleet.stats.layers_applied {
                     println!("Layer: {layer}");
