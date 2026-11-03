@@ -1,7 +1,8 @@
 # WayExpand Compositor Certification Matrix
 
-**Version:** 1.3.3
-**Last Updated:** 2026-10-31
+**WayExpand version scope:** 1.3.3 release line
+**Matrix revision:** 2026-11-02.1
+**Last Updated:** 2026-11-02
 **Status:** No compositor route is production-certified
 
 ## Overview
@@ -33,6 +34,36 @@ availability claims, and no target is certified without reviewed evidence.
 | `sway` | Sway / wlroots | evdev+wlroots, input-method-v2 | none | Unavailable | Not observed | **Not certified** |
 | `hyprland` | Hyprland / wlroots | evdev+wlroots, input-method-v2 | none | Unavailable | Not observed | **Not certified** |
 <!-- generated:desktop-certification-matrix:end -->
+
+## Release certification record — 1.3.3 line, revision 2026-11-02.1
+
+This is the published release-facing record for KDE, GNOME, Sway, and
+Hyprland. Update the revision and retain its previous version in Git whenever
+new desktop evidence is reviewed. A release candidate must link its exact
+WayExpand commit and the raw machine-readable reports used for every result.
+“Not tested” means no qualifying physical-session evidence is recorded; it
+does not mean the route passed.
+
+| Desktop | Session evidence on record | Physical keyboard capture | Focused client and focus changes | Screen lock/unlock | Active layout changes | Suspend/resume | Portal revocation | Long-session soak | Release status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| KDE Plasma / KWin | Private headless KWin 6.6.6 reports; capture was simulated | Not tested | Headless clients only; not physical-session evidence | Not tested | Headless `us,de` active-group limitation observed; physical switching not tested | Not tested | Not tested | No 72-hour desktop soak | **Not certified** |
+| GNOME Shell / Mutter | No qualifying physical-session report recorded | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | No 72-hour desktop soak | **Not certified** |
+| Sway / wlroots | Headless CI coverage only; no qualifying physical-session report recorded | Not tested | Headless coverage only; not physical-session evidence | Not tested | Not tested | Not tested | Not tested | No 72-hour desktop soak | **Not certified** |
+| Hyprland / wlroots | No qualifying physical-session report recorded | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | No 72-hour desktop soak | **Not certified** |
+
+CI unit, stress, packaging, and headless compositor results are published
+separately from this record. They can find regressions and establish behavior
+inside their test environment, but they do not populate physical-session
+cells or certify a desktop route. A cell can be marked passed only from a
+reviewed report tied to the exact WayExpand commit, compositor and version,
+route, physical keyboard, focused client, and test date. Failures, unavailable
+capabilities, and untested cases remain visible; they are not converted into
+passes by a green CI run.
+
+Automatic replacement must remain unavailable on a route until its reviewed
+production report demonstrates the required target-integrity and sensitive-
+field contracts. A route without those guarantees stays experimental or
+refuses automatic replacement, regardless of its CI status.
 
 <!-- generated:route-contract:start -->
 | Route | Capture | Injection | Replacement assurance | Focus tracking | Sensitive fields (implementation) | Protocol signal | Compositor observation | Certification | Atomic replace | App identity | Status |

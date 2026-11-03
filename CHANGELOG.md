@@ -8,6 +8,10 @@ All notable changes to WayExpand are documented here.
   return them with completion, avoiding a second allocation of the full
   replacement text. Pending reactor state retains only the trigger needed for
   outcome bookkeeping.
+- Publish a dated, versioned desktop certification snapshot for KDE, GNOME,
+  Sway, and Hyprland. It separates CI/headless results from physical-session
+  evidence and lists the remaining lock, layout, suspend, portal, and soak
+  gates; no route is promoted to production-safe without reviewed evidence.
 - Connect the compositor's trusted active-layout snapshot to the libei
   keysym fallback and compare the full compiled XKB mapping against the EIS
   keymap before using it. KWin and Hyprland can supply layout groups when EIS
