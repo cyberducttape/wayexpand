@@ -743,12 +743,29 @@ fn terminate_form_helper(guard: &mut ChildSupervisor, unit: Option<&str>) {
 /// The helper prints a JSON object and exits 0, or exits non-zero when the
 /// user cancels. Values are checked: every field present, choices limited to
 /// their options, no control characters other than tab and newline.
+#[cfg(test)]
 pub(super) fn run_form_helper(
     title: &str,
     fields: &[crate::FormField],
     shutdown: &AtomicBool,
 ) -> Result<crate::FormValues, CommandError> {
-    let spec = serde_json::json!({ "title": title, "fields": fields }).to_string();
+    run_form_helper_with_preview(title, fields, None, None, shutdown)
+}
+
+pub(super) fn run_form_helper_with_preview(
+    title: &str,
+    fields: &[crate::FormField],
+    preview_template: Option<&str>,
+    context_notice: Option<&str>,
+    shutdown: &AtomicBool,
+) -> Result<crate::FormValues, CommandError> {
+    let spec = serde_json::json!({
+        "title": title,
+        "fields": fields,
+        "preview_template": preview_template,
+        "context_notice": context_notice,
+    })
+    .to_string();
     let helper = form_helper_command();
     let FormHelperCommand {
         program,

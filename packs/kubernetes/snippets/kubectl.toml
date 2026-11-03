@@ -6,11 +6,12 @@ tags = ["kubectl", "pods"]
 replacement = "kubectl get pods --namespace {{shellq:namespace=default|required|max=63|validate=dns-label}} --output wide"
 
 [[expansion]]
-trigger = ";;kube-logs"
-description = "Read recent logs from a selected pod and container"
+trigger = ";klogs"
+aliases = [";;kube-logs"]
+description = "Preview recent logs for a selected Kubernetes context, namespace, pod, and container"
 category = "Kubernetes"
 tags = ["kubectl", "logs"]
-replacement = "kubectl logs --namespace {{shellq:namespace=default|required|max=63|validate=dns-label}} {{shellq:pod=pod-name|required|max=253|validate=dns-subdomain}} --container {{shellq:container=app|required|max=63|validate=dns-label}} --since={{shellq:since=15m|required|max=32|validate=duration}} --tail={{shellq:lines=200|required|max=5|validate=positive-integer}}"
+replacement = "kubectl --context {{shellq:context|required|max=253|validate=single-line}} logs --namespace {{shellq:namespace=default|required|max=63|validate=dns-label}} {{shellq:pod=pod-name|required|max=253|validate=kubernetes-name}} --container {{shellq:container=app|required|max=63|validate=dns-label}} --since={{shellq:since=15m|required|max=32|validate=kubernetes-duration}} --tail=200"
 
 [[expansion]]
 trigger = ";;kube-events"

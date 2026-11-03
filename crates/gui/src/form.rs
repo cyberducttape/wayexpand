@@ -13,7 +13,7 @@ use std::{
 
 use eframe::egui::{self, RichText};
 use serde::Deserialize;
-use wayexpand_core::{FormField, FormFieldKind};
+use wayexpand_core::{CompiledTemplate, FormField, FormFieldKind, FormValues, TemplateContext};
 
 use crate::theme::{self, Palette};
 
@@ -21,6 +21,10 @@ use crate::theme::{self, Palette};
 pub(crate) struct FormSpec {
     pub(crate) title: String,
     pub(crate) fields: Vec<FormField>,
+    #[serde(default)]
+    pub(crate) preview_template: Option<String>,
+    #[serde(default)]
+    pub(crate) context_notice: Option<String>,
 }
 
 type Outcome = Arc<Mutex<Option<HashMap<String, String>>>>;
@@ -33,14 +37,11 @@ pub(crate) struct FormApp {
     focused_once: bool,
     error: Option<String>,
     date_months: Vec<(i32, u32)>,
+    preview_template: Option<CompiledTemplate>,
 }
 
 impl FormApp {
-    pub(crate) fn new(
-        spec: FormSpec,
-        palette: Palette,
-        outcome: Outcome,
-    ) -> Result<Self, wayexpand_core::DateError> {
+    pub(crate) fn new(spec: FormSpec, palette: Palette, outcome: Outcome) -> anyhow::Result<Self> {
         let values = initial_values(&spec.fields, wayexpand_core::today_local_date)?;
         let date_months = values
             .iter()
@@ -50,6 +51,12 @@ impl FormApp {
                     .unwrap_or((2026, 1))
             })
             .collect();
+        let preview_template = spec
+            .preview_template
+            .as_deref()
+            .map(CompiledTemplate::compile)
+            .transpose()
+            .map_err(|error| anyhow::anyhow!("invalid form preview template: {error}"))?;
         Ok(Self {
             spec,
             values,
@@ -58,6 +65,7 @@ impl FormApp {
             focused_once: false,
             error: None,
             date_months,
+            preview_template,
         })
     }
 
@@ -186,6 +194,38 @@ impl FormApp {
                             ui.end_row();
                         }
                     });
+                if let Some(context_notice) = &self.spec.context_notice {
+                    ui.add_space(6.0);
+                    ui.label(RichText::new(context_notice).strong());
+                }
+                if let Some(preview_template) = &self.preview_template {
+                    let values: FormValues = self
+                        .spec
+                        .fields
+                        .iter()
+                        .zip(&self.values)
+                        .map(|(field, value)| (field.key.clone(), value.clone()))
+                        .collect();
+                    let preview = preview_template
+                        .render_with_cursor(&TemplateContext {
+                            fields: Arc::new(values),
+                            ..TemplateContext::default()
+                        })
+                        .map(|(rendered, _)| rendered)
+                        .unwrap_or_else(|_| {
+                            "Complete valid fields to show the command preview.".into()
+                        });
+                    ui.add_space(8.0);
+                    ui.label(RichText::new("Command preview · inserted as text only").strong());
+                    let mut preview = preview;
+                    ui.add(
+                        egui::TextEdit::multiline(&mut preview)
+                            .code_editor()
+                            .desired_rows(3)
+                            .desired_width(f32::INFINITY)
+                            .interactive(false),
+                    );
+                }
                 ui.add_space(12.0);
                 if let Some(error) = &self.error {
                     ui.label(RichText::new(error).color(palette.danger));
