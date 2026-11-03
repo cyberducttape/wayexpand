@@ -8,6 +8,10 @@ All notable changes to WayExpand are documented here.
   validates and shell-quotes each value, and previews the exact insert-only
   command. Form dialogs now preview field-only output before insertion.
 - Add Kubernetes validators for resource names and bounded log durations.
+- Publish a dated, versioned desktop certification snapshot for KDE, GNOME,
+  Sway, and Hyprland. It separates CI/headless results from physical-session
+  evidence and lists the remaining lock, layout, suspend, portal, and soak
+  gates; no route is promoted to production-safe without reviewed evidence.
 - Connect the compositor's trusted active-layout snapshot to the libei
   keysym fallback and compare the full compiled XKB mapping against the EIS
   keymap before using it. KWin and Hyprland can supply layout groups when EIS

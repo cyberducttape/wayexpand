@@ -120,6 +120,16 @@ session evidence; unit tests alone do not satisfy them.
 
 ## Operations
 
+- [x] Publish the initial dated, versioned desktop certification record for
+      KDE, GNOME, Sway, and Hyprland. The current release-line snapshot is
+      [CERTIFICATION_MATRIX](CERTIFICATION_MATRIX.md); all four targets remain
+      uncertified.
+- [ ] Complete and publish physical-session certification for each target.
+      Record exact compositor and WayExpand versions, route, physical keyboard,
+      focused clients, screen lock/unlock, layout changes, suspend/resume,
+      portal revocation, and a 72-hour session soak. Link reviewed
+      machine-readable evidence for every pass and retain failures and untested
+      cases. CI and headless tests do not satisfy these desktop-session checks.
 - [ ] Pass crash/restart and suspend/resume tests in real user sessions.
 - [x] Verify atomic upgrade and rollback under injected installer failures,
       including SIGTERM after version switching. See
