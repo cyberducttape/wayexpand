@@ -442,6 +442,92 @@ impl ArtifactValidator for NginxValidator {
 
 struct KubeconformValidator;
 
+/// Validate the built-in HTTP 503 checklist without executing any of its
+/// commands or invoking pack-defined programs.
+struct Http503ChecklistValidator;
+
+impl ArtifactValidator for Http503ChecklistValidator {
+    fn name(&self) -> &'static str {
+        "WayExpand read-only HTTP 503 checklist validator"
+    }
+
+    fn supports(&self, template_trigger: &str) -> bool {
+        template_trigger == ";http503"
+    }
+
+    fn validate(&self, _workspace: &Path, target: &ValidationTarget) -> Result<()> {
+        let ValidationTarget::File(path) = target else {
+            bail!("HTTP 503 checklist validation requires a generated file");
+        };
+        let contents = fs::read_to_string(path)?;
+        for required in ["Terminal session (operator-confirmed):", "Expected host:"] {
+            if !contents.contains(required) {
+                bail!("generated checklist is missing required review content: {required}");
+            }
+        }
+        let mut in_commands = false;
+        let mut hostname_check = false;
+        let mut service_status = false;
+        let mut journal_checks = 0usize;
+        let mut socket_check = false;
+        let mut host_probe = false;
+        let mut nginx_check = false;
+        for line in contents.lines() {
+            let line = line.trim();
+            if line == "```sh" {
+                if in_commands {
+                    bail!("generated checklist has nested shell code fences");
+                }
+                in_commands = true;
+                continue;
+            }
+            if line == "```" {
+                if !in_commands {
+                    bail!("generated checklist has an unmatched shell code fence");
+                }
+                in_commands = false;
+                continue;
+            }
+            if !in_commands || line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let readonly = [
+                "hostname -f",
+                "systemctl status --no-pager -- ",
+                "journalctl -u ",
+                "ss -lntp",
+                "curl -sS -I --connect-timeout 3 --max-time 5 -H \"Host: ",
+                "sudo nginx -t",
+            ]
+            .iter()
+            .any(|prefix| line.starts_with(prefix));
+            if !readonly {
+                bail!("generated checklist contains an unapproved shell command");
+            }
+            hostname_check |= line.starts_with("hostname -f");
+            service_status |= line.starts_with("systemctl status --no-pager -- ");
+            journal_checks += usize::from(line.starts_with("journalctl -u "));
+            socket_check |= line.starts_with("ss -lntp");
+            host_probe |=
+                line.starts_with("curl -sS -I --connect-timeout 3 --max-time 5 -H \"Host: ");
+            nginx_check |= line.starts_with("sudo nginx -t");
+        }
+        if in_commands {
+            bail!("generated checklist has an unclosed shell code fence");
+        }
+        if !(hostname_check
+            && service_status
+            && journal_checks >= 2
+            && socket_check
+            && host_probe
+            && nginx_check)
+        {
+            bail!("generated checklist is missing one or more required read-only commands");
+        }
+        Ok(())
+    }
+}
+
 impl ArtifactValidator for KubeconformValidator {
     fn name(&self) -> &'static str {
         "kubeconform -strict -summary"
@@ -512,7 +598,8 @@ fn validator_registry() -> Vec<&'static dyn ArtifactValidator> {
     };
     static NGINX: NginxValidator = NginxValidator;
     static KUBECONFORM: KubeconformValidator = KubeconformValidator;
-    let validators: [&'static dyn ArtifactValidator; 7] = [
+    static HTTP503: Http503ChecklistValidator = Http503ChecklistValidator;
+    let validators: [&'static dyn ArtifactValidator; 8] = [
         &ANSIBLE,
         &HADOLINT,
         &COMPOSE,
@@ -520,6 +607,7 @@ fn validator_registry() -> Vec<&'static dyn ArtifactValidator> {
         &ACTIONLINT,
         &NGINX,
         &KUBECONFORM,
+        &HTTP503,
     ];
     validators.into_iter().collect()
 }

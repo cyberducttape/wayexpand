@@ -76,16 +76,19 @@ labels describe the likely effect and sensitivity of the content when manually
 used. All included content is inserted as text. Review its destination, active
 credentials, and output before running or sharing anything.
 
-For a review-first HTTP 503 workflow, install `ops-triage` and type `;http503`.
-The form asks for the operator-selected environment, target host, service unit,
-and local service port, then inserts the checklist and diagnostic commands as
-text. Commands run on whichever machine the operator's current shell targets;
-the host label does not connect to or select a host. WayExpand does not inspect
-terminal contents, SSH state, or shell history to infer that target. Review each
-command before manually running it. The sequence reads systemd status and
-journal entries, checks listening sockets, and makes a bounded localhost HTTP
-probe; it does not restart a service or modify configuration. Redact
-credentials and customer data before sharing command output.
+For the complete first-run demonstration, follow the
+[HTTP 503 walkthrough](HTTP503_WALKTHROUGH.md). It installs this pack, confirms
+the session's support status, generates a validated checklist for an
+operator-selected local or remote SSH session, reviews the file diff before
+writing, and shows how to copy one selected command without running it. The
+`;http503` form asks for environment, local/remote session, expected host,
+service unit, reverse-proxy unit, and port. Session selection is a declaration
+by the operator; WayExpand does not inspect terminal contents, SSH state, or
+shell history to infer the active target. Commands run on whichever machine
+the current shell controls. They read status, journal entries, listening
+sockets, and a bounded localhost HTTP response, then validate Nginx
+configuration without reloading it. They do not restart a service or modify
+configuration. Redact credentials and customer data before sharing output.
 
 The same pack provides `;escalation`, `;runbook`, `;change-record`,
 `;apache-check`, `;exim-check`, `;mariadb-check`, `;cpanel-check`, and

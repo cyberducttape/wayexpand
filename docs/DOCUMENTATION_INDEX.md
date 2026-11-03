@@ -29,6 +29,12 @@ Complete guide to all WayExpand documentation, organized by use case and audienc
 - Fleet management at scale
 - Health checks and monitoring
 
+### I need a practical sysadmin first task
+→ Follow the [HTTP 503 incident triage walkthrough](HTTP503_WALKTHROUGH.md)
+- Install and inspect the reviewed operations pack
+- Declare the local or remote session and expected host
+- Generate, validate, preview, and copy read-only diagnostics
+
 ### I want to generate infrastructure files or run an approved action
 → Read [SAFE_WORKFLOWS.md](SAFE_WORKFLOWS.md)
 - Explicit insert, reviewed file generation, and broker action modes
@@ -102,6 +108,7 @@ Then see [SECURITY.md](../SECURITY.md)
 | [PERFORMANCE_TUNING.md](PERFORMANCE_TUNING.md) | Large-library users | Matcher limits and tuning |
 | [BENCHMARKS.md](BENCHMARKS.md) | Large-library users and contributors | Measured matcher, memory, and injection latency, with reproduction commands |
 | [FOR_SYSADMINS.md](FOR_SYSADMINS.md) | System admins | Deployment, monitoring, 30+ examples |
+| [HTTP503_WALKTHROUGH.md](HTTP503_WALKTHROUGH.md) | System admins | First-run HTTP 503 triage, target review, and command generation |
 | [ACTION_BROKER_ARCHITECTURE.md](ACTION_BROKER_ARCHITECTURE.md) | SREs and security architects | Named-action policy, service lifecycle, audit sink, and same-UID trust boundary |
 
 ### Configuration & Customization

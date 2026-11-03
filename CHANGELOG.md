@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Turn `;http503` into the flagship first-run sysadmin workflow. Collect an
+  explicit local/remote SSH session declaration, expected host, service,
+  proxy unit, and port; validate and generate a reviewable checklist with a
+  built-in read-only command validator. Add one-command service, journal,
+  sockets, and proxy forms, plus a documented CLI workflow to preview a file
+  or copy a selected command without running it.
 - Extend pack lint with an operational-field gate: command/config interpolations
   require a domain validator or explicit `free_text=true`, and JSON failures
   identify the exact pack file, trigger, and field. Add URL, URL path, duration,

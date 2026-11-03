@@ -87,27 +87,79 @@ trigger = ";http503"
 description = "Review-first HTTP 503 diagnostic checklist and read-only command sequence"
 category = "Operations triage"
 tags = ["http", "incident", "diagnostics", "read-only"]
+output_file = "http503-checklist.md"
 replacement = """HTTP 503 first-response checklist (review each command before running)
 
 Operator-selected environment: {{choice:environment=development|staging|production;default=staging;required}}
-Target host (label only; WayExpand does not detect SSH, container, or sudo context): {{field:target host|required|validate=hostname|max=253}}
+Terminal session (operator-confirmed): {{choice:session context=local|remote SSH;required}}
+Expected host: {{field:target host|required|validate=hostname|max=253}}
 Service: {{field:service=nginx.service|validate=systemd-unit|required|max=255}}
+Reverse proxy unit: {{field:proxy service=nginx.service|validate=systemd-unit|required|max=255}}
 Local service port: {{field:port=8080|validate=port|required|max=5}}
 
-Confirm the current terminal is connected to the intended target before running these commands. They run on the machine of the shell where you execute them; the host label above does not connect to or select a host.
+Before running anything, confirm that this terminal is the selected local or remote SSH session and that `hostname -f` matches the expected host. WayExpand does not inspect terminal contents, detect SSH, or connect to the host. Every command below runs on the machine of the current shell.
 
 1. Confirm the affected URL, start time, scope, and whether the failure is persistent.
-2. Check local service status, recent logs, and listening sockets:
+2. Check service status, recent logs, and listening sockets:
+   ```sh
+   hostname -f
    systemctl status --no-pager -- {{shellq:service=nginx.service|required|validate=systemd-unit|max=255}}
    journalctl -u {{shellq:service}} -n 100 --no-pager
    ss -lntp
-3. Probe the local service port without downloading a response body:
-   curl -sS -I --connect-timeout 3 --max-time 5 -- 'http://127.0.0.1:{{shellq:port=8080|required|validate=port|max=5}}'
-4. Check reverse-proxy and upstream errors; for Nginx, validate config without reloading:
+   ```
+3. Probe the local service port with the expected virtual host and no response body:
+   ```sh
+   curl -sS -I --connect-timeout 3 --max-time 5 -H "Host: {{field:target host}}" -- 'http://127.0.0.1:{{field:port=8080|required|validate=port|max=5}}/'
+   ```
+4. Check reverse-proxy logs and validate Nginx configuration without reloading:
+   ```sh
+   journalctl -u {{shellq:proxy service=nginx.service|required|validate=systemd-unit|max=255}} -n 100 --no-pager
    sudo nginx -t
+   ```
 5. Compare proxy/upstream health, recent deploys, capacity, and dependency status. Record evidence and escalate before making changes.
 
 These are inserted as editable text and are not executed by WayExpand. The commands inspect state; they do not restart services or change configuration. Redact credentials, tokens, and customer data before sharing output.
+"""
+
+[[expansion]]
+trigger = ";http503-service"
+description = "Generate one read-only HTTP 503 service status command for the selected shell target"
+category = "Operations triage"
+tags = ["http", "incident", "systemd", "read-only"]
+replacement = """# {{choice:session context=local|remote SSH;required}} session; expected host {{field:target host|required|validate=hostname|max=253}}
+# Confirm `hostname -f` matches before running; this command uses the current shell.
+systemctl status --no-pager -- {{shellq:service=nginx.service|required|validate=systemd-unit|max=255}}
+"""
+
+[[expansion]]
+trigger = ";http503-journal"
+description = "Generate one read-only HTTP 503 service journal command for the selected shell target"
+category = "Operations triage"
+tags = ["http", "incident", "journalctl", "read-only"]
+replacement = """# {{choice:session context=local|remote SSH;required}} session; expected host {{field:target host|required|validate=hostname|max=253}}
+# Confirm `hostname -f` matches before running; this command uses the current shell.
+journalctl -u {{shellq:service=nginx.service|required|validate=systemd-unit|max=255}} -n {{shellq:lines=100|required|max=5|validate=positive-integer}} --no-pager
+"""
+
+[[expansion]]
+trigger = ";http503-sockets"
+description = "Generate one read-only listening socket inspection command for the selected shell target"
+category = "Operations triage"
+tags = ["http", "incident", "sockets", "read-only"]
+replacement = """# {{choice:session context=local|remote SSH;required}} session; expected host {{field:target host|required|validate=hostname|max=253}}
+# Confirm `hostname -f` matches before running; this command uses the current shell.
+ss -lntp
+"""
+
+[[expansion]]
+trigger = ";http503-proxy"
+description = "Generate a read-only HTTP virtual-host probe and Nginx configuration check"
+category = "Operations triage"
+tags = ["http", "incident", "nginx", "read-only"]
+replacement = """# {{choice:session context=local|remote SSH;required}} session; expected host {{field:target host|required|validate=hostname|max=253}}
+# Confirm `hostname -f` matches before running; these commands use the current shell.
+curl -sS -I --connect-timeout 3 --max-time 5 -H "Host: {{field:target host}}" -- 'http://127.0.0.1:{{field:port=8080|required|validate=port|max=5}}/'
+sudo nginx -t
 """
 
 [[expansion]]

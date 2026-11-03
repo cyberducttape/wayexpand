@@ -19,7 +19,7 @@ summary = "Diagnostic output may contain sensitive operational data; commands ar
 [review]
 reviewed_by = "WayExpand project review"
 reviewed_at = "2026-11-02"
-summary = "Reviewed by WayExpand Incident Response Maintainers; content is inserted as text and never run by WayExpand. Review command targets and outputs before manual use."
+summary = "Reviewed by WayExpand Incident Response Maintainers; the HTTP 503 workflow requires an explicit local or remote shell declaration, validates target fields, and generates read-only commands for review without executing them."
 
 [verification]
 test_cases = "tests/cases.toml"
