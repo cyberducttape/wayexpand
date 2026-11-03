@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add `;klogs`, a Kubernetes log form that shows the active kubectl context,
+  validates and shell-quotes each value, and previews the exact insert-only
+  command. Form dialogs now preview field-only output before insertion.
+- Add Kubernetes validators for resource names and bounded log durations.
 - Gate IBus replacement through the shared capability admission contract.
   Non-atomic replacement is refused by default, expansion accounting waits
   for successful signal emission. Outcomes distinguish fully emitted but
