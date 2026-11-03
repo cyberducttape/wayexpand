@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Resolve fleet settings per field with pack defaults, organization defaults, and user preferences in explicit precedence order; report each effective setting's source in `wayexpand fleet status`.
+
 - Gate IBus replacement through the shared capability admission contract.
   Non-atomic replacement is refused by default, expansion accounting waits
   for successful signal emission. Outcomes distinguish fully emitted but
