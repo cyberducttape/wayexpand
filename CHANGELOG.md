@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add `wayexpand workflow` with three explicit modes: verified Insert, Generate
+  File with a staged validator, destination and diff review plus typed write
+  confirmation, and Run Approved Action through the Action Broker. Broker
+  execution requires an exact action approval, enabled and healthy mandatory
+  audit, and an enabled named action in the active configuration; successful
+  responses confirm the broker's required completion audit record.
 - Expand the maintained operations catalog to 17 packs, adding networking,
   DNS/TLS, cPanel/WHM, database operations, Terraform, CI/CD, and incident
   response. Pack manifests now carry maintainer, shell/platform/tool

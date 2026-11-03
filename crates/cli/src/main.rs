@@ -108,6 +108,7 @@ fn run() -> Result<()> {
         Some("test-hotkey") => test_hotkey_command(args)?,
         Some("preview") => preview_command(args)?,
         Some("new") => new_command(args)?,
+        Some("workflow") => commands::workflow::workflow_command(args)?,
         Some("list") => list_command(args)?,
         Some("search") => search_command(args)?,
         Some("schema") => schema_command(args)?,
@@ -209,6 +210,10 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
             (
                 "new [<name> [--set NAME=VALUE]... [-o FILE|--stdout] [--gui] [--force] [--validate]]",
                 "Fill in a file template (Dockerfile, playbook...) and write it",
+            ),
+            (
+                "workflow insert|generate|run ...",
+                "Choose explicit insertion, reviewed file generation, or an approved broker action",
             ),
             (
                 "test <text> [--json] [config]",

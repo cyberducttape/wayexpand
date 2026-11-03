@@ -133,7 +133,7 @@ Resolve a hotkey without executing its action.
 Preview a replacement. The optional application context is supplied with
 --preview-app APP or --preview-app=APP.
 .TP
-.B new [NAME [--set NAME=VALUE]... [-o PATH|--stdout] [--gui] [--force] [--validate]] [--show NAME] [--json] [--config FILE]
+.B new [NAME [--set NAME=VALUE]... [-o PATH|--stdout] [--gui] [--force] [--validate] [--review]] [--show NAME] [--json] [--config FILE]
 Fill in a file template, such as a Dockerfile or an Ansible playbook, and
 write it to the snippet's output_file in the current directory. The built-in
 ansible-role template writes a complete, atomically published role directory.
@@ -150,6 +150,17 @@ credential variables. Validation failure leaves the destination untouched.
 Each validator must be installed separately; see
 .I docs/ARTIFACT_VALIDATION.md
 for the supported tools and validation boundary.
+.TP
+.B workflow insert TRIGGER
+Insert a replacement into the exact currently focused window, verified by the daemon at insertion time. This does not execute the inserted text.
+.TP
+.B workflow generate TEMPLATE [--set NAME=VALUE]... [-o PATH] [--force] [--config FILE]
+Render a file template, run its registered validator, show the output destination and proposed diff, then require typing `write` before publishing.
+.TP
+.B workflow run ACTION_ID [--set NAME=VALUE]... [--approve-action ACTION_ID] [--config FILE]
+Run one enabled named Action Broker action after exact interactive confirmation or an exact --approve-action match. Requires healthy mandatory broker auditing. See
+.I docs/SAFE_WORKFLOWS.md
+for policy and approval details.
 .TP
 .B list [--json] [CONFIG]
 List configured expansions and hotkeys.

@@ -29,6 +29,11 @@ Complete guide to all WayExpand documentation, organized by use case and audienc
 - Fleet management at scale
 - Health checks and monitoring
 
+### I want to generate infrastructure files or run an approved action
+→ Read [SAFE_WORKFLOWS.md](SAFE_WORKFLOWS.md)
+- Explicit insert, reviewed file generation, and broker action modes
+- Validator, destination diff, approval, and mandatory audit requirements
+
 ### I'm deploying to my organization
 → Start with [FLEET_CONFIG.md](FLEET_CONFIG.md)
 - Multi-layer configuration
