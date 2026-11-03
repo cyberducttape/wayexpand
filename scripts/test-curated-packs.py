@@ -69,12 +69,20 @@ def main() -> None:
                     or not expected_path.resolve().is_relative_to(pack.resolve())
                 ):
                     fail(pack.name, f"invalid example case {case!r}")
+                expected = expected_path.read_text()
+                # `pack test` above renders interactive forms with the fixture's
+                # validated `values`. The CLI preview command cannot collect
+                # those values, so it correctly reports a recognized form
+                # instead of replacement text. Avoid treating that safe refusal
+                # as a fixture mismatch; the pack test already compared its
+                # rendered output byte-for-byte with this expected file.
+                if case.get("values"):
+                    continue
                 preview = run(cli, ["preview", trigger, "--json", str(config)], pack)
                 try:
                     result = json.loads(preview.stdout)
                 except json.JSONDecodeError as error:
                     fail(pack.name, f"preview returned invalid JSON: {error}")
-                expected = expected_path.read_text()
                 if result.get("matched") is not True or result.get("replacement") != expected:
                     fail(
                         pack.name,

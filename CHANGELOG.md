@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Fix the reviewed-pack CI fixture harness to compare interactive-form output
+  through validated `pack test` values instead of asking the CLI preview path
+  to collect fields it cannot interactively request.
 - Turn `;http503` into the flagship first-run sysadmin workflow. Collect an
   explicit local/remote SSH session declaration, expected host, service,
   proxy unit, and port; validate and generate a reviewable checklist with a
