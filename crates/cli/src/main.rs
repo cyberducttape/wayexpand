@@ -165,6 +165,10 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "Inspect policy provenance or fail CI when restrictions are not enforced",
             ),
             (
+                "doctor --security [--json] [config]",
+                "Inspect the effective sandbox of running WayExpand services",
+            ),
+            (
                 "doctor --certify [--json]",
                 "Run isolated live insertion checks in a private KWin",
             ),
