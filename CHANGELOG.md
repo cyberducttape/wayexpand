@@ -7,6 +7,13 @@ All notable changes to WayExpand are documented here.
 - Validate and shell-quote fields in curated Linux and Kubernetes command
   packs. Add Kubernetes resource-name and duration validators, reject invalid
   integer inputs, and bump both pack versions to 1.0.1.
+
+- Resolve fleet settings per field with pack defaults, organization defaults, and user preferences in explicit precedence order; report each effective setting's source in `wayexpand fleet status`.
+
+- Gate IBus replacement through the shared capability admission contract.
+  Non-atomic replacement is refused by default, expansion accounting waits
+  for successful signal emission. Outcomes distinguish fully emitted but
+  unverified text from a possibly partial signal sequence.
 - Reduce evdev capture polling churn and layout background traffic, while
   retaining compositor layout-change notification with a slower fallback.
 - Add insert-only sysadmin diagnostic templates for TLS, service, port, HTTP,

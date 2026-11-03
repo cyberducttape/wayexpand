@@ -223,7 +223,7 @@ fn emit_actions(
 /// with the owning engine's path; it blocks on the channel rather than
 /// polling. Each result is validated and emitted under the engine's adapter
 /// lock (the same lock `ProcessKeyEvent` holds), and recorded as applied only
-/// after its signals were emitted.
+/// after its signals were emitted; that is not a client-document receipt.
 fn run_completion_pump(
     wakeups: mpsc::Receiver<OwnedObjectPath>,
     instances: Instances,
@@ -293,6 +293,9 @@ impl EngineObject {
                 adapter.output_failed();
             }
             return false;
+        }
+        if let Ok(mut adapter) = self.adapter.lock() {
+            adapter.output_succeeded();
         }
         result.handled
     }
@@ -658,6 +661,9 @@ replacement = "signature"
         )));
         {
             let mut adapter = adapter.lock().unwrap();
+            adapter
+                .engine_mut()
+                .set_compatibility_mode(wayexpand_core::CompatibilityMode::TrackedFocus);
             adapter.focus_in();
             adapter.set_capabilities(crate::IBUS_CAP_SURROUNDING_TEXT);
             adapter.set_content_type(0, 0);
@@ -688,7 +694,8 @@ replacement = "signature"
     /// they must not overlap even when tests run on many threads.
     static BROKER_LOCK: Mutex<()> = Mutex::new(());
 
-    const BROKER_CONFIG: &str = "[settings]\nundo_chord = \"Ctrl+Z\"\n\
+    const BROKER_CONFIG: &str =
+        "[settings]\ncompatibility_mode = \"tracked-focus\"\nundo_chord = \"Ctrl+Z\"\n\
          [[expansion]]\ntrigger = \":ok\"\nreplacement = \"\"\n\
          [expansion.command]\naction = \"status\"\ntimeout_ms = 3000\n";
 
@@ -907,7 +914,16 @@ replacement = "signature"
     #[test]
     fn focus_in_binds_forms_to_the_factory_input_context_path() {
         let harness = Harness::start(
-            "[[expansion]]\ntrigger = ':incident'\nreplacement = 'Incident {{field:hostname}}'\n",
+            "[settings]\ncompatibility_mode = 'tracked-focus'\n\n[[expansion]]\ntrigger = ':incident'\nreplacement = 'Incident {{field:hostname}}'\n",
+        );
+        assert_eq!(
+            harness.instances.lock().unwrap()[&harness.engine]
+                .adapter
+                .lock()
+                .unwrap()
+                .engine()
+                .compatibility_mode(),
+            wayexpand_core::CompatibilityMode::TrackedFocus
         );
         harness.focus_text_field();
         let instances = harness.instances.lock().unwrap();
@@ -980,6 +996,12 @@ replacement = "signature"
             harness.key(character, &before);
             before.push(character);
         }
+        harness.instances.lock().unwrap()[&harness.engine]
+            .adapter
+            .lock()
+            .unwrap()
+            .engine_mut()
+            .set_compatibility_mode(wayexpand_core::CompatibilityMode::TrackedFocus);
 
         // Hold the helper open while its IBus context loses and regains focus.
         // This exercises the real completion pump, not just adapter polling.
@@ -1078,6 +1100,9 @@ replacement = "signature"
             BrokerFixture::start("emit-fails", "from-broker", Duration::from_millis(50));
         let config: Config = toml::from_str(BROKER_CONFIG).unwrap();
         let mut adapter = IbusEngineAdapter::new(ExpansionEngine::new(config).unwrap());
+        adapter
+            .engine_mut()
+            .set_compatibility_mode(wayexpand_core::CompatibilityMode::TrackedFocus);
         let (completed, completion) = mpsc::channel();
         adapter.set_completion_notifier(Some(Arc::new(move || {
             let _ = completed.send(());
