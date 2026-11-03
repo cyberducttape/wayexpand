@@ -1,7 +1,7 @@
 use super::{
     CommandError, CommandMetricsState, ExpansionEngine, ExpansionResult, HotkeyError, HotkeyResult,
 };
-use crate::CommandConfig;
+use crate::{CommandConfig, CommandEnvironment, FormFieldKind};
 use std::{
     collections::VecDeque,
     sync::{
@@ -12,6 +12,15 @@ use std::{
     thread::JoinHandle,
     time::Duration,
 };
+
+fn form_template_uses_only_fields(template: &str) -> bool {
+    crate::template_variables(template).iter().all(|name| {
+        *name == "cursor"
+            || ["field:", "prompt:", "choice:", "datefield:", "shellq:"]
+                .iter()
+                .any(|prefix| name.starts_with(prefix))
+    })
+}
 
 /// Wakeup callback for asynchronous expansion completions. It runs on a
 /// worker thread and must only signal the host; draining happens on the host
@@ -221,9 +230,64 @@ impl AsyncCommandRuntime {
                                     mut result,
                                 } => {
                                     worker_metrics.in_flight.fetch_add(1, Ordering::Relaxed);
-                                    let output = match super::command_runtime::run_form_helper(
+                                    let kubernetes_context = template.contains(
+                                        "--context {{shellq:context",
+                                    );
+                                    let mut form_fields = fields.as_ref().clone();
+                                    let active_context = if kubernetes_context {
+                                        let context_probe = CommandConfig {
+                                            action: None,
+                                            program: "kubectl".into(),
+                                            args: vec!["config".into(), "current-context".into()],
+                                            timeout_ms: 2_000,
+                                            cache_ms: 0,
+                                            environment: CommandEnvironment::Minimal,
+                                            pass_env: vec!["KUBECONFIG".into()],
+                                        };
+                                        super::command_runtime::run_command_with_parameters(
+                                            &context_probe,
+                                            &std::collections::HashMap::new(),
+                                            Some(&command_shutdown),
+                                        )
+                                        .ok()
+                                        .map(|value| value.trim().to_owned())
+                                        .filter(|value| {
+                                            !value.is_empty()
+                                                && value.chars().count() <= 253
+                                                && !value.chars().any(char::is_control)
+                                        })
+                                    } else {
+                                        None
+                                    };
+                                    if kubernetes_context {
+                                        if let Some(field) =
+                                            form_fields.iter_mut().find(|field| field.key == "context")
+                                        {
+                                            if let (Some(context), FormFieldKind::Text { default }) =
+                                                (&active_context, &mut field.kind)
+                                            {
+                                                *default = context.clone();
+                                            }
+                                        }
+                                    }
+                                    let context_notice = if kubernetes_context {
+                                        Some(match active_context.as_deref() {
+                                            Some(context) => format!(
+                                                "Active kubectl context: {context}. Verify it before inserting."
+                                            ),
+                                            None => "Active kubectl context could not be read. Enter the intended context explicitly.".into(),
+                                        })
+                                    } else {
+                                        None
+                                    };
+                                    let preview_template = (command.is_none()
+                                        && form_template_uses_only_fields(&template))
+                                    .then_some(template.as_ref());
+                                    let output = match super::command_runtime::run_form_helper_with_preview(
                                         &title,
-                                        &fields,
+                                        &form_fields,
+                                        preview_template,
+                                        context_notice.as_deref(),
                                         &command_shutdown,
                                     ) {
                                         Ok(values) => {
