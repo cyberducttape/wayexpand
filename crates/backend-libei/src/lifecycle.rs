@@ -18,13 +18,14 @@ impl LibeiSession {
     /// Connect to EIS from the caller's dedicated session thread. The
     /// resulting session must stay on that thread for its entire lifetime.
     pub(super) fn connect_with_cancellation(
-        options: LibeiOptions,
+        mut options: LibeiOptions,
         cancellation: ConnectCancellation,
     ) -> Result<Self, LibeiError> {
         if cancellation.is_cancelled() {
             return Err(LibeiError::Cancelled);
         }
         let fcitx5_direct_commit = options.fcitx5_direct_commit;
+        let active_layout_provider = options.active_layout_provider.take();
         let (stream, portal) = if let Some(socket) = std::env::var_os("LIBEI_SOCKET") {
             let socket = PathBuf::from(socket);
             let socket = if socket.is_relative() {
@@ -148,6 +149,7 @@ impl LibeiSession {
             tab_keycode,
             _portal: portal,
             fcitx5: fcitx5_direct_commit.then(fcitx5::Client::connect).flatten(),
+            active_layout_provider,
             checkpoint: wayexpand_core::OutputCheckpoint::default(),
         })
     }
