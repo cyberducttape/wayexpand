@@ -1,0 +1,20 @@
+[[expansion]]
+trigger = ";;dns-query"
+description = "Query a selected DNS record type using the configured resolver"
+category = "DNS and TLS"
+tags = ["dns", "read-only"]
+replacement = "dig +time=3 +tries=1 +noall +answer {{shellq:name=example.net|required|max=253|validate=hostname}} {{choice:type=A|AAAA|CNAME|MX|TXT;required}}"
+
+[[expansion]]
+trigger = ";;dnssec-check"
+description = "Inspect DNSSEC validation state through systemd-resolved"
+category = "DNS and TLS"
+tags = ["dnssec", "read-only"]
+replacement = "resolvectl query {{shellq:name=example.net|required|max=253|validate=hostname}}"
+
+[[expansion]]
+trigger = ";;tls-peer"
+description = "Inspect the presented certificate chain and validity for a TLS endpoint"
+category = "DNS and TLS"
+tags = ["tls", "certificate"]
+replacement = "openssl s_client -connect {{shellq:host=example.net|required|max=253|validate=hostname}}:{{shellq:port=443|required|max=5|validate=port}} -servername {{shellq:host}} -verify_return_error -showcerts </dev/null 2>/dev/null | openssl x509 -noout -subject -issuer -dates -ext subjectAltName"

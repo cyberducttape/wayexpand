@@ -1,0 +1,25 @@
+format_version = 1
+id = "wayexpand.cpanel-whm"
+version = "1.0.0"
+name = "cPanel and WHM Operations"
+publisher = "WayExpand project"
+maintainer = "WayExpand Hosting Operations Maintainers"
+description = "Read-only cPanel and WHM account, service, and certificate diagnostics."
+capabilities = ["forms"]
+
+[compatibility]
+shells = ["bash", "zsh", "fish"]
+platforms = ["linux"]
+tools = ["whmapi1", "uapi", "tail"]
+
+[risk]
+level = "moderate"
+summary = "Hosting account and service reports can expose customer identifiers; no account or service changes are included."
+
+[review]
+reviewed_by = "WayExpand project review"
+reviewed_at = "2026-11-02"
+summary = "Reviewed by WayExpand Hosting Operations Maintainers; generated text is never run by WayExpand. Inspect targets and output before manual use."
+
+[verification]
+test_cases = "tests/cases.toml"

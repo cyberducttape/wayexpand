@@ -1,0 +1,6 @@
+[[expansion]]
+trigger = ";;cicd-pack-example"
+description = "Recent GitHub Actions runs"
+category = "CI/CD Operations"
+tags = ["example", "reviewed"]
+replacement = "gh run list --limit 10"

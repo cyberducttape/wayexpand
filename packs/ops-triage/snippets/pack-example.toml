@@ -1,0 +1,6 @@
+[[expansion]]
+trigger = ";;ops-triage-pack-example"
+description = "Reviewed pack example output: Operations Triage"
+category = "Operations Triage"
+tags = ["example", "reviewed"]
+replacement = "curl -sS -I --max-time 5 https://example.net/health"

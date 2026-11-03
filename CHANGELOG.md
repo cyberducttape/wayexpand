@@ -4,6 +4,14 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Expand the maintained operations catalog to 17 packs, adding networking,
+  DNS/TLS, cPanel/WHM, database operations, Terraform, CI/CD, and incident
+  response. Pack manifests now carry maintainer, shell/platform/tool
+  compatibility, risk, review, and verification metadata. Each pack includes
+  an example output and a CI fixture that checks the rendered result; pack
+  review screens display maintainer, compatibility, and risk information.
+- Add DNS subdomain validation and apply shell-quoted, typed fields to common
+  Kubernetes, container, Nginx, and sysadmin diagnostic arguments.
 - Gate IBus replacement through the shared capability admission contract.
   Non-atomic replacement is refused by default, expansion accounting waits
   for successful signal emission. Outcomes distinguish fully emitted but

@@ -3,28 +3,28 @@ trigger = ";;tls-expiry"
 description = "Show the certificate a server presents and when it expires"
 category = "Operations triage"
 tags = ["tls", "certificate"]
-replacement = "openssl s_client -connect {{field:host=example.net}}:{{field:port=443}} -servername {{field:host}} </dev/null 2>/dev/null | openssl x509 -noout -subject -issuer -dates"
+replacement = "openssl s_client -connect {{shellq:host=example.net|required|max=253|validate=hostname}}:{{shellq:port=443|required|max=5|validate=port}} -servername {{shellq:host}} </dev/null 2>/dev/null | openssl x509 -noout -subject -issuer -dates"
 
 [[expansion]]
 trigger = ";;cert-file"
 description = "Inspect a local certificate file's subject, names, and validity"
 category = "Operations triage"
 tags = ["tls", "certificate"]
-replacement = "openssl x509 -in {{field:certificate=/etc/ssl/certs/example.crt}} -noout -subject -ext subjectAltName -dates"
+replacement = "openssl x509 -in {{shellq:certificate=/etc/ssl/certs/example.crt|required|max=512|validate=absolute-path}} -noout -subject -ext subjectAltName -dates"
 
 [[expansion]]
 trigger = ";;disk-triage"
 description = "Filesystem usage, then the largest directories one level down"
 category = "Operations triage"
 tags = ["disk", "diagnostics"]
-replacement = "df -hT -x tmpfs -x devtmpfs && sudo du -xh --max-depth=1 {{field:path=/var}} 2>/dev/null | sort -rh | head -n {{field:entries=15}}"
+replacement = "df -hT -x tmpfs -x devtmpfs && sudo du -xh --max-depth=1 -- {{shellq:path=/var|required|max=512|validate=absolute-path}} 2>/dev/null | sort -rh | head -n {{shellq:entries=15|required|max=3|validate=positive-integer}}"
 
 [[expansion]]
 trigger = ";;mem-triage"
 description = "Memory summary and the processes using the most of it"
 category = "Operations triage"
 tags = ["memory", "diagnostics"]
-replacement = "free -h && ps -eo pid,user,rss,comm --sort=-rss | head -n {{field:processes=15}}"
+replacement = "free -h && ps -eo pid,user,rss,comm --sort=-rss | head -n {{shellq:processes=15|required|max=3|validate=positive-integer}}"
 
 [[expansion]]
 trigger = ";;listening"
@@ -38,7 +38,7 @@ trigger = ";;dns-check"
 description = "Resolve a name through the system resolver and one explicit server"
 category = "Operations triage"
 tags = ["dns", "network"]
-replacement = "resolvectl query {{field:name=example.net}}; dig +short {{field:name}} {{choice:type=A|AAAA|CNAME|MX|TXT}} @{{field:server=1.1.1.1}}"
+replacement = "resolvectl query {{shellq:name=example.net|required|max=253|validate=hostname}}; dig +time=3 +tries=1 +short {{shellq:name}} {{choice:type=A|AAAA|CNAME|MX|TXT}} @{{shellq:server=1.1.1.1|required|max=253|validate=hostname}}"
 
 [[expansion]]
 trigger = ";cloud-context"
@@ -59,7 +59,7 @@ trigger = ";;http-check"
 description = "Status, timing, and headers for one HTTP request, without the body"
 category = "Operations triage"
 tags = ["http", "network"]
-replacement = "curl -sS -o /dev/null -D - -w 'status=%{http_code} connect=%{time_connect}s ttfb=%{time_starttransfer}s total=%{time_total}s\\n' {{field:url=https://example.net/health}}"
+replacement = "curl -sS -o /dev/null -D - -w 'status=%{http_code} connect=%{time_connect}s ttfb=%{time_starttransfer}s total=%{time_total}s\\n' -- {{shellq:url=https://example.net/health|required|max=2048}}"
 
 [[expansion]]
 trigger = ";;nginx-test"
@@ -98,11 +98,11 @@ Confirm the current terminal is connected to the intended target before running 
 
 1. Confirm the affected URL, start time, scope, and whether the failure is persistent.
 2. Check local service status, recent logs, and listening sockets:
-   systemctl status --no-pager -- '{{field:service}}'
-   journalctl -u '{{field:service}}' -n 100 --no-pager
+   systemctl status --no-pager -- {{shellq:service=nginx.service|required|validate=systemd-unit|max=255}}
+   journalctl -u {{shellq:service}} -n 100 --no-pager
    ss -lntp
 3. Probe the local service port without downloading a response body:
-   curl -sS -I --connect-timeout 3 --max-time 5 'http://127.0.0.1:{{field:port}}'
+   curl -sS -I --connect-timeout 3 --max-time 5 -- 'http://127.0.0.1:{{shellq:port=8080|required|validate=port|max=5}}'
 4. Check reverse-proxy and upstream errors; for Nginx, validate config without reloading:
    sudo nginx -t
 5. Compare proxy/upstream health, recent deploys, capacity, and dependency status. Record evidence and escalate before making changes.
@@ -120,8 +120,8 @@ Target host (verify the active shell/SSH session yourself): {{field:target host|
 Apache unit: {{choice:service=apache2.service|httpd.service;default=apache2.service;required}}
 
 Review the target and run these read-only checks from the intended host:
-systemctl status --no-pager -- '{{field:service}}'
-journalctl -u '{{field:service}}' -n 100 --no-pager
+   systemctl status --no-pager -- {{shellq:service=apache2.service|required|validate=systemd-unit|max=255}}
+   journalctl -u {{shellq:service}} -n 100 --no-pager
 sudo apachectl configtest
 ss -lntp
 
@@ -154,8 +154,8 @@ Target host (verify the active shell/SSH session yourself): {{field:target host|
 Service unit: {{field:service=mariadb.service|validate=systemd-unit|required|max=255}}
 
 Review the target and confirm the approved account/context before running checks:
-systemctl status --no-pager -- '{{field:service}}'
-journalctl -u '{{field:service}}' -n 100 --no-pager
+   systemctl status --no-pager -- {{shellq:service=mariadb.service|required|validate=systemd-unit|max=255}}
+   journalctl -u {{shellq:service}} -n 100 --no-pager
 ss -lntp
 mariadb-admin --connect-timeout=5 ping
 

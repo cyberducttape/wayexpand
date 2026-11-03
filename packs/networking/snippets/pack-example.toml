@@ -1,0 +1,6 @@
+[[expansion]]
+trigger = ";;networking-pack-example"
+description = "Local interface summary"
+category = "Networking Operations"
+tags = ["example", "reviewed"]
+replacement = "ip -brief address"

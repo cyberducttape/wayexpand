@@ -1,0 +1,6 @@
+[[expansion]]
+trigger = ";;terraform-pack-example"
+description = "Terraform formatting check"
+category = "Terraform Operations"
+tags = ["example", "reviewed"]
+replacement = "terraform fmt -check -recursive"

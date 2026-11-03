@@ -1,12 +1,25 @@
 format_version = 1
 id = "wayexpand.ops-triage"
-version = "1.2.0"
+version = "1.3.0"
 name = "Operations Triage"
 publisher = "WayExpand project"
-description = "Insert-only, review-first diagnostics and standardized incident, escalation, runbook, change-record, and target-context templates."
+maintainer = "WayExpand Incident Response Maintainers"
+description = "Read-only first-response diagnostics and standardized incident documentation."
 capabilities = ["forms"]
+
+[compatibility]
+shells = ["bash", "zsh", "fish"]
+platforms = ["linux"]
+tools = ["systemctl", "journalctl", "curl", "openssl", "apachectl", "exim", "mariadb-admin", "whmapi1", "kubectl", "aws", "gcloud", "az"]
+
+[risk]
+level = "moderate"
+summary = "Diagnostic output may contain sensitive operational data; commands are inserted for review and never run automatically."
 
 [review]
 reviewed_by = "WayExpand project review"
-reviewed_at = "2026-11-01"
-summary = "Diagnostic commands remain inserted text; target labels are explicit and never inferred from terminal contents, SSH state, or shell history."
+reviewed_at = "2026-11-02"
+summary = "Reviewed by WayExpand Incident Response Maintainers; content is inserted as text and never run by WayExpand. Review command targets and outputs before manual use."
+
+[verification]
+test_cases = "tests/cases.toml"

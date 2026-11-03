@@ -44,6 +44,18 @@ pub struct PackManifest {
     /// Oldest WayExpand version that understands this pack.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_wayexpand_version: Option<String>,
+    /// Team or person maintaining the pack content.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub maintainer: Option<String>,
+    /// Shells, platforms, and external tools this content assumes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compatibility: Option<PackCompatibility>,
+    /// Human-readable operational risk classification.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub risk: Option<PackRisk>,
+    /// Location of the pack's generated-output regression cases.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification: Option<PackVerification>,
     /// Capabilities the pack's snippets use: any of `commands`,
     /// `broker_actions`, `clipboard`, `env`, and `forms`. When present, the
     /// pack may use nothing it does not declare.
@@ -56,6 +68,27 @@ pub struct PackManifest {
     /// not a cryptographic trust signal; signatures authenticate the bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review: Option<PackReview>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PackCompatibility {
+    pub shells: Vec<String>,
+    pub platforms: Vec<String>,
+    pub tools: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PackRisk {
+    pub level: String,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PackVerification {
+    pub test_cases: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -203,6 +236,10 @@ pub enum PackError {
     InvalidVersion(String),
     #[error("pack review date must be a real date in YYYY-MM-DD form")]
     InvalidReviewDate,
+    #[error("pack risk level must be low, moderate, high, or critical")]
+    InvalidRiskLevel,
+    #[error("pack verification case path must be a relative path under tests/")]
+    InvalidVerificationPath,
     #[error("pack uses the `{0}` capability without declaring it")]
     UndeclaredCapability(String),
     #[error("pack calls Action Broker action `{0}` that is not in allowed_actions")]
@@ -281,6 +318,28 @@ fn read_manifest(path: &Path) -> Result<PackManifest, PackError> {
             (review.summary.as_str(), "review.summary"),
         ]
     });
+    let risk_fields = manifest
+        .risk
+        .iter()
+        .map(|risk| (risk.summary.as_str(), "risk.summary"));
+    let compatibility_fields = manifest.compatibility.iter().flat_map(|compatibility| {
+        compatibility
+            .shells
+            .iter()
+            .map(|value| (value.as_str(), "compatibility.shells"))
+            .chain(
+                compatibility
+                    .platforms
+                    .iter()
+                    .map(|value| (value.as_str(), "compatibility.platforms")),
+            )
+            .chain(
+                compatibility
+                    .tools
+                    .iter()
+                    .map(|value| (value.as_str(), "compatibility.tools")),
+            )
+    });
     let list_fields = manifest
         .capabilities
         .iter()
@@ -299,10 +358,59 @@ fn read_manifest(path: &Path) -> Result<PackManifest, PackError> {
     ]
     .into_iter()
     .chain(review_fields)
+    .chain(risk_fields)
+    .chain(compatibility_fields)
     .chain(list_fields)
     {
         if value.chars().any(char::is_control) {
             return Err(PackError::ControlCharacters(field));
+        }
+    }
+    if let Some(maintainer) = manifest.maintainer.as_deref() {
+        if maintainer.trim().is_empty() || maintainer.len() > 128 {
+            return Err(PackError::EmptyField("maintainer"));
+        }
+        if maintainer.chars().any(char::is_control) {
+            return Err(PackError::ControlCharacters("maintainer"));
+        }
+    }
+    if let Some(compatibility) = &manifest.compatibility {
+        for (values, field, required) in [
+            (&compatibility.shells, "compatibility.shells", true),
+            (&compatibility.platforms, "compatibility.platforms", true),
+            (&compatibility.tools, "compatibility.tools", false),
+        ] {
+            if (required && values.is_empty())
+                || values
+                    .iter()
+                    .any(|value| value.trim().is_empty() || value.len() > 64)
+            {
+                return Err(PackError::EmptyField(field));
+            }
+        }
+    }
+    if let Some(risk) = &manifest.risk {
+        if !matches!(
+            risk.level.as_str(),
+            "low" | "moderate" | "high" | "critical"
+        ) {
+            return Err(PackError::InvalidRiskLevel);
+        }
+        if risk.summary.trim().is_empty() || risk.summary.len() > 512 {
+            return Err(PackError::EmptyField("risk.summary"));
+        }
+    }
+    if let Some(verification) = &manifest.verification {
+        let path = Path::new(&verification.test_cases);
+        if verification.test_cases.len() > 128
+            || verification.test_cases.chars().any(char::is_control)
+            || path.is_absolute()
+            || !path.starts_with("tests")
+            || path
+                .components()
+                .any(|component| !matches!(component, std::path::Component::Normal(_)))
+        {
+            return Err(PackError::InvalidVerificationPath);
         }
     }
     if !is_valid_pack_id(&manifest.id) {
@@ -519,7 +627,7 @@ fn required_capabilities(configs: &[(PathBuf, Config)]) -> std::collections::BTr
                     required.insert("clipboard".to_owned());
                 } else if name.starts_with("env:") {
                     required.insert("env".to_owned());
-                } else if ["field:", "prompt:", "choice:"]
+                } else if ["field:", "prompt:", "choice:", "shellq:"]
                     .iter()
                     .any(|prefix| name.starts_with(prefix))
                 {
@@ -559,9 +667,10 @@ fn check_declared_capabilities(
     Ok(())
 }
 
-/// The canonical text a pack signature covers: the format tag, then the
-/// SHA-256 of the manifest and of every snippet file, sorted by path.
-/// Any change to any signed file changes the digest.
+/// The canonical text a pack signature covers: the manifest and snippets, plus
+/// any example/test fixtures, sorted by path. Packs without a verification
+/// declaration retain the original v1 digest format; fixture-bearing packs
+/// use v2 so their review artifacts are authenticated alongside snippets.
 pub fn pack_digest(path: impl AsRef<Path>) -> Result<String, PackError> {
     let path = path.as_ref();
     let files = [MANIFEST_FILE];
@@ -584,7 +693,35 @@ pub fn pack_digest(path: impl AsRef<Path>) -> Result<String, PackError> {
         }
     }
     snippet_files.sort_by(|left, right| left.0.cmp(&right.0));
-    let mut digest = String::from("wayexpand-pack-digest-v1\n");
+    let mut review_files = Vec::new();
+    let mut review_bytes = 0usize;
+    let manifest = read_bounded_text(&path.join(MANIFEST_FILE), MAX_MANIFEST_BYTES)?;
+    let has_verification = toml::from_str::<PackManifest>(&manifest)
+        .is_ok_and(|manifest| manifest.verification.is_some());
+    if has_verification {
+        for directory in ["examples", "tests"] {
+            let review_dir = path.join(directory);
+            match fs::symlink_metadata(&review_dir) {
+                Ok(metadata) if metadata.file_type().is_dir() => {
+                    collect_review_files(path, &review_dir, &mut review_files, &mut review_bytes)?;
+                }
+                Ok(_) => return Err(PackError::InvalidFile { path: review_dir }),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(source) => {
+                    return Err(PackError::Read {
+                        path: review_dir,
+                        source,
+                    })
+                }
+            }
+        }
+    }
+    review_files.sort_by(|left, right| left.0.cmp(&right.0));
+    let mut digest = String::from(if has_verification {
+        "wayexpand-pack-digest-v2\n"
+    } else {
+        "wayexpand-pack-digest-v1\n"
+    });
     for file in files {
         append_pack_digest_file(&mut digest, &path.join(file), file)?;
     }
@@ -604,7 +741,81 @@ pub fn pack_digest(path: impl AsRef<Path>) -> Result<String, PackError> {
         };
         append_pack_digest_file(&mut digest, &file_path, &name)?;
     }
+    for (name, file_path) in review_files {
+        append_pack_digest_file(&mut digest, &file_path, &name)?;
+    }
     Ok(digest)
+}
+
+fn collect_review_files(
+    pack_root: &Path,
+    directory: &Path,
+    files: &mut Vec<(String, PathBuf)>,
+    total_bytes: &mut usize,
+) -> Result<(), PackError> {
+    for entry in fs::read_dir(directory).map_err(|source| PackError::Read {
+        path: directory.to_owned(),
+        source,
+    })? {
+        let entry = entry.map_err(|source| PackError::Read {
+            path: directory.to_owned(),
+            source,
+        })?;
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path).map_err(|source| PackError::Read {
+            path: path.clone(),
+            source,
+        })?;
+        if metadata.file_type().is_symlink() {
+            return Err(PackError::InvalidFile { path });
+        }
+        if metadata.file_type().is_dir() {
+            collect_review_files(pack_root, &path, files, total_bytes)?;
+            continue;
+        }
+        if !metadata.file_type().is_file() {
+            return Err(PackError::InvalidFile { path });
+        }
+        if files.len() >= MAX_SNIPPET_FILES {
+            return Err(PackError::TooManyFiles {
+                maximum: MAX_SNIPPET_FILES,
+            });
+        }
+        if metadata.len() > MAX_SNIPPET_FILE_BYTES as u64 {
+            return Err(PackError::FileTooLarge {
+                path,
+                maximum: MAX_SNIPPET_FILE_BYTES,
+            });
+        }
+        *total_bytes =
+            total_bytes
+                .checked_add(metadata.len() as usize)
+                .ok_or(PackError::PackTooLarge {
+                    maximum: MAX_PACK_BYTES,
+                })?;
+        if *total_bytes > MAX_PACK_BYTES {
+            return Err(PackError::PackTooLarge {
+                maximum: MAX_PACK_BYTES,
+            });
+        }
+        let relative = path
+            .strip_prefix(pack_root)
+            .expect("collected review file is under pack root");
+        let label = match relative.to_str() {
+            Some(name) => name.to_owned(),
+            None => format!(
+                "\0{}",
+                relative
+                    .as_os_str()
+                    .as_bytes()
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>()
+            ),
+        };
+        files.push((label, path));
+    }
+    Ok(())
 }
 
 /// Compact stable fingerprint of every file covered by the pack signature.
@@ -1195,6 +1406,65 @@ mod tests {
     }
 
     #[test]
+    fn curated_pack_metadata_validates_risk_and_test_case_paths() {
+        let path = test_pack_path();
+        write_review_pack(&path, "contents");
+        let metadata = "format_version=1\nid=\"review.test\"\nversion=\"1.0.0\"\nname=\"Review test\"\npublisher=\"Tests\"\nmaintainer=\"Pack maintainers\"\n[compatibility]\nshells=[\"bash\"]\nplatforms=[\"linux\"]\ntools=[]\n[risk]\nlevel=\"moderate\"\nsummary=\"Read-only diagnostics; review output before sharing\"\n[verification]\ntest_cases=\"tests/cases.toml\"\n";
+        fs::write(path.join(MANIFEST_FILE), metadata).unwrap();
+        let inspection = inspect_pack(&path).unwrap();
+        assert_eq!(
+            inspection.manifest.maintainer.as_deref(),
+            Some("Pack maintainers")
+        );
+        assert_eq!(
+            inspection
+                .manifest
+                .risk
+                .as_ref()
+                .map(|risk| risk.level.as_str()),
+            Some("moderate")
+        );
+
+        fs::write(
+            path.join(MANIFEST_FILE),
+            metadata.replace("level=\"moderate\"", "level=\"unknown\""),
+        )
+        .unwrap();
+        assert!(matches!(
+            inspect_pack(&path),
+            Err(PackError::InvalidRiskLevel)
+        ));
+
+        fs::write(
+            path.join(MANIFEST_FILE),
+            metadata.replace("tests/cases.toml", "tests/../outside.toml"),
+        )
+        .unwrap();
+        assert!(matches!(
+            inspect_pack(&path),
+            Err(PackError::InvalidVerificationPath)
+        ));
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn shell_quoted_form_fields_require_the_forms_capability() {
+        let path = test_pack_path();
+        write_review_pack(&path, "{{shellq:host=example.net|required}}");
+        let manifest = fs::read_to_string(path.join(MANIFEST_FILE)).unwrap();
+        fs::write(
+            path.join(MANIFEST_FILE),
+            format!("{manifest}capabilities = []\n"),
+        )
+        .unwrap();
+        assert!(matches!(
+            inspect_pack(&path),
+            Err(PackError::UndeclaredCapability(capability)) if capability == "forms"
+        ));
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
     fn pack_review_fingerprint_tracks_manifest_and_snippet_content() {
         let path = test_pack_path();
         write_review_pack(&path, "first version");
@@ -1349,6 +1619,32 @@ mod tests {
             hash(b"snippet")
         );
         assert_eq!(pack_digest(&path).unwrap(), expected);
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn pack_digest_covers_example_and_test_fixtures() {
+        let path = test_pack_path();
+        let snippets = path.join(SNIPPETS_DIR);
+        fs::create_dir_all(&snippets).unwrap();
+        fs::create_dir_all(path.join("examples")).unwrap();
+        fs::create_dir_all(path.join("tests")).unwrap();
+        fs::write(
+            path.join(MANIFEST_FILE),
+            "format_version=1\nid=\"review.test\"\nversion=\"1.0.0\"\nname=\"Review test\"\npublisher=\"Tests\"\n[verification]\ntest_cases=\"tests/cases.toml\"\n",
+        )
+        .unwrap();
+        fs::write(snippets.join("main.toml"), "snippet").unwrap();
+        fs::write(path.join("examples/generated.txt"), "first output").unwrap();
+        fs::write(path.join("tests/cases.toml"), "first fixture").unwrap();
+
+        let first = pack_digest(&path).unwrap();
+        assert!(first.starts_with("wayexpand-pack-digest-v2\n"));
+        fs::write(path.join("examples/generated.txt"), "changed output").unwrap();
+        let changed_example = pack_digest(&path).unwrap();
+        assert_ne!(first, changed_example);
+        fs::write(path.join("tests/cases.toml"), "changed fixture").unwrap();
+        assert_ne!(changed_example, pack_digest(&path).unwrap());
         fs::remove_dir_all(path).unwrap();
     }
 

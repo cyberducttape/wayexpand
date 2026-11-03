@@ -1,0 +1,5 @@
+format_version = 1
+
+[[case]]
+trigger = ";;ops-triage-pack-example"
+expected_output = "examples/generated.txt"

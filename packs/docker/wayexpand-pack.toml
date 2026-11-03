@@ -1,12 +1,25 @@
 format_version = 1
 id = "wayexpand.docker"
-version = "1.0.0"
+version = "1.1.0"
 name = "Docker and Podman"
 publisher = "WayExpand project"
-description = "Insert-only Docker and Podman inspection and Compose templates."
+maintainer = "WayExpand Container Pack Maintainers"
+description = "Docker and Podman inspection and Compose validation templates."
 capabilities = ["forms"]
+
+[compatibility]
+shells = ["bash", "zsh", "fish"]
+platforms = ["linux"]
+tools = ["docker", "podman"]
+
+[risk]
+level = "low"
+summary = "Inspection and validation commands are read-only; generated Compose files can change services only when separately applied."
 
 [review]
 reviewed_by = "WayExpand project review"
-reviewed_at = "2026-10-27"
-summary = "Insert-only Docker, Podman, and Compose inspection templates with bounded log defaults."
+reviewed_at = "2026-11-02"
+summary = "Reviewed by WayExpand Container Pack Maintainers; content is inserted as text and never run by WayExpand. Review command targets and outputs before manual use."
+
+[verification]
+test_cases = "tests/cases.toml"

@@ -149,6 +149,7 @@ pub struct FormField {
 #[serde(rename_all = "kebab-case")]
 pub enum FormFieldValidation {
     DnsLabel,
+    DnsSubdomain,
     Hostname,
     HostPort,
     Port,
@@ -170,6 +171,7 @@ impl FormFieldValidation {
     fn parse(value: &str) -> Option<Self> {
         Some(match value {
             "dns-label" => Self::DnsLabel,
+            "dns-subdomain" => Self::DnsSubdomain,
             "hostname" => Self::Hostname,
             "host-port" => Self::HostPort,
             "port" => Self::Port,
@@ -192,6 +194,7 @@ impl FormFieldValidation {
     fn label(self) -> &'static str {
         match self {
             Self::DnsLabel => "DNS label",
+            Self::DnsSubdomain => "DNS subdomain",
             Self::Hostname => "hostname or IP address",
             Self::HostPort => "hostname or IP address followed by a valid port",
             Self::Port => "port from 1 to 65535",
@@ -213,6 +216,7 @@ impl FormFieldValidation {
     fn accepts(self, value: &str) -> bool {
         match self {
             Self::DnsLabel => valid_dns_label(value, false),
+            Self::DnsSubdomain => valid_dns_subdomain(value),
             Self::Hostname => valid_host(value),
             Self::HostPort => valid_host_port(value),
             Self::Port => valid_port(value),
@@ -438,6 +442,12 @@ fn valid_dns_label(value: &str, allow_uppercase: bool) -> bool {
                 || byte.is_ascii_digit()
                 || byte == b'-'
         })
+}
+
+fn valid_dns_subdomain(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 253
+        && value.split('.').all(|label| valid_dns_label(label, false))
 }
 
 fn valid_host(value: &str) -> bool {
@@ -1638,6 +1648,16 @@ pub(crate) fn civil_from_days(days_since_epoch: i64) -> (i64, i64, i64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dns_subdomain_validator_accepts_valid_names_and_rejects_hostile_values() {
+        let validator = FormFieldValidation::parse("dns-subdomain").unwrap();
+        assert!(validator.accepts("api-v2.example.net"));
+        assert!(validator.accepts("pod-1"));
+        assert!(!validator.accepts("API.example.net"));
+        assert!(!validator.accepts("api.example.net --help"));
+        assert!(!validator.accepts("api..example.net"));
+    }
 
     #[test]
     fn clipboard_variable_is_adopted_by_sensitive_storage_without_copying() {

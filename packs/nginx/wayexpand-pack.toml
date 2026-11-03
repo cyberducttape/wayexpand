@@ -1,12 +1,25 @@
 format_version = 1
 id = "wayexpand.nginx"
-version = "1.0.0"
+version = "1.1.0"
 name = "Nginx Operations"
 publisher = "WayExpand project"
-description = "Configuration checks, request probes, and editable nginx server-block starters."
+maintainer = "WayExpand Web Operations Maintainers"
+description = "Nginx configuration validation, bounded request probes, and editable server-block starters."
 capabilities = ["forms"]
+
+[compatibility]
+shells = ["bash", "zsh", "fish"]
+platforms = ["linux"]
+tools = ["nginx", "curl", "systemctl"]
+
+[risk]
+level = "moderate"
+summary = "Diagnostics are read-only; generated server configuration requires review and an explicit operator-managed deployment."
 
 [review]
 reviewed_by = "WayExpand project review"
-reviewed_at = "2026-10-27"
-summary = "Includes read-only diagnostics and configuration text; configuration changes and reloads remain explicit operator actions."
+reviewed_at = "2026-11-02"
+summary = "Reviewed by WayExpand Web Operations Maintainers; content is inserted as text and never run by WayExpand. Review command targets and outputs before manual use."
+
+[verification]
+test_cases = "tests/cases.toml"

@@ -1,0 +1,3 @@
+Subject: Maintenance window
+Impact: No customer impact expected
+Next update: 2026-11-02 18:00 UTC

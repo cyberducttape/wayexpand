@@ -1,0 +1,6 @@
+[[expansion]]
+trigger = ";;database-pack-example"
+description = "MySQL server version query"
+category = "Database Operations"
+tags = ["example", "reviewed"]
+replacement = "mysql --batch --execute='SELECT VERSION();'"

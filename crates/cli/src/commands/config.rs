@@ -3,7 +3,7 @@
 use super::Args;
 use crate::args::take_flag;
 use crate::*;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;
 
 pub(crate) fn test_command(mut args: Args) -> Result<()> {
@@ -962,7 +962,10 @@ pub(crate) fn search_pack_catalog(
             "version": manifest.version,
             "name": manifest.name,
             "publisher": manifest.publisher,
+            "maintainer": &manifest.maintainer,
             "description": manifest.description,
+            "compatibility": &manifest.compatibility,
+            "risk": &manifest.risk,
             "review": manifest.review.as_ref(),
             "required_capabilities": inspection.required_capabilities,
             "allowed_actions": &manifest.allowed_actions,
@@ -1402,6 +1405,50 @@ fn copy_pack_to_stage(source: &Path, stage: &Path) -> Result<()> {
             copy_pack_file(&entry.path(), &target_snippets.join(entry.file_name()))?;
         }
     }
+    for directory in ["examples", "tests"] {
+        let auxiliary_source = source.join(directory);
+        match std::fs::symlink_metadata(&auxiliary_source) {
+            Ok(_) => copy_pack_auxiliary_tree(&auxiliary_source, &stage.join(directory))?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(config_error(format!(
+                    "could not inspect pack {directory} directory: {error}"
+                )))
+            }
+        }
+    }
+    Ok(())
+}
+
+fn copy_pack_auxiliary_tree(source: &Path, target: &Path) -> Result<()> {
+    let metadata = std::fs::symlink_metadata(source)
+        .map_err(|error| config_error(format!("could not inspect pack fixture: {error}")))?;
+    if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+        bail!("pack examples and tests must be regular directories");
+    }
+    std::fs::create_dir(target).map_err(|error| {
+        config_error(format!("could not stage pack fixture directory: {error}"))
+    })?;
+    std::fs::set_permissions(target, std::fs::Permissions::from_mode(0o700)).map_err(|error| {
+        config_error(format!("could not secure pack fixture directory: {error}"))
+    })?;
+    for entry in std::fs::read_dir(source)
+        .map_err(|error| config_error(format!("could not read pack fixture directory: {error}")))?
+    {
+        let entry =
+            entry.map_err(|error| config_error(format!("could not read pack fixture: {error}")))?;
+        let source_path = entry.path();
+        let target_path = target.join(entry.file_name());
+        let metadata = std::fs::symlink_metadata(&source_path)
+            .map_err(|error| config_error(format!("could not inspect pack fixture: {error}")))?;
+        if metadata.file_type().is_dir() {
+            copy_pack_auxiliary_tree(&source_path, &target_path)?;
+        } else if metadata.file_type().is_file() && !metadata.file_type().is_symlink() {
+            copy_pack_file(&source_path, &target_path)?;
+        } else {
+            bail!("pack examples and tests may contain only regular files and directories");
+        }
+    }
     Ok(())
 }
 
@@ -1425,8 +1472,17 @@ fn copy_pack_file(source: &Path, target: &Path) -> Result<()> {
         .mode(0o600)
         .open(target)
         .map_err(|error| config_error(format!("could not create staged pack file: {error}")))?;
-    std::io::copy(&mut input, &mut output)
+    let mut contents = Vec::new();
+    Read::by_ref(&mut input)
+        .take(1024 * 1024 + 1)
+        .read_to_end(&mut contents)
         .map_err(|error| config_error(format!("could not copy pack file: {error}")))?;
+    if contents.len() > 1024 * 1024 {
+        bail!("pack file exceeds the 1 MiB staging limit");
+    }
+    output
+        .write_all(&contents)
+        .map_err(|error| config_error(format!("could not write staged pack file: {error}")))?;
     output
         .sync_all()
         .map_err(|error| config_error(format!("could not sync staged pack file: {error}")))?;
@@ -1524,6 +1580,24 @@ fn print_pack_diff(installed: &Path, candidate: &Path) -> Result<()> {
             println!("manifest {label}: {old:?} → {new:?}");
         }
     }
+    if old_manifest.manifest.maintainer != new_manifest.manifest.maintainer {
+        println!(
+            "maintainer: {:?} → {:?}",
+            old_manifest.manifest.maintainer, new_manifest.manifest.maintainer
+        );
+    }
+    if old_manifest.manifest.compatibility != new_manifest.manifest.compatibility {
+        println!(
+            "compatibility: {:?} → {:?}",
+            old_manifest.manifest.compatibility, new_manifest.manifest.compatibility
+        );
+    }
+    if old_manifest.manifest.risk != new_manifest.manifest.risk {
+        println!(
+            "risk classification: {:?} → {:?}",
+            old_manifest.manifest.risk, new_manifest.manifest.risk
+        );
+    }
     println!(
         "capabilities: {} → {}",
         old_manifest.required_capabilities.join(", "),
@@ -1549,8 +1623,8 @@ fn print_pack_diff(installed: &Path, candidate: &Path) -> Result<()> {
             old_manifest.manifest.capabilities, new_manifest.manifest.capabilities
         );
     }
-    let old_files = pack_snippet_files(installed)?;
-    let new_files = pack_snippet_files(candidate)?;
+    let old_files = pack_review_files(installed)?;
+    let new_files = pack_review_files(candidate)?;
     let names: std::collections::BTreeSet<_> = old_files.keys().chain(new_files.keys()).collect();
     for name in names {
         match (old_files.get(name), new_files.get(name)) {
@@ -1600,7 +1674,7 @@ fn print_pack_diff(installed: &Path, candidate: &Path) -> Result<()> {
     Ok(())
 }
 
-fn pack_snippet_files(root: &Path) -> Result<std::collections::BTreeMap<String, String>> {
+fn pack_review_files(root: &Path) -> Result<std::collections::BTreeMap<String, String>> {
     let mut files = std::collections::BTreeMap::new();
     let snippets = root.join("snippets");
     let metadata = std::fs::symlink_metadata(&snippets)
@@ -1641,7 +1715,67 @@ fn pack_snippet_files(root: &Path) -> Result<std::collections::BTreeMap<String, 
             files.insert(name, content);
         }
     }
+    for directory in ["examples", "tests"] {
+        let path = root.join(directory);
+        match std::fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.file_type().is_dir() => {
+                collect_pack_review_files(root, &path, &mut files)?;
+            }
+            Ok(_) => bail!("pack {directory} path is not a real directory"),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(config_error(format!(
+                    "could not inspect pack {directory}: {error}"
+                )))
+            }
+        }
+    }
     Ok(files)
+}
+
+fn collect_pack_review_files(
+    root: &Path,
+    directory: &Path,
+    files: &mut std::collections::BTreeMap<String, String>,
+) -> Result<()> {
+    for entry in std::fs::read_dir(directory)
+        .map_err(|error| config_error(format!("could not read pack review files: {error}")))?
+    {
+        let entry = entry
+            .map_err(|error| config_error(format!("could not read pack review entry: {error}")))?;
+        let path = entry.path();
+        let metadata = std::fs::symlink_metadata(&path).map_err(|error| {
+            config_error(format!("could not inspect pack review file: {error}"))
+        })?;
+        if metadata.file_type().is_dir() {
+            collect_pack_review_files(root, &path, files)?;
+        } else if metadata.file_type().is_file() && !metadata.file_type().is_symlink() {
+            if metadata.len() > 1024 * 1024 {
+                bail!("pack review file exceeds the 1 MiB display limit");
+            }
+            let name = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .into_owned();
+            let file = std::fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NOFOLLOW)
+                .open(&path)
+                .map_err(|error| config_error(format!("could not safely open {name}: {error}")))?;
+            let mut content = String::new();
+            file.take(1024 * 1024 + 1)
+                .read_to_string(&mut content)
+                .map_err(|error| config_error(format!("could not read {name}: {error}")))?;
+            if content.len() > 1024 * 1024 {
+                bail!("pack review file exceeds the 1 MiB display limit");
+            }
+            files.insert(name, content);
+        } else {
+            bail!("pack review directories may contain only regular files and directories");
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn pack_command(args: Args) -> Result<()> {
@@ -2099,8 +2233,29 @@ pub(crate) fn pack_command(args: Args) -> Result<()> {
             );
             println!("id: {}", inspection.manifest.id);
             println!("publisher: {}", inspection.manifest.publisher);
+            if let Some(maintainer) = &inspection.manifest.maintainer {
+                println!("maintainer: {maintainer}");
+            }
             if !inspection.manifest.description.is_empty() {
                 println!("description: {}", inspection.manifest.description);
+            }
+            if let Some(compatibility) = &inspection.manifest.compatibility {
+                println!("shells: {}", compatibility.shells.join(", "));
+                println!("platforms: {}", compatibility.platforms.join(", "));
+                println!(
+                    "tools: {}",
+                    if compatibility.tools.is_empty() {
+                        "none".to_owned()
+                    } else {
+                        compatibility.tools.join(", ")
+                    }
+                );
+            }
+            if let Some(risk) = &inspection.manifest.risk {
+                println!("risk: {} — {}", risk.level, risk.summary);
+            }
+            if let Some(verification) = &inspection.manifest.verification {
+                println!("verification cases: {}", verification.test_cases);
             }
             if let Some(review) = &inspection.manifest.review {
                 println!(
@@ -2697,6 +2852,46 @@ mod pack_install_tests {
         )
         .unwrap();
         inspect_pack(path).unwrap()
+    }
+
+    #[test]
+    fn installing_a_pack_preserves_signed_examples_and_test_fixtures() {
+        let base = temp_dir("pack-review-fixtures");
+        let source = base.join("source");
+        let root = base.join("user/packs");
+        let _ = make_pack(&source, "1.0.0");
+        let manifest = std::fs::read_to_string(source.join("wayexpand-pack.toml")).unwrap();
+        std::fs::write(
+            source.join("wayexpand-pack.toml"),
+            format!("{manifest}\n[verification]\ntest_cases = \"tests/cases.toml\"\n"),
+        )
+        .unwrap();
+        std::fs::create_dir_all(source.join("examples/nested")).unwrap();
+        std::fs::create_dir_all(source.join("tests")).unwrap();
+        std::fs::write(
+            source.join("examples/nested/generated.txt"),
+            "expected output",
+        )
+        .unwrap();
+        std::fs::write(source.join("tests/cases.toml"), "fixture cases").unwrap();
+        let inspection = inspect_pack(&source).unwrap();
+
+        let installed =
+            install_local_pack_at(&source, &inspection, false, false, None, &root).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(installed.join("examples/nested/generated.txt")).unwrap(),
+            "expected output"
+        );
+        assert_eq!(
+            std::fs::read_to_string(installed.join("tests/cases.toml")).unwrap(),
+            "fixture cases"
+        );
+        assert_eq!(
+            inspect_pack(&installed).unwrap().fingerprint,
+            inspection.fingerprint
+        );
+        std::fs::remove_dir_all(base).unwrap();
     }
 
     #[test]

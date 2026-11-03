@@ -1,0 +1,6 @@
+[[expansion]]
+trigger = ";;git-pack-example"
+description = "Reviewed pack example output: Git Workflows"
+category = "Git Workflows"
+tags = ["example", "reviewed"]
+replacement = "git status --short --branch"

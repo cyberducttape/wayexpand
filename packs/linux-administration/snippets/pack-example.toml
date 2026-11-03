@@ -1,0 +1,6 @@
+[[expansion]]
+trigger = ";;linux-pack-example"
+description = "Reviewed pack example output: Linux Administration"
+category = "Linux Administration"
+tags = ["example", "reviewed"]
+replacement = "systemctl --failed --no-pager"

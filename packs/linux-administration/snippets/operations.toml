@@ -3,21 +3,21 @@ trigger = ";;journal-service"
 description = "Inspect recent service logs without following or modifying the unit"
 category = "Linux operations"
 tags = ["systemd", "journalctl"]
-replacement = "journalctl --user -u {{field:unit=example.service}} --since '{{field:since=1 hour ago}}' --no-pager -n {{field:lines=100}}"
+replacement = "journalctl --user -u {{shellq:unit=example.service|required|max=255|validate=systemd-unit}} --since {{shellq:since=1 hour ago|required|max=80}} --no-pager -n {{shellq:lines=100|required|max=5|validate=positive-integer}}"
 
 [[expansion]]
 trigger = ";;service-status"
 description = "Check a system service's current state"
 category = "Linux operations"
 tags = ["systemd", "status"]
-replacement = "systemctl status {{field:unit=example.service}} --no-pager"
+replacement = "systemctl status --no-pager -- {{shellq:unit=example.service|required|max=255|validate=systemd-unit}}"
 
 [[expansion]]
 trigger = ";;ssh-check"
 description = "Run a read-only remote host identity and uptime check"
 category = "Linux operations"
 tags = ["ssh", "diagnostics"]
-replacement = "ssh {{field:user=admin}}@{{field:host=host.example.net}} 'hostname; uptime'"
+replacement = "ssh {{shellq:user=admin|required|max=32|validate=linux-user}}@{{shellq:host=host.example.net|required|max=253|validate=hostname}} 'hostname -f; uptime'"
 
 [[expansion]]
 trigger = ";;bash-safe"

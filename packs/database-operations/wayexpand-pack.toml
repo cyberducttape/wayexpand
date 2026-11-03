@@ -1,0 +1,25 @@
+format_version = 1
+id = "wayexpand.database-operations"
+version = "1.0.0"
+name = "Database Operations"
+publisher = "WayExpand project"
+maintainer = "WayExpand Database Operations Maintainers"
+description = "Read-only MySQL and PostgreSQL health, session, and replication queries."
+capabilities = ["forms"]
+
+[compatibility]
+shells = ["bash", "zsh", "fish"]
+platforms = ["linux"]
+tools = ["mysql", "psql"]
+
+[risk]
+level = "moderate"
+summary = "Database queries run with the current local client credentials and may expose sensitive metadata; query output is not captured by WayExpand."
+
+[review]
+reviewed_by = "WayExpand project review"
+reviewed_at = "2026-11-02"
+summary = "Reviewed by WayExpand Database Operations Maintainers; generated text is never run by WayExpand. Inspect targets and output before manual use."
+
+[verification]
+test_cases = "tests/cases.toml"

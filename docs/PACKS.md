@@ -2,10 +2,12 @@
 
 ## Optional sysadmin and developer libraries
 
-The seven administration and support packs are versioned and carry a source
-review record in `packs/`; existing developer and operations-triage examples
-remain available alongside them. Every pack is optional and works entirely
-offline. Install only the libraries you want.
+The maintained catalog contains 17 optional packs. Each has a named maintainer,
+semantic version, supported shells/platforms/tools, a risk classification, a
+review record, an example output, and an automated generated-output fixture.
+The fixtures are exercised in CI by `scripts/test-curated-packs.py`; packs also
+go through the normal strict import and snippet validation checks. The catalog
+is local and works offline. Install only the libraries you want.
 
 | Pack | Contents |
 | --- | --- |
@@ -18,6 +20,27 @@ offline. Install only the libraries you want.
 | `customer-support` | Acknowledgements, status updates, maintenance notices, ticket resolutions |
 | `developer` | SQL, shell, and Markdown starters |
 | `ops-triage` | Read-only first-response checks for HTTP 503, Apache, Exim, MariaDB, and cPanel/WHM, plus target-context review and structured incident documentation |
+| `networking` | Linux interfaces, routes, sockets, and bounded TCP reachability checks |
+| `dns-tls` | DNS record and DNSSEC queries, certificate chain and validity inspection |
+| `cpanel-whm` | Read-only account inventory, virtual-host certificate status, and bounded error logs |
+| `database-operations` | Read-only MySQL/MariaDB and PostgreSQL health, session, and replication queries |
+| `terraform` | Formatting, validation, and plan review without apply or destroy commands |
+| `ci-cd` | GitHub Actions and GitLab pipeline status inspection |
+| `incident-response` | UTC incident timelines, bounded host evidence, journal review, and incident notes |
+
+Inspect the pack's maintainer, compatibility declarations, risk classification,
+review record, and example fixture with:
+
+```bash
+wayexpand pack inspect ./packs/database-operations
+cat packs/database-operations/examples/generated.txt
+```
+
+The compatibility tools list names expected executables or client families; it
+does not guarantee their installation or a particular vendor version. Risk
+labels describe the likely effect and sensitivity of the content when manually
+used. All included content is inserted as text. Review its destination, active
+credentials, and output before running or sharing anything.
 
 For a review-first HTTP 503 workflow, install `ops-triage` and type `;http503`.
 The form asks for the operator-selected environment, target host, service unit,
@@ -124,14 +147,18 @@ modification, update the source pack and its semantic version before sharing
 or reinstalling it. Local changes invalidate any pack signature.
 
 CI checks every pack in this repository with
-`scripts/check-snippet-repo.sh --deny-risks packs`; run the same check on your
-own snippet repository (see [SNIPPET_REPOSITORIES.md](SNIPPET_REPOSITORIES.md)).
+`scripts/check-snippet-repo.sh --deny-risks packs` and runs
+`scripts/test-curated-packs.py target/debug/wayexpand` to compare each declared
+example with the actual rendered trigger. Run the snippet checker on your own
+repository (see [SNIPPET_REPOSITORIES.md](SNIPPET_REPOSITORIES.md)); use the
+fixture runner for packs that declare `[verification]`.
 
-`pack inspect` shows the version, review record, signature state, capabilities,
-and action counts. The review record is descriptive repository metadata, not a
-signature; a trusted signature authenticates the exact reviewed bytes. The
-repository packs are unsigned. Managed deployments that require signed packs
-must review and sign the selected content with their own trusted key.
+`pack inspect` shows the version, maintainer, compatibility, risk, review
+record, signature state, capabilities, and action counts. Review, maintainer,
+compatibility, and risk fields are descriptive metadata, not policy controls or
+identity proof. The repository packs are unsigned. Managed deployments that
+require signed packs must review and sign the selected content with their own
+trusted key.
 
 ### Review and install in the GUI
 
@@ -153,12 +180,13 @@ command or hotkey requires a separate explicit consent checkbox, and current
 organization policy and signature requirements still apply.
 
 The GUI binds installation to a SHA-256 fingerprint of the manifest and
-snippet files shown during review. The CLI checks that fingerprint before
-installation and verifies the staged copy again, so changing the source after
-review causes installation to fail and asks for a new review. Review text is
-displayed as untrusted content. If the GUI cannot display all of a pack or its
-diff within its review limits, installation is disabled; use `wayexpand pack
-inspect` in a terminal to examine it.
+snippet files shown during review, plus declared example and test fixtures. The
+CLI checks that fingerprint before installation and verifies the staged copy
+again, so changing the source after review causes installation to fail and
+asks for a new review. Review text is displayed as untrusted content. If the
+GUI cannot display all of a pack or its diff within its review limits,
+installation is disabled; use `wayexpand pack inspect` in a terminal to examine
+it.
 
 For an installed pack, the same review panel offers a two-step rollback to its
 most recent backup. The GUI asks separately whether commands or hotkeys from
@@ -181,9 +209,13 @@ directories, not downloaded archives, in this first version:
 ```text
 incident-pack/
 ├── wayexpand-pack.toml
-└── snippets/
-    ├── operations.toml
-    └── support.toml
+├── examples/
+│   └── generated.txt
+├── snippets/
+│   ├── operations.toml
+│   └── support.toml
+└── tests/
+    └── cases.toml
 ```
 
 `wayexpand-pack.toml` is metadata, not executable policy:
@@ -195,12 +227,33 @@ version = "1.0.0"
 name = "Example Operations"
 publisher = "Example Team"
 description = "Common incident-response snippets"
+maintainer = "Operations pack maintainers"
 
 [review]
 reviewed_by = "Operations maintainers"
 reviewed_at = "2026-10-27"
 summary = "Insert-only incident templates and read-only diagnostics"
+
+[compatibility]
+shells = ["bash", "zsh", "fish"]
+platforms = ["linux"]
+tools = ["systemctl", "journalctl"]
+
+[risk]
+level = "moderate"
+summary = "Diagnostics may reveal operational details; generated commands are inserted as text for review."
+
+[verification]
+test_cases = "tests/cases.toml"
 ```
+
+In a real manifest, `maintainer` is a top-level field, before `[review]`.
+`compatibility` lists shells, platforms, and expected tools. `risk.level` is
+`low`, `moderate`, `high`, or `critical`; its summary explains likely effects
+and data sensitivity. The verification path points to test cases containing a
+trigger and expected file under `examples/`. Existing external packs may omit
+these descriptive fields for backwards compatibility. Repository packs must
+provide them, as enforced by CI.
 
 Each file under `snippets/` is a normal WayExpand TOML configuration. Its
 expansions are merged in lexical filename order. The pack manifest and every
@@ -269,10 +322,12 @@ wayexpand pack sign ./support-team --key ~/.ssh/support_team_ed25519
 wayexpand pack verify ./support-team --signers ./allowed_signers
 ```
 
-The signature (`wayexpand-pack.sig`) covers a SHA-256 digest of the manifest
-and every snippet file, so changing any of them invalidates it. Signers are
-listed in OpenSSH `allowed_signers` format with the `wayexpand-pack`
-namespace:
+The signature (`wayexpand-pack.sig`) covers the manifest and every snippet
+file. Packs declaring `[verification]` also sign every file under `examples/`
+and `tests/`, so changing reviewed output or fixtures invalidates the
+signature. Older manifests without verification metadata retain the original
+signature digest format. Signers are listed in OpenSSH `allowed_signers` format
+with the `wayexpand-pack` namespace:
 
 ```text
 support@example.com namespaces="wayexpand-pack" ssh-ed25519 AAAA...

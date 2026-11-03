@@ -1,0 +1,35 @@
+[[expansion]]
+trigger = ";;incident-timestamp"
+description = "Generate a UTC timestamp for an incident timeline"
+category = "Incident response"
+tags = ["incident", "timestamp"]
+replacement = "date -u +'%Y-%m-%dT%H:%M:%SZ'"
+
+[[expansion]]
+trigger = ";;incident-host-snapshot"
+description = "Collect bounded, read-only local host diagnostics for incident triage"
+category = "Incident response"
+tags = ["incident", "linux", "read-only"]
+replacement = "date -u; hostname -f; uptime; df -hT; free -h; ss -s"
+
+[[expansion]]
+trigger = ";;incident-errors"
+description = "Inspect recent high-priority journal messages from the current boot"
+category = "Incident response"
+tags = ["incident", "journal", "read-only"]
+replacement = "journalctl -b -p err..alert -n {{shellq:lines=100|required|max=4|validate=positive-integer}} --no-pager"
+
+[[expansion]]
+trigger = ";;incident-note"
+description = "Create a structured incident update with impact and next action"
+category = "Incident response"
+tags = ["incident", "documentation"]
+replacement = """## {{field:incident|required|max=160}}
+
+- Environment: {{choice:environment=development|staging|production;default=staging;required}}
+- Impact: {{field:impact|required|max=1000}}
+- Evidence: {{field:evidence|required|max=1500}}
+- Actions taken: {{field:actions|required|max=1000}}
+- Next action and owner: {{field:next action|required|max=500}}
+- Next update: {{field:time|required|max=100}}
+"""

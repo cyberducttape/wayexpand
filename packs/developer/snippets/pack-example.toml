@@ -1,0 +1,6 @@
+[[expansion]]
+trigger = ";;developer-pack-example"
+description = "Reviewed pack example output: Developer Workflows"
+category = "Developer Workflows"
+tags = ["example", "reviewed"]
+replacement = "git diff --check"

@@ -1,0 +1,1 @@
+mysql --batch --execute='SELECT VERSION();'

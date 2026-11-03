@@ -1,0 +1,6 @@
+[[expansion]]
+trigger = ";;kubernetes-pack-example"
+description = "Reviewed pack example output: Kubernetes Operations"
+category = "Kubernetes Operations"
+tags = ["example", "reviewed"]
+replacement = "kubectl config current-context"
