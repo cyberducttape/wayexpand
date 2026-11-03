@@ -18,6 +18,7 @@ mod pending_output;
 mod policy;
 mod reactor;
 mod reload;
+mod session_context;
 mod socket_security;
 mod source_steps;
 mod status;

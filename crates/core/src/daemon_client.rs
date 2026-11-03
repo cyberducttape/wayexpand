@@ -10,7 +10,7 @@ use std::{
 use thiserror::Error;
 
 const CONTROL_IO_TIMEOUT: Duration = Duration::from_secs(2);
-const CONTROL_MAX_COMMAND_BYTES: usize = 1024;
+const CONTROL_MAX_COMMAND_BYTES: usize = 2048;
 const CONTROL_BUSY_RESPONSE: &[u8] = b"error=busy\nretryable=true\n";
 const MAX_INSERT_TRIGGER_CHARS: usize = 128;
 const MAX_EXPLAIN_TEXT_CHARS: usize = 256;
@@ -140,6 +140,18 @@ pub enum DaemonOperation {
         text: String,
         json: bool,
     },
+    ContextSet {
+        ttl_seconds: u32,
+        report: crate::SessionContextReport,
+    },
+    ContextGet {
+        terminal_id: String,
+        session_id: String,
+    },
+    ContextClear {
+        terminal_id: String,
+        session_id: String,
+    },
 }
 
 /// Bounded client for the daemon control socket, shared by all frontends.
@@ -260,7 +272,58 @@ fn encode_operation(operation: &DaemonOperation) -> Result<String, DaemonClientE
                 if *json { "-json" } else { "" }
             ))
         }
+        DaemonOperation::ContextSet {
+            ttl_seconds,
+            report,
+        } => {
+            if !(1..=300).contains(ttl_seconds) {
+                return Err(DaemonClientError::InvalidOperation {
+                    reason: "context TTL must be between 1 and 300 seconds",
+                });
+            }
+            report
+                .validate()
+                .map_err(|reason| DaemonClientError::InvalidOperation { reason })?;
+            let payload =
+                serde_json::to_string(report).map_err(|_| DaemonClientError::InvalidOperation {
+                    reason: "context report could not be encoded",
+                })?;
+            Ok(format!("context-set {ttl_seconds} {payload}"))
+        }
+        DaemonOperation::ContextGet {
+            terminal_id,
+            session_id,
+        } => {
+            validate_context_target(terminal_id, session_id)?;
+            Ok(format!("context-get {terminal_id} {session_id}"))
+        }
+        DaemonOperation::ContextClear {
+            terminal_id,
+            session_id,
+        } => {
+            validate_context_target(terminal_id, session_id)?;
+            Ok(format!("context-clear {terminal_id} {session_id}"))
+        }
     }
+}
+
+fn validate_context_target(terminal_id: &str, session_id: &str) -> Result<(), DaemonClientError> {
+    if terminal_id.is_empty()
+        || terminal_id.len() > 96
+        || !terminal_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b":_-".contains(&byte))
+    {
+        return Err(DaemonClientError::InvalidOperation {
+            reason: "context terminal identity is invalid",
+        });
+    }
+    if session_id.len() != 32 || !session_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(DaemonClientError::InvalidOperation {
+            reason: "context session identifier must contain 32 hexadecimal characters",
+        });
+    }
+    Ok(())
 }
 
 fn validate_text(
