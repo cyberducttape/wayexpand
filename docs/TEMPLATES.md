@@ -318,16 +318,20 @@ Infrastructure fields can declare a shared constraint with
 `--set` handling, and final renderer. Built-in generators use DNS-label,
 hostname, host-and-port, port, positive-integer, Linux-user, absolute-path,
 YAML-string, Ansible host-pattern, Compose service-name, container-image,
-systemd-executable, and single-line checks where each value is used. These
-checks (including `shell-single-quoted` for safe shell arguments) prevent
-common malformed values and syntax breakouts; they do not
-replace validation by the target tool.
+Kubernetes resource-name, duration, systemd-executable, and single-line checks
+where each value is used. These checks prevent common malformed values; they
+do not replace validation by the target tool. In shell command templates,
+write form values as `{{shellq:field=default|required|validate=TYPE}}` so each
+value renders as one POSIX shell argument. Validation and shell quoting solve
+different problems and should both be used for command arguments.
 
 Available text-field types are `dns-label`, `hostname`, `host-port`, `port`,
 `positive-integer`, `linux-user`, `ansible-role-name`, `absolute-path`,
 `yaml-string`, `ansible-host-pattern`, `compose-service`, `container-image`,
-`systemd-executable`, `systemd-unit`, `single-line`, and
-`shell-single-quoted`. For example,
+`systemd-executable`, `systemd-unit`, `kubernetes-name`, `duration`,
+`single-line`, and `shell-single-quoted`. A Kubernetes name accepts a DNS
+subdomain; a duration accepts a positive integer followed by `ns`, `us`, `µs`,
+`ms`, `s`, `m`, or `h`. For example,
 `{{field:port=443|required|max=5|validate=port}}` accepts only a decimal port
 from 1 through 65535.
 

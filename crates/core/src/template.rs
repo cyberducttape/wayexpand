@@ -162,6 +162,8 @@ pub enum FormFieldValidation {
     AnsibleHostPattern,
     ComposeService,
     ContainerImage,
+    KubernetesName,
+    Duration,
     SingleLine,
     ShellSingleQuoted,
 }
@@ -183,6 +185,8 @@ impl FormFieldValidation {
             "ansible-host-pattern" => Self::AnsibleHostPattern,
             "compose-service" => Self::ComposeService,
             "container-image" => Self::ContainerImage,
+            "kubernetes-name" => Self::KubernetesName,
+            "duration" => Self::Duration,
             "single-line" => Self::SingleLine,
             "shell-single-quoted" => Self::ShellSingleQuoted,
             _ => return None,
@@ -205,6 +209,8 @@ impl FormFieldValidation {
             Self::AnsibleHostPattern => "single-line Ansible host pattern",
             Self::ComposeService => "Docker Compose service name",
             Self::ContainerImage => "container image reference",
+            Self::KubernetesName => "Kubernetes DNS subdomain name",
+            Self::Duration => "positive integer duration with ns, us, µs, ms, s, m, or h unit",
             Self::SingleLine => "single-line value",
             Self::ShellSingleQuoted => "single-line value safe inside shell single quotes",
         }
@@ -253,9 +259,10 @@ impl FormFieldValidation {
             Self::SystemdExecutable => {
                 value.starts_with('/')
                     && !value.chars().any(char::is_whitespace)
-                    && value
-                        .chars()
-                        .all(|character| !character.is_control() && character != '%')
+                    && value.chars().all(|character| {
+                        !character.is_control()
+                            && !matches!(character, '%' | '\\' | '\'' | '"' | '{' | '}' | ';')
+                    })
             }
             Self::YamlString => {
                 !value.is_empty()
@@ -286,6 +293,8 @@ impl FormFieldValidation {
                         .all(|byte| byte.is_ascii_alphanumeric() || b"._/:@-".contains(&byte))
                     && !value.contains("..")
             }
+            Self::KubernetesName => valid_dns_subdomain(value),
+            Self::Duration => valid_positive_duration(value),
             Self::SingleLine => !value.chars().any(char::is_control),
             Self::ShellSingleQuoted => {
                 !value.is_empty()
@@ -438,6 +447,19 @@ fn valid_dns_label(value: &str, allow_uppercase: bool) -> bool {
                 || byte.is_ascii_digit()
                 || byte == b'-'
         })
+}
+
+fn valid_dns_subdomain(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 253
+        && value.split('.').all(|label| valid_dns_label(label, false))
+}
+
+fn valid_positive_duration(value: &str) -> bool {
+    ["ns", "us", "µs", "ms", "s", "m", "h"]
+        .iter()
+        .find_map(|unit| value.strip_suffix(unit))
+        .is_some_and(|number| number.parse::<u64>().is_ok_and(|number| number > 0))
 }
 
 fn valid_host(value: &str) -> bool {
@@ -2218,6 +2240,25 @@ mod tests {
                 field.validate_value(value).is_err(),
                 "{}: {value:?}",
                 field.label
+            );
+        }
+    }
+
+    #[test]
+    fn kubernetes_names_and_durations_reject_shell_and_type_confusion() {
+        let fields = form_fields(
+            "{{field:resource=api.v2|required|validate=kubernetes-name}} {{field:timeout=120s|required|validate=duration}}",
+        )
+        .unwrap();
+        assert!(fields[0].validate_value("api.v2").is_ok());
+        assert!(fields[1].validate_value("15m").is_ok());
+        assert!(fields[0].validate_value("api; touch /tmp/pwn").is_err());
+        assert!(fields[0].validate_value("api with spaces").is_err());
+        assert!(fields[0].validate_value("поды").is_err());
+        for invalid in ["120", "0s", "-1s", "1 s", "1e3s", "５s", "1m;id"] {
+            assert!(
+                fields[1].validate_value(invalid).is_err(),
+                "unexpected duration acceptance: {invalid:?}"
             );
         }
     }

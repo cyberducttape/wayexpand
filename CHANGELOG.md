@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Validate and shell-quote fields in curated Linux and Kubernetes command
+  packs. Add Kubernetes resource-name and duration validators, reject invalid
+  integer inputs, and bump both pack versions to 1.0.1.
 - Reduce evdev capture polling churn and layout background traffic, while
   retaining compositor layout-change notification with a slower fallback.
 - Add insert-only sysadmin diagnostic templates for TLS, service, port, HTTP,
