@@ -1228,10 +1228,15 @@ mod tests {
     #[tokio::test]
     #[cfg(unix)]
     async fn executor_cleans_session_descendant_holding_output_pipe() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock is after the Unix epoch")
+            .as_nanos();
         let pid_file = format!(
-            "/tmp/wayexpand-broker-incomplete-output-{}.pid",
-            std::process::id()
+            "/tmp/wayexpand-broker-incomplete-output-{}-{nonce}.pid",
+            std::process::id(),
         );
+        let _ = std::fs::remove_file(&pid_file);
         let mut config = BrokerConfig::default();
         config.actions.insert(
             "holds-output".to_string(),
@@ -1272,8 +1277,7 @@ mod tests {
                 .parse::<libc::pid_t>()
                 .map_err(std::io::Error::other)
         });
-        let cgroup_required =
-            std::env::var_os("WAYEXPAND_PROCESS_CGROUP").is_some_and(|value| value == "required");
+        let cgroup_required = wayexpand_process_supervisor::containment_mode() == "cgroup";
         if cgroup_required {
             let pid = descendant_pid.expect("test command should report its detached child");
             let exited = |pid: libc::pid_t| {

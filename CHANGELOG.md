@@ -8,6 +8,13 @@ All notable changes to WayExpand are documented here.
   Sway, and Hyprland. It separates CI/headless results from physical-session
   evidence and lists the remaining lock, layout, suspend, portal, and soak
   gates; no route is promoted to production-safe without reviewed evidence.
+
+- Resolve fleet settings per field with pack defaults, organization defaults, and user preferences in explicit precedence order; report each effective setting's source in `wayexpand fleet status`.
+
+- Gate IBus replacement through the shared capability admission contract.
+  Non-atomic replacement is refused by default, expansion accounting waits
+  for successful signal emission. Outcomes distinguish fully emitted but
+  unverified text from a possibly partial signal sequence.
 - Reduce evdev capture polling churn and layout background traffic, while
   retaining compositor layout-change notification with a slower fallback.
 - Add insert-only sysadmin diagnostic templates for TLS, service, port, HTTP,

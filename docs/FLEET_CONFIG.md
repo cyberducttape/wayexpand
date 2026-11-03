@@ -92,7 +92,11 @@ upgrade that route's capabilities.
 
 ## Layer Precedence and Conflict Resolution
 
-**Layer Loading Order:** Base config → Organization → User → Packs (base config is prepended and has the lowest priority)
+**Snippet Loading Order:** Base config → Organization → User → Packs. This order resolves snippets with the same stable ID and controls duplicate-trigger checks; duplicates with different IDs remain errors.
+
+**Settings Precedence:** Settings merge field by field. Curated packs supply defaults, organization layer settings supply administrator defaults, and the primary config plus user layer supply personal preferences. Within each category, later files override earlier files. An explicitly configured user value wins even when it equals WayExpand's built-in default. The root-owned `/etc/wayexpand/policy.toml` remains the source of enforced security restrictions and takes effect independently of these preferences.
+
+Run `wayexpand fleet status` to see the effective settings and their source. `wayexpand fleet status --json` reports the same mapping as `effective_settings`.
 
 **Duplicate/Conflict Behavior:**
 
@@ -100,10 +104,10 @@ upgrade that route's capabilities.
 |--------|-------------------|-------|
 | Expansion trigger | Hard error, rejected | Fail-closed: prevents accidental overwrites. Use distinct trigger names. |
 | Hotkey chord | Hard error, rejected | Fail-closed: prevents key binding conflicts. |
-| Settings (`max_buffer_chars`, `undo_chord`, `font_scale`, `libei_token_persistence`, `fcitx5_direct_commit`, `keystroke_max_chars`) | Last layer wins | Pack settings override user, which override organization. Within a layer, last file wins; disallowed pack settings are filtered before precedence is resolved. |
+| Settings | Field by field | User preferences override organization defaults, which override pack recommendations. Later files win within a category. Enforced restrictions come from root policy. |
 | Organization policy | Root policy only | `/etc/wayexpand/policy.toml` is the administrator security-policy source. |
 | Curated packs | Filtered by root policy in safe mode | `allowed_packs` restricts which packs are active in daemon fleet mode only when enforcement is enabled. |
-| Base config | Prepended first (lowest priority) | Base config expansions/hotkeys precede fleet layers. Base settings only override if fleet has no settings. |
+| Base config | User preference for settings; first for snippets/hotkeys | Base config expansions/hotkeys precede fleet layers. Explicit settings in the base config override organization and pack defaults. |
 
 **Example precedence:**
 - If organization defines `;sig` trigger and user also defines `;sig`, deployment fails with duplicate-trigger error.
