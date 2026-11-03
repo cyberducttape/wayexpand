@@ -1,7 +1,7 @@
 use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
 use wayexpand_core::{
-    Config, FormFieldKind, FormFieldValidation, FormValues, TemplateContext, render_template,
+    render_template, Config, FormFieldKind, FormFieldValidation, FormValues, TemplateContext,
 };
 
 #[test]
