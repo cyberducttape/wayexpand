@@ -25,7 +25,7 @@ use crate::socket_security::{
 };
 
 /// Large enough for `insert ` plus a maximum-length (128 character) trigger.
-const MAX_COMMAND_BYTES: usize = 1024;
+const MAX_COMMAND_BYTES: usize = 2048;
 const CONTROL_IO_TIMEOUT: Duration = Duration::from_secs(2);
 const CONTROL_WORKERS: usize = 4;
 /// The diagnostics worker is single-consumer and bounded independently of
@@ -256,6 +256,9 @@ impl ControlServer {
         let explain_slot = explain_requests.clone();
         let usage_clear_slot = Arc::clone(&usage_clear);
         let status = Arc::new(Mutex::new("starting".into()));
+        let session_context = Arc::new(Mutex::new(
+            crate::session_context::SessionContextStore::default(),
+        ));
         let waker: crate::waker::WakerSlot = Arc::default();
         let waker_slot = Arc::clone(&waker);
         let reload_flag = Arc::clone(&reload_requested);
@@ -264,6 +267,7 @@ impl ControlServer {
         let insert_slot = Arc::clone(&insert_requested);
         let focus_slot = Arc::clone(&focus_snapshot);
         let status_flag = Arc::clone(&status);
+        let session_context_flag = Arc::clone(&session_context);
         let active_requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let active_requests_for_listener = Arc::clone(&active_requests);
         let rejected_for_listener = Arc::clone(&control_rejected_total);
@@ -308,6 +312,7 @@ impl ControlServer {
                         explain: explain_slot.clone(),
                         usage_clear: Arc::clone(&usage_clear_slot),
                         status: Arc::clone(&status_flag),
+                        session_context: Arc::clone(&session_context_flag),
                         waker: Arc::clone(&waker_slot),
                     };
                     let admitted = active_requests_for_listener.fetch_update(
@@ -513,6 +518,7 @@ struct Flags {
     explain: std::sync::mpsc::SyncSender<ExplainRequest>,
     usage_clear: Arc<Mutex<Option<crate::usage::UsageClearHandle>>>,
     status: Arc<Mutex<String>>,
+    session_context: Arc<Mutex<crate::session_context::SessionContextStore>>,
     waker: crate::waker::WakerSlot,
 }
 
@@ -600,6 +606,86 @@ fn insert_request(line: &str) -> Option<Option<InsertRequest>> {
         focus_token: None,
         focus_generation: None,
     }))
+}
+
+fn valid_context_key(terminal_id: &str, session_id: &str) -> bool {
+    !terminal_id.is_empty()
+        && terminal_id.len() <= 96
+        && terminal_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b":_-".contains(&byte))
+        && session_id.len() == 32
+        && session_id.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn session_context_request(
+    command: &str,
+    store: &Arc<Mutex<crate::session_context::SessionContextStore>>,
+) -> Option<String> {
+    let command = command.trim();
+    if let Some(arguments) = command.strip_prefix("context-set ") {
+        let mut parts = arguments.splitn(2, ' ');
+        let ttl_seconds = parts.next()?.parse::<u32>().ok()?;
+        let payload = parts.next()?;
+        let report: wayexpand_core::SessionContextReport = match serde_json::from_str(payload) {
+            Ok(report) => report,
+            Err(_) => return Some("context refused: invalid report\n".into()),
+        };
+        if !(1..=300).contains(&ttl_seconds) {
+            return Some("context refused: invalid target or TTL\n".into());
+        }
+        if report.validate().is_err() {
+            return Some("context refused: invalid report fields\n".into());
+        }
+        let result = store.lock().map_err(|_| ()).and_then(|mut store| {
+            store
+                .set(Duration::from_secs(ttl_seconds.into()), report)
+                .map_err(|_| ())
+        });
+        return Some(match result {
+            Ok(()) => "context updated\n".into(),
+            Err(()) => "context refused: store unavailable or full\n".into(),
+        });
+    }
+
+    let (operation, arguments) = if let Some(arguments) = command.strip_prefix("context-get ") {
+        ("get", arguments)
+    } else if let Some(arguments) = command.strip_prefix("context-clear ") {
+        ("clear", arguments)
+    } else {
+        return None;
+    };
+    let mut parts = arguments.split(' ');
+    let terminal_id = parts.next()?;
+    let session_id = parts.next()?;
+    if parts.next().is_some() || !valid_context_key(terminal_id, session_id) {
+        return Some("context refused: invalid target\n".into());
+    }
+    match operation {
+        "clear" => Some(match store.lock() {
+            Ok(mut store) => {
+                store.clear(terminal_id, session_id);
+                "context cleared\n".into()
+            }
+            Err(_) => "context unavailable\n".into(),
+        }),
+        _ => Some(match store.lock() {
+            Ok(mut store) => match store.get(terminal_id, session_id) {
+                Some((report, updated_at_unix, expires_in_seconds)) => {
+                    serde_json::json!({
+                        "active": true,
+                        "updated_at_unix": updated_at_unix,
+                        "expires_in_seconds": expires_in_seconds,
+                        "context": report,
+                    })
+                    .to_string()
+                        + "\n"
+                }
+                None => "{\"active\":false}\n".into(),
+            },
+            Err(_) => "{\"active\":false,\"error\":\"context unavailable\"}\n".into(),
+        }),
+    }
 }
 
 /// Handle `explain <text>` / `explain-json <text>`: hand the text to the
@@ -869,6 +955,7 @@ fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
         explain,
         usage_clear,
         status,
+        session_context,
         waker,
     } = flags;
     stream.set_write_timeout(Some(CONTROL_IO_TIMEOUT))?;
@@ -921,6 +1008,10 @@ fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
             Some(Err(error)) => format!("could not clear local usage statistics: {error}\n"),
             None => "usage statistics writer unavailable\n".to_string(),
         };
+        stream.write_all(response.as_bytes())?;
+        return Ok(());
+    }
+    if let Some(response) = session_context_request(&command, &session_context) {
         stream.write_all(response.as_bytes())?;
         return Ok(());
     }
@@ -1009,6 +1100,8 @@ fn is_mutating_request(command: &str) -> bool {
     ) || command.starts_with("insert ")
         || command.starts_with("insert-target ")
         || command.starts_with("stats-clear ")
+        || command.starts_with("context-set ")
+        || command.starts_with("context-clear ")
 }
 
 fn peer_uid_is_authorized(peer_uid: u32, daemon_uid: u32) -> bool {
@@ -1377,6 +1470,9 @@ mod tests {
             explain: std::sync::mpsc::sync_channel(EXPLAIN_QUEUE_CAPACITY).0,
             usage_clear: Arc::new(Mutex::new(None)),
             status: Arc::new(Mutex::new("running".into())),
+            session_context: Arc::new(Mutex::new(
+                crate::session_context::SessionContextStore::default(),
+            )),
             waker: Arc::default(),
         };
         let send = |command: &str| {
@@ -1434,6 +1530,9 @@ mod tests {
             usage_clear: Arc::new(Mutex::new(None)),
             status: Arc::new(Mutex::new(
                 "running\ninject_atomic_replace=true\nreplacement_assurance=verified\n".into(),
+            )),
+            session_context: Arc::new(Mutex::new(
+                crate::session_context::SessionContextStore::default(),
             )),
             waker: Arc::default(),
         };
@@ -1552,6 +1651,9 @@ mod tests {
                     explain: std::sync::mpsc::sync_channel(EXPLAIN_QUEUE_CAPACITY).0,
                     usage_clear: Arc::new(Mutex::new(None)),
                     status: status_worker,
+                    session_context: Arc::new(Mutex::new(
+                        crate::session_context::SessionContextStore::default(),
+                    )),
                     waker: Arc::default(),
                 },
             )
@@ -1610,6 +1712,9 @@ mod tests {
             explain: std::sync::mpsc::sync_channel(EXPLAIN_QUEUE_CAPACITY).0,
             usage_clear: Arc::new(Mutex::new(None)),
             status: Arc::new(Mutex::new(String::new())),
+            session_context: Arc::new(Mutex::new(
+                crate::session_context::SessionContextStore::default(),
+            )),
             waker: Arc::default(),
         };
         let send = |command: &str| {
@@ -1650,6 +1755,9 @@ mod tests {
             explain: std::sync::mpsc::sync_channel(EXPLAIN_QUEUE_CAPACITY).0,
             usage_clear: Arc::new(Mutex::new(None)),
             status,
+            session_context: Arc::new(Mutex::new(
+                crate::session_context::SessionContextStore::default(),
+            )),
             waker: Arc::default(),
         };
         let send = |command: &str| {
@@ -1987,6 +2095,9 @@ mod tests {
             explain: std::sync::mpsc::sync_channel(EXPLAIN_QUEUE_CAPACITY).0,
             usage_clear: Arc::new(Mutex::new(None)),
             status: Arc::new(Mutex::new(String::new())),
+            session_context: Arc::new(Mutex::new(
+                crate::session_context::SessionContextStore::default(),
+            )),
             waker: slot,
         };
         let fd = waker.fd();
