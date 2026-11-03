@@ -63,15 +63,28 @@ credentials; it does not initiate an SSH connection.
 ## Copy one command
 
 The `;http503-service`, `;http503-journal`, `;http503-sockets`, and
-`;http503-proxy` forms generate one diagnostic command at a time. To place the
-selected service command on the clipboard without executing it:
+`;http503-proxy` forms generate one diagnostic command at a time. Generate and
+inspect the exact command first:
 
 ```sh
 wayexpand new ';http503-service' \
   --set 'session context=remote SSH' \
   --set 'target host=web-01.example.net' \
   --set 'service=nginx.service' \
-  --stdout | sed -n '/^systemctl status /p' | wl-copy
+  --stdout
+```
+
+After reviewing the output and confirming the target, run the same generator
+with a filter to copy only the command line. This writes to the clipboard; it
+does not run the command:
+
+```sh
+wayexpand new ';http503-service' \
+  --set 'session context=remote SSH' \
+  --set 'target host=web-01.example.net' \
+  --set 'service=nginx.service' \
+  --stdout \
+  | sed -n '/^systemctl status /p' | wl-copy
 ```
 
 Use the matching `sed` prefix for another command form. This writes the
