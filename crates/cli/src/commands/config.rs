@@ -690,11 +690,16 @@ pub(crate) fn import_command(mut args: Args) -> Result<()> {
             if add_to_active_library {
                 if !report_json {
                     eprintln!(
-                        "AutoKey import: {} phrases imported, {} unsupported",
-                        imported.report.imported, imported.report.unsupported
+                        "AutoKey migration: {} imported, {} skipped, {} need review",
+                        imported.report.imported,
+                        imported.report.skipped,
+                        imported.report.needs_review
                     );
                     for warning in &imported.report.warnings {
-                        eprintln!("unsupported: {}: {}", warning.entry, warning.reason);
+                        eprintln!(
+                            "skipped: {}: {} (remediation: {})",
+                            warning.entry, warning.reason, warning.remediation
+                        );
                     }
                 }
                 let report =
@@ -712,11 +717,14 @@ pub(crate) fn import_command(mut args: Args) -> Result<()> {
                 eprintln!("{}", serde_json::to_string(&imported.report)?);
             } else {
                 eprintln!(
-                    "AutoKey import: {} phrases imported, {} unsupported",
-                    imported.report.imported, imported.report.unsupported
+                    "AutoKey migration: {} imported, {} skipped, {} need review",
+                    imported.report.imported, imported.report.skipped, imported.report.needs_review
                 );
                 for warning in &imported.report.warnings {
-                    eprintln!("unsupported: {}: {}", warning.entry, warning.reason);
+                    eprintln!(
+                        "skipped: {}: {} (remediation: {})",
+                        warning.entry, warning.reason, warning.remediation
+                    );
                 }
             }
             print!("{}", toml::to_string_pretty(&imported.config)?);
@@ -2328,6 +2336,7 @@ pub(crate) fn fleet_command(mut args: Args) -> Result<()> {
                         "hotkey_count": fleet.stats.total_hotkeys,
                         "layers": fleet.stats.layers_applied,
                         "policy_violations": fleet.policy_violations,
+                        "organization_policy": crate::doctor::policy::effective_policy_report(&policy),
                         "expansions": fleet.config.expansion.iter().map(|expansion| serde_json::json!({
                             "trigger": expansion.trigger,
                             "source": fleet.trigger_source(&expansion.trigger),
@@ -2343,6 +2352,17 @@ pub(crate) fn fleet_command(mut args: Args) -> Result<()> {
                 println!("Files loaded: {}", fleet.stats.total_files_loaded);
                 println!("Expansions: {}", fleet.stats.total_expansions);
                 println!("Hotkeys: {}", fleet.stats.total_hotkeys);
+                println!(
+                    "Organization policy mode: {}",
+                    if policy.safe_mode {
+                        "enforcement"
+                    } else {
+                        "AUDIT ONLY"
+                    }
+                );
+                if !policy.safe_mode {
+                    println!("  Configured expansion restrictions are warnings only; use `wayexpand policy inspect` for effective values.");
+                }
                 for violation in &fleet.policy_violations {
                     println!("Policy violation: {violation}");
                 }

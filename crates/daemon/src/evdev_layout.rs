@@ -10,17 +10,20 @@ use std::{
     collections::hash_map::DefaultHasher,
     env, fs,
     hash::{Hash, Hasher},
+    io::{Read, Write},
+    os::unix::net::UnixStream,
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Condvar, Mutex,
     },
     thread::{self, JoinHandle},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use futures_lite::StreamExt;
 use wayexpand_backend_evdev::{KeyboardLayoutProvider, KeyboardLayoutSnapshot};
+use xkbcommon_rs::{xkb_keymap::RuleNames, Context, Keymap};
 #[cfg(test)]
 use zbus::blocking::{connection::Builder, Connection, Proxy};
 
@@ -29,9 +32,232 @@ const LAYOUT_FALLBACK_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const LAYOUT_STOP_CHECK_INTERVAL: Duration = Duration::from_millis(100);
 const UNAVAILABLE_RETRY_INTERVAL: Duration = Duration::from_millis(500);
 const INITIAL_SNAPSHOT_WAIT: Duration = Duration::from_millis(300);
+const HYPRLAND_SOCKET_TIMEOUT: Duration = Duration::from_millis(100);
+const HYPRLAND_RESPONSE_LIMIT: usize = 256 * 1024;
+const HYPRLAND_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 pub(crate) fn provider() -> Box<dyn KeyboardLayoutProvider> {
-    Box::new(KwinKeyboardLayoutProvider::new())
+    if env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some() {
+        Box::new(HyprlandKeyboardLayoutProvider::new())
+    } else if env::var_os("SWAYSOCK").is_some() {
+        // Sway's get_inputs reports localized layout names, not the effective
+        // XKB rules/model/variant/options. Do not infer those from localed or
+        // a config file: includes, device overrides and runtime changes make
+        // that an unverifiable approximation.
+        Box::new(NoLayoutProvider)
+    } else {
+        Box::new(KwinKeyboardLayoutProvider::new())
+    }
+}
+
+struct NoLayoutProvider;
+
+impl KeyboardLayoutProvider for NoLayoutProvider {
+    fn snapshot(&mut self) -> Option<KeyboardLayoutSnapshot> {
+        None
+    }
+}
+
+/// Tracks Hyprland's active keymap from its compositor-owned device data.
+/// Evdev uses one shared XKB state, so differing per-device maps are refused.
+pub(crate) struct HyprlandKeyboardLayoutProvider {
+    shared: Arc<SharedSnapshot>,
+    stopping: Arc<AtomicBool>,
+    worker: Option<JoinHandle<()>>,
+}
+
+impl HyprlandKeyboardLayoutProvider {
+    pub(crate) fn new() -> Self {
+        let shared = Arc::new(SharedSnapshot {
+            value: Mutex::new(None),
+            first_attempt: Mutex::new(false),
+            ready: Condvar::new(),
+        });
+        let stopping = Arc::new(AtomicBool::new(false));
+        let worker_shared = Arc::clone(&shared);
+        let worker_stopping = Arc::clone(&stopping);
+        let worker = thread::Builder::new()
+            .name("wayexpand-hyprland-layout".into())
+            .spawn(move || hyprland_layout_worker(worker_shared, worker_stopping))
+            .ok();
+        if let Ok(attempted) = shared.first_attempt.lock() {
+            if !*attempted {
+                let _ = shared.ready.wait_timeout_while(
+                    attempted,
+                    INITIAL_SNAPSHOT_WAIT,
+                    |attempted| !*attempted,
+                );
+            }
+        }
+        Self {
+            shared,
+            stopping,
+            worker,
+        }
+    }
+}
+
+impl KeyboardLayoutProvider for HyprlandKeyboardLayoutProvider {
+    fn snapshot(&mut self) -> Option<KeyboardLayoutSnapshot> {
+        self.shared
+            .value
+            .lock()
+            .ok()
+            .and_then(|value| value.clone())
+    }
+}
+
+impl Drop for HyprlandKeyboardLayoutProvider {
+    fn drop(&mut self) {
+        self.stopping.store(true, Ordering::Release);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct HyprDevices {
+    keyboards: Vec<HyprKeyboard>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct HyprKeyboard {
+    rules: String,
+    model: String,
+    layout: String,
+    variant: String,
+    options: String,
+    active_keymap: String,
+}
+
+fn hyprland_layout_worker(shared: Arc<SharedSnapshot>, stopping: Arc<AtomicBool>) {
+    while !stopping.load(Ordering::Acquire) {
+        match hyprland_snapshot() {
+            Ok(snapshot) => publish_snapshot(&shared, Some(snapshot)),
+            Err(error) => {
+                tracing::debug!(%error, "Hyprland keyboard layout is unavailable or inconsistent");
+                publish_snapshot(&shared, None);
+            }
+        }
+        sleep_or_stop(&stopping, HYPRLAND_POLL_INTERVAL);
+    }
+}
+
+fn sleep_or_stop(stopping: &AtomicBool, duration: Duration) {
+    let deadline = Instant::now() + duration;
+    while !stopping.load(Ordering::Acquire) {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return;
+        }
+        thread::sleep(left.min(LAYOUT_STOP_CHECK_INTERVAL));
+    }
+}
+
+fn hyprland_snapshot() -> anyhow::Result<KeyboardLayoutSnapshot> {
+    let runtime = env::var_os("XDG_RUNTIME_DIR")
+        .ok_or_else(|| anyhow::anyhow!("XDG_RUNTIME_DIR is unavailable"))?;
+    let signature = env::var("HYPRLAND_INSTANCE_SIGNATURE")?;
+    if signature.is_empty() || signature.contains('/') || signature.contains("..") {
+        anyhow::bail!("invalid Hyprland instance signature");
+    }
+    let socket_path = PathBuf::from(runtime)
+        .join("hypr")
+        .join(signature)
+        .join(".socket.sock");
+    let mut socket = UnixStream::connect(socket_path)?;
+    socket.set_read_timeout(Some(HYPRLAND_SOCKET_TIMEOUT))?;
+    socket.set_write_timeout(Some(HYPRLAND_SOCKET_TIMEOUT))?;
+    socket.write_all(b"j/devices")?;
+    let deadline = Instant::now() + HYPRLAND_SOCKET_TIMEOUT;
+    let mut response = Vec::new();
+    let mut chunk = [0_u8; 8192];
+    loop {
+        if Instant::now() >= deadline {
+            anyhow::bail!("timed out reading Hyprland device response");
+        }
+        match socket.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(count) => {
+                if response.len().saturating_add(count) > HYPRLAND_RESPONSE_LIMIT {
+                    anyhow::bail!("Hyprland device response exceeds size limit");
+                }
+                response.extend_from_slice(&chunk[..count]);
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) && Instant::now() >= deadline =>
+            {
+                anyhow::bail!("timed out reading Hyprland device response");
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+    let devices: HyprDevices = serde_json::from_slice(&response)?;
+    snapshot_for_hyprland_devices(devices)
+}
+
+fn snapshot_for_hyprland_devices(devices: HyprDevices) -> anyhow::Result<KeyboardLayoutSnapshot> {
+    let first = devices
+        .keyboards
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("Hyprland reported no keyboards"))?;
+    if first.layout.is_empty() {
+        anyhow::bail!("Hyprland did not provide an XKB layout");
+    }
+    if devices.keyboards.iter().any(|keyboard| {
+        keyboard.rules != first.rules
+            || keyboard.model != first.model
+            || keyboard.layout != first.layout
+            || keyboard.variant != first.variant
+            || keyboard.options != first.options
+            || keyboard.active_keymap != first.active_keymap
+    }) {
+        anyhow::bail!(
+            "keyboards have different effective layouts; shared evdev state is ambiguous"
+        );
+    }
+    let context =
+        Context::new(0).map_err(|error| anyhow::anyhow!("cannot initialize XKB: {error}"))?;
+    let keymap = Keymap::new_from_names(
+        context,
+        Some(RuleNames {
+            rules: Some(first.rules.clone()),
+            model: Some(first.model.clone()),
+            layout: Some(first.layout.clone()),
+            variant: Some(first.variant.clone()),
+            options: Some(first.options.clone()),
+        }),
+        0,
+    )
+    .map_err(|error| anyhow::anyhow!("cannot compile compositor XKB keymap: {error:?}"))?;
+    let groups = (0..keymap.num_layouts())
+        .filter(|group| keymap.layout_get_name(*group) == Some(first.active_keymap.as_str()))
+        .collect::<Vec<_>>();
+    let [group] = groups.as_slice() else {
+        anyhow::bail!(
+            "active Hyprland layout name does not uniquely match the reported XKB keymap"
+        );
+    };
+    let mut hasher = DefaultHasher::new();
+    first.rules.hash(&mut hasher);
+    first.model.hash(&mut hasher);
+    first.layout.hash(&mut hasher);
+    first.variant.hash(&mut hasher);
+    first.options.hash(&mut hasher);
+    first.active_keymap.hash(&mut hasher);
+    Ok(KeyboardLayoutSnapshot {
+        generation: hasher.finish(),
+        group: *group as u32,
+        rules: Some(first.rules.clone()),
+        model: Some(first.model.clone()),
+        layout: Some(first.layout.clone()),
+        variant: Some(first.variant.clone()),
+        options: Some(first.options.clone()),
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -621,6 +847,63 @@ fn valid_options(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn hypr_keyboard(layout: &str, active_keymap: &str) -> HyprKeyboard {
+        HyprKeyboard {
+            rules: "evdev".into(),
+            model: "pc105".into(),
+            layout: layout.into(),
+            variant: "".into(),
+            options: "".into(),
+            active_keymap: active_keymap.into(),
+        }
+    }
+
+    #[test]
+    fn hyprland_snapshot_matches_active_group_in_xkb_keymap() {
+        let first = snapshot_for_hyprland_devices(HyprDevices {
+            keyboards: vec![hypr_keyboard("us,de", "German")],
+        })
+        .unwrap();
+        let second = snapshot_for_hyprland_devices(HyprDevices {
+            keyboards: vec![hypr_keyboard("us,de", "English (US)")],
+        })
+        .unwrap();
+        assert_eq!(first.group, 1);
+        assert_eq!(second.group, 0);
+        assert_ne!(first.generation, second.generation);
+        assert_eq!(first.layout.as_deref(), Some("us,de"));
+    }
+
+    #[test]
+    fn parses_hyprland_device_socket_shape() {
+        let devices: HyprDevices = serde_json::from_str(
+            r#"{"keyboards":[{"name":"kbd","rules":"evdev","model":"pc105","layout":"us","variant":"","options":"","active_keymap":"English (US)","main":true}]}"#,
+        )
+        .unwrap();
+        let snapshot = snapshot_for_hyprland_devices(devices).unwrap();
+        assert_eq!(snapshot.group, 0);
+    }
+
+    #[test]
+    fn hyprland_snapshot_rejects_unknown_or_ambiguous_layouts() {
+        assert!(snapshot_for_hyprland_devices(HyprDevices {
+            keyboards: vec![hypr_keyboard("us,de", "Unknown layout")],
+        })
+        .is_err());
+        assert!(snapshot_for_hyprland_devices(HyprDevices { keyboards: vec![] }).is_err());
+    }
+
+    #[test]
+    fn hyprland_snapshot_rejects_different_keyboard_layouts() {
+        assert!(snapshot_for_hyprland_devices(HyprDevices {
+            keyboards: vec![
+                hypr_keyboard("us", "English (US)"),
+                hypr_keyboard("de", "German")
+            ],
+        })
+        .is_err());
+    }
 
     #[test]
     fn parses_kde_layouts_and_parallel_variants() {

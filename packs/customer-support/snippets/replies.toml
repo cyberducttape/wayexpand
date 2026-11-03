@@ -34,3 +34,19 @@ Window: {{field:start=YYYY-MM-DD HH:MM}} to {{field:end=YYYY-MM-DD HH:MM}} {{fie
 Expected impact: {{field:impact=describe expected impact}}
 Updates: {{field:status_url=status page URL}}
 """
+
+[[expansion]]
+trigger = ";;ticket-resolution"
+description = "Close a support ticket with verified resolution and follow-up details"
+category = "Support"
+tags = ["support", "ticket", "resolution"]
+replacement = """Hello {{field:name=there}},
+
+We have {{choice:status=resolved|mitigated|identified the cause}} for {{field:issue|required|max=256}}.
+
+What changed or resolved it: {{field:resolution|required|min=5|max=1500}}
+Verification performed: {{field:verification|required|max=1000}}
+Customer action needed: {{field:customer action=none|required|max=512}}
+
+Please let us know if the issue returns or you see different results. Related reference: {{field:ticket or change ID|max=128}}.
+"""

@@ -342,12 +342,16 @@ password-field protection is required.
 The evdev source translates keys only when it has a current compositor layout
 snapshot. KDE's provider reads the active group from KWin and cross-checks its
 effective layout and variant list against `kxkbrc`, or systemd-localed keyboard
-properties when no per-user KDE layout file exists.
-Layout changes rebuild XKB state, reset the matcher, and replay held
-modifiers. `wayexpand status` reports `capture_layout_state=tracked` while
-that contract is available; missing or inconsistent state is reported as
-`unavailable` and disables layout-dependent matching and hotkeys. Other
-compositors do not yet have evdev providers.
+properties when no per-user KDE layout file exists. Hyprland uses its
+compositor device socket and accepts a snapshot only when all keyboards report
+the same complete XKB rules/model/layout/variant/options and active layout
+name, and that name uniquely matches the compiled XKB keymap. Layout changes
+rebuild XKB state, reset the matcher, and replay held modifiers. Both providers
+report `capture_layout_state=tracked` only while this contract is available;
+missing or inconsistent state disables layout-dependent matching and hotkeys.
+Sway currently remains unavailable: its input query reports active layout
+display names but not the effective XKB rules/model/variant/options, so WayExpand
+does not infer them from local configuration or system defaults.
 
 **Non-exclusive capture and rapid typing:**
 The focused application receives evdev key events independently of WayExpand.
@@ -383,15 +387,18 @@ boundary and the risks of a future exclusive proxy.
 On KDE Plasma, evdev obtains the active XKB group from KWin's keyboard-layout
 D-Bus interface and cross-checks KWin's effective layouts and variants
 against `kxkbrc`, or systemd-localed keyboard properties when `kxkbrc` is
-absent. Layout changes reset matcher state and replay held modifiers under the
-new group. If KWin's active layout list and local configuration do not agree,
-matching and hotkeys stay disabled. Other compositors currently have no
-evdev layout provider and also fail closed.
+absent. Hyprland reports per-device keymap settings and active keymap names;
+WayExpand compiles the reported keymap and requires every keyboard to agree
+before matching. Layout changes reset matcher state and replay held modifiers
+under the new group. If compositor data is absent, ambiguous, or inconsistent,
+matching and hotkeys stay disabled. Sway currently has no evdev layout provider
+because its input query does not expose sufficient effective XKB settings.
 
 **Hotplug and layout limitations:**
 Device discovery refreshes every five seconds, so a newly attached keyboard
-may take up to that long to enter the capture set. On KDE, the XKB keymap is
-rebuilt when KWin reports an active-group or configured-layout change. Compose
+may take up to that long to enter the capture set. KWin and Hyprland layout
+state is polled and the XKB keymap is rebuilt on an active-group or
+configured-layout change. Compose
 and dead-key sequences are not tracked by evdev. This is a fallback path, not an
 authoritative desktop keyboard integration.
 
