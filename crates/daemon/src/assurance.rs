@@ -21,7 +21,8 @@ use std::sync::{
 use tracing::warn;
 use wayexpand_core::{
     CompatibilityMode, FocusCheck, FocusStamp, FocusWitness, InjectorCapabilities, InjectorError,
-    KeyEventState, Modifiers, OutputCheckpoint, ReplacementGuarantee, TextInjector,
+    KeyEventState, Modifiers, OutputCheckpoint, ReplacementAdmission, ReplacementGuarantee,
+    TextInjector,
 };
 
 /// Why an output was refused before anything was typed.
@@ -211,11 +212,13 @@ impl GuardState {
         capabilities: &InjectorCapabilities,
         erases: bool,
     ) -> Result<(), Refusal> {
-        if !erases || has_atomic_replacement_contract(capabilities) {
+        if !erases
+            || capabilities.replacement_admission(self.mode()) == ReplacementAdmission::Atomic
+        {
             return Ok(());
         }
         let mode = self.mode();
-        if mode == CompatibilityMode::Off {
+        if capabilities.replacement_admission(mode) == ReplacementAdmission::Refused {
             return Err(Refusal::CompatibilityModeOff);
         }
         match (self.focus(), mode) {

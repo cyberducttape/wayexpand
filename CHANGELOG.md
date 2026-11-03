@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Gate IBus replacement through the shared capability admission contract.
+  Non-atomic replacement is refused by default, expansion accounting waits
+  for successful signal emission. Outcomes distinguish fully emitted but
+  unverified text from a possibly partial signal sequence.
 - Reduce evdev capture polling churn and layout background traffic, while
   retaining compositor layout-change notification with a slower fallback.
 - Add insert-only sysadmin diagnostic templates for TLS, service, port, HTTP,
