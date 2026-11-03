@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Move expansion transaction payloads into the serialized output worker and
+  return them with completion, avoiding a second allocation of the full
+  replacement text. Pending reactor state retains only the trigger needed for
+  outcome bookkeeping.
 - Make the effective security snapshot regression portable to CI hosts where
   `/tmp` shares the root mount; retain the live mount ID when one is available.
 - Add `wayexpand doctor --security` to probe the running daemon and broker for

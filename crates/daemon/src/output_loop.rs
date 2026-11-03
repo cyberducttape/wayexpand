@@ -181,7 +181,10 @@ enum OutputCommand {
     KeyEvent(u32, Modifiers, KeyEventState, Completion),
     /// A whole expansion transaction, applied on the worker and reported as
     /// one outcome, so the reactor need not wait for each step.
-    Transaction(Box<ExpansionResult>, SyncSender<TransactionOutcome>),
+    Transaction(
+        Box<ExpansionResult>,
+        SyncSender<(ExpansionResult, TransactionOutcome)>,
+    ),
     Shutdown,
 }
 
@@ -198,19 +201,37 @@ pub struct TransactionSubmitter {
 
 /// A transaction accepted by the worker, awaiting its outcome.
 pub struct SubmittedTransaction {
-    pub outcome: Receiver<TransactionOutcome>,
+    pub outcome: Receiver<(ExpansionResult, TransactionOutcome)>,
     pub deadline: std::time::Instant,
 }
 
 impl TransactionSubmitter {
-    pub fn submit(&self, result: &ExpansionResult) -> Result<SubmittedTransaction, InjectorError> {
+    pub fn submit(
+        &self,
+        result: ExpansionResult,
+    ) -> Result<SubmittedTransaction, Box<(InjectorError, ExpansionResult)>> {
         let (completion, outcome) = sync_channel(1);
-        let chars = transaction_keystrokes(result);
-        enqueue_command(
-            &self.sender,
-            OutputCommand::Transaction(Box::new(result.clone()), completion),
-            self.name,
-        )?;
+        let chars = transaction_keystrokes(&result);
+        let command = OutputCommand::Transaction(Box::new(result), completion);
+        if let Err(error) = self.sender.try_send(command) {
+            let (command, message) = match error {
+                TrySendError::Full(command) => (command, "serialized output queue is full"),
+                TrySendError::Disconnected(command) => {
+                    (command, "serialized output worker stopped")
+                }
+            };
+            let OutputCommand::Transaction(result, _) = command else {
+                unreachable!("transaction admission returned a different command")
+            };
+            return Err(Box::new((
+                InjectorError {
+                    backend: self.name,
+                    message: message.into(),
+                    retryable: true,
+                },
+                *result,
+            )));
+        }
         Ok(SubmittedTransaction {
             outcome,
             deadline: std::time::Instant::now() + completion_deadline(&self.capabilities, chars),
@@ -411,7 +432,7 @@ pub fn spawn_async_injector(
                             });
                         }
                         let stop = failed.is_some();
-                        let _ = completion.send(outcome);
+                        let _ = completion.send((*result, outcome));
                         if let Some(waker) = &waker {
                             waker.wake();
                         }
@@ -818,7 +839,7 @@ mod tests {
         .unwrap();
         let submitter = worker.submitter().unwrap();
 
-        let first = submitter.submit(&test_transaction()).unwrap();
+        let first = submitter.submit(test_transaction()).unwrap();
         let startup_deadline = std::time::Instant::now() + Duration::from_secs(1);
         while !started.load(Ordering::Acquire) {
             assert!(
@@ -829,25 +850,27 @@ mod tests {
         }
 
         let queued = (0..ASYNC_OUTPUT_QUEUE_CAPACITY)
-            .map(|_| submitter.submit(&test_transaction()).unwrap())
+            .map(|_| submitter.submit(test_transaction()).unwrap())
             .collect::<Vec<_>>();
         let error = submitter
-            .submit(&test_transaction())
+            .submit(test_transaction())
             .err()
             .expect("excess output must be rejected while the bounded queue is full");
-        assert_eq!(error.message, "serialized output queue is full");
+        assert_eq!(error.0.message, "serialized output queue is full");
 
         release.store(true, Ordering::Release);
         assert!(first
             .outcome
             .recv_timeout(Duration::from_secs(2))
             .expect("the in-flight transaction completes")
+            .1
             .is_applied());
         for transaction in queued {
             assert!(transaction
                 .outcome
                 .recv_timeout(Duration::from_secs(2))
                 .expect("each admitted transaction completes")
+                .1
                 .is_applied());
         }
         assert!(
@@ -856,12 +879,13 @@ mod tests {
         );
 
         let fresh = submitter
-            .submit(&test_transaction())
+            .submit(test_transaction())
             .expect("the queue accepts fresh work after draining");
         assert!(fresh
             .outcome
             .recv_timeout(Duration::from_secs(2))
             .expect("fresh work completes")
+            .1
             .is_applied());
     }
 
@@ -1060,7 +1084,7 @@ mod tests {
             undoable: false,
             folded_suffix_chars: 0,
         };
-        let transaction = submitter.submit(&result).unwrap();
+        let transaction = submitter.submit(result).unwrap();
         thread::sleep(Duration::from_millis(100));
         submitter.abandon_after_timeout();
         let typed_at_cancel = typed.lock().unwrap().len();
@@ -1069,7 +1093,7 @@ mod tests {
             .outcome
             .recv_timeout(Duration::from_secs(2))
             .expect("the worker reports the interrupted transaction");
-        assert!(!outcome.is_applied(), "{outcome}");
+        assert!(!outcome.1.is_applied(), "{}", outcome.1);
         // At most the character already being typed may follow cancellation.
         let typed_after = typed.lock().unwrap().len();
         assert!(
@@ -1104,7 +1128,7 @@ mod tests {
             undoable: false,
             folded_suffix_chars: 0,
         };
-        let transaction = submitter.submit(&result).unwrap();
+        let transaction = submitter.submit(result).unwrap();
         thread::sleep(Duration::from_millis(100));
         submitter.cancel_for_physical_input();
         let typed_at_cancel = typed.lock().unwrap().len();
@@ -1114,7 +1138,7 @@ mod tests {
             .recv_timeout(Duration::from_secs(2))
             .expect("the interrupted transaction reports its uncertain result");
         assert!(matches!(
-            outcome,
+            outcome.1,
             TransactionOutcome::UnknownPartialFailure { .. }
         ));
         let typed_after = typed.lock().unwrap().len();
@@ -1166,16 +1190,21 @@ mod tests {
             undoable: false,
             folded_suffix_chars: 0,
         };
+        let second = ExpansionResult {
+            insert: "done".into(),
+            ..first.clone()
+        };
 
         let outcome = submitter
-            .submit(&first)
+            .submit(first)
             .unwrap()
             .outcome
             .recv_timeout(Duration::from_secs(2))
             .expect("focus interruption must complete the transaction");
         assert!(
-            matches!(outcome, TransactionOutcome::UnknownPartialFailure { .. }),
-            "{outcome}"
+            matches!(outcome.1, TransactionOutcome::UnknownPartialFailure { .. }),
+            "{}",
+            outcome.1
         );
         assert_eq!(*typed.lock().unwrap(), "rep");
         assert!(failures.try_recv().is_err());
@@ -1187,17 +1216,13 @@ mod tests {
         guard.set_stamp(stamp);
         focus_sender.send(window("w1")).unwrap();
         guard.set_stamp(focus_receiver.try_recv_stamped().unwrap().1);
-        let second = ExpansionResult {
-            insert: "done".into(),
-            ..first
-        };
         let next = submitter
-            .submit(&second)
+            .submit(second)
             .unwrap()
             .outcome
             .recv_timeout(Duration::from_secs(2))
             .expect("the worker should accept the next transaction");
-        assert!(next.is_applied(), "{next}");
+        assert!(next.1.is_applied(), "{}", next.1);
         assert_eq!(*typed.lock().unwrap(), "repdone");
         assert!(failures.try_recv().is_err());
     }
@@ -1243,6 +1268,23 @@ mod tests {
         fn insert(&mut self, _: &str) -> Result<(), InjectorError> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn completed_transaction_returns_the_moved_payload_without_copying_it() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let (_injector, _failures, worker) =
+            spawn_async_injector(Box::new(SlowInjector { calls }), None).unwrap();
+        let submitter = worker.submitter().unwrap();
+        let result = test_transaction();
+        let insert_ptr = result.insert.as_ptr();
+        let transaction = submitter.submit(result).unwrap();
+        let (returned, outcome) = transaction
+            .outcome
+            .recv_timeout(Duration::from_secs(2))
+            .expect("the worker returns the transaction payload with its outcome");
+        assert!(outcome.is_applied());
+        assert_eq!(returned.insert.as_ptr(), insert_ptr);
     }
 
     #[test]
