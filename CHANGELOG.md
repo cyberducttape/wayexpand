@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add `wayexpand doctor --security` to probe the running daemon and broker for
+  active namespaces, seccomp/NoNewPrivs, address-family restrictions, effective
+  filesystem protections, resource limits, config permissions, and broker
+  health. Restrictions that cannot be verified without elevated inspection
+  are reported as unverified.
 - Reduce evdev capture polling churn and layout background traffic, while
   retaining compositor layout-change notification with a slower fallback.
 - Add insert-only sysadmin diagnostic templates for TLS, service, port, HTTP,

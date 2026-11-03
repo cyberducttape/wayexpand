@@ -90,6 +90,18 @@ daemon, compare `readlink /proc/<daemon-pid>/ns/mnt` with
 `readlink /proc/self/ns/mnt`: identical values mean the filesystem
 restrictions are not in effect.
 
+### Effective sandbox inspection
+
+Run `wayexpand doctor --security` to inspect the live daemon's effective
+namespace IDs, NoNewPrivs and seccomp state, address-family socket probes,
+read-only mount flags, private `/tmp`, proc restrictions, W^X behavior, and
+configuration permissions. When named actions are configured it also checks
+the live Action Broker and its in-process probes. `--json` emits the same
+checks for fleet tooling. Unit-file directives alone are not treated as
+evidence. Kernel policy details that cannot be safely inspected from an
+unprivileged process remain listed as unverified instead of being reported as
+active.
+
 The systemd unit is deliberately restrictive to limit the blast radius of a
 compromised or misconfigured command. Do not relax the restrictions in
 `systemd/wayexpand.service` or use a wrapper script as a way to bypass them.

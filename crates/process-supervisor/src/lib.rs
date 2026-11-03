@@ -10,6 +10,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 use std::time::Instant;
 
+mod security;
+pub use security::{effective_security_snapshot, EffectiveSecuritySnapshot};
+
 #[cfg(target_os = "linux")]
 use std::path::PathBuf;
 

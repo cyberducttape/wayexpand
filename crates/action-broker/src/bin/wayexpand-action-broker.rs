@@ -389,6 +389,7 @@ fn write_broker_health(
         "audit_queue_dropped_total": health.dropped_events,
         "audit_write_failures_total": health.write_failures,
         "audit_healthy": audit_logger.is_none() || health.healthy(),
+        "security": wayexpand_process_supervisor::effective_security_snapshot(),
     });
     let prefix = path
         .file_name()

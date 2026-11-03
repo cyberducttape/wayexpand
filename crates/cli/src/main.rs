@@ -158,6 +158,10 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "Diagnose configuration, backends and the running daemon",
             ),
             (
+                "doctor --security [--json] [config]",
+                "Inspect the effective sandbox of running WayExpand services",
+            ),
+            (
                 "policy inspect [--file PATH] [--json]",
                 "Show configured and effective organization policy controls",
             ),

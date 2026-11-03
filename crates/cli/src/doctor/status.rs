@@ -79,6 +79,8 @@ pub(crate) fn status_as_json(response: &str) -> Result<serde_json::Value> {
             }
             "injection_latency_profiles" => serde_json::from_str(value)
                 .unwrap_or_else(|_| serde_json::Value::String(value.into())),
+            value if key == "sandbox_security" => serde_json::from_str(value)
+                .unwrap_or_else(|_| serde_json::Value::String(value.into())),
             "recent_expansion_failures" => serde_json::from_str(value)
                 .unwrap_or_else(|_| serde_json::Value::String(value.into())),
             _ => value.into(),
