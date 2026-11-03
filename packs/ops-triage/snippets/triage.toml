@@ -122,7 +122,7 @@ These are inserted as editable text and are not executed by WayExpand. The comma
 """
 
 [[expansion]]
-trigger = ";http503-service"
+trigger = ";503-service"
 description = "Generate one read-only HTTP 503 service status command for the selected shell target"
 category = "Operations triage"
 tags = ["http", "incident", "systemd", "read-only"]
@@ -132,7 +132,7 @@ systemctl status --no-pager -- {{shellq:service=nginx.service|required|validate=
 """
 
 [[expansion]]
-trigger = ";http503-journal"
+trigger = ";503-journal"
 description = "Generate one read-only HTTP 503 service journal command for the selected shell target"
 category = "Operations triage"
 tags = ["http", "incident", "journalctl", "read-only"]
@@ -142,7 +142,7 @@ journalctl -u {{shellq:service=nginx.service|required|validate=systemd-unit|max=
 """
 
 [[expansion]]
-trigger = ";http503-sockets"
+trigger = ";503-sockets"
 description = "Generate one read-only listening socket inspection command for the selected shell target"
 category = "Operations triage"
 tags = ["http", "incident", "sockets", "read-only"]
@@ -152,7 +152,7 @@ ss -lntp
 """
 
 [[expansion]]
-trigger = ";http503-proxy"
+trigger = ";503-proxy"
 description = "Generate a read-only HTTP virtual-host probe and Nginx configuration check"
 category = "Operations triage"
 tags = ["http", "incident", "nginx", "read-only"]

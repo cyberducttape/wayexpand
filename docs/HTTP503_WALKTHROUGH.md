@@ -62,12 +62,12 @@ credentials; it does not initiate an SSH connection.
 
 ## Copy one command
 
-The `;http503-service`, `;http503-journal`, `;http503-sockets`, and
-`;http503-proxy` forms generate one diagnostic command at a time. Generate and
+The `;503-service`, `;503-journal`, `;503-sockets`, and
+`;503-proxy` forms generate one diagnostic command at a time. Generate and
 inspect the exact command first:
 
 ```sh
-wayexpand new ';http503-service' \
+wayexpand new ';503-service' \
   --set 'session context=remote SSH' \
   --set 'target host=web-01.example.net' \
   --set 'service=nginx.service' \
@@ -79,7 +79,7 @@ with a filter to copy only the command line. This writes to the clipboard; it
 does not run the command:
 
 ```sh
-wayexpand new ';http503-service' \
+wayexpand new ';503-service' \
   --set 'session context=remote SSH' \
   --set 'target host=web-01.example.net' \
   --set 'service=nginx.service' \

@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Give the focused HTTP 503 one-command helpers a distinct `;503-*` prefix so they do not delay the flagship `;http503` trigger.
+
 - Fix the reviewed-pack CI fixture harness to compare interactive-form output
   through validated `pack test` values instead of asking the CLI preview path
   to collect fields it cannot interactively request.
