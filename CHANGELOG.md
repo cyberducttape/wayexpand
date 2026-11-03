@@ -11,6 +11,10 @@ All notable changes to WayExpand are documented here.
   Context is bound to a local terminal and random shell session, is
   informational, and never authorizes execution or guesses remote destinations
   from shell history or terminal contents.
+- Add `;klogs`, a Kubernetes log form that shows the active kubectl context,
+  validates and shell-quotes each value, and previews the exact insert-only
+  command. Form dialogs now preview field-only output before insertion.
+- Add Kubernetes validators for resource names and bounded log durations.
 - Publish a dated, versioned desktop certification snapshot for KDE, GNOME,
   Sway, and Hyprland. It separates CI/headless results from physical-session
   evidence and lists the remaining lock, layout, suspend, portal, and soak
