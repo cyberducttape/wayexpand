@@ -10,14 +10,14 @@ trigger = ";;nginx-service-status"
 description = "Inspect nginx service state and recent unit messages"
 category = "Nginx"
 tags = ["nginx", "systemd", "read-only"]
-replacement = "systemctl status nginx --no-pager && journalctl -u nginx --since '{{field:since=30 minutes ago}}' --no-pager -n {{field:lines=100}}"
+replacement = "systemctl status nginx --no-pager && journalctl -u nginx --since {{shellq:since=30 minutes ago|required|max=80|validate=duration}} --no-pager -n {{shellq:lines=100|required|max=5|validate=positive-integer}}"
 
 [[expansion]]
 trigger = ";;nginx-http-probe"
 description = "Check response headers and timing for one virtual host"
 category = "Nginx"
 tags = ["nginx", "http", "read-only"]
-replacement = "curl --silent --show-error --head --max-time 10 --write-out 'status=%{http_code} total=%{time_total}s\\n' -- {{shellq:url=https://example.net/health|required|max=2048}}"
+replacement = "curl --silent --show-error --head --max-time 10 --write-out 'status=%{http_code} total=%{time_total}s\\n' -- {{shellq:url=https://example.net/health|required|max=2048|validate=url}}"
 
 [[expansion]]
 trigger = ";;nginx-server-block"

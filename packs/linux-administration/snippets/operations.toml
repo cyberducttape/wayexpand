@@ -3,7 +3,7 @@ trigger = ";;journal-service"
 description = "Inspect recent service logs without following or modifying the unit"
 category = "Linux operations"
 tags = ["systemd", "journalctl"]
-replacement = "journalctl --user -u {{shellq:unit=example.service|required|max=255|validate=systemd-unit}} --since {{shellq:since=1 hour ago|required|max=80}} --no-pager -n {{shellq:lines=100|required|max=5|validate=positive-integer}}"
+replacement = "journalctl --user -u {{shellq:unit=example.service|required|max=255|validate=systemd-unit}} --since {{shellq:since=1 hour ago|required|max=80|validate=duration}} --no-pager -n {{shellq:lines=100|required|max=5|validate=positive-integer}}"
 
 [[expansion]]
 trigger = ";;service-status"
@@ -28,7 +28,7 @@ replacement = """#!/usr/bin/env bash
 set -Eeuo pipefail
 
 main() {
-    local target="{{field:target=/path/to/target}}"
+    local target="{{shellq:target=/path/to/target|required|max=4096|validate=absolute-path}}"
     printf 'Review target before continuing: %s\\n' \"$target\"
 }
 
@@ -41,11 +41,11 @@ description = "Hardened user service unit starter"
 category = "Linux operations"
 tags = ["systemd", "unit"]
 replacement = """[Unit]
-Description={{field:description=Example user service}}
+Description={{field:description=Example user service|required|max=256|validate=single-line}}
 
 [Service]
 Type=simple
-ExecStart={{field:executable=/usr/bin/example}} {{field:arguments=--foreground}}
+ExecStart={{field:executable=/usr/bin/example|required|max=4096|validate=systemd-executable}} {{field:arguments=--foreground|max=1024|free_text=true}}
 Restart=on-failure
 NoNewPrivileges=yes
 PrivateTmp=yes

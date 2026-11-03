@@ -22,7 +22,11 @@ wayexpand pack diff wayexpand.database-operations ./packs/database-operations --
 
 `pack lint` checks structural and configuration validity, required maintainer,
 compatibility, risk, review, and verification metadata, safe fixture paths,
-signatures, and active organization policy admission. Add
+signatures, active organization policy admission, and operational form fields.
+In command or configuration snippets, every free-text field must use a
+context-appropriate `validate=...` rule or explicitly declare
+`free_text=true` when arbitrary content is intentional. The JSON report lists
+each failing trigger, source file, and field in `field_findings`. Add
 `--require-signature --signers ./allowed_signers` to require a trusted SSH
 signature in release CI. `pack test` imports the pack with all command and
 hotkey execution disabled, renders declared test cases, and compares exact

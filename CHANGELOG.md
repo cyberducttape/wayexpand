@@ -4,6 +4,15 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Extend pack lint with an operational-field gate: command/config interpolations
+  require a domain validator or explicit `free_text=true`, and JSON failures
+  identify the exact pack file, trigger, and field. Add URL, URL path, duration,
+  Git revision, SQL identifier, and container-name validators; apply them to
+  maintained operations packs and shell-quote path and revision arguments.
+- Confirm and document that libei negotiates native UTF-8 `ei_text` before
+  keysym synthesis; paced keysym fallback stays visibly labeled and refuses
+  output above the configured limit before trigger deletion. Long file content
+  should use `wayexpand new` or manual clipboard insertion.
 - Add CI-oriented `wayexpand pack lint` and `pack test` commands with stable
   JSON reports, exact output fixtures, optional required-signature checks, and
   organization-policy admission findings. `pack diff --json` now returns

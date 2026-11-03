@@ -92,6 +92,21 @@ fn lint_pack(
             .as_deref()
             .unwrap_or("the merged static snippet configuration is valid"),
     );
+    let operational_fields = operational_field_findings(&inspection.expansions);
+    let operational_field_message = if operational_fields.is_empty() {
+        "operational fields have a domain validator, constrained choices, or explicit free_text=true justification".to_owned()
+    } else {
+        format!(
+            "{} operational field(s) need validate=... or explicit free_text=true; see field_findings",
+            operational_fields.len()
+        )
+    };
+    add_check(
+        &mut checks,
+        "operational field validation",
+        operational_fields.is_empty(),
+        &operational_field_message,
+    );
     add_check(
         &mut checks,
         "maintainer",
@@ -136,6 +151,7 @@ fn lint_pack(
                 "pack": {"id": manifest.id, "version": manifest.version, "fingerprint": inspection.fingerprint, "path": path},
                 "signature": {"status":"not_checked"},
                 "checks": checks,
+                "field_findings": operational_fields,
             });
             if json {
                 println!("{report}");
@@ -203,6 +219,7 @@ fn lint_pack(
         "pack": {"id": manifest.id, "version": manifest.version, "fingerprint": inspection.fingerprint, "path": path},
         "signature": signature,
         "checks": checks,
+        "field_findings": operational_fields,
     });
     if json {
         println!("{report}");
@@ -230,6 +247,89 @@ fn lint_pack(
         bail!("pack lint failed; see checks above");
     }
     Ok(())
+}
+
+fn operational_field_findings(
+    expansions: &[wayexpand_core::PackExpansionReview],
+) -> Vec<serde_json::Value> {
+    expansions
+        .iter()
+        .filter(|expansion| looks_operational(&expansion.replacement))
+        .flat_map(|expansion| {
+            form_fields(&expansion.replacement)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|field| {
+                    field.validation.is_none()
+                        && !field.free_text
+                        && !matches!(field.kind, wayexpand_core::FormFieldKind::Choice { .. })
+                })
+                .map(|field| {
+                    serde_json::json!({
+                        "file": expansion.file,
+                        "trigger": expansion.trigger,
+                        "field": field.label,
+                        "key": field.key,
+                        "reason": "operational interpolation needs a domain validator or explicit free_text=true justification",
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+fn looks_operational(replacement: &str) -> bool {
+    const COMMANDS: &[&str] = &[
+        "ansible",
+        "ansible-playbook",
+        "ansible-inventory",
+        "apt",
+        "awk",
+        "aws",
+        "bash",
+        "curl",
+        "docker",
+        "find",
+        "git",
+        "gh",
+        "grep",
+        "helm",
+        "iptables",
+        "journalctl",
+        "kubectl",
+        "mysql",
+        "nc",
+        "nginx",
+        "openssl",
+        "podman",
+        "psql",
+        "resolvectl",
+        "rpm",
+        "rsync",
+        "sed",
+        "sh",
+        "ssh",
+        "systemctl",
+        "tee",
+        "terraform",
+        "ufw",
+    ];
+    let lower = replacement.to_ascii_lowercase();
+    lower.contains("{{shellq:")
+        || lower
+            .split(|character: char| {
+                !character.is_ascii_alphanumeric() && !matches!(character, '_' | '-')
+            })
+            .any(|token| COMMANDS.contains(&token))
+        || lower.lines().any(|line| {
+            let line = line.trim_start();
+            ["select ", "insert into ", "update ", "delete from "]
+                .iter()
+                .any(|statement| line.starts_with(statement))
+                || ["execstart=", "listen ", "image:", "replicas:", "hosts:"]
+                    .iter()
+                    .any(|directive| line.starts_with(directive))
+        })
 }
 
 fn lint_fixture(

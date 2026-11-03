@@ -3,14 +3,14 @@ trigger = ";;ansible-syntax-check"
 description = "Check a playbook's syntax without executing its tasks"
 category = "Ansible"
 tags = ["ansible", "validation"]
-replacement = "ansible-playbook --syntax-check {{field:playbook=site.yml}}"
+replacement = "ansible-playbook --syntax-check {{shellq:playbook=/tmp/site.yml|required|max=512|validate=absolute-path}}"
 
 [[expansion]]
 trigger = ";;ansible-inventory"
 description = "Inspect inventory grouping without connecting to hosts"
 category = "Ansible"
 tags = ["ansible", "inventory", "read-only"]
-replacement = "ansible-inventory --graph --inventory {{field:inventory=inventory.ini}}"
+replacement = "ansible-inventory --graph --inventory {{shellq:inventory=/tmp/inventory.ini|required|max=512|validate=absolute-path}}"
 
 [[expansion]]
 trigger = ";;ansible-package-play"

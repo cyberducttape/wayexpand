@@ -46,7 +46,7 @@ description = "Review the active Kubernetes or cloud CLI identity before an oper
 category = "Operations triage"
 tags = ["cloud", "kubernetes", "target-review", "read-only"]
 replacement = """Operator-selected environment: {{choice:environment=development|staging|production;default=staging;required}}
-Expected account, project, or cluster: {{field:expected target|required|max=256}}
+Expected account, project, or cluster: {{field:expected target|required|max=256|free_text=true}}
 
 This does not infer or select your shell, SSH, container, Kubernetes, or cloud context. Review the expected target, then choose and run the matching read-only identity command in the intended session:
 {{choice:identity command=kubectl config current-context|aws sts get-caller-identity|gcloud config get-value project|az account show --output table;required}}
@@ -59,7 +59,7 @@ trigger = ";;http-check"
 description = "Status, timing, and headers for one HTTP request, without the body"
 category = "Operations triage"
 tags = ["http", "network"]
-replacement = "curl -sS -o /dev/null -D - -w 'status=%{http_code} connect=%{time_connect}s ttfb=%{time_starttransfer}s total=%{time_total}s\\n' -- {{shellq:url=https://example.net/health|required|max=2048}}"
+replacement = "curl -sS -o /dev/null -D - -w 'status=%{http_code} connect=%{time_connect}s ttfb=%{time_starttransfer}s total=%{time_total}s\\n' -- {{shellq:url=https://example.net/health|required|max=2048|validate=url}}"
 
 [[expansion]]
 trigger = ";;nginx-test"
@@ -80,7 +80,7 @@ trigger = ";;failed-units"
 description = "List failed systemd units and the most recent errors"
 category = "Operations triage"
 tags = ["systemd", "diagnostics"]
-replacement = "systemctl --failed --no-pager && journalctl -p err -b --no-pager -n {{field:lines=50}}"
+replacement = "systemctl --failed --no-pager && journalctl -p err -b --no-pager -n {{shellq:lines=50|required|max=5|validate=positive-integer}}"
 
 [[expansion]]
 trigger = ";http503"

@@ -143,6 +143,10 @@ pub struct FormField {
     /// template rendering.
     #[serde(default)]
     pub validation: Option<FormFieldValidation>,
+    /// Explicitly documents that arbitrary text is intentional. Operational
+    /// pack linting accepts this only when a field has no domain validator.
+    #[serde(default)]
+    pub free_text: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -165,6 +169,12 @@ pub enum FormFieldValidation {
     ContainerImage,
     SingleLine,
     ShellSingleQuoted,
+    Duration,
+    GitRevision,
+    SqlIdentifier,
+    Url,
+    ContainerName,
+    UrlPath,
 }
 
 impl FormFieldValidation {
@@ -187,6 +197,12 @@ impl FormFieldValidation {
             "container-image" => Self::ContainerImage,
             "single-line" => Self::SingleLine,
             "shell-single-quoted" => Self::ShellSingleQuoted,
+            "duration" => Self::Duration,
+            "git-revision" => Self::GitRevision,
+            "sql-identifier" => Self::SqlIdentifier,
+            "url" => Self::Url,
+            "container-name" => Self::ContainerName,
+            "url-path" => Self::UrlPath,
             _ => return None,
         })
     }
@@ -210,6 +226,14 @@ impl FormFieldValidation {
             Self::ContainerImage => "container image reference",
             Self::SingleLine => "single-line value",
             Self::ShellSingleQuoted => "single-line value safe inside shell single quotes",
+            Self::Duration => "duration such as 15m or 1 hour ago",
+            Self::GitRevision => "Git revision or ref without option or shell syntax",
+            Self::SqlIdentifier => {
+                "SQL identifier, schema-qualified identifier, or identifier list"
+            }
+            Self::Url => "HTTP or HTTPS URL with a valid host and no whitespace",
+            Self::ContainerName => "Docker container name or hexadecimal ID",
+            Self::UrlPath => "single-line absolute URL path",
         }
     }
 
@@ -297,8 +321,112 @@ impl FormFieldValidation {
                         .chars()
                         .any(|character| character.is_control() || character == '\'')
             }
+            Self::Duration => valid_duration(value),
+            Self::GitRevision => valid_git_revision(value),
+            Self::SqlIdentifier => valid_sql_identifier(value),
+            Self::Url => valid_http_url(value),
+            Self::ContainerName => {
+                !value.starts_with('-')
+                    && ((value.len() >= 12
+                        && value.len() <= 64
+                        && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+                        || (!value.is_empty()
+                            && value.len() <= 128
+                            && value.bytes().all(|byte| {
+                                byte.is_ascii_alphanumeric() || b"_.-".contains(&byte)
+                            })))
+            }
+            Self::UrlPath => {
+                value.starts_with('/')
+                    && !value.chars().any(|character| {
+                        character.is_control() || character.is_whitespace() || character == '\''
+                    })
+            }
         }
     }
+}
+
+fn valid_duration(value: &str) -> bool {
+    let compact = value
+        .strip_suffix('s')
+        .or_else(|| value.strip_suffix('m'))
+        .or_else(|| value.strip_suffix('h'));
+    if compact.is_some_and(|number| number.parse::<u32>().is_ok_and(|value| value > 0)) {
+        return true;
+    }
+    let words = value.split_whitespace().collect::<Vec<_>>();
+    matches!(words.as_slice(), [number, unit, "ago"]
+        if number.parse::<u32>().is_ok_and(|value| value > 0)
+            && matches!(*unit, "second" | "seconds" | "minute" | "minutes" | "hour" | "hours" | "day" | "days" | "week" | "weeks"))
+}
+
+fn valid_git_revision(value: &str) -> bool {
+    !value.is_empty()
+        && !value.starts_with('-')
+        && !value.contains("..")
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"._/-~^@{}".contains(&byte))
+}
+
+fn valid_sql_identifier(value: &str) -> bool {
+    value == "*"
+        || (!value.is_empty()
+            && value.split(',').all(|item| {
+                !item.is_empty()
+                    && item.split('.').all(|part| {
+                        let mut bytes = part.bytes();
+                        bytes
+                            .next()
+                            .is_some_and(|first| first.is_ascii_alphabetic() || first == b'_')
+                            && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+                    })
+            }))
+}
+
+fn valid_http_url(value: &str) -> bool {
+    let Some(rest) = value
+        .strip_prefix("https://")
+        .or_else(|| value.strip_prefix("http://"))
+    else {
+        return false;
+    };
+    if rest.is_empty()
+        || value.chars().any(|character| {
+            character.is_control() || character.is_whitespace() || character == '\''
+        })
+    {
+        return false;
+    }
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    if authority.contains('@') {
+        return false;
+    }
+    let host = if let Some(address) = authority.strip_prefix('[') {
+        let Some((address, suffix)) = address.split_once(']') else {
+            return false;
+        };
+        if address.parse::<std::net::Ipv6Addr>().is_err() {
+            return false;
+        }
+        if suffix.is_empty() {
+            return true;
+        }
+        let Some(port) = suffix.strip_prefix(':') else {
+            return false;
+        };
+        return valid_port(port);
+    } else {
+        authority
+            .rsplit_once(':')
+            .filter(|(_, port)| port.bytes().all(|byte| byte.is_ascii_digit()))
+            .map_or(authority, |(host, _)| host)
+    };
+    valid_host(host)
+        && authority
+            .rsplit_once(':')
+            .filter(|(_, port)| port.bytes().all(|byte| byte.is_ascii_digit()))
+            .is_none_or(|(_, port)| valid_port(port))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -484,6 +612,7 @@ struct ParsedFormAttributes {
     min_chars: Option<usize>,
     max_chars: Option<usize>,
     validation: Option<FormFieldValidation>,
+    free_text: bool,
 }
 
 fn parse_form_attributes(
@@ -494,6 +623,7 @@ fn parse_form_attributes(
     let mut min_chars = None;
     let mut max_chars = None;
     let mut validation = None;
+    let mut free_text = false;
     for attribute in attributes {
         let attribute = attribute.trim();
         if attribute == "required" && !required {
@@ -514,11 +644,16 @@ fn parse_form_attributes(
             }
             validation =
                 Some(FormFieldValidation::parse(value).ok_or(TemplateError::InvalidField)?);
+        } else if attribute == "free_text=true" && !free_text {
+            free_text = true;
         } else {
             return Err(TemplateError::InvalidField);
         }
     }
-    if min_chars.zip(max_chars).is_some_and(|(min, max)| min > max) {
+    if (!allow_length && free_text)
+        || min_chars.zip(max_chars).is_some_and(|(min, max)| min > max)
+        || (free_text && validation.is_some())
+    {
         return Err(TemplateError::InvalidField);
     }
     Ok(ParsedFormAttributes {
@@ -526,6 +661,7 @@ fn parse_form_attributes(
         min_chars,
         max_chars,
         validation,
+        free_text,
     })
 }
 
@@ -578,6 +714,7 @@ fn parse_form_field(name: &str) -> Option<Result<FormField, TemplateError>> {
             min_chars,
             max_chars,
             validation,
+            free_text,
         } = match validation {
             Ok(validation) => validation,
             Err(error) => return Some(Err(error)),
@@ -592,6 +729,7 @@ fn parse_form_field(name: &str) -> Option<Result<FormField, TemplateError>> {
             min_chars,
             max_chars,
             validation,
+            free_text,
         }));
     }
     if let Some(spec) = name.strip_prefix("datefield:") {
@@ -608,6 +746,7 @@ fn parse_form_field(name: &str) -> Option<Result<FormField, TemplateError>> {
             min_chars,
             max_chars,
             validation,
+            free_text: _,
         } = match parse_form_attributes(&attributes, false) {
             Ok(validation) => validation,
             Err(error) => return Some(Err(error)),
@@ -625,6 +764,7 @@ fn parse_form_field(name: &str) -> Option<Result<FormField, TemplateError>> {
             min_chars,
             max_chars,
             validation,
+            free_text: false,
         }));
     }
     let spec = name.strip_prefix("choice:")?;
@@ -673,6 +813,7 @@ fn parse_form_field(name: &str) -> Option<Result<FormField, TemplateError>> {
         min_chars: None,
         max_chars: None,
         validation: None,
+        free_text: false,
     }))
 }
 
