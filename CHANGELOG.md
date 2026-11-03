@@ -8,6 +8,13 @@ All notable changes to WayExpand are documented here.
   return them with completion, avoiding a second allocation of the full
   replacement text. Pending reactor state retains only the trigger needed for
   outcome bookkeeping.
+- Make the effective security snapshot regression portable to CI hosts where
+  `/tmp` shares the root mount; retain the live mount ID when one is available.
+- Add `wayexpand doctor --security` to probe the running daemon and broker for
+  active namespaces, seccomp/NoNewPrivs, address-family restrictions, effective
+  filesystem protections, resource limits, config permissions, and broker
+  health. Restrictions that cannot be verified without elevated inspection
+  are reported as unverified.
 - Add opt-in Bash, Zsh, and Fish terminal context reporting. Reports bind to
   the local terminal device and random shell session, expire quickly, and can
   include Git root, configured Kubernetes context, explicit environment and
