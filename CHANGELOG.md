@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add opt-in Bash, Zsh, and Fish terminal context reporting. Reports bind to
+  the local terminal device and random shell session, expire quickly, and can
+  include Git root, configured Kubernetes context, explicit environment and
+  container labels, and an SSH destination supplied to `wayexpand-ssh`.
+  Context is bound to a local terminal and random shell session, is
+  informational, and never authorizes execution or guesses remote destinations
+  from shell history or terminal contents.
 - Gate IBus replacement through the shared capability admission contract.
   Non-atomic replacement is refused by default, expansion accounting waits
   for successful signal emission. Outcomes distinguish fully emitted but
