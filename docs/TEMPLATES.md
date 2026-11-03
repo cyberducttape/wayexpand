@@ -182,7 +182,22 @@ newlines and tabs. The same `min`, `max`, and `validate` constraints available
 on `{{field:...}}` markers can be applied to `{{shellq:...}}` values. Quoting
 protects shell word boundaries when an operator later runs the command; it
 does not make the command safe to execute or authorize execution. WayExpand
-inserts the completed command for review and does not press Enter.
+inserts the completed command for review and does not press Enter. The form
+shows a live preview of the exact field-only text that will be inserted.
+
+Kubernetes fields support `validate=dns-label` for namespaces and container
+names, `validate=kubernetes-name` for pod names, and
+`validate=kubernetes-duration` for positive Go-style durations up to 30 days
+(for example `15m` or `1h30m`). These checks run in the form and again when
+the daemon renders submitted values.
+
+The Kubernetes `;klogs` form reads the current local `kubectl` context using
+the read-only `kubectl config current-context` command, pre-fills it for
+review, and pins that context in the previewed `kubectl logs` command. If it
+cannot read a context, the context field stays empty and must be filled before
+insertion. The generated command remains text; WayExpand does not execute it.
+Infrastructure-changing operations need a separately authorized action and
+explicit confirmation.
 
 ```toml
 [[expansion]]

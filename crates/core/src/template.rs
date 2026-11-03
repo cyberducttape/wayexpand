@@ -164,6 +164,7 @@ pub enum FormFieldValidation {
     ContainerImage,
     KubernetesName,
     Duration,
+    KubernetesDuration,
     SingleLine,
     ShellSingleQuoted,
 }
@@ -187,6 +188,7 @@ impl FormFieldValidation {
             "container-image" => Self::ContainerImage,
             "kubernetes-name" => Self::KubernetesName,
             "duration" => Self::Duration,
+            "kubernetes-duration" => Self::KubernetesDuration,
             "single-line" => Self::SingleLine,
             "shell-single-quoted" => Self::ShellSingleQuoted,
             _ => return None,
@@ -211,6 +213,7 @@ impl FormFieldValidation {
             Self::ContainerImage => "container image reference",
             Self::KubernetesName => "Kubernetes DNS subdomain name",
             Self::Duration => "positive integer duration with ns, us, µs, ms, s, m, or h unit",
+            Self::KubernetesDuration => "Kubernetes log duration up to 30 days",
             Self::SingleLine => "single-line value",
             Self::ShellSingleQuoted => "single-line value safe inside shell single quotes",
         }
@@ -295,6 +298,12 @@ impl FormFieldValidation {
             }
             Self::KubernetesName => valid_dns_subdomain(value),
             Self::Duration => valid_positive_duration(value),
+            Self::KubernetesName => {
+                !value.is_empty()
+                    && value.len() <= 253
+                    && value.split('.').all(|label| valid_dns_label(label, false))
+            }
+            Self::KubernetesDuration => valid_kubernetes_duration(value),
             Self::SingleLine => !value.chars().any(char::is_control),
             Self::ShellSingleQuoted => {
                 !value.is_empty()
@@ -304,6 +313,49 @@ impl FormFieldValidation {
             }
         }
     }
+}
+
+fn valid_kubernetes_duration(value: &str) -> bool {
+    const MAX_NANOS: u128 = 30 * 24 * 60 * 60 * 1_000_000_000;
+    let mut remaining = value;
+    let mut total = 0u128;
+    while !remaining.is_empty() {
+        let digit_count = remaining.bytes().take_while(u8::is_ascii_digit).count();
+        if digit_count == 0 {
+            return false;
+        }
+        let Ok(amount) = remaining[..digit_count].parse::<u128>() else {
+            return false;
+        };
+        remaining = &remaining[digit_count..];
+        let (unit, multiplier) = [
+            ("ns", 1u128),
+            ("us", 1_000),
+            ("µs", 1_000),
+            ("ms", 1_000_000),
+            ("s", 1_000_000_000),
+            ("m", 60 * 1_000_000_000),
+            ("h", 60 * 60 * 1_000_000_000),
+        ]
+        .into_iter()
+        .find(|(unit, _)| remaining.starts_with(unit))
+        .unwrap_or(("", 0));
+        if unit.is_empty() {
+            return false;
+        }
+        let Some(nanos) = amount
+            .checked_mul(multiplier)
+            .and_then(|nanos| total.checked_add(nanos))
+        else {
+            return false;
+        };
+        if nanos > MAX_NANOS {
+            return false;
+        }
+        total = nanos;
+        remaining = &remaining[unit.len()..];
+    }
+    total > 0
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
