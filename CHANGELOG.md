@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Make the effective security snapshot regression portable to CI hosts where
+  `/tmp` shares the root mount; retain the live mount ID when one is available.
 - Add `wayexpand doctor --security` to probe the running daemon and broker for
   active namespaces, seccomp/NoNewPrivs, address-family restrictions, effective
   filesystem protections, resource limits, config permissions, and broker

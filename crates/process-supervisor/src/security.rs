@@ -314,7 +314,8 @@ fn mount_id_for(path: &Path) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
-    use super::effective_security_snapshot;
+    use super::{effective_security_snapshot, mount_id_for};
+    use std::path::Path;
 
     #[test]
     fn effective_snapshot_reports_live_kernel_state_without_user_data() {
@@ -323,7 +324,10 @@ mod tests {
         assert!(snapshot.namespaces.mount.is_some());
         assert!(snapshot.seccomp_mode.is_some());
         assert!(snapshot.no_new_privileges.is_some());
-        assert!(snapshot.tmp_mount_id.is_some());
+        // Some CI hosts mount `/tmp` as part of `/` rather than as a separate
+        // mount, so the exact mountpoint may be unavailable. The snapshot
+        // should report the same optional value as the live mount table probe.
+        assert_eq!(snapshot.tmp_mount_id, mount_id_for(Path::new("/tmp")));
         assert!(snapshot.max_open_files.is_some());
     }
 }
