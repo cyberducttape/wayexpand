@@ -44,6 +44,9 @@ All notable changes to WayExpand are documented here.
   Non-atomic replacement is refused by default, expansion accounting waits
   for successful signal emission. Outcomes distinguish fully emitted but
   unverified text from a possibly partial signal sequence.
+- Split evdev polling and translation, template form validation and parsing,
+  control protocol and diagnostics, and reload file watching into focused
+  modules while keeping existing behavior and public APIs intact.
 - Reduce evdev capture polling churn and layout background traffic, while
   retaining compositor layout-change notification with a slower fallback.
 - Add insert-only sysadmin diagnostic templates for TLS, service, port, HTTP,
