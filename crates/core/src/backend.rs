@@ -423,6 +423,14 @@ pub enum ReplacementGuarantee {
     Atomic,
 }
 
+/// Admission decision shared by every output backend before it erases text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplacementAdmission {
+    Atomic,
+    ExplicitCompatibility,
+    Refused,
+}
+
 impl ReplacementGuarantee {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -462,6 +470,25 @@ pub struct InjectorCapabilities {
     pub cursor_reposition: bool,
     /// The backend can preserve unsupported physical key press/release events.
     pub key_passthrough: bool,
+}
+
+impl InjectorCapabilities {
+    /// Admit replacement only when the route is atomic or the user explicitly
+    /// enabled a compatibility mode for non-atomic output.
+    pub fn replacement_admission(
+        self,
+        compatibility: crate::CompatibilityMode,
+    ) -> ReplacementAdmission {
+        if self.atomic_replace && self.replacement_guarantee == ReplacementGuarantee::Atomic {
+            ReplacementAdmission::Atomic
+        } else if compatibility != crate::CompatibilityMode::Off
+            && self.replacement_guarantee != ReplacementGuarantee::Unsupported
+        {
+            ReplacementAdmission::ExplicitCompatibility
+        } else {
+            ReplacementAdmission::Refused
+        }
+    }
 }
 
 /// The platform-independent operation required by the expansion engine.
