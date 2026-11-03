@@ -52,8 +52,9 @@ pub fn readable_keyboard_available() -> bool {
 }
 
 use std::{
+    cell::RefCell,
     collections::{HashSet, VecDeque},
-    os::fd::{AsFd, BorrowedFd, OwnedFd},
+    os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd},
     path::Path,
     sync::Arc,
     time::{Duration, Instant},
@@ -78,6 +79,156 @@ const MAX_PENDING_EVENTS: usize = 4096;
 /// kernel ring buffer and device adapter retain any remaining events for the
 /// next turn; no event batch is silently truncated.
 const MAX_RAW_EVENTS_PER_SLICE: usize = 128;
+
+#[derive(Default)]
+struct PollBuffers {
+    descriptors: Vec<libc::pollfd>,
+    ready: Vec<usize>,
+    lost: Vec<usize>,
+}
+
+thread_local! {
+    /// `poll_once` runs on the source's owning reactor thread. Reuse its
+    /// descriptor and index storage instead of allocating three vectors on
+    /// every idle/input turn.
+    static POLL_BUFFERS: RefCell<PollBuffers> = RefCell::new(PollBuffers::default());
+}
+
+/// Synthetic device harness for the full capture-and-translation benchmark.
+/// It exercises descriptor polling, device batch reads, XKB translation and
+/// event queuing without requiring access to a physical keyboard.
+#[cfg(feature = "benchmark")]
+pub mod benchmark_support {
+    use super::*;
+    use std::{
+        io::{Read, Write},
+        os::fd::BorrowedFd,
+        os::unix::net::UnixStream,
+        path::Path,
+        sync::{Arc, Mutex},
+    };
+
+    struct BenchKeyboard {
+        reader: UnixStream,
+        events: Arc<Mutex<Vec<evdev::InputEvent>>>,
+    }
+
+    impl device::KeyboardDeviceAccess for BenchKeyboard {
+        fn path(&self) -> &Path {
+            Path::new("/benchmark/evdev-keyboard")
+        }
+
+        fn as_fd(&self) -> BorrowedFd<'_> {
+            self.reader.as_fd()
+        }
+
+        fn fetch_events(&mut self, output: &mut Vec<evdev::InputEvent>) -> std::io::Result<()> {
+            let mut ready = [0_u8; 1];
+            let _ = self.reader.read(&mut ready)?;
+            output.clear();
+            output.extend(
+                self.events
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .drain(..),
+            );
+            Ok(())
+        }
+    }
+
+    struct BenchLayoutProvider;
+
+    impl KeyboardLayoutProvider for BenchLayoutProvider {
+        fn snapshot(&mut self) -> Option<KeyboardLayoutSnapshot> {
+            Some(KeyboardLayoutSnapshot {
+                generation: 1,
+                group: 0,
+                rules: None,
+                model: None,
+                layout: None,
+                variant: None,
+                options: None,
+            })
+        }
+    }
+
+    pub struct CaptureSource {
+        source: EvdevSource,
+        writer: UnixStream,
+        events: Arc<Mutex<Vec<evdev::InputEvent>>>,
+    }
+
+    impl CaptureSource {
+        pub fn new() -> Self {
+            let (reader, writer) = UnixStream::pair().expect("create benchmark device");
+            reader
+                .set_nonblocking(true)
+                .expect("set benchmark device nonblocking");
+            let events = Arc::new(Mutex::new(Vec::with_capacity(2)));
+            let context = Context::new(0).expect("create benchmark XKB context");
+            let keymap = Keymap::new_from_names(context, None, 0).expect("create benchmark keymap");
+            Self {
+                source: EvdevSource {
+                    devices: vec![Box::new(BenchKeyboard {
+                        reader,
+                        events: Arc::clone(&events),
+                    })],
+                    state: State::new(keymap),
+                    layout_provider: Box::new(BenchLayoutProvider),
+                    layout_generation: Some(1),
+                    layout_available: true,
+                    pending: VecDeque::with_capacity(4),
+                    raw_events: Vec::with_capacity(4),
+                    raw_event_cursor: 0,
+                    raw_event_device: None,
+                    pending_lost_devices: Vec::new(),
+                    pressed: vec![HashSet::new()],
+                    last_device_refresh: Instant::now(),
+                    wake: None,
+                    topology_watch: None,
+                    topology_refresh_pending: false,
+                },
+                writer,
+                events,
+            }
+        }
+
+        /// Capture and translate one ASCII key press/release pair; return the
+        /// number of generated core input events.
+        pub fn capture_ascii_pair(&mut self, keycode: u16) -> usize {
+            self.capture_ascii_pair_with(keycode, false)
+        }
+
+        pub fn capture_ascii_pair_allocating_baseline(&mut self, keycode: u16) -> usize {
+            self.capture_ascii_pair_with(keycode, true)
+        }
+
+        fn capture_ascii_pair_with(&mut self, keycode: u16, allocating_baseline: bool) -> usize {
+            {
+                let mut events = self
+                    .events
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
+                events.clear();
+                events.push(evdev::InputEvent::new(evdev::EventType::KEY.0, keycode, 1));
+                events.push(evdev::InputEvent::new(evdev::EventType::KEY.0, keycode, 0));
+            }
+            self.writer.write_all(&[1]).expect("wake benchmark device");
+            if allocating_baseline {
+                self.source
+                    .poll_once_allocating(Duration::from_millis(1), false)
+                    .expect("poll and translate benchmark device");
+            } else {
+                self.source
+                    .poll_once(Duration::from_millis(1), false)
+                    .expect("poll and translate benchmark device");
+            }
+            let count = self.source.pending.len();
+            self.source.pending.clear();
+            count
+        }
+    }
+}
 
 /// A compositor supplied keymap snapshot. `generation` must change whenever
 /// the effective layout changes, including while modifiers are held.
@@ -282,6 +433,118 @@ impl EvdevSource {
                 self.apply_pending_lost_devices()?;
             }
             return Ok(key_activity);
+        }
+        self.apply_pending_lost_devices()?;
+        if self.devices.is_empty() {
+            return Err(EvdevError::AllDevicesLost);
+        }
+        POLL_BUFFERS.with(|scratch| {
+            let mut scratch = scratch.borrow_mut();
+            scratch.descriptors.clear();
+            scratch.ready.clear();
+            scratch.lost.clear();
+            scratch
+                .descriptors
+                .extend(self.devices.iter().map(|device| libc::pollfd {
+                    fd: device.as_fd().as_raw_fd(),
+                    events: libc::POLLIN | libc::POLLERR | libc::POLLHUP | libc::POLLNVAL,
+                    revents: 0,
+                }));
+            let device_count = scratch.descriptors.len();
+            let topology_index = self.topology_watch.as_ref().map(|watch| {
+                scratch.descriptors.push(libc::pollfd {
+                    fd: watch.as_raw_fd(),
+                    events: libc::POLLIN | libc::POLLERR | libc::POLLHUP | libc::POLLNVAL,
+                    revents: 0,
+                });
+                scratch.descriptors.len() - 1
+            });
+            let wake = with_wake.then_some(self.wake.as_deref()).flatten();
+            if let Some(wake) = wake {
+                scratch.descriptors.push(libc::pollfd {
+                    fd: wake.as_raw_fd(),
+                    events: libc::POLLIN,
+                    revents: 0,
+                });
+            }
+            let timeout = libc::timespec {
+                tv_sec: timeout.as_secs().try_into().unwrap_or(i64::MAX),
+                tv_nsec: timeout.subsec_nanos().into(),
+            };
+            // SAFETY: descriptors contain live borrowed fds owned by `self`
+            // for the duration of this call; ppoll does not retain pointers.
+            let poll_result = unsafe {
+                libc::ppoll(
+                    scratch.descriptors.as_mut_ptr(),
+                    scratch.descriptors.len() as libc::nfds_t,
+                    &timeout,
+                    std::ptr::null(),
+                )
+            };
+            if poll_result < 0 {
+                let error = std::io::Error::last_os_error();
+                if error.raw_os_error() == Some(libc::EINTR) {
+                    return Ok(false);
+                }
+                return Err(EvdevError::Poll(error.to_string()));
+            }
+            if wake.is_some()
+                && scratch
+                    .descriptors
+                    .last()
+                    .is_some_and(|fd| fd.revents & libc::POLLIN != 0)
+            {
+                if let Some(wake) = wake {
+                    drain_wake_fd(wake.as_fd());
+                }
+            }
+            let topology_revents = topology_index.map(|index| scratch.descriptors[index].revents);
+            for index in 0..device_count {
+                let revents = scratch.descriptors[index].revents;
+                if revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
+                    scratch.lost.push(index);
+                } else if revents & libc::POLLIN != 0 {
+                    scratch.ready.push(index);
+                }
+            }
+            let topology_changed = match topology_revents {
+                Some(revents)
+                    if revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 =>
+                {
+                    return Err(EvdevError::HotplugMonitor(
+                        "inotify descriptor became unavailable".into(),
+                    ));
+                }
+                Some(revents) if revents & libc::POLLIN != 0 => {
+                    let watch = self.topology_watch.as_ref().ok_or_else(|| {
+                        EvdevError::HotplugMonitor("inotify descriptor disappeared".into())
+                    })?;
+                    drain_topology_events(watch.as_fd())?
+                }
+                _ => false,
+            };
+            self.pending_lost_devices
+                .extend(scratch.lost.iter().copied());
+            let key_activity = self.drain_ready(&scratch.ready)?;
+            if !self.has_buffered_raw_events() {
+                self.apply_pending_lost_devices()?;
+            }
+            self.topology_refresh_pending |= topology_changed;
+            Ok(key_activity || topology_changed)
+        })
+    }
+
+    /// Previous allocating poll loop retained only in the benchmark feature
+    /// to compare the same capture/translation workload before and after the
+    /// reusable-buffer change.
+    #[cfg(feature = "benchmark")]
+    fn poll_once_allocating(
+        &mut self,
+        timeout: Duration,
+        with_wake: bool,
+    ) -> Result<bool, EvdevError> {
+        if self.devices.is_empty() {
+            return Err(EvdevError::AllDevicesLost);
         }
         self.apply_pending_lost_devices()?;
         if self.devices.is_empty() {
@@ -1020,6 +1283,7 @@ fn drain_topology_events(fd: BorrowedFd<'_>) -> Result<bool, EvdevError> {
 /// Poll the device descriptors and, when present, the final wake descriptor.
 /// Keeping wake handling here lets its readiness and drain behavior be tested
 /// without opening a host keyboard device.
+#[cfg(any(test, feature = "benchmark"))]
 fn poll_with_wake(
     fds: &mut [rustix::event::PollFd<'_>],
     timeout: Duration,
@@ -1406,6 +1670,30 @@ mod tests {
             Some(InputEvent::Key(_))
         ));
         assert_eq!(source.pending.pop_front(), Some(InputEvent::TextChar('a')));
+
+        let warmed_capacities = POLL_BUFFERS.with(|buffers| {
+            let buffers = buffers.borrow();
+            (
+                buffers.descriptors.capacity(),
+                buffers.ready.capacity(),
+                buffers.lost.capacity(),
+            )
+        });
+        events
+            .lock()
+            .unwrap()
+            .push(evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 0));
+        writer.write_all(b"event").unwrap();
+        source.poll_once(Duration::from_secs(1), false).unwrap();
+        let reused_capacities = POLL_BUFFERS.with(|buffers| {
+            let buffers = buffers.borrow();
+            (
+                buffers.descriptors.capacity(),
+                buffers.ready.capacity(),
+                buffers.lost.capacity(),
+            )
+        });
+        assert_eq!(reused_capacities, warmed_capacities);
 
         drop(writer);
         source.poll_once(Duration::from_secs(1), false).unwrap();
