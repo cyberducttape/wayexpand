@@ -4,6 +4,14 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Connect the compositor's trusted active-layout snapshot to the libei
+  keysym fallback and compare the full compiled XKB mapping against the EIS
+  keymap before using it. KWin and Hyprland can supply layout groups when EIS
+  omits them; missing or mismatched state still refuses insertion. A
+  configured Fcitx5 direct Unicode commit is attempted without requiring the
+  EIS layout group, and layout refusal diagnostics now explain why expansion
+  is disabled.
+
 - Resolve fleet settings per field with pack defaults, organization defaults, and user preferences in explicit precedence order; report each effective setting's source in `wayexpand fleet status`.
 
 - Gate IBus replacement through the shared capability admission contract.

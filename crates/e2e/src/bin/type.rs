@@ -82,6 +82,7 @@ fn connect() -> Result<Box<dyn TextInjector>> {
                 persist_portal_token: false,
                 fcitx5_direct_commit: false,
                 portal_token_path: None,
+                active_layout_provider: None,
             })
             .context("connecting to EIS through LIBEI_SOCKET")?,
         )),

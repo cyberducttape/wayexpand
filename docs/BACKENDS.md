@@ -45,9 +45,14 @@ and Level5 keys, are typeable (so `@` is typed as AltGr+Q on a German
 layout). Before every erase or insertion the backend applies the server's
 `ei_keyboard.modifiers` reports: a layout switch or Caps Lock change rebuilds
 the character map, a paused or removed device (a keymap change replaces the
-device) refuses and reconnects, and a keymap with several layouts is refused
-until the server has reported which one is active, rather than guessed. Whether
-a given compositor sends those reports still needs live verification. A
+device) refuses and reconnects. A keymap with several layouts uses the
+server-reported group or the daemon's compositor layout provider. Provider
+data is accepted only after compiling its complete XKB
+rules/model/layout/variant/options and checking every layout name and
+keycode-level keysym against the EIS keymap. Missing or inconsistent state is
+refused rather than guessed. KWin's provider reads its keyboard-layout
+service; Hyprland uses compositor-owned keyboard data. These paths still
+require live certification. A
 replacement
 containing an unreachable character is rejected with an error before
 anything is typed, rather than partially or incorrectly inserted. Portal use
@@ -78,10 +83,12 @@ unknown statuses, and transport failures are fail-closed. In particular,
 WayExpand never follows an uncertain D-Bus result with raw backspaces. The
 option is disabled by default and does not make libei claim atomic replacement
 or sensitive-field awareness. When the EIS device only exposes its
-layout-dependent keysym fallback, Unicode replacements are attempted through
-the bridge first; if it reports that no Fcitx input context is focused, the
-ordinary fallback's representability and pacing limits are applied before any
-raw erase.
+layout-dependent keysym fallback, the bridge is tried before requiring an
+active EIS layout group. Thus a verified Fcitx5 Unicode commit can still work
+when KWin omits that group. If the bridge reports that no Fcitx input context
+is focused, the ordinary fallback's layout, representability and pacing
+checks are applied before any raw erase. A missing group never selects the
+first configured layout.
 
 **Character insertion latency (ei_keyboard fallback):**
 When the EIS server provides only `ei_keyboard` (no `ei_text`), the backend
