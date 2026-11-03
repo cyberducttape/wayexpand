@@ -159,8 +159,8 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "Diagnose configuration, backends and the running daemon",
             ),
             (
-                "policy inspect [--file PATH] [--json]",
-                "Show configured and effective organization policy controls",
+                "policy inspect|check [--file PATH] [--allow-audit-only] [--json]",
+                "Inspect policy provenance or fail CI when restrictions are not enforced",
             ),
             (
                 "doctor --certify [--json]",
@@ -252,8 +252,8 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "Convert to TOML, or merge into a library after smoke-testing imported triggers",
             ),
             (
-                "pack search|inspect|diff|install|outdated|update|lock|sync|list|path|remove|rollback|import|verify|sign ...",
-                "Discover, review, and manage offline versioned snippet packs",
+                "pack lint|test|diff|search|inspect|install|outdated|update|lock|sync|list|path|remove|rollback|import|verify|sign ...",
+                "Lint, test, review, sign, distribute, and roll back local snippet packs",
             ),
             (
                 "profile list|create|switch|remove|assign-app|unassign-app ...",

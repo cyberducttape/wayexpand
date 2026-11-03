@@ -582,7 +582,27 @@ fn load_pack(path: &Path) -> Result<(PackManifest, Vec<(PathBuf, Config)>), Pack
         });
     }
     check_declared_capabilities(&manifest, &configs)?;
+    validate_pack_config(&configs)?;
     Ok((manifest, configs))
+}
+
+/// Validate the complete merged configuration without executing its actions.
+/// Per-file TOML parsing alone cannot detect trigger collisions or invalid
+/// command shapes split across a pack's snippet files.
+fn validate_pack_config(configs: &[(PathBuf, Config)]) -> Result<(), PackError> {
+    let mut merged = Config {
+        expansion: Vec::new(),
+        hotkey: Vec::new(),
+        settings: Default::default(),
+        organization: Default::default(),
+    };
+    for (_, config) in configs {
+        merged.expansion.extend(config.expansion.iter().cloned());
+        merged.hotkey.extend(config.hotkey.iter().cloned());
+    }
+    merged
+        .validate()
+        .map_err(|error| PackError::InvalidConfig(error.safe_summary()))
 }
 
 struct StablePack {
@@ -1378,6 +1398,20 @@ mod tests {
             format!("[[expansion]]\ntrigger=\";review\"\nreplacement={replacement:?}\n"),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn inspect_pack_rejects_invalid_merged_snippet_configuration() {
+        let path = test_pack_path();
+        write_review_pack(&path, "\"first\"");
+        fs::write(
+            path.join(SNIPPETS_DIR).join("second.toml"),
+            "[[expansion]]\ntrigger=\";review\"\nreplacement=\"duplicate\"\n",
+        )
+        .unwrap();
+        let error = inspect_pack(&path).unwrap_err();
+        assert!(matches!(error, PackError::InvalidConfig(_)));
+        let _ = fs::remove_dir_all(path);
     }
 
     #[test]

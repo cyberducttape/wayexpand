@@ -79,16 +79,17 @@ minimum_replacement_guarantee = "verified"
 allowed_backends = ["ibus", "input-method-v2"]
 ```
 
-Inspect the policy's actual enforcement view with `wayexpand policy inspect`
-or consume `wayexpand policy inspect --json` in deployment CI. CI can validate
-a candidate without installing it using
-`wayexpand policy inspect --file ./policy.toml --json`; this parses and reports
-the file but does not treat it as a trusted deployed policy. The report
-includes configured and effective values, controls that remain audit-only, and
-known unsupported requirements. `doctor --json` and `fleet status --json`
-include the same policy view. A restrictive policy can intentionally refuse to
-start on a compositor whose route lacks a required guarantee; it does not
-upgrade that route's capabilities.
+Inspect the policy's enforcement view with `wayexpand policy inspect`. CI
+should use `wayexpand policy check --file ./policy.toml --json`; its exit code
+is 0 when the policy is enforceable, 1 when restrictions are only audit-mode
+or known unsupported controls are requested, 2 for invalid command usage, and
+3 for an invalid policy file. The JSON report includes each control's
+configured/effective value and the reason a setting is audit-only or
+unsupported. `--allow-audit-only` is an explicit inspection override and does
+not make those restrictions enforceable. Candidate files are syntax and
+semantics checked but are not treated as trusted deployed policy. `doctor
+--json` and `fleet status --json` include the same policy view. Session-dependent
+requirements still need runtime route verification.
 
 ## Layer Precedence and Conflict Resolution
 

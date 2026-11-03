@@ -4,6 +4,14 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add CI-oriented `wayexpand pack lint` and `pack test` commands with stable
+  JSON reports, exact output fixtures, optional required-signature checks, and
+  organization-policy admission findings. `pack diff --json` now returns
+  version, fingerprint, signature, permission, and changed-file data.
+- Add `wayexpand policy check` for CI. It reports the configured and effective
+  controls with the cause of audit-only or unsupported settings and exits
+  nonzero when policy is not enforceable (unless audit-only review is explicitly
+  allowed).
 - Add `wayexpand workflow` with three explicit modes: verified Insert, Generate
   File with a staged validator, destination and diff review plus typed write
   confirmation, and Run Approved Action through the Action Broker. Broker

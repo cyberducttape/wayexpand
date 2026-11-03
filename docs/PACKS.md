@@ -5,9 +5,39 @@
 The maintained catalog contains 17 optional packs. Each has a named maintainer,
 semantic version, supported shells/platforms/tools, a risk classification, a
 review record, an example output, and an automated generated-output fixture.
-The fixtures are exercised in CI by `scripts/test-curated-packs.py`; packs also
-go through the normal strict import and snippet validation checks. The catalog
-is local and works offline. Install only the libraries you want.
+The fixtures are exercised by `wayexpand pack test`, run alongside
+`wayexpand pack lint` in CI, and also go through strict import and snippet
+validation. The catalog is local and works offline. Install only the libraries
+you want.
+
+## Authoring and CI checks
+
+Run the same checks locally and in a Git hook or CI job:
+
+```sh
+wayexpand pack lint ./packs/database-operations --json
+wayexpand pack test ./packs/database-operations --json
+wayexpand pack diff wayexpand.database-operations ./packs/database-operations --json
+```
+
+`pack lint` checks structural and configuration validity, required maintainer,
+compatibility, risk, review, and verification metadata, safe fixture paths,
+signatures, and active organization policy admission. Add
+`--require-signature --signers ./allowed_signers` to require a trusted SSH
+signature in release CI. `pack test` imports the pack with all command and
+hotkey execution disabled, renders declared test cases, and compares exact
+output against files under `examples/`. A failing lint or test returns exit
+code 1; malformed command usage returns 2; invalid WayExpand or policy
+configuration returns 3. JSON reports include `ok`, `exit_code`, check/case
+results, pack version, and the content fingerprint.
+
+`pack diff --json` includes before/after manifests, fingerprints, candidate
+signature presence, action/capability counts, and changed file contents. A
+signature marked `present_unverified` is not authenticated by diff; verify it
+with `pack lint --require-signature` or `pack verify` before accepting an
+update. Pack signatures cover the manifest, snippets, examples, and tests.
+Git commit history and the signature signer provide source provenance without
+uploading snippet content to a service.
 
 | Pack | Contents |
 | --- | --- |

@@ -174,6 +174,13 @@ Print the stable machine-readable TOML configuration shape for authoring tools.
 .B validate [--fleet] [--json] [--deny-risks] [CONFIG]
 Parse and validate a configuration file without starting the daemon. With
 --fleet, validate the merged fleet configuration; --json selects machine-readable output.
+.TP
+.B policy inspect|check [--file PATH] [--allow-audit-only] [--json]
+Inspect configured and effective organization policy. BcheckR is intended
+for CI: exit 0 means enforced and supported by static policy checks, exit 1
+means audit-only or unsupported policy, exit 2 means usage error, and exit 3
+means the policy configuration is invalid. Session-dependent controls still
+require runtime route verification.
 Triggers likely to fire by accident or to shadow each other are reported;
 --deny-risks makes them a configuration error.
 .TP
@@ -204,8 +211,16 @@ lower versions additionally require \fB--allow-downgrade\fR. The expected
 fingerprint, as shown by \fBpack inspect\fR, binds the installation to the
 reviewed content.
 .TP
-.B pack diff INSTALLED-ID CANDIDATE-DIRECTORY
+.B pack lint DIRECTORY [--json] [--require-signature] [--signers FILE] | pack test DIRECTORY [--json]
+Lint metadata, configuration, fixtures, signature state, and organization
+policy admission, or render declared fixture cases and compare exact outputs.
+These checks are safe for CI: pack test strips commands and hotkeys before
+rendering. Failures exit 1; JSON includes check/case results and fingerprints.
+.TP
+.B pack diff INSTALLED-ID CANDIDATE-DIRECTORY [--json]
 Show what would change if an installed pack were replaced by a candidate.
+JSON reports include before/after manifests and fingerprints, action and
+capability counts, signature presence, and changed files.
 .TP
 .B pack lock [--check [--json]] [--lock FILE]
 Record the installed packs' exact versions and content fingerprints in

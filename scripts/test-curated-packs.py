@@ -45,6 +45,14 @@ def main() -> None:
             fail(pack.name, "test cases must declare format_version=1 and at least one case")
 
         run(cli, ["pack", "inspect", str(pack)], pack)
+        for quality_command in ("lint", "test"):
+            quality = run(cli, ["pack", quality_command, str(pack), "--json"], pack)
+            try:
+                report = json.loads(quality.stdout)
+            except json.JSONDecodeError as error:
+                fail(pack.name, f"pack {quality_command} returned invalid JSON: {error}")
+            if report.get("ok") is not True:
+                fail(pack.name, f"pack {quality_command} reported failure: {report}")
         imported = run(cli, ["pack", "import", str(pack)], pack)
         with tempfile.TemporaryDirectory(prefix="wayexpand-pack-case-") as temp:
             config = Path(temp) / "merged.toml"
