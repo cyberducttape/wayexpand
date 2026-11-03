@@ -44,6 +44,10 @@ All notable changes to WayExpand are documented here.
   review screens display maintainer, compatibility, and risk information.
 - Add DNS subdomain validation and apply shell-quoted, typed fields to common
   Kubernetes, container, Nginx, and sysadmin diagnostic arguments.
+- Publish a dated, versioned desktop certification snapshot for KDE, GNOME,
+  Sway, and Hyprland. It separates CI/headless results from physical-session
+  evidence and lists the remaining lock, layout, suspend, portal, and soak
+  gates; no route is promoted to production-safe without reviewed evidence.
 - Connect the compositor's trusted active-layout snapshot to the libei
   keysym fallback and compare the full compiled XKB mapping against the EIS
   keymap before using it. KWin and Hyprland can supply layout groups when EIS
