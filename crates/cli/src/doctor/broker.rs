@@ -75,6 +75,11 @@ pub(crate) fn broker_diagnostics(config: Option<&Config>) -> serde_json::Value {
             .and_then(|status| status.get("audit_healthy"))
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false);
+    let effective_security = audit_status
+        .as_ref()
+        .and_then(|status| status.get("security"))
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
     let required = named_actions > 0;
     serde_json::json!({
         "required": required,
@@ -82,6 +87,7 @@ pub(crate) fn broker_diagnostics(config: Option<&Config>) -> serde_json::Value {
         "network_access": "blocked",
         "network_dependent_actions_supported": false,
         "network_policy": "packaged systemd broker allows AF_UNIX only and denies IP networking",
+        "effective_security": effective_security,
         "socket": {
             "path": socket,
             "exists": socket_exists,

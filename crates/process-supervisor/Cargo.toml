@@ -13,4 +13,5 @@ categories.workspace = true
 
 [dependencies]
 libc.workspace = true
+serde.workspace = true
 tracing.workspace = true

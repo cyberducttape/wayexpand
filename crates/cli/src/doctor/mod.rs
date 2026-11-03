@@ -7,5 +7,6 @@ pub(crate) mod files;
 pub(crate) mod json;
 pub(crate) mod live_certification;
 pub(crate) mod policy;
+pub(crate) mod security;
 pub(crate) mod status;
 pub(crate) mod support;
