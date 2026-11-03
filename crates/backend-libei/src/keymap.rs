@@ -5,7 +5,8 @@ use std::{
     os::fd::OwnedFd,
 };
 use xkbcommon_rs::{
-    xkb_state::KeyDirection, Context, Keymap as XkbKeymap, KeymapFormat, State as XkbState,
+    xkb_keymap::RuleNames, xkb_state::KeyDirection, Context, Keymap as XkbKeymap, KeymapFormat,
+    State as XkbState,
 };
 
 use super::{LibeiError, MAX_KEYMAP_BYTES, XKB_KEYCODE_OFFSET};
@@ -37,6 +38,7 @@ pub(super) struct KeysymTyper {
     /// Latest group/locks reported by the server (`None` until the first
     /// `ei_keyboard.modifiers` event).
     pub(super) reported: Option<KeyboardLock>,
+    external_generation: Option<u64>,
     /// Evdev keycodes of the Shift, Level3 (AltGr) and Level5 keys, indexed
     /// like the `MOD_*` bits. Level3/Level5 are absent on layouts that do
     /// not define them.
@@ -133,6 +135,7 @@ impl KeysymTyper {
             keymap,
             built_for: lock,
             reported,
+            external_generation: None,
             modifier_keycodes,
             return_keycode,
             tab_keycode,
@@ -144,6 +147,50 @@ impl KeysymTyper {
     /// lazily by [`KeysymTyper::current`].
     pub(super) fn note_modifiers(&mut self, group: u32, locked_mods: u32) {
         self.reported = Some(KeyboardLock { group, locked_mods });
+    }
+
+    pub(super) fn note_external_layout(
+        &mut self,
+        snapshot: &super::ActiveKeyboardLayout,
+    ) -> Result<(), LibeiError> {
+        if Some(snapshot.generation) != self.external_generation {
+            let (Some(layout), Some(model), Some(variant)) =
+                (&snapshot.layout, &snapshot.model, &snapshot.variant)
+            else {
+                return Err(LibeiError::LayoutProviderMismatch);
+            };
+            let compiled = XkbKeymap::new_from_names(
+                Context::new(0).map_err(|error| LibeiError::Keymap(error.to_string()))?,
+                Some(RuleNames {
+                    rules: snapshot.rules.clone(),
+                    model: Some(model.clone()),
+                    layout: Some(layout.clone()),
+                    variant: Some(variant.clone()),
+                    options: snapshot.options.clone(),
+                }),
+                0,
+            )
+            .map_err(|_| LibeiError::LayoutProviderMismatch)?;
+            if !keymaps_match(&self.keymap, &compiled) {
+                return Err(LibeiError::LayoutProviderMismatch);
+            }
+            self.external_generation = Some(snapshot.generation);
+        }
+        if snapshot.group as usize >= self.keymap.num_layouts() {
+            return Err(LibeiError::UnknownActiveLayout(self.keymap.num_layouts()));
+        }
+        if self
+            .reported
+            .is_some_and(|state| state.group != snapshot.group)
+        {
+            return Err(LibeiError::LayoutProviderMismatch);
+        }
+        let locked_mods = self.reported.map_or(0, |state| state.locked_mods);
+        self.reported = Some(KeyboardLock {
+            group: snapshot.group,
+            locked_mods,
+        });
+        Ok(())
     }
 
     /// Bring the character map in line with the server's reported state, or
@@ -158,7 +205,9 @@ impl KeysymTyper {
             None => KeyboardLock::default(),
         };
         if wanted != self.built_for {
+            let external_generation = self.external_generation;
             *self = Self::build_for(self.keymap.clone(), wanted, self.reported)?;
+            self.external_generation = external_generation;
         }
         Ok(())
     }
@@ -175,6 +224,34 @@ impl KeysymTyper {
             .filter(move |(bit, _)| stroke.modifiers & **bit != 0)
             .filter_map(|(_, keycode)| *keycode)
     }
+}
+
+fn keymaps_match(left: &XkbKeymap, right: &XkbKeymap) -> bool {
+    if left.num_layouts() != right.num_layouts() {
+        return false;
+    }
+    for group in 0..left.num_layouts() {
+        if left.layout_get_name(group) != right.layout_get_name(group) {
+            return false;
+        }
+    }
+    for &keycode in left.iter_keycodes() {
+        for group in 0..left.num_layouts() {
+            let left_levels = left.num_levels_for_key(keycode, group);
+            let right_levels = right.num_levels_for_key(keycode, group);
+            if left_levels != right_levels {
+                return false;
+            }
+            for level in 0..left_levels {
+                if left.key_get_syms_by_level(keycode, group, level).ok()
+                    != right.key_get_syms_by_level(keycode, group, level).ok()
+                {
+                    return false;
+                }
+            }
+        }
+    }
+    true
 }
 
 pub(super) fn find_keycode_for_keysym(
