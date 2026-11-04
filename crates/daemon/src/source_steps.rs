@@ -123,6 +123,7 @@ impl Daemon {
                     info!("input-method source reconnected");
                 }
                 Err(error) if error.is_retryable() => {
+                    crate::counters::note_input_connection_failure();
                     warn!(%error, "input-method unavailable; retrying");
                     self.schedule_input_retry();
                 }
@@ -170,7 +171,7 @@ impl Daemon {
                     Err(error) if error.expansion_rejected() => {
                         self.note_unsupported_output(&error);
                         warn!(
-                            error = %error,
+                            outcome = error.diagnostic_category(),
                             trigger_chars = error.result.trigger.chars().count(),
                             insert_bytes = error.result.insert.len(),
                             "input-method rejected expansion; continuing"
@@ -179,7 +180,7 @@ impl Daemon {
                     }
                     Err(error) if error.retryable() => {
                         warn!(
-                            error = %error,
+                            outcome = error.diagnostic_category(),
                             trigger_chars = error.result.trigger.chars().count(),
                             insert_bytes = error.result.insert.len(),
                             "input-method output failed; current expansion is not replayed"
@@ -265,6 +266,7 @@ impl Daemon {
                     info!("evdev source reconnected");
                 }
                 Err(error) if error.is_retryable() => {
+                    crate::counters::note_input_connection_failure();
                     warn!(%error, "evdev source unavailable; retrying");
                     self.schedule_input_retry();
                 }
@@ -451,7 +453,7 @@ impl Daemon {
                         if let Err(error) = result {
                             if error.expansion_rejected() {
                                 warn!(
-                                    error = %error,
+                                    outcome = error.diagnostic_category(),
                                     trigger_chars = error.result.trigger.chars().count(),
                                     insert_bytes = error.result.insert.len(),
                                     "output backend rejected expansion; continuing"
@@ -462,7 +464,7 @@ impl Daemon {
                                 return Err(error.into());
                             }
                             warn!(
-                                error = %error,
+                                outcome = error.diagnostic_category(),
                                 trigger_chars = error.result.trigger.chars().count(),
                                 insert_bytes = error.result.insert.len(),
                                 "output session failed; current expansion is not replayed"
@@ -513,7 +515,7 @@ impl Daemon {
                                     return Err(error.into());
                                 }
                                 warn!(
-                                    error = %error,
+                                    outcome = error.diagnostic_category(),
                                     trigger_chars = error.result.trigger.chars().count(),
                                     insert_bytes = error.result.insert.len(),
                                     "output backend rejected expansion; continuing"

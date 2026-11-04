@@ -76,6 +76,27 @@ XKB path now forwards a `TextChar`; multi-scalar text and composed commits
 retain the owned string event. Use the probe as a narrow core regression
 check, not as an end-to-end daemon allocation claim.
 
+## Hotkey child-exit polling probe
+
+The hotkey worker checks child completion with `waitid(WNOWAIT)` and sleeps
+for 5 ms between checks. Run the focused probe with:
+
+```sh
+WAYEXPAND_PROCESS_CGROUP=disabled cargo test --locked -p wayexpand-core \
+  benchmark_hotkey_polling_wait -- --ignored --nocapture
+```
+
+The probe measures only the wait interval after spawning `/bin/sleep 0.025`;
+it does not include production cgroup setup, command setup, or output handling.
+Two runs on this host (100 samples each) reported 7.96 and 7.97 `waitid`
+polls per child, p50 36.25 / 36.23 ms, and p95 36.70 / 36.67 ms. An uncontained
+blocking `Child::wait` reference measured p50 32.05 / 32.10 ms and p95 32.58 /
+32.77 ms. That reference does not preserve descendant cleanup and is not a
+drop-in replacement. The approximately 4 ms completion-detection overhead is
+small beside the 25 ms command duration; the poll loop remains unchanged until
+an event-driven alternative can wake promptly for both child exit and daemon
+shutdown while retaining the process-group/cgroup cleanup guarantees.
+
 ## Evdev capture and translation benchmark
 
 The evdev benchmark feeds press/release pairs through a synthetic file

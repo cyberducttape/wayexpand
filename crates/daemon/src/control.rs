@@ -28,6 +28,9 @@ use crate::socket_security::{
 const MAX_COMMAND_BYTES: usize = 2048;
 const CONTROL_IO_TIMEOUT: Duration = Duration::from_secs(2);
 const CONTROL_WORKERS: usize = 4;
+/// Keep one isolated worker available for complete health and lifecycle
+/// requests so slow ordinary clients cannot starve operator recovery.
+const CONTROL_PRIORITY_WORKERS: usize = 1;
 /// The diagnostics worker is single-consumer and bounded independently of
 /// the keyboard reactor.
 const EXPLAIN_QUEUE_CAPACITY: usize = CONTROL_WORKERS;
@@ -269,7 +272,9 @@ impl ControlServer {
         let status_flag = Arc::clone(&status);
         let session_context_flag = Arc::clone(&session_context);
         let active_requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let active_priority_requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let active_requests_for_listener = Arc::clone(&active_requests);
+        let active_priority_for_listener = Arc::clone(&active_priority_requests);
         let rejected_for_listener = Arc::clone(&control_rejected_total);
         let listener = thread::Builder::new()
             .name("wayexpand-control-listener".into())
@@ -315,10 +320,23 @@ impl ControlServer {
                         session_context: Arc::clone(&session_context_flag),
                         waker: Arc::clone(&waker_slot),
                     };
-                    let admitted = active_requests_for_listener.fetch_update(
+                    let ordinary_pool_full =
+                        active_requests_for_listener.load(Ordering::Acquire) >= CONTROL_WORKERS;
+                    let priority = has_complete_priority_request(&stream, ordinary_pool_full);
+                    let active_for_request = if priority {
+                        &active_priority_for_listener
+                    } else {
+                        &active_requests_for_listener
+                    };
+                    let capacity = if priority {
+                        CONTROL_PRIORITY_WORKERS
+                    } else {
+                        CONTROL_WORKERS
+                    };
+                    let admitted = active_for_request.fetch_update(
                         Ordering::AcqRel,
                         Ordering::Acquire,
-                        |active| (active < CONTROL_WORKERS).then_some(active + 1),
+                        |active| (active < capacity).then_some(active + 1),
                     );
                     if admitted.is_err() {
                         // Keep control-plane concurrency bounded. Return a
@@ -328,7 +346,7 @@ impl ControlServer {
                         reject_busy(stream, &rejected_for_listener);
                         continue;
                     }
-                    let active_requests = Arc::clone(&active_requests_for_listener);
+                    let active_requests = Arc::clone(active_for_request);
                     // Keep a spare descriptor so a transient thread-resource
                     // failure can still return the same bounded busy response
                     // as request-pool saturation. `spawn` consumes its
@@ -345,7 +363,7 @@ impl ControlServer {
                             active_requests.fetch_sub(1, Ordering::AcqRel);
                         });
                     if let Err(error) = worker {
-                        active_requests_for_listener.fetch_sub(1, Ordering::AcqRel);
+                        active_for_request.fetch_sub(1, Ordering::AcqRel);
                         warn!(%error, "could not start control request worker");
                         if let Some(stream) = busy_stream {
                             reject_busy(stream, &rejected_for_listener);
@@ -503,6 +521,47 @@ fn accept_failure(error: &std::io::Error) -> AcceptFailure {
         Errno::MFILE | Errno::NFILE | Errno::NOBUFS | Errno::NOMEM => AcceptFailure::Backoff,
         _ => AcceptFailure::Fatal,
     }
+}
+
+/// Recognize only a complete, short operator-recovery request without
+/// blocking the listener. A partial or silent connection always uses the
+/// ordinary bounded pool. This is a scheduling hint, not authorization;
+/// `handle_request` still parses and checks peer credentials and policy.
+fn has_complete_priority_request(stream: &UnixStream, wait_for_initial_bytes: bool) -> bool {
+    if wait_for_initial_bytes {
+        let mut descriptor = libc::pollfd {
+            fd: stream.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // At saturation, allow a tiny bounded window for an operator request
+        // sent immediately after connect to become visible before classifying
+        // it. Silent or trickling peers still cannot hold the listener open.
+        // SAFETY: `descriptor` is initialized and remains valid for poll.
+        unsafe { libc::poll(&mut descriptor, 1, 10) };
+    }
+    let mut bytes = [0_u8; 32];
+    // SAFETY: `bytes` is writable for its full length and `stream` owns a live
+    // descriptor. MSG_PEEK leaves the request untouched for handle_request.
+    let count = unsafe {
+        libc::recv(
+            stream.as_raw_fd(),
+            bytes.as_mut_ptr().cast(),
+            bytes.len(),
+            libc::MSG_PEEK | libc::MSG_DONTWAIT,
+        )
+    };
+    if count <= 0 {
+        return false;
+    }
+    let bytes = &bytes[..count as usize];
+    let Some(end) = bytes.iter().position(|byte| *byte == b'\n') else {
+        return false;
+    };
+    matches!(
+        &bytes[..end],
+        b"status" | b"reload" | b"stop" | b"pause" | b"resume"
+    )
 }
 
 /// The shared state one control request may touch.
@@ -1974,6 +2033,67 @@ mod tests {
         assert_eq!(response, "error=busy\nretryable=true\n");
         client.write_all(b"explain-json :clip\n").unwrap();
         assert_eq!(server_thread.join().unwrap(), 1);
+    }
+
+    #[test]
+    fn stalled_clients_are_deadlined_and_control_workers_recover() {
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-control-saturation-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&directory).unwrap();
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let path = directory.join("control.sock");
+        let server = ControlServer::start_at(&path, false, false).unwrap();
+
+        // Connect without sending a request. Every accepted handler must
+        // release its bounded worker when the whole-request read deadline
+        // expires, even if the client keeps the socket open.
+        let stalled_clients = (0..CONTROL_WORKERS)
+            .map(|_| UnixStream::connect(&path).unwrap())
+            .collect::<Vec<_>>();
+        let mut priority_status = UnixStream::connect(&path).unwrap();
+        priority_status.write_all(b"status\n").unwrap();
+        priority_status.shutdown(std::net::Shutdown::Write).unwrap();
+        let mut response = String::new();
+        priority_status.read_to_string(&mut response).unwrap();
+        assert_eq!(response, "running\nstarting\n");
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let mut observed_busy = false;
+        while Instant::now() < deadline && !observed_busy {
+            let mut probe = UnixStream::connect(&path).unwrap();
+            probe.write_all(b"unrecognized\n").unwrap();
+            probe.shutdown(std::net::Shutdown::Write).unwrap();
+            let mut response = String::new();
+            probe.read_to_string(&mut response).unwrap();
+            observed_busy = response == "error=busy\nretryable=true\n";
+            if !observed_busy {
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+        assert!(
+            observed_busy,
+            "slow clients did not saturate the ordinary request pool"
+        );
+        assert!(server.control_rejected_total.load(Ordering::Relaxed) > 0);
+
+        // Keep the stalled peers connected across their finite read deadline.
+        thread::sleep(CONTROL_IO_TIMEOUT + Duration::from_millis(200));
+        let mut recovered = UnixStream::connect(&path).unwrap();
+        recovered.write_all(b"unrecognized\n").unwrap();
+        recovered.shutdown(std::net::Shutdown::Write).unwrap();
+        let mut response = String::new();
+        recovered.read_to_string(&mut response).unwrap();
+        assert!(response.starts_with("unknown command;"));
+
+        drop(stalled_clients);
+        drop(server);
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

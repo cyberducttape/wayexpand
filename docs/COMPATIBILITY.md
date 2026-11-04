@@ -525,9 +525,11 @@ side never counts as a match (`commit_matches` is then `false`).
   "backend": "input-method-v2",
   "route_id": "input-method-v2",
   "backend_mode": "unknown",
-  "status_schema": 19,
+  "status_schema": 22,
   "daemon_commit": "example-commit",
   "state": "connected",
+  "route_available": true,
+  "matching_available": true,
   "paused": false,
   "config": "/home/user/.config/wayexpand/expansions.toml",
   "config_state": "ok",
@@ -547,6 +549,8 @@ side never counts as a match (`commit_matches` is then `false`).
   "inject_insertion_mode": "input-method-v2 text",
   "inject_max_text_chars": 0,
   "inject_expected_throughput_chars_per_sec": 0,
+  "command_worker_threads": 0,
+  "hotkey_worker_threads": 0,
   "command_queue_depth": 0,
   "command_in_flight": 0,
   "expansion_command_queue_depth": 0,
@@ -594,8 +598,14 @@ side never counts as a match (`commit_matches` is then `false`).
   "output_health": "ok",
   "output_uncertain_total": 0,
   "output_partial_total": 0,
+  "partial_write_total": 0,
   "output_retiring_workers": 0,
   "output_stalled_ms": 0,
+  "backend_shutdown_workers_active": 0,
+  "backend_shutdown_workers_started_total": 0,
+  "backend_shutdown_workers_acknowledged_total": 0,
+  "backend_shutdown_workers_timed_out_total": 0,
+  "backend_shutdown_workers_failed_total": 0,
   "insertion_assurance": "verified",
   "replacement_assurance": "verified",
   "compatibility_mode": "off",
@@ -605,8 +615,12 @@ side never counts as a match (`commit_matches` is then `false`).
   "output_unsupported_total": 0,
   "output_last_unsupported": "none",
   "recent_expansion_failures": [],
+  "recent_expansion_outcomes": [],
+  "suppressed_expansions_total": 0,
   "output_reconnect_total": 0,
   "input_reconnect_total": 0,
+  "input_connection_failures_total": 0,
+  "output_connection_failures_total": 0,
   "input_overflow_total": 0,
   "evdev_quarantined_events_total": 0,
   "control_rejected_total": 0,
@@ -622,8 +636,10 @@ side never counts as a match (`commit_matches` is then `false`).
 - `route_id` (string): Canonical capture/injection route ID from the shared route catalog; `"stdin-test"` identifies the stdin harness, and `"unknown"` means the active pair has no catalog entry. Consumers should use this field instead of reconstructing route identity from `source` and `backend`.
 - `backend_mode` (string): Negotiated backend capability detail. Libei reports either `"ei_text (UTF-8 insertion)"` or `"ei_keyboard keysym fallback (12ms key pacing)"`; it is `"unknown"` before a backend has negotiated a mode or for backends without submodes.
 - `sandbox_security` (object, optional): Live in-process evidence for namespace IDs, seccomp/NoNewPrivs, socket address-family probes, read-only mounts, proc restrictions, W^X, personality and SUID-bit probes, resource limits, and cgroup limits. It reports effective process state, not unit-file intent. See [SECURITY](../SECURITY.md#effective-sandbox-inspection).
-- `status_schema` (integer): Version of the daemon status contract. Certification requires a matching schema before treating runtime capabilities as current; missing or different values mean the daemon should be restarted/updated. Schema 11 adds canonical `route_id`; schema 12 adds usage-event recorded, persisted, and dropped counters; schema 13 adds precise `replacement_assurance`; schema 14 adds matcher-latency dropped-sample reporting; schema 15 adds aggregate and per-mode output-latency dropped-sample reporting; schema 16 adds capture_layout_state; schema 17 adds command cgroup cleanup health; schema 18 adds `output_partial_total`, distinguishing partial insertion from other outcomes whose target effect is unknown; schema 19 adds background connection-worker lifecycle counters and the daemon-context command containment self-test result.
+- `status_schema` (integer): Version of the daemon status contract. Certification requires a matching schema before treating runtime capabilities as current; missing or different values mean the daemon should be restarted/updated. Schema 11 adds canonical `route_id`; schema 12 adds usage-event recorded, persisted, and dropped counters; schema 13 adds precise `replacement_assurance`; schema 14 adds matcher-latency dropped-sample reporting; schema 15 adds aggregate and per-mode output-latency dropped-sample reporting; schema 16 adds capture_layout_state; schema 17 adds command cgroup cleanup health; schema 18 adds `output_partial_total`, distinguishing partial insertion from other outcomes whose target effect is unknown; schema 19 adds background connection-worker lifecycle counters and the daemon-context command containment self-test result; schema 20 adds effective route/matching availability, command-worker counts, suppressed-expansion totals, and input/output connection-attempt failure totals; schema 21 adds a distinct partial-write counter and confirmed per-transaction erase/insert progress; schema 22 adds active, acknowledged, timed-out, and failed backend-shutdown worker counters.
 - `state` (string): Backend connection state (e.g. `"connected"`, `"reconnecting"`)
+- `route_available` (bool): `true` only when capture is connected, evdev has a current layout snapshot when applicable, and an output route advertises replacement support.
+- `matching_available` (bool): `true` when `route_available` is true, matching is not paused, and the active configuration is healthy.
 - `paused` (bool): Whether expansion matching is currently disabled
 - `config` (string): Path to the active configuration file
 - `config_state` (string): `"ok"`, `"loading"`, or `"reload-rejected"`. `loading` means the current requested config is being built off the input reactor; `reload-rejected` means a completed load failed and the previous valid engine was retained.
@@ -636,6 +652,7 @@ side never counts as a match (`commit_matches` is then `false`).
 - inject_max_text_chars (integer): Mode-specific maximum replacement length in Unicode scalar values; 0 means no mode-specific limit is advertised.
 - inject_expected_throughput_chars_per_sec (integer): Approximate sustained output rate for paced modes; 0 means no rate estimate is advertised.
 - `command_queue_depth` (integer): Backward-compatible aggregate of expansion-command and hotkey work waiting for workers
+- `command_worker_threads`, `hotkey_worker_threads` (integers): Configured command and hotkey worker thread counts; these are fixed worker-pool sizes, not in-flight task counts.
 - `command_in_flight` (integer): Backward-compatible aggregate of expansion commands and hotkeys currently executing
 - `expansion_command_queue_depth` (integer): Accepted command-backed expansions waiting for the expansion worker
 - `expansion_command_in_flight` (integer): Command-backed expansions currently executing
@@ -671,9 +688,12 @@ side never counts as a match (`commit_matches` is then `false`).
 - `clipboard_read_max_duration_us` (integer): Longest completed clipboard command duration in microseconds since daemon start
 - `output_health` (string): `ok`; `recovering` while a retired output worker is stopping; or `stalled` once it has outlived the 5 s base acknowledgement deadline. While any retired worker runs, the output route does not reconnect, so a late operation cannot type into the current window. `stalled` persists until the worker stops or the daemon is restarted. Added in status schema 7.
 - `output_uncertain_total` (integer): Expansions and inserts since daemon start whose effect on the target text is unknown (a non-atomic backend failed mid-transaction or did not acknowledge in time). They are never retried. Added in status schema 7.
-- `output_partial_total` (integer): Transactions since daemon start where insertion began before output failed, so partial text may remain. These are never retried. The GUI highlights this separately, and `wayexpand doctor --json` reports it as `partial_insertions_total`.
+- `suppressed_expansions_total` (integer): Matched expansions refused by policy, output safety gates, or preparation before reaching output. It does not count keys filtered before a match is produced (for example, while paused or in a sensitive field).
+- `output_partial_total` (integer): Legacy count of non-atomic transactions whose target effect may be partial. These are never retried.
+- `partial_write_total` (integer): Explicit count of transactions with a potentially partial non-atomic write. This currently aliases `output_partial_total` for compatibility. Recent outcome records identify `completion="partial_write"`, set `recovery="manual_review"`, and include `progress_tracked`, `erased_units`, and `inserted_units` when a backend can count successfully flushed units. Counts are protocol progress, not proof of what the application rendered; no automatic recovery or replay is attempted. `wayexpand doctor --json` continues to report `partial_insertions_total`.
 - `output_retiring_workers` (integer): Retired output workers still running. Added in status schema 7.
 - `output_stalled_ms` (integer): Age of the oldest retired output worker still running; `0` when there is none. Added in status schema 7.
+- `backend_shutdown_workers_active`, `backend_shutdown_workers_started_total`, `backend_shutdown_workers_acknowledged_total`, `backend_shutdown_workers_timed_out_total`, and `backend_shutdown_workers_failed_total` (integers): Counts for bounded backend teardown. A timed-out worker remains joinable and counted until its thread exits; completion acknowledgement means `TextInjector::shutdown` returned, not that the backend forcibly honored cancellation. Added in status schema 22.
 - `insertion_assurance` (string): What the output route promises before it erases a trigger. `verified`: the route checks the field's own text first (input-method-v2, IBus). `compatibility`: a keystroke route (libei, wlroots virtual keyboard) that erases without seeing the text, allowed by `compatibility_mode`. `blocked`: a keystroke route without that consent; typed expansions are refused. `unavailable`: no route that can replace text. Added in status schema 8.
 - `replacement_assurance` (string): Precise live replacement status. `verified`: the route checks target text before deletion; `focus-tracked-best-effort`: a tracker confirms the window, but the route cannot inspect the text/cursor; `unverified`: untracked keystroke replacement was explicitly allowed; `blocked`: strict mode or a focus check refuses the operation; `unavailable`: no output route. `insertion_assurance` remains as a coarse compatibility field. Added in status schema 13.
 - `compatibility_mode` (string): The configured consent, `off`, `tracked-focus`, or `untracked-focus` (see `Settings::compatibility_mode`). Added in status schema 8.
@@ -692,6 +712,7 @@ side never counts as a match (`commit_matches` is then `false`).
 - `recent_expansion_failures` (array): Up to eight content-free transaction traces from this daemon session. Each record has a timestamp, backend, trigger-recognition marker, output-admission result, backend-selection marker, erase acknowledgement, insertion-attempt marker, `transaction_phases`, and completion result. `transaction_phases` records the ordered lifecycle (`prepared`, optionally `validated` and `applying`, then `committed`, `failed`, or `uncertain`). An uncertain transaction is terminal and is never automatically replayed. Output admission does not itself claim that the focused client was verified; consult `focus_assurance` for that route-level guarantee. It never contains trigger text, replacement text, clipboard contents, or raw key events. Added additively without changing the status schema.
 - `output_reconnect_total` (integer): Output routes reconnected since daemon start, after the first connection was lost. Steady growth means the route keeps dropping (portal revoked, compositor restarting). Added in 1.2.x without a schema change.
 - `input_reconnect_total` (integer): Input sources (input-method or evdev) reconnected since daemon start. Added in 1.2.x without a schema change.
+- `input_connection_failures_total`, `output_connection_failures_total` (integers): Retryable initial connection and reconnect attempts that failed. These are attempt failures; successful reconnect totals remain separately available above.
 - `input_overflow_total` (integer): Times evdev input arrived faster than it could be applied and the queue (4,096 events) was dropped, resetting the matcher; always 0 for other sources. Added in 1.2.x without a schema change.
 - `evdev_quarantined_events_total` (integer): Captured evdev events discarded after serialized output until 40 ms of input quiet, preventing queued input from being replayed as stale triggers. The GUI diagnostics displays the count and explains that a skipped trigger may need to be retried after output settles. This does not prevent physical input from interleaving in the target application. Additive status field; no schema change.
 - `control_rejected_total` (integer): Control requests answered `error=busy` because all control workers were occupied. Added in 1.2.x without a schema change.
@@ -729,8 +750,9 @@ daemon is running: `wayexpand_daemon_route_info` (labels `route_id`,
 `wayexpand_daemon_sensitive_field_detection`, the gauges
 `wayexpand_daemon_command_queue_depth`, `wayexpand_daemon_command_in_flight`,
 `wayexpand_daemon_output_stalled_milliseconds`,
-`wayexpand_daemon_output_retiring_workers`,
-`wayexpand_daemon_memory_rss_kibibytes`,
+`wayexpand_daemon_output_retiring_workers`, `wayexpand_daemon_command_worker_threads`,
+`wayexpand_daemon_hotkey_worker_threads`, `wayexpand_daemon_connection_workers_active`,
+`wayexpand_daemon_clipboard_worker_threads`, `wayexpand_daemon_memory_rss_kibibytes`,
 `wayexpand_daemon_matcher_latency_p95_microseconds` and
 `wayexpand_daemon_injection_latency_p95_microseconds`, and one counter
 `wayexpand_daemon_<field>` for every `*_total` field of `status --json`. When

@@ -19,6 +19,26 @@ const STATUS_GAUGES: &[(&str, &str, &str)] = &[
         "Commands waiting for a worker.",
     ),
     (
+        "command_worker_threads",
+        "command_worker_threads",
+        "Expansion command workers configured in the daemon.",
+    ),
+    (
+        "hotkey_worker_threads",
+        "hotkey_worker_threads",
+        "Hotkey command workers configured in the daemon.",
+    ),
+    (
+        "connect_workers_active",
+        "connection_workers_active",
+        "Input and output connection workers currently active.",
+    ),
+    (
+        "clipboard_worker_threads",
+        "clipboard_worker_threads",
+        "Clipboard reader workers currently alive.",
+    ),
+    (
         "command_in_flight",
         "command_in_flight",
         "Commands currently running.",
@@ -32,6 +52,31 @@ const STATUS_GAUGES: &[(&str, &str, &str)] = &[
         "output_retiring_workers",
         "output_retiring_workers",
         "Output workers still shutting down after a failure.",
+    ),
+    (
+        "backend_shutdown_workers_active",
+        "backend_shutdown_workers_active",
+        "Backend teardown workers currently awaiting completion acknowledgement.",
+    ),
+    (
+        "backend_shutdown_workers_timed_out_total",
+        "backend_shutdown_workers_timed_out_total",
+        "Backend teardown workers that exceeded the five-second wait deadline.",
+    ),
+    (
+        "backend_shutdown_workers_started_total",
+        "backend_shutdown_workers_started_total",
+        "Backend teardown workers started.",
+    ),
+    (
+        "backend_shutdown_workers_acknowledged_total",
+        "backend_shutdown_workers_acknowledged_total",
+        "Backend teardown workers that acknowledged completion.",
+    ),
+    (
+        "backend_shutdown_workers_failed_total",
+        "backend_shutdown_workers_failed_total",
+        "Backend teardown workers that exited without completion acknowledgement.",
     ),
     (
         "output_partial_total",
@@ -57,6 +102,16 @@ const STATUS_GAUGES: &[(&str, &str, &str)] = &[
 
 /// Daemon status booleans exported as 0/1: (status field, metric suffix, help).
 const STATUS_FLAGS: &[(&str, &str, &str)] = &[
+    (
+        "route_available",
+        "route_available",
+        "Whether both capture and replacement routes are available.",
+    ),
+    (
+        "matching_available",
+        "matching_available",
+        "Whether the route can currently match and produce expansions.",
+    ),
     ("paused", "paused", "Whether expansion is paused."),
     (
         "window_tracker_connected",

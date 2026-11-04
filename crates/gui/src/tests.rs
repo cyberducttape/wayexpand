@@ -2027,6 +2027,7 @@ fn every_panel_and_dialog_renders_for_supported_languages_and_settings_tabs() {
         output_last_refusal: Some(runtime::OutputRefusal::FocusChanged),
         output_uncertain_total: Some(1),
         output_partial_total: Some(1),
+        partial_write_total: None,
         compatibility_mode: None,
         evdev_quarantined_events_total: None,
         usage_flush_max_duration_us: None,
