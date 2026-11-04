@@ -6,8 +6,9 @@ if [[ ! ${WAYEXPAND_CONTEXT_SESSION_ID:-} =~ '^[[:xdigit:]]{32}$' ]] && (( $+com
 fi
 
 _wayexpand_context_report() {
-    [[ ${WAYEXPAND_CONTEXT_SESSION_ID:-} =~ '^[[:xdigit:]]{32}$' ]] || return 0
-    (( $+commands[wayexpand] )) || return 0
+    local previous_status=$?
+    [[ ${WAYEXPAND_CONTEXT_SESSION_ID:-} =~ '^[[:xdigit:]]{32}$' ]] || return "$previous_status"
+    (( $+commands[wayexpand] )) || return "$previous_status"
 
     local project_root='' kube_context='' remote_host=''
     if [[ ${1:-} != --local ]]; then
@@ -28,6 +29,7 @@ _wayexpand_context_report() {
     [[ -n ${WAYEXPAND_CONTEXT_ENVIRONMENT:-} ]] && arguments+=(--environment "$WAYEXPAND_CONTEXT_ENVIRONMENT")
     [[ -z $remote_host && -n ${WAYEXPAND_CONTEXT_CONTAINER:-} ]] && arguments+=(--container "$WAYEXPAND_CONTEXT_CONTAINER")
     command wayexpand "${arguments[@]}" >/dev/null 2>&1 || :
+    return "$previous_status"
 }
 
 _wayexpand_context_remote_heartbeat() {

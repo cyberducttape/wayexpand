@@ -82,6 +82,19 @@ expected=(
     exit 1
 }
 
+# Prompt hooks run before user-configured prompt commands. Their subprocesses
+# must not replace the exit status that the prompt displays for the command.
+set +e
+false
+_wayexpand_context_report
+prompt_hook_status=$?
+set -e
+[[ $prompt_hook_status == 1 ]] || {
+    printf 'Prompt hook changed the prior command status: expected 1, got %s\n' \
+        "$prompt_hook_status" >&2
+    exit 1
+}
+
 # Stop the reporter while a remote report is in flight. It must finish before
 # the local clear and refresh so a late remote write cannot restore stale data.
 race_stop_file=$(mktemp "${TMPDIR:-/tmp}/wayexpand-context-race.XXXXXX")

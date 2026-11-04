@@ -4,8 +4,9 @@ if not set -q WAYEXPAND_CONTEXT_SESSION_ID; and command -q wayexpand
 end
 
 function __wayexpand_context_report --on-event fish_prompt
+    set -l previous_status $status
     if not set -q WAYEXPAND_CONTEXT_SESSION_ID; or not command -q wayexpand
-        return
+        return $previous_status
     end
 
     set -l project_root ''
@@ -44,6 +45,7 @@ function __wayexpand_context_report --on-event fish_prompt
         set -a arguments --container "$WAYEXPAND_CONTEXT_CONTAINER"
     end
     command wayexpand $arguments >/dev/null 2>&1
+    return $previous_status
 end
 
 function __wayexpand_context_remote_heartbeat --argument-names target stop_file interval
