@@ -1138,6 +1138,7 @@ mod tests {
     fn failure_stops_the_batch_and_retires_the_route() {
         let mut harness = Harness::new(true);
         harness.open_gate();
+        let uncertain_before = output_health::snapshot().uncertain_total;
         harness
             .daemon
             .start_output(
@@ -1156,6 +1157,10 @@ mod tests {
         assert!(harness.daemon.injector.is_none());
         assert_eq!(harness.daemon.retiring_output_workers.len(), 1);
         assert!(harness.daemon.output_retry_at.is_some());
+        assert!(
+            output_health::snapshot().uncertain_total > uncertain_before,
+            "failure after trigger deletion must be recorded as an uncertain partial result"
+        );
     }
 
     #[test]

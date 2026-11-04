@@ -405,6 +405,33 @@ mod tests {
     }
 
     #[test]
+    fn large_stdout_and_stderr_are_both_drained_with_per_stream_caps() {
+        let mut command = Command::new("/bin/sh");
+        command
+            .args([
+                "-c",
+                "head -c 2097152 /dev/zero; head -c 2097152 /dev/zero >&2",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        configure_process_group(&mut command);
+        let mut child = command.spawn().expect("spawn bounded-output child");
+        let stdout = child.stdout.take().expect("child stdout");
+        let stderr = child.stderr.take().expect("child stderr");
+
+        let (status, stdout, stderr, stdout_truncated, stderr_truncated) =
+            run_child_unix(child, Some(stdout), Some(stderr), Duration::from_secs(5))
+                .expect("the child should finish while both streams are drained");
+
+        assert!(status.success());
+        assert_eq!(stdout.len(), MAX_STREAM_OUTPUT_BYTES);
+        assert_eq!(stderr.len(), MAX_STREAM_OUTPUT_BYTES);
+        assert!(stdout_truncated);
+        assert!(stderr_truncated);
+    }
+
+    #[test]
     fn broker_shutdown_cancels_a_continuous_action_promptly() {
         use std::sync::atomic::AtomicBool;
 
