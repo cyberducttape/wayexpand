@@ -20,6 +20,7 @@ fn matching_unavailable_reason(
     state: &str,
     layout_aware: bool,
     injection_available: bool,
+    replacement_admitted: bool,
     paused: bool,
     config_state: &str,
 ) -> &'static str {
@@ -33,9 +34,21 @@ fn matching_unavailable_reason(
         "paused"
     } else if config_state != "ok" {
         "configuration_unhealthy"
+    } else if !replacement_admitted {
+        "replacement_not_admitted"
     } else {
         "none"
     }
+}
+
+fn replacement_is_admitted(
+    injection: &InjectorCapabilities,
+    mode: wayexpand_core::CompatibilityMode,
+    focus: wayexpand_core::FocusCheck,
+) -> bool {
+    injection.replacement_admission(mode) != wayexpand_core::ReplacementAdmission::Refused
+        && crate::assurance::Assurance::of(Some(injection), mode, focus)
+            != crate::assurance::Assurance::Blocked
 }
 
 /// A complete control-socket status body.
@@ -171,15 +184,18 @@ pub fn daemon_status_body_with_runtime_capabilities_and_config_state(
     let usage_metrics = crate::usage::metrics_snapshot();
     let clipboard_metrics = crate::clipboard::metrics_snapshot();
     let guard = crate::assurance::GuardState::global();
+    let compatibility_mode = guard.mode();
+    let focus_check = guard.focus();
     // A route that cannot replace at all (including no connected route)
     // makes no insertion promise.
     let connected =
         injection.replacement_guarantee != wayexpand_core::ReplacementGuarantee::Unsupported;
     let assurance = crate::assurance::Assurance::of(
         connected.then_some(&injection),
-        guard.mode(),
-        guard.focus(),
+        compatibility_mode,
+        focus_check,
     );
+    let replacement_admitted = replacement_is_admitted(&injection, compatibility_mode, focus_check);
     let focus_assurance = match assurance {
         crate::assurance::Assurance::Verified => "protocol",
         crate::assurance::Assurance::Unavailable => "none",
@@ -211,6 +227,7 @@ pub fn daemon_status_body_with_runtime_capabilities_and_config_state(
         state,
         capture.layout_aware,
         injection_available,
+        replacement_admitted,
         paused,
         config_state,
     );
@@ -390,33 +407,93 @@ pub fn set_daemon_status_direct(
 
 #[cfg(test)]
 mod matching_reason_tests {
-    use super::matching_unavailable_reason;
+    use super::{matching_unavailable_reason, replacement_is_admitted};
+    use wayexpand_core::{
+        CompatibilityMode, FocusCheck, InjectorCapabilities, ReplacementAdmission,
+        ReplacementGuarantee,
+    };
 
     #[test]
     fn matching_availability_reason_identifies_each_failed_prerequisite() {
         let available =
-            matching_unavailable_reason("input-method", "connected", true, true, false, "ok");
+            matching_unavailable_reason("input-method", "connected", true, true, true, false, "ok");
         assert_eq!(available, "none");
         assert_eq!(
-            matching_unavailable_reason("evdev", "connected", false, true, false, "ok"),
+            matching_unavailable_reason("evdev", "connected", false, true, true, false, "ok"),
             "keyboard_layout_unavailable"
         );
         assert_eq!(
-            matching_unavailable_reason("input-method", "reconnecting", true, true, false, "ok"),
+            matching_unavailable_reason(
+                "input-method",
+                "reconnecting",
+                true,
+                true,
+                true,
+                false,
+                "ok"
+            ),
             "capture_disconnected"
-        );
-        assert_eq!(
-            matching_unavailable_reason("input-method", "connected", true, false, false, "ok"),
-            "replacement_route_unavailable"
-        );
-        assert_eq!(
-            matching_unavailable_reason("input-method", "connected", true, true, true, "ok"),
-            "paused"
         );
         assert_eq!(
             matching_unavailable_reason(
                 "input-method",
                 "connected",
+                true,
+                false,
+                false,
+                false,
+                "ok"
+            ),
+            "replacement_route_unavailable"
+        );
+        assert_eq!(
+            matching_unavailable_reason("input-method", "connected", true, true, true, true, "ok"),
+            "paused"
+        );
+        assert_eq!(
+            matching_unavailable_reason("evdev", "connected", true, true, false, false, "ok"),
+            "replacement_not_admitted",
+            "connected capture and an injector are insufficient when the safety guard refuses replacement"
+        );
+        let non_atomic = InjectorCapabilities {
+            replacement_guarantee: ReplacementGuarantee::BestEffort,
+            ..InjectorCapabilities::default()
+        };
+        let admitted =
+            replacement_is_admitted(&non_atomic, CompatibilityMode::Off, FocusCheck::Unchanged);
+        assert!(!admitted);
+        assert_eq!(
+            matching_unavailable_reason("evdev", "connected", true, true, admitted, false, "ok"),
+            "replacement_not_admitted"
+        );
+        let atomic = InjectorCapabilities {
+            atomic_replace: true,
+            replacement_guarantee: ReplacementGuarantee::Atomic,
+            ..InjectorCapabilities::default()
+        };
+        assert!(
+            replacement_is_admitted(&atomic, CompatibilityMode::Off, FocusCheck::Unconfirmed),
+            "atomic replacement remains admitted with compatibility mode off"
+        );
+        assert_eq!(
+            non_atomic.replacement_admission(CompatibilityMode::TrackedFocus),
+            ReplacementAdmission::ExplicitCompatibility
+        );
+        assert!(replacement_is_admitted(
+            &non_atomic,
+            CompatibilityMode::TrackedFocus,
+            FocusCheck::Unchanged
+        ));
+        assert!(!replacement_is_admitted(
+            &non_atomic,
+            CompatibilityMode::TrackedFocus,
+            FocusCheck::Unconfirmed
+        ));
+        assert_eq!(
+            matching_unavailable_reason(
+                "input-method",
+                "connected",
+                true,
                 true,
                 true,
                 false,

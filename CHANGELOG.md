@@ -27,6 +27,10 @@ All notable changes to WayExpand are documented here.
   unsupported replacement, pause, and invalid configuration. Derive
   `matching_available` from that same reason and bump daemon status schema to
   23.
+- Include safety-guard admission in matching availability. A connected
+  non-atomic route with compatibility mode disabled now reports
+  `replacement_not_admitted` instead of appearing usable; bump daemon status
+  schema to 24.
 - Track confirmed erase and insertion progress for paced output. Report a
   distinct content-free `partial_write` outcome and counter, retain progress
   in transaction traces, and never automatically replay a partial write.

@@ -2,7 +2,7 @@
 
 /// Version of the daemon's stable key/value control-socket status contract.
 /// Increment when a consumer must distinguish a newer required field set.
-pub const CONTROL_STATUS_SCHEMA: u32 = 23;
+pub const CONTROL_STATUS_SCHEMA: u32 = 24;
 
 pub use limits::{CommandLimits, COMMAND_LIMITS, CONTROL_MAX_RESPONSE_BYTES};
 pub use wayexpand_process_supervisor::containment_mode as command_containment_mode;

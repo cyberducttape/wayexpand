@@ -637,7 +637,7 @@ fn status_json_matches_documented_stable_contract() {
          backend=input-method-v2\n\
          route_id=input-method-v2\n\
          backend_mode=unknown\n\
-         status_schema=23\n\
+         status_schema=24\n\
          daemon_commit=test-commit\n\
          state=connected\n\
          route_available=true\n\
