@@ -227,12 +227,20 @@ impl ReloadableConfig {
             match retiring.try_recv() {
                 Ok(()) | Err(TryRecvError::Disconnected) => self.retiring_runtime = None,
                 Err(TryRecvError::Empty) => {
+                    if !self.engine.requires_async_workers() {
+                        self.worker_retry_at = None;
+                        return true;
+                    }
                     self.engine
                         .set_commands_disabled(self.commands_restricted || self.async_workers);
                     self.worker_retry_at = None;
                     return false;
                 }
             }
+        }
+        if !self.engine.requires_async_workers() {
+            self.worker_retry_at = None;
+            return true;
         }
         let running = self.engine.enable_async_commands();
         self.worker_retry_at = (!running).then(|| Instant::now() + WORKER_RETRY_INTERVAL);

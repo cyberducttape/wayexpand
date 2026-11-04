@@ -37,6 +37,12 @@ fn config_text(replacement: &str) -> String {
     format!("[[expansion]]\ntrigger = \":x\"\nreplacement = {replacement:?}\n")
 }
 
+fn command_config_text(replacement: &str) -> String {
+    format!(
+        "[[expansion]]\ntrigger = \":x\"\nreplacement = {replacement:?}\ncommand = {{ program = \"/bin/true\" }}\n"
+    )
+}
+
 fn wait_for_command_workers(config: &mut ReloadableConfig) {
     let deadline = Instant::now() + Duration::from_secs(2);
     while !config.engine.async_commands_enabled() {
@@ -364,14 +370,14 @@ fn missing_file_keeps_previous_engine_and_reloads_when_restored() {
 #[test]
 fn command_workers_restart_after_every_reload_without_overlapping() {
     let path = temporary_config();
-    write_config(&path, &config_text("old"));
+    write_config(&path, &command_config_text("old"));
     let mut config =
         ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
     assert!(config.start_async_workers(false));
     assert!(config.engine.async_commands_enabled());
     assert!(!config.engine.commands_disabled());
     for replacement in ["one", "two", "three"] {
-        write_config(&path, &config_text(replacement));
+        write_config(&path, &command_config_text(replacement));
         config.reload_now();
         config.finish_pending_reload();
         wait_for_command_workers(&mut config);
@@ -382,9 +388,28 @@ fn command_workers_restart_after_every_reload_without_overlapping() {
 }
 
 #[test]
-fn commands_disabled_by_a_failed_worker_start_come_back_on_retry() {
+fn plain_text_configs_do_not_start_or_churn_command_workers_on_reload() {
     let path = temporary_config();
     write_config(&path, &config_text("old"));
+    let mut config =
+        ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
+    assert!(config.start_async_workers(false));
+    assert!(!config.engine.async_commands_enabled());
+
+    for replacement in ["one", "two", "three"] {
+        write_config(&path, &config_text(replacement));
+        config.reload_now();
+        config.finish_pending_reload();
+        assert!(!config.engine.async_commands_enabled(), "{replacement}");
+        assert!(!config.engine.commands_disabled(), "{replacement}");
+    }
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn commands_disabled_by_a_failed_worker_start_come_back_on_retry() {
+    let path = temporary_config();
+    write_config(&path, &command_config_text("old"));
     let mut config =
         ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
     // As after a failed start: commands off and a retry scheduled.
@@ -399,7 +424,7 @@ fn commands_disabled_by_a_failed_worker_start_come_back_on_retry() {
     // A reload after a failure also starts them, instead of carrying
     // the disabled state forward as it used to.
     config.engine.set_commands_disabled(true);
-    write_config(&path, &config_text("new"));
+    write_config(&path, &command_config_text("new"));
     config.reload_now();
     config.finish_pending_reload();
     wait_for_command_workers(&mut config);
@@ -411,12 +436,12 @@ fn commands_disabled_by_a_failed_worker_start_come_back_on_retry() {
 #[test]
 fn an_enforced_command_policy_survives_reloads() {
     let path = temporary_config();
-    write_config(&path, &config_text("old"));
+    write_config(&path, &command_config_text("old"));
     let mut config =
         ReloadableConfig::load_with_policy(&path, OrganizationPolicy::default()).unwrap();
     assert!(config.start_async_workers(true));
     assert!(config.engine.commands_disabled());
-    write_config(&path, &config_text("new"));
+    write_config(&path, &command_config_text("new"));
     config.reload_now();
     config.finish_pending_reload();
     assert!(config.engine.commands_disabled());
@@ -901,7 +926,10 @@ fn reload_does_not_wait_for_a_blocked_command_worker_on_the_reactor() {
         "input processing waited for old worker teardown"
     );
     assert_eq!(typed[0].insert, "reloaded");
-    wait_for_command_workers(&mut config);
+    assert!(
+        !config.engine.async_commands_enabled(),
+        "a text-only reload should not restart command workers"
+    );
     assert!(config.engine.drain_completed_commands().is_empty());
     let _ = fs::remove_file(path);
 }

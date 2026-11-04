@@ -10,6 +10,9 @@ All notable changes to WayExpand are documented here.
   Unix-socket proxies.
 - Make `wayexpand status` report when its CLI and daemon builds do not match;
   include the comparison and an actionable warning in JSON output.
+- Avoid creating asynchronous command workers for text-only configurations;
+  command and hotkey worker threads now start only when an enabled action
+  requires them, reducing reload churn and background threads.
 - Expand operational pack lint coverage to common DNS, firewall, certificate,
   database, Kubernetes, systemd, and cPanel/WHM command families so their form
   fields must use a validator, constrained choice, or explicit free-text
