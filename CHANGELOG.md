@@ -17,6 +17,8 @@ All notable changes to WayExpand are documented here.
   was skipped and why.
 - Keep permissive AutoKey imports going when an individual phrase fails
   configuration validation, and report the skipped path and remediation.
+- Make the continuous setup-output fairness regression deterministic instead of
+  relying on pipe scheduling and an external `yes` process.
 - Add a stable `matching_unavailable_reason` status field so operators and
   automation can distinguish disconnected capture, unavailable evdev layout,
   unsupported replacement, pause, and invalid configuration. Derive
