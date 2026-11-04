@@ -618,7 +618,7 @@ fn target_integrity_check(daemon: &serde_json::Value) -> serde_json::Value {
         if result == Some(true) {
             "Automatic replacement is either refused by default or backed by a certified atomic route."
         } else if result == Some(false) {
-            "An explicit compatibility override enables a non-atomic replacement route that has not passed the real-session target-integrity gate."
+            "An explicit compatibility override enables a non-atomic route that has not passed real-session target-integrity certification. Set settings.compatibility_mode = \"off\" and restart the daemon to restore default refusal; the trigger will remain unless a safe replacement route is available."
         } else {
             "The active route lacks sufficient certification evidence to establish safe automatic replacement."
         },
@@ -1131,6 +1131,10 @@ mod tests {
         });
         assert_eq!(target_integrity_check(&refused)["status"], "pass");
         assert_eq!(target_integrity_check(&override_enabled)["status"], "fail");
+        assert!(target_integrity_check(&override_enabled)["detail"]
+            .as_str()
+            .unwrap()
+            .contains("settings.compatibility_mode = \"off\""));
         assert_eq!(
             target_integrity_check(&uncertified_atomic)["status"],
             "unavailable"

@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Give target-integrity failures a direct recovery instruction for disabling
+  non-atomic compatibility output and restoring default refusal.
 - Treat a stale or missing daemon status schema as unavailable security
   evidence, not a verified sandbox failure. Keep the required gate incomplete
   until the daemon is updated or restarted; bump the security report schema to
