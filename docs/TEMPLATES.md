@@ -178,8 +178,9 @@ the character count (text fields only). For example,
 For insert-only shell command templates, `{{shellq:NAME=DEFAULT|required|max=N}}`
 collects a text field and renders it as one POSIX shell-quoted word. Repeat it
 as `{{shellq:NAME}}` to reuse the entered value. Shell-quoted form values reject
-control characters such as newlines, carriage returns, and tabs. The same
-`min`, `max`, and `validate` constraints available on `{{field:...}}` markers can be applied to `{{shellq:...}}` values. Quoting
+terminal control characters, including newlines, carriage returns, tabs, and
+escape sequences. The same `min`, `max`, and `validate` constraints available
+on `{{field:...}}` markers can be applied to `{{shellq:...}}` values. Quoting
 protects shell word boundaries when an operator later runs the command; it
 does not make the command safe to execute or authorize execution. WayExpand
 inserts the completed command for review and does not press Enter. The form
@@ -333,10 +334,12 @@ Infrastructure fields can declare a shared constraint with
 `--set` handling, and final renderer. Built-in generators use DNS-label,
 hostname, host-and-port, port, positive-integer, Linux-user, absolute-path,
 YAML-string, Ansible host-pattern, Compose service-name, container-image,
-systemd-executable, and single-line checks where each value is used. These
-checks (including `shell-single-quoted` for safe shell arguments) prevent
-common malformed values and syntax breakouts; they do not
-replace validation by the target tool.
+Kubernetes resource-name, duration, systemd-executable, and single-line checks
+where each value is used. These checks prevent common malformed values; they
+do not replace validation by the target tool. In shell command templates,
+write form values as `{{shellq:field=default|required|validate=TYPE}}` so each
+value renders as one POSIX shell argument. Validation and shell quoting solve
+different problems and should both be used for command arguments.
 
 Available text-field types are `dns-label`, `hostname`, `host-port`, `port`,
 `positive-integer`, `linux-user`, `ansible-role-name`, `absolute-path`,
@@ -348,7 +351,7 @@ Go-style durations up to 30 days such as `15m` or `1h30m` (for
 `docker logs --since` or `kubectl --timeout`); `relative-time` accepts
 `journalctl --since` values such as `1 hour ago`. The `free_text=true` marker explicitly
 documents an intentionally unrestricted text field for operational-pack lint.
-For example,
+`kubernetes-name` and `dns-subdomain` accept DNS subdomains. For example,
 `{{field:port=443|required|max=5|validate=port}}` accepts only a decimal port
 from 1 through 65535.
 

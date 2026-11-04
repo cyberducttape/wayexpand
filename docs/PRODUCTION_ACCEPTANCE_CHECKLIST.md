@@ -18,6 +18,9 @@ session evidence; unit tests alone do not satisfy them.
       and `wayexpand setup`.
 - [x] Require explicit acknowledgement for evdev's missing sensitive-field
       signal. See [BACKENDS_SENSITIVE_FIELDS](BACKENDS_SENSITIVE_FIELDS.md).
+      The local consent marker remains per-machine, and the GUI's persistent
+      route indicator uses live daemon status to distinguish verified,
+      unavailable, and unknown sensitive-field signals.
 - [x] Verify broker socket ownership, permissions, trusted ancestors, socket
       identity, bounded frames, peer identity, and action policy in automated
       tests. See `crates/action-broker/src/ipc.rs` and `path_security.rs`.
@@ -35,6 +38,12 @@ session evidence; unit tests alone do not satisfy them.
       passes the real-session target-integrity gate below. The explicit legacy
       compatibility setting is an experimental override for typed triggers;
       it never makes Quick Picker use non-atomic output.
+- [x] Keep paced keysym output bounded by a short default and preview route
+      strategy. The planner recommends atomic verified replacement first,
+      otherwise native text commit only under explicit compatibility consent,
+      paced keystrokes only for estimates within 100 ms, and clipboard/manual
+      paste when the active route cannot meet those conditions. The latency
+      threshold is a product objective, not certification evidence.
 - [ ] Pass a compositor-specific integration matrix. See
       [CERTIFICATION_MATRIX](CERTIFICATION_MATRIX.md).
 - [ ] Record zero unintended deletions, duplicate insertions, or wrong-window
@@ -74,6 +83,11 @@ session evidence; unit tests alone do not satisfy them.
       synthetic characters may leave partial text, so the target-integrity
       gate still requires a passing real-session test or refusing automatic
       replacement on that route.
+      Any unknown or partial output outcome now stops the batch and quarantines
+      queued evdev input even if the interruption monitor saw no new key. A
+      separate `output_partial_total` counter and GUI alert call out failures
+      after insertion began; uncertain output is never replayed. These changes
+      reduce stale-trigger risk but do not recover already delivered text.
       The same failure was reproduced against clean commit `afdcd03633df` in
       [this report](evidence/kwin-overlap-reproduction-afdcd0363.json): 124 of
       128 replacement characters remained, the concurrent trigger was

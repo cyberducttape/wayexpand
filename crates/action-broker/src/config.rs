@@ -138,12 +138,27 @@ impl ActionParameter {
     }
 }
 
+/// Readability profile for an action's executable runtime.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum RuntimeProfile {
+    /// Preserve compatibility by allowing common dynamic runtime directories.
+    #[default]
+    Compatible,
+    /// Allow only the executable and explicitly listed read paths.
+    Minimal,
+}
+
 /// Per-action filesystem grants. Paths are canonicalized when the broker
-/// loads its policy. The action also receives read access to its executable,
-/// standard runtime directories, `/proc`, and its working directory.
+/// loads its policy. The compatible runtime profile additionally grants
+/// common system runtime directories and `/proc`; the minimal profile grants
+/// only the executable and explicitly listed read paths.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ActionSandbox {
+    /// Common runtime directories, or only application-specific read grants.
+    #[serde(default)]
+    pub runtime_profile: RuntimeProfile,
     /// Additional files or directories the action may read and execute.
     #[serde(default)]
     pub read_paths: Vec<String>,
@@ -1097,6 +1112,9 @@ enabled = true
         let sandbox: ActionSandbox = toml::from_str("read_paths = []\nwrite_paths = []").unwrap();
         assert!(!sandbox.deny_network);
         assert!(!sandbox.deny_devices);
+        assert_eq!(sandbox.runtime_profile, RuntimeProfile::Compatible);
+        let minimal: ActionSandbox = toml::from_str("runtime_profile = 'minimal'").unwrap();
+        assert_eq!(minimal.runtime_profile, RuntimeProfile::Minimal);
     }
 
     #[test]
@@ -1134,6 +1152,7 @@ enabled = true
             write_paths: vec![],
             deny_network: false,
             deny_devices: false,
+            runtime_profile: RuntimeProfile::Compatible,
         };
         assert!(relative.validate().unwrap_err().contains("absolute"));
         assert!(

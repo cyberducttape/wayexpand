@@ -555,6 +555,82 @@ mod tests {
     }
 
     #[test]
+    fn shutdown_during_a_blocked_read_does_not_start_another_read() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (started_sender, started_receiver) = mpsc::channel();
+        let (release_sender, release_receiver) = mpsc::channel();
+        let release_receiver = Mutex::new(release_receiver);
+        let counter = Arc::clone(&calls);
+        let read: ReadClipboard = Arc::new(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+            started_sender.send(()).unwrap();
+            release_receiver.lock().unwrap().recv().ok()?;
+            Some("clipboard value".into())
+        });
+        let max_age = Duration::from_secs(5);
+        let shared = Arc::new(Shared {
+            slot: Mutex::new(Slot::default()),
+            ready: Condvar::new(),
+        });
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let worker_shared = Arc::clone(&shared);
+        let worker =
+            std::thread::spawn(move || clipboard_worker(receiver, worker_shared, read, max_age));
+        start_prefetch(&shared, &sender);
+        started_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the clipboard worker entered its blocked read");
+        // Closing the request channel is the worker's shutdown signal. The
+        // active read must finish before the worker can observe it.
+        drop(sender);
+        release_sender
+            .send(())
+            .expect("the test releases the bounded in-flight read");
+        worker
+            .join()
+            .expect("worker exits after the blocked read returns");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_new_clipboard_owner_supersedes_an_unconsumed_prefetch() {
+        let (read, calls) = counting_read(Duration::ZERO);
+        let max_age = Duration::from_secs(5);
+        let shared = Arc::new(Shared {
+            slot: Mutex::new(Slot::default()),
+            ready: Condvar::new(),
+        });
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let worker_shared = Arc::clone(&shared);
+        let worker =
+            std::thread::spawn(move || clipboard_worker(receiver, worker_shared, read, max_age));
+        start_prefetch(&shared, &sender);
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while !matches!(lock(&shared).value, Prefetched::Ready { generation: 1, .. })
+            && Instant::now() < deadline
+        {
+            std::thread::yield_now();
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        // A later trigger can observe the new clipboard owner; the prior
+        // completed value is replaced rather than leaking across triggers.
+        start_prefetch(&shared, &sender);
+        while !matches!(lock(&shared).value, Prefetched::Ready { generation: 2, .. })
+            && Instant::now() < deadline
+        {
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            take_or_read(&shared, &sender, max_age).as_deref(),
+            Some("value-2")
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        drop(sender);
+        worker.join().unwrap();
+    }
+
+    #[test]
     fn disconnected_clipboard_worker_fails_closed_without_waiting_for_deadline() {
         let shared = Shared {
             slot: Mutex::new(Slot::default()),

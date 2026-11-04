@@ -114,15 +114,39 @@ pub(crate) fn doctor_command(args: Args) -> Result<()> {
         .map(|index| rest.remove(index))
         .is_some();
     if requested_security {
-        if rest.iter().any(|argument| argument == "--certify") || rest.len() > 1 {
-            usage_bail!("usage: wayexpand doctor --security [--json] [config]");
+        let mut profile = crate::doctor::security::ProtectionProfile::Workstation;
+        let mut positional = Vec::new();
+        let mut index = 0;
+        while index < rest.len() {
+            let argument = rest[index].as_str();
+            if argument == "--certify" {
+                usage_bail!("usage: wayexpand doctor --security [--profile workstation|hardened|strict] [--json] [config]");
+            }
+            if argument == "--profile" {
+                let value = rest.get(index + 1).ok_or_else(|| {
+                    usage_error("--profile requires workstation, hardened, or strict")
+                })?;
+                profile = crate::doctor::security::ProtectionProfile::parse(value)?;
+                index += 2;
+            } else if let Some(value) = argument.strip_prefix("--profile=") {
+                profile = crate::doctor::security::ProtectionProfile::parse(value)?;
+                index += 1;
+            } else if argument.starts_with('-') {
+                usage_bail!("usage: wayexpand doctor --security [--profile workstation|hardened|strict] [--json] [config]");
+            } else {
+                positional.push(argument.to_owned());
+                index += 1;
+            }
         }
-        let config_path = rest
+        if positional.len() > 1 {
+            usage_bail!("usage: wayexpand doctor --security [--profile workstation|hardened|strict] [--json] [config]");
+        }
+        let config_path = positional
             .into_iter()
             .next()
             .map(PathBuf::from)
             .unwrap_or_else(default_config_path);
-        return crate::doctor::security::run(&config_path, requested_json);
+        return crate::doctor::security::run(&config_path, requested_json, profile);
     }
     if rest.iter().any(|argument| argument == "--certify") {
         if rest.len() != 1 {

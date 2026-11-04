@@ -186,7 +186,10 @@ backends never return from a wedged call.
 systemctl --user restart wayexpand-evdev.service
 ```
 2. Check the text you were editing. `output_uncertain_total` counts
-   expansions that may have been partially typed; they are never retried.
+   transactions whose target effect is unknown; they are never retried.
+   `output_partial_total` specifically counts failures after insertion began.
+   The GUI raises a separate partial-insertion warning, and the recent outcome
+   trace identifies the transaction without retaining its text.
 3. If it recurs, capture `journalctl --user -u <unit>` around the stall for a
    bug report.
 

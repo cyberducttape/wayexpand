@@ -3,6 +3,48 @@ use crate::runtime::{OutputRefusal, ReplacementAssurance};
 use wayexpand_core::CompatibilityMode;
 
 impl Strings {
+    pub fn insertion_plan_notice(&self, strategy: wayexpand_core::InsertionStrategy) -> String {
+        use wayexpand_core::InsertionStrategy as Strategy;
+        match (self.lang, strategy) {
+            (Language::English, Strategy::VerifiedReplacement) => {
+                "Plan: verified atomic replacement.".into()
+            }
+            (Language::English, Strategy::NativeTextCommit) => {
+                "Plan: native text commit. Compatibility mode is enabled; replacement remains non-atomic.".into()
+            }
+            (Language::English, Strategy::ClipboardAssistedPaste) => {
+                "Plan: copy and paste manually. The active route cannot provide a verified, interactive replacement. For long configuration text, use `wayexpand new` to generate a file.".into()
+            }
+            (Language::English, Strategy::PacedSyntheticKeystrokes { predicted_ms }) => {
+                format!("Plan: paced synthetic keystrokes, estimated {predicted_ms} ms; compatibility mode is enabled.")
+            }
+            (Language::German, Strategy::VerifiedReplacement) => {
+                "Plan: verifizierte atomare Ersetzung.".into()
+            }
+            (Language::German, Strategy::NativeTextCommit) => {
+                "Plan: native Texteingabe. Der Kompatibilitätsmodus ist aktiv; die Ersetzung bleibt nicht atomar.".into()
+            }
+            (Language::German, Strategy::ClipboardAssistedPaste) => {
+                "Plan: manuell kopieren und einfügen. Der aktive Weg bietet keine verifizierte interaktive Ersetzung.".into()
+            }
+            (Language::German, Strategy::PacedSyntheticKeystrokes { predicted_ms }) => {
+                format!("Plan: simulierte Tastenanschläge, geschätzt {predicted_ms} ms; der Kompatibilitätsmodus ist aktiv.")
+            }
+            (Language::Indonesian, Strategy::VerifiedReplacement) => {
+                "Rencana: penggantian atomik terverifikasi.".into()
+            }
+            (Language::Indonesian, Strategy::NativeTextCommit) => {
+                "Rencana: komit teks native. Mode kompatibilitas aktif; penggantian tetap non-atomik.".into()
+            }
+            (Language::Indonesian, Strategy::ClipboardAssistedPaste) => {
+                "Rencana: salin dan tempel secara manual. Jalur aktif tidak menyediakan penggantian interaktif terverifikasi.".into()
+            }
+            (Language::Indonesian, Strategy::PacedSyntheticKeystrokes { predicted_ms }) => {
+                format!("Rencana: ketukan papan ketik sintetis, perkiraan {predicted_ms} ms; mode kompatibilitas aktif.")
+            }
+        }
+    }
+
     pub fn replacement_pill(&self, assurance: ReplacementAssurance) -> &'static str {
         match (self.lang, assurance) {
             (Language::English, ReplacementAssurance::Verified) => {
@@ -107,22 +149,38 @@ impl Strings {
     pub fn output_uncertain_notice(&self, count: u64) -> String {
         match self.lang {
             Language::English => format!(
-                "{count} expansion(s) may have been partly typed when output failed. They were not retried; check the affected text."
+                "The result of {count} output transaction(s) is unknown. They were not retried; check the affected text and recent outcomes."
             ),
             Language::German => format!(
-                "{count} Erweiterung(en) wurden beim Ausgabefehler möglicherweise nur teilweise getippt. Sie wurden nicht wiederholt; prüfen Sie den betroffenen Text."
+                "Das Ergebnis von {count} Ausgabevorgang(en) ist unbekannt. Sie wurden nicht wiederholt; prüfen Sie den betroffenen Text und die letzten Ergebnisse."
             ),
             Language::Indonesian => format!(
-                "{count} ekspansi mungkin hanya sebagian terketik saat keluaran gagal. Ekspansi tersebut tidak diulang; periksa teks yang terdampak."
+                "Hasil {count} transaksi keluaran tidak diketahui. Transaksi tidak diulang; periksa teks dan hasil terbaru."
             ),
+        }
+    }
+
+    pub fn output_partial_notice(&self, count: u64) -> String {
+        match self.lang {
+            Language::English => format!("Partial insertion detected in {count} transaction(s). Check the target text; WayExpand did not retry."),
+            Language::German => format!("Teilweise Einfügung bei {count} Vorgang/Vorgängen erkannt. Prüfen Sie den Zieltext; WayExpand hat nichts wiederholt."),
+            Language::Indonesian => format!("Penyisipan sebagian terdeteksi pada {count} transaksi. Periksa teks tujuan; WayExpand tidak mengulanginya."),
+        }
+    }
+
+    pub fn output_partial_badge(&self, count: u64) -> String {
+        match self.lang {
+            Language::English => format!("Partial insertion · {count}"),
+            Language::German => format!("Teilweise Einfügung · {count}"),
+            Language::Indonesian => format!("Penyisipan sebagian · {count}"),
         }
     }
 
     pub fn output_uncertain_badge(&self, count: u64) -> String {
         match self.lang {
-            Language::English => format!("Partial output · {count}"),
-            Language::German => format!("Teilausgabe · {count}"),
-            Language::Indonesian => format!("Keluaran parsial · {count}"),
+            Language::English => format!("Check output · {count}"),
+            Language::German => format!("Ausgabe prüfen · {count}"),
+            Language::Indonesian => format!("Periksa keluaran · {count}"),
         }
     }
 
@@ -137,13 +195,13 @@ impl Strings {
     pub fn keystroke_limit_help(&self) -> &'static str {
         match self.lang {
             Language::English => {
-                "Characters (1–5000). When text must be typed key by key (the libei keysym fallback, about 83 characters a second), longer replacements are refused. 250 is about 3 seconds; anything you type meanwhile is mixed into the replacement."
+                "Characters (1–5000). When text must be typed key by key (the libei keysym fallback, about 83 characters a second), longer replacements are refused. The default limit is 8 characters (about 100 ms). Longer output is refused unless you raise the limit explicitly; copy and paste or generate a file for bulk text."
             }
             Language::German => {
-                "Zeichen (1–5000). Muss Text Taste für Taste getippt werden (libei-Keysym-Fallback, etwa 83 Zeichen pro Sekunde), werden längere Ersetzungen abgelehnt. 250 sind etwa 3 Sekunden; was Sie währenddessen tippen, landet in der Ersetzung."
+                "Zeichen (1–5000). Muss Text Taste für Taste getippt werden (libei-Keysym-Fallback, etwa 83 Zeichen pro Sekunde), werden längere Ersetzungen abgelehnt. Der Standardwert beträgt 8 Zeichen (etwa 100 ms). Längere Ausgabe wird abgelehnt, sofern Sie das Limit nicht ausdrücklich erhöhen; kopieren und einfügen oder erzeugen Sie eine Datei für größere Texte."
             }
             Language::Indonesian => {
-                "Karakter (1–5000). Jika teks harus diketik tombol demi tombol (fallback keysym libei, sekitar 83 karakter per detik), penggantian yang lebih panjang ditolak. 250 sekitar 3 detik; apa pun yang Anda ketik selama itu tercampur ke penggantian."
+                "Karakter (1–5000). Jika teks harus diketik tombol demi tombol (fallback keysym libei, sekitar 83 karakter per detik), penggantian yang lebih panjang ditolak. Batas bawaan adalah 8 karakter (sekitar 100 ms). Keluaran lebih panjang ditolak kecuali batas dinaikkan secara eksplisit; salin dan tempel atau buat berkas untuk teks besar."
             }
         }
     }

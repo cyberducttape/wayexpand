@@ -178,32 +178,29 @@ impl Strings {
         &self,
         route: &str,
         maturity: &str,
-        sensitive_fields: bool,
+        sensitive_fields: Option<bool>,
         atomic_replace: bool,
         replacement_assurance: &str,
         certified: bool,
     ) -> String {
-        let semantics = match (self.lang, sensitive_fields, atomic_replace) {
-            (Language::English, true, true) => "sensitive-field aware · atomic replacement",
-            (Language::Indonesian, true, true) => "sadar kolom sensitif · penggantian atomik",
-            (Language::English, true, false) => "sensitive-field aware · non-atomic replacement",
-            (Language::Indonesian, true, false) => "sadar kolom sensitif · penggantian non-atomik",
-            (Language::English, false, true) => "global keyboard visibility · atomic replacement",
-            (Language::Indonesian, false, true) => {
-                "visibilitas papan ketik global · penggantian atomik"
-            }
-            (Language::English, false, false) => {
-                "global keyboard visibility · non-atomic replacement"
-            }
-            (Language::Indonesian, false, false) => {
-                "visibilitas papan ketik global · penggantian non-atomik"
-            }
-            (Language::German, true, true) => "passwortfeldbewusst · atomare Ersetzung",
-            (Language::German, true, false) => "passwortfeldbewusst · nicht-atomare Ersetzung",
-            (Language::German, false, true) => "globale Tastatursichtbarkeit · atomare Ersetzung",
-            (Language::German, false, false) => {
-                "globale Tastatursichtbarkeit · nicht-atomare Ersetzung"
-            }
+        let privacy = match (self.lang, sensitive_fields) {
+            (Language::English, Some(true)) => "sensitive-field protection verified",
+            (Language::English, Some(false)) => "no sensitive-field protection",
+            (Language::English, None) => "sensitive-field protection unknown",
+            (Language::Indonesian, Some(true)) => "perlindungan kolom sensitif terverifikasi",
+            (Language::Indonesian, Some(false)) => "tanpa perlindungan kolom sensitif",
+            (Language::Indonesian, None) => "perlindungan kolom sensitif tidak diketahui",
+            (Language::German, Some(true)) => "Schutz sensibler Felder verifiziert",
+            (Language::German, Some(false)) => "kein Schutz sensibler Felder",
+            (Language::German, None) => "Schutz sensibler Felder unbekannt",
+        };
+        let replacement = match (self.lang, atomic_replace) {
+            (Language::English, true) => "atomic replacement",
+            (Language::English, false) => "non-atomic replacement",
+            (Language::Indonesian, true) => "penggantian atomik",
+            (Language::Indonesian, false) => "penggantian non-atomik",
+            (Language::German, true) => "atomare Ersetzung",
+            (Language::German, false) => "nicht-atomare Ersetzung",
         };
         let evidence = match (self.lang, certified) {
             (Language::English, true) => "certified",
@@ -235,7 +232,7 @@ impl Strings {
             (Language::German, "unavailable") => "Ersetzung nicht verfügbar",
             (Language::German, _) => "Ersetzungssicherheit unbekannt",
         };
-        format!("{route} · {assurance} · {maturity} · {semantics} · {evidence}")
+        format!("{route} · {assurance} · {maturity} · {privacy} · {replacement} · {evidence}")
     }
 
     pub fn route_connected_status(&self) -> &'static str {
@@ -904,7 +901,9 @@ impl Strings {
 
     pub fn onboarding_evdev_setup(&self) -> &'static str {
         match self.lang {
-            Language::English => "Enable raw keyboard capture — advanced…",
+            Language::English => {
+                "Enable raw keyboard capture — no password-field detection (advanced)…"
+            }
             Language::Indonesian => "Aktifkan tangkapan papan ketik mentah — lanjutan…",
             Language::German => "Rohe Tastaturerfassung aktivieren — erweitert…",
         }
@@ -912,7 +911,7 @@ impl Strings {
 
     pub fn evdev_setup_title(&self) -> &'static str {
         match self.lang {
-            Language::English => "Enable raw keyboard capture — advanced",
+            Language::English => "Enable raw keyboard capture — no password-field detection",
             Language::Indonesian => "Aktifkan tangkapan papan ketik mentah — lanjutan",
             Language::German => "Rohe Tastaturerfassung aktivieren — erweitert",
         }
@@ -920,7 +919,7 @@ impl Strings {
 
     pub fn evdev_setup_warning(&self) -> &'static str {
         match self.lang {
-            Language::English => "Works in more applications, but can observe password-field typing because this mode has no sensitive-field signal. This is an explicit opt-in. Device permissions are a separate system-wide change and are never made by this GUI.",
+            Language::English => "Evdev reads global keyboard input and cannot detect password fields, password-manager prompts, or other sensitive fields. Keystrokes in those fields may be observed. Use an input-method route when you need sensitive-field protection. This is an explicit opt-in. Device permissions are a separate system-wide change and are never made by this GUI.",
             Language::Indonesian => "Berfungsi di lebih banyak aplikasi, tetapi dapat mengamati pengetikan di kolom kata sandi karena mode ini tidak memiliki sinyal kolom sensitif. Ini adalah pilihan eksplisit. Izin perangkat merupakan perubahan terpisah di seluruh sistem dan tidak pernah dilakukan oleh GUI ini.",
             Language::German => "Funktioniert in mehr Anwendungen, kann aber Eingaben in Passwortfeldern beobachten, weil dieser Modus kein Signal für sensible Felder hat. Dies ist eine ausdrückliche Zustimmung. Geräteberechtigungen sind eine separate systemweite Änderung und werden von dieser GUI niemals vorgenommen.",
         }
@@ -928,7 +927,7 @@ impl Strings {
 
     pub fn evdev_setup_acknowledge(&self) -> &'static str {
         match self.lang {
-            Language::English => "I understand the raw-input and password-field limitations",
+            Language::English => "I understand evdev cannot detect or protect sensitive fields",
             Language::Indonesian => "Saya memahami batasan masukan mentah dan kolom kata sandi",
             Language::German => "Ich verstehe die Einschränkungen bei Rohdaten und Passwortfeldern",
         }
@@ -954,7 +953,7 @@ mod route_trust_tests {
         let unverified = strings.route_trust_status(
             "Evdev + libei",
             "experimental",
-            false,
+            Some(false),
             false,
             "unverified",
             false,
@@ -967,12 +966,42 @@ mod route_trust_tests {
             unverified.contains("non-atomic replacement"),
             "{unverified}"
         );
+        assert!(
+            unverified.contains("no sensitive-field protection"),
+            "{unverified}"
+        );
         assert!(!unverified.contains("best effort"), "{unverified}");
 
-        let verified =
-            strings.route_trust_status("IBus", "experimental", true, false, "verified", false);
+        let verified = strings.route_trust_status(
+            "IBus",
+            "experimental",
+            Some(true),
+            false,
+            "verified",
+            false,
+        );
         assert!(verified.contains("target text verified"), "{verified}");
+        assert!(
+            verified.contains("sensitive-field protection verified"),
+            "{verified}"
+        );
         assert!(verified.contains("non-atomic replacement"), "{verified}");
         assert!(!verified.contains("· atomic replacement"), "{verified}");
+    }
+
+    #[test]
+    fn missing_live_status_is_reported_as_unknown_sensitive_protection() {
+        let text = Strings::new(Language::English).route_trust_status(
+            "input-method-v2",
+            "supported",
+            None,
+            true,
+            "verified",
+            false,
+        );
+        assert!(
+            text.contains("sensitive-field protection unknown"),
+            "{text}"
+        );
     }
 }

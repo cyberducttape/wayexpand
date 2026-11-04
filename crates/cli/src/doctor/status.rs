@@ -59,6 +59,7 @@ pub(crate) fn status_as_json(response: &str) -> Result<serde_json::Value> {
                         | "clipboard_deadline_misses_total"
                         | "clipboard_read_max_duration_us"
                         | "output_uncertain_total"
+                        | "output_partial_total"
                         | "output_retiring_workers"
                         | "output_stalled_ms"
                         | "output_reconnect_total"
@@ -148,6 +149,7 @@ pub(crate) fn output_health_from_status(snapshot: &serde_json::Value) -> serde_j
     serde_json::json!({
         "health": health,
         "uncertain_transactions_total": snapshot.get("output_uncertain_total"),
+        "partial_insertions_total": snapshot.get("output_partial_total"),
         "retiring_workers": snapshot.get("output_retiring_workers"),
         "stalled_ms": snapshot.get("output_stalled_ms"),
         "recovery": recovery,

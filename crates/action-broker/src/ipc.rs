@@ -8,15 +8,17 @@ use crate::config::is_user_or_root_owner;
 use crate::protocol::{ActionError, MAX_OUTPUT_BYTES};
 use crate::protocol::{ActionRequest, ActionResponse};
 use serde_json;
+use std::fs::File;
 #[cfg(test)]
 use std::io::Write;
 use std::io::{BufRead, BufReader, Read};
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
+use std::{ffi::OsStr, ffi::OsString};
 use thiserror::Error;
 
 mod frame;
@@ -30,6 +32,7 @@ use frame::{
 const SOCKET_READ_TIMEOUT: Duration = Duration::from_secs(30);
 const SOCKET_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 const DEADLINE_POLL_INTERVAL: Duration = Duration::from_millis(100);
+static SOCKET_PATH_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Error)]
 pub enum IpcError {
@@ -67,6 +70,8 @@ impl IpcError {
 pub struct BrokerServer {
     listener: UnixListener,
     socket_path: PathBuf,
+    socket_parent: File,
+    socket_name: OsString,
     socket_identity: (u64, u64),
 }
 
@@ -167,36 +172,21 @@ impl BrokerServer {
     /// Create a new broker server at the given socket path.
     pub fn bind<P: AsRef<Path>>(path: P) -> Result<Self, IpcError> {
         let path = path.as_ref();
-        let file_name = path
-            .file_name()
-            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
         let parent = path
             .parent()
             .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
         let parent = parent.canonicalize()?;
-        let socket_path = parent.join(file_name);
+        let socket_name = path
+            .file_name()
+            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?
+            .to_os_string();
         let uid = rustix::process::geteuid().as_raw();
-        Self::validate_socket_ancestors(&parent, uid)?;
+        let socket_parent = open_socket_directory(&parent, uid)?;
+        let socket_path = parent.join(&socket_name);
+        let operation_path = socket_operation_path(&socket_parent, &socket_name, &socket_path);
 
-        // A socket's mode is initially determined by the process umask, and
-        // chmod necessarily happens after bind has published the pathname.
-        // Require the containing directory itself to be private so a
-        // permissive manual-launch umask cannot expose that short interval to
-        // another uid. The broker binary also sets umask(0077) before starting
-        // Tokio; this directory check protects library callers and custom
-        // launchers that do not use that entry point.
-        let parent_metadata = std::fs::metadata(&parent)?;
-        if !is_user_or_root_owner(parent_metadata.uid(), uid) || parent_metadata.mode() & 0o077 != 0
-        {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                "broker socket parent directory must be owned by the broker user or root and private",
-            )
-            .into());
-        }
-
-        if let Ok(metadata) = std::fs::symlink_metadata(&socket_path) {
-            if !metadata.file_type().is_socket() || !is_user_or_root_owner(metadata.uid(), uid) {
+        if let Some(metadata) = socket_entry_stat(&socket_parent, &socket_name)? {
+            if !stat_is_socket(&metadata) || !is_user_or_root_owner(metadata.st_uid, uid) {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::PermissionDenied,
                     "refusing to replace a non-socket or untrusted broker path",
@@ -206,7 +196,7 @@ impl BrokerServer {
             // Connecting is the ownership test. Never unlink a path while a
             // live broker is accepting it: a second same-user daemon must be
             // rejected instead of stealing the first daemon's endpoint.
-            match UnixStream::connect(&socket_path) {
+            match UnixStream::connect(&operation_path) {
                 Ok(_) => {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::AddrInUse,
@@ -221,80 +211,92 @@ impl BrokerServer {
                     ) => {}
                 Err(error) => return Err(error.into()),
             }
-            let identity = (metadata.dev(), metadata.ino());
-            let current = std::fs::symlink_metadata(&socket_path)?;
-            if !current.file_type().is_socket()
-                || (current.dev(), current.ino()) != identity
-                || !is_user_or_root_owner(current.uid(), uid)
-            {
+            let identity = stat_identity(&metadata);
+            if !unlink_socket_if_same_at(&socket_parent, &socket_name, identity, uid, || {})? {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::PermissionDenied,
                     "broker socket path changed while checking stale socket",
                 )
                 .into());
             }
-            std::fs::remove_file(&socket_path)?;
         }
 
-        // The systemd unit supplies UMask=0077. Do not mutate the process-wide
-        // umask here: this code runs after Tokio has started worker threads,
-        // so a concurrent file creation could inherit a transient umask.
-        let listener = UnixListener::bind(&socket_path)?;
+        // Bind and set permissions inside a private staging directory. The
+        // final name appears only after the socket is private, via an atomic
+        // no-replace rename relative to the held parent directory.
+        let staging = SocketStagingDirectory::create(&socket_parent, &socket_name)?;
+        let staging_fallback = parent.join(&staging.name).join(&socket_name);
+        let staging_path =
+            socket_operation_path(&staging.directory, &socket_name, &staging_fallback);
+        let listener = UnixListener::bind(&staging_path)?;
+        let metadata = socket_entry_stat(&staging.directory, &socket_name)?.ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "staged broker socket disappeared during creation",
+            )
+        })?;
+        let identity = stat_identity(&metadata);
+        if !stat_is_socket(&metadata) || metadata.st_uid != uid {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "staged broker socket was replaced during creation",
+            )
+            .into());
+        }
         if let Err(error) =
-            std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600))
+            std::fs::set_permissions(&staging_path, std::fs::Permissions::from_mode(0o600))
         {
-            drop(listener);
-            let _ = std::fs::remove_file(&socket_path);
             return Err(error.into());
         }
-        let metadata = std::fs::metadata(&socket_path)?;
+        let verified =
+            socket_entry_stat(&staging.directory, &socket_name)?.is_some_and(|current| {
+                stat_is_socket(&current)
+                    && stat_identity(&current) == identity
+                    && current.st_uid == uid
+            });
+        if !verified {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "staged broker socket path changed while setting permissions",
+            )
+            .into());
+        }
+        rustix::fs::renameat_with(
+            &staging.directory,
+            &socket_name,
+            &socket_parent,
+            &socket_name,
+            rustix::fs::RenameFlags::NOREPLACE,
+        )
+        .map_err(|error| {
+            if error == rustix::io::Errno::EXIST {
+                std::io::Error::new(
+                    std::io::ErrorKind::AddrInUse,
+                    "another broker claimed the socket path during startup",
+                )
+            } else {
+                error.into()
+            }
+        })?;
+        let published = socket_entry_stat(&socket_parent, &socket_name)?.is_some_and(|current| {
+            stat_is_socket(&current) && stat_identity(&current) == identity && current.st_uid == uid
+        });
+        if !published {
+            let _ = unlink_socket_if_same_at(&socket_parent, &socket_name, identity, uid, || {});
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "broker socket changed during atomic publication",
+            )
+            .into());
+        }
+        drop(staging);
         Ok(Self {
             listener,
             socket_path,
-            socket_identity: (metadata.dev(), metadata.ino()),
+            socket_parent,
+            socket_name,
+            socket_identity: identity,
         })
-    }
-
-    fn validate_socket_ancestors(path: &Path, uid: u32) -> Result<(), IpcError> {
-        let mut current = path;
-        loop {
-            let metadata = std::fs::metadata(current)?;
-            if !metadata.is_dir() {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::NotADirectory,
-                    "broker socket ancestor is not a directory",
-                )
-                .into());
-            }
-            if !is_user_or_root_owner(metadata.uid(), uid) {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::PermissionDenied,
-                    "broker socket ancestor is not owned by the current user or root",
-                )
-                .into());
-            }
-            let group_or_other_writable = metadata.mode() & 0o022 != 0;
-            let is_sticky_directory = metadata.mode() & 0o1000 != 0;
-            let is_trusted_sticky_directory =
-                is_sticky_directory && is_user_or_root_owner(metadata.uid(), uid);
-            if group_or_other_writable && !is_trusted_sticky_directory {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::PermissionDenied,
-                    "broker socket ancestor is writable by group or other users",
-                )
-                .into());
-            }
-            if current == Path::new("/") {
-                break;
-            }
-            current = current.parent().ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "broker socket ancestor traversal failed",
-                )
-            })?;
-        }
-        Ok(())
     }
 
     /// Accept a new client connection.
@@ -319,14 +321,252 @@ impl BrokerServer {
 
 impl Drop for BrokerServer {
     fn drop(&mut self) {
-        if let Ok(metadata) = std::fs::metadata(&self.socket_path) {
-            if metadata.file_type().is_socket()
-                && (metadata.dev(), metadata.ino()) == self.socket_identity
-            {
-                let _ = std::fs::remove_file(&self.socket_path);
+        let uid = rustix::process::geteuid().as_raw();
+        let _ = unlink_socket_if_same_at(
+            &self.socket_parent,
+            &self.socket_name,
+            self.socket_identity,
+            uid,
+            || {},
+        );
+    }
+}
+
+fn open_socket_directory(path: &Path, uid: u32) -> Result<File, IpcError> {
+    use rustix::fs::{Mode, OFlags};
+
+    let root = rustix::fs::open(
+        "/",
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(std::io::Error::from)?;
+    let mut current = File::from(root);
+    validate_open_socket_directory(&current, uid)?;
+    for component in path.components() {
+        let Component::Normal(name) = component else {
+            if matches!(component, Component::RootDir) {
+                continue;
+            }
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "canonical broker socket directory contains an unsafe component",
+            )
+            .into());
+        };
+        let fd = rustix::fs::openat(
+            &current,
+            name,
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+            Mode::empty(),
+        )
+        .map_err(std::io::Error::from)?;
+        current = File::from(fd);
+        validate_open_socket_directory(&current, uid)?;
+    }
+    Ok(current)
+}
+
+fn validate_open_socket_directory(directory: &File, uid: u32) -> Result<(), IpcError> {
+    let metadata = directory.metadata()?;
+    if !metadata.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotADirectory,
+            "broker socket ancestor is not a directory",
+        )
+        .into());
+    }
+    if !is_user_or_root_owner(metadata.uid(), uid) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "broker socket ancestor is not owned by the current user or root",
+        )
+        .into());
+    }
+    let group_or_other_writable = metadata.mode() & 0o022 != 0;
+    let is_sticky_directory = metadata.mode() & 0o1000 != 0;
+    let is_trusted_sticky_directory =
+        is_sticky_directory && is_user_or_root_owner(metadata.uid(), uid);
+    if group_or_other_writable && !is_trusted_sticky_directory {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "broker socket ancestor is writable by group or other users",
+        )
+        .into());
+    }
+    Ok(())
+}
+
+fn socket_operation_path(directory: &File, name: &OsStr, fallback: &Path) -> PathBuf {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = fallback;
+        let mut path = PathBuf::from(format!("/proc/self/fd/{}", directory.as_raw_fd()));
+        path.push(name);
+        path
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (directory, name);
+        fallback.to_path_buf()
+    }
+}
+
+fn socket_entry_stat(
+    directory: &File,
+    name: &OsStr,
+) -> Result<Option<rustix::fs::Stat>, std::io::Error> {
+    match rustix::fs::statat(directory, name, rustix::fs::AtFlags::SYMLINK_NOFOLLOW) {
+        Ok(metadata) => Ok(Some(metadata)),
+        Err(error) if error == rustix::io::Errno::NOENT => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn stat_is_socket(metadata: &rustix::fs::Stat) -> bool {
+    metadata.st_mode & libc::S_IFMT == libc::S_IFSOCK
+}
+
+fn stat_identity(metadata: &rustix::fs::Stat) -> (u64, u64) {
+    (metadata.st_dev, metadata.st_ino)
+}
+
+fn temporary_socket_name(kind: &str) -> OsString {
+    OsString::from(format!(
+        ".wayexpand-{kind}-{}-{}",
+        std::process::id(),
+        SOCKET_PATH_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ))
+}
+
+struct SocketStagingDirectory {
+    parent: File,
+    name: OsString,
+    directory: File,
+    socket_name: OsString,
+}
+
+impl SocketStagingDirectory {
+    fn create(parent: &File, socket_name: &OsStr) -> Result<Self, std::io::Error> {
+        use rustix::fs::{Mode, OFlags};
+
+        for _ in 0..16 {
+            let name = temporary_socket_name("broker-stage");
+            let parent_clone = parent.try_clone()?;
+            match rustix::fs::mkdirat(parent, &name, Mode::from_raw_mode(0o700)) {
+                Ok(()) => {
+                    let directory = match rustix::fs::openat(
+                        parent,
+                        &name,
+                        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+                        Mode::empty(),
+                    ) {
+                        Ok(directory) => directory,
+                        Err(error) => {
+                            let _ =
+                                rustix::fs::unlinkat(parent, &name, rustix::fs::AtFlags::REMOVEDIR);
+                            return Err(error.into());
+                        }
+                    };
+                    return Ok(Self {
+                        parent: parent_clone,
+                        name,
+                        directory: File::from(directory),
+                        socket_name: socket_name.to_os_string(),
+                    });
+                }
+                Err(error) if error == rustix::io::Errno::EXIST => continue,
+                Err(error) => return Err(error.into()),
             }
         }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "could not allocate a unique broker socket staging directory",
+        ))
     }
+}
+
+impl Drop for SocketStagingDirectory {
+    fn drop(&mut self) {
+        let _ = rustix::fs::unlinkat(
+            &self.directory,
+            &self.socket_name,
+            rustix::fs::AtFlags::empty(),
+        );
+        let _ = rustix::fs::unlinkat(&self.parent, &self.name, rustix::fs::AtFlags::REMOVEDIR);
+    }
+}
+
+fn unlink_socket_if_same_at<F>(
+    directory: &File,
+    name: &OsStr,
+    identity: (u64, u64),
+    uid: u32,
+    between_checks: F,
+) -> Result<bool, std::io::Error>
+where
+    F: FnOnce(),
+{
+    let matches_expected = |metadata: &rustix::fs::Stat| {
+        stat_is_socket(metadata)
+            && stat_identity(metadata) == identity
+            && is_user_or_root_owner(metadata.st_uid, uid)
+    };
+    let Some(first) = socket_entry_stat(directory, name)? else {
+        return Ok(false);
+    };
+    if !matches_expected(&first) {
+        return Ok(false);
+    }
+    // Linux has no compare-inode-and-unlink syscall. Atomically rename the
+    // entry to a unique quarantine name without replacing another entry, then
+    // inspect the moved inode before unlinking. If the original name was
+    // swapped after the first stat, restore the unexpected entry instead.
+    between_checks();
+    for _ in 0..16 {
+        let quarantine = temporary_socket_name("broker-remove");
+        match rustix::fs::renameat_with(
+            directory,
+            name,
+            directory,
+            &quarantine,
+            rustix::fs::RenameFlags::NOREPLACE,
+        ) {
+            Ok(()) => {
+                let moved = socket_entry_stat(directory, &quarantine)?;
+                if moved.as_ref().is_some_and(&matches_expected) {
+                    // Recheck the quarantined entry immediately before its
+                    // removal. The directory is trusted and the name is
+                    // unique; a same-UID process remains outside this IPC
+                    // boundary.
+                    if socket_entry_stat(directory, &quarantine)?
+                        .as_ref()
+                        .is_some_and(&matches_expected)
+                    {
+                        rustix::fs::unlinkat(directory, &quarantine, rustix::fs::AtFlags::empty())
+                            .map_err(std::io::Error::from)?;
+                        return Ok(true);
+                    }
+                }
+                rustix::fs::renameat_with(
+                    directory,
+                    &quarantine,
+                    directory,
+                    name,
+                    rustix::fs::RenameFlags::NOREPLACE,
+                )
+                .map_err(std::io::Error::from)?;
+                return Ok(false);
+            }
+            Err(error) if error == rustix::io::Errno::EXIST => continue,
+            Err(error) if error == rustix::io::Errno::NOENT => return Ok(false),
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "could not allocate a unique broker socket quarantine name",
+    ))
 }
 
 /// Server-side connection to a client.
@@ -584,7 +824,6 @@ mod tests {
     }
     use crate::protocol::ActionOutput;
     use std::{
-        os::unix::fs::PermissionsExt,
         process::Command,
         thread,
         time::{SystemTime, UNIX_EPOCH},
@@ -624,14 +863,6 @@ mod tests {
 
         // Socket file exists
         assert!(socket_path.exists());
-        assert_eq!(
-            std::fs::metadata(&socket_path)
-                .unwrap()
-                .permissions()
-                .mode()
-                & 0o777,
-            0o600
-        );
         let second = BrokerServer::bind(&socket_path);
         assert!(matches!(
             second,
@@ -639,6 +870,7 @@ mod tests {
         ));
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn ipc_bind_under_umask_child() {
         let Ok(mask) = std::env::var("WAYEXPAND_TEST_SOCKET_UMASK") else {
@@ -646,7 +878,7 @@ mod tests {
         };
         let mask = u32::from_str_radix(&mask, 8).unwrap();
         let socket_path = PathBuf::from(std::env::var_os("WAYEXPAND_TEST_SOCKET_PATH").unwrap());
-        unsafe { libc::umask(mask as libc::mode_t) };
+        rustix::process::umask(rustix::fs::Mode::from_raw_mode(mask));
 
         let server = BrokerServer::bind(&socket_path).unwrap();
         assert_eq!(
@@ -661,6 +893,7 @@ mod tests {
         drop(server);
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn ipc_creation_remains_private_under_common_umasks() {
         for mask in [0o000, 0o022, 0o077] {
@@ -718,6 +951,72 @@ mod tests {
     }
 
     #[test]
+    fn ipc_cleanup_preserves_socket_replaced_between_identity_checks() {
+        let socket_path = test_socket("race");
+        let original_path = socket_path.with_file_name("race-original");
+        let server = BrokerServer::bind(&socket_path).unwrap();
+        let uid = rustix::process::geteuid().as_raw();
+        let mut replacement_listener = None;
+
+        let removed = unlink_socket_if_same_at(
+            &server.socket_parent,
+            &server.socket_name,
+            server.socket_identity,
+            uid,
+            || {
+                std::fs::rename(&socket_path, &original_path).unwrap();
+                replacement_listener = Some(UnixListener::bind(&socket_path).unwrap());
+            },
+        )
+        .unwrap();
+
+        assert!(!removed, "a replacement socket must fail the inode recheck");
+        assert!(
+            UnixStream::connect(&socket_path).is_ok(),
+            "the replacement socket must remain available"
+        );
+        drop(server);
+        assert!(
+            UnixStream::connect(&socket_path).is_ok(),
+            "server cleanup must not unlink a replacement socket"
+        );
+        drop(replacement_listener);
+        std::fs::remove_file(&socket_path).unwrap();
+        std::fs::remove_file(&original_path).unwrap();
+    }
+
+    #[test]
+    fn ipc_drop_uses_the_original_directory_after_its_path_is_replaced() {
+        let socket_path = test_socket("pinned-directory");
+        let parent = socket_path.parent().unwrap().to_path_buf();
+        let relocated_parent = parent.with_file_name(format!(
+            "{}-relocated",
+            parent.file_name().unwrap().to_string_lossy()
+        ));
+        let server = BrokerServer::bind(&socket_path).unwrap();
+
+        std::fs::rename(&parent, &relocated_parent).unwrap();
+        std::fs::create_dir(&parent).unwrap();
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::write(&socket_path, "replacement entry").unwrap();
+
+        drop(server);
+
+        assert!(
+            !relocated_parent.join("pinned-directory").exists(),
+            "cleanup should remove the original socket through its pinned directory fd"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&socket_path).unwrap(),
+            "replacement entry",
+            "cleanup must not follow the replaced parent pathname"
+        );
+        std::fs::remove_file(&socket_path).unwrap();
+        std::fs::remove_dir(&parent).unwrap();
+        std::fs::remove_dir(&relocated_parent).unwrap();
+    }
+
+    #[test]
     fn ipc_rejects_non_sticky_writable_ancestor() {
         let socket_path = test_socket("insecure/socket");
         let parent = socket_path.parent().unwrap();
@@ -730,22 +1029,6 @@ mod tests {
             Err(IpcError::Io(error)) if error.kind() == std::io::ErrorKind::PermissionDenied
         ));
 
-        std::fs::remove_dir(parent).unwrap();
-    }
-
-    #[test]
-    fn ipc_rejects_a_non_private_socket_parent() {
-        let socket_path = test_socket("public/socket");
-        let parent = socket_path.parent().unwrap();
-        std::fs::create_dir_all(parent).unwrap();
-        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        let result = BrokerServer::bind(&socket_path);
-        assert!(matches!(
-            result,
-            Err(IpcError::Io(error)) if error.kind() == std::io::ErrorKind::PermissionDenied
-        ));
-        assert!(!socket_path.exists());
         std::fs::remove_dir(parent).unwrap();
     }
 

@@ -92,15 +92,59 @@ restrictions are not in effect.
 
 ### Effective sandbox inspection
 
-Run `wayexpand doctor --security` to inspect the live daemon's effective
+Run `wayexpand doctor --security --profile workstation` to inspect the live daemon's effective
 namespace IDs, NoNewPrivs and seccomp state, address-family socket probes,
 read-only mount flags, private `/tmp`, proc restrictions, W^X behavior, and
-configuration permissions. When named actions are configured it also checks
-the live Action Broker and its in-process probes. `--json` emits the same
-checks for fleet tooling. Unit-file directives alone are not treated as
-evidence. Kernel policy details that cannot be safely inspected from an
-unprivileged process remain listed as unverified instead of being reported as
-active.
+configuration permissions. At daemon and Action Broker startup, WayExpand
+launches a harmless short-lived descendant in each service's own cgroup,
+starts a new session, and verifies that the production supervisor kills and
+reaps it. The daemon result appears as `command_containment_self_test`; the
+broker result is included in Action Broker diagnostics. The doctor requires
+`passed` for each command-capable service. A failed or explicitly disabled
+probe fails the managed readiness check. Under the default required-cgroup
+policy, command execution also fails closed when containment setup is
+unavailable; process-group cleanup is used only when the operator explicitly
+sets `WAYEXPAND_PROCESS_CGROUP=disabled`. When named actions are configured it
+also checks the live Action Broker and its in-process probes. `--json` emits
+the same checks for fleet tooling (schema 2), including `readiness` (`pass`,
+`degraded`, or `fail`), the selected profile, and which checks are required.
+Unit-file directives alone are not treated as evidence. Kernel policy details
+that cannot be safely inspected from an unprivileged process remain listed as
+unverified instead of being reported as active.
+
+Protection profiles are:
+
+- `workstation`: requires the live daemon, safe configuration permissions,
+  process restrictions, blocked direct IP sockets, W^X protection, command
+  containment when command expansions are configured, and broker availability
+  when required. Missing additional protections are reported as degraded.
+- `hardened`: requires all currently probeable daemon protections and reports
+  optional missing probes as degraded. Managed deployments should run this
+  profile after the user service starts and accept the deployment only when
+  the command exits successfully with `readiness: pass`.
+- `strict`: requires the hardened checks and fails while any sandbox mechanism
+  remains unverified. The current documented unverified systemd controls mean
+  strict readiness is expected to fail until those guarantees become
+  introspectable.
+
+The default profile is `workstation`. A managed deployment must explicitly
+validate `hardened` after starting the daemon; a unit file by itself is not a
+deployment assurance result. For example:
+
+```sh
+wayexpand doctor --security --profile hardened --json
+```
+
+The command returns nonzero for degraded or failed readiness, so it can serve
+as an Ansible, Puppet, or image-provisioning gate. Run it from the desktop
+user's session, outside the daemon's sandbox, because the check compares the
+daemon's namespaces with the caller's.
+
+The report also identifies the active capture source and its privacy
+capabilities. Evdev is opt-in and cannot identify password or other sensitive
+fields. Fleet policy that requires sensitive-field protection must set
+`require_sensitive_focus = true` with `safe_mode = true`; this refuses routes
+such as evdev that cannot provide that signal.
 
 The systemd unit is deliberately restrictive to limit the blast radius of a
 compromised or misconfigured command. Do not relax the restrictions in

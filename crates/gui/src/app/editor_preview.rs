@@ -1,5 +1,6 @@
 use crate::*;
 
+#[cfg(test)]
 pub(crate) fn estimated_key_event_latency_ms(chars: usize, chars_per_second: u32) -> Option<u128> {
     (chars_per_second > 0).then(|| (chars as u128 * 1_000).div_ceil(chars_per_second as u128))
 }
@@ -124,28 +125,20 @@ impl GuiApp {
                 .show(ui, |ui| match preview_result {
                     Ok(preview_text) => {
                         if let Some(capabilities) = self.daemon_capabilities.as_ref() {
-                            if capabilities
-                                .injection_mode
-                                .is_some_and(|mode| mode.contains("keysym fallback"))
-                            {
-                                if let Some(rate) = capabilities
-                                    .injection_throughput_chars_per_sec
-                                    .filter(|rate| *rate > 0)
-                                {
-                                    let chars = preview_text.chars().count();
-                                    let millis = estimated_key_event_latency_ms(chars, rate)
-                                        .expect("the throughput was filtered to a positive rate");
-                                    if millis >= 500 {
-                                        ui.colored_label(
-                                            palette.warning,
-                                            format!(
-                                                "Estimated insertion time: {:.1}s via paced keyboard events. For long configuration text, use Copy or `wayexpand new` to generate a file.",
-                                                millis as f64 / 1_000.0
-                                            ),
-                                        );
-                                    }
+                            let plan = capabilities.insertion_plan(preview_text.chars().count());
+                            let color = match plan {
+                                wayexpand_core::InsertionStrategy::VerifiedReplacement => {
+                                    palette.success
                                 }
-                            }
+                                wayexpand_core::InsertionStrategy::ClipboardAssistedPaste => {
+                                    palette.warning
+                                }
+                                wayexpand_core::InsertionStrategy::NativeTextCommit
+                                | wayexpand_core::InsertionStrategy::PacedSyntheticKeystrokes {
+                                    ..
+                                } => palette.danger,
+                            };
+                            ui.colored_label(color, self.strings.insertion_plan_notice(plan));
                         }
                         ui.horizontal(|ui| {
                             ui.label(RichText::new(&preview_text).monospace());
