@@ -184,8 +184,9 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         ),
         check(
             "daemon_command_cgroup_containment",
-            daemon["command_containment"].as_str() == Some("cgroup"),
-            "Command-backed expansions must use cgroup descendant cleanup.",
+            daemon["command_containment"].as_str() == Some("cgroup")
+                && daemon["command_containment_self_test"].as_str() == Some("passed"),
+            "The daemon must require cgroup containment and pass its harmless descendant-cancellation self-test in its own service context.",
         ),
     ];
 
@@ -212,6 +213,11 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         let broker_mount = broker_sandbox["namespaces"]["mount"].as_u64();
         let broker_uts = broker_sandbox["namespaces"]["uts"].as_u64();
         checks.extend([
+            check(
+                "broker_command_cgroup_containment",
+                broker["command_containment_self_test"].as_str() == Some("passed"),
+                "The running Action Broker must pass the descendant-cancellation self-test in its own service context.",
+            ),
             check(
                 "broker_seccomp",
                 broker_sandbox["seccomp_mode"].as_u64() == Some(2),
@@ -289,6 +295,13 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         },
         "configuration": config_permissions,
         "command_execution_configured": command_execution_configured,
+        "command_containment": {
+            "mode": daemon.get("command_containment"),
+            "policy": daemon.get("command_containment_mode"),
+            "self_test": daemon.get("command_containment_self_test"),
+            "cleanup_pending_jobs": daemon.get("command_cleanup_pending_jobs"),
+            "cleanup_degraded": daemon.get("command_cleanup_degraded"),
+        },
         "action_broker": {
             "required": broker_required,
             "available": broker_running,
@@ -324,6 +337,14 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         if evdev_privacy {
             println!("Privacy: evdev cannot identify password or other sensitive fields; keyboard input may be observed while capture is active.");
         }
+        println!(
+            "Command containment: mode={}, policy={}, self_test={}, pending_cleanup_jobs={}, degraded={}",
+            daemon["command_containment"].as_str().unwrap_or("unknown"),
+            daemon["command_containment_mode"].as_str().unwrap_or("unknown"),
+            daemon["command_containment_self_test"].as_str().unwrap_or("unknown"),
+            daemon["command_cleanup_pending_jobs"].as_u64().unwrap_or(0),
+            daemon["command_cleanup_degraded"].as_bool().unwrap_or(true),
+        );
         for check in report["checks"].as_array().into_iter().flatten() {
             println!(
                 "{}: {} ({}) — {}",
@@ -390,6 +411,7 @@ fn required_checks(profile: ProtectionProfile) -> &'static [&'static str] {
         "daemon_af_inet6_blocked",
         "daemon_memory_deny_write_execute",
         "daemon_command_cgroup_containment",
+        "broker_command_cgroup_containment",
         "action_broker_availability",
     ];
     const HARDENED: &[&str] = &[
@@ -417,6 +439,7 @@ fn required_checks(profile: ProtectionProfile) -> &'static [&'static str] {
         "daemon_memory_limit",
         "daemon_task_limit",
         "daemon_command_cgroup_containment",
+        "broker_command_cgroup_containment",
         "action_broker_availability",
         "broker_seccomp",
         "broker_no_new_privileges",
@@ -518,6 +541,8 @@ mod tests {
         );
         assert!(ProtectionProfile::parse("guess").is_err());
         assert!(required_checks(ProtectionProfile::Hardened).contains(&"daemon_mount_namespace"));
+        assert!(required_checks(ProtectionProfile::Workstation)
+            .contains(&"broker_command_cgroup_containment"));
         assert!(
             !required_checks(ProtectionProfile::Workstation).contains(&"daemon_mount_namespace")
         );

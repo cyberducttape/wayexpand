@@ -637,7 +637,7 @@ fn status_json_matches_documented_stable_contract() {
          backend=input-method-v2\n\
          route_id=input-method-v2\n\
          backend_mode=unknown\n\
-         status_schema=18\n\
+         status_schema=19\n\
          daemon_commit=test-commit\n\
          state=connected\n\
          paused=false\n\
@@ -720,9 +720,15 @@ fn status_json_matches_documented_stable_contract() {
          memory_high_water_kib=6\n\
          command_containment=cgroup\n\
          command_containment_mode=required-cgroup\n\
+         command_containment_self_test=passed\n\
          command_cleanup_pending_jobs=0\n\
          command_cleanup_failed_attempts=0\n\
-         command_cleanup_degraded=false";
+         command_cleanup_degraded=false\n\
+         connect_workers_active=0\n\
+         connect_workers_started_total=0\n\
+         connect_workers_completed_total=0\n\
+         connect_workers_cancelled_total=0\n\
+         connect_workers_rejected_total=0";
     let value = status_as_json(daemon_response).unwrap();
     let object = value.as_object().expect("status --json returns an object");
     let contract: serde_json::Value =

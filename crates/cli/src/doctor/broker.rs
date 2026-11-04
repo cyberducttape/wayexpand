@@ -80,6 +80,12 @@ pub(crate) fn broker_diagnostics(config: Option<&Config>) -> serde_json::Value {
         .and_then(|status| status.get("security"))
         .cloned()
         .unwrap_or(serde_json::Value::Null);
+    let command_containment_self_test = audit_status
+        .as_ref()
+        .and_then(|status| status.get("command_containment_self_test"))
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let containment_healthy = command_containment_self_test.as_str() == Some("passed");
     let required = named_actions > 0;
     serde_json::json!({
         "required": required,
@@ -88,6 +94,7 @@ pub(crate) fn broker_diagnostics(config: Option<&Config>) -> serde_json::Value {
         "network_dependent_actions_supported": false,
         "network_policy": "packaged systemd broker allows AF_UNIX only and denies IP networking",
         "effective_security": effective_security,
+        "command_containment_self_test": command_containment_self_test,
         "socket": {
             "path": socket,
             "exists": socket_exists,
@@ -102,7 +109,7 @@ pub(crate) fn broker_diagnostics(config: Option<&Config>) -> serde_json::Value {
             "audit_enabled": false,
             "audit_healthy": true,
         })),
-        "healthy": !required || (socket_exists && socket_valid && service_active && audit_healthy),
+        "healthy": !required || (socket_exists && socket_valid && service_active && audit_healthy && containment_healthy),
     })
 }
 
@@ -117,6 +124,12 @@ pub(crate) fn print_broker_diagnostics(config: Option<&Config>) -> bool {
     let exists = broker["socket"]["exists"].as_bool().unwrap_or(false);
     let valid = broker["socket"]["valid"].as_bool().unwrap_or(false);
     println!("Action Broker: {} named action(s), service_active={active}, socket={socket}, socket_exists={exists}, socket_valid={valid}", broker["named_action_count"]);
+    println!(
+        "  Command containment self-test: {}",
+        broker["command_containment_self_test"]
+            .as_str()
+            .unwrap_or("unknown")
+    );
     println!("  Network access: blocked; network-dependent actions (kubectl, ssh, cloud CLIs, Vault) are unsupported by this broker");
     if broker["audit"]["audit_enabled"].as_bool().unwrap_or(false) {
         let dropped = broker["audit"]["audit_queue_dropped_total"]

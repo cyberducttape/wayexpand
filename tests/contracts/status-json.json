@@ -1,6 +1,6 @@
 {
   "schema_version": 11,
-  "daemon_control_schema": 18,
+  "daemon_control_schema": 19,
   "fields": {
     "response": "string",
     "source": "string",
@@ -41,9 +41,15 @@
     "command_failure_total": "integer",
     "command_containment": "string",
     "command_containment_mode": "string",
+    "command_containment_self_test": "string",
     "command_cleanup_pending_jobs": "integer",
     "command_cleanup_failed_attempts": "integer",
     "command_cleanup_degraded": "boolean",
+    "connect_workers_active": "integer",
+    "connect_workers_started_total": "integer",
+    "connect_workers_completed_total": "integer",
+    "connect_workers_cancelled_total": "integer",
+    "connect_workers_rejected_total": "integer",
     "action_broker": "object",
     "injection_latency_sample_count": "integer",
     "injection_latency_window_count": "integer",
