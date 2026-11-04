@@ -369,16 +369,7 @@ fn looks_operational_with_tools(replacement: &str, declared_tools: &[String]) ->
     let lower = replacement.to_ascii_lowercase();
     has_operational_code_fence(&lower)
         || lower.contains("{{shellq:")
-        || lower
-            .split(|character: char| {
-                !character.is_ascii_alphanumeric() && !matches!(character, '_' | '-')
-            })
-            .any(|token| {
-                COMMANDS.contains(&token)
-                    || declared_tools
-                        .iter()
-                        .any(|tool| tool.eq_ignore_ascii_case(token))
-            })
+        || contains_known_command(&lower, COMMANDS, declared_tools)
         || lower.lines().any(|line| {
             let line = line.trim_start();
             ["select ", "insert into ", "update ", "delete from "]
@@ -388,6 +379,46 @@ fn looks_operational_with_tools(replacement: &str, declared_tools: &[String]) ->
                     .iter()
                     .any(|directive| line.starts_with(directive))
         })
+}
+
+fn contains_known_command(replacement: &str, commands: &[&str], declared_tools: &[String]) -> bool {
+    const WRAPPERS: &[&str] = &[
+        "command", "doas", "env", "exec", "if", "nohup", "sudo", "then", "time", "while",
+    ];
+    replacement.lines().any(|line| {
+        line.split([';', '|', '&']).any(|segment| {
+            let mut skip_next = false;
+            for token in segment.split_whitespace() {
+                let token = token.trim_start_matches(['#', '$', '>', '*', '!']);
+                if token.is_empty() {
+                    continue;
+                }
+                if skip_next {
+                    skip_next = false;
+                    continue;
+                }
+                if matches!(
+                    token,
+                    "-u" | "-g" | "-h" | "-C" | "-D" | "--user" | "--group" | "--host" | "--chdir"
+                ) {
+                    skip_next = true;
+                    continue;
+                }
+                if token.contains('=') || token.starts_with('-') {
+                    continue;
+                }
+                let command = token.rsplit('/').next().unwrap_or(token);
+                if WRAPPERS.contains(&command) {
+                    continue;
+                }
+                return commands.contains(&command)
+                    || declared_tools
+                        .iter()
+                        .any(|tool| tool.eq_ignore_ascii_case(command));
+            }
+            false
+        })
+    })
 }
 
 fn has_operational_code_fence(replacement: &str) -> bool {
@@ -859,6 +890,29 @@ mod tests {
         let findings = operational_field_findings(&[unreviewed, justified, validated], &[]);
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0]["key"], "field:chain");
+    }
+
+    #[test]
+    fn narrative_service_fields_are_not_mistaken_for_commands() {
+        let support_notice = wayexpand_core::PackExpansionReview {
+            file: "snippets/replies.toml".into(),
+            id: "maintenance_notice".into(),
+            trigger: ";maintenance-notice".into(),
+            description: "Announce a maintenance window".into(),
+            replacement: "Scheduled maintenance: {{field:service=service name}}".into(),
+            command: None,
+        };
+        assert!(operational_field_findings(&[support_notice], &[]).is_empty());
+
+        let command = wayexpand_core::PackExpansionReview {
+            file: "snippets/service.toml".into(),
+            id: "service_restart".into(),
+            trigger: ";restart-service".into(),
+            description: "Restart a service".into(),
+            replacement: "sudo -u root service {{field:unit}} restart".into(),
+            command: None,
+        };
+        assert_eq!(operational_field_findings(&[command], &[]).len(), 1);
     }
 
     #[test]

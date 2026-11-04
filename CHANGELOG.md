@@ -17,8 +17,9 @@ All notable changes to WayExpand are documented here.
   firewall, certificate, database, Kubernetes, systemd, cPanel/WHM, package
   manager, and cloud command families. Labeled shell and executable
   configuration blocks and each pack's declared tools also extend command
-  detection, so fields in internal commands and configuration need a validator
-  or explicit free-text justification.
+  detection. Tool names are matched in command position to avoid treating
+  narrative words such as "service" as commands; detected operational fields
+  need a validator or explicit free-text justification.
 - Keep AutoKey migration counts distinct: unreadable phrase files and missing or
   malformed sidecars count as skipped entries needing review, while
   `unsupported` counts only phrase behavior WayExpand cannot represent. This
