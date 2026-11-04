@@ -637,11 +637,12 @@ fn status_json_matches_documented_stable_contract() {
          backend=input-method-v2\n\
          route_id=input-method-v2\n\
          backend_mode=unknown\n\
-         status_schema=22\n\
+         status_schema=23\n\
          daemon_commit=test-commit\n\
          state=connected\n\
          route_available=true\n\
          matching_available=true\n\
+         matching_unavailable_reason=none\n\
          paused=false\n\
          config=/home/user/.config/wayexpand/expansions.toml\n\
          config_state=ok\n\
@@ -748,7 +749,7 @@ fn status_json_matches_documented_stable_contract() {
     let contract: serde_json::Value =
         serde_json::from_str(include_str!("../../../tests/contracts/status-json.json"))
             .expect("status contract fixture must be valid JSON");
-    assert_eq!(contract["schema_version"], 11);
+    assert_eq!(contract["schema_version"], 12);
     assert_eq!(contract["daemon_control_schema"], CONTROL_STATUS_SCHEMA);
     assert_ne!(
         contract["schema_version"],
@@ -775,6 +776,7 @@ fn status_json_matches_documented_stable_contract() {
     assert_eq!(value["state"], "connected");
     assert_eq!(value["route_available"], true);
     assert_eq!(value["matching_available"], true);
+    assert_eq!(value["matching_unavailable_reason"], "none");
     assert_eq!(value["suppressed_expansions_total"], 0);
     assert_eq!(value["input_connection_failures_total"], 0);
     assert_eq!(value["output_connection_failures_total"], 0);
