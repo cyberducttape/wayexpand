@@ -106,9 +106,10 @@ policy, command execution also fails closed when containment setup is
 unavailable; process-group cleanup is used only when the operator explicitly
 sets `WAYEXPAND_PROCESS_CGROUP=disabled`. When named actions are configured it
 also checks the live Action Broker and its in-process probes. `--json` emits
-the same checks for fleet tooling (schema 6), including overall `readiness` and
+the same checks for fleet tooling (schema 7), including overall `readiness` and
 independent `execution_sandbox_readiness`, `input_privacy_readiness`,
-`configuration_integrity_readiness`, and `action_broker_availability_readiness`
+`configuration_integrity_readiness`, `action_broker_availability_readiness`,
+and `target_integrity_readiness`
 values (`pass`,
 `degraded`, `incomplete`, or `fail`), the selected profile, and which checks are required. A
 workstation or hardened profile reports missing sensitive-field detection as
@@ -119,6 +120,10 @@ required profile `incomplete`, while an observed failed control is `fail`.
 The execution-sandbox gate also requires the running daemon's status schema
 to match the CLI's expected schema. A stale daemon fails this check; a daemon
 that omits the schema is reported as unavailable and cannot pass readiness.
+The target-integrity gate passes when automatic replacement is refused by
+default or the live route is certified and atomic. An enabled non-atomic
+compatibility override fails; an uncertified route that advertises atomic
+replacement remains incomplete.
 The `gates` object groups check names and reports required/applicable status
 independently. An unused Action Broker is `not_required`; broker sandbox
 controls, when it is required, remain part of `execution_sandbox`. The old

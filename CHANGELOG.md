@@ -25,8 +25,10 @@ All notable changes to WayExpand are documented here.
   checks, and per-gate unavailable evidence; retain `sandbox_readiness` as a
   compatibility alias. Require the running daemon to expose the CLI's expected
   status schema so stale runtimes cannot pass using incomplete security
-  evidence, and include the daemon schema and commit in the report. Bump the
-  security report schema to 6.
+  evidence, and include the daemon schema and commit in the report. Add a
+  separate target-integrity gate that fails when compatibility mode enables
+  uncertified non-atomic replacement and remains incomplete for uncertified
+  atomic routes. Bump the security report schema to 7.
 - Allow `wayexpand library add --approved-revision FULL_COMMIT` to pin a Git
   catalog checkout to the exact commit selected during review, independent of
   a moving branch head. Content signatures remain separately verified.

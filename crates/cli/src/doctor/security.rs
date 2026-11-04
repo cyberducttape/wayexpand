@@ -224,6 +224,7 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
             "No named actions require the broker; availability is reported for visibility."
         },
     ));
+    checks.push(target_integrity_check(&daemon));
     if broker_required && broker_running {
         let broker_mount = broker_sandbox["namespaces"]["mount"].as_u64();
         let broker_uts = broker_sandbox["namespaces"]["uts"].as_u64();
@@ -308,6 +309,7 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
     let execution_sandbox_checks = checks_for_gate(&checks, "execution_sandbox");
     let configuration_integrity_checks = checks_for_gate(&checks, "configuration_integrity");
     let action_broker_checks = checks_for_gate(&checks, "action_broker_availability");
+    let target_integrity_checks = checks_for_gate(&checks, "target_integrity");
     let execution_unverified = unverified
         .iter()
         .copied()
@@ -316,6 +318,7 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
     let execution_sandbox_required = gate_is_required(&execution_sandbox_checks);
     let configuration_integrity_required = gate_is_required(&configuration_integrity_checks);
     let action_broker_required = broker_required && gate_is_required(&action_broker_checks);
+    let target_integrity_required = gate_is_required(&target_integrity_checks);
     let execution_sandbox_readiness =
         readiness_for(profile, &execution_sandbox_checks, &execution_unverified);
     let configuration_integrity_readiness =
@@ -325,6 +328,7 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
     } else {
         "not_required"
     };
+    let target_integrity_readiness = readiness_for(profile, &target_integrity_checks, &[]);
     let input_privacy_readiness =
         privacy_readiness(profile, capture_source, sensitive_field_detection);
     let input_privacy_required = profile == ProtectionProfile::Strict;
@@ -333,11 +337,12 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         input_privacy_readiness,
         configuration_integrity_readiness,
         action_broker_availability_readiness,
+        target_integrity_readiness,
     ]);
     let healthy = readiness == "pass";
     let route = active_route_summary(&daemon);
     let report = serde_json::json!({
-        "schema": 6,
+        "schema": 7,
         "profile": profile.name(),
         "readiness": readiness,
         "execution_sandbox_readiness": execution_sandbox_readiness,
@@ -345,6 +350,7 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         "input_privacy_readiness": input_privacy_readiness,
         "configuration_integrity_readiness": configuration_integrity_readiness,
         "action_broker_availability_readiness": action_broker_availability_readiness,
+        "target_integrity_readiness": target_integrity_readiness,
         "gates": {
             "execution_sandbox": gate_report(execution_sandbox_readiness, execution_sandbox_required, &execution_sandbox_checks, &execution_unverified),
             "input_privacy": {
@@ -357,6 +363,7 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
             },
             "configuration_integrity": gate_report(configuration_integrity_readiness, configuration_integrity_required, &configuration_integrity_checks, &[]),
             "action_broker_availability": gate_report(action_broker_availability_readiness, action_broker_required, &action_broker_checks, &[]),
+            "target_integrity": gate_report(target_integrity_readiness, target_integrity_required, &target_integrity_checks, &[]),
         },
         "healthy": healthy,
         "daemon_pid": sandbox.get("pid"),
@@ -429,6 +436,10 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         println!(
             "Action Broker availability readiness: {}",
             action_broker_availability_readiness.to_ascii_uppercase()
+        );
+        println!(
+            "Target integrity readiness: {}",
+            target_integrity_readiness.to_ascii_uppercase()
         );
         println!("Daemon PID: {}", report["daemon_pid"]);
         println!(
@@ -534,10 +545,46 @@ fn daemon_status_schema_check(daemon: &serde_json::Value) -> serde_json::Value {
     )
 }
 
+fn target_integrity_check(daemon: &serde_json::Value) -> serde_json::Value {
+    let automatic_mode = daemon["inject_atomic_replace"]
+        .as_bool()
+        .zip(daemon["compatibility_mode"].as_str());
+    let route_certified_atomic = daemon["route_id"]
+        .as_str()
+        .and_then(wayexpand_backend_selection::route_contract_by_id)
+        .is_some_and(|route| route.is_certified() && route.atomic_replace);
+    let result = match automatic_mode {
+        // The trigger is retained and destructive automatic replacement is
+        // refused by default on this route.
+        Some((false, "off")) => Some(true),
+        // Route certification and the live atomic capability are both
+        // required before automatic replacement can be considered safe.
+        Some((true, _)) if route_certified_atomic => Some(true),
+        // Compatibility mode explicitly admits non-atomic replacement.
+        Some((false, "tracked-focus" | "untracked-focus")) => Some(false),
+        // An atomic capability without a certified desktop route is not
+        // enough evidence to pass target-integrity readiness.
+        Some((true, _)) => None,
+        _ => None,
+    };
+    check(
+        "automatic_replacement_target_integrity",
+        result,
+        if result == Some(true) {
+            "Automatic replacement is either refused by default or backed by a certified atomic route."
+        } else if result == Some(false) {
+            "An explicit compatibility override enables a non-atomic replacement route that has not passed the real-session target-integrity gate."
+        } else {
+            "The active route lacks sufficient certification evidence to establish safe automatic replacement."
+        },
+    )
+}
+
 fn gate_for_check(name: &str) -> &'static str {
     match name {
         "config_permissions" => "configuration_integrity",
         "action_broker_availability" => "action_broker_availability",
+        "automatic_replacement_target_integrity" => "target_integrity",
         _ => "execution_sandbox",
     }
 }
@@ -609,6 +656,7 @@ fn required_checks(profile: ProtectionProfile) -> &'static [&'static str] {
     const WORKSTATION: &[&str] = &[
         "daemon_connected",
         "daemon_status_schema",
+        "automatic_replacement_target_integrity",
         "config_permissions",
         "daemon_no_new_privileges",
         "daemon_seccomp",
@@ -623,6 +671,7 @@ fn required_checks(profile: ProtectionProfile) -> &'static [&'static str] {
     const HARDENED: &[&str] = &[
         "daemon_connected",
         "daemon_status_schema",
+        "automatic_replacement_target_integrity",
         "config_permissions",
         "daemon_mount_namespace",
         "daemon_private_tmp",
@@ -805,6 +854,8 @@ mod tests {
         assert!(required_checks(ProtectionProfile::Workstation)
             .contains(&"broker_command_cgroup_containment"));
         assert!(required_checks(ProtectionProfile::Workstation).contains(&"daemon_status_schema"));
+        assert!(required_checks(ProtectionProfile::Workstation)
+            .contains(&"automatic_replacement_target_integrity"));
         assert!(
             !required_checks(ProtectionProfile::Workstation).contains(&"daemon_mount_namespace")
         );
@@ -820,6 +871,35 @@ mod tests {
         assert_eq!(
             daemon_status_schema_check(&missing)["status"],
             "unavailable"
+        );
+    }
+
+    #[test]
+    fn target_integrity_fails_open_non_atomic_compatibility_overrides() {
+        let refused = serde_json::json!({
+            "route_id": "kde-evdev-libei",
+            "inject_atomic_replace": false,
+            "compatibility_mode": "off"
+        });
+        let override_enabled = serde_json::json!({
+            "route_id": "kde-evdev-libei",
+            "inject_atomic_replace": false,
+            "compatibility_mode": "untracked-focus"
+        });
+        let uncertified_atomic = serde_json::json!({
+            "route_id": "unlisted-atomic-route",
+            "inject_atomic_replace": true,
+            "compatibility_mode": "off"
+        });
+        assert_eq!(target_integrity_check(&refused)["status"], "pass");
+        assert_eq!(target_integrity_check(&override_enabled)["status"], "fail");
+        assert_eq!(
+            target_integrity_check(&uncertified_atomic)["status"],
+            "unavailable"
+        );
+        assert_eq!(
+            gate_for_check("automatic_replacement_target_integrity"),
+            "target_integrity"
         );
     }
 

@@ -89,12 +89,14 @@ managed user service, require
 `"input_privacy_readiness": "pass"`,
 `"configuration_integrity_readiness": "pass"`, and either
 `"action_broker_availability_readiness": "pass"` or `"not_required"` before
-treating the host as deployment-ready. Known unavailable kernel/systemd
+treating the host as deployment-ready. Also require
+`"target_integrity_readiness": "pass"`; non-atomic compatibility overrides
+fail this gate, and uncertified atomic routes remain incomplete. Known unavailable kernel/systemd
 evidence currently makes hardened readiness degraded; do not treat such a
 host as passing the gate. Overall `readiness` is degraded when the sandbox
 passes but the active route lacks sensitive-field detection. The
 strict profile fails for evdev even if a route reports that capability. The
-four independent results are also available under `gates`, including whether
+independent gate results are also available under `gates`, including whether
 each gate is required and which checks contributed to its result. The legacy
 `sandbox_readiness` key aliases `execution_sandbox_readiness`. The
 security report's `active_route` object records the live source, backend,
