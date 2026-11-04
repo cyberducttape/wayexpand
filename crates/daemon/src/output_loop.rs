@@ -8,6 +8,7 @@
 
 use anyhow::Result;
 use std::path::Path;
+use std::sync::{Mutex, OnceLock};
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -128,7 +129,16 @@ impl Drop for WorkerRunningGuard {
 /// output actor makes all backend shutdown paths use the same deadline.
 pub fn shutdown_injector(injector: Box<dyn TextInjector>) {
     let backend = injector.name();
+    shutdown_with_deadline(backend, Duration::from_secs(5), move || injector.shutdown());
+}
+
+fn shutdown_with_deadline(
+    backend: &'static str,
+    deadline: Duration,
+    shutdown: impl FnOnce() + Send + 'static,
+) {
     let (finished_sender, finished_receiver) = std::sync::mpsc::sync_channel(1);
+    reap_finished_shutdown_workers();
     info!(
         backend,
         event = "injector_shutdown_started",
@@ -137,27 +147,39 @@ pub fn shutdown_injector(injector: Box<dyn TextInjector>) {
     let spawn = thread::Builder::new()
         .name("wayexpand-injector-shutdown".into())
         .spawn(move || {
-            injector.shutdown();
+            let worker_guard = crate::output_health::shutdown_worker_started();
+            shutdown();
+            worker_guard.acknowledge();
             let _ = finished_sender.send(());
         });
     match spawn {
-        Ok(_) => match finished_receiver.recv_timeout(Duration::from_secs(5)) {
-            Ok(()) => info!(
-                backend,
-                event = "injector_shutdown_finished",
-                "backend shutdown completed"
-            ),
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => warn!(
-                backend,
-                event = "injector_shutdown_deadline_exceeded",
-                "backend shutdown exceeded its deadline; leaving the worker detached"
-            ),
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => warn!(
-                backend,
-                event = "injector_shutdown_worker_failed",
-                "backend shutdown worker exited without completion"
-            ),
-        },
+        Ok(worker) => {
+            shutdown_worker_handles()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .push(worker);
+            match finished_receiver.recv_timeout(deadline) {
+                Ok(()) => info!(
+                    backend,
+                    event = "injector_shutdown_finished",
+                    "backend shutdown acknowledged"
+                ),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    crate::output_health::note_shutdown_timeout();
+                    warn!(
+                    backend,
+                    event = "injector_shutdown_deadline_exceeded",
+                    "backend shutdown exceeded its deadline; worker remains tracked until it exits"
+                )
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => warn!(
+                    backend,
+                    event = "injector_shutdown_worker_failed",
+                    "backend shutdown worker exited without completion"
+                ),
+            }
+            reap_finished_shutdown_workers();
+        }
         Err(error) => warn!(
             backend,
             %error,
@@ -165,6 +187,36 @@ pub fn shutdown_injector(injector: Box<dyn TextInjector>) {
             "could not start backend shutdown worker; backend will be reclaimed at process exit"
         ),
     }
+}
+
+static SHUTDOWN_WORKERS: OnceLock<Mutex<Vec<thread::JoinHandle<()>>>> = OnceLock::new();
+
+fn shutdown_worker_handles() -> &'static Mutex<Vec<thread::JoinHandle<()>>> {
+    SHUTDOWN_WORKERS.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// Keep timed-out shutdown workers joinable and reap them after their explicit
+/// completion acknowledgement. The backend call itself remains cooperative;
+/// this prevents an unbounded accumulation of abandoned JoinHandles across
+/// reconnect/shutdown cycles.
+fn reap_finished_shutdown_workers() {
+    let mut workers = shutdown_worker_handles()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut pending = Vec::with_capacity(workers.len());
+    for worker in workers.drain(..) {
+        if worker.is_finished() {
+            if worker.join().is_err() {
+                warn!(
+                    event = "injector_shutdown_worker_panicked",
+                    "backend shutdown worker panicked"
+                );
+            }
+        } else {
+            pending.push(worker);
+        }
+    }
+    *workers = pending;
 }
 
 enum OutputCommand {
@@ -1420,5 +1472,65 @@ mod tests {
             thread::sleep(Duration::from_millis(1));
         }
         panic!("worker did not report termination after backend teardown");
+    }
+
+    #[test]
+    fn timed_out_backend_shutdown_remains_counted_and_is_reaped_after_ack() {
+        reap_finished_shutdown_workers();
+        let before = crate::output_health::snapshot();
+        let initial_handles = shutdown_worker_handles()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .len();
+        for _ in 0..8 {
+            let started = Arc::new(AtomicBool::new(false));
+            let release = Arc::new(AtomicBool::new(false));
+            let started_worker = Arc::clone(&started);
+            let release_worker = Arc::clone(&release);
+            shutdown_with_deadline(
+                "shutdown-tracker-test",
+                Duration::from_millis(5),
+                move || {
+                    started_worker.store(true, Ordering::Release);
+                    while !release_worker.load(Ordering::Acquire) {
+                        thread::sleep(Duration::from_millis(1));
+                    }
+                },
+            );
+            assert!(started.load(Ordering::Acquire));
+            assert!(crate::output_health::snapshot().shutdown_workers_active >= 1);
+            release.store(true, Ordering::Release);
+            let deadline = std::time::Instant::now() + Duration::from_secs(1);
+            while crate::output_health::snapshot().shutdown_workers_active
+                > before.shutdown_workers_active
+                && std::time::Instant::now() < deadline
+            {
+                thread::sleep(Duration::from_millis(1));
+            }
+            assert!(
+                crate::output_health::snapshot().shutdown_workers_active
+                    <= before.shutdown_workers_active
+            );
+            reap_finished_shutdown_workers();
+            assert!(
+                shutdown_worker_handles()
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .len()
+                    <= initial_handles
+            );
+        }
+        let completed = crate::output_health::snapshot();
+        assert!(
+            completed.shutdown_workers_started_total >= before.shutdown_workers_started_total + 8
+        );
+        assert!(
+            completed.shutdown_workers_timed_out_total
+                >= before.shutdown_workers_timed_out_total + 8
+        );
+        assert!(
+            completed.shutdown_workers_acknowledged_total
+                >= before.shutdown_workers_acknowledged_total + 8
+        );
     }
 }

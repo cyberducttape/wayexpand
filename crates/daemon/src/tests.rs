@@ -82,6 +82,11 @@ fn daemon_status_body_matches_documented_stable_contract() {
         vec![
             "backend",
             "backend_mode",
+            "backend_shutdown_workers_acknowledged_total",
+            "backend_shutdown_workers_active",
+            "backend_shutdown_workers_failed_total",
+            "backend_shutdown_workers_started_total",
+            "backend_shutdown_workers_timed_out_total",
             "capture_composition_aware",
             "capture_exclusive",
             "capture_key_passthrough",
@@ -190,7 +195,7 @@ fn daemon_status_body_matches_documented_stable_contract() {
         "daemon status body fields no longer match docs/COMPATIBILITY.md's documented Stable contract"
     );
     assert!(body.starts_with(&format!(
-        "source=input-method\nbackend=input-method-v2\nroute_id=input-method-v2\nbackend_mode=unknown\nstatus_schema=21\ndaemon_commit={}\nstate=connected\nroute_available=false\nmatching_available=false\npaused=false\n",
+        "source=input-method\nbackend=input-method-v2\nroute_id=input-method-v2\nbackend_mode=unknown\nstatus_schema=22\ndaemon_commit={}\nstate=connected\nroute_available=false\nmatching_available=false\npaused=false\n",
         super::build_info::COMMIT
     )));
     for field in [

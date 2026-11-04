@@ -54,6 +54,31 @@ const STATUS_GAUGES: &[(&str, &str, &str)] = &[
         "Output workers still shutting down after a failure.",
     ),
     (
+        "backend_shutdown_workers_active",
+        "backend_shutdown_workers_active",
+        "Backend teardown workers currently awaiting completion acknowledgement.",
+    ),
+    (
+        "backend_shutdown_workers_timed_out_total",
+        "backend_shutdown_workers_timed_out_total",
+        "Backend teardown workers that exceeded the five-second wait deadline.",
+    ),
+    (
+        "backend_shutdown_workers_started_total",
+        "backend_shutdown_workers_started_total",
+        "Backend teardown workers started.",
+    ),
+    (
+        "backend_shutdown_workers_acknowledged_total",
+        "backend_shutdown_workers_acknowledged_total",
+        "Backend teardown workers that acknowledged completion.",
+    ),
+    (
+        "backend_shutdown_workers_failed_total",
+        "backend_shutdown_workers_failed_total",
+        "Backend teardown workers that exited without completion acknowledgement.",
+    ),
+    (
         "output_partial_total",
         "output_partial_insertions_total",
         "Output transactions where insertion began before failing.",

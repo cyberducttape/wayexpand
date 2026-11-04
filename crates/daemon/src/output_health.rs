@@ -7,7 +7,7 @@
 //! inside a compositor or portal call blocks reconnection indefinitely; status
 //! consumers and `doctor` need to see either without reading logs.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -20,6 +20,11 @@ pub const STALLED_AFTER: Duration = Duration::from_secs(5);
 
 static UNCERTAIN_TOTAL: AtomicU64 = AtomicU64::new(0);
 static PARTIAL_TOTAL: AtomicU64 = AtomicU64::new(0);
+static SHUTDOWN_ACTIVE: AtomicUsize = AtomicUsize::new(0);
+static SHUTDOWN_STARTED: AtomicU64 = AtomicU64::new(0);
+static SHUTDOWN_ACKNOWLEDGED: AtomicU64 = AtomicU64::new(0);
+static SHUTDOWN_TIMED_OUT: AtomicU64 = AtomicU64::new(0);
+static SHUTDOWN_FAILED: AtomicU64 = AtomicU64::new(0);
 static RETIRING: Mutex<Retiring> = Mutex::new(Retiring {
     workers: 0,
     oldest: None,
@@ -36,6 +41,46 @@ pub struct Snapshot {
     pub partial_total: u64,
     pub retiring_workers: usize,
     pub stalled_ms: u64,
+    pub shutdown_workers_active: usize,
+    pub shutdown_workers_started_total: u64,
+    pub shutdown_workers_acknowledged_total: u64,
+    pub shutdown_workers_timed_out_total: u64,
+    pub shutdown_workers_failed_total: u64,
+}
+
+/// Account for one bounded backend-shutdown worker. Dropping the guard is the
+/// worker-exit acknowledgement, including panic/unwind paths.
+pub(crate) struct ShutdownWorkerGuard {
+    acknowledged: bool,
+}
+
+pub(crate) fn shutdown_worker_started() -> ShutdownWorkerGuard {
+    SHUTDOWN_ACTIVE.fetch_add(1, Ordering::AcqRel);
+    SHUTDOWN_STARTED.fetch_add(1, Ordering::Relaxed);
+    ShutdownWorkerGuard {
+        acknowledged: false,
+    }
+}
+
+impl ShutdownWorkerGuard {
+    pub(crate) fn acknowledge(mut self) {
+        self.acknowledged = true;
+    }
+}
+
+impl Drop for ShutdownWorkerGuard {
+    fn drop(&mut self) {
+        if self.acknowledged {
+            SHUTDOWN_ACKNOWLEDGED.fetch_add(1, Ordering::Relaxed);
+        } else {
+            SHUTDOWN_FAILED.fetch_add(1, Ordering::Relaxed);
+        }
+        SHUTDOWN_ACTIVE.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+pub(crate) fn note_shutdown_timeout() {
+    SHUTDOWN_TIMED_OUT.fetch_add(1, Ordering::Relaxed);
 }
 
 impl Snapshot {
@@ -102,6 +147,11 @@ fn snapshot_of(uncertain_total: u64, partial_total: u64, retiring: &Retiring) ->
         stalled_ms: retiring.oldest.map_or(0, |since| {
             u64::try_from(since.elapsed().as_millis()).unwrap_or(u64::MAX)
         }),
+        shutdown_workers_active: SHUTDOWN_ACTIVE.load(Ordering::Acquire),
+        shutdown_workers_started_total: SHUTDOWN_STARTED.load(Ordering::Relaxed),
+        shutdown_workers_acknowledged_total: SHUTDOWN_ACKNOWLEDGED.load(Ordering::Relaxed),
+        shutdown_workers_timed_out_total: SHUTDOWN_TIMED_OUT.load(Ordering::Relaxed),
+        shutdown_workers_failed_total: SHUTDOWN_FAILED.load(Ordering::Relaxed),
     }
 }
 
@@ -116,6 +166,11 @@ mod tests {
             partial_total: 0,
             retiring_workers,
             stalled_ms,
+            shutdown_workers_active: 0,
+            shutdown_workers_started_total: 0,
+            shutdown_workers_acknowledged_total: 0,
+            shutdown_workers_timed_out_total: 0,
+            shutdown_workers_failed_total: 0,
         };
         assert_eq!(snapshot(0, 0).health(), "ok");
         assert_eq!(snapshot(1, 10).health(), "recovering");

@@ -86,8 +86,10 @@ itself identify or prohibit an evdev capture source. After starting the
 managed user service, require
 `wayexpand doctor --security --profile hardened --json` to report
 `"sandbox_readiness": "pass"` and `"input_privacy_readiness": "pass"` before
-treating the host as deployment-ready. Overall `readiness` is degraded when
-the sandbox passes but the active route lacks sensitive-field detection. The
+treating the host as deployment-ready. Known unavailable kernel/systemd
+evidence currently makes hardened readiness degraded; do not treat such a
+host as passing the gate. Overall `readiness` is degraded when the sandbox
+passes but the active route lacks sensitive-field detection. The
 strict profile fails for evdev even if a route reports that capability. The
 security report's `active_route` object records the live source, backend,
 atomic replacement capability, replacement assurance, focus assurance, and

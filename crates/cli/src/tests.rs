@@ -637,7 +637,7 @@ fn status_json_matches_documented_stable_contract() {
          backend=input-method-v2\n\
          route_id=input-method-v2\n\
          backend_mode=unknown\n\
-         status_schema=21\n\
+         status_schema=22\n\
          daemon_commit=test-commit\n\
          state=connected\n\
          route_available=true\n\
@@ -705,6 +705,11 @@ fn status_json_matches_documented_stable_contract() {
          output_uncertain_total=1\n\
          output_retiring_workers=0\n\
          output_stalled_ms=0\n\
+         backend_shutdown_workers_active=0\n\
+         backend_shutdown_workers_started_total=0\n\
+         backend_shutdown_workers_acknowledged_total=0\n\
+         backend_shutdown_workers_timed_out_total=0\n\
+         backend_shutdown_workers_failed_total=0\n\
          output_partial_total=0\n\
          partial_write_total=0\n\
          insertion_assurance=verified\n\
@@ -928,6 +933,11 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "partial_write_total",
             "output_retiring_workers",
             "output_stalled_ms",
+            "backend_shutdown_workers_active",
+            "backend_shutdown_workers_started_total",
+            "backend_shutdown_workers_acknowledged_total",
+            "backend_shutdown_workers_timed_out_total",
+            "backend_shutdown_workers_failed_total",
             "insertion_assurance",
             "compatibility_mode",
             "focus_assurance",

@@ -106,15 +106,14 @@ policy, command execution also fails closed when containment setup is
 unavailable; process-group cleanup is used only when the operator explicitly
 sets `WAYEXPAND_PROCESS_CGROUP=disabled`. When named actions are configured it
 also checks the live Action Broker and its in-process probes. `--json` emits
-the same checks for fleet tooling (schema 3), including overall `readiness` and
+the same checks for fleet tooling (schema 4), including overall `readiness` and
 separate `sandbox_readiness` and `input_privacy_readiness` values (`pass`,
-`degraded`, or `fail`), the selected profile, and which checks are required. A
+`degraded`, `incomplete`, or `fail`), the selected profile, and which checks are required. A
 workstation or hardened profile reports missing sensitive-field detection as
-`degraded`; strict profile fails unless the active non-evdev route reports
-sensitive-field detection. Sandboxing and input privacy are independent results.
-Unit-file directives alone are not treated as evidence. Kernel policy details
-that cannot be safely inspected from an unprivileged process remain listed as
-unverified instead of being reported as active.
+`degraded`; strict profile reports `incomplete` when required evidence cannot be observed and `fail` only for a verified failed control or missing required input privacy. Sandboxing and input privacy are independent results.
+Unit-file directives alone are not treated as evidence. Kernel policy details that cannot be safely inspected from an unprivileged process appear in `unavailable_evidence`; observed failed controls appear separately in `verified_failures`.
+Each check reports `pass`, `fail`, or `unavailable`; missing probe data makes a
+required profile `incomplete`, while an observed failed control is `fail`.
 
 Protection profiles are:
 
@@ -123,13 +122,10 @@ Protection profiles are:
   containment when command expansions are configured, and broker availability
   when required. Missing additional protections are reported as degraded.
 - `hardened`: requires all currently probeable daemon protections and reports
-  optional missing probes as degraded. Managed deployments should run this
-  profile after the user service starts and accept the deployment only when
-  the command exits successfully with `readiness: pass`.
-- `strict`: requires the hardened checks and fails while any sandbox mechanism
-  remains unverified. The current documented unverified systemd controls mean
-  strict readiness is expected to fail until those guarantees become
-  introspectable.
+  optional missing probes as degraded. The known unavailable kernel/systemd
+  evidence is also degraded, so this profile does not currently yield a pass
+  until an authorized verifier can attest those controls.
+- `strict`: requires the hardened checks and complete evidence. A verified required-control failure reports `fail`; unavailable evidence reports `incomplete` rather than implying the control is broken. Strict therefore remains a non-passing gate until an authorized attestation mechanism can verify all listed controls.
 
 The default profile is `workstation`. A managed deployment must explicitly
 validate `hardened` after starting the daemon; a unit file by itself is not a
@@ -139,7 +135,7 @@ deployment assurance result. For example:
 wayexpand doctor --security --profile hardened --json
 ```
 
-The command returns nonzero for degraded or failed readiness, so it can serve
+The command returns nonzero for degraded, incomplete, or failed readiness, so it can serve
 as an Ansible, Puppet, or image-provisioning gate. Run it from the desktop
 user's session, outside the daemon's sandbox, because the check compares the
 daemon's namespaces with the caller's.

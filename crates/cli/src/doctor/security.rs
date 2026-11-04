@@ -64,128 +64,135 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         ),
         check(
             "config_permissions",
-            config_permissions["safe"].as_bool() == Some(true),
+            config_permissions["safe"].as_bool(),
             "The configuration must be a valid regular file owned by this user or root and not group/world writable; Config loading also validates its ancestors.",
         ),
         check(
             "daemon_mount_namespace",
-            sandbox["namespaces"]["mount"].as_u64().is_some()
-                && local_mount_ns.is_some()
-                && sandbox["namespaces"]["mount"].as_u64() != local_mount_ns,
+            sandbox["namespaces"]["mount"]
+                .as_u64()
+                .zip(local_mount_ns)
+                .map(|(daemon_ns, local_ns)| daemon_ns != local_ns),
             "The running daemon must be in a mount namespace distinct from the doctor process.",
         ),
         check(
             "daemon_private_tmp",
-            sandbox["tmp_mount_id"].as_u64().is_some()
-                && local_tmp_mount.is_some()
-                && sandbox["tmp_mount_id"].as_u64() != local_tmp_mount,
+            sandbox["tmp_mount_id"]
+                .as_u64()
+                .zip(local_tmp_mount)
+                .map(|(daemon_mount, local_mount)| daemon_mount != local_mount),
             "The daemon and desktop session must see distinct /tmp mounts.",
         ),
         check(
             "daemon_uts_namespace",
-            sandbox["namespaces"]["uts"].as_u64().is_some()
-                && local_uts_ns.is_some()
-                && sandbox["namespaces"]["uts"].as_u64() != local_uts_ns,
+            sandbox["namespaces"]["uts"]
+                .as_u64()
+                .zip(local_uts_ns)
+                .map(|(daemon_ns, local_ns)| daemon_ns != local_ns),
             "ProtectHostname should place the daemon in a distinct UTS namespace.",
         ),
         check(
             "daemon_no_new_privileges",
-            sandbox["no_new_privileges"].as_bool() == Some(true),
+            sandbox["no_new_privileges"].as_bool(),
             "The kernel must report NoNewPrivs=1 for the daemon process.",
         ),
         check(
             "daemon_seccomp",
-            sandbox["seccomp_mode"].as_u64() == Some(2),
+            sandbox["seccomp_mode"].as_u64().map(|mode| mode == 2),
             "The kernel must report seccomp filter mode for the daemon process.",
         ),
         check(
             "daemon_af_unix_allowed",
-            state(&sandbox, &["address_families", "unix"]) == Some("allowed"),
+            state(&sandbox, &["address_families", "unix"]).map(|value| value == "allowed"),
             "The daemon needs AF_UNIX for its control and portal sockets.",
         ),
         check(
             "daemon_af_inet_blocked",
-            state(&sandbox, &["address_families", "inet"]) == Some("blocked"),
+            state(&sandbox, &["address_families", "inet"]).map(|value| value == "blocked"),
             "The daemon must be unable to create AF_INET sockets.",
         ),
         check(
             "daemon_af_inet6_blocked",
-            state(&sandbox, &["address_families", "inet6"]) == Some("blocked"),
+            state(&sandbox, &["address_families", "inet6"]).map(|value| value == "blocked"),
             "The daemon must be unable to create AF_INET6 sockets.",
         ),
         check(
             "daemon_home_read_only",
-            sandbox["home_read_only"].as_bool() == Some(true),
+            sandbox["home_read_only"].as_bool(),
             "The daemon's home mount must be read-only outside explicit unit exceptions.",
         ),
         check(
             "daemon_system_read_only",
-            sandbox["system_read_only"].as_bool() == Some(true),
+            sandbox["system_read_only"].as_bool(),
             "The daemon's /usr mount must be read-only under ProtectSystem=strict.",
         ),
         check(
             "daemon_kernel_tunables_read_only",
-            sandbox["kernel_tunables_read_only"].as_bool() == Some(true),
+            sandbox["kernel_tunables_read_only"].as_bool(),
             "The daemon must not have a writable /proc/sys mount.",
         ),
         check(
             "daemon_proc_subset_pid",
-            sandbox["proc_subset_pid"].as_bool() == Some(true),
+            sandbox["proc_subset_pid"].as_bool(),
             "The daemon's proc mount should expose only process-related entries.",
         ),
         check(
             "daemon_proc_hidepid",
-            sandbox["proc_hidepid_invisible"].as_bool() == Some(true),
+            sandbox["proc_hidepid_invisible"].as_bool(),
             "ProtectProc=invisible should be effective on the daemon proc mount.",
         ),
         check(
             "daemon_memory_deny_write_execute",
-            state(&sandbox, &["memory_write_execute_blocked"]) == Some("blocked"),
+            state(&sandbox, &["memory_write_execute_blocked"]).map(|value| value == "blocked"),
             "A direct anonymous RWX mapping attempt must be refused.",
         ),
         check(
             "daemon_restrict_namespaces",
-            state(&sandbox, &["namespace_creation"]) == Some("blocked"),
+            state(&sandbox, &["namespace_creation"]).map(|value| value == "blocked"),
             "A child-process probe must be unable to create an unprivileged user namespace.",
         ),
         check(
             "daemon_lock_personality",
-            state(&sandbox, &["personality_syscall"]) == Some("blocked"),
+            state(&sandbox, &["personality_syscall"]).map(|value| value == "blocked"),
             "The personality syscall must be blocked by LockPersonality.",
         ),
         check(
             "daemon_restrict_suid_sgid",
-            state(&sandbox, &["setuid_mode_bit"]) == Some("blocked"),
+            state(&sandbox, &["setuid_mode_bit"]).map(|value| value == "blocked"),
             "Setting a setuid bit on an ephemeral memfd must be refused.",
         ),
         check(
             "daemon_core_limit",
-            sandbox["max_core_file_size"][1].as_u64() == Some(0),
+            sandbox["max_core_file_size"][1].as_u64().map(|limit| limit == 0),
             "The hard core-file limit must be zero.",
         ),
         check(
             "daemon_open_file_limit",
-            sandbox["max_open_files"][1].as_u64().is_some_and(|limit| limit <= 64),
+            sandbox["max_open_files"][1]
+                .as_u64()
+                .map(|limit| limit <= 64),
             "The hard open-file limit must not exceed the service's LimitNOFILE=64.",
         ),
         check(
             "daemon_memory_limit",
             sandbox["cgroup_memory_max_bytes"]
                 .as_u64()
-                .is_some_and(|limit| limit <= 256 * 1024 * 1024),
+                .map(|limit| limit <= 256 * 1024 * 1024),
             "The effective cgroup memory.max must not exceed MemoryMax=256M.",
         ),
         check(
             "daemon_task_limit",
             sandbox["cgroup_pids_max"]
                 .as_u64()
-                .is_some_and(|limit| limit <= 32),
+                .map(|limit| limit <= 32),
             "The effective cgroup pids.max must not exceed TasksMax=32.",
         ),
         check(
             "daemon_command_cgroup_containment",
-            daemon["command_containment"].as_str() == Some("cgroup")
-                && daemon["command_containment_self_test"].as_str() == Some("passed"),
+            daemon["command_containment"]
+                .as_str()
+                .zip(daemon["command_containment_self_test"].as_str())
+                .map(|(mode, result)| mode == "cgroup" && result == "passed"),
             "The daemon must require cgroup containment and pass its harmless descendant-cancellation self-test in its own service context.",
         ),
     ];
@@ -202,7 +209,14 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         && broker["socket"]["valid"].as_bool() == Some(true);
     checks.push(check(
         "action_broker_availability",
-        !broker_required || broker_running,
+        if broker_required {
+            broker["service"]["active"]
+                .as_bool()
+                .zip(broker["socket"]["valid"].as_bool())
+                .map(|(active, socket_valid)| active && socket_valid)
+        } else {
+            Some(true)
+        },
         if broker_required {
             "A configured named action requires a healthy, active Action Broker."
         } else {
@@ -215,42 +229,42 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         checks.extend([
             check(
                 "broker_command_cgroup_containment",
-                broker["command_containment_self_test"].as_str() == Some("passed"),
+                broker["command_containment_self_test"].as_str().map(|result| result == "passed"),
                 "The running Action Broker must pass the descendant-cancellation self-test in its own service context.",
             ),
             check(
                 "broker_seccomp",
-                broker_sandbox["seccomp_mode"].as_u64() == Some(2),
+                broker_sandbox["seccomp_mode"].as_u64().map(|mode| mode == 2),
                 "The running broker must report an active seccomp filter.",
             ),
             check(
                 "broker_no_new_privileges",
-                broker_sandbox["no_new_privileges"].as_bool() == Some(true),
+                broker_sandbox["no_new_privileges"].as_bool(),
                 "The running broker must report NoNewPrivs=1.",
             ),
             check(
                 "broker_af_unix_allowed",
-                state(&broker_sandbox, &["address_families", "unix"]) == Some("allowed"),
+                state(&broker_sandbox, &["address_families", "unix"]).map(|value| value == "allowed"),
                 "The broker requires AF_UNIX for its IPC socket.",
             ),
             check(
                 "broker_af_inet_blocked",
-                state(&broker_sandbox, &["address_families", "inet"]) == Some("blocked"),
+                state(&broker_sandbox, &["address_families", "inet"]).map(|value| value == "blocked"),
                 "The broker must not be able to create AF_INET sockets.",
             ),
             check(
                 "broker_af_inet6_blocked",
-                state(&broker_sandbox, &["address_families", "inet6"]) == Some("blocked"),
+                state(&broker_sandbox, &["address_families", "inet6"]).map(|value| value == "blocked"),
                 "The broker must not be able to create AF_INET6 sockets.",
             ),
             check(
                 "broker_mount_namespace",
-                broker_mount.is_some() && broker_mount != local_mount_ns,
+                broker_mount.zip(local_mount_ns).map(|(broker_ns, local_ns)| broker_ns != local_ns),
                 "The running broker should have an isolated mount namespace.",
             ),
             check(
                 "broker_uts_namespace",
-                broker_uts.is_some() && broker_uts != local_uts_ns,
+                broker_uts.zip(local_uts_ns).map(|(broker_ns, local_ns)| broker_ns != local_ns),
                 "The running broker should have an isolated UTS namespace.",
             ),
         ]);
@@ -258,12 +272,7 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
 
     // These restrictions cannot be established from /proc status alone. Keep
     // the limits explicit instead of treating configured unit text as proof.
-    let unverified = [
-        "SystemCallArchitectures=native (the kernel does not expose the installed rule set)",
-        "RestrictRealtime=yes (the installed seccomp rule is not introspectable here)",
-        "UMask=0077 (the active umask cannot be queried without changing it)",
-        "broker IPAddressDeny=any (the address-family probe verifies socket creation, not cgroup BPF policy)",
-    ];
+    let unverified = unavailable_systemd_evidence();
     let required = required_checks(profile);
     for check in &mut checks {
         let name = check["name"].as_str().unwrap_or_default();
@@ -274,6 +283,20 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
                     || command_execution_configured),
         );
     }
+    let unavailable_checks = checks
+        .iter()
+        .filter_map(|check| {
+            (check["status"] == "unavailable")
+                .then_some(check["name"].as_str().unwrap_or("unknown").to_owned())
+        })
+        .collect::<Vec<_>>();
+    let verified_failures = checks
+        .iter()
+        .filter_map(|check| {
+            (check["status"] == "fail")
+                .then_some(check["name"].as_str().unwrap_or("unknown").to_owned())
+        })
+        .collect::<Vec<_>>();
     let capture_source = daemon["source"].as_str().unwrap_or("unknown");
     let sensitive_field_detection = daemon["capture_sensitive_focus"].as_bool();
     let evdev_privacy = capture_source == "evdev";
@@ -284,7 +307,7 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
     let healthy = readiness == "pass";
     let route = active_route_summary(&daemon);
     let report = serde_json::json!({
-        "schema": 3,
+        "schema": 4,
         "profile": profile.name(),
         "readiness": readiness,
         "sandbox_readiness": sandbox_readiness,
@@ -326,6 +349,10 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         },
         "checks": checks,
         "unverified_mechanisms": unverified,
+        "unavailable_evidence": unverified,
+        "unavailable_checks": unavailable_checks,
+        "verified_failures": verified_failures,
+        "evidence_readiness": if unverified.is_empty() && unavailable_checks.is_empty() { "complete" } else { "incomplete" },
     });
 
     if json {
@@ -386,9 +413,20 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
             "Action Broker: required={}, active={}, socket_valid={}",
             broker_required, broker["service"]["active"], broker["socket"]["valid"]
         );
-        println!("Unverified systemd restrictions:");
+        println!(
+            "Verification evidence: {}",
+            if unverified.is_empty() && unavailable_checks.is_empty() {
+                "COMPLETE"
+            } else {
+                "INCOMPLETE"
+            }
+        );
+        println!("Unavailable evidence (not a verified failure):");
         for mechanism in unverified {
             println!("  - {mechanism}");
+        }
+        for name in &unavailable_checks {
+            println!("  - check {name}: probe data unavailable");
         }
         println!("Overall: {}", readiness.to_ascii_uppercase());
     }
@@ -486,17 +524,35 @@ fn readiness_for(
 ) -> &'static str {
     let required_failure = checks
         .iter()
-        .any(|check| check["required"] == true && check["status"] != "pass");
+        .any(|check| check["required"] == true && check["status"] == "fail");
+    let required_unavailable = checks
+        .iter()
+        .any(|check| check["required"] == true && check["status"] == "unavailable");
     let optional_failure = checks
         .iter()
         .any(|check| check["required"] != true && check["status"] != "pass");
-    if required_failure || (profile == ProtectionProfile::Strict && !unverified.is_empty()) {
+    let incomplete =
+        required_unavailable || (profile == ProtectionProfile::Strict && !unverified.is_empty());
+    let degraded =
+        optional_failure || (profile == ProtectionProfile::Hardened && !unverified.is_empty());
+    if required_failure {
         "fail"
-    } else if optional_failure {
+    } else if incomplete {
+        "incomplete"
+    } else if degraded {
         "degraded"
     } else {
         "pass"
     }
+}
+
+fn unavailable_systemd_evidence() -> Vec<&'static str> {
+    vec![
+        "SystemCallArchitectures=native (the kernel does not expose the installed rule set)",
+        "RestrictRealtime=yes (the installed seccomp rule is not introspectable here)",
+        "UMask=0077 (the active umask cannot be queried without changing it)",
+        "broker IPAddressDeny=any (the address-family probe verifies socket creation, not cgroup BPF policy)",
+    ]
 }
 
 fn privacy_readiness(
@@ -506,16 +562,25 @@ fn privacy_readiness(
 ) -> &'static str {
     match sensitive_field_detection {
         Some(true) if source != "evdev" && source != "unknown" => "pass",
-        _ if profile == ProtectionProfile::Strict => "fail",
+        Some(false) if profile == ProtectionProfile::Strict => "fail",
         Some(false) => "degraded",
-        None => "degraded",
+        Some(true) | None if source == "unknown" || sensitive_field_detection.is_none() => {
+            if profile == ProtectionProfile::Strict {
+                "incomplete"
+            } else {
+                "degraded"
+            }
+        }
         Some(true) => "degraded",
+        None => "degraded",
     }
 }
 
 fn combine_readiness(sandbox: &str, privacy: &str) -> &'static str {
     if sandbox == "fail" || privacy == "fail" {
         "fail"
+    } else if sandbox == "incomplete" || privacy == "incomplete" {
+        "incomplete"
     } else if sandbox != "pass" || privacy != "pass" {
         "degraded"
     } else {
@@ -529,10 +594,15 @@ fn state<'a>(value: &'a serde_json::Value, path: &[&str]) -> Option<&'a str> {
         .and_then(serde_json::Value::as_str)
 }
 
-fn check(name: &str, passed: bool, detail: &str) -> serde_json::Value {
+fn check(name: &str, passed: impl Into<Option<bool>>, detail: &str) -> serde_json::Value {
+    let status = match passed.into() {
+        Some(true) => "pass",
+        Some(false) => "fail",
+        None => "unavailable",
+    };
     serde_json::json!({
         "name": name,
-        "status": if passed { "pass" } else { "fail" },
+        "status": status,
         "detail": detail,
     })
 }
@@ -597,16 +667,16 @@ mod tests {
     }
 
     #[test]
-    fn strict_readiness_fails_closed_on_unverified_controls() {
+    fn readiness_separates_verified_failures_from_missing_evidence() {
         let passing = [serde_json::json!({"required": true, "status": "pass"})];
         let unverified = ["UMask=0077 is not introspectable"];
         assert_eq!(
             readiness_for(ProtectionProfile::Hardened, &passing, &unverified),
-            "pass"
+            "degraded"
         );
         assert_eq!(
             readiness_for(ProtectionProfile::Strict, &passing, &unverified),
-            "fail"
+            "incomplete"
         );
         let failed = [serde_json::json!({"required": true, "status": "fail"})];
         assert_eq!(
@@ -618,6 +688,17 @@ mod tests {
             readiness_for(ProtectionProfile::Workstation, &optional_failure, &[]),
             "degraded"
         );
+        assert_eq!(
+            readiness_for(ProtectionProfile::Strict, &failed, &unverified),
+            "fail",
+            "an observed required-control failure remains distinct from missing evidence"
+        );
+        let unavailable = [serde_json::json!({"required": true, "status": "unavailable"})];
+        assert_eq!(
+            readiness_for(ProtectionProfile::Strict, &unavailable, &[]),
+            "incomplete"
+        );
+        assert_eq!(combine_readiness("incomplete", "pass"), "incomplete");
     }
 
     #[test]
@@ -638,7 +719,7 @@ mod tests {
         );
         assert_eq!(
             privacy_readiness(ProtectionProfile::Strict, "unknown", Some(true)),
-            "fail"
+            "incomplete"
         );
         assert_eq!(
             combine_readiness(
