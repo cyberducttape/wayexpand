@@ -113,10 +113,13 @@ fn reserve_worker() -> bool {
     }
 }
 
-struct WorkerGuard;
+struct WorkerGuard {
+    finished: Arc<std::sync::atomic::AtomicBool>,
+}
 
 impl Drop for WorkerGuard {
     fn drop(&mut self) {
+        self.finished.store(true, Ordering::Release);
         counters().active.fetch_sub(1, Ordering::AcqRel);
         counters().completed_total.fetch_add(1, Ordering::Relaxed);
     }
@@ -170,7 +173,9 @@ impl BackgroundConnect {
             match thread::Builder::new()
                 .name("wayexpand-connect".into())
                 .spawn(move || {
-                    let _guard = WorkerGuard;
+                    let _guard = WorkerGuard {
+                        finished: Arc::clone(&worker_finished),
+                    };
                     let response = connect(worker_cancellation);
                     worker_finished.store(true, Ordering::Release);
                     let _ = sender.send(response);
@@ -315,6 +320,28 @@ mod tests {
             Waker::new().unwrap(),
         );
         assert!(matches!(wait_for(&connect), Err(error) if !error.retryable));
+    }
+
+    #[test]
+    fn a_panicking_worker_releases_its_slot_and_is_reaped() {
+        let _serial = TEST_LOCK.lock().unwrap();
+        let baseline = worker_stats();
+        let connect = BackgroundConnect::spawn(Waker::new().unwrap(), |_| -> ConnectResult {
+            panic!("injected worker panic")
+        });
+        assert!(matches!(wait_for(&connect), Err(error) if error.retryable));
+        drop(connect);
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while worker_stats().active != baseline.active {
+            assert!(
+                Instant::now() < deadline,
+                "panicking worker leaked its slot"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(worker_stats().completed_total > baseline.completed_total);
+        assert_eq!(worker_stats().cancelled_total, baseline.cancelled_total);
     }
 
     #[test]
