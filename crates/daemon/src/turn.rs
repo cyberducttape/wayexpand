@@ -606,6 +606,12 @@ impl Daemon {
 
     /// Count an expansion the route refused because it could not type it.
     pub(crate) fn note_unsupported_output(&self, error: &EventError) {
+        if let Some(source) = error.source.source() {
+            if let Some(reason) = backend_refusal_category(&source.message) {
+                crate::counters::note_output_unsupported_reason(reason);
+                return;
+            }
+        }
         if let Some(limit) = self
             .output_capabilities()
             .and_then(|capabilities| error.route_limit(&capabilities))

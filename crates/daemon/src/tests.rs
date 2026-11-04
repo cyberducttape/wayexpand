@@ -7,6 +7,25 @@ use std::time::Instant;
 use wayexpand_core::{Config, InjectorError, KeyChord};
 
 #[test]
+fn libei_refusal_diagnostics_are_content_free_and_actionable() {
+    assert_eq!(
+        backend_refusal_category(
+            "character U+1F512 is not reachable on the current keyboard layout"
+        ),
+        Some("unicode-keymap")
+    );
+    assert_eq!(
+        backend_refusal_category("keysym fallback for 257 characters would take about 3072 ms"),
+        Some("fallback-too-slow")
+    );
+    assert_eq!(
+        backend_refusal_category("multiple keyboard layouts detected (2)"),
+        Some("active-layout-unavailable")
+    );
+    assert_eq!(backend_refusal_category("unrelated backend error"), None);
+}
+
+#[test]
 fn startup_worker_failure_remains_command_disabled_in_audit_mode() {
     let policy = wayexpand_core::OrganizationPolicy::default();
     assert!(commands_disabled_for_startup(&policy, true));
@@ -196,7 +215,7 @@ fn daemon_status_body_matches_documented_stable_contract() {
         "daemon status body fields no longer match docs/COMPATIBILITY.md's documented Stable contract"
     );
     assert!(body.starts_with(&format!(
-        "source=input-method\nbackend=input-method-v2\nroute_id=input-method-v2\nbackend_mode=unknown\nstatus_schema=24\ndaemon_commit={}\nstate=connected\nroute_available=false\nmatching_available=false\nmatching_unavailable_reason=replacement_route_unavailable\npaused=false\n",
+        "source=input-method\nbackend=input-method-v2\nroute_id=input-method-v2\nbackend_mode=unknown\nstatus_schema=25\ndaemon_commit={}\nstate=connected\nroute_available=false\nmatching_available=false\nmatching_unavailable_reason=replacement_route_unavailable\npaused=false\n",
         super::build_info::COMMIT
     )));
     for field in [
