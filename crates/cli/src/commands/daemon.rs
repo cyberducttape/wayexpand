@@ -73,33 +73,6 @@ fn daemon_build_matches(response: &str, client_commit: &str) -> Option<bool> {
         .map(|daemon_commit| daemon_commit == client_commit)
 }
 
-#[cfg(test)]
-mod status_build_tests {
-    use super::{daemon_build_matches, daemon_build_warning};
-    use wayexpand_core::CONTROL_STATUS_SCHEMA;
-
-    #[test]
-    fn status_warns_when_daemon_and_client_builds_do_not_match() {
-        let status =
-            format!("running\nstatus_schema={CONTROL_STATUS_SCHEMA}\ndaemon_commit=old-build\n");
-        assert!(daemon_build_warning(&status, "new-build").is_some());
-        assert!(daemon_build_warning(&status, "old-build").is_none());
-        assert_eq!(daemon_build_matches(&status, "new-build"), Some(false));
-        assert_eq!(daemon_build_matches(&status, "old-build"), Some(true));
-    }
-
-    #[test]
-    fn status_warns_when_daemon_identity_is_unavailable_or_protocol_differs() {
-        let missing_identity = format!("running\nstatus_schema={CONTROL_STATUS_SCHEMA}\n");
-        assert!(daemon_build_warning(&missing_identity, "new-build").is_some());
-        assert_eq!(daemon_build_matches(&missing_identity, "new-build"), None);
-
-        let old_protocol = "running\nstatus_schema=1\ndaemon_commit=old-build\n";
-        assert!(daemon_build_warning(old_protocol, "old-build").is_some());
-        assert_eq!(daemon_build_matches(old_protocol, "old-build"), None);
-    }
-}
-
 pub(crate) fn insert_command(args: impl Iterator<Item = String>) -> Result<()> {
     const USAGE: &str = "usage: wayexpand insert [--verified] <trigger>";
     let (verified, trigger) = match args.collect::<Vec<_>>().as_slice() {
@@ -139,4 +112,31 @@ pub(crate) fn insert_command(args: impl Iterator<Item = String>) -> Result<()> {
     }
     println!("insert scheduled");
     Ok(())
+}
+
+#[cfg(test)]
+mod status_build_tests {
+    use super::{daemon_build_matches, daemon_build_warning};
+    use wayexpand_core::CONTROL_STATUS_SCHEMA;
+
+    #[test]
+    fn status_warns_when_daemon_and_client_builds_do_not_match() {
+        let status =
+            format!("running\nstatus_schema={CONTROL_STATUS_SCHEMA}\ndaemon_commit=old-build\n");
+        assert!(daemon_build_warning(&status, "new-build").is_some());
+        assert!(daemon_build_warning(&status, "old-build").is_none());
+        assert_eq!(daemon_build_matches(&status, "new-build"), Some(false));
+        assert_eq!(daemon_build_matches(&status, "old-build"), Some(true));
+    }
+
+    #[test]
+    fn status_warns_when_daemon_identity_is_unavailable_or_protocol_differs() {
+        let missing_identity = format!("running\nstatus_schema={CONTROL_STATUS_SCHEMA}\n");
+        assert!(daemon_build_warning(&missing_identity, "new-build").is_some());
+        assert_eq!(daemon_build_matches(&missing_identity, "new-build"), None);
+
+        let old_protocol = "running\nstatus_schema=1\ndaemon_commit=old-build\n";
+        assert!(daemon_build_warning(old_protocol, "old-build").is_some());
+        assert_eq!(daemon_build_matches(old_protocol, "old-build"), None);
+    }
 }
