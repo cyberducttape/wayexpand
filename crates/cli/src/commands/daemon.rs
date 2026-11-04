@@ -28,12 +28,49 @@ pub(crate) fn control_command(requested: &str, mut args: Args) -> Result<()> {
     {
         return Err(daemon_error(message.to_owned()));
     }
+    let build_warning = (requested == "status")
+        .then(|| daemon_build_warning(&response, build_info::COMMIT))
+        .flatten();
     if requested_json {
-        println!("{}", status_as_json(&response)?);
+        let mut status = status_as_json(&response)?;
+        if requested == "status" {
+            status["client_commit"] = serde_json::json!(build_info::COMMIT);
+            status["daemon_build_matches_client"] =
+                serde_json::json!(daemon_build_matches(&response, build_info::COMMIT));
+            status["daemon_build_warning"] = serde_json::json!(build_warning);
+        }
+        println!("{status}");
     } else {
         print!("{response}");
+        if let Some(warning) = build_warning {
+            eprintln!("warning: {warning}");
+        }
     }
     Ok(())
+}
+
+fn daemon_build_warning(response: &str, client_commit: &str) -> Option<&'static str> {
+    let status = wayexpand_core::DaemonStatus::parse(response);
+    if status.status_schema() != Some(CONTROL_STATUS_SCHEMA) {
+        Some("the running daemon uses an incompatible status protocol; restart it before relying on its behavior")
+    } else {
+        match daemon_build_matches(response, client_commit) {
+            Some(true) => None,
+            Some(false) => Some("the running daemon is from a different build; update and restart it before relying on its behavior"),
+            None => Some("the running daemon build cannot be verified; update or rebuild it with a commit ID, then restart it"),
+        }
+    }
+}
+
+fn daemon_build_matches(response: &str, client_commit: &str) -> Option<bool> {
+    let status = wayexpand_core::DaemonStatus::parse(response);
+    if status.status_schema() != Some(CONTROL_STATUS_SCHEMA) || client_commit == "unknown" {
+        return None;
+    }
+    status
+        .field("daemon_commit")
+        .filter(|commit| *commit != "unknown")
+        .map(|daemon_commit| daemon_commit == client_commit)
 }
 
 pub(crate) fn insert_command(args: impl Iterator<Item = String>) -> Result<()> {
@@ -75,4 +112,31 @@ pub(crate) fn insert_command(args: impl Iterator<Item = String>) -> Result<()> {
     }
     println!("insert scheduled");
     Ok(())
+}
+
+#[cfg(test)]
+mod status_build_tests {
+    use super::{daemon_build_matches, daemon_build_warning};
+    use wayexpand_core::CONTROL_STATUS_SCHEMA;
+
+    #[test]
+    fn status_warns_when_daemon_and_client_builds_do_not_match() {
+        let status =
+            format!("running\nstatus_schema={CONTROL_STATUS_SCHEMA}\ndaemon_commit=old-build\n");
+        assert!(daemon_build_warning(&status, "new-build").is_some());
+        assert!(daemon_build_warning(&status, "old-build").is_none());
+        assert_eq!(daemon_build_matches(&status, "new-build"), Some(false));
+        assert_eq!(daemon_build_matches(&status, "old-build"), Some(true));
+    }
+
+    #[test]
+    fn status_warns_when_daemon_identity_is_unavailable_or_protocol_differs() {
+        let missing_identity = format!("running\nstatus_schema={CONTROL_STATUS_SCHEMA}\n");
+        assert!(daemon_build_warning(&missing_identity, "new-build").is_some());
+        assert_eq!(daemon_build_matches(&missing_identity, "new-build"), None);
+
+        let old_protocol = "running\nstatus_schema=1\ndaemon_commit=old-build\n";
+        assert!(daemon_build_warning(old_protocol, "old-build").is_some());
+        assert_eq!(daemon_build_matches(old_protocol, "old-build"), None);
+    }
 }
