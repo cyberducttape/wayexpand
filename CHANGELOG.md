@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Treat a stale or missing daemon status schema as unavailable security
+  evidence, not a verified sandbox failure. Keep the required gate incomplete
+  until the daemon is updated or restarted; bump the security report schema to
+  10.
 - Make `doctor --security` account for an enforced organization
   `require_sensitive_focus` policy when evaluating the input-privacy gate.
   Invalid or unreadable root policy now leaves privacy readiness incomplete,

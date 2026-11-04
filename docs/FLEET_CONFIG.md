@@ -116,7 +116,7 @@ and healthy. A
 broker can therefore be reachable while failing its audit or sandbox checks;
 the availability result covers audit, while confinement appears only under
 execution sandboxing. Input privacy and configuration integrity are evaluated
-separately as well. The top-level `schema` field is currently `9` and is
+separately as well. The top-level `schema` field is currently `10` and is
 versioned; automation should consume the stable `gates.<name>.readiness`,
 `required`, and `checks` fields and reject unrecognized schema versions. The legacy
 `sandbox_readiness` key aliases `execution_sandbox_readiness`. The

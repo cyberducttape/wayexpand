@@ -7,7 +7,7 @@ use super::{
 use crate::*;
 use std::os::unix::fs::MetadataExt;
 
-pub(crate) const SECURITY_REPORT_SCHEMA: u64 = 9;
+pub(crate) const SECURITY_REPORT_SCHEMA: u64 = 10;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ProtectionProfile {
@@ -572,14 +572,19 @@ fn daemon_runtime_report(daemon: &serde_json::Value) -> serde_json::Value {
 }
 
 fn daemon_status_schema_check(daemon: &serde_json::Value) -> serde_json::Value {
-    check(
-        "daemon_status_schema",
-        daemon
-            .get("status_schema")
-            .and_then(serde_json::Value::as_u64)
-            .map(|schema| schema == u64::from(CONTROL_STATUS_SCHEMA)),
-        "The running daemon must expose the current status contract so security checks cannot pass using stale or incomplete runtime evidence.",
-    )
+    let compatible = daemon
+        .get("status_schema")
+        .and_then(serde_json::Value::as_u64)
+        .is_some_and(|schema| schema == u64::from(CONTROL_STATUS_SCHEMA));
+    serde_json::json!({
+        "name": "daemon_status_schema",
+        "status": if compatible { "pass" } else { "unavailable" },
+        "detail": if compatible {
+            "The running daemon exposes the current status contract."
+        } else {
+            "The running daemon does not expose the current status contract; its sandbox protections cannot be verified until it is updated or restarted."
+        },
+    })
 }
 
 fn target_integrity_check(daemon: &serde_json::Value) -> serde_json::Value {
@@ -1043,15 +1048,30 @@ mod tests {
     }
 
     #[test]
-    fn daemon_schema_gate_rejects_stale_and_missing_runtime_contracts() {
+    fn daemon_schema_gate_marks_stale_and_missing_runtime_contracts_unavailable() {
         let current = serde_json::json!({"status_schema": CONTROL_STATUS_SCHEMA});
         let stale = serde_json::json!({"status_schema": CONTROL_STATUS_SCHEMA - 1});
         let missing = serde_json::json!({});
         assert_eq!(daemon_status_schema_check(&current)["status"], "pass");
-        assert_eq!(daemon_status_schema_check(&stale)["status"], "fail");
+        assert_eq!(daemon_status_schema_check(&stale)["status"], "unavailable");
         assert_eq!(
             daemon_status_schema_check(&missing)["status"],
             "unavailable"
+        );
+        let unavailable = [serde_json::json!({
+            "name": "daemon_status_schema",
+            "required": true,
+            "status": daemon_status_schema_check(&stale)["status"],
+        })];
+        assert_eq!(
+            readiness_for(ProtectionProfile::Hardened, &unavailable, &[]),
+            "incomplete"
+        );
+        assert!(
+            gate_report("incomplete", true, &unavailable, &[])["verified_failures"]
+                .as_array()
+                .unwrap()
+                .is_empty()
         );
     }
 
