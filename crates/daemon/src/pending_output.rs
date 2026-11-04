@@ -488,6 +488,7 @@ mod tests {
     struct GatedInjector {
         gate: Arc<(Mutex<bool>, std::sync::Condvar)>,
         calls: Arc<Mutex<Vec<String>>>,
+        delivered: Arc<Mutex<String>>,
         erase_started: Arc<std::sync::atomic::AtomicUsize>,
         fail: bool,
         checkpoint: wayexpand_core::OutputCheckpoint,
@@ -533,12 +534,14 @@ mod tests {
             })?;
             self.calls.lock().unwrap().push(format!("insert:{text}"));
             if self.fail {
+                self.delivered.lock().unwrap().extend(text.chars().take(2));
                 return Err(InjectorError {
                     backend: "gated-test",
                     message: "portal went away".into(),
                     retryable: true,
                 });
             }
+            self.delivered.lock().unwrap().push_str(text);
             Ok(())
         }
 
@@ -551,6 +554,7 @@ mod tests {
         daemon: Daemon,
         gate: Arc<(Mutex<bool>, std::sync::Condvar)>,
         calls: Arc<Mutex<Vec<String>>>,
+        delivered: Arc<Mutex<String>>,
         erase_started: Arc<std::sync::atomic::AtomicUsize>,
         waiting: Arc<std::sync::atomic::AtomicBool>,
         physical_input: mpsc::Sender<InputEvent>,
@@ -592,6 +596,7 @@ mod tests {
                 .unwrap();
             let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
             let calls = Arc::new(Mutex::new(Vec::new()));
+            let delivered = Arc::new(Mutex::new(String::new()));
             let erase_started = Arc::new(std::sync::atomic::AtomicUsize::new(0));
             let waiting = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let (physical_input, physical_input_events) = mpsc::channel();
@@ -599,6 +604,7 @@ mod tests {
             let backend: Box<dyn TextInjector> = Box::new(GatedInjector {
                 gate: Arc::clone(&gate),
                 calls: Arc::clone(&calls),
+                delivered: Arc::clone(&delivered),
                 erase_started: Arc::clone(&erase_started),
                 fail,
                 checkpoint: wayexpand_core::OutputCheckpoint::default(),
@@ -662,6 +668,7 @@ mod tests {
                 daemon,
                 gate,
                 calls,
+                delivered,
                 erase_started,
                 waiting,
                 physical_input,
@@ -1154,6 +1161,11 @@ mod tests {
         // The failed transaction is not replayed and the rest of the batch
         // is never sent to a possibly inconsistent target.
         assert_eq!(*harness.calls.lock().unwrap(), ["erase::a", "insert:first"]);
+        assert_eq!(
+            harness.delivered.lock().unwrap().as_str(),
+            "fi",
+            "the fake backend applies a prefix before reporting the lost connection"
+        );
         assert!(harness.daemon.injector.is_none());
         assert_eq!(harness.daemon.retiring_output_workers.len(), 1);
         assert!(harness.daemon.output_retry_at.is_some());
