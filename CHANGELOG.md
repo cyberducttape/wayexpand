@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Make `wayexpand status` report when its CLI and daemon builds do not match;
+  include the comparison and an actionable warning in JSON output.
 - Give the focused HTTP 503 one-command helpers a distinct `;503-*` prefix so they do not delay the flagship `;http503` trigger.
 
 - Fix the reviewed-pack CI fixture harness to compare interactive-form output

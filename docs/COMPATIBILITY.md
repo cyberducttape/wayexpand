@@ -506,8 +506,11 @@ Current daemon status (requires running daemon). This wraps the daemon's
 plain-text control-socket status response (`response` is its first line;
 every subsequent `key=value` line becomes a field, with `true`/`false`
 parsed as JSON booleans and nonnegative integer values parsed as JSON numbers)
-rather than a purpose-built schema, so the fields
-below are exactly what that response currently carries -- nothing more.
+rather than a purpose-built schema. The CLI adds `client_commit`,
+`daemon_build_matches_client`, and `daemon_build_warning` to make build skew
+visible; text output prints the same warning to stderr. A matching commit has
+no warning, while unknown build identity or a status protocol mismatch is
+reported as unverifiable.
 The optional `sandbox_security` object contains direct `/proc` and syscall
 probes from the daemon process for `wayexpand doctor --security`; older daemons
 omit it, and this optional additive field does not change the status schema.
@@ -527,6 +530,9 @@ side never counts as a match (`commit_matches` is then `false`).
   "backend_mode": "unknown",
   "status_schema": 17,
   "daemon_commit": "example-commit",
+  "client_commit": "example-commit",
+  "daemon_build_matches_client": true,
+  "daemon_build_warning": null,
   "state": "connected",
   "paused": false,
   "config": "/home/user/.config/wayexpand/expansions.toml",
