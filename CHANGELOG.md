@@ -10,6 +10,9 @@ All notable changes to WayExpand are documented here.
   Unix-socket proxies.
 - Make `wayexpand status` report when its CLI and daemon builds do not match;
   include the comparison and an actionable warning in JSON output.
+- Place RPM build workspaces on disk-backed runner storage instead of the small
+  `/tmp` tmpfs in CI and release package builds, preventing full-workspace tests
+  from exhausting it.
 - Track confirmed erase and insertion progress for paced output. Report a
   distinct content-free `partial_write` outcome and counter, retain progress
   in transaction traces, and never automatically replay a partial write.

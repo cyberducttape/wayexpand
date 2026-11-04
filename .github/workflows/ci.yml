@@ -614,7 +614,12 @@ jobs:
           deb=$(find .. -maxdepth 1 -type f -name 'wayexpand_*.deb' -print -quit)
           test -n "$deb"
           version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)
-          top=$(mktemp -d)
+          # /tmp is a small tmpfs on GitHub-hosted Linux runners. rpmbuild's
+          # vendored source tree and full workspace test artifacts can exceed
+          # it and make the linker fail with SIGBUS. RUNNER_TEMP is on the
+          # runner's disk-backed workspace volume.
+          test -n "${RUNNER_TEMP:-}"
+          top=$(mktemp -d "$RUNNER_TEMP/wayexpand-rpmbuild.XXXXXX")
           source_dir="$top/sources/wayexpand-${version}"
           mkdir -p "$source_dir" "$top/rpmbuild/SOURCES"
           git archive --format=tar "HEAD^{tree}" | tar -x -C "$source_dir"
