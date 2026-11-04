@@ -367,7 +367,7 @@ fn looks_operational_with_tools(replacement: &str, declared_tools: &[String]) ->
         "zypper",
     ];
     let lower = replacement.to_ascii_lowercase();
-    has_shell_code_fence(&lower)
+    has_operational_code_fence(&lower)
         || lower.contains("{{shellq:")
         || lower
             .split(|character: char| {
@@ -390,17 +390,32 @@ fn looks_operational_with_tools(replacement: &str, declared_tools: &[String]) ->
         })
 }
 
-fn has_shell_code_fence(replacement: &str) -> bool {
-    const SHELLS: &[&str] = &[
+fn has_operational_code_fence(replacement: &str) -> bool {
+    const OPERATIONAL_FORMATS: &[&str] = &[
         "bash",
         "console",
+        "compose",
+        "conf",
         "dash",
+        "docker",
+        "dockerfile",
         "fish",
+        "hcl",
+        "ini",
+        "json",
         "ksh",
+        "nginx",
         "powershell",
         "pwsh",
         "sh",
         "shell",
+        "sql",
+        "systemd",
+        "terraform",
+        "tf",
+        "toml",
+        "yaml",
+        "yml",
         "zsh",
     ];
     replacement.lines().any(|line| {
@@ -419,7 +434,7 @@ fn has_shell_code_fence(replacement: &str) -> bool {
         fence
             .split_whitespace()
             .next()
-            .is_some_and(|language| SHELLS.contains(&language))
+            .is_some_and(|language| OPERATIONAL_FORMATS.contains(&language))
     })
 }
 
@@ -794,11 +809,13 @@ mod tests {
     }
 
     #[test]
-    fn unknown_commands_in_shell_fences_still_require_field_review() {
+    fn unknown_commands_and_operational_config_fences_require_field_review() {
         for (index, replacement) in [
             "```bash\ninternalctl inspect {{field:target}}\n```",
             "~~~~zsh\ninternalctl inspect {{field:target}}\n~~~~",
             "````powershell title=example\ninternalctl inspect {{field:target}}\n````",
+            "```hcl\nresource \"aws_instance\" \"web\" { ami = {{field:ami}} }\n```",
+            "~~~yaml\napiVersion: v1\ndata: {{field:config}}\n~~~",
         ]
         .into_iter()
         .enumerate()
@@ -813,8 +830,8 @@ mod tests {
             };
 
             let findings = operational_field_findings(&[expansion], &[]);
-            assert_eq!(findings.len(), 1, "fence form {replacement:?}");
-            assert_eq!(findings[0]["key"], "field:target");
+            assert_eq!(findings.len(), 1, "fence or format {replacement:?}");
+            assert!(findings[0]["key"].as_str().is_some());
         }
     }
 
