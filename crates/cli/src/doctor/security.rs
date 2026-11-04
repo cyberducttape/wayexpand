@@ -195,6 +195,7 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
             .expansion
             .iter()
             .any(|expansion| expansion.command.is_some())
+            || !config.hotkey.is_empty()
     });
     let broker_running = broker["service"]["active"].as_bool() == Some(true)
         && broker["socket"]["valid"].as_bool() == Some(true);
