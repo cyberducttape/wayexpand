@@ -638,7 +638,7 @@ fn keysym_typer_refuses_to_guess_the_active_layout_of_a_multi_layout_keymap() {
 }
 
 #[test]
-fn compositor_layout_snapshot_is_used_only_when_its_compiled_keymap_matches_eis() {
+fn compositor_layout_snapshot_is_used_when_ordered_layout_groups_match() {
     let keymap = super::XkbKeymap::new_from_names(
         super::Context::new(0).unwrap(),
         Some(xkbcommon_rs::xkb_keymap::RuleNames {
@@ -673,6 +673,30 @@ fn compositor_layout_snapshot_is_used_only_when_its_compiled_keymap_matches_eis(
         typer.note_external_layout(&mismatch),
         Err(super::LibeiError::LayoutProviderMismatch)
     ));
+}
+
+#[test]
+fn layout_group_check_ignores_model_differences_but_not_layout_order() {
+    let compile = |model: &str, layout: &str| {
+        super::XkbKeymap::new_from_names(
+            super::Context::new(0).unwrap(),
+            Some(xkbcommon_rs::xkb_keymap::RuleNames {
+                rules: None,
+                model: Some(model.into()),
+                layout: Some(layout.into()),
+                variant: Some(",".into()),
+                options: None,
+            }),
+            0,
+        )
+        .unwrap()
+    };
+    let eis = compile("pc104", "us,de");
+    let compositor = compile("pc105", "us,de");
+    assert!(super::keymap::layout_groups_match(&eis, &compositor));
+
+    let reordered = compile("pc105", "de,us");
+    assert!(!super::keymap::layout_groups_match(&eis, &reordered));
 }
 
 #[test]
