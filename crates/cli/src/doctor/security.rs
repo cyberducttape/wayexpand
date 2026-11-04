@@ -220,6 +220,11 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         && broker["socket"]["valid"].as_bool() == Some(true);
     checks.push(action_broker_availability_check(&broker, broker_required));
     checks.push(action_broker_audit_check(&broker, broker_required));
+    if let Some(broker_security_check) =
+        broker_runtime_security_check(broker_required, broker_running)
+    {
+        checks.push(broker_security_check);
+    }
     checks.push(target_integrity_check(&daemon));
     if broker_required && broker_running {
         let broker_mount = broker_sandbox["namespaces"]["mount"].as_u64();
@@ -581,6 +586,7 @@ fn gate_for_check(name: &str) -> &'static str {
         // Broker confinement is still execution sandboxing. Keep it distinct
         // from whether the optional broker service/socket is available.
         "broker_command_cgroup_containment"
+        | "broker_runtime_security_evidence"
         | "broker_seccomp"
         | "broker_no_new_privileges"
         | "broker_af_unix_allowed"
@@ -677,6 +683,16 @@ fn action_broker_audit_check(broker: &serde_json::Value, required: bool) -> serd
             "Broker health evidence is unavailable or incomplete, so mandatory audit readiness cannot be verified."
         },
     )
+}
+
+fn broker_runtime_security_check(required: bool, running: bool) -> Option<serde_json::Value> {
+    (required && !running).then(|| {
+        check(
+            "broker_runtime_security_evidence",
+            None,
+            "The Action Broker is required but unavailable, so its live execution-sandbox guarantees cannot be inspected.",
+        )
+    })
 }
 
 fn checks_for_gate(checks: &[serde_json::Value], gate: &str) -> Vec<serde_json::Value> {
@@ -778,6 +794,7 @@ fn required_checks(profile: ProtectionProfile) -> &'static [&'static str] {
         "daemon_memory_deny_write_execute",
         "daemon_command_cgroup_containment",
         "broker_command_cgroup_containment",
+        "broker_runtime_security_evidence",
         "action_broker_availability",
         "action_broker_mandatory_audit",
     ];
@@ -809,6 +826,7 @@ fn required_checks(profile: ProtectionProfile) -> &'static [&'static str] {
         "daemon_task_limit",
         "daemon_command_cgroup_containment",
         "broker_command_cgroup_containment",
+        "broker_runtime_security_evidence",
         "action_broker_availability",
         "action_broker_mandatory_audit",
         "broker_seccomp",
@@ -1141,6 +1159,10 @@ mod tests {
         );
         assert_eq!(gate_for_check("broker_seccomp"), "execution_sandbox");
         assert_eq!(
+            gate_for_check("broker_runtime_security_evidence"),
+            "execution_sandbox"
+        );
+        assert_eq!(
             gate_for_check("broker_command_cgroup_containment"),
             "execution_sandbox"
         );
@@ -1189,6 +1211,23 @@ mod tests {
             readiness_for(ProtectionProfile::Workstation, &sandbox, &[]),
             "fail"
         );
+
+        let broker_unavailable_sandbox_check =
+            broker_runtime_security_check(true, false).expect("required unavailable broker");
+        assert_eq!(broker_unavailable_sandbox_check["status"], "unavailable");
+        assert!(broker_runtime_security_check(false, false).is_none());
+        assert!(broker_runtime_security_check(true, true).is_none());
+        let mut broker_unavailable_sandbox_check = broker_unavailable_sandbox_check;
+        broker_unavailable_sandbox_check["gate"] =
+            serde_json::Value::String("execution_sandbox".to_owned());
+        broker_unavailable_sandbox_check["required"] = serde_json::Value::Bool(true);
+        let broker_sandbox_gate = gate_report(
+            "incomplete",
+            true,
+            std::slice::from_ref(&broker_unavailable_sandbox_check),
+            &[],
+        );
+        assert_eq!(broker_sandbox_gate["observed_readiness"], "incomplete");
 
         let unavailable_optional_broker = action_broker_availability_check(
             &serde_json::json!({

@@ -105,6 +105,9 @@ has `readiness: "not_required"`, `required: false`, and
 `observed_readiness: "fail"`; this remains visible to inventory automation
 without making an installation that has no named actions unhealthy. The execution
 sandbox gate includes daemon and, when configured, broker confinement checks;
+if configured broker actions need a broker that is not running, that gate also
+reports `broker_runtime_security_evidence` as unavailable rather than implying
+that the broker's confinement was verified.
 the Action Broker availability gate reports service/socket health and mandatory
 audit readiness, and is required only when configured named actions need it.
 For those actions, `action_broker_mandatory_audit` must report `pass`:
