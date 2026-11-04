@@ -137,9 +137,23 @@ grep -Fq 'set -e WAYEXPAND_CONTEXT_REMOTE_HOST' \
     "$repo_root/crates/cli/integrations/wayexpand.fish"
 if command -v zsh >/dev/null 2>&1; then
     zsh -n "$repo_root/crates/cli/integrations/wayexpand.zsh"
+    zsh -c '
+        source "$1"
+        false
+        _wayexpand_context_report
+        prompt_status=$?
+        [[ $prompt_status == 1 ]]
+    ' zsh "$repo_root/crates/cli/integrations/wayexpand.zsh"
 fi
 if command -v fish >/dev/null 2>&1; then
     fish --no-execute "$repo_root/crates/cli/integrations/wayexpand.fish"
+    fish -c '
+        source $argv[1]
+        false
+        __wayexpand_context_report
+        set prompt_status $status
+        test $prompt_status -eq 1
+    ' "$repo_root/crates/cli/integrations/wayexpand.fish"
 fi
 
 printf '%s\n' 'SSH context lifecycle test passed'
