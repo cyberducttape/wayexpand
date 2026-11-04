@@ -4,6 +4,48 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Give the focused HTTP 503 one-command helpers a distinct `;503-*` prefix so they do not delay the flagship `;http503` trigger.
+
+- Fix the reviewed-pack CI fixture harness to compare interactive-form output
+  through validated `pack test` values instead of asking the CLI preview path
+  to collect fields it cannot interactively request.
+- Turn `;http503` into the flagship first-run sysadmin workflow. Collect an
+  explicit local/remote SSH session declaration, expected host, service,
+  proxy unit, and port; validate and generate a reviewable checklist with a
+  built-in read-only command validator. Add one-command service, journal,
+  sockets, and proxy forms, plus a documented CLI workflow to preview a file
+  or copy a selected command without running it.
+- Extend pack lint with an operational-field gate: command/config interpolations
+  require a domain validator or explicit `free_text=true`, and JSON failures
+  identify the exact pack file, trigger, and field. Add URL, URL path, duration,
+  Git revision, SQL identifier, and container-name validators; apply them to
+  maintained operations packs and shell-quote path and revision arguments.
+- Confirm and document that libei negotiates native UTF-8 `ei_text` before
+  keysym synthesis; paced keysym fallback stays visibly labeled and refuses
+  output above the configured limit before trigger deletion. Long file content
+  should use `wayexpand new` or manual clipboard insertion.
+- Add CI-oriented `wayexpand pack lint` and `pack test` commands with stable
+  JSON reports, exact output fixtures, optional required-signature checks, and
+  organization-policy admission findings. `pack diff --json` now returns
+  version, fingerprint, signature, permission, and changed-file data.
+- Add `wayexpand policy check` for CI. It reports the configured and effective
+  controls with the cause of audit-only or unsupported settings and exits
+  nonzero when policy is not enforceable (unless audit-only review is explicitly
+  allowed).
+- Add `wayexpand workflow` with three explicit modes: verified Insert, Generate
+  File with a staged validator, destination and diff review plus typed write
+  confirmation, and Run Approved Action through the Action Broker. Broker
+  execution requires an exact action approval, enabled and healthy mandatory
+  audit, and an enabled named action in the active configuration; successful
+  responses confirm the broker's required completion audit record.
+- Expand the maintained operations catalog to 17 packs, adding networking,
+  DNS/TLS, cPanel/WHM, database operations, Terraform, CI/CD, and incident
+  response. Pack manifests now carry maintainer, shell/platform/tool
+  compatibility, risk, review, and verification metadata. Each pack includes
+  an example output and a CI fixture that checks the rendered result; pack
+  review screens display maintainer, compatibility, and risk information.
+- Add DNS subdomain validation and apply shell-quoted, typed fields to common
+  Kubernetes, container, Nginx, and sysadmin diagnostic arguments.
 - Move expansion transaction payloads into the serialized output worker and
   return them with completion, avoiding a second allocation of the full
   replacement text. Pending reactor state retains only the trigger needed for
@@ -39,7 +81,6 @@ All notable changes to WayExpand are documented here.
   is disabled.
 
 - Resolve fleet settings per field with pack defaults, organization defaults, and user preferences in explicit precedence order; report each effective setting's source in `wayexpand fleet status`.
-
 - Gate IBus replacement through the shared capability admission contract.
   Non-atomic replacement is refused by default, expansion accounting waits
   for successful signal emission. Outcomes distinguish fully emitted but

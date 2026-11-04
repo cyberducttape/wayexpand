@@ -1,0 +1,6 @@
+[[expansion]]
+trigger = ";;sysadmin-pack-example"
+description = "Reviewed pack example output: Sysadmin Diagnostics"
+category = "Sysadmin Diagnostics"
+tags = ["example", "reviewed"]
+replacement = "openssl x509 -in /etc/ssl/certs/example.crt -noout -dates"

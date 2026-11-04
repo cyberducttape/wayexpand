@@ -1,0 +1,6 @@
+[[expansion]]
+trigger = ";;dns-tls-pack-example"
+description = "DNS A record lookup"
+category = "DNS and TLS Operations"
+tags = ["example", "reviewed"]
+replacement = "dig +noall +answer example.net A"

@@ -1,0 +1,6 @@
+[[expansion]]
+trigger = ";;support-pack-example"
+description = "Reviewed pack example output: Customer Support"
+category = "Customer Support"
+tags = ["example", "reviewed"]
+replacement = "Subject: Maintenance window\nImpact: No customer impact expected\nNext update: 2026-11-02 18:00 UTC"

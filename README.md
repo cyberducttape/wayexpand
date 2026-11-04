@@ -124,6 +124,11 @@ wayexpand upgrade-status  # is the running daemon from this CLI build?
 wayexpand test ';sig'     # check matching without the desktop
 ```
 
+For a sysadmin first task, see the [HTTP 503 incident triage
+walkthrough](docs/HTTP503_WALKTHROUGH.md). It generates a validated,
+review-first checklist for an explicitly selected local or remote shell
+session; diagnostic commands are never run by WayExpand.
+
 ## Generate config files
 
 Any snippet with an `output_file` is a file template. `wayexpand new` lists
@@ -239,6 +244,7 @@ matching pauses while a newly focused app's library loads. See the
 - [Templates](docs/TEMPLATES.md) · [GUI](docs/GUI.md)
 - [Backends](docs/BACKENDS.md) · [Support matrix](docs/SUPPORT_MATRIX.md)
 - [Fleet deployment](docs/FLEET_CONFIG.md) · [For sysadmins](docs/FOR_SYSADMINS.md)
+- [Safety-aware workflows](docs/SAFE_WORKFLOWS.md)
 - [Packaging](docs/PACKAGING.md) · [Roadmap](docs/ROADMAP.md)
 - [Everything else](docs/DOCUMENTATION_INDEX.md)
 

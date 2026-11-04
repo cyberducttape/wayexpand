@@ -1,0 +1,1 @@
+whmapi1 listaccts --output=jsonpretty

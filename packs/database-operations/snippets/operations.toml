@@ -1,0 +1,27 @@
+[[expansion]]
+trigger = ";;mysql-version"
+description = "Query the MySQL or MariaDB server version using current client credentials"
+category = "Databases"
+tags = ["mysql", "mariadb", "read-only"]
+replacement = "mysql --batch --execute='SELECT VERSION();'"
+
+[[expansion]]
+trigger = ";;mysql-sessions"
+description = "Inspect active MySQL sessions; query text may contain sensitive data"
+category = "Databases"
+tags = ["mysql", "sessions", "read-only"]
+replacement = "mysql --table --execute='SHOW FULL PROCESSLIST;'"
+
+[[expansion]]
+trigger = ";;postgres-health"
+description = "Inspect PostgreSQL readiness through the local client configuration"
+category = "Databases"
+tags = ["postgresql", "health", "read-only"]
+replacement = "psql --no-psqlrc --command='SELECT current_database(), current_user, version();'"
+
+[[expansion]]
+trigger = ";;postgres-replication"
+description = "Inspect PostgreSQL replication sender state"
+category = "Databases"
+tags = ["postgresql", "replication", "read-only"]
+replacement = "psql --no-psqlrc --command='SELECT application_name, state, sync_state, write_lag, flush_lag, replay_lag FROM pg_stat_replication;'"

@@ -262,6 +262,25 @@ impl GuiApp {
                     json_string(&pack, "publisher"),
                     json_string(&pack, "description")
                 ));
+                if let Some(maintainer) = pack.get("maintainer").and_then(serde_json::Value::as_str)
+                {
+                    ui.label(self.strings.pack_maintainer(maintainer));
+                }
+                if let Some(compatibility) =
+                    pack.get("compatibility").filter(|value| value.is_object())
+                {
+                    ui.label(self.strings.pack_compatibility(
+                        &json_string_array(&compatibility["shells"]),
+                        &json_string_array(&compatibility["platforms"]),
+                        &json_string_array(&compatibility["tools"]),
+                    ));
+                }
+                if let Some(risk) = pack.get("risk").filter(|value| value.is_object()) {
+                    ui.label(
+                        self.strings
+                            .pack_risk(&json_string(risk, "level"), &json_string(risk, "summary")),
+                    );
+                }
                 let signature = &pack["signature"];
                 if signature["state"] == "verified" {
                     ui.label(
@@ -346,6 +365,28 @@ impl GuiApp {
             json_string(manifest, "publisher"),
             json_string(manifest, "description")
         ));
+        if let Some(maintainer) = manifest
+            .get("maintainer")
+            .and_then(serde_json::Value::as_str)
+        {
+            ui.label(self.strings.pack_maintainer(maintainer));
+        }
+        if let Some(compatibility) = manifest
+            .get("compatibility")
+            .filter(|value| value.is_object())
+        {
+            ui.label(self.strings.pack_compatibility(
+                &json_string_array(&compatibility["shells"]),
+                &json_string_array(&compatibility["platforms"]),
+                &json_string_array(&compatibility["tools"]),
+            ));
+        }
+        if let Some(risk) = manifest.get("risk").filter(|value| value.is_object()) {
+            ui.label(
+                self.strings
+                    .pack_risk(&json_string(risk, "level"), &json_string(risk, "summary")),
+            );
+        }
         self.render_signature_details(ui, details);
         if let Some(review_record) = manifest.get("review").filter(|value| value.is_object()) {
             ui.label(self.strings.pack_review_record(

@@ -1,0 +1,6 @@
+[[expansion]]
+trigger = ";;cpanel-pack-example"
+description = "WHM account inventory report"
+category = "cPanel and WHM Operations"
+tags = ["example", "reviewed"]
+replacement = "whmapi1 listaccts --output=jsonpretty"

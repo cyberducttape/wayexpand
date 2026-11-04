@@ -4381,6 +4381,7 @@ dependencies = [
  "wayexpand-backend-libei",
  "wayexpand-backend-selection",
  "wayexpand-backend-wlroots",
+ "wayexpand-broker-client",
  "wayexpand-build-info",
  "wayexpand-core",
  "wayexpand-process-supervisor",

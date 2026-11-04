@@ -1,0 +1,20 @@
+[[expansion]]
+trigger = ";;terraform-validate"
+description = "Check formatting and validate initialized Terraform configuration"
+category = "Terraform"
+tags = ["terraform", "validation", "read-only"]
+replacement = "terraform fmt -check -recursive && terraform validate"
+
+[[expansion]]
+trigger = ";;terraform-plan-review"
+description = "Generate a plan without refreshing remote state; review sensitive values"
+category = "Terraform"
+tags = ["terraform", "plan", "review"]
+replacement = "terraform plan -refresh=false -input=false -no-color"
+
+[[expansion]]
+trigger = ";;terraform-state-list"
+description = "List resource addresses in the currently selected Terraform state"
+category = "Terraform"
+tags = ["terraform", "state", "read-only"]
+replacement = "terraform state list"

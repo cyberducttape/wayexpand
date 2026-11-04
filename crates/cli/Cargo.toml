@@ -22,6 +22,7 @@ libc.workspace = true
 semver.workspace = true
 unicode-segmentation = "1"
 wayexpand-core = { path = "../core" }
+wayexpand-broker-client = { path = "../broker-client" }
 wayexpand-process-supervisor = { path = "../process-supervisor" }
 wayexpand-backend-ibus = { path = "../backend-ibus" }
 wayexpand-backend-wlroots = { path = "../backend-wlroots" }

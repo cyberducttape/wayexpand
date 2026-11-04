@@ -1,0 +1,6 @@
+[[expansion]]
+trigger = ";;incident-pack-example"
+description = "UTC incident timestamp"
+category = "Incident Response"
+tags = ["example", "reviewed"]
+replacement = "date -u +'%Y-%m-%dT%H:%M:%SZ'"

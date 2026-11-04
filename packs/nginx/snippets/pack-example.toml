@@ -1,0 +1,6 @@
+[[expansion]]
+trigger = ";;nginx-pack-example"
+description = "Reviewed pack example output: Nginx Operations"
+category = "Nginx Operations"
+tags = ["example", "reviewed"]
+replacement = "sudo nginx -t"

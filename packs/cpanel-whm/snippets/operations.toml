@@ -1,0 +1,20 @@
+[[expansion]]
+trigger = ";;whm-accounts"
+description = "List cPanel accounts through the WHM API"
+category = "cPanel and WHM"
+tags = ["whm", "accounts", "read-only"]
+replacement = "whmapi1 listaccts --output=jsonpretty"
+
+[[expansion]]
+trigger = ";;cpanel-ssl-status"
+description = "Inspect certificate status for a selected cPanel domain"
+category = "cPanel and WHM"
+tags = ["cpanel", "tls", "read-only"]
+replacement = "uapi --output=jsonpretty SSL get_vhost_ssl_status domain={{shellq:domain=example.net|required|max=253|validate=hostname}}"
+
+[[expansion]]
+trigger = ";;whm-error-log"
+description = "Inspect a bounded tail of the WHM service error log"
+category = "cPanel and WHM"
+tags = ["whm", "logs", "read-only"]
+replacement = "tail -n {{shellq:lines=100|required|max=4|validate=positive-integer}} /usr/local/cpanel/logs/error_log"

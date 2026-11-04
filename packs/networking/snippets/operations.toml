@@ -1,0 +1,20 @@
+[[expansion]]
+trigger = ";;network-route"
+description = "Inspect the route Linux would use for a selected destination"
+category = "Networking"
+tags = ["route", "read-only"]
+replacement = "ip route get {{shellq:destination=192.0.2.10|required|max=253|validate=hostname}}"
+
+[[expansion]]
+trigger = ";;socket-summary"
+description = "Summarize TCP and UDP socket state"
+category = "Networking"
+tags = ["sockets", "read-only"]
+replacement = "ss -s"
+
+[[expansion]]
+trigger = ";;tcp-probe"
+description = "Check TCP reachability with a bounded timeout"
+category = "Networking"
+tags = ["tcp", "connectivity"]
+replacement = "nc -vz -w 3 {{shellq:host=host.example.net|required|max=253|validate=hostname}} {{shellq:port=443|required|max=5|validate=port}}"

@@ -1,0 +1,25 @@
+format_version = 1
+id = "wayexpand.incident-response"
+version = "1.0.0"
+name = "Incident Response"
+publisher = "WayExpand project"
+maintainer = "WayExpand Incident Response Maintainers"
+description = "Time-bounded Linux first-response checklist, evidence capture, and incident notes."
+capabilities = ["forms"]
+
+[compatibility]
+shells = ["bash", "zsh", "fish"]
+platforms = ["linux"]
+tools = ["date", "hostname", "uptime", "df", "free", "ss", "journalctl"]
+
+[risk]
+level = "moderate"
+summary = "First-response commands collect potentially sensitive host and incident data; review and redact output before sharing."
+
+[review]
+reviewed_by = "WayExpand project review"
+reviewed_at = "2026-11-02"
+summary = "Reviewed by WayExpand Incident Response Maintainers; generated text is never run by WayExpand. Inspect targets and output before manual use."
+
+[verification]
+test_cases = "tests/cases.toml"

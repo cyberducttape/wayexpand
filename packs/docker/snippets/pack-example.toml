@@ -1,0 +1,6 @@
+[[expansion]]
+trigger = ";;containers-pack-example"
+description = "Reviewed pack example output: Docker and Podman"
+category = "Docker and Podman"
+tags = ["example", "reviewed"]
+replacement = "docker ps --format table"

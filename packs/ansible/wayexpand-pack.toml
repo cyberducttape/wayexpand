@@ -1,12 +1,25 @@
 format_version = 1
 id = "wayexpand.ansible"
-version = "1.0.0"
+version = "1.1.0"
 name = "Ansible Administration"
 publisher = "WayExpand project"
-description = "Reviewed playbook and inventory starters with idempotent examples and validation commands."
+maintainer = "WayExpand Ansible Maintainers"
+description = "Reviewed playbook, inventory, and role starters with syntax-check examples."
 capabilities = ["forms"]
+
+[compatibility]
+shells = ["bash", "zsh", "fish"]
+platforms = ["linux"]
+tools = ["ansible-playbook", "ansible-inventory"]
+
+[risk]
+level = "moderate"
+summary = "Generated playbooks can alter managed hosts when an operator runs them; examples here are syntax and inventory inspection only."
 
 [review]
 reviewed_by = "WayExpand project review"
-reviewed_at = "2026-10-27"
-summary = "Playbooks are inserted as text; package-install examples are idempotent but still make changes when an operator runs them."
+reviewed_at = "2026-11-02"
+summary = "Reviewed by WayExpand Ansible Maintainers; content is inserted as text and never run by WayExpand. Review command targets and outputs before manual use."
+
+[verification]
+test_cases = "tests/cases.toml"
