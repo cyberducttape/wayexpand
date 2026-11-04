@@ -13,10 +13,10 @@ All notable changes to WayExpand are documented here.
 - Avoid creating asynchronous command workers for text-only configurations;
   command and hotkey worker threads now start only when an enabled action
   requires them, reducing reload churn and background threads.
-- Expand operational pack lint coverage to common DNS, firewall, certificate,
-  database, Kubernetes, systemd, and cPanel/WHM command families so their form
-  fields must use a validator, constrained choice, or explicit free-text
-  justification.
+- Expand operational pack lint coverage to common IP route, socket, DNS,
+  firewall, certificate, database, Kubernetes, systemd, and cPanel/WHM command
+  families so their form fields must use a validator, constrained choice, or
+  explicit free-text justification.
 - Keep AutoKey migration counts distinct: unreadable phrase files and missing or
   malformed sidecars count as skipped entries needing review, while
   `unsupported` counts only phrase behavior WayExpand cannot represent. This

@@ -301,6 +301,7 @@ fn looks_operational(replacement: &str) -> bool {
         "helm",
         "iptables",
         "journalctl",
+        "ip",
         "kubectl",
         "kustomize",
         "mariadb",
@@ -318,6 +319,7 @@ fn looks_operational(replacement: &str) -> bool {
         "rsync",
         "sed",
         "sh",
+        "ss",
         "ssh",
         "systemctl",
         "systemd-run",
@@ -664,6 +666,8 @@ mod tests {
     fn operational_detection_covers_common_sysadmin_command_families() {
         for command in [
             "nft add rule inet filter input",
+            "ip route get 192.0.2.1",
+            "ss -lntp",
             "firewall-cmd --reload",
             "mariadb --host=db-primary",
             "certbot certificates",
@@ -706,6 +710,31 @@ mod tests {
         let findings = operational_field_findings(&[unreviewed, justified, validated]);
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0]["key"], "field:chain");
+    }
+
+    #[test]
+    fn ip_and_socket_diagnostic_fields_are_not_skipped_by_lint() {
+        let unvalidated_ip = wayexpand_core::PackExpansionReview {
+            file: "snippets/network.toml".into(),
+            id: "network".into(),
+            trigger: ";route".into(),
+            description: "Inspect a route".into(),
+            replacement: "ip route get {{field:destination}}".into(),
+            command: None,
+        };
+        let unvalidated_socket = wayexpand_core::PackExpansionReview {
+            replacement: "ss -lntp {{field:port}}".into(),
+            ..unvalidated_ip.clone()
+        };
+
+        let findings = operational_field_findings(&[unvalidated_ip, unvalidated_socket]);
+        assert_eq!(findings.len(), 2);
+        assert!(findings
+            .iter()
+            .any(|finding| finding["key"] == "field:destination"));
+        assert!(findings
+            .iter()
+            .any(|finding| finding["key"] == "field:port"));
     }
 
     #[test]
