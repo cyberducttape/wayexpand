@@ -34,26 +34,80 @@ pub fn keystroke_max_chars() -> usize {
 /// changed, or the daemon abandoned the transaction). A failure means no
 /// further output may be sent.
 #[derive(Clone, Default)]
-pub struct OutputCheckpoint(Option<Arc<dyn Fn() -> Result<(), String> + Send + Sync>>);
+pub struct OutputCheckpoint {
+    check: Option<Arc<dyn Fn() -> Result<(), String> + Send + Sync>>,
+    erased_units: Arc<AtomicUsize>,
+    inserted_units: Arc<AtomicUsize>,
+    progress_tracked: Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// Confirmed output units successfully flushed by the backend. These counts
+/// describe protocol actions, not text content or proof that a client painted
+/// the text.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct OutputProgress {
+    pub tracked: bool,
+    pub erased_units: usize,
+    pub inserted_units: usize,
+}
 
 impl OutputCheckpoint {
     pub fn new(check: impl Fn() -> Result<(), String> + Send + Sync + 'static) -> Self {
-        Self(Some(Arc::new(check)))
+        Self {
+            check: Some(Arc::new(check)),
+            ..Self::default()
+        }
     }
 
     pub fn check(&self) -> Result<(), String> {
-        self.0.as_ref().map_or(Ok(()), |check| check())
+        self.check.as_ref().map_or(Ok(()), |check| check())
+    }
+
+    pub fn reset_progress(&self) {
+        self.erased_units.store(0, Ordering::Relaxed);
+        self.inserted_units.store(0, Ordering::Relaxed);
+        self.progress_tracked
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub fn record_erasure(&self, units: usize) {
+        self.progress_tracked
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        self.erased_units.fetch_add(units, Ordering::Relaxed);
+    }
+
+    pub fn record_insertion(&self, units: usize) {
+        self.progress_tracked
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        self.inserted_units.fetch_add(units, Ordering::Relaxed);
+    }
+
+    pub fn progress(&self) -> OutputProgress {
+        OutputProgress {
+            tracked: self
+                .progress_tracked
+                .load(std::sync::atomic::Ordering::Relaxed),
+            erased_units: self.erased_units.load(Ordering::Relaxed),
+            inserted_units: self.inserted_units.load(Ordering::Relaxed),
+        }
     }
 
     /// Both checks must pass; the first failure wins.
     pub fn and(self, other: Self) -> Self {
-        match (self.0, other.0) {
-            (None, other) => Self(other),
-            (first, None) => Self(first),
-            (Some(first), Some(second)) => Self::new(move || {
+        let check = match (self.check, other.check) {
+            (None, other) => other,
+            (first, None) => first,
+            (Some(first), Some(second)) => Some(Arc::new(move || {
                 first()?;
                 second()
-            }),
+            })
+                as Arc<dyn Fn() -> Result<(), String> + Send + Sync>),
+        };
+        Self {
+            check,
+            erased_units: self.erased_units,
+            inserted_units: self.inserted_units,
+            progress_tracked: self.progress_tracked,
         }
     }
 }
@@ -61,8 +115,9 @@ impl OutputCheckpoint {
 impl fmt::Debug for OutputCheckpoint {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_tuple("OutputCheckpoint")
-            .field(&self.0.is_some())
+            .debug_struct("OutputCheckpoint")
+            .field("has_check", &self.check.is_some())
+            .field("progress", &self.progress())
             .finish()
     }
 }
@@ -544,6 +599,13 @@ pub trait TextInjector: Send {
     /// before each synthesized character and stop with a non-retryable error
     /// when it fails. Backends that write in one burst may ignore it.
     fn set_output_checkpoint(&mut self, _checkpoint: OutputCheckpoint) {}
+    /// Clear and read confirmed output progress for one replacement. A
+    /// backend increments the supplied checkpoint after each flushed erase
+    /// or insertion unit. Defaults keep atomic/native backends compatible.
+    fn reset_output_progress(&mut self) {}
+    fn output_progress(&self) -> OutputProgress {
+        OutputProgress::default()
+    }
     /// Remove the exact trigger text immediately before the cursor.
     ///
     /// Backends may need the original UTF-8 string rather than only its

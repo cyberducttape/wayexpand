@@ -8,6 +8,31 @@ All notable changes to WayExpand are documented here.
   returns, waiting for any in-flight context refresh before publishing the
   local shell context. This prevents a completed SSH target from being shown
   as the active destination after reconnecting locally.
+- Track confirmed erase and insertion progress for paced output. Report a
+  distinct content-free `partial_write` outcome and counter, retain progress
+  in transaction traces, and never automatically replay a partial write.
+  Separate sandbox and input-privacy readiness; strict security profile now
+  rejects evdev capture. Distinguish verified security failures from
+  unavailable attestation evidence: hardened is degraded and strict is
+  incomplete until unavailable controls can be independently verified.
+  Retain timed-out backend-shutdown workers until their exit acknowledgement,
+  expose shutdown lifecycle counters, and reap completed worker handles.
+  Measure hotkey completion polling before changing it; two runs show roughly
+  eight 5 ms polls and 4 ms additional p95 wait for a 25 ms child, too little
+  evidence to trade away prompt cancellation for a more complex wait path.
+  Reserve a bounded control worker for complete status
+  and lifecycle requests so stalled clients cannot starve operator recovery.
+  Bump the daemon status contract to schema 22.
+- Split `wayexpand doctor --security --json` readiness into independent
+  execution-sandbox, input-privacy, configuration-integrity, and Action Broker
+  availability gates. Report applicability, required status, contributing
+  checks, and per-gate unavailable evidence; retain `sandbox_readiness` as a
+  compatibility alias. Require the running daemon to expose the CLI's expected
+  status schema so stale runtimes cannot pass using incomplete security
+  evidence, and include the daemon schema and commit in the report. Add a
+  separate target-integrity gate that fails when compatibility mode enables
+  uncertified non-atomic replacement and remains incomplete for uncertified
+  atomic routes. Bump the security report schema to 7.
 - Allow `wayexpand library add --approved-revision FULL_COMMIT` to pin a Git
   catalog checkout to the exact commit selected during review, independent of
   a moving branch head. Content signatures remain separately verified.

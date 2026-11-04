@@ -2,7 +2,7 @@
 
 /// Version of the daemon's stable key/value control-socket status contract.
 /// Increment when a consumer must distinguish a newer required field set.
-pub const CONTROL_STATUS_SCHEMA: u32 = 19;
+pub const CONTROL_STATUS_SCHEMA: u32 = 22;
 
 pub use limits::{CommandLimits, COMMAND_LIMITS, CONTROL_MAX_RESPONSE_BYTES};
 pub use wayexpand_process_supervisor::containment_mode as command_containment_mode;
@@ -45,9 +45,9 @@ pub use backend::{
     discover_backends, keystroke_max_chars, set_keystroke_max_chars, window_update_channel,
     BackendKind, BackendState, BackendStatus, FocusCheck, FocusStamp, FocusWitness,
     InjectorCapabilities, InjectorError, InjectorErrorKind, InputSource, InputSourceCapabilities,
-    InputSourceError, KeyEventState, OutputCheckpoint, ReplacementAdmission, ReplacementGuarantee,
-    TextInjector, WindowTracker, WindowTrackerError, WindowUpdateReceiver, WindowUpdateSendError,
-    WindowUpdateSender,
+    InputSourceError, KeyEventState, OutputCheckpoint, OutputProgress, ReplacementAdmission,
+    ReplacementGuarantee, TextInjector, WindowTracker, WindowTrackerError, WindowUpdateReceiver,
+    WindowUpdateSendError, WindowUpdateSender,
 };
 pub use capabilities::{all_capabilities, Capabilities, TextMethod};
 pub use config::{

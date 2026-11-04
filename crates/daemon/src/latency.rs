@@ -200,7 +200,7 @@ pub fn apply(injector: &mut dyn TextInjector, result: &ExpansionResult) -> Trans
     let report = measure(mode, size, || {
         ExpansionEngine::apply_with_report(&mut traced, result)
     });
-    traced.record_outcome(&report.outcome, &report.phases);
+    traced.record_outcome(&report.outcome, &report.phases, report.progress);
     let outcome = report.outcome;
     crate::output_health::note_outcome(&outcome);
     outcome

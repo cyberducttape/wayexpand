@@ -13,6 +13,15 @@ impl ExpansionEngine {
         let hotkey_queue_depth = self.hotkey_metrics.queue_depth.load(Ordering::Relaxed);
         let hotkey_in_flight = self.hotkey_metrics.in_flight.load(Ordering::Relaxed);
         CommandMetrics {
+            command_worker_threads: self
+                .async_commands
+                .as_ref()
+                .map_or(0, |runtime| runtime.command_workers.len()),
+            hotkey_worker_threads: self
+                .async_commands
+                .as_ref()
+                .is_some_and(|runtime| runtime.hotkey_worker.is_some())
+                as usize,
             command_queue_depth: expansion_command_queue_depth + hotkey_queue_depth,
             command_in_flight: expansion_command_in_flight + hotkey_in_flight,
             expansion_command_queue_depth,

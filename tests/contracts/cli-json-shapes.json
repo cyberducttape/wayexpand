@@ -35,6 +35,11 @@
     "source",
     "backend",
     "backend_mode",
+    "backend_shutdown_workers_active",
+    "backend_shutdown_workers_started_total",
+    "backend_shutdown_workers_acknowledged_total",
+    "backend_shutdown_workers_timed_out_total",
+    "backend_shutdown_workers_failed_total",
     "state",
     "paused",
     "config",
@@ -113,6 +118,7 @@
     "evdev_quarantined_events_total",
     "control_rejected_total",
     "memory_rss_kib",
-    "memory_high_water_kib"
+    "memory_high_water_kib",
+    "partial_write_total"
   ]
 }
