@@ -28,7 +28,7 @@ replacement = """#!/usr/bin/env bash
 set -Eeuo pipefail
 
 main() {
-    local target="{{shellq:target=/path/to/target|required|max=4096|validate=absolute-path}}"
+    local target={{shellq:target=/path/to/target|required|max=4096|validate=absolute-path}}
     printf 'Review target before continuing: %s\\n' \"$target\"
 }
 

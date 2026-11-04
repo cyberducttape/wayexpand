@@ -19,7 +19,7 @@ summary = "Commands query the configured cluster and may expose workload metadat
 [review]
 reviewed_by = "WayExpand project review"
 reviewed_at = "2026-11-02"
-summary = "Reviewed by WayExpand Kubernetes Pack Maintainers; content is inserted as text and never run by WayExpand. Review command targets and outputs before manual use."
+summary = "Reviewed by WayExpand Kubernetes Pack Maintainers; commands use validated, shell-quoted resource fields and are inserted as text, never run by WayExpand. Review command targets and outputs before manual use."
 
 [verification]
 test_cases = "tests/cases.toml"

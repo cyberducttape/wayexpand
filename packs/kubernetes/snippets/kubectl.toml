@@ -11,7 +11,7 @@ aliases = [";;kube-logs"]
 description = "Preview recent logs for a selected Kubernetes context, namespace, pod, and container"
 category = "Kubernetes"
 tags = ["kubectl", "logs"]
-replacement = "kubectl --context {{shellq:context|required|max=253|validate=single-line}} logs --namespace {{shellq:namespace=default|required|max=63|validate=dns-label}} {{shellq:pod=pod-name|required|max=253|validate=kubernetes-name}} --container {{shellq:container=app|required|max=63|validate=dns-label}} --since={{shellq:since=15m|required|max=32|validate=kubernetes-duration}} --tail=200"
+replacement = "kubectl --context {{shellq:context|required|max=253|validate=single-line}} logs --namespace {{shellq:namespace=default|required|max=63|validate=dns-label}} {{shellq:pod=pod-name|required|max=253|validate=kubernetes-name}} --container {{shellq:container=app|required|max=63|validate=dns-label}} --since={{shellq:since=15m|required|max=32|validate=kubernetes-duration}} --tail={{shellq:lines=200|required|max=10|validate=positive-integer}}"
 
 [[expansion]]
 trigger = ";;kube-events"
