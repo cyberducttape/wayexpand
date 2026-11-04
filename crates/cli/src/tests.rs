@@ -895,6 +895,7 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "input_privacy",
             "configuration_integrity",
             "action_broker_availability",
+            "target_integrity",
         ]
         .into_iter()
         .collect()
