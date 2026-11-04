@@ -685,8 +685,18 @@ fn privacy_readiness(
     source: &str,
     sensitive_field_detection: Option<bool>,
 ) -> &'static str {
+    // Raw evdev capture cannot identify sensitive fields. Treat the known
+    // source limitation as authoritative even if a future or inconsistent
+    // status payload claims otherwise; strict privacy must fail closed.
+    if source == "evdev" {
+        return if profile == ProtectionProfile::Strict {
+            "fail"
+        } else {
+            "degraded"
+        };
+    }
     match sensitive_field_detection {
-        Some(true) if source != "evdev" && source != "unknown" => "pass",
+        Some(true) if source != "unknown" => "pass",
         Some(false) if profile == ProtectionProfile::Strict => "fail",
         Some(false) => "degraded",
         Some(true) | None if source == "unknown" || sensitive_field_detection.is_none() => {
@@ -831,6 +841,16 @@ mod tests {
         assert_eq!(
             privacy_readiness(ProtectionProfile::Strict, "evdev", Some(false)),
             "fail"
+        );
+        assert_eq!(
+            privacy_readiness(ProtectionProfile::Strict, "evdev", Some(true)),
+            "fail",
+            "strict privacy rejects evdev based on its known source limitation"
+        );
+        assert_eq!(
+            privacy_readiness(ProtectionProfile::Workstation, "evdev", Some(true)),
+            "degraded",
+            "a contradictory capability report cannot make evdev privacy-ready"
         );
         assert_eq!(
             privacy_readiness(ProtectionProfile::Strict, "input-method", Some(true)),
