@@ -46,11 +46,22 @@ function __wayexpand_context_report --on-event fish_prompt
     command wayexpand $arguments >/dev/null 2>&1
 end
 
-function __wayexpand_context_remote_heartbeat --argument-names target
-    while true
-        sleep 30
-        set -lx WAYEXPAND_CONTEXT_REMOTE_HOST $target
-        __wayexpand_context_report
+function __wayexpand_context_remote_heartbeat --argument-names target stop_file interval
+    if test -z "$interval"
+        set interval 30
+    end
+    set -l elapsed 0
+    while not test -e "$stop_file"
+        sleep 1
+        if test -e "$stop_file"
+            break
+        end
+        set elapsed (math $elapsed + 1)
+        if test $elapsed -ge $interval
+            set -lx WAYEXPAND_CONTEXT_REMOTE_HOST $target
+            __wayexpand_context_report
+            set elapsed 0
+        end
     end
 end
 
@@ -81,15 +92,26 @@ function wayexpand-ssh
         command ssh $options $target $remote_command
         return $status
     end
-    __wayexpand_context_remote_heartbeat $target &
+    set -l temp_root /tmp
+    if set -q TMPDIR; and test -n "$TMPDIR"
+        set temp_root "$TMPDIR"
+    end
+    set -l stop_file (command mktemp "$temp_root/wayexpand-context-stop.XXXXXX")
+    set -l mktemp_status $status
+    if test $mktemp_status -ne 0; or test -z "$stop_file"
+        command ssh $options $target $remote_command
+        return $status
+    end
+    __wayexpand_context_remote_heartbeat $target $stop_file &
     set -l reporter_pid $last_pid
     set -lx WAYEXPAND_CONTEXT_REMOTE_HOST $target
     __wayexpand_context_report
     command ssh $options $target $remote_command
     set -l ssh_status $status
-    kill $reporter_pid 2>/dev/null
+    printf 'stop\n' >"$stop_file"
     wait $reporter_pid 2>/dev/null
     command wayexpand context clear >/dev/null 2>&1
+    command rm -f -- "$stop_file"
     set -e WAYEXPAND_CONTEXT_REMOTE_HOST
     __wayexpand_context_report --local
     return $ssh_status
