@@ -62,6 +62,7 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
             !sandbox.is_null(),
             "The live daemon must provide its in-process security probes.",
         ),
+        daemon_status_schema_check(&daemon),
         check(
             "config_permissions",
             config_permissions["safe"].as_bool(),
@@ -336,7 +337,7 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
     let healthy = readiness == "pass";
     let route = active_route_summary(&daemon);
     let report = serde_json::json!({
-        "schema": 5,
+        "schema": 6,
         "profile": profile.name(),
         "readiness": readiness,
         "execution_sandbox_readiness": execution_sandbox_readiness,
@@ -359,6 +360,12 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         },
         "healthy": healthy,
         "daemon_pid": sandbox.get("pid"),
+        "daemon_runtime": {
+            "status_schema": daemon.get("status_schema"),
+            "expected_status_schema": CONTROL_STATUS_SCHEMA,
+            "schema_compatible": daemon.get("status_schema").and_then(serde_json::Value::as_u64) == Some(u64::from(CONTROL_STATUS_SCHEMA)),
+            "daemon_commit": daemon.get("daemon_commit"),
+        },
         "daemon": sandbox,
         "active_route": route,
         "input_privacy": {
@@ -516,6 +523,17 @@ fn active_route_summary(daemon: &serde_json::Value) -> serde_json::Value {
     })
 }
 
+fn daemon_status_schema_check(daemon: &serde_json::Value) -> serde_json::Value {
+    check(
+        "daemon_status_schema",
+        daemon
+            .get("status_schema")
+            .and_then(serde_json::Value::as_u64)
+            .map(|schema| schema == u64::from(CONTROL_STATUS_SCHEMA)),
+        "The running daemon must expose the current status contract so security checks cannot pass using stale or incomplete runtime evidence.",
+    )
+}
+
 fn gate_for_check(name: &str) -> &'static str {
     match name {
         "config_permissions" => "configuration_integrity",
@@ -590,6 +608,7 @@ fn combine_gate_readiness(gates: &[&str]) -> &'static str {
 fn required_checks(profile: ProtectionProfile) -> &'static [&'static str] {
     const WORKSTATION: &[&str] = &[
         "daemon_connected",
+        "daemon_status_schema",
         "config_permissions",
         "daemon_no_new_privileges",
         "daemon_seccomp",
@@ -603,6 +622,7 @@ fn required_checks(profile: ProtectionProfile) -> &'static [&'static str] {
     ];
     const HARDENED: &[&str] = &[
         "daemon_connected",
+        "daemon_status_schema",
         "config_permissions",
         "daemon_mount_namespace",
         "daemon_private_tmp",
@@ -784,8 +804,22 @@ mod tests {
         assert!(required_checks(ProtectionProfile::Hardened).contains(&"daemon_mount_namespace"));
         assert!(required_checks(ProtectionProfile::Workstation)
             .contains(&"broker_command_cgroup_containment"));
+        assert!(required_checks(ProtectionProfile::Workstation).contains(&"daemon_status_schema"));
         assert!(
             !required_checks(ProtectionProfile::Workstation).contains(&"daemon_mount_namespace")
+        );
+    }
+
+    #[test]
+    fn daemon_schema_gate_rejects_stale_and_missing_runtime_contracts() {
+        let current = serde_json::json!({"status_schema": CONTROL_STATUS_SCHEMA});
+        let stale = serde_json::json!({"status_schema": CONTROL_STATUS_SCHEMA - 1});
+        let missing = serde_json::json!({});
+        assert_eq!(daemon_status_schema_check(&current)["status"], "pass");
+        assert_eq!(daemon_status_schema_check(&stale)["status"], "fail");
+        assert_eq!(
+            daemon_status_schema_check(&missing)["status"],
+            "unavailable"
         );
     }
 

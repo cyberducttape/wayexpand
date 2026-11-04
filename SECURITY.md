@@ -106,7 +106,7 @@ policy, command execution also fails closed when containment setup is
 unavailable; process-group cleanup is used only when the operator explicitly
 sets `WAYEXPAND_PROCESS_CGROUP=disabled`. When named actions are configured it
 also checks the live Action Broker and its in-process probes. `--json` emits
-the same checks for fleet tooling (schema 5), including overall `readiness` and
+the same checks for fleet tooling (schema 6), including overall `readiness` and
 independent `execution_sandbox_readiness`, `input_privacy_readiness`,
 `configuration_integrity_readiness`, and `action_broker_availability_readiness`
 values (`pass`,
@@ -116,6 +116,9 @@ workstation or hardened profile reports missing sensitive-field detection as
 Unit-file directives alone are not treated as evidence. Kernel policy details that cannot be safely inspected from an unprivileged process appear in `unavailable_evidence`; observed failed controls appear separately in `verified_failures`.
 Each check reports `pass`, `fail`, or `unavailable`; missing probe data makes a
 required profile `incomplete`, while an observed failed control is `fail`.
+The execution-sandbox gate also requires the running daemon's status schema
+to match the CLI's expected schema. A stale daemon fails this check; a daemon
+that omits the schema is reported as unavailable and cannot pass readiness.
 The `gates` object groups check names and reports required/applicable status
 independently. An unused Action Broker is `not_required`; broker sandbox
 controls, when it is required, remain part of `execution_sandbox`. The old
