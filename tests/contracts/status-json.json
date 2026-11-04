@@ -1,6 +1,6 @@
 {
   "schema_version": 12,
-  "daemon_control_schema": 24,
+  "daemon_control_schema": 25,
   "fields": {
     "response": "string",
     "source": "string",
