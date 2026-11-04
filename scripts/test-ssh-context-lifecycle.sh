@@ -147,6 +147,7 @@ if command -v zsh >/dev/null 2>&1; then
 fi
 if command -v fish >/dev/null 2>&1; then
     fish --no-execute "$repo_root/crates/cli/integrations/wayexpand.fish"
+    # shellcheck disable=SC2016 # Single quotes preserve Fish's own variable syntax.
     fish -c '
         source $argv[1]
         false

@@ -341,7 +341,7 @@ jobs:
       - name: Install supported shell interpreters
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fish zsh
       - name: ShellCheck scripts
-        run: shellcheck scripts/*.sh
+        run: shellcheck scripts/*.sh crates/cli/integrations/wayexpand.bash
       - name: Verify daemon soak environment isolation
         run: bash scripts/test-soak-isolation.sh
       - name: Verify source cleanliness path filtering

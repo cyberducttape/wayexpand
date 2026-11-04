@@ -89,6 +89,7 @@ if [[ $(declare -p PROMPT_COMMAND 2>/dev/null) == 'declare -a'* ]]; then
         PROMPT_COMMAND=(_wayexpand_context_report "${PROMPT_COMMAND[@]}")
     fi
 else
+    # shellcheck disable=SC2178,SC2128 # This branch handles scalar PROMPT_COMMAND only.
     case ";${PROMPT_COMMAND:-};" in
         *";_wayexpand_context_report;"*) ;;
         *) PROMPT_COMMAND="_wayexpand_context_report${PROMPT_COMMAND:+;${PROMPT_COMMAND}}" ;;

@@ -141,6 +141,7 @@ All notable changes to WayExpand are documented here.
   reporting does not change prompt indicators or conditional shell behavior.
 - Install Zsh and Fish in CI and exercise their context hooks so supported
   shell integrations receive deterministic syntax and prompt-status coverage.
+  Run ShellCheck over the Bash integration as well as standalone scripts.
 - Add `;klogs`, a Kubernetes log form that shows the active kubectl context,
   validates and shell-quotes each value, and previews the exact insert-only
   command. Form dialogs now preview field-only output before insertion.
