@@ -218,22 +218,7 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
     });
     let broker_running = broker["service"]["active"].as_bool() == Some(true)
         && broker["socket"]["valid"].as_bool() == Some(true);
-    checks.push(check(
-        "action_broker_availability",
-        if broker_required {
-            broker["service"]["active"]
-                .as_bool()
-                .zip(broker["socket"]["valid"].as_bool())
-                .map(|(active, socket_valid)| active && socket_valid)
-        } else {
-            Some(true)
-        },
-        if broker_required {
-            "A configured named action requires a healthy, active Action Broker."
-        } else {
-            "No named actions require the broker; availability is reported for visibility."
-        },
-    ));
+    checks.push(action_broker_availability_check(&broker, broker_required));
     checks.push(target_integrity_check(&daemon));
     if broker_required && broker_running {
         let broker_mount = broker_sandbox["namespaces"]["mount"].as_u64();
@@ -631,6 +616,25 @@ fn input_privacy_check(
         "required": profile == ProtectionProfile::Strict,
         "gate": "input_privacy",
     })
+}
+
+fn action_broker_availability_check(
+    broker: &serde_json::Value,
+    required: bool,
+) -> serde_json::Value {
+    let available = broker["service"]["active"]
+        .as_bool()
+        .zip(broker["socket"]["valid"].as_bool())
+        .map(|(active, socket_valid)| active && socket_valid);
+    check(
+        "action_broker_availability",
+        available,
+        if required {
+            "A configured named action requires a healthy, active Action Broker."
+        } else {
+            "No named actions require the broker; actual availability is informational."
+        },
+    )
 }
 
 fn checks_for_gate(checks: &[serde_json::Value], gate: &str) -> Vec<serde_json::Value> {
@@ -1111,6 +1115,28 @@ mod tests {
         assert_eq!(
             readiness_for(ProtectionProfile::Workstation, &sandbox, &[]),
             "fail"
+        );
+
+        let unavailable_optional_broker = action_broker_availability_check(
+            &serde_json::json!({
+                "service": {"active": false},
+                "socket": {"valid": false}
+            }),
+            false,
+        );
+        assert_eq!(unavailable_optional_broker["status"], "fail");
+        assert_eq!(
+            unavailable_optional_broker["detail"],
+            "No named actions require the broker; actual availability is informational."
+        );
+        assert_eq!(
+            gate_report(
+                "not_required",
+                false,
+                std::slice::from_ref(&unavailable_optional_broker),
+                &[]
+            )["readiness"],
+            "not_required"
         );
     }
 

@@ -32,10 +32,11 @@ All notable changes to WayExpand are documented here.
   compatibility alias. Keep broker confinement checks under execution
   sandboxing while broker service/socket health remains in availability, so
   the two results stay independently actionable. Include the input-privacy
-  check in the same top-level check list as the other gates. Require the running daemon
-  to expose the CLI's expected status schema so stale runtimes cannot pass
-  using incomplete security evidence, and include the daemon schema and commit
-  in the report. Add a
+  check in the same top-level check list as the other gates. Report observed
+  broker availability even when the broker is optional. Require the running
+  daemon to expose the CLI's expected status schema so stale runtimes cannot
+  pass using incomplete security evidence, and include the daemon schema and
+  commit in the report. Add a
   separate target-integrity gate that fails when compatibility mode enables
   uncertified non-atomic replacement and remains incomplete for uncertified
   atomic routes. Bump the security report schema to 7.
