@@ -180,10 +180,10 @@ pub struct Settings {
     #[serde(default = "default_usage_stats", skip_serializing_if = "is_true")]
     pub usage_stats: bool,
     /// Whether non-atomic routes may replace triggers automatically.
-    /// Off by default: atomic routes and routes that verify target surrounding
-    /// text may replace triggers; unverified routes leave the trigger intact
-    /// for manual recovery. Omitted when off so saved configs still load in
-    /// older readers.
+    /// Off by default, including routes that verify surrounding text: only
+    /// atomic replacement is admitted. Non-atomic routes leave the trigger
+    /// intact for manual recovery unless compatibility is explicitly enabled.
+    /// Omitted when off so saved configs still load in older readers.
     #[serde(skip_serializing_if = "CompatibilityMode::is_off")]
     pub compatibility_mode: CompatibilityMode,
     /// Longest replacement, in characters, that a paced keystroke route (the
@@ -210,16 +210,17 @@ fn is_default_keystroke_max_chars(value: &usize) -> bool {
     *value == DEFAULT_KEYSTROKE_MAX_CHARS
 }
 
-/// Explicit consent for automatic replacement on unverified routes, such as
-/// those that type keystrokes without seeing the target's text.
+/// Explicit consent for automatic replacement on non-atomic routes, including
+/// routes that verify surrounding text but emit deletion and insertion as
+/// separate operations.
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum CompatibilityMode {
-    /// Unverified routes never replace: typed triggers remain for manual use.
+    /// Non-atomic routes never replace: typed triggers remain for manual use.
     #[default]
     Off,
-    /// Erase with keystrokes only while a window tracker confirms, right
-    /// before typing, that the trigger's window still has focus.
+    /// Permit non-atomic replacement only while a window tracker confirms,
+    /// right before output, that the trigger's window still has focus.
     TrackedFocus,
     /// Also erase when no tracker can confirm focus. A detected focus change
     /// is still refused.

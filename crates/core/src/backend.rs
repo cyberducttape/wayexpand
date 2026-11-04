@@ -1374,4 +1374,35 @@ mod tests {
             assert_eq!(status.permission(), "Granted", "{kind}");
         }
     }
+
+    #[test]
+    fn non_atomic_replacement_requires_explicit_compatibility_even_when_verified() {
+        let verified = InjectorCapabilities {
+            replacement_guarantee: ReplacementGuarantee::VerifiedSurroundingText,
+            ..InjectorCapabilities::default()
+        };
+        assert_eq!(
+            verified.replacement_admission(crate::CompatibilityMode::Off),
+            ReplacementAdmission::Refused
+        );
+        assert_eq!(
+            verified.replacement_admission(crate::CompatibilityMode::TrackedFocus),
+            ReplacementAdmission::ExplicitCompatibility
+        );
+
+        let atomic = InjectorCapabilities {
+            atomic_replace: true,
+            replacement_guarantee: ReplacementGuarantee::Atomic,
+            ..InjectorCapabilities::default()
+        };
+        assert_eq!(
+            atomic.replacement_admission(crate::CompatibilityMode::Off),
+            ReplacementAdmission::Atomic
+        );
+        assert_eq!(
+            InjectorCapabilities::default()
+                .replacement_admission(crate::CompatibilityMode::UntrackedFocus),
+            ReplacementAdmission::Refused
+        );
+    }
 }

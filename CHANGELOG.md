@@ -12,6 +12,8 @@ All notable changes to WayExpand are documented here.
   failure.
 - Include the target-integrity gate in the stable doctor security JSON shape
   contract so automation can validate every emitted security gate.
+- Clarify and test that surrounding-text verification does not make separate
+  deletion and insertion atomic; non-atomic replacement remains opt-in.
 - Include the daemon upgrade status and recovery action in security JSON so
   stale or protocol-incompatible runtimes are actionable to fleet automation.
 - Require broker socket creation to remain private under permissive umasks and
