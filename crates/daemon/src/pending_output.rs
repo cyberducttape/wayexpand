@@ -322,11 +322,21 @@ impl Daemon {
             Some(result) => in_flight.with_result(result),
             None => in_flight,
         };
+        let outcome_uncertain = matches!(
+            &outcome,
+            wayexpand_core::TransactionOutcome::UnknownApplicationOutcome { .. }
+                | wayexpand_core::TransactionOutcome::UnknownPartialFailure { .. }
+        );
         let completed = self.complete_job(origin, in_flight, outcome)?;
-        if physical_input_interrupted {
+        if physical_input_interrupted || outcome_uncertain {
             // The input event has already reached the application. Do not
             // replay captured input or continue a queued batch against text
-            // that may have changed while output was in progress.
+            // that may have changed while output was in progress. An
+            // unacknowledged/partial backend failure has the same ambiguity
+            // even when the physical-input monitor saw no new event. Reset
+            // matcher context on every capture route; evdev additionally
+            // needs its quiet-window quarantine.
+            self.config.engine.reset_with_unknown_preceding_text();
             self.quarantine_evdev_input();
             Ok(())
         } else if completed {
@@ -1145,6 +1155,20 @@ mod tests {
     fn failure_stops_the_batch_and_retires_the_route() {
         let mut harness = Harness::new(true);
         harness.open_gate();
+        let hotkey_marker = harness.directory.join("follow-up-hotkey-ran");
+        let mut config = wayexpand_core::Config::parse(
+            "[[hotkey]]\nchord = 'Ctrl+Alt+F12'\ncommand = { program = '/usr/bin/touch' }\n",
+        )
+        .unwrap();
+        config.hotkey[0].command.args.push(
+            hotkey_marker
+                .to_str()
+                .expect("test path is UTF-8")
+                .to_owned(),
+        );
+        let mut engine = wayexpand_core::ExpansionEngine::new(config).unwrap();
+        assert!(engine.enable_async_commands());
+        harness.daemon.config.engine = engine;
         let uncertain_before = output_health::snapshot().uncertain_total;
         harness
             .daemon
@@ -1154,7 +1178,9 @@ mod tests {
                     OutputJob::Expansion(result(":a", "first")),
                     OutputJob::Expansion(result(":b", "second")),
                 ],
-                Vec::new(),
+                vec![InputEvent::Key(
+                    wayexpand_core::KeyChord::parse("Ctrl+Alt+F12").unwrap(),
+                )],
             )
             .unwrap();
         harness.run_until_resolved();
@@ -1172,6 +1198,13 @@ mod tests {
         assert!(
             output_health::snapshot().uncertain_total > uncertain_before,
             "failure after trigger deletion must be recorded as an uncertain partial result"
+        );
+        let command_metrics = harness.daemon.config.engine.command_metrics();
+        assert_eq!(command_metrics.hotkey_queue_depth, 0);
+        assert_eq!(command_metrics.hotkey_in_flight, 0);
+        assert!(
+            !hotkey_marker.exists(),
+            "follow-up input after uncertain insertion must be quarantined, not dispatched"
         );
     }
 

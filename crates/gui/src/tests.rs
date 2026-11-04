@@ -1754,6 +1754,7 @@ fn diagnostics_accessibly_explains_keysym_fallback_and_separates_latency() {
             ..Default::default()
         }],
         output_uncertain_total: Some(1),
+        output_partial_total: Some(1),
         injection_latency_mean_us: Some(420_000),
         injection_latency_p50_us: Some(400),
         injection_latency_p95_us: Some(700),
@@ -1814,7 +1815,7 @@ fn diagnostics_accessibly_explains_keysym_fallback_and_separates_latency() {
     assert!(semantics.contains("Sensitive-field protection"));
     assert!(semantics.contains("Compositor permissions"));
     assert!(semantics.contains("Keysym fallback is active"));
-    assert!(semantics.contains("Partial output · 1"));
+    assert!(semantics.contains("Partial insertion · 1"));
     assert!(semantics.contains("Matcher latency"));
     assert!(semantics.contains("Backend injection latency"));
     assert!(semantics.contains("Usage statistics persistence"));
@@ -2025,6 +2026,7 @@ fn every_panel_and_dialog_renders_for_supported_languages_and_settings_tabs() {
         output_refused_total: Some(2),
         output_last_refusal: Some(runtime::OutputRefusal::FocusChanged),
         output_uncertain_total: Some(1),
+        output_partial_total: Some(1),
         evdev_quarantined_events_total: None,
         usage_flush_max_duration_us: None,
         usage_flush_failures_total: None,

@@ -1,6 +1,6 @@
 {
   "schema_version": 11,
-  "daemon_control_schema": 17,
+  "daemon_control_schema": 18,
   "fields": {
     "response": "string",
     "source": "string",
@@ -92,6 +92,7 @@
     "memory_rss_kib": "integer",
     "memory_high_water_kib": "integer",
     "injection_latency_mean_us": "integer",
-    "recent_expansion_failures": "array"
+    "recent_expansion_failures": "array",
+    "output_partial_total": "integer"
   }
 }

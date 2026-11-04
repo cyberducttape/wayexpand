@@ -95,6 +95,7 @@
     "clipboard_read_max_duration_us",
     "output_health",
     "output_uncertain_total",
+    "output_partial_total",
     "output_retiring_workers",
     "output_stalled_ms",
     "insertion_assurance",

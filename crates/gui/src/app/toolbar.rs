@@ -469,6 +469,31 @@ impl GuiApp {
         if let Some(count) = self
             .daemon_capabilities
             .as_ref()
+            .and_then(|capabilities| capabilities.output_partial_total)
+            .filter(|count| *count > 0)
+        {
+            let notice = self.strings.output_partial_notice(count);
+            if ui
+                .add(
+                    egui::Button::new(
+                        RichText::new(self.strings.output_partial_badge(count))
+                            .color(palette.danger),
+                    )
+                    .fill(theme::tint(palette.danger, 42))
+                    .stroke(egui::Stroke::NONE)
+                    .corner_radius(egui::CornerRadius::same(255))
+                    .min_size(egui::vec2(0.0, 30.0)),
+                )
+                .on_hover_text(notice)
+                .clicked()
+            {
+                self.diagnostics_open = true;
+                self.refresh_diagnostics(true);
+            }
+        }
+        if let Some(count) = self
+            .daemon_capabilities
+            .as_ref()
             .and_then(|capabilities| capabilities.output_uncertain_total)
             .filter(|count| *count > 0)
         {
@@ -477,9 +502,9 @@ impl GuiApp {
                 .add(
                     egui::Button::new(
                         RichText::new(self.strings.output_uncertain_badge(count))
-                            .color(palette.danger),
+                            .color(palette.warning),
                     )
-                    .fill(theme::tint(palette.danger, 42))
+                    .fill(theme::tint(palette.warning, 36))
                     .stroke(egui::Stroke::NONE)
                     .corner_radius(egui::CornerRadius::same(255))
                     .min_size(egui::vec2(0.0, 30.0)),

@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- After an output failure with an uncertain target effect, quarantine queued input instead of replaying it; never continue a queued batch after a partial transaction. Expose confirmed partial insertions as a separate daemon status counter, GUI warning, and `wayexpand doctor --json` field. Bump the status contract to schema 18.
+
 - Anchor Action Broker socket operations to validated directory descriptors.
   Publish sockets from private staging directories with atomic no-replace
   rename, and quarantine/recheck entries before stale-socket and shutdown

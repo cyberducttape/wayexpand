@@ -74,6 +74,11 @@ session evidence; unit tests alone do not satisfy them.
       synthetic characters may leave partial text, so the target-integrity
       gate still requires a passing real-session test or refusing automatic
       replacement on that route.
+      Any unknown or partial output outcome now stops the batch and quarantines
+      queued evdev input even if the interruption monitor saw no new key. A
+      separate `output_partial_total` counter and GUI alert call out failures
+      after insertion began; uncertain output is never replayed. These changes
+      reduce stale-trigger risk but do not recover already delivered text.
       The same failure was reproduced against clean commit `afdcd03633df` in
       [this report](evidence/kwin-overlap-reproduction-afdcd0363.json): 124 of
       128 replacement characters remained, the concurrent trigger was

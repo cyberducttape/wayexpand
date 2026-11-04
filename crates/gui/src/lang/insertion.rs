@@ -107,22 +107,38 @@ impl Strings {
     pub fn output_uncertain_notice(&self, count: u64) -> String {
         match self.lang {
             Language::English => format!(
-                "{count} expansion(s) may have been partly typed when output failed. They were not retried; check the affected text."
+                "The result of {count} output transaction(s) is unknown. They were not retried; check the affected text and recent outcomes."
             ),
             Language::German => format!(
-                "{count} Erweiterung(en) wurden beim Ausgabefehler möglicherweise nur teilweise getippt. Sie wurden nicht wiederholt; prüfen Sie den betroffenen Text."
+                "Das Ergebnis von {count} Ausgabevorgang(en) ist unbekannt. Sie wurden nicht wiederholt; prüfen Sie den betroffenen Text und die letzten Ergebnisse."
             ),
             Language::Indonesian => format!(
-                "{count} ekspansi mungkin hanya sebagian terketik saat keluaran gagal. Ekspansi tersebut tidak diulang; periksa teks yang terdampak."
+                "Hasil {count} transaksi keluaran tidak diketahui. Transaksi tidak diulang; periksa teks dan hasil terbaru."
             ),
+        }
+    }
+
+    pub fn output_partial_notice(&self, count: u64) -> String {
+        match self.lang {
+            Language::English => format!("Partial insertion detected in {count} transaction(s). Check the target text; WayExpand did not retry."),
+            Language::German => format!("Teilweise Einfügung bei {count} Vorgang/Vorgängen erkannt. Prüfen Sie den Zieltext; WayExpand hat nichts wiederholt."),
+            Language::Indonesian => format!("Penyisipan sebagian terdeteksi pada {count} transaksi. Periksa teks tujuan; WayExpand tidak mengulanginya."),
+        }
+    }
+
+    pub fn output_partial_badge(&self, count: u64) -> String {
+        match self.lang {
+            Language::English => format!("Partial insertion · {count}"),
+            Language::German => format!("Teilweise Einfügung · {count}"),
+            Language::Indonesian => format!("Penyisipan sebagian · {count}"),
         }
     }
 
     pub fn output_uncertain_badge(&self, count: u64) -> String {
         match self.lang {
-            Language::English => format!("Partial output · {count}"),
-            Language::German => format!("Teilausgabe · {count}"),
-            Language::Indonesian => format!("Keluaran parsial · {count}"),
+            Language::English => format!("Check output · {count}"),
+            Language::German => format!("Ausgabe prüfen · {count}"),
+            Language::Indonesian => format!("Periksa keluaran · {count}"),
         }
     }
 

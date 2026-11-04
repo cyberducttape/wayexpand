@@ -489,11 +489,13 @@ fn doctor_reports_stalled_output_with_route_specific_recovery() {
         "source": "evdev",
         "output_health": "stalled",
         "output_uncertain_total": 2,
+        "output_partial_total": 1,
         "output_retiring_workers": 1,
         "output_stalled_ms": 9000,
     }));
     assert_eq!(stalled["health"], "stalled");
     assert_eq!(stalled["uncertain_transactions_total"], 2);
+    assert_eq!(stalled["partial_insertions_total"], 1);
     assert!(stalled["recovery"]
         .as_str()
         .unwrap()
@@ -635,7 +637,7 @@ fn status_json_matches_documented_stable_contract() {
          backend=input-method-v2\n\
          route_id=input-method-v2\n\
          backend_mode=unknown\n\
-         status_schema=17\n\
+         status_schema=18\n\
          daemon_commit=test-commit\n\
          state=connected\n\
          paused=false\n\
@@ -699,6 +701,7 @@ fn status_json_matches_documented_stable_contract() {
          output_uncertain_total=1\n\
          output_retiring_workers=0\n\
          output_stalled_ms=0\n\
+         output_partial_total=0\n\
          insertion_assurance=verified\n\
          replacement_assurance=verified\n\
          compatibility_mode=off\n\
@@ -899,6 +902,7 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "clipboard_read_max_duration_us",
             "output_health",
             "output_uncertain_total",
+            "output_partial_total",
             "output_retiring_workers",
             "output_stalled_ms",
             "insertion_assurance",
@@ -1332,6 +1336,7 @@ fn metrics_export_status_counters_without_content() {
         "state": "connected",
         "config_state": "ok",
         "output_health": "ok",
+        "output_partial_total": 2,
         "paused": false,
         "window_tracker_connected": true,
         "command_queue_depth": 2,
@@ -1359,6 +1364,7 @@ fn metrics_export_status_counters_without_content() {
         "wayexpand_daemon_command_queue_depth 2",
         "# TYPE wayexpand_daemon_output_reconnect_total counter",
         "wayexpand_daemon_output_reconnect_total 3",
+        "wayexpand_daemon_output_partial_insertions_total 2",
         "wayexpand_daemon_future_counter_total 7",
         "wayexpand_config_valid 1",
         "wayexpand_config_expansions 10",

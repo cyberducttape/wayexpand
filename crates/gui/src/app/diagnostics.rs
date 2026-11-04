@@ -528,6 +528,12 @@ impl GuiApp {
                             self.strings.output_uncertain_notice(uncertain),
                         );
                     }
+                    if let Some(partial) = capabilities.output_partial_total.filter(|n| *n > 0) {
+                        ui.colored_label(
+                            palette.danger,
+                            self.strings.output_partial_notice(partial),
+                        );
+                    }
                     if let Some(discarded) = capabilities
                         .evdev_quarantined_events_total
                         .filter(|n| *n > 0)
