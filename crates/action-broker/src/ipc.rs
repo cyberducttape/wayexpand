@@ -167,14 +167,35 @@ impl BrokerServer {
     /// Create a new broker server at the given socket path.
     pub fn bind<P: AsRef<Path>>(path: P) -> Result<Self, IpcError> {
         let path = path.as_ref();
+        let file_name = path
+            .file_name()
+            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
         let parent = path
             .parent()
             .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
         let parent = parent.canonicalize()?;
+        let socket_path = parent.join(file_name);
         let uid = rustix::process::geteuid().as_raw();
         Self::validate_socket_ancestors(&parent, uid)?;
 
-        if let Ok(metadata) = std::fs::symlink_metadata(path) {
+        // A socket's mode is initially determined by the process umask, and
+        // chmod necessarily happens after bind has published the pathname.
+        // Require the containing directory itself to be private so a
+        // permissive manual-launch umask cannot expose that short interval to
+        // another uid. The broker binary also sets umask(0077) before starting
+        // Tokio; this directory check protects library callers and custom
+        // launchers that do not use that entry point.
+        let parent_metadata = std::fs::metadata(&parent)?;
+        if !is_user_or_root_owner(parent_metadata.uid(), uid) || parent_metadata.mode() & 0o077 != 0
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "broker socket parent directory must be owned by the broker user or root and private",
+            )
+            .into());
+        }
+
+        if let Ok(metadata) = std::fs::symlink_metadata(&socket_path) {
             if !metadata.file_type().is_socket() || !is_user_or_root_owner(metadata.uid(), uid) {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::PermissionDenied,
@@ -185,7 +206,7 @@ impl BrokerServer {
             // Connecting is the ownership test. Never unlink a path while a
             // live broker is accepting it: a second same-user daemon must be
             // rejected instead of stealing the first daemon's endpoint.
-            match UnixStream::connect(path) {
+            match UnixStream::connect(&socket_path) {
                 Ok(_) => {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::AddrInUse,
@@ -201,7 +222,7 @@ impl BrokerServer {
                 Err(error) => return Err(error.into()),
             }
             let identity = (metadata.dev(), metadata.ino());
-            let current = std::fs::symlink_metadata(path)?;
+            let current = std::fs::symlink_metadata(&socket_path)?;
             if !current.file_type().is_socket()
                 || (current.dev(), current.ino()) != identity
                 || !is_user_or_root_owner(current.uid(), uid)
@@ -212,18 +233,24 @@ impl BrokerServer {
                 )
                 .into());
             }
-            std::fs::remove_file(path)?;
+            std::fs::remove_file(&socket_path)?;
         }
 
         // The systemd unit supplies UMask=0077. Do not mutate the process-wide
         // umask here: this code runs after Tokio has started worker threads,
         // so a concurrent file creation could inherit a transient umask.
-        let listener = UnixListener::bind(path)?;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
-        let metadata = std::fs::metadata(path)?;
+        let listener = UnixListener::bind(&socket_path)?;
+        if let Err(error) =
+            std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600))
+        {
+            drop(listener);
+            let _ = std::fs::remove_file(&socket_path);
+            return Err(error.into());
+        }
+        let metadata = std::fs::metadata(&socket_path)?;
         Ok(Self {
             listener,
-            socket_path: path.to_path_buf(),
+            socket_path,
             socket_identity: (metadata.dev(), metadata.ino()),
         })
     }
@@ -557,6 +584,8 @@ mod tests {
     }
     use crate::protocol::ActionOutput;
     use std::{
+        os::unix::fs::PermissionsExt,
+        process::Command,
         thread,
         time::{SystemTime, UNIX_EPOCH},
     };
@@ -595,11 +624,64 @@ mod tests {
 
         // Socket file exists
         assert!(socket_path.exists());
+        assert_eq!(
+            std::fs::metadata(&socket_path)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
         let second = BrokerServer::bind(&socket_path);
         assert!(matches!(
             second,
             Err(IpcError::Io(error)) if error.kind() == std::io::ErrorKind::AddrInUse
         ));
+    }
+
+    #[test]
+    fn ipc_bind_under_umask_child() {
+        let Ok(mask) = std::env::var("WAYEXPAND_TEST_SOCKET_UMASK") else {
+            return;
+        };
+        let mask = u32::from_str_radix(&mask, 8).unwrap();
+        let socket_path = PathBuf::from(std::env::var_os("WAYEXPAND_TEST_SOCKET_PATH").unwrap());
+        unsafe { libc::umask(mask as libc::mode_t) };
+
+        let server = BrokerServer::bind(&socket_path).unwrap();
+        assert_eq!(
+            std::fs::metadata(&socket_path)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600,
+            "socket must be private after bind with umask {mask:o}"
+        );
+        drop(server);
+    }
+
+    #[test]
+    fn ipc_creation_remains_private_under_common_umasks() {
+        for mask in [0o000, 0o022, 0o077] {
+            let socket_path = test_socket(&format!("umask-{mask:o}"));
+            let result = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "ipc::tests::ipc_bind_under_umask_child",
+                    "--nocapture",
+                ])
+                .env("WAYEXPAND_TEST_SOCKET_UMASK", format!("{mask:o}"))
+                .env("WAYEXPAND_TEST_SOCKET_PATH", &socket_path)
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "socket bind failed with umask {mask:o}: {}{}",
+                String::from_utf8_lossy(&result.stdout),
+                String::from_utf8_lossy(&result.stderr)
+            );
+        }
     }
 
     #[test]
@@ -648,6 +730,22 @@ mod tests {
             Err(IpcError::Io(error)) if error.kind() == std::io::ErrorKind::PermissionDenied
         ));
 
+        std::fs::remove_dir(parent).unwrap();
+    }
+
+    #[test]
+    fn ipc_rejects_a_non_private_socket_parent() {
+        let socket_path = test_socket("public/socket");
+        let parent = socket_path.parent().unwrap();
+        std::fs::create_dir_all(parent).unwrap();
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let result = BrokerServer::bind(&socket_path);
+        assert!(matches!(
+            result,
+            Err(IpcError::Io(error)) if error.kind() == std::io::ErrorKind::PermissionDenied
+        ));
+        assert!(!socket_path.exists());
         std::fs::remove_dir(parent).unwrap();
     }
 

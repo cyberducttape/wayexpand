@@ -27,11 +27,12 @@ The design aims to provide:
 
 ## Runtime architecture
 
-The packaged 1.x broker is a local-action broker. Its systemd unit denies IP
-networking (`IPAddressDeny=any`) and permits only `AF_UNIX`; the example policy
-therefore contains no networked command such as `kubectl`. Networked actions
-remain unavailable until per-action network policy exists; do not enable them
-by weakening the whole broker service.
+The packaged 1.x broker blocks direct IP networking (`IPAddressDeny=any`) and
+permits only `AF_UNIX` socket creation. The example policy therefore contains
+no network-dependent command such as `kubectl`. A local Unix-socket proxy can
+still relay requests for an action; these controls are not a total egress
+boundary. Do not enable network-dependent actions by weakening the whole broker
+service.
 
 The daemon's bounded command worker routes named actions through this socket;
 ordinary `program =` commands retain the existing restricted direct runner.
@@ -253,8 +254,11 @@ policy. A manual user-local install requires an administrator to install
 `polkit/org.wayexpand.action.policy` in the system polkit actions directory;
 without it, broker actions fail closed. Every invocation asks for fresh
 active-session authentication, including actions triggered by snippets.
-The packaged unit restricts the broker and its child actions to `AF_UNIX`, uses
-`IPAddressDeny=any`, denies high-risk syscall groups, uses
+The packaged unit permits the broker and its child actions to create only
+`AF_UNIX` sockets and uses `IPAddressDeny=any` to block direct IP traffic. A
+local `AF_UNIX` service may still proxy a request to the network; these unit
+settings do not guarantee total egress isolation. The unit also denies
+high-risk syscall groups, uses
 `ProtectSystem=strict`, and exposes only the configuration, runtime socket, and
 state directory as writable. Custom service launches must reproduce these
 restrictions before being used for production actions.
@@ -298,9 +302,15 @@ cwd = "/home/user/reports"
 enabled = true
 ```
 
-The packaged 1.x service is intentionally local-only: `IPAddressDeny=any` and
-`RestrictAddressFamilies=AF_UNIX` prevent networked actions. The unit does not
-provide a per-action device allowlist. Do not configure
+The packaged 1.x service blocks direct IP networking with
+`IPAddressDeny=any` and allows only `AF_UNIX` sockets with
+`RestrictAddressFamilies=AF_UNIX`. This does not establish complete
+communication isolation: an action may connect to an authorized local Unix
+socket whose service or proxy has network access. Do not treat either
+`IPAddressDeny` or the per-action `deny_network` filter as a no-egress
+guarantee. Strict no-egress actions need a separately reviewed network
+namespace or equivalent isolation, in addition to filesystem and action
+authorization. The unit does not provide a per-action device allowlist. Do not configure
 `kubectl`, AWS, cloud, Vault, or other network-dependent programs in this
 catalog and do not weaken the whole service to make one action work. Such
 actions require a future per-action OS sandbox profile and a separate review.
@@ -326,10 +336,13 @@ The action is refused if Landlock is unavailable or rules cannot be enforced.
 When `deny_network` is true, a child seccomp filter rejects creation of
 IPv4, IPv6, packet, and netlink sockets, and rejects `io_uring_setup`; local
 `AF_UNIX` sockets remain available. The child receives no pre-opened network
-socket from the broker. This is defense in depth, not complete network
-containment: a process able to receive a socket descriptor from another local
-service may use that descriptor. The packaged service independently denies IP
-networking for every action. `deny_devices` blocks access to paths outside the
+socket from the broker. This setting means **direct IP socket creation is
+denied**, not that all communication or indirect network egress is impossible.
+An action that can reach a local proxy over `AF_UNIX` may ask that proxy to
+perform network operations; the proxy's own authorization and network policy
+then determine what happens. The packaged service also blocks direct IP
+networking for every action but does not block such local IPC proxying.
+`deny_devices` blocks access to paths outside the
 Landlock allowlist (including `/dev`), `ioctl`, receipt of file descriptors via
 `recvmsg`/`recvmmsg`, and creation of device nodes. It rejects `log_output`
 because inherited broker output could be a terminal descriptor. This is a
@@ -346,6 +359,12 @@ replacement for a device namespace. Landlock and authenticated IPC are not
 boundaries against malicious same-UID software. The polkit check adds a fresh,
 action-specific user-consent gate; it does not provide automatic trusted-app
 identification.
+
+The broker socket is created only in a broker-user-owned private directory
+(no group or other permissions). The broker executable also sets `umask(0077)`
+before creating its Tokio runtime. Keep this requirement for manual launches
+and custom socket paths; a permissive umask is not a reason to use a shared
+directory.
 
 ### Daemon routing configuration
 

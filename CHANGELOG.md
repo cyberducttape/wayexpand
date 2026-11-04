@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Require broker sockets to live in a private parent directory and test their
+  final permissions under umasks `0000`, `0022`, and `0077`. Clarify that
+  `deny_network` and the packaged broker policy block direct IP networking but
+  do not prevent indirect egress through an authorized local Unix-socket proxy.
 - Give the focused HTTP 503 one-command helpers a distinct `;503-*` prefix so they do not delay the flagship `;http503` trigger.
 
 - Fix the reviewed-pack CI fixture harness to compare interactive-form output
