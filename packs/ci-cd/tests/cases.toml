@@ -1,0 +1,5 @@
+format_version = 1
+
+[[case]]
+trigger = ";;cicd-pack-example"
+expected_output = "examples/generated.txt"

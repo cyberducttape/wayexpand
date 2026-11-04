@@ -109,6 +109,7 @@ fn run() -> Result<()> {
         Some("test-hotkey") => test_hotkey_command(args)?,
         Some("preview") => preview_command(args)?,
         Some("new") => new_command(args)?,
+        Some("workflow") => commands::workflow::workflow_command(args)?,
         Some("list") => list_command(args)?,
         Some("search") => search_command(args)?,
         Some("schema") => schema_command(args)?,
@@ -160,12 +161,12 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "Diagnose configuration, backends and the running daemon",
             ),
             (
-                "doctor --security [--json] [config]",
-                "Inspect the effective sandbox of running WayExpand services",
+                "policy inspect|check [--file PATH] [--allow-audit-only] [--json]",
+                "Inspect policy provenance or fail CI when restrictions are not enforced",
             ),
             (
-                "policy inspect [--file PATH] [--json]",
-                "Show configured and effective organization policy controls",
+                "doctor --security [--json] [config]",
+                "Inspect the effective sandbox of running WayExpand services",
             ),
             (
                 "doctor --certify [--json]",
@@ -230,6 +231,10 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "Fill in a file template (Dockerfile, playbook...) and write it",
             ),
             (
+                "workflow insert|generate|run ...",
+                "Choose explicit insertion, reviewed file generation, or an approved broker action",
+            ),
+            (
                 "test <text> [--json] [config]",
                 "Simulate input and print a match",
             ),
@@ -266,8 +271,8 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "Convert to TOML, or merge into a library after smoke-testing imported triggers",
             ),
             (
-                "pack search|inspect|diff|install|outdated|update|lock|sync|list|path|remove|rollback|import|verify|sign ...",
-                "Discover, review, and manage offline versioned snippet packs",
+                "pack lint|test|diff|search|inspect|install|outdated|update|lock|sync|list|path|remove|rollback|import|verify|sign ...",
+                "Lint, test, review, sign, distribute, and roll back local snippet packs",
             ),
             (
                 "profile list|create|switch|remove|assign-app|unassign-app ...",
@@ -356,6 +361,22 @@ fn prompt_yes_no(prompt: &str, default: bool) -> Result<bool> {
         return Ok(default);
     }
     Ok(matches!(answer.as_str(), "y" | "yes"))
+}
+
+/// Make untrusted text safe to show in a terminal: control characters other
+/// than tab are shown as escapes so content under review cannot move the
+/// cursor, clear lines, or otherwise hide what it contains.
+pub(crate) fn terminal_safe(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| {
+            if character.is_control() && character != '\t' {
+                character.escape_default().to_string()
+            } else {
+                character.to_string()
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]

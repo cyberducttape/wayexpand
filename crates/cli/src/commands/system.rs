@@ -1,6 +1,7 @@
 //! Setup and diagnostics commands: setup, doctor, certify, backend selection, and portal tokens.
 
 use super::Args;
+use crate::args::take_flag;
 use crate::*;
 
 pub(crate) fn setup_command(mut args: Args) -> Result<()> {
@@ -173,9 +174,15 @@ pub(crate) fn doctor_command(args: Args) -> Result<()> {
 }
 
 pub(crate) fn policy_command(mut args: Args) -> Result<()> {
-    if args.next().as_deref() != Some("inspect") {
-        usage_bail!("usage: wayexpand policy inspect [--file PATH] [--json]");
+    let action = args.next();
+    match action.as_deref() {
+        Some("inspect") => policy_inspect(args),
+        Some("check") => policy_check(args),
+        _ => usage_bail!("usage: wayexpand policy inspect|check [--file PATH] [--json]"),
     }
+}
+
+fn policy_inspect(args: Args) -> Result<()> {
     let mut rest: Vec<String> = args.collect();
     let requested_json = take_json_flag(&mut rest);
     let policy_path = match rest.iter().position(|argument| argument == "--file") {
@@ -247,6 +254,132 @@ pub(crate) fn policy_command(mut args: Args) -> Result<()> {
         println!("Capability assessment: {}", report["capability_assessment"]);
     }
     Ok(())
+}
+
+fn policy_check(args: Args) -> Result<()> {
+    let mut rest: Vec<String> = args.collect();
+    let requested_json = take_json_flag(&mut rest);
+    let allow_audit_only = take_flag(&mut rest, "--allow-audit-only");
+    let policy_file = take_option(&mut rest, "--file")
+        .map_err(|error| usage_error(error.to_string()))?
+        .map(PathBuf::from);
+    if !rest.is_empty() {
+        usage_bail!("usage: wayexpand policy check [--file PATH] [--allow-audit-only] [--json]");
+    }
+    let trusted_system_policy = policy_file.is_none();
+    let report_path = policy_file
+        .clone()
+        .unwrap_or_else(|| PathBuf::from(wayexpand_core::ORGANIZATION_POLICY_PATH));
+    let loaded_policy = match policy_file {
+        Some(path) => fs::read_to_string(&path)
+            .map_err(|error| {
+                config_error(format!(
+                    "could not read policy file {}: {error}",
+                    path.display()
+                ))
+            })
+            .and_then(|source| {
+                wayexpand_core::parse_organization_policy(&source).map_err(|error| {
+                    config_error(format!("invalid policy file {}: {error}", path.display()))
+                })
+            }),
+        None => crate::doctor::policy::load_policy()
+            .map_err(|error| config_error(format!("organization policy is invalid: {error}"))),
+    };
+    let policy = match loaded_policy {
+        Ok(policy) => policy,
+        Err(error) => {
+            if requested_json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "schema_version": 1,
+                        "command": "policy check",
+                        "ok": false,
+                        "exit_code": 3,
+                        "trusted_system_policy": trusted_system_policy,
+                        "path": report_path,
+                        "findings": [{"control":"policy_file", "status":"fail", "reason": error.to_string()}],
+                    })
+                );
+            }
+            return Err(error);
+        }
+    };
+    let report = crate::doctor::policy::effective_policy_report(&policy);
+    let findings = policy_check_findings(&policy, &report, allow_audit_only);
+    let failed = findings.iter().any(|finding| finding["status"] == "fail");
+    let output = serde_json::json!({
+        "schema_version": 1,
+        "command": "policy check",
+        "ok": !failed,
+        "exit_code": if failed { 1 } else { 0 },
+        "trusted_system_policy": trusted_system_policy,
+        "path": report_path,
+        "policy": report,
+        "findings": findings,
+    });
+    if requested_json {
+        println!("{output}");
+    } else {
+        println!(
+            "Policy check: {} ({})",
+            if failed { "FAIL" } else { "PASS" },
+            output["policy"]["mode"].as_str().unwrap_or("unknown")
+        );
+        for finding in output["findings"].as_array().into_iter().flatten() {
+            println!(
+                "{}  {} — {}",
+                finding["status"]
+                    .as_str()
+                    .unwrap_or("unknown")
+                    .to_uppercase(),
+                finding["control"].as_str().unwrap_or("policy"),
+                finding["reason"].as_str().unwrap_or("")
+            );
+        }
+    }
+    if failed {
+        bail!("policy check failed; inspect the control-level findings above");
+    }
+    Ok(())
+}
+
+fn policy_check_findings(
+    policy: &OrganizationPolicy,
+    report: &serde_json::Value,
+    allow_audit_only: bool,
+) -> Vec<serde_json::Value> {
+    let mut findings = Vec::new();
+    if !policy.safe_mode {
+        findings.push(serde_json::json!({
+            "control": "safe_mode",
+            "status": if allow_audit_only {"warn"} else {"fail"},
+            "reason": "safe_mode is false, so restriction controls are audit-only and are not enforced",
+        }));
+    }
+    if let Some(controls) = report["controls"].as_object() {
+        for (name, control) in controls {
+            if control["status"] == "audit_only" {
+                findings.push(serde_json::json!({
+                    "control": name,
+                    "status": if allow_audit_only {"warn"} else {"fail"},
+                    "reason": format!("{name} is configured but cleared from the effective policy because safe_mode is false"),
+                }));
+            }
+            if control["support"] == "unsupported" && control["status"] != "not_configured" {
+                findings.push(serde_json::json!({
+                    "control": name,
+                    "status": "fail",
+                    "reason": format!("{name} is configured but this build cannot provide the required capability"),
+                }));
+            }
+        }
+    }
+    if findings.is_empty() {
+        findings.push(serde_json::json!({"control":"policy","status":"pass","reason":"configured restrictions are enforced; session-dependent controls still require runtime verification"}));
+    }
+    findings
 }
 
 pub(crate) fn upgrade_status_command(args: Args) -> Result<()> {
@@ -487,5 +620,46 @@ pub(crate) fn live_explain_build_gate(
         Some(
             "the running daemon is from a different build; restart it before relying on live explanations",
         )
+    }
+}
+
+#[cfg(test)]
+mod policy_check_tests {
+    use super::policy_check_findings;
+    use wayexpand_core::OrganizationPolicy;
+
+    #[test]
+    fn policy_check_explains_audit_only_controls_and_can_allow_them_explicitly() {
+        let policy = OrganizationPolicy {
+            safe_mode: false,
+            disable_commands: true,
+            ..OrganizationPolicy::default()
+        };
+        let report = crate::doctor::policy::effective_policy_report(&policy);
+        let findings = policy_check_findings(&policy, &report, false);
+        assert!(findings.iter().any(|finding| {
+            finding["control"] == "disable_commands"
+                && finding["status"] == "fail"
+                && finding["reason"]
+                    .as_str()
+                    .unwrap()
+                    .contains("safe_mode is false")
+        }));
+        let allowed = policy_check_findings(&policy, &report, true);
+        assert!(allowed.iter().all(|finding| finding["status"] != "fail"));
+    }
+
+    #[test]
+    fn policy_check_fails_known_unsupported_controls_even_in_audit_mode() {
+        let policy = OrganizationPolicy {
+            safe_mode: true,
+            require_composition_aware: true,
+            ..OrganizationPolicy::default()
+        };
+        let report = crate::doctor::policy::effective_policy_report(&policy);
+        let findings = policy_check_findings(&policy, &report, true);
+        assert!(findings.iter().any(|finding| {
+            finding["control"] == "require_composition_aware" && finding["status"] == "fail"
+        }));
     }
 }

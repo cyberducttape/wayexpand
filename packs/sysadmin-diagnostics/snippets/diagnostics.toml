@@ -10,7 +10,7 @@ trigger = ";svcdiag"
 description = "Show service status and recent journal entries for a systemd unit"
 category = "Sysadmin diagnostics"
 tags = ["systemd", "journalctl", "service"]
-replacement = "systemctl status --no-pager -- {{shellq:service=nginx.service|required|max=255|validate=systemd-unit}}; journalctl -u {{shellq:service}} --since {{shellq:since=1 hour ago|required|max=80}} -n {{shellq:lines=100|required|max=5|validate=positive-integer}} --no-pager"
+replacement = "systemctl status --no-pager -- {{shellq:service=nginx.service|required|max=255|validate=systemd-unit}}; journalctl -u {{shellq:service}} --since {{shellq:since=1 hour ago|required|max=80|validate=relative-time}} -n {{shellq:lines=100|required|max=5|validate=positive-integer}} --no-pager"
 
 [[expansion]]
 trigger = ";portcheck"
@@ -24,14 +24,14 @@ trigger = ";httpcheck"
 description = "Inspect HTTP response headers and request timing for a domain and path"
 category = "Sysadmin diagnostics"
 tags = ["http", "web", "network"]
-replacement = "curl --connect-timeout 5 --max-time 15 -sS -o /dev/null -D - -w '\\nstatus=%{http_code} connect=%{time_connect}s ttfb=%{time_starttransfer}s total=%{time_total}s\\n' {{choice:scheme=https|http}}://{{shellq:domain=example.com|required|max=253|validate=hostname}}{{shellq:path=/health|required|max=2048}}"
+replacement = "curl --connect-timeout 5 --max-time 15 -sS -o /dev/null -D - -w '\\nstatus=%{http_code} connect=%{time_connect}s ttfb=%{time_starttransfer}s total=%{time_total}s\\n' {{choice:scheme=https|http}}://{{shellq:domain=example.com|required|max=253|validate=hostname}}{{shellq:path=/health|required|max=2048|validate=url-path}}"
 
 [[expansion]]
 trigger = ";pathcheck"
 description = "Inspect path permissions, metadata, and the mounted filesystem"
 category = "Sysadmin diagnostics"
 tags = ["filesystem", "permissions", "diagnostics"]
-replacement = "namei -l -- {{shellq:path=/var/log|required|max=4096}}; stat -- {{shellq:path}}; findmnt --target {{shellq:path}}"
+replacement = "namei -l -- {{shellq:path=/var/log|required|max=4096|validate=absolute-path}}; stat -- {{shellq:path}}; findmnt --target {{shellq:path}}"
 
 [[expansion]]
 trigger = ";sshcheck"

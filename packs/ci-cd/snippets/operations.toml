@@ -1,0 +1,20 @@
+[[expansion]]
+trigger = ";;github-runs"
+description = "Inspect recent GitHub Actions runs without triggering a workflow"
+category = "CI/CD"
+tags = ["github-actions", "read-only"]
+replacement = "gh run list --limit 10"
+
+[[expansion]]
+trigger = ";;github-run-review"
+description = "Review status and conclusion for a selected GitHub Actions run"
+category = "CI/CD"
+tags = ["github-actions", "read-only"]
+replacement = "gh run view {{shellq:run=123456789|required|max=20|validate=positive-integer}} --json name,status,conclusion,createdAt,updatedAt"
+
+[[expansion]]
+trigger = ";;gitlab-pipelines"
+description = "Inspect recent GitLab pipelines in the current project"
+category = "CI/CD"
+tags = ["gitlab", "read-only"]
+replacement = "glab pipeline list --per-page 10"

@@ -1,0 +1,5 @@
+format_version = 1
+
+[[case]]
+trigger = ";;database-pack-example"
+expected_output = "examples/generated.txt"

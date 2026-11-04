@@ -3,14 +3,14 @@ trigger = ";;ansible-syntax-check"
 description = "Check a playbook's syntax without executing its tasks"
 category = "Ansible"
 tags = ["ansible", "validation"]
-replacement = "ansible-playbook --syntax-check {{field:playbook=site.yml}}"
+replacement = "ansible-playbook --syntax-check {{shellq:playbook=/tmp/site.yml|required|max=512|validate=absolute-path}}"
 
 [[expansion]]
 trigger = ";;ansible-inventory"
 description = "Inspect inventory grouping without connecting to hosts"
 category = "Ansible"
 tags = ["ansible", "inventory", "read-only"]
-replacement = "ansible-inventory --graph --inventory {{field:inventory=inventory.ini}}"
+replacement = "ansible-inventory --graph --inventory {{shellq:inventory=/tmp/inventory.ini|required|max=512|validate=absolute-path}}"
 
 [[expansion]]
 trigger = ";;ansible-package-play"
@@ -19,14 +19,14 @@ category = "Ansible"
 tags = ["ansible", "playbook", "package"]
 replacement = """---
 - name: Install a package on selected hosts
-  hosts: {{field:hosts=web}}
+  hosts: {{field:hosts=web|required|validate=ansible-host-pattern|max=512}}
   become: {{choice:become=false|true;default=false}}
   gather_facts: true
 
   tasks:
     - name: Ensure package is installed
       ansible.builtin.package:
-        name: {{field:package=nginx}}
+        name: "{{field:package=nginx|required|validate=yaml-string|max=128}}"
         state: present
 """
 
@@ -37,14 +37,14 @@ category = "Ansible"
 tags = ["ansible", "playbook", "systemd"]
 replacement = """---
 - name: Ensure a service is enabled and running
-  hosts: {{field:hosts=web}}
+  hosts: {{field:hosts=web|required|validate=ansible-host-pattern|max=512}}
   become: {{choice:become=false|true;default=false}}
   gather_facts: false
 
   tasks:
     - name: Enable and start service
       ansible.builtin.service:
-        name: {{field:service=nginx}}
+        name: "{{field:service=nginx.service|required|validate=systemd-unit|max=255}}"
         enabled: true
         state: started
 """
@@ -55,9 +55,9 @@ description = "Minimal role metadata starter"
 category = "Ansible"
 tags = ["ansible", "role"]
 replacement = """galaxy_info:
-  role_name: {{field:role_name=example_role}}
-  author: {{field:author=Your Name}}
-  description: {{field:description=Describe the role}}
+  role_name: {{field:role_name=example_role|required|validate=ansible-role-name|max=64}}
+  author: "{{field:author=Your Name|required|validate=yaml-string|max=128}}"
+  description: "{{field:description=Describe the role|required|validate=yaml-string|max=256}}"
   license: MIT
   min_ansible_version: '2.15'
   platforms:

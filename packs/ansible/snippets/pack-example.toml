@@ -1,0 +1,6 @@
+[[expansion]]
+trigger = ";;ansible-pack-example"
+description = "Reviewed pack example output: Ansible Administration"
+category = "Ansible Administration"
+tags = ["example", "reviewed"]
+replacement = "ansible-playbook --syntax-check site.yml"

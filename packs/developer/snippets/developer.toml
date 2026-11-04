@@ -10,18 +10,18 @@ trigger = ";;git-log"
 description = "Compact recent commit history for a selected branch"
 category = "Developer"
 tags = ["git", "history"]
-replacement = "git log --oneline --decorate -{{field:count=12}} {{field:ref=HEAD}}"
+replacement = "git log --oneline --decorate -{{shellq:count=12|required|max=5|validate=positive-integer}} {{shellq:ref=HEAD|required|max=255|validate=git-revision}}"
 
 [[expansion]]
 trigger = ";;sql-select"
 description = "Parameterized read-only SQL query starter"
 category = "Developer"
 tags = ["sql", "database"]
-replacement = """SELECT {{field:columns=*}}
-FROM {{field:table=schema.table}}
-WHERE {{field:condition=1 = 1}}
-ORDER BY {{field:sort_column=created_at}} DESC
-LIMIT {{field:limit=100}};
+replacement = """SELECT {{field:columns=*|required|validate=sql-identifier|max=512}}
+FROM {{field:table=schema.table|required|validate=sql-identifier|max=256}}
+WHERE {{field:condition=1 = 1|required|free_text=true|max=1024}}
+ORDER BY {{field:sort_column=created_at|required|validate=sql-identifier|max=256}} DESC
+LIMIT {{field:limit=100|required|validate=positive-integer|max=10}};
 """
 
 [[expansion]]

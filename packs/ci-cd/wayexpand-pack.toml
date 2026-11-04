@@ -1,0 +1,25 @@
+format_version = 1
+id = "wayexpand.ci-cd"
+version = "1.0.0"
+name = "CI/CD Operations"
+publisher = "WayExpand project"
+maintainer = "WayExpand Delivery Engineering Maintainers"
+description = "Review-first GitHub Actions and GitLab pipeline inspection workflows."
+capabilities = ["forms"]
+
+[compatibility]
+shells = ["bash", "zsh", "fish"]
+platforms = ["linux"]
+tools = ["git", "gh"]
+
+[risk]
+level = "low"
+summary = "Commands inspect local changes and pipeline status; they do not trigger, cancel, approve, or deploy workflows."
+
+[review]
+reviewed_by = "WayExpand project review"
+reviewed_at = "2026-11-02"
+summary = "Reviewed by WayExpand Delivery Engineering Maintainers; generated text is never run by WayExpand. Inspect targets and output before manual use."
+
+[verification]
+test_cases = "tests/cases.toml"

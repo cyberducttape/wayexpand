@@ -1,0 +1,25 @@
+format_version = 1
+id = "wayexpand.terraform"
+version = "1.0.0"
+name = "Terraform Operations"
+publisher = "WayExpand project"
+maintainer = "WayExpand Infrastructure as Code Maintainers"
+description = "Terraform formatting, validation, and plan review commands; no apply or destroy actions."
+capabilities = ["forms"]
+
+[compatibility]
+shells = ["bash", "zsh", "fish"]
+platforms = ["linux"]
+tools = ["terraform"]
+
+[risk]
+level = "moderate"
+summary = "Formatting and validation are local; plans can contact providers and reveal infrastructure details. No apply or destroy action is included."
+
+[review]
+reviewed_by = "WayExpand project review"
+reviewed_at = "2026-11-02"
+summary = "Reviewed by WayExpand Infrastructure as Code Maintainers; generated text is never run by WayExpand. Inspect targets and output before manual use."
+
+[verification]
+test_cases = "tests/cases.toml"

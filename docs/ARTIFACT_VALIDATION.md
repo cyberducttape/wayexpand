@@ -32,11 +32,14 @@ atomic directory publish.
 | GitHub Actions workflow | `actionlint` | lint generated workflow |
 | Nginx site | `nginx` | `-t` with an isolated wrapper config |
 | Kubernetes deployment | `kubeconform` | `-strict -summary` |
+| HTTP 503 incident checklist | built-in | read-only command allowlist and required context fields; no external command is run |
 
-The selected validator must be installed separately. Missing tools produce a
-clear startup error. Every validator runs with a 30-second deadline in its own
-process group and receives a cleared environment, a private temporary HOME,
-and no inherited credential variables. Kubeconform may fetch schemas using
+External validators must be installed separately. Missing tools produce a
+clear startup error. Each external validator runs with a 30-second deadline in
+its own process group and receives a cleared environment, a private temporary
+HOME, and no inherited credential variables. The HTTP 503 checklist validator
+is built into WayExpand and checks its generated read-only command blocks
+without executing commands. Kubeconform may fetch schemas using
 its normal schema sources, so `--validate` for Kubernetes manifests requires
 network access unless kubeconform has a usable local cache.
 
