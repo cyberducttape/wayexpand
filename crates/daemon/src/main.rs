@@ -117,6 +117,9 @@ impl EventError {
             wayexpand_core::TransactionOutcome::NotApplied { source }
             | wayexpand_core::TransactionOutcome::UnknownApplicationOutcome { source }
             | wayexpand_core::TransactionOutcome::UnknownPartialFailure { source } => {
+                if let Some(category) = backend_refusal_category(&source.message) {
+                    return category;
+                }
                 match source.kind() {
                     wayexpand_core::InjectorErrorKind::TransportFailure => "transport_failure",
                     wayexpand_core::InjectorErrorKind::ExpansionRejected => "expansion_rejected",
@@ -160,6 +163,25 @@ impl EventError {
                 | wayexpand_core::TransactionOutcome::UnknownPartialFailure { source }
                 if source.kind() == wayexpand_core::InjectorErrorKind::ExpansionRejected
         )
+    }
+}
+
+/// Classify known libei preflight errors using static, content-free labels.
+/// The backend's full error text may contain rejected characters and must
+/// never be written to logs or status.
+fn backend_refusal_category(message: &str) -> Option<&'static str> {
+    if message.starts_with("character U+") {
+        Some("unicode-keymap")
+    } else if message.starts_with("keysym fallback for ") {
+        Some("fallback-too-slow")
+    } else if message.starts_with("the compositor's active keyboard layout") {
+        Some("layout-mismatch")
+    } else if message.starts_with("multiple keyboard layouts detected ") {
+        Some("active-layout-unavailable")
+    } else if message.starts_with("the EIS server is still sending device updates") {
+        Some("keyboard-state-busy")
+    } else {
+        None
     }
 }
 

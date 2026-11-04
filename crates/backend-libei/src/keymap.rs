@@ -171,7 +171,14 @@ impl KeysymTyper {
                 0,
             )
             .map_err(|_| LibeiError::LayoutProviderMismatch)?;
-            if !keymaps_match(&self.keymap, &compiled) {
+            // The compositor's map is authoritative for injection. The
+            // external snapshot only supplies the active group, so require
+            // its ordered layout identities to match. Comparing every
+            // keysym is unnecessarily strict: compositor maps can differ in
+            // media keys and other non-text symbols while using the same
+            // ordered text layouts. A group-count or order difference still
+            // fails closed because it could select the wrong language.
+            if !layout_groups_match(&self.keymap, &compiled) {
                 return Err(LibeiError::LayoutProviderMismatch);
             }
             self.external_generation = Some(snapshot.generation);
@@ -226,32 +233,10 @@ impl KeysymTyper {
     }
 }
 
-fn keymaps_match(left: &XkbKeymap, right: &XkbKeymap) -> bool {
-    if left.num_layouts() != right.num_layouts() {
-        return false;
-    }
-    for group in 0..left.num_layouts() {
-        if left.layout_get_name(group) != right.layout_get_name(group) {
-            return false;
-        }
-    }
-    for &keycode in left.iter_keycodes() {
-        for group in 0..left.num_layouts() {
-            let left_levels = left.num_levels_for_key(keycode, group);
-            let right_levels = right.num_levels_for_key(keycode, group);
-            if left_levels != right_levels {
-                return false;
-            }
-            for level in 0..left_levels {
-                if left.key_get_syms_by_level(keycode, group, level).ok()
-                    != right.key_get_syms_by_level(keycode, group, level).ok()
-                {
-                    return false;
-                }
-            }
-        }
-    }
-    true
+pub(super) fn layout_groups_match(left: &XkbKeymap, right: &XkbKeymap) -> bool {
+    left.num_layouts() == right.num_layouts()
+        && (0..left.num_layouts())
+            .all(|group| left.layout_get_name(group) == right.layout_get_name(group))
 }
 
 pub(super) fn find_keycode_for_keysym(

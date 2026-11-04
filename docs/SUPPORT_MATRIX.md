@@ -108,10 +108,12 @@ two layouts configured (for example `us,de`), KWin 6.6.6 sends libei clients
 a two-layout keymap but never reports which layout is active, not at connect
 and not after a layout switch. This reproduced limitation applies to builds
 that rely only on EIS modifier reports. The current daemon also consults the
-compositor's layout provider and accepts its active group only after the
-provider's full XKB map matches the EIS keymap. If the provider is unavailable
-or disagrees, the fallback refuses with a clear diagnostic; WayExpand never
-selects the first layout. The optional Fcitx5 bridge can provide a verified
+compositor's layout provider and accepts its active group only when its
+ordered layout groups match the EIS keymap. The EIS map is still used for
+character synthesis; unrelated non-text keysym differences do not invalidate
+the active-group signal. If the provider is unavailable or layout groups
+differ, the fallback refuses with a clear diagnostic; WayExpand never selects
+the first layout. The optional Fcitx5 bridge can provide a verified
 Unicode direct-commit route when enabled and available. The original
 limitation was observed in private headless KWin sessions on 2026-10-27
 (commit `c8c27d86d632`, see

@@ -7,7 +7,7 @@ use super::{
 use crate::*;
 use std::os::unix::fs::MetadataExt;
 
-pub(crate) const SECURITY_REPORT_SCHEMA: u64 = 10;
+pub(crate) const SECURITY_REPORT_SCHEMA: u64 = 11;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ProtectionProfile {
@@ -60,20 +60,31 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         .filter(|value| value.is_object())
         .cloned()
         .unwrap_or(serde_json::Value::Null);
+    let daemon_evidence_compatible = daemon_status_schema_compatible(&daemon);
     let broker_sandbox = broker
         .get("effective_security")
         .filter(|value| value.is_object())
         .cloned()
         .unwrap_or(serde_json::Value::Null);
-    let capture_source = daemon["source"].as_str().unwrap_or("unknown");
-    let sensitive_field_detection = daemon["capture_sensitive_focus"].as_bool();
-    let input_privacy_readiness = privacy_gate_readiness(
-        profile,
-        capture_source,
-        sensitive_field_detection,
-        input_privacy_required,
-        organization_policy.is_ok(),
-    );
+    let capture_source = if daemon_evidence_compatible {
+        daemon["source"].as_str().unwrap_or("unknown")
+    } else {
+        "unknown"
+    };
+    let sensitive_field_detection = daemon_evidence_compatible
+        .then(|| daemon["capture_sensitive_focus"].as_bool())
+        .flatten();
+    let input_privacy_readiness = if daemon_evidence_compatible {
+        privacy_gate_readiness(
+            profile,
+            capture_source,
+            sensitive_field_detection,
+            input_privacy_required,
+            organization_policy.is_ok(),
+        )
+    } else {
+        "incomplete"
+    };
 
     let local_mount_ns = namespace_inode("mnt");
     let local_uts_ns = namespace_inode("uts");
@@ -297,6 +308,10 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         ]);
     }
 
+    if !daemon_evidence_compatible {
+        mark_daemon_runtime_checks_unavailable(&mut checks);
+    }
+
     // These restrictions cannot be established from /proc status alone. Keep
     // the limits explicit instead of treating configured unit text as proof.
     let unverified = unavailable_systemd_evidence();
@@ -367,6 +382,16 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
     ]);
     let healthy = readiness == "pass";
     let route = active_route_summary(&daemon);
+    let trusted_sandbox = if daemon_evidence_compatible {
+        sandbox.clone()
+    } else {
+        serde_json::Value::Null
+    };
+    let trusted_daemon = if daemon_evidence_compatible {
+        daemon.clone()
+    } else {
+        serde_json::Value::Null
+    };
     let report = serde_json::json!({
         "schema": SECURITY_REPORT_SCHEMA,
         "profile": profile.name(),
@@ -385,12 +410,12 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
             "target_integrity": gate_report(target_integrity_readiness, target_integrity_required, &target_integrity_checks, &[]),
         },
         "healthy": healthy,
-        "daemon_pid": sandbox.get("pid"),
+        "daemon_pid": trusted_sandbox.get("pid"),
         "daemon_runtime": daemon_runtime_report(&daemon),
-        "daemon": sandbox,
+        "daemon": trusted_sandbox,
         "active_route": route,
         "input_privacy": {
-            "source": capture_source,
+            "source": if daemon_evidence_compatible { capture_source } else { "unknown" },
             "sensitive_field_detection": sensitive_field_detection,
             "readiness": input_privacy_readiness,
             "required": input_privacy_required,
@@ -424,11 +449,11 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         "configuration": config_permissions,
         "command_execution_configured": command_execution_configured,
         "command_containment": {
-            "mode": daemon.get("command_containment"),
-            "policy": daemon.get("command_containment_mode"),
-            "self_test": daemon.get("command_containment_self_test"),
-            "cleanup_pending_jobs": daemon.get("command_cleanup_pending_jobs"),
-            "cleanup_degraded": daemon.get("command_cleanup_degraded"),
+            "mode": trusted_daemon.get("command_containment"),
+            "policy": trusted_daemon.get("command_containment_mode"),
+            "self_test": trusted_daemon.get("command_containment_self_test"),
+            "cleanup_pending_jobs": trusted_daemon.get("command_cleanup_pending_jobs"),
+            "cleanup_degraded": trusted_daemon.get("command_cleanup_degraded"),
         },
         "action_broker": {
             "required": broker_required,
@@ -543,6 +568,32 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
 }
 
 fn active_route_summary(daemon: &serde_json::Value) -> serde_json::Value {
+    if daemon.is_null() {
+        return serde_json::json!({
+            "source": null,
+            "backend": null,
+            "route_id": null,
+            "atomic_replace": null,
+            "replacement_assurance": null,
+            "compatibility_mode": null,
+            "focus_assurance": null,
+            "sensitive_field_detection": null,
+            "automatic_replacement_mode": "unknown",
+        });
+    }
+    if !daemon_status_schema_compatible(daemon) {
+        return serde_json::json!({
+            "source": null,
+            "backend": null,
+            "route_id": null,
+            "atomic_replace": null,
+            "replacement_assurance": null,
+            "compatibility_mode": null,
+            "focus_assurance": null,
+            "sensitive_field_detection": null,
+            "automatic_replacement_mode": "unavailable",
+        });
+    }
     let atomic = daemon["inject_atomic_replace"].as_bool();
     let compatibility_mode = daemon["compatibility_mode"].as_str();
     let automatic_replacement_mode = match (atomic, compatibility_mode) {
@@ -575,19 +626,40 @@ fn daemon_runtime_report(daemon: &serde_json::Value) -> serde_json::Value {
 }
 
 fn daemon_status_schema_check(daemon: &serde_json::Value) -> serde_json::Value {
-    let compatible = daemon
-        .get("status_schema")
-        .and_then(serde_json::Value::as_u64)
-        .is_some_and(|schema| schema == u64::from(CONTROL_STATUS_SCHEMA));
+    let compatible = daemon_status_schema_compatible(daemon);
     serde_json::json!({
         "name": "daemon_status_schema",
         "status": if compatible { "pass" } else { "unavailable" },
         "detail": if compatible {
             "The running daemon exposes the current status contract."
         } else {
-            "The running daemon does not expose the current status contract; its sandbox protections cannot be verified until it is updated or restarted."
+            "The running daemon does not expose the current status contract; its sandbox and route capabilities cannot be verified until it is updated or restarted."
         },
     })
+}
+
+fn daemon_status_schema_compatible(daemon: &serde_json::Value) -> bool {
+    daemon
+        .get("status_schema")
+        .and_then(serde_json::Value::as_u64)
+        .is_some_and(|schema| schema == u64::from(CONTROL_STATUS_SCHEMA))
+}
+
+fn mark_daemon_runtime_checks_unavailable(checks: &mut [serde_json::Value]) {
+    for check in checks {
+        let name = check["name"].as_str().unwrap_or_default();
+        if name.starts_with("daemon_")
+            || matches!(
+                name,
+                "capture_sensitive_focus" | "automatic_replacement_target_integrity"
+            )
+        {
+            check["status"] = serde_json::Value::String("unavailable".to_owned());
+            check["detail"] = serde_json::Value::String(
+                "The running daemon status schema is stale or unavailable, so this runtime capability cannot be verified.".to_owned(),
+            );
+        }
+    }
 }
 
 fn target_integrity_check(daemon: &serde_json::Value) -> serde_json::Value {
@@ -1478,6 +1550,7 @@ mod tests {
     #[test]
     fn route_report_identifies_non_atomic_compatibility_override() {
         let route = active_route_summary(&serde_json::json!({
+            "status_schema": CONTROL_STATUS_SCHEMA,
             "source": "evdev",
             "backend": "libei",
             "route_id": "kde-evdev-libei",
@@ -1502,6 +1575,34 @@ mod tests {
     fn route_report_defaults_to_unknown_when_no_daemon_is_connected() {
         let route = active_route_summary(&serde_json::Value::Null);
         assert_eq!(route["automatic_replacement_mode"], "unknown");
+        assert!(route["source"].is_null());
+    }
+
+    #[test]
+    fn stale_status_hides_all_daemon_derived_capabilities_but_keeps_other_gates() {
+        let stale = serde_json::json!({
+            "status_schema": CONTROL_STATUS_SCHEMA - 1,
+            "source": "evdev",
+            "capture_sensitive_focus": false,
+            "inject_atomic_replace": false,
+            "compatibility_mode": "untracked-focus",
+        });
+        let mut checks = vec![
+            serde_json::json!({"name":"daemon_seccomp", "status":"pass"}),
+            serde_json::json!({"name":"capture_sensitive_focus", "status":"fail"}),
+            serde_json::json!({"name":"automatic_replacement_target_integrity", "status":"fail"}),
+            serde_json::json!({"name":"broker_seccomp", "status":"pass"}),
+            serde_json::json!({"name":"config_permissions", "status":"pass"}),
+        ];
+        assert!(!daemon_status_schema_compatible(&stale));
+        mark_daemon_runtime_checks_unavailable(&mut checks);
+        assert_eq!(checks[0]["status"], "unavailable");
+        assert_eq!(checks[1]["status"], "unavailable");
+        assert_eq!(checks[2]["status"], "unavailable");
+        assert_eq!(checks[3]["status"], "pass");
+        assert_eq!(checks[4]["status"], "pass");
+        let route = active_route_summary(&stale);
+        assert_eq!(route["automatic_replacement_mode"], "unavailable");
         assert!(route["source"].is_null());
     }
 }

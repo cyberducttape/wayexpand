@@ -54,11 +54,32 @@ pub(crate) fn note_output_unsupported(limit: RouteLimit) {
     LAST_UNSUPPORTED.store(code, Ordering::Relaxed);
 }
 
+/// Record a backend-specific preflight refusal without retaining any part of
+/// the rejected text. These labels are stable status values and deliberately
+/// contain no code point or snippet content.
+pub(crate) fn note_output_unsupported_reason(reason: &'static str) {
+    OUTPUT_UNSUPPORTED.fetch_add(1, Ordering::Relaxed);
+    let code = match reason {
+        "unicode-keymap" => 4,
+        "fallback-too-slow" => 5,
+        "layout-mismatch" => 6,
+        "active-layout-unavailable" => 7,
+        "keyboard-state-busy" => 8,
+        _ => return,
+    };
+    LAST_UNSUPPORTED.store(code, Ordering::Relaxed);
+}
+
 fn last_unsupported_name(code: u8) -> &'static str {
     match code {
         1 => "unicode",
         2 => "too-long",
         3 => "cursor",
+        4 => "unicode-keymap",
+        5 => "fallback-too-slow",
+        6 => "layout-mismatch",
+        7 => "active-layout-unavailable",
+        8 => "keyboard-state-busy",
         _ => "none",
     }
 }
