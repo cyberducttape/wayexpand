@@ -9,7 +9,10 @@ _wayexpand_context_report() {
     [[ ${WAYEXPAND_CONTEXT_SESSION_ID:-} =~ '^[[:xdigit:]]{32}$' ]] || return 0
     (( $+commands[wayexpand] )) || return 0
 
-    local project_root='' kube_context='' remote_host="${WAYEXPAND_CONTEXT_REMOTE_HOST:-}"
+    local project_root='' kube_context='' remote_host=''
+    if [[ ${1:-} != --local ]]; then
+        remote_host=${WAYEXPAND_CONTEXT_REMOTE_HOST:-}
+    fi
     if [[ -z $remote_host ]]; then
         project_root=$(command git rev-parse --show-toplevel 2>/dev/null) || project_root=''
         if (( $+commands[kubectl] )); then
@@ -65,6 +68,8 @@ wayexpand-ssh() {
     local ssh_status=$?
     kill "$reporter_pid" 2>/dev/null || :
     wait "$reporter_pid" 2>/dev/null || :
-    _wayexpand_context_report
+    command wayexpand context clear >/dev/null 2>&1 || :
+    unset WAYEXPAND_CONTEXT_REMOTE_HOST
+    _wayexpand_context_report --local
     return "$ssh_status"
 }
