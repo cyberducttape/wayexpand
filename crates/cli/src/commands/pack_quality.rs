@@ -404,9 +404,18 @@ fn has_shell_code_fence(replacement: &str) -> bool {
         "zsh",
     ];
     replacement.lines().any(|line| {
-        let Some(fence) = line.trim_start().strip_prefix("```") else {
+        let line = line.trim_start();
+        let Some(marker @ ('`' | '~')) = line.chars().next() else {
             return false;
         };
+        let fence_length = line
+            .chars()
+            .take_while(|character| *character == marker)
+            .count();
+        if fence_length < 3 {
+            return false;
+        }
+        let fence = &line[marker.len_utf8() * fence_length..];
         fence
             .split_whitespace()
             .next()
@@ -786,18 +795,27 @@ mod tests {
 
     #[test]
     fn unknown_commands_in_shell_fences_still_require_field_review() {
-        let expansion = wayexpand_core::PackExpansionReview {
-            file: "snippets/custom-tool.toml".into(),
-            id: "custom_tool".into(),
-            trigger: ";custom".into(),
-            description: "Run an internal operations tool".into(),
-            replacement: "```bash\ninternalctl inspect {{field:target}}\n```".into(),
-            command: None,
-        };
+        for (index, replacement) in [
+            "```bash\ninternalctl inspect {{field:target}}\n```",
+            "~~~~zsh\ninternalctl inspect {{field:target}}\n~~~~",
+            "````powershell title=example\ninternalctl inspect {{field:target}}\n````",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let expansion = wayexpand_core::PackExpansionReview {
+                file: "snippets/custom-tool.toml".into(),
+                id: format!("custom_tool_{index}"),
+                trigger: format!(";custom{index}"),
+                description: "Run an internal operations tool".into(),
+                replacement: replacement.into(),
+                command: None,
+            };
 
-        let findings = operational_field_findings(&[expansion], &[]);
-        assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0]["key"], "field:target");
+            let findings = operational_field_findings(&[expansion], &[]);
+            assert_eq!(findings.len(), 1, "fence form {replacement:?}");
+            assert_eq!(findings[0]["key"], "field:target");
+        }
     }
 
     #[test]
