@@ -10,6 +10,11 @@ All notable changes to WayExpand are documented here.
   cleanup. Add a deterministic rename/replacement race regression. Add an
   opt-in minimal Landlock runtime profile that omits shared runtime trees and
   `/proc`, requiring explicit dependency paths instead.
+- Add `wayexpand doctor --security --profile workstation|hardened|strict` with
+  machine-readable pass/degraded/fail readiness and per-check enforcement
+  metadata. Document the hardened live sandbox check as a managed deployment
+  gate. Make evdev's inability to detect sensitive fields explicit in GUI
+  setup, diagnostics, fleet guidance, and the security readiness report.
 - Give the focused HTTP 503 one-command helpers a distinct `;503-*` prefix so they do not delay the flagship `;http503` trigger.
 
 - Fix the reviewed-pack CI fixture harness to compare interactive-form output

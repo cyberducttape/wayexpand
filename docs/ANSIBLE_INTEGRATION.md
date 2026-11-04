@@ -207,6 +207,7 @@ wayexpand_desktop_users:
 safe_mode = true
 disable_hotkeys = false
 disable_title_matching = false
+require_sensitive_focus = true
 max_replacement_size = 65536
 allowed_backends = ["input-method-v2", "libei"]
 ```
@@ -237,6 +238,32 @@ The role deploys `files/policy.toml`, shown above, with `safe_mode = true`.
 See [Organization Policy](ORGANIZATION_POLICY.md) for every field. Keep the
 file root-owned and `0644`: a `0600` policy cannot be read by the user
 services and stops them from starting.
+
+Managed deployment acceptance must include a live sandbox check after starting
+the selected user service. Run it as the desktop user from that user's session,
+outside the daemon sandbox. A degraded or failed result returns a nonzero exit
+code and must fail the deployment:
+
+```yaml
+- name: Require hardened WayExpand sandbox readiness
+  ansible.builtin.command:
+    argv: [wayexpand, doctor, --security, --profile, hardened, --json]
+  become: true
+  become_user: "{{ item.user }}"
+  environment:
+    XDG_RUNTIME_DIR: "{{ item.runtime_dir }}"
+    DBUS_SESSION_BUS_ADDRESS: "unix:path={{ item.runtime_dir }}/bus"
+  loop: "{{ wayexpand_active_sessions | default([]) }}"
+  loop_control:
+    label: "{{ item.user }}"
+  changed_when: false
+```
+
+`require_sensitive_focus = true` is enforced only with `safe_mode = true` and
+causes capture routes without a sensitive-field signal, including evdev, to be
+refused. `allowed_backends` controls insertion backends and does not identify
+the evdev capture source, so it is not a substitute for this requirement.
+Evdev cannot distinguish password fields or password-manager prompts.
 
 ## Example Snippet Files
 

@@ -188,12 +188,12 @@ impl Strings {
             (Language::Indonesian, true, true) => "sadar kolom sensitif · penggantian atomik",
             (Language::English, true, false) => "sensitive-field aware · non-atomic replacement",
             (Language::Indonesian, true, false) => "sadar kolom sensitif · penggantian non-atomik",
-            (Language::English, false, true) => "global keyboard visibility · atomic replacement",
+            (Language::English, false, true) => "no sensitive-field detection · atomic replacement",
             (Language::Indonesian, false, true) => {
                 "visibilitas papan ketik global · penggantian atomik"
             }
             (Language::English, false, false) => {
-                "global keyboard visibility · non-atomic replacement"
+                "no sensitive-field detection · non-atomic replacement"
             }
             (Language::Indonesian, false, false) => {
                 "visibilitas papan ketik global · penggantian non-atomik"
@@ -904,7 +904,9 @@ impl Strings {
 
     pub fn onboarding_evdev_setup(&self) -> &'static str {
         match self.lang {
-            Language::English => "Enable raw keyboard capture — advanced…",
+            Language::English => {
+                "Enable raw keyboard capture — no password-field detection (advanced)…"
+            }
             Language::Indonesian => "Aktifkan tangkapan papan ketik mentah — lanjutan…",
             Language::German => "Rohe Tastaturerfassung aktivieren — erweitert…",
         }
@@ -912,7 +914,7 @@ impl Strings {
 
     pub fn evdev_setup_title(&self) -> &'static str {
         match self.lang {
-            Language::English => "Enable raw keyboard capture — advanced",
+            Language::English => "Enable raw keyboard capture — no password-field detection",
             Language::Indonesian => "Aktifkan tangkapan papan ketik mentah — lanjutan",
             Language::German => "Rohe Tastaturerfassung aktivieren — erweitert",
         }
@@ -920,7 +922,7 @@ impl Strings {
 
     pub fn evdev_setup_warning(&self) -> &'static str {
         match self.lang {
-            Language::English => "Works in more applications, but can observe password-field typing because this mode has no sensitive-field signal. This is an explicit opt-in. Device permissions are a separate system-wide change and are never made by this GUI.",
+            Language::English => "Evdev reads global keyboard input and cannot detect password fields, password-manager prompts, or other sensitive fields. Keystrokes in those fields may be observed. Use an input-method route when you need sensitive-field protection. This is an explicit opt-in. Device permissions are a separate system-wide change and are never made by this GUI.",
             Language::Indonesian => "Berfungsi di lebih banyak aplikasi, tetapi dapat mengamati pengetikan di kolom kata sandi karena mode ini tidak memiliki sinyal kolom sensitif. Ini adalah pilihan eksplisit. Izin perangkat merupakan perubahan terpisah di seluruh sistem dan tidak pernah dilakukan oleh GUI ini.",
             Language::German => "Funktioniert in mehr Anwendungen, kann aber Eingaben in Passwortfeldern beobachten, weil dieser Modus kein Signal für sensible Felder hat. Dies ist eine ausdrückliche Zustimmung. Geräteberechtigungen sind eine separate systemweite Änderung und werden von dieser GUI niemals vorgenommen.",
         }
@@ -928,7 +930,7 @@ impl Strings {
 
     pub fn evdev_setup_acknowledge(&self) -> &'static str {
         match self.lang {
-            Language::English => "I understand the raw-input and password-field limitations",
+            Language::English => "I understand evdev cannot detect or protect sensitive fields",
             Language::Indonesian => "Saya memahami batasan masukan mentah dan kolom kata sandi",
             Language::German => "Ich verstehe die Einschränkungen bei Rohdaten und Passwortfeldern",
         }

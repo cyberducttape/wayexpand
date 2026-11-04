@@ -165,8 +165,8 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "Inspect policy provenance or fail CI when restrictions are not enforced",
             ),
             (
-                "doctor --security [--json] [config]",
-                "Inspect the effective sandbox of running WayExpand services",
+                "doctor --security [--profile workstation|hardened|strict] [--json] [config]",
+                "Inspect sandbox readiness against an explicit protection profile",
             ),
             (
                 "doctor --certify [--json]",
