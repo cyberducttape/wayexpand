@@ -56,12 +56,15 @@ re-validates (rolling back an invalid merge), and pushes. A synced library that
 contains command-backed snippets is refused unless \fB--allow-executable\fR
 names the reviewed commit with \fB--approved-revision\fR.
 .TP
-.B library add URL [--name NAME] [--branch BRANCH] [--json] | list [--json] | path NAME | search NAME [QUERY] [--json] | remove NAME
+.B library add URL [--name NAME] [--branch BRANCH] [--approved-revision FULL_COMMIT] [--json] | list [--json] | path NAME | search NAME [QUERY] [--json] | remove NAME
 Manage offline Git sources for signed snippet-pack catalogs. Adding a source
 does not install packs. Search reports signer status using the configured
 trusted signer policy; review packs and install them explicitly. HTTPS, SSH,
 and absolute file URLs are supported. Embedded HTTPS credentials are refused.
-Repository updates are currently managed through the user's Git workflow.
+The optional full commit ID pins the source checkout to the exact revision
+selected during review. Pack signatures remain the content-authentication
+mechanism; a commit ID alone does not establish signer trust. Updates remain
+explicit through the user's Git workflow.
 .TP
 .B stats [--json] [--days N] [--clear] [CONFIG]
 Show local usage statistics: recent expansions, keystrokes avoided, most-used

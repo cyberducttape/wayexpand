@@ -64,11 +64,15 @@ impl LibraryBudgets {
 }
 
 pub(crate) fn library_command(args: Args) -> Result<()> {
-    const USAGE: &str = "usage: wayexpand library add <git-url> [--name NAME] [--branch BRANCH] [--json]\n       wayexpand library list [--json]\n       wayexpand library path <name>\n       wayexpand library search <name> [query] [--json]\n       wayexpand library remove <name>";
+    const USAGE: &str = "usage: wayexpand library add <git-url> [--name NAME] [--branch BRANCH] [--approved-revision FULL_COMMIT] [--json]\n       wayexpand library list [--json]\n       wayexpand library path <name>\n       wayexpand library search <name> [query] [--json]\n       wayexpand library remove <name>";
     let mut rest: Vec<String> = args.collect();
     let requested_json = take_json_flag(&mut rest);
     let branch = take_option(&mut rest, "--branch")?;
+    let revision = take_option(&mut rest, "--approved-revision")?;
     let name = take_option(&mut rest, "--name")?;
+    if let Some(revision) = &revision {
+        validate_requested_revision(revision)?;
+    }
     if let Some(name) = &name {
         config::ensure_pack_id(name)?;
     }
@@ -83,8 +87,9 @@ pub(crate) fn library_command(args: Args) -> Result<()> {
                 })?,
             };
             config::ensure_pack_id(&name)?;
+            let revision_pinned = revision.is_some();
             let (path, revision, selected_branch, pack_count) =
-                add_repository(remote, &name, branch.as_deref())?;
+                add_repository(remote, &name, branch.as_deref(), revision.as_deref())?;
             if requested_json {
                 println!(
                     "{}",
@@ -93,6 +98,7 @@ pub(crate) fn library_command(args: Args) -> Result<()> {
                         "path": path,
                         "branch": selected_branch,
                         "revision": revision,
+                        "pinned": revision_pinned,
                         "pack_count": pack_count,
                         "installed": false,
                     })
@@ -101,22 +107,34 @@ pub(crate) fn library_command(args: Args) -> Result<()> {
                 println!(
                     "Added {name} at {revision} ({selected_branch}); {pack_count} valid pack(s) available offline."
                 );
+                if revision_pinned {
+                    println!("The catalog is pinned to the approved commit {revision}.");
+                }
                 println!("Review with `wayexpand library search {name}`.");
                 println!("No pack was installed or activated.");
             }
             Ok(())
         }
-        Some("list") if rest.len() == 1 && branch.is_none() && name.is_none() => {
+        Some("list")
+            if rest.len() == 1 && branch.is_none() && revision.is_none() && name.is_none() =>
+        {
             list_repositories(requested_json)
         }
-        Some("path") if rest.len() == 2 && branch.is_none() && name.is_none() => {
+        Some("path")
+            if rest.len() == 2 && branch.is_none() && revision.is_none() && name.is_none() =>
+        {
             config::ensure_pack_id(&rest[1])?;
             let path = library_root()?.join(&rest[1]);
             verify_repository_directory(&path)?;
             println!("{}", path.display());
             Ok(())
         }
-        Some("search") if (2..=3).contains(&rest.len()) && branch.is_none() && name.is_none() => {
+        Some("search")
+            if (2..=3).contains(&rest.len())
+                && branch.is_none()
+                && revision.is_none()
+                && name.is_none() =>
+        {
             config::ensure_pack_id(&rest[1])?;
             let path = library_root()?.join(&rest[1]);
             verify_repository_directory(&path)?;
@@ -135,7 +153,9 @@ pub(crate) fn library_command(args: Args) -> Result<()> {
             let query = rest.get(2).map(String::as_str).unwrap_or_default();
             config::search_pack_catalog(&path, query, signers, requested_json)
         }
-        Some("remove") if rest.len() == 2 && branch.is_none() && name.is_none() => {
+        Some("remove")
+            if rest.len() == 2 && branch.is_none() && revision.is_none() && name.is_none() =>
+        {
             if requested_json {
                 usage_bail!("library remove does not support --json");
             }
@@ -160,9 +180,10 @@ fn add_repository(
     remote: &str,
     name: &str,
     branch: Option<&str>,
+    revision: Option<&str>,
 ) -> Result<(PathBuf, String, String, usize)> {
     let root = library_root()?;
-    add_repository_at(&root, remote, name, branch)
+    add_repository_at(&root, remote, name, branch, revision)
 }
 
 fn add_repository_at(
@@ -170,6 +191,7 @@ fn add_repository_at(
     remote: &str,
     name: &str,
     branch: Option<&str>,
+    revision: Option<&str>,
 ) -> Result<(PathBuf, String, String, usize)> {
     config::prepare_private_directory(root)?;
     let target = root.join(name);
@@ -238,6 +260,52 @@ fn add_repository_at(
     }
     if String::from_utf8_lossy(&output.stderr).contains("filtering not recognized") {
         bail!("library server did not honor the filtered clone request");
+    }
+
+    if let Some(revision) = revision {
+        let revision = revision.to_ascii_lowercase();
+        let fetch = [
+            "fetch",
+            "--quiet",
+            "--depth=1",
+            "--no-tags",
+            "--no-recurse-submodules",
+            "--filter=blob:none",
+            "origin",
+            revision.as_str(),
+        ];
+        let output = sync::git_library_output_bounded(
+            &stage,
+            &fetch,
+            None,
+            git_limits(budgets.network_bytes),
+        )?;
+        if !output.status.success()
+            || String::from_utf8_lossy(&output.stderr).contains("filtering not recognized")
+        {
+            bail!(
+                "could not fetch approved catalog revision: {}",
+                sync::redact_library_diagnostic(String::from_utf8_lossy(&output.stderr).trim())
+            );
+        }
+        let fetched = sync::git_library_ok(&stage, &["rev-parse", "FETCH_HEAD"])?;
+        if !fetched.eq_ignore_ascii_case(&revision) {
+            bail!("Git server returned a different commit than the approved revision");
+        }
+        if sync::git_library_ok(&stage, &["cat-file", "-t", "FETCH_HEAD"])? != "commit" {
+            bail!("--approved-revision must identify a Git commit");
+        }
+        let branch = sync::git_library_ok(&stage, &["branch", "--show-current"])?;
+        if branch.is_empty() || branch == "HEAD" {
+            bail!("pinned catalog clone did not select a local branch");
+        }
+        sync::git_library_ok(
+            &stage,
+            &["update-ref", &format!("refs/heads/{branch}"), &revision],
+        )?;
+        if repository_pack_bytes(&stage)? > budgets.network_bytes {
+            bail!("library download exceeds the network budget");
+        }
     }
 
     let entries = validate_repository_tree(&stage, git_limits(budgets.network_bytes))?;
@@ -554,6 +622,14 @@ fn validate_object_id(revision: &str) -> Result<()> {
     Ok(())
 }
 
+fn validate_requested_revision(revision: &str) -> Result<()> {
+    if !matches!(revision.len(), 40 | 64) || !revision.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        bail!("--approved-revision requires a full 40- or 64-character Git commit ID");
+    }
+    Ok(())
+}
+
 fn library_name_from_remote(remote: &str) -> Option<String> {
     let path = remote
         .split_once("://")
@@ -760,7 +836,7 @@ mod tests {
         let remote = format!("file://{}", repository.display());
         let root = tree.0.join("libraries");
         let (path, revision, branch, count) =
-            add_repository_at(&root, &remote, "community", Some("main")).unwrap();
+            add_repository_at(&root, &remote, "community", Some("main"), None).unwrap();
 
         assert!(path.join(".git").is_dir());
         assert_eq!(branch, "main");
@@ -781,12 +857,55 @@ mod tests {
     }
 
     #[test]
+    fn add_pins_a_reviewed_full_commit_instead_of_a_moving_branch_tip() {
+        let tree = TestTree::new("pinned-revision");
+        let repository = source_repository(&tree.0, false);
+        let approved = Command::new("git")
+            .arg("-C")
+            .arg(&repository)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        assert!(approved.status.success());
+        let approved = String::from_utf8(approved.stdout)
+            .unwrap()
+            .trim()
+            .to_owned();
+        git(
+            &repository,
+            &[
+                "commit",
+                "--quiet",
+                "--allow-empty",
+                "-m",
+                "later catalog change",
+            ],
+        );
+        let root = tree.0.join("libraries");
+        let remote = format!("file://{}", repository.display());
+        let (path, revision, branch, count) =
+            add_repository_at(&root, &remote, "pinned", Some("main"), Some(&approved)).unwrap();
+
+        assert_eq!(revision, approved);
+        assert_eq!(branch, "main");
+        assert!(count > 0);
+        assert_eq!(
+            sync::git_library_ok(&path, &["rev-parse", "HEAD"]).unwrap(),
+            approved
+        );
+        assert_ne!(
+            sync::git_library_ok(&repository, &["rev-parse", "HEAD"]).unwrap(),
+            revision
+        );
+    }
+
+    #[test]
     fn add_rejects_symlinks_before_checkout_and_cleans_staging() {
         let tree = TestTree::new("symlink");
         let repository = source_repository(&tree.0, true);
         let remote = format!("file://{}", repository.display());
         let root = tree.0.join("libraries");
-        let error = add_repository_at(&root, &remote, "unsafe", Some("main"))
+        let error = add_repository_at(&root, &remote, "unsafe", Some("main"), None)
             .expect_err("symlink tree entries must be rejected");
         assert!(error.to_string().contains("symlink"));
         assert!(fs::read_dir(&root).unwrap().next().is_none());
@@ -807,7 +926,7 @@ mod tests {
         git(&repository, &["commit", "--quiet", "-m", "oversized blob"]);
         let root = tree.0.join("libraries");
         let remote = format!("file://{}", repository.display());
-        let error = add_repository_at(&root, &remote, "oversized", Some("main"))
+        let error = add_repository_at(&root, &remote, "oversized", Some("main"), None)
             .expect_err("oversized blobs must be rejected before materialization");
         assert!(
             error.to_string().contains("oversized") || error.to_string().contains("blob"),
@@ -838,7 +957,7 @@ mod tests {
         let root = tree.0.join("libraries");
         let remote = format!("file://{}", repository.display());
         let (path, _, _, count) =
-            add_repository_at(&root, &remote, "rootpack", Some("main")).unwrap();
+            add_repository_at(&root, &remote, "rootpack", Some("main"), None).unwrap();
         assert_eq!(count, 1);
         assert!(path.join("wayexpand-pack.toml").is_file());
         assert!(!path.join("packs").exists());
@@ -851,5 +970,13 @@ mod tests {
         assert!(validate_remote("ext::sh -c evil").is_err());
         assert!(validate_remote("ssh://git@example.invalid/team/catalog.git").is_ok());
         assert!(validate_remote("git@example.invalid:team/catalog.git").is_ok());
+    }
+
+    #[test]
+    fn approved_library_revisions_must_be_full_object_ids() {
+        assert!(validate_requested_revision(&"a".repeat(40)).is_ok());
+        assert!(validate_requested_revision(&"A".repeat(64)).is_ok());
+        assert!(validate_requested_revision("0123456789abcdef").is_err());
+        assert!(validate_requested_revision(&format!("{}g", "a".repeat(39))).is_err());
     }
 }
