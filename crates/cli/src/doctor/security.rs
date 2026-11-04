@@ -273,6 +273,7 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
     let capture_source = daemon["source"].as_str().unwrap_or("unknown");
     let sensitive_field_detection = daemon["capture_sensitive_focus"].as_bool();
     let evdev_privacy = capture_source == "evdev";
+    let route = active_route_summary(&daemon);
     let report = serde_json::json!({
         "schema": 2,
         "profile": profile.name(),
@@ -280,6 +281,7 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         "healthy": healthy,
         "daemon_pid": sandbox.get("pid"),
         "daemon": sandbox,
+        "active_route": route,
         "input_privacy": {
             "source": capture_source,
             "sensitive_field_detection": sensitive_field_detection,
@@ -304,6 +306,21 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         println!("Protection profile: {}", profile.name());
         println!("Readiness: {}", readiness.to_ascii_uppercase());
         println!("Daemon PID: {}", report["daemon_pid"]);
+        println!(
+            "Active route: source={}, backend={}, atomic_replace={}, replacement_assurance={}, compatibility_mode={}, focus_assurance={}",
+            route["source"].as_str().unwrap_or("unknown"),
+            route["backend"].as_str().unwrap_or("unknown"),
+            route["atomic_replace"].as_bool().unwrap_or(false),
+            route["replacement_assurance"].as_str().unwrap_or("unknown"),
+            route["compatibility_mode"].as_str().unwrap_or("unknown"),
+            route["focus_assurance"].as_str().unwrap_or("unknown"),
+        );
+        println!(
+            "Automatic replacement mode: {}",
+            route["automatic_replacement_mode"]
+                .as_str()
+                .unwrap_or("unavailable")
+        );
         if evdev_privacy {
             println!("Privacy: evdev cannot identify password or other sensitive fields; keyboard input may be observed while capture is active.");
         }
@@ -338,6 +355,28 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
             profile.name()
         )
     }
+}
+
+fn active_route_summary(daemon: &serde_json::Value) -> serde_json::Value {
+    let atomic = daemon["inject_atomic_replace"].as_bool();
+    let compatibility_mode = daemon["compatibility_mode"].as_str();
+    let automatic_replacement_mode = match (atomic, compatibility_mode) {
+        (Some(true), _) => "atomic-capability-reported",
+        (Some(false), Some("off")) => "refused-by-default",
+        (Some(false), Some(_)) => "experimental-compatibility-override",
+        _ => "unknown",
+    };
+    serde_json::json!({
+        "source": daemon.get("source").cloned().unwrap_or(serde_json::Value::Null),
+        "backend": daemon.get("backend").cloned().unwrap_or(serde_json::Value::Null),
+        "route_id": daemon.get("route_id").cloned().unwrap_or(serde_json::Value::Null),
+        "atomic_replace": atomic,
+        "replacement_assurance": daemon.get("replacement_assurance").cloned().unwrap_or(serde_json::Value::Null),
+        "compatibility_mode": daemon.get("compatibility_mode").cloned().unwrap_or(serde_json::Value::Null),
+        "focus_assurance": daemon.get("focus_assurance").cloned().unwrap_or(serde_json::Value::Null),
+        "sensitive_field_detection": daemon.get("capture_sensitive_focus").cloned().unwrap_or(serde_json::Value::Null),
+        "automatic_replacement_mode": automatic_replacement_mode,
+    })
 }
 
 fn required_checks(profile: ProtectionProfile) -> &'static [&'static str] {
@@ -506,5 +545,35 @@ mod tests {
             readiness_for(ProtectionProfile::Workstation, &optional_failure, &[]),
             "degraded"
         );
+    }
+
+    #[test]
+    fn route_report_identifies_non_atomic_compatibility_override() {
+        let route = active_route_summary(&serde_json::json!({
+            "source": "evdev",
+            "backend": "libei",
+            "route_id": "kde-evdev-libei",
+            "inject_atomic_replace": false,
+            "replacement_assurance": "focus-tracked-best-effort",
+            "compatibility_mode": "untracked-focus",
+            "focus_assurance": "tracker",
+            "capture_sensitive_focus": false,
+        }));
+
+        assert_eq!(route["source"], "evdev");
+        assert_eq!(route["backend"], "libei");
+        assert_eq!(route["atomic_replace"], false);
+        assert_eq!(
+            route["automatic_replacement_mode"],
+            "experimental-compatibility-override"
+        );
+        assert_eq!(route["sensitive_field_detection"], false);
+    }
+
+    #[test]
+    fn route_report_defaults_to_unknown_when_no_daemon_is_connected() {
+        let route = active_route_summary(&serde_json::Value::Null);
+        assert_eq!(route["automatic_replacement_mode"], "unknown");
+        assert!(route["source"].is_null());
     }
 }

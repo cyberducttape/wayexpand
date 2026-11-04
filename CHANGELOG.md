@@ -14,7 +14,10 @@ All notable changes to WayExpand are documented here.
   machine-readable pass/degraded/fail readiness and per-check enforcement
   metadata. Document the hardened live sandbox check as a managed deployment
   gate. Make evdev's inability to detect sensitive fields explicit in GUI
-  setup, diagnostics, fleet guidance, and the security readiness report.
+  setup, diagnostics, fleet guidance, and the security readiness report. Include
+  the active input route's replacement guarantee and compatibility override in
+  security diagnostics so a degraded host shows when automatic replacement is
+  experimental.
 - Give the focused HTTP 503 one-command helpers a distinct `;503-*` prefix so they do not delay the flagship `;http503` trigger.
 
 - Fix the reviewed-pack CI fixture harness to compare interactive-form output
