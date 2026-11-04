@@ -186,6 +186,26 @@ does not make the command safe to execute or authorize execution. WayExpand
 inserts the completed command for review and does not press Enter. The form
 shows a live preview of the exact field-only text that will be inserted.
 
+## Opt-in terminal context
+
+An explicitly invoked `wayexpand context render <trigger>` can render a static
+snippet with a fresh shell integration report or context supplied on the
+command line. Supported values are `{{context:shell}}`,
+`{{context:remote_host}}`, `{{context:environment}}`,
+`{{context:project_root}}`, `{{context:kubernetes_context}}`, and
+`{{context:container}}`. For a context value used as a command argument, use
+`{{shellq:context:remote_host}}` (replace the key as needed); this quotes one
+POSIX shell word for Bash, Zsh, or Fish. The unquoted forms are for display in
+comments or prose only.
+
+Context-dependent templates fail closed when context is missing or expired.
+The normal desktop expansion engine does not guess a focused terminal's shell,
+SSH target, or Kubernetes identity. `context render` accepts only static text
+snippets, validates their form fields, prints a review preview, and never types,
+pastes, or executes it. Multi-line output is text for review; do not paste a
+whole block into an interactive shell that may execute pasted newlines. Select
+individual reviewed commands and run them manually in the intended session.
+
 Kubernetes fields support `validate=dns-label` for namespaces and container
 names, `validate=kubernetes-name` for pod names, and
 `validate=kubernetes-duration` for positive Go-style durations up to 30 days

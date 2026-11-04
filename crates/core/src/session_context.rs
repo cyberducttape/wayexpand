@@ -47,9 +47,9 @@ impl SessionContextReport {
             ),
             (self.container.as_deref(), 128, "container"),
         ] {
-            if value
-                .is_some_and(|value| value.len() > maximum || value.chars().any(char::is_control))
-            {
+            if value.is_some_and(|value| {
+                value.is_empty() || value.len() > maximum || value.chars().any(char::is_control)
+            }) {
                 return Err(match name {
                     "shell" => "shell value is too long or contains control characters",
                     "remote host" => "remote host is too long or contains control characters",
@@ -75,5 +75,43 @@ impl SessionContextReport {
             return Err("context report exceeds the control message size limit");
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn report() -> SessionContextReport {
+        SessionContextReport {
+            terminal_id: "tty-1-2".into(),
+            session_id: "0123456789abcdef0123456789abcdef".into(),
+            shell: Some("bash".into()),
+            remote_host: Some("web-staging".into()),
+            environment: Some("staging".into()),
+            ..SessionContextReport::default()
+        }
+    }
+
+    #[test]
+    fn explicit_shell_and_remote_context_validates() {
+        assert_eq!(report().validate(), Ok(()));
+    }
+
+    #[test]
+    fn empty_or_control_bearing_context_labels_are_rejected() {
+        let mut invalid = report();
+        invalid.environment = Some(String::new());
+        assert_eq!(
+            invalid.validate(),
+            Err("environment is too long or contains control characters")
+        );
+
+        let mut invalid = report();
+        invalid.remote_host = Some("prod\nwrong-host".into());
+        assert_eq!(
+            invalid.validate(),
+            Err("remote host is too long or contains control characters")
+        );
     }
 }

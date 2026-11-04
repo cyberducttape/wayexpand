@@ -27,6 +27,24 @@ struct TestCase {
     app_id: Option<String>,
     #[serde(default)]
     values: BTreeMap<String, String>,
+    #[serde(default)]
+    context: Option<TestContext>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TestContext {
+    shell: String,
+    #[serde(default)]
+    remote_host: Option<String>,
+    #[serde(default)]
+    environment: Option<String>,
+    #[serde(default)]
+    project_root: Option<String>,
+    #[serde(default)]
+    kubernetes_context: Option<String>,
+    #[serde(default)]
+    container: Option<String>,
 }
 
 pub(crate) fn pack_quality_command(action: &str, args: Vec<String>) -> Result<()> {
@@ -536,6 +554,11 @@ fn render_case(
                 error.safe_summary()
             ))
         })?;
+        if let Some(context) = &case.context {
+            let mut template_context = config.template_context(None);
+            template_context.session_context = Some(test_session_context(context));
+            engine.set_template_context(template_context);
+        }
         if let Some(app_id) = case.app_id.as_deref() {
             engine.set_current_window(Some(wayexpand_core::WindowContext {
                 app_id: Some(app_id.to_owned()),
@@ -575,10 +598,26 @@ fn render_case(
         bail!("fixture includes a value for an unknown form field");
     }
     let mut context: TemplateContext = config.template_context(None);
+    if let Some(session) = &case.context {
+        context.session_context = Some(test_session_context(session));
+    }
     context.fields = Arc::new(form_values);
     render_template_with_cursor(&expansion.replacement, &context)
         .map(|(rendered, _)| rendered)
         .map_err(|error| config_error(format!("template render failed: {error}")))
+}
+
+fn test_session_context(context: &TestContext) -> wayexpand_core::SessionContextReport {
+    wayexpand_core::SessionContextReport {
+        terminal_id: "tty-1-2".into(),
+        session_id: "0123456789abcdef0123456789abcdef".into(),
+        shell: Some(context.shell.clone()),
+        remote_host: context.remote_host.clone(),
+        environment: context.environment.clone(),
+        project_root: context.project_root.clone(),
+        kubernetes_context: context.kubernetes_context.clone(),
+        container: context.container.clone(),
+    }
 }
 
 fn field_default(kind: &wayexpand_core::FormFieldKind) -> Option<String> {
