@@ -427,6 +427,15 @@ impl GuiApp {
                         color,
                         RichText::new(self.strings.trace_completion(&trace.completion)).strong(),
                     );
+                    if trace.progress_tracked {
+                        ui.label(
+                            RichText::new(
+                                self.strings
+                                    .trace_progress(trace.erased_units, trace.inserted_units),
+                            )
+                            .small(),
+                        );
+                    }
                     ui.label(
                         RichText::new(format!("{} · {}", trace.backend, trace.at_unix))
                             .small()

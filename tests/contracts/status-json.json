@@ -1,12 +1,17 @@
 {
   "schema_version": 11,
-  "daemon_control_schema": 19,
+  "daemon_control_schema": 22,
   "fields": {
     "response": "string",
     "source": "string",
     "backend": "string",
     "route_id": "string",
     "backend_mode": "string",
+    "backend_shutdown_workers_active": "integer",
+    "backend_shutdown_workers_started_total": "integer",
+    "backend_shutdown_workers_acknowledged_total": "integer",
+    "backend_shutdown_workers_timed_out_total": "integer",
+    "backend_shutdown_workers_failed_total": "integer",
     "status_schema": "integer",
     "daemon_commit": "string",
     "capture_sensitive_focus": "boolean",
@@ -99,6 +104,15 @@
     "memory_high_water_kib": "integer",
     "injection_latency_mean_us": "integer",
     "recent_expansion_failures": "array",
-    "output_partial_total": "integer"
+    "output_partial_total": "integer",
+    "route_available": "boolean",
+    "matching_available": "boolean",
+    "command_worker_threads": "integer",
+    "hotkey_worker_threads": "integer",
+    "suppressed_expansions_total": "integer",
+    "input_connection_failures_total": "integer",
+    "output_connection_failures_total": "integer",
+    "recent_expansion_outcomes": "array",
+    "partial_write_total": "integer"
   }
 }

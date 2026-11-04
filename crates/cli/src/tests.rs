@@ -637,9 +637,11 @@ fn status_json_matches_documented_stable_contract() {
          backend=input-method-v2\n\
          route_id=input-method-v2\n\
          backend_mode=unknown\n\
-         status_schema=19\n\
+         status_schema=22\n\
          daemon_commit=test-commit\n\
          state=connected\n\
+         route_available=true\n\
+         matching_available=true\n\
          paused=false\n\
          config=/home/user/.config/wayexpand/expansions.toml\n\
          config_state=ok\n\
@@ -660,6 +662,8 @@ fn status_json_matches_documented_stable_contract() {
          inject_insertion_mode=ei_text\n\
          inject_max_text_chars=0\n\
          inject_expected_throughput_chars_per_sec=0\n\
+         command_worker_threads=0\n\
+         hotkey_worker_threads=0\n\
          command_queue_depth=0\n\
          command_in_flight=0\n\
          expansion_command_queue_depth=0\n\
@@ -701,7 +705,13 @@ fn status_json_matches_documented_stable_contract() {
          output_uncertain_total=1\n\
          output_retiring_workers=0\n\
          output_stalled_ms=0\n\
+         backend_shutdown_workers_active=0\n\
+         backend_shutdown_workers_started_total=0\n\
+         backend_shutdown_workers_acknowledged_total=0\n\
+         backend_shutdown_workers_timed_out_total=0\n\
+         backend_shutdown_workers_failed_total=0\n\
          output_partial_total=0\n\
+         partial_write_total=0\n\
          insertion_assurance=verified\n\
          replacement_assurance=verified\n\
          compatibility_mode=off\n\
@@ -711,8 +721,12 @@ fn status_json_matches_documented_stable_contract() {
          output_unsupported_total=7\n\
          output_last_unsupported=unicode\n\
          recent_expansion_failures=[]\n\
+         recent_expansion_outcomes=[]\n\
+         suppressed_expansions_total=0\n\
          output_reconnect_total=1\n\
          input_reconnect_total=2\n\
+         input_connection_failures_total=0\n\
+         output_connection_failures_total=0\n\
          input_overflow_total=3\n\
          evdev_quarantined_events_total=7\n\
          control_rejected_total=4\n\
@@ -759,6 +773,13 @@ fn status_json_matches_documented_stable_contract() {
     assert_eq!(value["backend"], "input-method-v2");
     assert_eq!(value["backend_mode"], "unknown");
     assert_eq!(value["state"], "connected");
+    assert_eq!(value["route_available"], true);
+    assert_eq!(value["matching_available"], true);
+    assert_eq!(value["suppressed_expansions_total"], 0);
+    assert_eq!(value["input_connection_failures_total"], 0);
+    assert_eq!(value["output_connection_failures_total"], 0);
+    assert_eq!(value["command_worker_threads"], 0);
+    assert_eq!(value["hotkey_worker_threads"], 0);
     assert_eq!(value["paused"], false);
     assert_eq!(
         value["config"],
@@ -909,8 +930,14 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "output_health",
             "output_uncertain_total",
             "output_partial_total",
+            "partial_write_total",
             "output_retiring_workers",
             "output_stalled_ms",
+            "backend_shutdown_workers_active",
+            "backend_shutdown_workers_started_total",
+            "backend_shutdown_workers_acknowledged_total",
+            "backend_shutdown_workers_timed_out_total",
+            "backend_shutdown_workers_failed_total",
             "insertion_assurance",
             "compatibility_mode",
             "focus_assurance",
@@ -1343,9 +1370,19 @@ fn metrics_export_status_counters_without_content() {
         "config_state": "ok",
         "output_health": "ok",
         "output_partial_total": 2,
+        "partial_write_total": 2,
+        "route_available": true,
+        "matching_available": true,
         "paused": false,
         "window_tracker_connected": true,
         "command_queue_depth": 2,
+        "command_worker_threads": 1,
+        "hotkey_worker_threads": 1,
+        "connect_workers_active": 1,
+        "clipboard_worker_threads": 1,
+        "suppressed_expansions_total": 4,
+        "input_connection_failures_total": 5,
+        "output_connection_failures_total": 6,
         "output_reconnect_total": 3,
         "future_counter_total": "7",
         "config": "/home/user/secret-project/expansions.toml",
@@ -1368,9 +1405,19 @@ fn metrics_export_status_counters_without_content() {
         "wayexpand_daemon_build_matches 1",
         "wayexpand_daemon_route_info{route_id=\"kde-evdev-libei\",source=\"evdev\",backend=\"libei\",state=\"connected\"} 1",
         "wayexpand_daemon_command_queue_depth 2",
+        "wayexpand_daemon_route_available 1",
+        "wayexpand_daemon_matching_available 1",
+        "wayexpand_daemon_command_worker_threads 1",
+        "wayexpand_daemon_hotkey_worker_threads 1",
+        "wayexpand_daemon_connection_workers_active 1",
+        "wayexpand_daemon_clipboard_worker_threads 1",
+        "wayexpand_daemon_suppressed_expansions_total 4",
+        "wayexpand_daemon_input_connection_failures_total 5",
+        "wayexpand_daemon_output_connection_failures_total 6",
         "# TYPE wayexpand_daemon_output_reconnect_total counter",
         "wayexpand_daemon_output_reconnect_total 3",
         "wayexpand_daemon_output_partial_insertions_total 2",
+        "wayexpand_daemon_partial_write_total 2",
         "wayexpand_daemon_future_counter_total 7",
         "wayexpand_config_valid 1",
         "wayexpand_config_expansions 10",

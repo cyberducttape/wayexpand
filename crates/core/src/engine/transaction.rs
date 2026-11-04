@@ -4,7 +4,7 @@
 //! for expansion results that need to maintain undo semantics across async completion.
 
 use super::{ExpansionEngine, ExpansionResult};
-use crate::{InjectorCapabilities, InjectorError, SensitiveText, TextInjector};
+use crate::{InjectorCapabilities, InjectorError, OutputProgress, SensitiveText, TextInjector};
 
 /// Result of the multi-stage replacement transaction.
 ///
@@ -52,6 +52,7 @@ impl TransactionPhase {
 pub struct TransactionReport {
     pub outcome: TransactionOutcome,
     pub phases: Vec<TransactionPhase>,
+    pub progress: OutputProgress,
 }
 
 struct TransactionJournal {
@@ -89,7 +90,11 @@ impl TransactionJournal {
         self.phases.push(next);
     }
 
-    fn finish(mut self, outcome: TransactionOutcome) -> TransactionReport {
+    fn finish(
+        mut self,
+        outcome: TransactionOutcome,
+        progress: OutputProgress,
+    ) -> TransactionReport {
         let terminal = match outcome {
             TransactionOutcome::Applied
             | TransactionOutcome::AppliedWithCursorPositionFailure { .. } => {
@@ -103,6 +108,7 @@ impl TransactionJournal {
         TransactionReport {
             outcome,
             phases: self.phases,
+            progress,
         }
     }
 }
@@ -305,9 +311,13 @@ impl ExpansionEngine {
         injector: &mut I,
         result: &ExpansionResult,
     ) -> TransactionReport {
+        injector.reset_output_progress();
         let mut journal = TransactionJournal::prepared();
         if let Err(source) = Self::preflight_output(injector, result) {
-            return journal.finish(TransactionOutcome::NotApplied { source });
+            return journal.finish(
+                TransactionOutcome::NotApplied { source },
+                injector.output_progress(),
+            );
         }
         journal.advance(TransactionPhase::Validated);
         journal.advance(TransactionPhase::Applying);
@@ -327,7 +337,7 @@ impl ExpansionEngine {
                     } else {
                         TransactionOutcome::UnknownPartialFailure { source }
                     };
-                    return journal.finish(outcome);
+                    return journal.finish(outcome, injector.output_progress());
                 }
             }
             Some(character) => {
@@ -350,7 +360,7 @@ impl ExpansionEngine {
                     } else {
                         TransactionOutcome::UnknownPartialFailure { source }
                     };
-                    return journal.finish(outcome);
+                    return journal.finish(outcome, injector.output_progress());
                 }
             }
         }
@@ -361,11 +371,13 @@ impl ExpansionEngine {
             .filter(|offset| *offset > 0)
         {
             if let Err(source) = injector.move_cursor_left(offset) {
-                return journal
-                    .finish(TransactionOutcome::AppliedWithCursorPositionFailure { source });
+                return journal.finish(
+                    TransactionOutcome::AppliedWithCursorPositionFailure { source },
+                    injector.output_progress(),
+                );
             }
         }
-        journal.finish(TransactionOutcome::Applied)
+        journal.finish(TransactionOutcome::Applied, injector.output_progress())
     }
 }
 
@@ -387,7 +399,9 @@ mod journal_tests {
         committed.advance(TransactionPhase::Validated);
         committed.advance(TransactionPhase::Applying);
         assert_eq!(
-            committed.finish(TransactionOutcome::Applied).phases,
+            committed
+                .finish(TransactionOutcome::Applied, OutputProgress::default())
+                .phases,
             vec![
                 TransactionPhase::Prepared,
                 TransactionPhase::Validated,
@@ -401,7 +415,10 @@ mod journal_tests {
         failed.advance(TransactionPhase::Applying);
         assert_eq!(
             failed
-                .finish(TransactionOutcome::NotApplied { source: error() })
+                .finish(
+                    TransactionOutcome::NotApplied { source: error() },
+                    OutputProgress::default()
+                )
                 .phases
                 .last(),
             Some(&TransactionPhase::Failed)
@@ -410,16 +427,20 @@ mod journal_tests {
         let mut uncertain = TransactionJournal::prepared();
         uncertain.advance(TransactionPhase::Validated);
         uncertain.advance(TransactionPhase::Applying);
-        let report =
-            uncertain.finish(TransactionOutcome::UnknownPartialFailure { source: error() });
+        let report = uncertain.finish(
+            TransactionOutcome::UnknownPartialFailure { source: error() },
+            OutputProgress::default(),
+        );
         assert_eq!(report.phases.last(), Some(&TransactionPhase::Uncertain));
         assert!(!report.phases.contains(&TransactionPhase::Committed));
     }
 
     #[test]
     fn preflight_failure_cannot_enter_the_applying_phase() {
-        let report = TransactionJournal::prepared()
-            .finish(TransactionOutcome::NotApplied { source: error() });
+        let report = TransactionJournal::prepared().finish(
+            TransactionOutcome::NotApplied { source: error() },
+            OutputProgress::default(),
+        );
         assert_eq!(
             report.phases,
             vec![TransactionPhase::Prepared, TransactionPhase::Failed]
