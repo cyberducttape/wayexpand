@@ -11,7 +11,11 @@ function __wayexpand_context_report --on-event fish_prompt
     set -l project_root ''
     set -l kube_context ''
     set -l remote_host ''
-    if set -q WAYEXPAND_CONTEXT_REMOTE_HOST
+    set -l report_mode ''
+    if test (count $argv) -gt 0
+        set report_mode $argv[1]
+    end
+    if test "$report_mode" != '--local'; and set -q WAYEXPAND_CONTEXT_REMOTE_HOST
         set remote_host $WAYEXPAND_CONTEXT_REMOTE_HOST
     end
     if test -z "$remote_host"
@@ -85,6 +89,8 @@ function wayexpand-ssh
     set -l ssh_status $status
     kill $reporter_pid 2>/dev/null
     wait $reporter_pid 2>/dev/null
-    __wayexpand_context_report
+    command wayexpand context clear >/dev/null 2>&1
+    set -e WAYEXPAND_CONTEXT_REMOTE_HOST
+    __wayexpand_context_report --local
     return $ssh_status
 end

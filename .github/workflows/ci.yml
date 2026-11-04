@@ -344,6 +344,8 @@ jobs:
         run: bash scripts/test-soak-isolation.sh
       - name: Verify source cleanliness path filtering
         run: bash scripts/test-source-tree-state.sh
+      - name: Verify SSH context expires when the command returns
+        run: bash scripts/test-ssh-context-lifecycle.sh
       - name: Verify isolated screenshot process cleanup
         run: bash scripts/test-private-home-cleanup.sh
       - name: Verify compositor scenario failures are recorded
