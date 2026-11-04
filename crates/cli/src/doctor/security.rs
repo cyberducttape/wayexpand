@@ -67,11 +67,12 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         .unwrap_or(serde_json::Value::Null);
     let capture_source = daemon["source"].as_str().unwrap_or("unknown");
     let sensitive_field_detection = daemon["capture_sensitive_focus"].as_bool();
-    let input_privacy_readiness = privacy_readiness(
+    let input_privacy_readiness = privacy_gate_readiness(
         profile,
         capture_source,
         sensitive_field_detection,
         input_privacy_required,
+        organization_policy.is_ok(),
     );
 
     let local_mount_ns = namespace_inode("mnt");
@@ -405,7 +406,9 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
             } else {
                 "not_configured"
             },
-            "reason": if input_privacy_readiness == "pass" {
+            "reason": if organization_policy.is_err() {
+                "organization policy could not be validated, so the effective privacy requirement is unknown"
+            } else if input_privacy_readiness == "pass" {
                 "active capture route reports sensitive-field detection"
             } else if evdev_privacy {
                 "evdev captures globally and cannot identify sensitive fields"
@@ -652,19 +655,16 @@ fn input_privacy_check(
     required: bool,
     policy_available: bool,
 ) -> serde_json::Value {
-    let readiness = privacy_readiness(profile, source, sensitive_field_detection, required);
-    let readiness = if !policy_available && profile != ProtectionProfile::Strict {
-        "incomplete"
-    } else {
-        readiness
-    };
-    let status = match readiness {
-        "pass" => "pass",
-        "fail" => "fail",
-        "incomplete" => "unavailable",
-        _ => "degraded",
-    };
-    let detail = if source == "evdev" {
+    let readiness = privacy_gate_readiness(
+        profile,
+        source,
+        sensitive_field_detection,
+        required,
+        policy_available,
+    );
+    let detail = if !policy_available {
+        "The organization policy could not be validated, so privacy readiness cannot be established."
+    } else if source == "evdev" {
         "The active evdev source captures globally and cannot identify sensitive fields."
     } else if source == "unknown" {
         "The active capture source is unknown; sensitive-field protection cannot be verified."
@@ -674,6 +674,12 @@ fn input_privacy_check(
         "The active capture route cannot identify sensitive fields."
     } else {
         "The active capture route did not report whether it identifies sensitive fields."
+    };
+    let status = match readiness {
+        "pass" => "pass",
+        "fail" => "fail",
+        "incomplete" => "unavailable",
+        _ => "degraded",
     };
     serde_json::json!({
         "name": "capture_sensitive_focus",
@@ -966,6 +972,20 @@ fn privacy_readiness(
     }
 }
 
+fn privacy_gate_readiness(
+    profile: ProtectionProfile,
+    source: &str,
+    sensitive_field_detection: Option<bool>,
+    required: bool,
+    policy_available: bool,
+) -> &'static str {
+    if !policy_available && profile != ProtectionProfile::Strict {
+        "incomplete"
+    } else {
+        privacy_readiness(profile, source, sensitive_field_detection, required)
+    }
+}
+
 fn state<'a>(value: &'a serde_json::Value, path: &[&str]) -> Option<&'a str> {
     path.iter()
         .try_fold(value, |value, key| value.get(*key))
@@ -1245,6 +1265,17 @@ mod tests {
             false,
         );
         assert_eq!(invalid_policy["status"], "unavailable");
+        assert_eq!(
+            privacy_gate_readiness(
+                ProtectionProfile::Hardened,
+                "evdev",
+                Some(false),
+                true,
+                false
+            ),
+            "incomplete",
+            "an invalid policy makes the effective privacy requirement unknown"
+        );
         let enforced_policy = input_privacy_check(
             ProtectionProfile::Hardened,
             "evdev",
