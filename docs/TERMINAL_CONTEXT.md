@@ -45,8 +45,9 @@ wayexpand-ssh db-staging -p 2222 -- 'exec bash -l'
 
 While that SSH process is active, the local terminal's context report includes
 the literal destination supplied to the wrapper. It refreshes periodically and
-clears the remote report before publishing local context after SSH exits. Use
-the wrapper for shell destinations that need reporting. A direct `ssh`
+waits for any in-flight refresh, then clears the remote report before publishing
+local context after SSH exits. Use the wrapper for shell destinations that
+need reporting. A direct `ssh`
 invocation is intentionally left untouched and does not cause WayExpand to
 guess the destination. The reported destination is the explicit SSH target or
 alias, not a DNS-resolved host identity.
