@@ -2,7 +2,7 @@
 
 use super::{
     broker::broker_diagnostics,
-    status::{read_daemon_status, status_as_json},
+    status::{read_daemon_status, status_as_json, upgrade_status_from_snapshot},
 };
 use crate::*;
 use std::os::unix::fs::MetadataExt;
@@ -360,12 +360,7 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         },
         "healthy": healthy,
         "daemon_pid": sandbox.get("pid"),
-        "daemon_runtime": {
-            "status_schema": daemon.get("status_schema"),
-            "expected_status_schema": CONTROL_STATUS_SCHEMA,
-            "schema_compatible": daemon.get("status_schema").and_then(serde_json::Value::as_u64) == Some(u64::from(CONTROL_STATUS_SCHEMA)),
-            "daemon_commit": daemon.get("daemon_commit"),
-        },
+        "daemon_runtime": daemon_runtime_report(&daemon),
         "daemon": sandbox,
         "active_route": route,
         "input_privacy": {
@@ -526,6 +521,16 @@ fn active_route_summary(daemon: &serde_json::Value) -> serde_json::Value {
         "focus_assurance": daemon.get("focus_assurance").cloned().unwrap_or(serde_json::Value::Null),
         "sensitive_field_detection": daemon.get("capture_sensitive_focus").cloned().unwrap_or(serde_json::Value::Null),
         "automatic_replacement_mode": automatic_replacement_mode,
+    })
+}
+
+fn daemon_runtime_report(daemon: &serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "status_schema": daemon.get("status_schema"),
+        "expected_status_schema": CONTROL_STATUS_SCHEMA,
+        "schema_compatible": daemon.get("status_schema").and_then(serde_json::Value::as_u64) == Some(u64::from(CONTROL_STATUS_SCHEMA)),
+        "daemon_commit": daemon.get("daemon_commit"),
+        "upgrade": upgrade_status_from_snapshot(daemon),
     })
 }
 
@@ -1004,6 +1009,23 @@ mod tests {
             daemon_status_schema_check(&missing)["status"],
             "unavailable"
         );
+    }
+
+    #[test]
+    fn daemon_runtime_report_includes_action_for_stale_service() {
+        let stale = serde_json::json!({
+            "status_schema": CONTROL_STATUS_SCHEMA - 1,
+            "daemon_commit": "old-build",
+            "source": "evdev",
+            "backend": "libei",
+        });
+        let report = daemon_runtime_report(&stale);
+        assert_eq!(report["schema_compatible"], false);
+        assert_eq!(report["upgrade"]["status"], "incompatible");
+        assert!(report["upgrade"]["action"]
+            .as_str()
+            .unwrap()
+            .contains("start the installed daemon"));
     }
 
     #[test]

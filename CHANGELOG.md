@@ -10,6 +10,8 @@ All notable changes to WayExpand are documented here.
 - Report required but unavailable Action Broker sandbox evidence as incomplete
   in the execution-sandbox gate, independently of the broker availability
   failure.
+- Include the daemon upgrade status and recovery action in security JSON so
+  stale or protocol-incompatible runtimes are actionable to fleet automation.
 - Require broker socket creation to remain private under permissive umasks and
   clarify that `deny_network` and the packaged broker policy block direct IP
   networking but do not prevent indirect egress through authorized local

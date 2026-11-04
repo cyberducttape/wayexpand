@@ -919,6 +919,24 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
         .into_iter()
         .collect()
     );
+    let security_runtime_fields = contract["doctor_security_runtime"]
+        .as_array()
+        .expect("security runtime contract must be an array")
+        .iter()
+        .map(|field| field.as_str().unwrap())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        security_runtime_fields,
+        [
+            "status_schema",
+            "expected_status_schema",
+            "schema_compatible",
+            "daemon_commit",
+            "upgrade",
+        ]
+        .into_iter()
+        .collect()
+    );
     let status_fields = contract["status"]
         .as_array()
         .expect("status contract must be an array")

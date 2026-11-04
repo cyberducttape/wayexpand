@@ -58,6 +58,13 @@
     "unavailable_evidence",
     "verified_failures"
   ],
+  "doctor_security_runtime": [
+    "status_schema",
+    "expected_status_schema",
+    "schema_compatible",
+    "daemon_commit",
+    "upgrade"
+  ],
   "status": [
     "response",
     "source",

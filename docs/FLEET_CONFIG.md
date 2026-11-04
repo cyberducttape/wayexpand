@@ -125,6 +125,9 @@ atomic replacement capability, replacement assurance, focus assurance, and
 compatibility mode. `automatic_replacement_mode` distinguishes an atomic
 capability, the default refusal for non-atomic routes, and an experimental
 compatibility override. It does not claim desktop certification.
+`daemon_runtime.upgrade` reports whether the live daemon is current, needs a
+restart, is protocol-incompatible, or cannot be verified, and includes a
+recovery action for fleet automation.
 
 Inspect the policy's enforcement view with `wayexpand policy inspect`. CI
 should use `wayexpand policy check --file ./policy.toml --json`; its exit code
