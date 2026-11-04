@@ -871,15 +871,15 @@ mod tests {
             .unwrap()
             .trim()
             .to_owned();
+        fs::write(
+            repository.join("unrelated.bin"),
+            vec![0x5a; (MAX_BLOB_BYTES + 1) as usize],
+        )
+        .unwrap();
+        git(&repository, &["add", "unrelated.bin"]);
         git(
             &repository,
-            &[
-                "commit",
-                "--quiet",
-                "--allow-empty",
-                "-m",
-                "later catalog change",
-            ],
+            &["commit", "--quiet", "-m", "later catalog change"],
         );
         let root = tree.0.join("libraries");
         let remote = format!("file://{}", repository.display());
