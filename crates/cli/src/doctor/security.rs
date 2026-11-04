@@ -7,7 +7,35 @@ use super::{
 use crate::*;
 use std::os::unix::fs::MetadataExt;
 
-pub(crate) fn run(config_path: &Path, json: bool) -> Result<()> {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ProtectionProfile {
+    Workstation,
+    Hardened,
+    Strict,
+}
+
+impl ProtectionProfile {
+    pub(crate) fn parse(value: &str) -> Result<Self> {
+        match value {
+            "workstation" => Ok(Self::Workstation),
+            "hardened" => Ok(Self::Hardened),
+            "strict" => Ok(Self::Strict),
+            _ => bail!(
+                "unknown security profile {value:?}; expected workstation, hardened, or strict"
+            ),
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Workstation => "workstation",
+            Self::Hardened => "hardened",
+            Self::Strict => "strict",
+        }
+    }
+}
+
+pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) -> Result<()> {
     let config = Config::load(config_path);
     let config_permissions = config_permission_report(config_path, config.is_ok());
     let broker = broker_diagnostics(config.as_ref().ok());
@@ -162,6 +190,13 @@ pub(crate) fn run(config_path: &Path, json: bool) -> Result<()> {
     ];
 
     let broker_required = broker["required"].as_bool() == Some(true);
+    let command_execution_configured = config.as_ref().is_ok_and(|config| {
+        config
+            .expansion
+            .iter()
+            .any(|expansion| expansion.command.is_some())
+            || !config.hotkey.is_empty()
+    });
     let broker_running = broker["service"]["active"].as_bool() == Some(true)
         && broker["socket"]["valid"].as_bool() == Some(true);
     checks.push(check(
@@ -223,13 +258,35 @@ pub(crate) fn run(config_path: &Path, json: bool) -> Result<()> {
         "UMask=0077 (the active umask cannot be queried without changing it)",
         "broker IPAddressDeny=any (the address-family probe verifies socket creation, not cgroup BPF policy)",
     ];
-    let healthy = checks.iter().all(|check| check["status"] == "pass");
+    let required = required_checks(profile);
+    for check in &mut checks {
+        let name = check["name"].as_str().unwrap_or_default();
+        check["required"] = serde_json::Value::Bool(
+            (profile == ProtectionProfile::Strict || required.contains(&name))
+                && (name != "daemon_command_cgroup_containment"
+                    || profile != ProtectionProfile::Workstation
+                    || command_execution_configured),
+        );
+    }
+    let readiness = readiness_for(profile, &checks, &unverified);
+    let healthy = readiness == "pass";
+    let capture_source = daemon["source"].as_str().unwrap_or("unknown");
+    let sensitive_field_detection = daemon["capture_sensitive_focus"].as_bool();
+    let evdev_privacy = capture_source == "evdev";
     let report = serde_json::json!({
-        "schema": 1,
+        "schema": 2,
+        "profile": profile.name(),
+        "readiness": readiness,
         "healthy": healthy,
         "daemon_pid": sandbox.get("pid"),
         "daemon": sandbox,
+        "input_privacy": {
+            "source": capture_source,
+            "sensitive_field_detection": sensitive_field_detection,
+            "evdev_limitation": evdev_privacy.then_some("evdev cannot identify password or other sensitive fields; keyboard input may be observed while capture is active"),
+        },
         "configuration": config_permissions,
+        "command_execution_configured": command_execution_configured,
         "action_broker": {
             "required": broker_required,
             "available": broker_running,
@@ -244,12 +301,22 @@ pub(crate) fn run(config_path: &Path, json: bool) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
         println!("WayExpand effective security report");
+        println!("Protection profile: {}", profile.name());
+        println!("Readiness: {}", readiness.to_ascii_uppercase());
         println!("Daemon PID: {}", report["daemon_pid"]);
+        if evdev_privacy {
+            println!("Privacy: evdev cannot identify password or other sensitive fields; keyboard input may be observed while capture is active.");
+        }
         for check in report["checks"].as_array().into_iter().flatten() {
             println!(
-                "{}: {} — {}",
+                "{}: {} ({}) — {}",
                 check["name"].as_str().unwrap_or("unknown"),
                 check["status"].as_str().unwrap_or("unknown"),
+                if check["required"] == true {
+                    "required"
+                } else {
+                    "optional"
+                },
                 check["detail"].as_str().unwrap_or("")
             );
         }
@@ -261,12 +328,88 @@ pub(crate) fn run(config_path: &Path, json: bool) -> Result<()> {
         for mechanism in unverified {
             println!("  - {mechanism}");
         }
-        println!("Overall: {}", if healthy { "PASS" } else { "FAIL" });
+        println!("Overall: {}", readiness.to_ascii_uppercase());
     }
     if healthy {
         Ok(())
     } else {
-        bail!("effective sandbox checks failed; inspect the security report")
+        bail!(
+            "security readiness is {readiness} for profile {}; inspect the security report",
+            profile.name()
+        )
+    }
+}
+
+fn required_checks(profile: ProtectionProfile) -> &'static [&'static str] {
+    const WORKSTATION: &[&str] = &[
+        "daemon_connected",
+        "config_permissions",
+        "daemon_no_new_privileges",
+        "daemon_seccomp",
+        "daemon_af_unix_allowed",
+        "daemon_af_inet_blocked",
+        "daemon_af_inet6_blocked",
+        "daemon_memory_deny_write_execute",
+        "daemon_command_cgroup_containment",
+        "action_broker_availability",
+    ];
+    const HARDENED: &[&str] = &[
+        "daemon_connected",
+        "config_permissions",
+        "daemon_mount_namespace",
+        "daemon_private_tmp",
+        "daemon_uts_namespace",
+        "daemon_no_new_privileges",
+        "daemon_seccomp",
+        "daemon_af_unix_allowed",
+        "daemon_af_inet_blocked",
+        "daemon_af_inet6_blocked",
+        "daemon_home_read_only",
+        "daemon_system_read_only",
+        "daemon_kernel_tunables_read_only",
+        "daemon_proc_subset_pid",
+        "daemon_proc_hidepid",
+        "daemon_memory_deny_write_execute",
+        "daemon_restrict_namespaces",
+        "daemon_lock_personality",
+        "daemon_restrict_suid_sgid",
+        "daemon_core_limit",
+        "daemon_open_file_limit",
+        "daemon_memory_limit",
+        "daemon_task_limit",
+        "daemon_command_cgroup_containment",
+        "action_broker_availability",
+        "broker_seccomp",
+        "broker_no_new_privileges",
+        "broker_af_unix_allowed",
+        "broker_af_inet_blocked",
+        "broker_af_inet6_blocked",
+        "broker_mount_namespace",
+        "broker_uts_namespace",
+    ];
+    match profile {
+        ProtectionProfile::Workstation => WORKSTATION,
+        ProtectionProfile::Hardened | ProtectionProfile::Strict => HARDENED,
+    }
+}
+
+fn readiness_for(
+    profile: ProtectionProfile,
+    checks: &[serde_json::Value],
+    unverified: &[&str],
+) -> &'static str {
+    let required_failure = checks
+        .iter()
+        .any(|check| check["required"] == true && check["status"] != "pass");
+    let optional_failure = checks
+        .iter()
+        .any(|check| check["required"] != true && check["status"] != "pass");
+    if required_failure || (profile == ProtectionProfile::Strict && !unverified.is_empty()) {
+        "fail"
+    } else if optional_failure {
+        "degraded"
+    } else {
+        "pass"
     }
 }
 
@@ -322,4 +465,46 @@ fn mount_id_for(path: &Path) -> Option<u64> {
         fields.next()?;
         (fields.next()? == target).then_some(id)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn security_profiles_are_explicit_and_validated() {
+        assert_eq!(
+            ProtectionProfile::parse("hardened").unwrap(),
+            ProtectionProfile::Hardened
+        );
+        assert!(ProtectionProfile::parse("guess").is_err());
+        assert!(required_checks(ProtectionProfile::Hardened).contains(&"daemon_mount_namespace"));
+        assert!(
+            !required_checks(ProtectionProfile::Workstation).contains(&"daemon_mount_namespace")
+        );
+    }
+
+    #[test]
+    fn strict_readiness_fails_closed_on_unverified_controls() {
+        let passing = [serde_json::json!({"required": true, "status": "pass"})];
+        let unverified = ["UMask=0077 is not introspectable"];
+        assert_eq!(
+            readiness_for(ProtectionProfile::Hardened, &passing, &unverified),
+            "pass"
+        );
+        assert_eq!(
+            readiness_for(ProtectionProfile::Strict, &passing, &unverified),
+            "fail"
+        );
+        let failed = [serde_json::json!({"required": true, "status": "fail"})];
+        assert_eq!(
+            readiness_for(ProtectionProfile::Workstation, &failed, &[]),
+            "fail"
+        );
+        let optional_failure = [serde_json::json!({"required": false, "status": "fail"})];
+        assert_eq!(
+            readiness_for(ProtectionProfile::Workstation, &optional_failure, &[]),
+            "degraded"
+        );
+    }
 }

@@ -542,6 +542,9 @@ impl GuiApp {
             if capabilities.capture_sensitive_focus != Some(true) {
                 theme::card(ui, palette, |ui| {
                     ui.colored_label(palette.danger, self.strings.sensitive_field_warning());
+                    if capabilities.capture_source.as_deref() == Some("evdev") {
+                        ui.colored_label(palette.danger, self.strings.evdev_privacy_limitation());
+                    }
                 });
             }
             if capabilities.inject_atomic_replace != Some(true) {
