@@ -276,12 +276,16 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
     let required = required_checks(profile);
     for check in &mut checks {
         let name = check["name"].as_str().unwrap_or_default();
+        let gate = gate_for_check(name);
+        let broker_check_required = name != "action_broker_availability" || broker_required;
         check["required"] = serde_json::Value::Bool(
             (profile == ProtectionProfile::Strict || required.contains(&name))
+                && broker_check_required
                 && (name != "daemon_command_cgroup_containment"
                     || profile != ProtectionProfile::Workstation
                     || command_execution_configured),
         );
+        check["gate"] = serde_json::Value::String(gate.to_owned());
     }
     let unavailable_checks = checks
         .iter()
@@ -300,18 +304,59 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
     let capture_source = daemon["source"].as_str().unwrap_or("unknown");
     let sensitive_field_detection = daemon["capture_sensitive_focus"].as_bool();
     let evdev_privacy = capture_source == "evdev";
-    let sandbox_readiness = readiness_for(profile, &checks, &unverified);
+    let execution_sandbox_checks = checks_for_gate(&checks, "execution_sandbox");
+    let configuration_integrity_checks = checks_for_gate(&checks, "configuration_integrity");
+    let action_broker_checks = checks_for_gate(&checks, "action_broker_availability");
+    let execution_unverified = unverified
+        .iter()
+        .copied()
+        .filter(|evidence| broker_required || !evidence.starts_with("broker "))
+        .collect::<Vec<_>>();
+    let execution_sandbox_required = gate_is_required(&execution_sandbox_checks);
+    let configuration_integrity_required = gate_is_required(&configuration_integrity_checks);
+    let action_broker_required = broker_required && gate_is_required(&action_broker_checks);
+    let execution_sandbox_readiness =
+        readiness_for(profile, &execution_sandbox_checks, &execution_unverified);
+    let configuration_integrity_readiness =
+        readiness_for(profile, &configuration_integrity_checks, &[]);
+    let action_broker_availability_readiness = if broker_required {
+        readiness_for(profile, &action_broker_checks, &[])
+    } else {
+        "not_required"
+    };
     let input_privacy_readiness =
         privacy_readiness(profile, capture_source, sensitive_field_detection);
-    let readiness = combine_readiness(sandbox_readiness, input_privacy_readiness);
+    let input_privacy_required = profile == ProtectionProfile::Strict;
+    let readiness = combine_gate_readiness(&[
+        execution_sandbox_readiness,
+        input_privacy_readiness,
+        configuration_integrity_readiness,
+        action_broker_availability_readiness,
+    ]);
     let healthy = readiness == "pass";
     let route = active_route_summary(&daemon);
     let report = serde_json::json!({
-        "schema": 4,
+        "schema": 5,
         "profile": profile.name(),
         "readiness": readiness,
-        "sandbox_readiness": sandbox_readiness,
+        "execution_sandbox_readiness": execution_sandbox_readiness,
+        "sandbox_readiness": execution_sandbox_readiness,
         "input_privacy_readiness": input_privacy_readiness,
+        "configuration_integrity_readiness": configuration_integrity_readiness,
+        "action_broker_availability_readiness": action_broker_availability_readiness,
+        "gates": {
+            "execution_sandbox": gate_report(execution_sandbox_readiness, execution_sandbox_required, &execution_sandbox_checks, &execution_unverified),
+            "input_privacy": {
+                "readiness": input_privacy_readiness,
+                "required": input_privacy_required,
+                "applicable": true,
+                "checks": ["capture_sensitive_focus"],
+                "unavailable_checks": if sensitive_field_detection.is_none() || capture_source == "unknown" { vec!["capture_sensitive_focus"] } else { Vec::<&str>::new() },
+                "verified_failures": if input_privacy_readiness == "fail" { vec!["capture_sensitive_focus"] } else { Vec::<&str>::new() },
+            },
+            "configuration_integrity": gate_report(configuration_integrity_readiness, configuration_integrity_required, &configuration_integrity_checks, &[]),
+            "action_broker_availability": gate_report(action_broker_availability_readiness, action_broker_required, &action_broker_checks, &[]),
+        },
         "healthy": healthy,
         "daemon_pid": sandbox.get("pid"),
         "daemon": sandbox,
@@ -344,6 +389,7 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         "action_broker": {
             "required": broker_required,
             "available": broker_running,
+            "readiness": action_broker_availability_readiness,
             "runtime": broker_sandbox,
             "network_policy_note": "AF_INET/AF_INET6 socket creation is probed in the live broker; IPAddressDeny BPF is listed as unverified because its attached filter cannot be queried without elevated inspection privileges."
         },
@@ -362,12 +408,20 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         println!("Protection profile: {}", profile.name());
         println!("Readiness: {}", readiness.to_ascii_uppercase());
         println!(
-            "Sandbox readiness: {}",
-            sandbox_readiness.to_ascii_uppercase()
+            "Execution sandbox readiness: {}",
+            execution_sandbox_readiness.to_ascii_uppercase()
         );
         println!(
             "Input privacy readiness: {}",
             input_privacy_readiness.to_ascii_uppercase()
+        );
+        println!(
+            "Configuration integrity readiness: {}",
+            configuration_integrity_readiness.to_ascii_uppercase()
+        );
+        println!(
+            "Action Broker availability readiness: {}",
+            action_broker_availability_readiness.to_ascii_uppercase()
         );
         println!("Daemon PID: {}", report["daemon_pid"]);
         println!(
@@ -460,6 +514,77 @@ fn active_route_summary(daemon: &serde_json::Value) -> serde_json::Value {
         "sensitive_field_detection": daemon.get("capture_sensitive_focus").cloned().unwrap_or(serde_json::Value::Null),
         "automatic_replacement_mode": automatic_replacement_mode,
     })
+}
+
+fn gate_for_check(name: &str) -> &'static str {
+    match name {
+        "config_permissions" => "configuration_integrity",
+        "action_broker_availability" => "action_broker_availability",
+        _ => "execution_sandbox",
+    }
+}
+
+fn checks_for_gate(checks: &[serde_json::Value], gate: &str) -> Vec<serde_json::Value> {
+    checks
+        .iter()
+        .filter(|check| check["gate"] == gate)
+        .cloned()
+        .collect()
+}
+
+fn gate_is_required(checks: &[serde_json::Value]) -> bool {
+    checks.iter().any(|check| check["required"] == true)
+}
+
+fn gate_report(
+    readiness: &str,
+    required: bool,
+    checks: &[serde_json::Value],
+    unavailable_evidence: &[&str],
+) -> serde_json::Value {
+    let names = checks
+        .iter()
+        .filter_map(|check| check["name"].as_str())
+        .collect::<Vec<_>>();
+    let unavailable = checks
+        .iter()
+        .filter_map(|check| {
+            (check["status"] == "unavailable")
+                .then_some(check["name"].as_str().unwrap_or("unknown"))
+        })
+        .collect::<Vec<_>>();
+    let failures = checks
+        .iter()
+        .filter_map(|check| {
+            (check["status"] == "fail").then_some(check["name"].as_str().unwrap_or("unknown"))
+        })
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "readiness": readiness,
+        "required": required,
+        "applicable": readiness != "not_required",
+        "checks": names,
+        "unavailable_checks": unavailable,
+        "unavailable_evidence": unavailable_evidence,
+        "verified_failures": failures,
+    })
+}
+
+fn combine_gate_readiness(gates: &[&str]) -> &'static str {
+    if gates.contains(&"fail") {
+        "fail"
+    } else if gates.contains(&"incomplete") {
+        "incomplete"
+    } else if gates.contains(&"degraded") {
+        "degraded"
+    } else if gates
+        .iter()
+        .any(|gate| !matches!(*gate, "pass" | "not_required"))
+    {
+        "incomplete"
+    } else {
+        "pass"
+    }
 }
 
 fn required_checks(profile: ProtectionProfile) -> &'static [&'static str] {
@@ -576,18 +701,6 @@ fn privacy_readiness(
     }
 }
 
-fn combine_readiness(sandbox: &str, privacy: &str) -> &'static str {
-    if sandbox == "fail" || privacy == "fail" {
-        "fail"
-    } else if sandbox == "incomplete" || privacy == "incomplete" {
-        "incomplete"
-    } else if sandbox != "pass" || privacy != "pass" {
-        "degraded"
-    } else {
-        "pass"
-    }
-}
-
 fn state<'a>(value: &'a serde_json::Value, path: &[&str]) -> Option<&'a str> {
     path.iter()
         .try_fold(value, |value, key| value.get(*key))
@@ -698,7 +811,10 @@ mod tests {
             readiness_for(ProtectionProfile::Strict, &unavailable, &[]),
             "incomplete"
         );
-        assert_eq!(combine_readiness("incomplete", "pass"), "incomplete");
+        assert_eq!(
+            combine_gate_readiness(&["incomplete", "pass", "not_required"]),
+            "incomplete"
+        );
     }
 
     #[test]
@@ -708,7 +824,10 @@ mod tests {
             privacy_readiness(ProtectionProfile::Workstation, "evdev", Some(false));
         assert_eq!(sandbox, "pass");
         assert_eq!(workstation_privacy, "degraded");
-        assert_eq!(combine_readiness(sandbox, workstation_privacy), "degraded");
+        assert_eq!(
+            combine_gate_readiness(&[sandbox, workstation_privacy, "pass", "not_required"]),
+            "degraded"
+        );
         assert_eq!(
             privacy_readiness(ProtectionProfile::Strict, "evdev", Some(false)),
             "fail"
@@ -722,10 +841,61 @@ mod tests {
             "incomplete"
         );
         assert_eq!(
-            combine_readiness(
+            combine_gate_readiness(&[
                 "pass",
-                privacy_readiness(ProtectionProfile::Strict, "evdev", Some(false))
-            ),
+                privacy_readiness(ProtectionProfile::Strict, "evdev", Some(false)),
+                "pass",
+                "not_required",
+            ]),
+            "fail"
+        );
+    }
+
+    #[test]
+    fn security_gate_failures_do_not_leak_into_other_gate_results() {
+        let checks = vec![
+            serde_json::json!({"name": "daemon_seccomp", "gate": "execution_sandbox", "required": true, "status": "fail"}),
+            serde_json::json!({"name": "config_permissions", "gate": "configuration_integrity", "required": true, "status": "pass"}),
+            serde_json::json!({"name": "action_broker_availability", "gate": "action_broker_availability", "required": false, "status": "pass"}),
+        ];
+        let sandbox = checks_for_gate(&checks, "execution_sandbox");
+        let configuration = checks_for_gate(&checks, "configuration_integrity");
+        let broker = checks_for_gate(&checks, "action_broker_availability");
+        assert_eq!(
+            readiness_for(ProtectionProfile::Workstation, &sandbox, &[]),
+            "fail"
+        );
+        assert_eq!(
+            readiness_for(ProtectionProfile::Workstation, &configuration, &[]),
+            "pass"
+        );
+        assert_eq!(
+            gate_for_check("config_permissions"),
+            "configuration_integrity"
+        );
+        assert_eq!(
+            gate_for_check("action_broker_availability"),
+            "action_broker_availability"
+        );
+        assert!(!gate_is_required(&broker));
+        let report = gate_report("not_required", false, &broker, &[]);
+        assert_eq!(report["readiness"], "not_required");
+        assert_eq!(report["applicable"], false);
+        assert_eq!(report["checks"][0], "action_broker_availability");
+        let evidence = ["UMask=0077 is not introspectable"];
+        let sandbox_report = gate_report("incomplete", true, &sandbox, &evidence);
+        assert_eq!(sandbox_report["unavailable_evidence"][0], evidence[0]);
+        let failed_broker = [serde_json::json!({
+            "name": "action_broker_availability",
+            "required": true,
+            "status": "fail"
+        })];
+        assert_eq!(
+            readiness_for(ProtectionProfile::Workstation, &failed_broker, &[]),
+            "fail"
+        );
+        assert_eq!(
+            combine_gate_readiness(&["fail", "pass", "pass", "not_required"]),
             "fail"
         );
     }

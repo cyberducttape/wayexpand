@@ -106,14 +106,23 @@ policy, command execution also fails closed when containment setup is
 unavailable; process-group cleanup is used only when the operator explicitly
 sets `WAYEXPAND_PROCESS_CGROUP=disabled`. When named actions are configured it
 also checks the live Action Broker and its in-process probes. `--json` emits
-the same checks for fleet tooling (schema 4), including overall `readiness` and
-separate `sandbox_readiness` and `input_privacy_readiness` values (`pass`,
+the same checks for fleet tooling (schema 5), including overall `readiness` and
+independent `execution_sandbox_readiness`, `input_privacy_readiness`,
+`configuration_integrity_readiness`, and `action_broker_availability_readiness`
+values (`pass`,
 `degraded`, `incomplete`, or `fail`), the selected profile, and which checks are required. A
 workstation or hardened profile reports missing sensitive-field detection as
 `degraded`; strict profile reports `incomplete` when required evidence cannot be observed and `fail` only for a verified failed control or missing required input privacy. Sandboxing and input privacy are independent results.
 Unit-file directives alone are not treated as evidence. Kernel policy details that cannot be safely inspected from an unprivileged process appear in `unavailable_evidence`; observed failed controls appear separately in `verified_failures`.
 Each check reports `pass`, `fail`, or `unavailable`; missing probe data makes a
 required profile `incomplete`, while an observed failed control is `fail`.
+The `gates` object groups check names and reports required/applicable status
+independently. An unused Action Broker is `not_required`; broker sandbox
+controls, when it is required, remain part of `execution_sandbox`. The old
+`sandbox_readiness` field is retained as an alias of
+`execution_sandbox_readiness`. Individual gate results may also be
+`not_required`; overall `readiness` remains `pass`, `degraded`, `incomplete`,
+or `fail`.
 
 Protection profiles are:
 

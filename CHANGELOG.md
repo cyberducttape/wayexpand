@@ -19,6 +19,11 @@ All notable changes to WayExpand are documented here.
   Reserve a bounded control worker for complete status
   and lifecycle requests so stalled clients cannot starve operator recovery.
   Bump the daemon status contract to schema 22.
+- Split `wayexpand doctor --security --json` readiness into independent
+  execution-sandbox, input-privacy, configuration-integrity, and Action Broker
+  availability gates. Report applicability, required status, contributing
+  checks, and per-gate unavailable evidence; retain `sandbox_readiness` as a
+  compatibility alias. Bump the security report schema to 5.
 - Allow `wayexpand library add --approved-revision FULL_COMMIT` to pin a Git
   catalog checkout to the exact commit selected during review, independent of
   a moving branch head. Content signatures remain separately verified.
