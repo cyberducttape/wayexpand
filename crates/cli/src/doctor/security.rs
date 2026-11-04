@@ -714,8 +714,14 @@ fn gate_report(
             (check["status"] == "fail").then_some(check["name"].as_str().unwrap_or("unknown"))
         })
         .collect::<Vec<_>>();
+    // Keep policy applicability separate from the observed health. In
+    // particular, an optional Action Broker can be unavailable without
+    // blocking workstation readiness, but operators still need to see that
+    // observed failure in the gate itself.
+    let observed_readiness = observed_readiness(checks, unavailable_evidence);
     serde_json::json!({
         "readiness": readiness,
+        "observed_readiness": observed_readiness,
         "required": required,
         "applicable": readiness != "not_required",
         "checks": names,
@@ -723,6 +729,22 @@ fn gate_report(
         "unavailable_evidence": unavailable_evidence,
         "verified_failures": failures,
     })
+}
+
+fn observed_readiness(checks: &[serde_json::Value], unavailable_evidence: &[&str]) -> &'static str {
+    if checks.iter().any(|check| check["status"] == "fail") {
+        "fail"
+    } else if checks.iter().any(|check| check["status"] == "unavailable")
+        || !unavailable_evidence.is_empty()
+    {
+        "incomplete"
+    } else if checks.iter().any(|check| check["status"] == "degraded") {
+        "degraded"
+    } else if checks.iter().all(|check| check["status"] == "pass") {
+        "pass"
+    } else {
+        "incomplete"
+    }
 }
 
 fn combine_gate_readiness(gates: &[&str]) -> &'static str {
@@ -1125,6 +1147,7 @@ mod tests {
         assert!(!gate_is_required(&broker));
         let report = gate_report("not_required", false, &broker, &[]);
         assert_eq!(report["readiness"], "not_required");
+        assert_eq!(report["observed_readiness"], "pass");
         assert_eq!(report["applicable"], false);
         assert_eq!(report["checks"][0], "action_broker_availability");
         let evidence = ["UMask=0077 is not introspectable"];
@@ -1179,14 +1202,24 @@ mod tests {
             unavailable_optional_broker["detail"],
             "No named actions require the broker; actual availability is informational."
         );
+        let optional_broker_report = gate_report(
+            "not_required",
+            false,
+            std::slice::from_ref(&unavailable_optional_broker),
+            &[],
+        );
+        assert_eq!(optional_broker_report["readiness"], "not_required");
+        assert_eq!(optional_broker_report["observed_readiness"], "fail");
+        assert_eq!(optional_broker_report["required"], false);
         assert_eq!(
-            gate_report(
-                "not_required",
-                false,
-                std::slice::from_ref(&unavailable_optional_broker),
-                &[]
-            )["readiness"],
-            "not_required"
+            combine_gate_readiness(&[
+                "pass",
+                "pass",
+                "pass",
+                optional_broker_report["readiness"].as_str().unwrap(),
+            ]),
+            "pass",
+            "an unavailable optional broker remains visible without blocking a workstation that has no named actions"
         );
 
         let audit_ready = action_broker_audit_check(

@@ -97,7 +97,13 @@ host as passing the gate. Overall `readiness` is degraded when the sandbox
 passes but the active route lacks sensitive-field detection. The
 strict profile fails for evdev even if a route reports that capability. The
 independent gate results are also available under `gates`, including whether
-each gate is required and which checks contributed to its result. The execution
+each gate is required and which checks contributed to its result. Each gate
+reports both policy `readiness` and `observed_readiness`: the former can be
+`not_required` when a capability is unused, while the latter always summarizes
+the checks that were actually run. For example, an unused but stopped broker
+has `readiness: "not_required"`, `required: false`, and
+`observed_readiness: "fail"`; this remains visible to inventory automation
+without making an installation that has no named actions unhealthy. The execution
 sandbox gate includes daemon and, when configured, broker confinement checks;
 the Action Broker availability gate reports service/socket health and mandatory
 audit readiness, and is required only when configured named actions need it.

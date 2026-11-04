@@ -48,6 +48,16 @@
     "configuration_integrity",
     "action_broker_availability"
   ],
+  "doctor_security_gate_report": [
+    "readiness",
+    "observed_readiness",
+    "required",
+    "applicable",
+    "checks",
+    "unavailable_checks",
+    "unavailable_evidence",
+    "verified_failures"
+  ],
   "status": [
     "response",
     "source",
