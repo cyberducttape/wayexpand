@@ -585,6 +585,16 @@ fn gate_for_check(name: &str) -> &'static str {
         "config_permissions" => "configuration_integrity",
         "action_broker_availability" => "action_broker_availability",
         "automatic_replacement_target_integrity" => "target_integrity",
+        // Broker confinement is still execution sandboxing. Keep it distinct
+        // from whether the optional broker service/socket is available.
+        "broker_command_cgroup_containment"
+        | "broker_seccomp"
+        | "broker_no_new_privileges"
+        | "broker_af_unix_allowed"
+        | "broker_af_inet_blocked"
+        | "broker_af_inet6_blocked"
+        | "broker_mount_namespace"
+        | "broker_uts_namespace" => "execution_sandbox",
         _ => "execution_sandbox",
     }
 }
@@ -1011,6 +1021,11 @@ mod tests {
             gate_for_check("action_broker_availability"),
             "action_broker_availability"
         );
+        assert_eq!(gate_for_check("broker_seccomp"), "execution_sandbox");
+        assert_eq!(
+            gate_for_check("broker_command_cgroup_containment"),
+            "execution_sandbox"
+        );
         assert!(!gate_is_required(&broker));
         let report = gate_report("not_required", false, &broker, &[]);
         assert_eq!(report["readiness"], "not_required");
@@ -1030,6 +1045,23 @@ mod tests {
         );
         assert_eq!(
             combine_gate_readiness(&["fail", "pass", "pass", "not_required"]),
+            "fail"
+        );
+
+        let broker_checks = vec![
+            serde_json::json!({"name": "action_broker_availability", "gate": "action_broker_availability", "required": true, "status": "pass"}),
+            serde_json::json!({"name": "broker_seccomp", "gate": "execution_sandbox", "required": true, "status": "fail"}),
+        ];
+        let availability = checks_for_gate(&broker_checks, "action_broker_availability");
+        let sandbox = checks_for_gate(&broker_checks, "execution_sandbox");
+        assert_eq!(availability.len(), 1);
+        assert_eq!(availability[0]["name"], "action_broker_availability");
+        assert_eq!(
+            readiness_for(ProtectionProfile::Workstation, &availability, &[]),
+            "pass"
+        );
+        assert_eq!(
+            readiness_for(ProtectionProfile::Workstation, &sandbox, &[]),
             "fail"
         );
     }

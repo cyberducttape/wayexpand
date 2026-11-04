@@ -97,7 +97,12 @@ host as passing the gate. Overall `readiness` is degraded when the sandbox
 passes but the active route lacks sensitive-field detection. The
 strict profile fails for evdev even if a route reports that capability. The
 independent gate results are also available under `gates`, including whether
-each gate is required and which checks contributed to its result. The legacy
+each gate is required and which checks contributed to its result. The execution
+sandbox gate includes daemon and, when configured, broker confinement checks;
+the Action Broker availability gate covers only the broker's required service
+and socket availability. A broker can therefore be available while failing its
+sandbox checks, and that result appears only under execution sandboxing. Input
+privacy and configuration integrity are evaluated separately as well. The legacy
 `sandbox_readiness` key aliases `execution_sandbox_readiness`. The
 security report's `active_route` object records the live source, backend,
 atomic replacement capability, replacement assurance, focus assurance, and

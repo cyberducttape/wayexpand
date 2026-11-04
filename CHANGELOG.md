@@ -29,9 +29,12 @@ All notable changes to WayExpand are documented here.
   execution-sandbox, input-privacy, configuration-integrity, and Action Broker
   availability gates. Report applicability, required status, contributing
   checks, and per-gate unavailable evidence; retain `sandbox_readiness` as a
-  compatibility alias. Require the running daemon to expose the CLI's expected
-  status schema so stale runtimes cannot pass using incomplete security
-  evidence, and include the daemon schema and commit in the report. Add a
+  compatibility alias. Keep broker confinement checks under execution
+  sandboxing while broker service/socket health remains in availability, so
+  the two results stay independently actionable. Require the running daemon
+  to expose the CLI's expected status schema so stale runtimes cannot pass
+  using incomplete security evidence, and include the daemon schema and commit
+  in the report. Add a
   separate target-integrity gate that fails when compatibility mode enables
   uncertified non-atomic replacement and remains incomplete for uncertified
   atomic routes. Bump the security report schema to 7.
