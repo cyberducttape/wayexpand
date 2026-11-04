@@ -97,6 +97,7 @@ pub(crate) type RouteState = wayexpand_core::DaemonRouteState;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct DaemonCapabilities {
+    pub capture_source: Option<String>,
     pub injection_mode: Option<&'static str>,
     pub injection_max_text_chars: Option<usize>,
     pub injection_throughput_chars_per_sec: Option<u32>,
@@ -265,6 +266,8 @@ impl DaemonCapabilities {
                     "unavailable" => Some(ReplacementAssurance::Unavailable),
                     _ => None,
                 });
+        capabilities.capture_source = status.field("source").map(str::to_owned);
+        found |= capabilities.capture_source.is_some();
         capabilities.output_last_refusal =
             status
                 .field("output_last_refusal")
@@ -626,13 +629,14 @@ mod tests {
     #[test]
     fn daemon_capability_parser_preserves_unknowns_and_separates_io_guarantees() {
         let capabilities = super::DaemonCapabilities::parse(
-            "status_schema=17\ncapture_sensitive_focus=false\ncapture_exclusive=true\ncapture_composition_aware=false\ncapture_local_compose_aware=true\nwindow_tracker_connected=true\ninject_atomic_replace=false\ninject_full_unicode=true\ninject_insertion_mode=libei keysym fallback\ninject_max_text_chars=250\ninject_expected_throughput_chars_per_sec=83\n",
+            "status_schema=17\nsource=evdev\ncapture_sensitive_focus=false\ncapture_exclusive=true\ncapture_composition_aware=false\ncapture_local_compose_aware=true\nwindow_tracker_connected=true\ninject_atomic_replace=false\ninject_full_unicode=true\ninject_insertion_mode=libei keysym fallback\ninject_max_text_chars=250\ninject_expected_throughput_chars_per_sec=83\n",
         )
         .unwrap();
         assert_eq!(capabilities.injection_mode, Some("libei keysym fallback"));
         assert_eq!(capabilities.injection_max_text_chars, Some(250));
         assert_eq!(capabilities.injection_throughput_chars_per_sec, Some(83));
         assert_eq!(capabilities.capture_sensitive_focus, Some(false));
+        assert_eq!(capabilities.capture_source.as_deref(), Some("evdev"));
         assert_eq!(capabilities.capture_exclusive, Some(true));
         assert_eq!(capabilities.capture_composition_aware, Some(false));
         assert_eq!(capabilities.capture_local_compose_aware, Some(true));

@@ -260,6 +260,14 @@ impl Strings {
         }
     }
 
+    pub fn evdev_privacy_limitation(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Evdev captures global keyboard input and cannot detect password fields, password-manager prompts, or other sensitive fields.",
+            Language::Indonesian => "Evdev menangkap masukan papan ketik global dan tidak dapat mendeteksi kolom kata sandi, prompt pengelola kata sandi, atau kolom sensitif lainnya.",
+            Language::German => "Evdev erfasst globale Tastatureingaben und kann Passwortfelder, Passwortmanager-Abfragen oder andere sensible Felder nicht erkennen.",
+        }
+    }
+
     pub fn next_step_certification(&self) -> &'static str {
         match self.lang {
             Language::English => "This route is not certified for the current compositor. Treat runtime capability reports as diagnostics, not proof of reliable behavior in applications.",
