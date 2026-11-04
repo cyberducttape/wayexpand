@@ -92,7 +92,12 @@ fn lint_pack(
             .as_deref()
             .unwrap_or("the merged static snippet configuration is valid"),
     );
-    let operational_fields = operational_field_findings(&inspection.expansions);
+    let declared_tools = manifest
+        .compatibility
+        .as_ref()
+        .map(|compatibility| compatibility.tools.as_slice())
+        .unwrap_or_default();
+    let operational_fields = operational_field_findings(&inspection.expansions, declared_tools);
     let operational_field_message = if operational_fields.is_empty() {
         "operational fields have a domain validator, constrained choices, or explicit free_text=true justification".to_owned()
     } else {
@@ -251,10 +256,11 @@ fn lint_pack(
 
 fn operational_field_findings(
     expansions: &[wayexpand_core::PackExpansionReview],
+    declared_tools: &[String],
 ) -> Vec<serde_json::Value> {
     expansions
         .iter()
-        .filter(|expansion| looks_operational(&expansion.replacement))
+        .filter(|expansion| looks_operational_with_tools(&expansion.replacement, declared_tools))
         .flat_map(|expansion| {
             form_fields(&expansion.replacement)
                 .unwrap_or_default()
@@ -278,7 +284,7 @@ fn operational_field_findings(
         .collect()
 }
 
-fn looks_operational(replacement: &str) -> bool {
+fn looks_operational_with_tools(replacement: &str, declared_tools: &[String]) -> bool {
     const COMMANDS: &[&str] = &[
         "ansible",
         "ansible-playbook",
@@ -335,7 +341,12 @@ fn looks_operational(replacement: &str) -> bool {
             .split(|character: char| {
                 !character.is_ascii_alphanumeric() && !matches!(character, '_' | '-')
             })
-            .any(|token| COMMANDS.contains(&token))
+            .any(|token| {
+                COMMANDS.contains(&token)
+                    || declared_tools
+                        .iter()
+                        .any(|tool| tool.eq_ignore_ascii_case(token))
+            })
         || lower.lines().any(|line| {
             let line = line.trim_start();
             ["select ", "insert into ", "update ", "delete from "]
@@ -678,9 +689,10 @@ mod tests {
             "pg_dump production",
         ] {
             assert!(
-                looks_operational(&format!(
-                    "```sh\n{command} {{field:target=example|required}}\n```"
-                )),
+                looks_operational_with_tools(
+                    &format!("```sh\n{command} {{field:target=example|required}}\n```"),
+                    &[],
+                ),
                 "command family was not recognized: {command}"
             );
         }
@@ -707,7 +719,7 @@ mod tests {
             ..unreviewed.clone()
         };
 
-        let findings = operational_field_findings(&[unreviewed, justified, validated]);
+        let findings = operational_field_findings(&[unreviewed, justified, validated], &[]);
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0]["key"], "field:chain");
     }
@@ -727,7 +739,7 @@ mod tests {
             ..unvalidated_ip.clone()
         };
 
-        let findings = operational_field_findings(&[unvalidated_ip, unvalidated_socket]);
+        let findings = operational_field_findings(&[unvalidated_ip, unvalidated_socket], &[]);
         assert_eq!(findings.len(), 2);
         assert!(findings
             .iter()
@@ -735,6 +747,23 @@ mod tests {
         assert!(findings
             .iter()
             .any(|finding| finding["key"] == "field:port"));
+    }
+
+    #[test]
+    fn declared_pack_tools_extend_operational_field_detection() {
+        let expansion = wayexpand_core::PackExpansionReview {
+            file: "snippets/storage.toml".into(),
+            id: "storage".into(),
+            trigger: ";disk".into(),
+            description: "Inspect a filesystem".into(),
+            replacement: "df -hT -- {{field:path=/var|required}}".into(),
+            command: None,
+        };
+        let tools = vec!["df".to_owned()];
+
+        let findings = operational_field_findings(&[expansion], &tools);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0]["key"], "field:path");
     }
 
     #[test]
