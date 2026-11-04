@@ -383,6 +383,8 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
                 "active capture route reports sensitive-field detection"
             } else if evdev_privacy {
                 "evdev captures globally and cannot identify sensitive fields"
+            } else if capture_source == "unknown" {
+                "active capture source is unknown, so sensitive-field protection cannot be verified"
             } else if sensitive_field_detection == Some(false) {
                 "active capture route cannot identify sensitive fields"
             } else {
@@ -613,7 +615,9 @@ fn input_privacy_check(
     };
     let detail = if source == "evdev" {
         "The active evdev source captures globally and cannot identify sensitive fields."
-    } else if sensitive_field_detection == Some(true) && source != "unknown" {
+    } else if source == "unknown" {
+        "The active capture source is unknown; sensitive-field protection cannot be verified."
+    } else if sensitive_field_detection == Some(true) {
         "The active capture route reports sensitive-field detection."
     } else if sensitive_field_detection == Some(false) {
         "The active capture route cannot identify sensitive fields."
@@ -1033,6 +1037,10 @@ mod tests {
         assert_eq!(workstation_check["required"], false);
         assert_eq!(strict_check["status"], "fail");
         assert_eq!(unknown_check["status"], "unavailable");
+        assert!(unknown_check["detail"]
+            .as_str()
+            .unwrap()
+            .contains("source is unknown"));
     }
 
     #[test]
