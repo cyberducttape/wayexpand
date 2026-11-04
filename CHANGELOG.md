@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- When the daemon status schema is stale, mark all daemon-derived sandbox,
+  privacy, and target-integrity capabilities unavailable and hide the old route
+  snapshot. Keep independent configuration and broker evidence available; bump
+  the security report schema to 11.
 - Give target-integrity failures a direct recovery instruction for disabling
   non-atomic compatibility output and restoring default refusal.
 - Treat a stale or missing daemon status schema as unavailable security
