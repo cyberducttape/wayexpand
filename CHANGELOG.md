@@ -5,6 +5,8 @@ All notable changes to WayExpand are documented here.
 ## [Unreleased]
 
 - After an output failure with an uncertain target effect, quarantine queued input instead of replaying it; never continue a queued batch after a partial transaction. Expose confirmed partial insertions as a separate daemon status counter, GUI warning, and `wayexpand doctor --json` field. Bump the status contract to schema 18.
+- Show the active route's live sensitive-field signal persistently in the GUI, distinguishing verified protection from unavailable and unknown status. Keep raw evdev consent local to each machine.
+- Add a capability-based insertion strategy planner for verified atomic replacement, native text commit, short paced keys, and clipboard/manual paste. The editor preview shows the planned route and estimated paced latency. Set the default paced-keysym maximum to 8 characters (about 100 ms estimated); longer synthetic output requires an explicit setting change.
 
 - Anchor Action Broker socket operations to validated directory descriptors.
   Publish sockets from private staging directories with atomic no-replace

@@ -1343,7 +1343,7 @@ mod tests {
             expected_throughput_chars_per_sec: Some(83),
             ..InjectorCapabilities::default()
         };
-        // 250 characters at 83/s is ~3s of typing; allow twice that.
+        // Use a longer configured value to exercise the paced-output deadline path.
         let deadline = completion_deadline(&paced, 250);
         assert!(deadline >= OUTPUT_COMPLETION_BASE + Duration::from_secs(6));
         assert!(deadline <= OUTPUT_COMPLETION_BASE + Duration::from_secs(7));

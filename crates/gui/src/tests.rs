@@ -1618,7 +1618,7 @@ fn keystroke_limit_is_saved_validated_and_omitted_at_its_default() {
     let mut app = GuiApp::load(path.clone()).unwrap();
 
     app.open_settings();
-    assert_eq!(app.settings_keystroke_limit, "250");
+    assert_eq!(app.settings_keystroke_limit, "8");
     app.settings_keystroke_limit = "1000".into();
     app.save_settings(&egui::Context::default());
     assert_eq!(
@@ -1640,7 +1640,7 @@ fn keystroke_limit_is_saved_validated_and_omitted_at_its_default() {
         1000
     );
 
-    app.settings_keystroke_limit = "250".into();
+    app.settings_keystroke_limit = "8".into();
     app.save_settings(&egui::Context::default());
     assert!(!fs::read_to_string(&path)
         .unwrap()
@@ -2027,6 +2027,7 @@ fn every_panel_and_dialog_renders_for_supported_languages_and_settings_tabs() {
         output_last_refusal: Some(runtime::OutputRefusal::FocusChanged),
         output_uncertain_total: Some(1),
         output_partial_total: Some(1),
+        compatibility_mode: None,
         evdev_quarantined_events_total: None,
         usage_flush_max_duration_us: None,
         usage_flush_failures_total: None,

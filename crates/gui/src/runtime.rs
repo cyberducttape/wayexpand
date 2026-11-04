@@ -11,7 +11,10 @@ use wayexpand_backend_ibus::engine_available as ibus_engine_available;
 use wayexpand_backend_selection::{
     plan_routes, probe_capabilities, recommended_route, Capabilities, RecommendedRoute, RoutePlan,
 };
-use wayexpand_core::{discover_backends, Config, DaemonStatus, FleetConfig, CONTROL_STATUS_SCHEMA};
+use wayexpand_core::{
+    discover_backends, plan_insertion, CompatibilityMode, Config, DaemonStatus, FleetConfig,
+    InsertionRouteCapabilities, InsertionStrategy, CONTROL_STATUS_SCHEMA,
+};
 
 const REQUEST_CAPACITY: usize = 8;
 const RESULT_CAPACITY: usize = 16;
@@ -126,6 +129,7 @@ pub(crate) struct DaemonCapabilities {
     pub output_last_refusal: Option<OutputRefusal>,
     pub output_uncertain_total: Option<u64>,
     pub output_partial_total: Option<u64>,
+    pub compatibility_mode: Option<CompatibilityMode>,
     pub evdev_quarantined_events_total: Option<u64>,
     pub usage_flush_max_duration_us: Option<u64>,
     pub usage_flush_failures_total: Option<u64>,
@@ -173,6 +177,22 @@ pub(crate) enum OutputRefusal {
 }
 
 impl DaemonCapabilities {
+    pub fn insertion_plan(&self, characters: usize) -> InsertionStrategy {
+        let route = self.injection_mode.map(|mode| InsertionRouteCapabilities {
+            atomic_verified_replace: self.inject_atomic_replace == Some(true)
+                && self.replacement_assurance == Some(ReplacementAssurance::Verified),
+            native_text_commit: matches!(mode, "ei_text" | "input-method-v2 text")
+                || mode.contains("direct commit"),
+            paced_throughput_chars_per_sec: self.injection_throughput_chars_per_sec,
+            max_text_chars: self.injection_max_text_chars.unwrap_or(0),
+        });
+        plan_insertion(
+            characters,
+            route,
+            self.compatibility_mode.unwrap_or(CompatibilityMode::Off),
+        )
+    }
+
     pub fn provides_full_protection(&self) -> bool {
         self.capture_sensitive_focus == Some(true)
             && self.capture_composition_aware == Some(true)
@@ -210,6 +230,14 @@ impl DaemonCapabilities {
                 _ => None,
             };
             found = true;
+        }
+        if let Some(value) = status.field("compatibility_mode") {
+            capabilities.compatibility_mode = match value {
+                "off" => Some(CompatibilityMode::Off),
+                "tracked-focus" => Some(CompatibilityMode::TrackedFocus),
+                "untracked-focus" => Some(CompatibilityMode::UntrackedFocus),
+                _ => None,
+            };
         }
         if let Some(value) = status.u64_field("inject_max_text_chars") {
             capabilities.injection_max_text_chars = usize::try_from(value).ok();
@@ -685,12 +713,24 @@ mod tests {
     #[test]
     fn daemon_capability_parser_recognizes_the_negotiated_libei_fallback_label() {
         let capabilities = super::DaemonCapabilities::parse(
-            "status_schema=18\ninject_insertion_mode=ei_keyboard keysym fallback (12ms key pacing)\nmatcher_latency_p50_us=12\ninjection_latency_p95_us=3400\n",
+            "status_schema=18\ninject_insertion_mode=ei_keyboard keysym fallback (12ms key pacing)\ninject_max_text_chars=8\ninject_expected_throughput_chars_per_sec=83\ncompatibility_mode=tracked-focus\nmatcher_latency_p50_us=12\ninjection_latency_p95_us=3400\n",
         )
         .unwrap();
         assert_eq!(capabilities.injection_mode, Some("libei keysym fallback"));
+        assert_eq!(
+            capabilities.compatibility_mode,
+            Some(super::CompatibilityMode::TrackedFocus)
+        );
         assert_eq!(capabilities.matcher_latency_p50_us, Some(12));
         assert_eq!(capabilities.injection_latency_p95_us, Some(3400));
+        assert_eq!(
+            capabilities.insertion_plan(8),
+            super::InsertionStrategy::PacedSyntheticKeystrokes { predicted_ms: 97 }
+        );
+        assert_eq!(
+            capabilities.insertion_plan(9),
+            super::InsertionStrategy::ClipboardAssistedPaste
+        );
     }
 
     #[test]

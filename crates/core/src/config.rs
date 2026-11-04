@@ -197,8 +197,8 @@ pub struct Settings {
     pub keystroke_max_chars: usize,
 }
 
-/// About three seconds of paced typing.
-pub const DEFAULT_KEYSTROKE_MAX_CHARS: usize = 250;
+/// About 100 ms of paced typing at the measured libei keysym fallback rate.
+pub const DEFAULT_KEYSTROKE_MAX_CHARS: usize = 8;
 /// About a minute of paced typing.
 pub const MAX_KEYSTROKE_MAX_CHARS: usize = 5_000;
 

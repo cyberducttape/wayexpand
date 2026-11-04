@@ -22,6 +22,7 @@ mod fleet;
 #[cfg(any(test, feature = "fuzzing"))]
 #[doc(hidden)]
 pub mod fuzzing;
+mod insertion_plan;
 mod keys;
 pub mod limits;
 mod matcher;
@@ -68,6 +69,9 @@ pub use engine::{
     WindowContext, MAX_WINDOW_INSTANCE_ID_BYTES,
 };
 pub use fleet::{FleetConfig, FleetError, Layer, MergeStats, Provenance};
+pub use insertion_plan::{
+    plan_insertion, InsertionRouteCapabilities, InsertionStrategy, INTERACTIVE_INSERTION_TARGET_MS,
+};
 pub use keys::{KeyChord, KeyChordError, Modifiers};
 pub use matcher::{Matcher, MatcherBuildError};
 pub use migration::{

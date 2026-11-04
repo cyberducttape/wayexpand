@@ -139,16 +139,25 @@ impl GuiApp {
             None => (self.strings.route_unknown_status(), palette.muted),
         };
         let route_trust = self.active_route_contract().map(|contract| {
+            let sensitive_field_protection = if contract.sensitive_fields {
+                self.daemon_capabilities
+                    .as_ref()
+                    .and_then(|capabilities| capabilities.capture_sensitive_focus)
+            } else {
+                Some(false)
+            };
             (
                 self.strings.route_trust_status(
                     &contract.label,
                     &contract.status,
-                    contract.sensitive_fields,
+                    sensitive_field_protection,
                     contract.atomic_replace,
                     &contract.replacement_assurance,
                     contract.is_certified(),
                 ),
-                if contract.is_certified() {
+                if sensitive_field_protection == Some(false) {
+                    palette.danger
+                } else if contract.is_certified() && sensitive_field_protection == Some(true) {
                     palette.success
                 } else {
                     palette.warning
