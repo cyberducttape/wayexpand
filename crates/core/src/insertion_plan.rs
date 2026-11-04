@@ -6,10 +6,6 @@
 
 use crate::CompatibilityMode;
 
-/// Product latency objective for ordinary paced-key output. It is a routing
-/// threshold, not a certification claim or an observed p95 guarantee.
-pub const INTERACTIVE_INSERTION_TARGET_MS: u64 = 100;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InsertionRouteCapabilities {
     /// The active route verifies the target and replaces it atomically.
@@ -32,8 +28,10 @@ pub enum InsertionStrategy {
 
 /// Recommend an output path from live route capabilities and explicit
 /// compatibility consent. Unknown or unsupported routes fail to the manual
-/// clipboard path. Paced synthesis is recommended only when the estimated
-/// duration is within the ordinary-interaction target.
+/// clipboard path. Paced synthesis is recommended only when it fits the
+/// explicitly configured route limit. The default limit is intentionally
+/// short; users who raise it have explicitly accepted slower compatibility
+/// output.
 pub fn plan_insertion(
     characters: usize,
     route: Option<InsertionRouteCapabilities>,
@@ -63,11 +61,7 @@ pub fn plan_insertion(
     let characters = u64::try_from(characters).unwrap_or(u64::MAX);
     let rate = u64::from(rate);
     let predicted_ms = characters.saturating_mul(1_000).saturating_add(rate - 1) / rate;
-    if predicted_ms > INTERACTIVE_INSERTION_TARGET_MS {
-        InsertionStrategy::ClipboardAssistedPaste
-    } else {
-        InsertionStrategy::PacedSyntheticKeystrokes { predicted_ms }
-    }
+    InsertionStrategy::PacedSyntheticKeystrokes { predicted_ms }
 }
 
 #[cfg(test)]
@@ -120,14 +114,14 @@ mod tests {
     }
 
     #[test]
-    fn paced_synthesis_is_recommended_only_under_the_latency_target() {
+    fn explicit_route_limit_allows_slow_compatibility_output() {
         assert_eq!(
             plan_insertion(8, Some(route()), CompatibilityMode::TrackedFocus),
             InsertionStrategy::PacedSyntheticKeystrokes { predicted_ms: 97 }
         );
         assert_eq!(
             plan_insertion(9, Some(route()), CompatibilityMode::TrackedFocus),
-            InsertionStrategy::ClipboardAssistedPaste
+            InsertionStrategy::PacedSyntheticKeystrokes { predicted_ms: 109 }
         );
     }
 
