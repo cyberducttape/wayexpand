@@ -385,6 +385,75 @@ fn concurrent_conditional_writers_allow_only_one_revision_winner() {
     fs::remove_file(lock_path).unwrap();
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn stable_config_lock_serializes_writers_across_atomic_inode_replacement() {
+    use std::{
+        os::unix::fs::MetadataExt,
+        sync::mpsc,
+        time::{Duration, SystemTime, UNIX_EPOCH},
+    };
+
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-config-lock-replacement-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    Config::parse("[[expansion]]\ntrigger = ':x'\nreplacement = 'initial'\n")
+        .unwrap()
+        .save_atomic(&path)
+        .unwrap();
+
+    let filename = path.file_name().unwrap().to_string_lossy();
+    let lock_path = path.with_file_name(format!(".{filename}.wayexpand.lock"));
+    let lock_inode = fs::metadata(&lock_path).unwrap().ino();
+    let target_inode = fs::metadata(&path).unwrap().ino();
+    let held_lock = storage::ConfigWriteLock::acquire(&path).unwrap();
+
+    let (attempted_tx, attempted_rx) = mpsc::channel();
+    let (saved_tx, saved_rx) = mpsc::channel();
+    let competing_path = path.clone();
+    let competing_writer = std::thread::spawn(move || {
+        attempted_tx.send(()).unwrap();
+        let result = Config::save_atomic_text(
+            &competing_path,
+            "[[expansion]]\ntrigger = ':x'\nreplacement = 'competing writer'\n",
+        );
+        saved_tx.send(result.is_ok()).unwrap();
+    });
+    attempted_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert!(
+        saved_rx.recv_timeout(Duration::from_millis(150)).is_err(),
+        "the competing writer must wait for the stable sibling lock"
+    );
+
+    // Model the lock holder committing a write. This deliberately calls the
+    // low-level atomic replacement while retaining the lock, so the target
+    // inode changes before the competing writer acquires the lock.
+    Config::save_atomic_serialized(
+        &path,
+        b"[[expansion]]\ntrigger = ':x'\nreplacement = 'lock holder'\n",
+    )
+    .unwrap();
+    assert_ne!(fs::metadata(&path).unwrap().ino(), target_inode);
+    assert_eq!(fs::metadata(&lock_path).unwrap().ino(), lock_inode);
+
+    drop(held_lock);
+    assert!(saved_rx.recv_timeout(Duration::from_secs(2)).unwrap());
+    competing_writer.join().unwrap();
+    assert_eq!(fs::metadata(&lock_path).unwrap().ino(), lock_inode);
+    assert_eq!(
+        Config::load(&path).unwrap().expansion[0].replacement,
+        "competing writer"
+    );
+
+    fs::remove_file(path).unwrap();
+    fs::remove_file(lock_path).unwrap();
+}
+
 #[test]
 fn pre_category_config_without_new_fields_still_parses() {
     // A config written before `category`/`app_filter` existed: neither
