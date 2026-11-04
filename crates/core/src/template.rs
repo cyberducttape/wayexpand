@@ -1324,7 +1324,7 @@ impl SessionContextField {
         }
     }
 
-    fn get<'a>(self, report: &'a crate::SessionContextReport) -> Option<&'a str> {
+    fn get(self, report: &crate::SessionContextReport) -> Option<&str> {
         match self {
             Self::Shell => report.shell.as_deref(),
             Self::RemoteHost => report.remote_host.as_deref(),

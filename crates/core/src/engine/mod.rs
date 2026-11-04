@@ -790,7 +790,7 @@ impl ExpansionEngine {
             template: pending.form_template.unwrap_or_else(|| Arc::from("")),
             fields,
             command: pending.command.clone(),
-            context: self.template_context(),
+            context: Box::new(self.template_context()),
             title: pending.trigger.to_string(),
             origin,
             result: ExpansionResult {

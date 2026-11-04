@@ -537,7 +537,7 @@ pub(super) enum AsyncCommandJob {
         template: Arc<str>,
         fields: Arc<Vec<crate::FormField>>,
         command: Option<Arc<CommandConfig>>,
-        context: crate::TemplateContext,
+        context: Box<crate::TemplateContext>,
         title: String,
         origin: FormOrigin,
         result: ExpansionResult,
