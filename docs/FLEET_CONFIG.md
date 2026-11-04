@@ -99,11 +99,16 @@ strict profile fails for evdev even if a route reports that capability. The
 independent gate results are also available under `gates`, including whether
 each gate is required and which checks contributed to its result. The execution
 sandbox gate includes daemon and, when configured, broker confinement checks;
-the Action Broker availability gate reports service and socket health and is
-required only when configured named actions need it. A broker can therefore be
-available while failing its sandbox checks, and that result appears only under
+the Action Broker availability gate reports service/socket health and mandatory
+audit readiness, and is required only when configured named actions need it.
+For those actions, `action_broker_mandatory_audit` must report `pass`:
+`Run Approved Action` requires audit to be enabled, mandatory, and healthy. A
+broker can therefore be reachable while failing its audit or sandbox checks;
+the availability result covers audit, while confinement appears only under
 execution sandboxing. Input privacy and configuration integrity are evaluated
-separately as well. The legacy
+separately as well. The top-level `schema` field is currently `8` and is
+versioned; automation should consume the stable `gates.<name>.readiness`,
+`required`, and `checks` fields and reject unrecognized schema versions. The legacy
 `sandbox_readiness` key aliases `execution_sandbox_readiness`. The
 security report's `active_route` object records the live source, backend,
 atomic replacement capability, replacement assurance, focus assurance, and
