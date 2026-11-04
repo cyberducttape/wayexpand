@@ -83,6 +83,21 @@ tags = ["systemd", "diagnostics"]
 replacement = "systemctl --failed --no-pager && journalctl -p err -b --no-pager -n {{shellq:lines=50|required|max=5|validate=positive-integer}}"
 
 [[expansion]]
+trigger = ";;ssh-health"
+description = "Generate shell-aware, read-only host diagnostics from an explicitly reported SSH session"
+category = "Operations triage"
+tags = ["ssh", "incident", "systemd", "read-only", "multiline"]
+replacement = """# Review-only {{context:shell}} commands; environment={{context:environment}}; SSH target={{context:remote_host}}
+# Expected host: {{field:expected host|required|max=253|validate=hostname}}
+# Compare `hostname -f` with the expected host before running any line.
+hostname -f
+systemctl status --no-pager -- {{shellq:service=nginx.service|required|max=255|validate=systemd-unit}}
+journalctl -u {{shellq:service}} -n {{shellq:lines=100|required|max=5|validate=positive-integer}} --no-pager
+ss -lntp
+curl -sS -I --max-time 5 -- http://127.0.0.1:{{field:port=8080|required|max=5|validate=port}}/
+"""
+
+[[expansion]]
 trigger = ";http503"
 description = "Review-first HTTP 503 diagnostic checklist and read-only command sequence"
 category = "Operations triage"

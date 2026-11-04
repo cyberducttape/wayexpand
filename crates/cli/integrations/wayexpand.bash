@@ -5,10 +5,14 @@ if [[ ! ${WAYEXPAND_CONTEXT_SESSION_ID:-} =~ ^[[:xdigit:]]{32}$ ]] && command -v
 fi
 
 _wayexpand_context_report() {
-    [[ ${WAYEXPAND_CONTEXT_SESSION_ID:-} =~ ^[[:xdigit:]]{32}$ ]] || return 0
-    command -v wayexpand >/dev/null 2>&1 || return 0
+    local previous_status=$?
+    [[ ${WAYEXPAND_CONTEXT_SESSION_ID:-} =~ ^[[:xdigit:]]{32}$ ]] || return "$previous_status"
+    command -v wayexpand >/dev/null 2>&1 || return "$previous_status"
 
-    local project_root='' kube_context='' remote_host="${WAYEXPAND_CONTEXT_REMOTE_HOST:-}"
+    local project_root='' kube_context='' remote_host=''
+    if [[ ${1:-} != --local ]]; then
+        remote_host=${WAYEXPAND_CONTEXT_REMOTE_HOST:-}
+    fi
     if [[ -z $remote_host ]]; then
         project_root=$(command git rev-parse --show-toplevel 2>/dev/null) || project_root=''
         if command -v kubectl >/dev/null 2>&1; then
@@ -23,6 +27,20 @@ _wayexpand_context_report() {
     [[ -n ${WAYEXPAND_CONTEXT_ENVIRONMENT:-} ]] && arguments+=(--environment "$WAYEXPAND_CONTEXT_ENVIRONMENT")
     [[ -z $remote_host && -n ${WAYEXPAND_CONTEXT_CONTAINER:-} ]] && arguments+=(--container "$WAYEXPAND_CONTEXT_CONTAINER")
     command wayexpand "${arguments[@]}" >/dev/null 2>&1 || :
+    return "$previous_status"
+}
+
+_wayexpand_context_remote_heartbeat() {
+    local target=$1 stop_file=$2 interval=${3:-30} elapsed=0
+    while [[ ! -e $stop_file ]]; do
+        sleep 1
+        [[ -e $stop_file ]] && break
+        elapsed=$((elapsed + 1))
+        if ((elapsed >= interval)); then
+            WAYEXPAND_CONTEXT_REMOTE_HOST="$target" _wayexpand_context_report
+            elapsed=0
+        fi
+    done
 }
 
 # Explicit SSH wrapper: the target is the first argument, ssh options follow,
@@ -47,14 +65,22 @@ wayexpand-ssh() {
         command ssh "${options[@]}" "$target" "${remote_command[@]}"
         return $?
     fi
-    (while :; do sleep 30; WAYEXPAND_CONTEXT_REMOTE_HOST="$target" _wayexpand_context_report; done) &
+    local stop_file
+    stop_file=$(mktemp "${TMPDIR:-/tmp}/wayexpand-context-stop.XXXXXX") || {
+        command ssh "${options[@]}" "$target" "${remote_command[@]}"
+        return $?
+    }
+    _wayexpand_context_remote_heartbeat "$target" "$stop_file" &
     local reporter_pid=$!
     WAYEXPAND_CONTEXT_REMOTE_HOST="$target" _wayexpand_context_report
     command ssh "${options[@]}" "$target" "${remote_command[@]}"
     local ssh_status=$?
-    kill "$reporter_pid" 2>/dev/null || :
+    printf 'stop\n' >"$stop_file"
     wait "$reporter_pid" 2>/dev/null || :
-    _wayexpand_context_report
+    command wayexpand context clear >/dev/null 2>&1 || :
+    command rm -f -- "$stop_file"
+    unset WAYEXPAND_CONTEXT_REMOTE_HOST
+    _wayexpand_context_report --local
     return "$ssh_status"
 }
 
@@ -63,6 +89,7 @@ if [[ $(declare -p PROMPT_COMMAND 2>/dev/null) == 'declare -a'* ]]; then
         PROMPT_COMMAND=(_wayexpand_context_report "${PROMPT_COMMAND[@]}")
     fi
 else
+    # shellcheck disable=SC2178,SC2128 # This branch handles scalar PROMPT_COMMAND only.
     case ";${PROMPT_COMMAND:-};" in
         *";_wayexpand_context_report;"*) ;;
         *) PROMPT_COMMAND="_wayexpand_context_report${PROMPT_COMMAND:+;${PROMPT_COMMAND}}" ;;

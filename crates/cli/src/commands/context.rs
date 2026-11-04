@@ -3,8 +3,10 @@
 use super::Args;
 use crate::*;
 use std::{
+    collections::HashMap,
     fs,
     os::unix::fs::{FileTypeExt, MetadataExt},
+    sync::Arc,
 };
 
 const BASH_INTEGRATION: &str = include_str!("../../integrations/wayexpand.bash");
@@ -39,12 +41,267 @@ pub(crate) fn context_command(mut args: Args) -> Result<()> {
         }
         Some("report") => report_context(args.collect())?,
         Some("status") => show_context(args.collect())?,
+        Some("render") => render_context(args.collect())?,
         Some("clear") => clear_context(args.collect())?,
         _ => usage_bail!(
-            "usage: wayexpand context integration bash|zsh|fish | session-id | report [options] | status [--json] | clear"
+            "usage: wayexpand context integration bash|zsh|fish | session-id | report [options] | status [--json] | render <trigger> [--set NAME=VALUE]... [--json] | clear"
         ),
     }
     Ok(())
+}
+
+/// Render one static snippet using fresh shell context or explicitly selected
+/// context. This is an output-only preview: command-backed entries are
+/// refused, and this command never types, pastes, or executes the result.
+fn render_context(args: Vec<String>) -> Result<()> {
+    const USAGE: &str = "usage: wayexpand context render <trigger> [--shell bash|zsh|fish] [--remote-host TARGET] [--environment NAME] [--set NAME=VALUE]... [--config PATH] [--json]";
+    let Some(trigger) = args.first() else {
+        usage_bail!("{USAGE}");
+    };
+    let mut config_path = default_config_path();
+    let mut supplied = HashMap::new();
+    let mut json = false;
+    let mut shell_override = None;
+    let mut remote_host_override = None;
+    let mut environment_override = None;
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--json" => json = true,
+            "--set" => {
+                index += 1;
+                let assignment = args
+                    .get(index)
+                    .ok_or_else(|| usage_error("--set requires NAME=VALUE"))?;
+                let (name, value) = assignment
+                    .split_once('=')
+                    .ok_or_else(|| usage_error("--set requires NAME=VALUE"))?;
+                if name.is_empty() || supplied.insert(name.to_owned(), value.to_owned()).is_some() {
+                    usage_bail!("--set field names must be non-empty and unique");
+                }
+            }
+            "--config" => {
+                index += 1;
+                config_path = PathBuf::from(
+                    args.get(index)
+                        .ok_or_else(|| usage_error("--config requires a path"))?,
+                );
+            }
+            "--shell" => {
+                index += 1;
+                shell_override = Some(
+                    args.get(index)
+                        .ok_or_else(|| usage_error("--shell requires a value"))?
+                        .clone(),
+                );
+            }
+            "--remote-host" => {
+                index += 1;
+                remote_host_override = Some(
+                    args.get(index)
+                        .ok_or_else(|| usage_error("--remote-host requires a value"))?
+                        .clone(),
+                );
+            }
+            "--environment" => {
+                index += 1;
+                environment_override = Some(
+                    args.get(index)
+                        .ok_or_else(|| usage_error("--environment requires a value"))?
+                        .clone(),
+                );
+            }
+            option if option.starts_with("--set=") => {
+                let assignment = &option["--set=".len()..];
+                let (name, value) = assignment
+                    .split_once('=')
+                    .ok_or_else(|| usage_error("--set requires NAME=VALUE"))?;
+                if name.is_empty() || supplied.insert(name.to_owned(), value.to_owned()).is_some() {
+                    usage_bail!("--set field names must be non-empty and unique");
+                }
+            }
+            option if option.starts_with("--config=") => {
+                config_path = PathBuf::from(&option["--config=".len()..]);
+            }
+            option if option.starts_with("--shell=") => {
+                shell_override = Some(option["--shell=".len()..].to_owned());
+            }
+            option if option.starts_with("--remote-host=") => {
+                remote_host_override = Some(option["--remote-host=".len()..].to_owned());
+            }
+            option if option.starts_with("--environment=") => {
+                environment_override = Some(option["--environment=".len()..].to_owned());
+            }
+            _ => usage_bail!("{USAGE}"),
+        }
+        index += 1;
+    }
+
+    let mut session = reported_context_if_available(
+        shell_override.is_none()
+            || remote_host_override.is_none()
+            || environment_override.is_none(),
+    )?
+    .unwrap_or_else(|| wayexpand_core::SessionContextReport {
+        terminal_id: "tty-render".into(),
+        session_id: "0123456789abcdef0123456789abcdef".into(),
+        ..wayexpand_core::SessionContextReport::default()
+    });
+    if let Some(shell) = shell_override {
+        session.shell = Some(shell);
+    }
+    if let Some(remote_host) = remote_host_override {
+        session.remote_host = Some(remote_host);
+    }
+    if let Some(environment) = environment_override {
+        session.environment = Some(environment);
+    }
+    session
+        .validate()
+        .map_err(|reason| usage_error(format!("invalid session context: {reason}")))?;
+    let shell = session
+        .shell
+        .as_deref()
+        .filter(|shell| matches!(*shell, "bash" | "zsh" | "fish"))
+        .ok_or_else(|| {
+            usage_error("context rendering supports the reported bash, zsh, or fish shell only")
+        })?;
+
+    let config =
+        Config::load(&config_path).map_err(|error| config_load_error(&config_path, error))?;
+    let expansion = config
+        .expansion
+        .iter()
+        .find(|expansion| expansion.answers_to(trigger))
+        .ok_or_else(|| usage_error("no snippet has that trigger or alias"))?;
+    if !expansion.enabled {
+        usage_bail!("the selected snippet is disabled");
+    }
+    if expansion.command.is_some() {
+        usage_bail!(
+            "context render only renders text snippets; command-backed snippets are never run"
+        );
+    }
+
+    let fields = wayexpand_core::form_fields(&expansion.replacement)
+        .map_err(|error| config_error(format!("snippet form is invalid: {error}")))?;
+    let mut values = wayexpand_core::FormValues::default();
+    for field in &fields {
+        let value = supplied.remove(&field.key).or_else(|| match &field.kind {
+            wayexpand_core::FormFieldKind::Text { default }
+            | wayexpand_core::FormFieldKind::Date { default } => {
+                (!default.is_empty()).then(|| default.clone())
+            }
+            wayexpand_core::FormFieldKind::Choice { default, .. } => default.clone(),
+        });
+        let value = match value {
+            Some(value) => value,
+            None => prompt_context_field(field)?,
+        };
+        field
+            .validate_value(&value)
+            .map_err(|_| usage_error(format!("value for field {:?} is invalid", field.label)))?;
+        values.insert(field.key.clone(), value);
+    }
+    if !supplied.is_empty() {
+        usage_bail!("--set names a field that does not exist in the selected snippet");
+    }
+    let mut context = config.template_context(None);
+    context.fields = Arc::new(values);
+    context.session_context = Some(session.clone());
+    let (rendered, _) =
+        wayexpand_core::render_template_with_cursor(&expansion.replacement, &context).map_err(
+            |error| {
+                config_error(format!(
+                    "snippet could not be rendered: {}",
+                    error.safe_summary()
+                ))
+            },
+        )?;
+
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "rendered": rendered.as_str(),
+                "trigger": expansion.trigger,
+                "shell": shell,
+                "remote_host": session.remote_host,
+                "environment": session.environment,
+                "delivery": "manual-review-and-paste",
+                "execution": "never",
+            })
+        );
+    } else {
+        eprintln!(
+            "Preview only · shell={shell} · target={} · environment={} · review before pasting; WayExpand will not execute this text",
+            session.remote_host.as_deref().unwrap_or("local"),
+            session.environment.as_deref().unwrap_or("unspecified"),
+        );
+        print!("{}", rendered.as_str());
+        if !rendered.as_str().ends_with('\n') {
+            println!();
+        }
+    }
+    Ok(())
+}
+
+fn reported_context_if_available(
+    should_query: bool,
+) -> Result<Option<wayexpand_core::SessionContextReport>> {
+    if !should_query {
+        return Ok(None);
+    }
+    let (Ok(session_id), Ok(terminal_id)) =
+        (env::var("WAYEXPAND_CONTEXT_SESSION_ID"), terminal_id())
+    else {
+        return Ok(None);
+    };
+    let response = context_operation(wayexpand_core::DaemonOperation::ContextGet {
+        terminal_id,
+        session_id,
+    })?;
+    let status: serde_json::Value = serde_json::from_str(&response)
+        .map_err(|_| daemon_error("daemon returned an unreadable context response"))?;
+    if status.get("active").and_then(serde_json::Value::as_bool) != Some(true) {
+        return Ok(None);
+    }
+    let report: wayexpand_core::SessionContextReport = serde_json::from_value(
+        status
+            .get("context")
+            .cloned()
+            .ok_or_else(|| daemon_error("daemon omitted the terminal context"))?,
+    )
+    .map_err(|_| daemon_error("daemon returned an invalid terminal context"))?;
+    report
+        .validate()
+        .map_err(|_| daemon_error("daemon returned an invalid terminal context"))?;
+    Ok(Some(report))
+}
+
+fn prompt_context_field(field: &wayexpand_core::FormField) -> Result<String> {
+    use std::io::{BufRead, Write};
+    let mut terminal = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+        .map_err(|_| {
+            usage_error("missing snippet fields; pass --set NAME=VALUE or run from a terminal")
+        })?;
+    write!(terminal, "{}: ", field.label)?;
+    terminal.flush()?;
+    let mut value = String::new();
+    std::io::BufReader::new(terminal).read_line(&mut value)?;
+    while value.ends_with(['\n', '\r']) {
+        value.pop();
+    }
+    if value.is_empty() {
+        usage_bail!(
+            "field {:?} needs a value; pass --set NAME=VALUE",
+            field.label
+        );
+    }
+    Ok(value)
 }
 
 fn report_context(args: Vec<String>) -> Result<()> {
