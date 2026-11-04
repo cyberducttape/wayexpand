@@ -30,6 +30,24 @@
     "setup_recommendation",
     "capture_readiness"
   ],
+  "doctor_security": [
+    "schema",
+    "profile",
+    "readiness",
+    "gates",
+    "execution_sandbox_readiness",
+    "input_privacy_readiness",
+    "configuration_integrity_readiness",
+    "action_broker_availability_readiness",
+    "healthy",
+    "checks"
+  ],
+  "doctor_security_gates": [
+    "execution_sandbox",
+    "input_privacy",
+    "configuration_integrity",
+    "action_broker_availability"
+  ],
   "status": [
     "response",
     "source",

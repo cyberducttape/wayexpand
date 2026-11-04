@@ -858,6 +858,46 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
         .into_iter()
         .collect()
     );
+    let security_fields = contract["doctor_security"]
+        .as_array()
+        .expect("security doctor contract must be an array")
+        .iter()
+        .map(|field| field.as_str().unwrap())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        security_fields,
+        [
+            "schema",
+            "profile",
+            "readiness",
+            "gates",
+            "execution_sandbox_readiness",
+            "input_privacy_readiness",
+            "configuration_integrity_readiness",
+            "action_broker_availability_readiness",
+            "healthy",
+            "checks",
+        ]
+        .into_iter()
+        .collect()
+    );
+    let security_gates = contract["doctor_security_gates"]
+        .as_array()
+        .expect("security gate contract must be an array")
+        .iter()
+        .map(|field| field.as_str().unwrap())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        security_gates,
+        [
+            "execution_sandbox",
+            "input_privacy",
+            "configuration_integrity",
+            "action_broker_availability",
+        ]
+        .into_iter()
+        .collect()
+    );
     let status_fields = contract["status"]
         .as_array()
         .expect("status contract must be an array")
