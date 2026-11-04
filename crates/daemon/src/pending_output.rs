@@ -322,11 +322,21 @@ impl Daemon {
             Some(result) => in_flight.with_result(result),
             None => in_flight,
         };
+        let outcome_uncertain = matches!(
+            &outcome,
+            wayexpand_core::TransactionOutcome::UnknownApplicationOutcome { .. }
+                | wayexpand_core::TransactionOutcome::UnknownPartialFailure { .. }
+        );
         let completed = self.complete_job(origin, in_flight, outcome)?;
-        if physical_input_interrupted {
+        if physical_input_interrupted || outcome_uncertain {
             // The input event has already reached the application. Do not
             // replay captured input or continue a queued batch against text
-            // that may have changed while output was in progress.
+            // that may have changed while output was in progress. An
+            // unacknowledged/partial backend failure has the same ambiguity
+            // even when the physical-input monitor saw no new event. Reset
+            // matcher context on every capture route; evdev additionally
+            // needs its quiet-window quarantine.
+            self.config.engine.reset_with_unknown_preceding_text();
             self.quarantine_evdev_input();
             Ok(())
         } else if completed {
@@ -488,6 +498,7 @@ mod tests {
     struct GatedInjector {
         gate: Arc<(Mutex<bool>, std::sync::Condvar)>,
         calls: Arc<Mutex<Vec<String>>>,
+        delivered: Arc<Mutex<String>>,
         erase_started: Arc<std::sync::atomic::AtomicUsize>,
         fail: bool,
         checkpoint: wayexpand_core::OutputCheckpoint,
@@ -533,12 +544,14 @@ mod tests {
             })?;
             self.calls.lock().unwrap().push(format!("insert:{text}"));
             if self.fail {
+                self.delivered.lock().unwrap().extend(text.chars().take(2));
                 return Err(InjectorError {
                     backend: "gated-test",
                     message: "portal went away".into(),
                     retryable: true,
                 });
             }
+            self.delivered.lock().unwrap().push_str(text);
             Ok(())
         }
 
@@ -551,6 +564,7 @@ mod tests {
         daemon: Daemon,
         gate: Arc<(Mutex<bool>, std::sync::Condvar)>,
         calls: Arc<Mutex<Vec<String>>>,
+        delivered: Arc<Mutex<String>>,
         erase_started: Arc<std::sync::atomic::AtomicUsize>,
         waiting: Arc<std::sync::atomic::AtomicBool>,
         physical_input: mpsc::Sender<InputEvent>,
@@ -592,6 +606,7 @@ mod tests {
                 .unwrap();
             let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
             let calls = Arc::new(Mutex::new(Vec::new()));
+            let delivered = Arc::new(Mutex::new(String::new()));
             let erase_started = Arc::new(std::sync::atomic::AtomicUsize::new(0));
             let waiting = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let (physical_input, physical_input_events) = mpsc::channel();
@@ -599,6 +614,7 @@ mod tests {
             let backend: Box<dyn TextInjector> = Box::new(GatedInjector {
                 gate: Arc::clone(&gate),
                 calls: Arc::clone(&calls),
+                delivered: Arc::clone(&delivered),
                 erase_started: Arc::clone(&erase_started),
                 fail,
                 checkpoint: wayexpand_core::OutputCheckpoint::default(),
@@ -662,6 +678,7 @@ mod tests {
                 daemon,
                 gate,
                 calls,
+                delivered,
                 erase_started,
                 waiting,
                 physical_input,
@@ -1138,6 +1155,21 @@ mod tests {
     fn failure_stops_the_batch_and_retires_the_route() {
         let mut harness = Harness::new(true);
         harness.open_gate();
+        let hotkey_marker = harness.directory.join("follow-up-hotkey-ran");
+        let mut config = wayexpand_core::Config::parse(
+            "[[hotkey]]\nchord = 'Ctrl+Alt+F12'\ncommand = { program = '/usr/bin/touch' }\n",
+        )
+        .unwrap();
+        config.hotkey[0].command.args.push(
+            hotkey_marker
+                .to_str()
+                .expect("test path is UTF-8")
+                .to_owned(),
+        );
+        let mut engine = wayexpand_core::ExpansionEngine::new(config).unwrap();
+        assert!(engine.enable_async_commands());
+        harness.daemon.config.engine = engine;
+        let uncertain_before = output_health::snapshot().uncertain_total;
         harness
             .daemon
             .start_output(
@@ -1146,16 +1178,34 @@ mod tests {
                     OutputJob::Expansion(result(":a", "first")),
                     OutputJob::Expansion(result(":b", "second")),
                 ],
-                Vec::new(),
+                vec![InputEvent::Key(
+                    wayexpand_core::KeyChord::parse("Ctrl+Alt+F12").unwrap(),
+                )],
             )
             .unwrap();
         harness.run_until_resolved();
         // The failed transaction is not replayed and the rest of the batch
         // is never sent to a possibly inconsistent target.
         assert_eq!(*harness.calls.lock().unwrap(), ["erase::a", "insert:first"]);
+        assert_eq!(
+            harness.delivered.lock().unwrap().as_str(),
+            "fi",
+            "the fake backend applies a prefix before reporting the lost connection"
+        );
         assert!(harness.daemon.injector.is_none());
         assert_eq!(harness.daemon.retiring_output_workers.len(), 1);
         assert!(harness.daemon.output_retry_at.is_some());
+        assert!(
+            output_health::snapshot().uncertain_total > uncertain_before,
+            "failure after trigger deletion must be recorded as an uncertain partial result"
+        );
+        let command_metrics = harness.daemon.config.engine.command_metrics();
+        assert_eq!(command_metrics.hotkey_queue_depth, 0);
+        assert_eq!(command_metrics.hotkey_in_flight, 0);
+        assert!(
+            !hotkey_marker.exists(),
+            "follow-up input after uncertain insertion must be quarantined, not dispatched"
+        );
     }
 
     #[test]

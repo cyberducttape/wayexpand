@@ -86,6 +86,11 @@ itself identify or prohibit an evdev capture source. After starting the
 managed user service, require
 `wayexpand doctor --security --profile hardened --json` to report
 `"readiness": "pass"` before treating the host as deployment-ready.
+The security report's `active_route` object records the live source, backend,
+atomic replacement capability, replacement assurance, focus assurance, and
+compatibility mode. `automatic_replacement_mode` distinguishes an atomic
+capability, the default refusal for non-atomic routes, and an experimental
+compatibility override. It does not claim desktop certification.
 
 Inspect the policy's enforcement view with `wayexpand policy inspect`. CI
 should use `wayexpand policy check --file ./policy.toml --json`; its exit code

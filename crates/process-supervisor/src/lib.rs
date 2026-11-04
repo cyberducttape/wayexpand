@@ -13,6 +13,8 @@ use std::time::Instant;
 mod security;
 pub use security::{effective_security_snapshot, EffectiveSecuritySnapshot};
 
+static CONTAINMENT_SELF_TEST: OnceLock<String> = OnceLock::new();
+
 #[cfg(target_os = "linux")]
 use std::path::PathBuf;
 
@@ -366,6 +368,80 @@ pub fn containment_mode() -> &'static str {
 /// that the required cgroup can actually be created.
 pub fn containment_policy_mode() -> &'static str {
     containment_policy(std::env::var_os("WAYEXPAND_PROCESS_CGROUP").as_deref())
+}
+
+/// Run one short-lived, harmless containment probe from the daemon's own
+/// service context. A new session is created inside the command cgroup, then
+/// the same supervisor path used for actions must kill and reap it. This is
+/// runtime evidence for the current service instance, not a promise about a
+/// later policy or host change.
+#[cfg(target_os = "linux")]
+pub fn run_containment_self_test() -> &'static str {
+    CONTAINMENT_SELF_TEST
+        .get_or_init(|| match containment_mode() {
+            "process-group" => "explicitly-disabled".to_string(),
+            "invalid" => "invalid-policy".to_string(),
+            _ => containment_probe()
+                .map(|()| "passed".to_string())
+                .unwrap_or_else(|error| containment_error_status(error.kind()).to_string()),
+        })
+        .as_str()
+}
+
+#[cfg(target_os = "linux")]
+fn containment_error_status(kind: io::ErrorKind) -> &'static str {
+    match kind {
+        io::ErrorKind::PermissionDenied => "failed-permission-denied",
+        io::ErrorKind::NotFound => "failed-not-found",
+        io::ErrorKind::TimedOut => "failed-timeout",
+        io::ErrorKind::Unsupported => "failed-unsupported",
+        _ => "failed-other",
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn run_containment_self_test() -> &'static str {
+    "unsupported-platform"
+}
+
+/// Result recorded by [`run_containment_self_test`], or `not-run` when the
+/// daemon has not performed its startup probe.
+pub fn containment_self_test_result() -> &'static str {
+    #[cfg(target_os = "linux")]
+    {
+        CONTAINMENT_SELF_TEST
+            .get()
+            .map_or("not-run", String::as_str)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        "unsupported-platform"
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn containment_probe() -> Result<(), io::Error> {
+    use std::process::Stdio;
+
+    let mut command = Command::new("/bin/sh");
+    command
+        .args(["-c", "setsid /bin/sh -c 'exec sleep 30' & wait"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    configure_process_group(&mut command);
+    let cgroup = CommandCgroup::prepare_required(&mut command)?;
+    let child = command.spawn()?;
+    let mut supervisor = ChildSupervisor::new_with_cgroup(child, Some(cgroup));
+    std::thread::sleep(std::time::Duration::from_millis(25));
+    if supervisor.has_exited()? {
+        let _ = supervisor.reap();
+        return Err(io::Error::other(
+            "containment probe exited before cancellation was requested",
+        ));
+    }
+    supervisor.reap()?;
+    Ok(())
 }
 
 fn containment_policy(configured: Option<&std::ffi::OsStr>) -> &'static str {
@@ -943,6 +1019,23 @@ mod tests {
     // deliberate invalid-PID increments in one test cannot make another
     // test's before/after assertion scheduler-dependent.
     static KILL_FAILURE_COUNTER_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn containment_probe_reports_actionable_failure_classes() {
+        assert_eq!(
+            containment_error_status(io::ErrorKind::PermissionDenied),
+            "failed-permission-denied"
+        );
+        assert_eq!(
+            containment_error_status(io::ErrorKind::NotFound),
+            "failed-not-found"
+        );
+        assert_eq!(
+            containment_error_status(io::ErrorKind::TimedOut),
+            "failed-timeout"
+        );
+    }
 
     #[test]
     fn process_containment_requires_cgroups_unless_compatibility_is_explicit() {

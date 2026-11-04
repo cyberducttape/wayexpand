@@ -184,8 +184,9 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         ),
         check(
             "daemon_command_cgroup_containment",
-            daemon["command_containment"].as_str() == Some("cgroup"),
-            "Command-backed expansions must use cgroup descendant cleanup.",
+            daemon["command_containment"].as_str() == Some("cgroup")
+                && daemon["command_containment_self_test"].as_str() == Some("passed"),
+            "The daemon must require cgroup containment and pass its harmless descendant-cancellation self-test in its own service context.",
         ),
     ];
 
@@ -212,6 +213,11 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         let broker_mount = broker_sandbox["namespaces"]["mount"].as_u64();
         let broker_uts = broker_sandbox["namespaces"]["uts"].as_u64();
         checks.extend([
+            check(
+                "broker_command_cgroup_containment",
+                broker["command_containment_self_test"].as_str() == Some("passed"),
+                "The running Action Broker must pass the descendant-cancellation self-test in its own service context.",
+            ),
             check(
                 "broker_seccomp",
                 broker_sandbox["seccomp_mode"].as_u64() == Some(2),
@@ -273,6 +279,7 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
     let capture_source = daemon["source"].as_str().unwrap_or("unknown");
     let sensitive_field_detection = daemon["capture_sensitive_focus"].as_bool();
     let evdev_privacy = capture_source == "evdev";
+    let route = active_route_summary(&daemon);
     let report = serde_json::json!({
         "schema": 2,
         "profile": profile.name(),
@@ -280,6 +287,7 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         "healthy": healthy,
         "daemon_pid": sandbox.get("pid"),
         "daemon": sandbox,
+        "active_route": route,
         "input_privacy": {
             "source": capture_source,
             "sensitive_field_detection": sensitive_field_detection,
@@ -287,6 +295,13 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         },
         "configuration": config_permissions,
         "command_execution_configured": command_execution_configured,
+        "command_containment": {
+            "mode": daemon.get("command_containment"),
+            "policy": daemon.get("command_containment_mode"),
+            "self_test": daemon.get("command_containment_self_test"),
+            "cleanup_pending_jobs": daemon.get("command_cleanup_pending_jobs"),
+            "cleanup_degraded": daemon.get("command_cleanup_degraded"),
+        },
         "action_broker": {
             "required": broker_required,
             "available": broker_running,
@@ -304,9 +319,32 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         println!("Protection profile: {}", profile.name());
         println!("Readiness: {}", readiness.to_ascii_uppercase());
         println!("Daemon PID: {}", report["daemon_pid"]);
+        println!(
+            "Active route: source={}, backend={}, atomic_replace={}, replacement_assurance={}, compatibility_mode={}, focus_assurance={}",
+            route["source"].as_str().unwrap_or("unknown"),
+            route["backend"].as_str().unwrap_or("unknown"),
+            route["atomic_replace"].as_bool().unwrap_or(false),
+            route["replacement_assurance"].as_str().unwrap_or("unknown"),
+            route["compatibility_mode"].as_str().unwrap_or("unknown"),
+            route["focus_assurance"].as_str().unwrap_or("unknown"),
+        );
+        println!(
+            "Automatic replacement mode: {}",
+            route["automatic_replacement_mode"]
+                .as_str()
+                .unwrap_or("unavailable")
+        );
         if evdev_privacy {
             println!("Privacy: evdev cannot identify password or other sensitive fields; keyboard input may be observed while capture is active.");
         }
+        println!(
+            "Command containment: mode={}, policy={}, self_test={}, pending_cleanup_jobs={}, degraded={}",
+            daemon["command_containment"].as_str().unwrap_or("unknown"),
+            daemon["command_containment_mode"].as_str().unwrap_or("unknown"),
+            daemon["command_containment_self_test"].as_str().unwrap_or("unknown"),
+            daemon["command_cleanup_pending_jobs"].as_u64().unwrap_or(0),
+            daemon["command_cleanup_degraded"].as_bool().unwrap_or(true),
+        );
         for check in report["checks"].as_array().into_iter().flatten() {
             println!(
                 "{}: {} ({}) — {}",
@@ -340,6 +378,28 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
     }
 }
 
+fn active_route_summary(daemon: &serde_json::Value) -> serde_json::Value {
+    let atomic = daemon["inject_atomic_replace"].as_bool();
+    let compatibility_mode = daemon["compatibility_mode"].as_str();
+    let automatic_replacement_mode = match (atomic, compatibility_mode) {
+        (Some(true), _) => "atomic-capability-reported",
+        (Some(false), Some("off")) => "refused-by-default",
+        (Some(false), Some(_)) => "experimental-compatibility-override",
+        _ => "unknown",
+    };
+    serde_json::json!({
+        "source": daemon.get("source").cloned().unwrap_or(serde_json::Value::Null),
+        "backend": daemon.get("backend").cloned().unwrap_or(serde_json::Value::Null),
+        "route_id": daemon.get("route_id").cloned().unwrap_or(serde_json::Value::Null),
+        "atomic_replace": atomic,
+        "replacement_assurance": daemon.get("replacement_assurance").cloned().unwrap_or(serde_json::Value::Null),
+        "compatibility_mode": daemon.get("compatibility_mode").cloned().unwrap_or(serde_json::Value::Null),
+        "focus_assurance": daemon.get("focus_assurance").cloned().unwrap_or(serde_json::Value::Null),
+        "sensitive_field_detection": daemon.get("capture_sensitive_focus").cloned().unwrap_or(serde_json::Value::Null),
+        "automatic_replacement_mode": automatic_replacement_mode,
+    })
+}
+
 fn required_checks(profile: ProtectionProfile) -> &'static [&'static str] {
     const WORKSTATION: &[&str] = &[
         "daemon_connected",
@@ -351,6 +411,7 @@ fn required_checks(profile: ProtectionProfile) -> &'static [&'static str] {
         "daemon_af_inet6_blocked",
         "daemon_memory_deny_write_execute",
         "daemon_command_cgroup_containment",
+        "broker_command_cgroup_containment",
         "action_broker_availability",
     ];
     const HARDENED: &[&str] = &[
@@ -378,6 +439,7 @@ fn required_checks(profile: ProtectionProfile) -> &'static [&'static str] {
         "daemon_memory_limit",
         "daemon_task_limit",
         "daemon_command_cgroup_containment",
+        "broker_command_cgroup_containment",
         "action_broker_availability",
         "broker_seccomp",
         "broker_no_new_privileges",
@@ -479,6 +541,8 @@ mod tests {
         );
         assert!(ProtectionProfile::parse("guess").is_err());
         assert!(required_checks(ProtectionProfile::Hardened).contains(&"daemon_mount_namespace"));
+        assert!(required_checks(ProtectionProfile::Workstation)
+            .contains(&"broker_command_cgroup_containment"));
         assert!(
             !required_checks(ProtectionProfile::Workstation).contains(&"daemon_mount_namespace")
         );
@@ -506,5 +570,35 @@ mod tests {
             readiness_for(ProtectionProfile::Workstation, &optional_failure, &[]),
             "degraded"
         );
+    }
+
+    #[test]
+    fn route_report_identifies_non_atomic_compatibility_override() {
+        let route = active_route_summary(&serde_json::json!({
+            "source": "evdev",
+            "backend": "libei",
+            "route_id": "kde-evdev-libei",
+            "inject_atomic_replace": false,
+            "replacement_assurance": "focus-tracked-best-effort",
+            "compatibility_mode": "untracked-focus",
+            "focus_assurance": "tracker",
+            "capture_sensitive_focus": false,
+        }));
+
+        assert_eq!(route["source"], "evdev");
+        assert_eq!(route["backend"], "libei");
+        assert_eq!(route["atomic_replace"], false);
+        assert_eq!(
+            route["automatic_replacement_mode"],
+            "experimental-compatibility-override"
+        );
+        assert_eq!(route["sensitive_field_detection"], false);
+    }
+
+    #[test]
+    fn route_report_defaults_to_unknown_when_no_daemon_is_connected() {
+        let route = active_route_summary(&serde_json::Value::Null);
+        assert_eq!(route["automatic_replacement_mode"], "unknown");
+        assert!(route["source"].is_null());
     }
 }

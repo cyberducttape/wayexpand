@@ -95,12 +95,21 @@ restrictions are not in effect.
 Run `wayexpand doctor --security --profile workstation` to inspect the live daemon's effective
 namespace IDs, NoNewPrivs and seccomp state, address-family socket probes,
 read-only mount flags, private `/tmp`, proc restrictions, W^X behavior, and
-configuration permissions. When named actions are configured it also checks
-the live Action Broker and its in-process probes. `--json` emits the same
-checks for fleet tooling (schema 2), including `readiness` (`pass`, `degraded`,
-or `fail`), the selected profile, and which checks are required. Unit-file
-directives alone are not treated as evidence. Kernel policy details that
-cannot be safely inspected from an unprivileged process remain listed as
+configuration permissions. At daemon and Action Broker startup, WayExpand
+launches a harmless short-lived descendant in each service's own cgroup,
+starts a new session, and verifies that the production supervisor kills and
+reaps it. The daemon result appears as `command_containment_self_test`; the
+broker result is included in Action Broker diagnostics. The doctor requires
+`passed` for each command-capable service. A failed or explicitly disabled
+probe fails the managed readiness check. Under the default required-cgroup
+policy, command execution also fails closed when containment setup is
+unavailable; process-group cleanup is used only when the operator explicitly
+sets `WAYEXPAND_PROCESS_CGROUP=disabled`. When named actions are configured it
+also checks the live Action Broker and its in-process probes. `--json` emits
+the same checks for fleet tooling (schema 2), including `readiness` (`pass`,
+`degraded`, or `fail`), the selected profile, and which checks are required.
+Unit-file directives alone are not treated as evidence. Kernel policy details
+that cannot be safely inspected from an unprivileged process remain listed as
 unverified instead of being reported as active.
 
 Protection profiles are:

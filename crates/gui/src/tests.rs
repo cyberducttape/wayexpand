@@ -1618,7 +1618,7 @@ fn keystroke_limit_is_saved_validated_and_omitted_at_its_default() {
     let mut app = GuiApp::load(path.clone()).unwrap();
 
     app.open_settings();
-    assert_eq!(app.settings_keystroke_limit, "250");
+    assert_eq!(app.settings_keystroke_limit, "8");
     app.settings_keystroke_limit = "1000".into();
     app.save_settings(&egui::Context::default());
     assert_eq!(
@@ -1640,7 +1640,7 @@ fn keystroke_limit_is_saved_validated_and_omitted_at_its_default() {
         1000
     );
 
-    app.settings_keystroke_limit = "250".into();
+    app.settings_keystroke_limit = "8".into();
     app.save_settings(&egui::Context::default());
     assert!(!fs::read_to_string(&path)
         .unwrap()
@@ -1754,6 +1754,7 @@ fn diagnostics_accessibly_explains_keysym_fallback_and_separates_latency() {
             ..Default::default()
         }],
         output_uncertain_total: Some(1),
+        output_partial_total: Some(1),
         injection_latency_mean_us: Some(420_000),
         injection_latency_p50_us: Some(400),
         injection_latency_p95_us: Some(700),
@@ -1814,7 +1815,7 @@ fn diagnostics_accessibly_explains_keysym_fallback_and_separates_latency() {
     assert!(semantics.contains("Sensitive-field protection"));
     assert!(semantics.contains("Compositor permissions"));
     assert!(semantics.contains("Keysym fallback is active"));
-    assert!(semantics.contains("Partial output · 1"));
+    assert!(semantics.contains("Partial insertion · 1"));
     assert!(semantics.contains("Matcher latency"));
     assert!(semantics.contains("Backend injection latency"));
     assert!(semantics.contains("Usage statistics persistence"));
@@ -2025,6 +2026,8 @@ fn every_panel_and_dialog_renders_for_supported_languages_and_settings_tabs() {
         output_refused_total: Some(2),
         output_last_refusal: Some(runtime::OutputRefusal::FocusChanged),
         output_uncertain_total: Some(1),
+        output_partial_total: Some(1),
+        compatibility_mode: None,
         evdev_quarantined_events_total: None,
         usage_flush_max_duration_us: None,
         usage_flush_failures_total: None,

@@ -97,7 +97,7 @@ const EIS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 /// dropping keys out of a burst.
 const KEY_EVENT_INTERVAL: Duration = Duration::from_millis(12);
 // A keysym fallback longer than `wayexpand_core::keystroke_max_chars()`
-// (the user's `keystroke_max_chars`, default 250: about three seconds) is
+// (the user's `keystroke_max_chars`, default 8: under 100 ms at the configured fallback rate) is
 // refused before anything is sent. Native `ei_text` is unaffected.
 
 // XKB keycodes carry the legacy X11 offset of 8 over the Linux evdev codes

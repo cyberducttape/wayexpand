@@ -178,32 +178,29 @@ impl Strings {
         &self,
         route: &str,
         maturity: &str,
-        sensitive_fields: bool,
+        sensitive_fields: Option<bool>,
         atomic_replace: bool,
         replacement_assurance: &str,
         certified: bool,
     ) -> String {
-        let semantics = match (self.lang, sensitive_fields, atomic_replace) {
-            (Language::English, true, true) => "sensitive-field aware · atomic replacement",
-            (Language::Indonesian, true, true) => "sadar kolom sensitif · penggantian atomik",
-            (Language::English, true, false) => "sensitive-field aware · non-atomic replacement",
-            (Language::Indonesian, true, false) => "sadar kolom sensitif · penggantian non-atomik",
-            (Language::English, false, true) => "no sensitive-field detection · atomic replacement",
-            (Language::Indonesian, false, true) => {
-                "visibilitas papan ketik global · penggantian atomik"
-            }
-            (Language::English, false, false) => {
-                "no sensitive-field detection · non-atomic replacement"
-            }
-            (Language::Indonesian, false, false) => {
-                "visibilitas papan ketik global · penggantian non-atomik"
-            }
-            (Language::German, true, true) => "passwortfeldbewusst · atomare Ersetzung",
-            (Language::German, true, false) => "passwortfeldbewusst · nicht-atomare Ersetzung",
-            (Language::German, false, true) => "globale Tastatursichtbarkeit · atomare Ersetzung",
-            (Language::German, false, false) => {
-                "globale Tastatursichtbarkeit · nicht-atomare Ersetzung"
-            }
+        let privacy = match (self.lang, sensitive_fields) {
+            (Language::English, Some(true)) => "sensitive-field protection verified",
+            (Language::English, Some(false)) => "no sensitive-field protection",
+            (Language::English, None) => "sensitive-field protection unknown",
+            (Language::Indonesian, Some(true)) => "perlindungan kolom sensitif terverifikasi",
+            (Language::Indonesian, Some(false)) => "tanpa perlindungan kolom sensitif",
+            (Language::Indonesian, None) => "perlindungan kolom sensitif tidak diketahui",
+            (Language::German, Some(true)) => "Schutz sensibler Felder verifiziert",
+            (Language::German, Some(false)) => "kein Schutz sensibler Felder",
+            (Language::German, None) => "Schutz sensibler Felder unbekannt",
+        };
+        let replacement = match (self.lang, atomic_replace) {
+            (Language::English, true) => "atomic replacement",
+            (Language::English, false) => "non-atomic replacement",
+            (Language::Indonesian, true) => "penggantian atomik",
+            (Language::Indonesian, false) => "penggantian non-atomik",
+            (Language::German, true) => "atomare Ersetzung",
+            (Language::German, false) => "nicht-atomare Ersetzung",
         };
         let evidence = match (self.lang, certified) {
             (Language::English, true) => "certified",
@@ -235,7 +232,7 @@ impl Strings {
             (Language::German, "unavailable") => "Ersetzung nicht verfügbar",
             (Language::German, _) => "Ersetzungssicherheit unbekannt",
         };
-        format!("{route} · {assurance} · {maturity} · {semantics} · {evidence}")
+        format!("{route} · {assurance} · {maturity} · {privacy} · {replacement} · {evidence}")
     }
 
     pub fn route_connected_status(&self) -> &'static str {
@@ -956,7 +953,7 @@ mod route_trust_tests {
         let unverified = strings.route_trust_status(
             "Evdev + libei",
             "experimental",
-            false,
+            Some(false),
             false,
             "unverified",
             false,
@@ -969,12 +966,42 @@ mod route_trust_tests {
             unverified.contains("non-atomic replacement"),
             "{unverified}"
         );
+        assert!(
+            unverified.contains("no sensitive-field protection"),
+            "{unverified}"
+        );
         assert!(!unverified.contains("best effort"), "{unverified}");
 
-        let verified =
-            strings.route_trust_status("IBus", "experimental", true, false, "verified", false);
+        let verified = strings.route_trust_status(
+            "IBus",
+            "experimental",
+            Some(true),
+            false,
+            "verified",
+            false,
+        );
         assert!(verified.contains("target text verified"), "{verified}");
+        assert!(
+            verified.contains("sensitive-field protection verified"),
+            "{verified}"
+        );
         assert!(verified.contains("non-atomic replacement"), "{verified}");
         assert!(!verified.contains("· atomic replacement"), "{verified}");
+    }
+
+    #[test]
+    fn missing_live_status_is_reported_as_unknown_sensitive_protection() {
+        let text = Strings::new(Language::English).route_trust_status(
+            "input-method-v2",
+            "supported",
+            None,
+            true,
+            "verified",
+            false,
+        );
+        assert!(
+            text.contains("sensitive-field protection unknown"),
+            "{text}"
+        );
     }
 }

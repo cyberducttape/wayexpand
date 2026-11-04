@@ -944,6 +944,100 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[tokio::test]
+    async fn minimal_runtime_profile_requires_specific_dependencies_and_denies_proc() {
+        use crate::config::RuntimeProfile;
+        use std::collections::BTreeSet;
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-minimal-runtime-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let executable = directory.join("probe");
+        std::fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        // Grant only files actually mapped into this test process so the
+        // dynamic loader can start the child. No containing library
+        // directories or /proc are granted by the minimal runtime profile.
+        let mut dependencies = BTreeSet::new();
+        for line in std::fs::read_to_string("/proc/self/maps").unwrap().lines() {
+            let mut fields = line.split_whitespace();
+            for _ in 0..5 {
+                fields.next();
+            }
+            let path = fields.collect::<Vec<_>>().join(" ");
+            let path = path.strip_suffix(" (deleted)").unwrap_or(&path);
+            if path.starts_with('/') && std::path::Path::new(path).is_file() {
+                dependencies.insert(path.to_owned());
+            }
+        }
+        assert!(
+            dependencies.len() < 64,
+            "test runtime dependency list must fit the action policy path limit"
+        );
+
+        let mut config = BrokerConfig::default();
+        config.actions.insert(
+            "minimal-runtime-probe".into(),
+            ActionConfig {
+                program: executable.to_string_lossy().into_owned(),
+                args: vec![
+                    "--exact".into(),
+                    "sandbox::tests::minimal_runtime_profile_probe_child".into(),
+                    "--ignored".into(),
+                    "--nocapture".into(),
+                ],
+                parameters: std::collections::HashMap::new(),
+                sandbox: Some(crate::config::ActionSandbox {
+                    runtime_profile: RuntimeProfile::Minimal,
+                    read_paths: dependencies.into_iter().collect(),
+                    ..Default::default()
+                }),
+                timeout_ms: 5000,
+                server_env: vec![],
+                client_forward_env: vec![],
+                allow_dangerous_env: false,
+                inherit_env: false,
+                cwd: None,
+                log_output: false,
+                enabled: true,
+                description: None,
+            },
+        );
+        let executor = ActionExecutor::new(&config).unwrap();
+        let response = executor
+            .execute(ActionRequest {
+                action_id: "minimal-runtime-probe".into(),
+                timeout_ms: 5000,
+                inherit_env: false,
+                env_vars: vec![],
+                stdout_capture: true,
+                parameters: std::collections::BTreeMap::new(),
+            })
+            .await
+            .expect("minimal-profile probe action should run");
+        std::fs::remove_dir_all(&directory).unwrap();
+        let output = response
+            .output()
+            .expect("probe should complete successfully");
+        assert_eq!(output.exit_code, 0, "{}", output.stderr);
+        assert!(
+            output
+                .stdout
+                .contains("minimal_runtime_profile_probe_child ... ok"),
+            "unexpected child test output: {}",
+            output.stdout
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
     async fn action_network_and_device_policies_are_applied_before_exec() {
         use std::os::unix::fs::PermissionsExt;
 
@@ -1038,6 +1132,7 @@ mod tests {
                     write_paths: vec![directory.to_string_lossy().into_owned()],
                     deny_network: false,
                     deny_devices: false,
+                    runtime_profile: crate::config::RuntimeProfile::Compatible,
                 }),
                 program: "/usr/bin/touch".to_string(),
                 args: vec![output.to_string_lossy().into_owned()],
