@@ -36,6 +36,16 @@ All notable changes to WayExpand are documented here.
 - Place RPM build workspaces on disk-backed runner storage instead of the small
   `/tmp` tmpfs in CI and release package builds, preventing full-workspace tests
   from exhausting it.
+- Avoid creating asynchronous command workers for text-only configurations;
+  command and hotkey worker threads now start only when an enabled action
+  requires them, reducing reload churn and background threads.
+- Expand operational pack lint coverage to common IP route, socket, DNS,
+  firewall, certificate, database, Kubernetes, systemd, cPanel/WHM, package
+  manager, and cloud command families. Labeled shell and executable
+  configuration blocks and each pack's declared tools also extend command
+  detection. Tool names are matched in command position to avoid treating
+  narrative words such as "service" as commands; detected operational fields
+  need a validator or explicit free-text justification.
 - Keep AutoKey migration counts distinct: unreadable phrase files and missing or
   malformed sidecars count as skipped entries needing review, while
   `unsupported` counts only phrase behavior WayExpand cannot represent. This
