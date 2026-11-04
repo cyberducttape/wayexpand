@@ -528,7 +528,7 @@ side never counts as a match (`commit_matches` is then `false`).
   "backend": "input-method-v2",
   "route_id": "input-method-v2",
   "backend_mode": "unknown",
-  "status_schema": 24,
+  "status_schema": 25,
   "daemon_commit": "example-commit",
   "client_commit": "example-commit",
   "daemon_build_matches_client": true,
