@@ -157,6 +157,7 @@ fn daemon_status_body_matches_documented_stable_contract() {
             "matcher_latency_sample_count",
             "matcher_latency_window_count",
             "matching_available",
+            "matching_unavailable_reason",
             "memory_high_water_kib",
             "memory_rss_kib",
             "output_connection_failures_total",
@@ -195,7 +196,7 @@ fn daemon_status_body_matches_documented_stable_contract() {
         "daemon status body fields no longer match docs/COMPATIBILITY.md's documented Stable contract"
     );
     assert!(body.starts_with(&format!(
-        "source=input-method\nbackend=input-method-v2\nroute_id=input-method-v2\nbackend_mode=unknown\nstatus_schema=22\ndaemon_commit={}\nstate=connected\nroute_available=false\nmatching_available=false\npaused=false\n",
+        "source=input-method\nbackend=input-method-v2\nroute_id=input-method-v2\nbackend_mode=unknown\nstatus_schema=23\ndaemon_commit={}\nstate=connected\nroute_available=false\nmatching_available=false\nmatching_unavailable_reason=replacement_route_unavailable\npaused=false\n",
         super::build_info::COMMIT
     )));
     for field in [
