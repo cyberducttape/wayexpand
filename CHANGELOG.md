@@ -7,6 +7,10 @@ All notable changes to WayExpand are documented here.
 - Validate and shell-quote fields in curated Linux and Kubernetes command
   packs. Add Kubernetes resource-name and duration validators, reject invalid
   integer inputs, and bump both pack versions to 1.0.1.
+- Move expansion transaction payloads into the serialized output worker and
+  return them with completion, avoiding a second allocation of the full
+  replacement text. Pending reactor state retains only the trigger needed for
+  outcome bookkeeping.
 - Make the effective security snapshot regression portable to CI hosts where
   `/tmp` shares the root mount; retain the live mount ID when one is available.
 - Add `wayexpand doctor --security` to probe the running daemon and broker for
@@ -43,6 +47,9 @@ All notable changes to WayExpand are documented here.
   Non-atomic replacement is refused by default, expansion accounting waits
   for successful signal emission. Outcomes distinguish fully emitted but
   unverified text from a possibly partial signal sequence.
+- Split evdev polling and translation, template form validation and parsing,
+  control protocol and diagnostics, and reload file watching into focused
+  modules while keeping existing behavior and public APIs intact.
 - Reduce evdev capture polling churn and layout background traffic, while
   retaining compositor layout-change notification with a slower fallback.
 - Add insert-only sysadmin diagnostic templates for TLS, service, port, HTTP,

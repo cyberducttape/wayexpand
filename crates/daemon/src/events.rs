@@ -133,7 +133,7 @@ pub(crate) fn finish_undo(
             outcome,
             wayexpand_core::TransactionOutcome::NotApplied { .. }
         ) {
-            engine.commit_undo(&result);
+            engine.discard_undo();
         }
         return Err(Box::new(EventError {
             result,
