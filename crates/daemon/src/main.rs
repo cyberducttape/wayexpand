@@ -229,6 +229,14 @@ fn main() -> Result<()> {
         .init();
     let (path, explicit_source, explicit_backend, allow_evdev_sensitive_fields, use_fleet) =
         parse_args()?;
+    let containment_self_test = wayexpand_process_supervisor::run_containment_self_test();
+    if containment_self_test != "passed" {
+        warn!(
+            containment_self_test,
+            policy = wayexpand_process_supervisor::containment_policy_mode(),
+            "command containment self-test did not pass; inspect wayexpand doctor --security readiness"
+        );
+    }
 
     // Resolve automatic and partial explicit selections once. From this point
     // onward the daemon only consumes the canonical, compatible pair.

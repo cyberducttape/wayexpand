@@ -8,6 +8,30 @@ All notable changes to WayExpand are documented here.
   returns, waiting for any in-flight context refresh before publishing the
   local shell context. This prevents a completed SSH target from being shown
   as the active destination after reconnecting locally.
+- Allow `wayexpand library add --approved-revision FULL_COMMIT` to pin a Git
+  catalog checkout to the exact commit selected during review, independent of
+  a moving branch head. Content signatures remain separately verified.
+- After an output failure with an uncertain target effect, quarantine queued input instead of replaying it; never continue a queued batch after a partial transaction. Expose confirmed partial insertions as a separate daemon status counter, GUI warning, and `wayexpand doctor --json` field. Bump the status contract to schema 18.
+- Show the active route's live sensitive-field signal persistently in the GUI, distinguishing verified protection from unavailable and unknown status. Keep raw evdev consent local to each machine.
+- Add a capability-based insertion strategy planner for verified atomic replacement, native text commit, short paced keys, and clipboard/manual paste. The editor preview shows the planned route and estimated paced latency. Set the default paced-keysym maximum to 8 characters (about 100 ms estimated); longer synthetic output requires an explicit setting change.
+- Honor an explicitly raised `keystroke_max_chars` setting in the insertion planner. Keep the 8-character default fail-safe, while allowing users who opted into longer compatibility output to use their configured limit; exercise that explicit configuration in the headless compositor suites.
+- Add a Linux regression proving GUI/CLI writers wait on the persistent sibling lock across an atomic configuration inode replacement.
+- Bound background portal/output connection attempts to two workers process-wide and expose active, started, completed, cancelled, and rejected counts in daemon status (schema 19). Run a harmless child-containment self-test in both the daemon and Action Broker service contexts and report each result through `doctor --security`.
+
+- Anchor Action Broker socket operations to validated directory descriptors.
+  Publish sockets from private staging directories with atomic no-replace
+  rename, and quarantine/recheck entries before stale-socket and shutdown
+  cleanup. Add a deterministic rename/replacement race regression. Add an
+  opt-in minimal Landlock runtime profile that omits shared runtime trees and
+  `/proc`, requiring explicit dependency paths instead.
+- Add `wayexpand doctor --security --profile workstation|hardened|strict` with
+  machine-readable pass/degraded/fail readiness and per-check enforcement
+  metadata. Document the hardened live sandbox check as a managed deployment
+  gate. Make evdev's inability to detect sensitive fields explicit in GUI
+  setup, diagnostics, fleet guidance, and the security readiness report. Include
+  the active input route's replacement guarantee and compatibility override in
+  security diagnostics so a degraded host shows when automatic replacement is
+  experimental.
 - Give the focused HTTP 503 one-command helpers a distinct `;503-*` prefix so they do not delay the flagship `;http503` trigger.
 
 - Fix the reviewed-pack CI fixture harness to compare interactive-form output

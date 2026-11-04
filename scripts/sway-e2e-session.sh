@@ -23,6 +23,9 @@ set -u
 export WX_E2E_TYPIST=wlroots
 e2e_output_backend=wlroots
 e2e_compatibility_mode=untracked-focus
+# This private harness deliberately exercises explicitly enabled paced
+# compatibility output; production defaults remain limited to 8 characters.
+e2e_keystroke_max_chars=250
 
 # Focus the window whose app_id is $1 through Sway IPC.
 activate() {

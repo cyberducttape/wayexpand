@@ -21,6 +21,9 @@ export LIBEI_SOCKET="$XDG_RUNTIME_DIR/eis.sock"
 export WX_E2E_TYPIST=libei
 e2e_output_backend=libei
 e2e_compatibility_mode=tracked-focus
+# This private harness deliberately exercises explicitly enabled paced
+# compatibility output; production defaults remain limited to 8 characters.
+e2e_keystroke_max_chars=250
 e2e_input_source=${E2E_INPUT_SOURCE:-stdin}
 
 # Activate the window whose app_id is $1 through KWin scripting.

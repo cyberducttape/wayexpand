@@ -32,7 +32,7 @@ pub mod protocol;
 mod sandbox;
 
 pub use audit::{policy_hash, AuditEvent, AuditHealth, AuditLogger, CallerIdentity};
-pub use config::{ActionConfig, ActionParameter, ActionSandbox, BrokerConfig};
+pub use config::{ActionConfig, ActionParameter, ActionSandbox, BrokerConfig, RuntimeProfile};
 pub use executor::ActionExecutor;
 #[doc(hidden)]
 pub use ipc::decode_request_frame;

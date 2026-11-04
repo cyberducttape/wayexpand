@@ -525,7 +525,7 @@ side never counts as a match (`commit_matches` is then `false`).
   "backend": "input-method-v2",
   "route_id": "input-method-v2",
   "backend_mode": "unknown",
-  "status_schema": 17,
+  "status_schema": 19,
   "daemon_commit": "example-commit",
   "state": "connected",
   "paused": false,
@@ -593,6 +593,7 @@ side never counts as a match (`commit_matches` is then `false`).
   "clipboard_read_max_duration_us": 0,
   "output_health": "ok",
   "output_uncertain_total": 0,
+  "output_partial_total": 0,
   "output_retiring_workers": 0,
   "output_stalled_ms": 0,
   "insertion_assurance": "verified",
@@ -621,7 +622,7 @@ side never counts as a match (`commit_matches` is then `false`).
 - `route_id` (string): Canonical capture/injection route ID from the shared route catalog; `"stdin-test"` identifies the stdin harness, and `"unknown"` means the active pair has no catalog entry. Consumers should use this field instead of reconstructing route identity from `source` and `backend`.
 - `backend_mode` (string): Negotiated backend capability detail. Libei reports either `"ei_text (UTF-8 insertion)"` or `"ei_keyboard keysym fallback (12ms key pacing)"`; it is `"unknown"` before a backend has negotiated a mode or for backends without submodes.
 - `sandbox_security` (object, optional): Live in-process evidence for namespace IDs, seccomp/NoNewPrivs, socket address-family probes, read-only mounts, proc restrictions, W^X, personality and SUID-bit probes, resource limits, and cgroup limits. It reports effective process state, not unit-file intent. See [SECURITY](../SECURITY.md#effective-sandbox-inspection).
-- `status_schema` (integer): Version of the daemon status contract. Certification requires a matching schema before treating runtime capabilities as current; missing or different values mean the daemon should be restarted/updated. Schema 11 adds canonical `route_id`; schema 12 adds usage-event recorded, persisted, and dropped counters; schema 13 adds precise `replacement_assurance`; schema 14 adds matcher-latency dropped-sample reporting; schema 15 adds aggregate and per-mode output-latency dropped-sample reporting; schema 16 adds capture_layout_state; schema 17 adds command cgroup cleanup health.
+- `status_schema` (integer): Version of the daemon status contract. Certification requires a matching schema before treating runtime capabilities as current; missing or different values mean the daemon should be restarted/updated. Schema 11 adds canonical `route_id`; schema 12 adds usage-event recorded, persisted, and dropped counters; schema 13 adds precise `replacement_assurance`; schema 14 adds matcher-latency dropped-sample reporting; schema 15 adds aggregate and per-mode output-latency dropped-sample reporting; schema 16 adds capture_layout_state; schema 17 adds command cgroup cleanup health; schema 18 adds `output_partial_total`, distinguishing partial insertion from other outcomes whose target effect is unknown; schema 19 adds background connection-worker lifecycle counters and the daemon-context command containment self-test result.
 - `state` (string): Backend connection state (e.g. `"connected"`, `"reconnecting"`)
 - `paused` (bool): Whether expansion matching is currently disabled
 - `config` (string): Path to the active configuration file
@@ -670,6 +671,7 @@ side never counts as a match (`commit_matches` is then `false`).
 - `clipboard_read_max_duration_us` (integer): Longest completed clipboard command duration in microseconds since daemon start
 - `output_health` (string): `ok`; `recovering` while a retired output worker is stopping; or `stalled` once it has outlived the 5 s base acknowledgement deadline. While any retired worker runs, the output route does not reconnect, so a late operation cannot type into the current window. `stalled` persists until the worker stops or the daemon is restarted. Added in status schema 7.
 - `output_uncertain_total` (integer): Expansions and inserts since daemon start whose effect on the target text is unknown (a non-atomic backend failed mid-transaction or did not acknowledge in time). They are never retried. Added in status schema 7.
+- `output_partial_total` (integer): Transactions since daemon start where insertion began before output failed, so partial text may remain. These are never retried. The GUI highlights this separately, and `wayexpand doctor --json` reports it as `partial_insertions_total`.
 - `output_retiring_workers` (integer): Retired output workers still running. Added in status schema 7.
 - `output_stalled_ms` (integer): Age of the oldest retired output worker still running; `0` when there is none. Added in status schema 7.
 - `insertion_assurance` (string): What the output route promises before it erases a trigger. `verified`: the route checks the field's own text first (input-method-v2, IBus). `compatibility`: a keystroke route (libei, wlroots virtual keyboard) that erases without seeing the text, allowed by `compatibility_mode`. `blocked`: a keystroke route without that consent; typed expansions are refused. `unavailable`: no route that can replace text. Added in status schema 8.
@@ -682,9 +684,11 @@ side never counts as a match (`commit_matches` is then `false`).
 - `output_last_unsupported` (string): Cause of the most recent of those: `unicode`, `too-long`, `cursor`, or `none`. Added in 1.3.x without a schema change.
 - `command_containment` (string): Selected cleanup mechanism: `cgroup` or `process-group`; `invalid` means an unrecognized `WAYEXPAND_PROCESS_CGROUP` value and command startup fails.
 - `command_containment_mode` (string): Configured policy: `required-cgroup` (the default and bundled systemd mode), `process-group-compatibility` (only when `WAYEXPAND_PROCESS_CGROUP=disabled` is explicitly set), or `invalid`. Required cgroup setup fails closed for each command if the delegated cgroup is unavailable. Added additively without changing the status schema.
+- `command_containment_self_test` (string): `passed` only after the daemon launches a harmless child that starts a new session and confirms cgroup cancellation/reaping from its own service context; `failed-permission-denied`, `failed-not-found`, `failed-timeout`, `failed-unsupported`, `failed-other`, `explicitly-disabled`, `invalid-policy`, or `unsupported-platform` report degraded guarantees. The Action Broker publishes the equivalent value in the `action_broker` object. `wayexpand doctor --security` requires `passed` for each command-capable service.
 - `command_cleanup_pending_jobs` (integer): Bounded count of outstanding per-command cgroup cleanup jobs in the daemon.
 - `command_cleanup_failed_attempts` (integer): Number of failed asynchronous cgroup cleanup attempts since daemon start.
 - `command_cleanup_degraded` (boolean): `true` when cleanup reaches the backlog limit; new command-backed work is refused until stale cgroups are resolved and the daemon restarts.
+- `connect_workers_active`, `connect_workers_started_total`, `connect_workers_completed_total`, `connect_workers_cancelled_total`, `connect_workers_rejected_total` (integers): Connection-attempt lifecycle counters. The daemon caps input and output portal connections at two concurrent workers; retries are refused while that cap is occupied.
 - `recent_expansion_failures` (array): Up to eight content-free transaction traces from this daemon session. Each record has a timestamp, backend, trigger-recognition marker, output-admission result, backend-selection marker, erase acknowledgement, insertion-attempt marker, `transaction_phases`, and completion result. `transaction_phases` records the ordered lifecycle (`prepared`, optionally `validated` and `applying`, then `committed`, `failed`, or `uncertain`). An uncertain transaction is terminal and is never automatically replayed. Output admission does not itself claim that the focused client was verified; consult `focus_assurance` for that route-level guarantee. It never contains trigger text, replacement text, clipboard contents, or raw key events. Added additively without changing the status schema.
 - `output_reconnect_total` (integer): Output routes reconnected since daemon start, after the first connection was lost. Steady growth means the route keeps dropping (portal revoked, compositor restarting). Added in 1.2.x without a schema change.
 - `input_reconnect_total` (integer): Input sources (input-method or evdev) reconnected since daemon start. Added in 1.2.x without a schema change.
@@ -888,7 +892,7 @@ These fields are guaranteed present and backward-compatible. Missing fields use 
   when no tracker can confirm focus. A detected focus change is refused in
   every mode. Only the primary config, the user layer, and the organization
   layer can set it; curated packs cannot. Verified routes ignore it.
-- `Settings::keystroke_max_chars` (integer 1–5000, default 250, omitted from
+- `Settings::keystroke_max_chars` (integer 1–5000, default 8, omitted from
   saved TOML at the default) — the longest replacement a keystroke-typed
   route (the libei keysym fallback) accepts; longer ones are refused before
   anything is erased. It is reported as `inject_max_text_chars`. Older
