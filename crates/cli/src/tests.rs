@@ -875,6 +875,7 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "input_privacy_readiness",
             "configuration_integrity_readiness",
             "action_broker_availability_readiness",
+            "daemon_runtime",
             "healthy",
             "checks",
         ]
