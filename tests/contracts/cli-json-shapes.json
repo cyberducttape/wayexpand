@@ -44,6 +44,7 @@
     "healthy",
     "checks"
   ],
+  "doctor_security_schema": 9,
   "doctor_security_gates": [
     "execution_sandbox",
     "input_privacy",

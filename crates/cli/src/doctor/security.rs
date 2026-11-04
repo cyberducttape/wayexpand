@@ -7,6 +7,8 @@ use super::{
 use crate::*;
 use std::os::unix::fs::MetadataExt;
 
+pub(crate) const SECURITY_REPORT_SCHEMA: u64 = 9;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ProtectionProfile {
     Workstation,
@@ -38,6 +40,17 @@ impl ProtectionProfile {
 pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) -> Result<()> {
     let config = Config::load(config_path);
     let config_permissions = config_permission_report(config_path, config.is_ok());
+    let organization_policy = crate::doctor::policy::load_policy();
+    let policy_sensitive_focus_required = organization_policy
+        .as_ref()
+        .is_ok_and(|policy| policy.safe_mode && policy.require_sensitive_focus);
+    // If the root-owned policy cannot be read or validated, the doctor cannot
+    // establish whether sensitive-field detection is mandatory. Report the
+    // privacy gate as required but incomplete instead of silently ignoring a
+    // potentially enforced requirement.
+    let input_privacy_required = profile == ProtectionProfile::Strict
+        || policy_sensitive_focus_required
+        || organization_policy.is_err();
     let broker = broker_diagnostics(config.as_ref().ok());
     let daemon = read_daemon_status()
         .and_then(|response| status_as_json(&response))
@@ -54,9 +67,12 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         .unwrap_or(serde_json::Value::Null);
     let capture_source = daemon["source"].as_str().unwrap_or("unknown");
     let sensitive_field_detection = daemon["capture_sensitive_focus"].as_bool();
-    let input_privacy_readiness =
-        privacy_readiness(profile, capture_source, sensitive_field_detection);
-    let input_privacy_required = profile == ProtectionProfile::Strict;
+    let input_privacy_readiness = privacy_readiness(
+        profile,
+        capture_source,
+        sensitive_field_detection,
+        input_privacy_required,
+    );
 
     let local_mount_ns = namespace_inode("mnt");
     let local_uts_ns = namespace_inode("uts");
@@ -72,6 +88,11 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
             "config_permissions",
             config_permissions["safe"].as_bool(),
             "The configuration must be a valid regular file owned by this user or root and not group/world writable; Config loading also validates its ancestors.",
+        ),
+        check(
+            "organization_policy_integrity",
+            organization_policy.as_ref().ok().map(|_| true),
+            "The root-owned organization policy must pass the same ownership, permission, size, and syntax validation used by runtime policy loading.",
         ),
         check(
             "daemon_mount_namespace",
@@ -206,6 +227,8 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         profile,
         capture_source,
         sensitive_field_detection,
+        input_privacy_required,
+        organization_policy.is_ok(),
     ));
 
     let broker_required = broker["required"].as_bool() == Some(true);
@@ -285,7 +308,9 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
             "action_broker_availability" | "action_broker_mandatory_audit"
         ) || broker_required;
         check["required"] = serde_json::Value::Bool(
-            (profile == ProtectionProfile::Strict || required.contains(&name))
+            (profile == ProtectionProfile::Strict
+                || required.contains(&name)
+                || (name == "capture_sensitive_focus" && input_privacy_required))
                 && broker_check_required
                 && (name != "daemon_command_cgroup_containment"
                     || profile != ProtectionProfile::Workstation
@@ -342,7 +367,7 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
     let healthy = readiness == "pass";
     let route = active_route_summary(&daemon);
     let report = serde_json::json!({
-        "schema": 8,
+        "schema": SECURITY_REPORT_SCHEMA,
         "profile": profile.name(),
         "readiness": readiness,
         "execution_sandbox_readiness": execution_sandbox_readiness,
@@ -367,7 +392,19 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
             "source": capture_source,
             "sensitive_field_detection": sensitive_field_detection,
             "readiness": input_privacy_readiness,
-            "required": profile == ProtectionProfile::Strict,
+            "required": input_privacy_required,
+            "organization_requirement": if organization_policy.is_err() {
+                "unavailable"
+            } else if policy_sensitive_focus_required {
+                "enforced"
+            } else if organization_policy
+                .as_ref()
+                .is_ok_and(|policy| policy.require_sensitive_focus)
+            {
+                "audit_only"
+            } else {
+                "not_configured"
+            },
             "reason": if input_privacy_readiness == "pass" {
                 "active capture route reports sensitive-field detection"
             } else if evdev_privacy {
@@ -582,7 +619,7 @@ fn target_integrity_check(daemon: &serde_json::Value) -> serde_json::Value {
 
 fn gate_for_check(name: &str) -> &'static str {
     match name {
-        "config_permissions" => "configuration_integrity",
+        "config_permissions" | "organization_policy_integrity" => "configuration_integrity",
         "capture_sensitive_focus" => "input_privacy",
         "action_broker_availability" | "action_broker_mandatory_audit" => {
             "action_broker_availability"
@@ -607,8 +644,15 @@ fn input_privacy_check(
     profile: ProtectionProfile,
     source: &str,
     sensitive_field_detection: Option<bool>,
+    required: bool,
+    policy_available: bool,
 ) -> serde_json::Value {
-    let readiness = privacy_readiness(profile, source, sensitive_field_detection);
+    let readiness = privacy_readiness(profile, source, sensitive_field_detection, required);
+    let readiness = if !policy_available && profile != ProtectionProfile::Strict {
+        "incomplete"
+    } else {
+        readiness
+    };
     let status = match readiness {
         "pass" => "pass",
         "fail" => "fail",
@@ -630,7 +674,7 @@ fn input_privacy_check(
         "name": "capture_sensitive_focus",
         "status": status,
         "detail": detail,
-        "required": profile == ProtectionProfile::Strict,
+        "required": required,
         "gate": "input_privacy",
     })
 }
@@ -791,6 +835,7 @@ fn required_checks(profile: ProtectionProfile) -> &'static [&'static str] {
         "daemon_status_schema",
         "automatic_replacement_target_integrity",
         "config_permissions",
+        "organization_policy_integrity",
         "daemon_no_new_privileges",
         "daemon_seccomp",
         "daemon_af_unix_allowed",
@@ -808,6 +853,7 @@ fn required_checks(profile: ProtectionProfile) -> &'static [&'static str] {
         "daemon_status_schema",
         "automatic_replacement_target_integrity",
         "config_permissions",
+        "organization_policy_integrity",
         "daemon_mount_namespace",
         "daemon_private_tmp",
         "daemon_uts_namespace",
@@ -890,23 +936,21 @@ fn privacy_readiness(
     profile: ProtectionProfile,
     source: &str,
     sensitive_field_detection: Option<bool>,
+    required: bool,
 ) -> &'static str {
+    let required = required || profile == ProtectionProfile::Strict;
     // Raw evdev capture cannot identify sensitive fields. Treat the known
     // source limitation as authoritative even if a future or inconsistent
     // status payload claims otherwise; strict privacy must fail closed.
     if source == "evdev" {
-        return if profile == ProtectionProfile::Strict {
-            "fail"
-        } else {
-            "degraded"
-        };
+        return if required { "fail" } else { "degraded" };
     }
     match sensitive_field_detection {
         Some(true) if source != "unknown" => "pass",
-        Some(false) if profile == ProtectionProfile::Strict => "fail",
+        Some(false) if required => "fail",
         Some(false) => "degraded",
         Some(true) | None if source == "unknown" || sensitive_field_detection.is_none() => {
-            if profile == ProtectionProfile::Strict {
+            if required {
                 "incomplete"
             } else {
                 "degraded"
@@ -1099,7 +1143,7 @@ mod tests {
     fn sandbox_and_input_privacy_readiness_are_independent_and_strict_rejects_evdev() {
         let sandbox = "pass";
         let workstation_privacy =
-            privacy_readiness(ProtectionProfile::Workstation, "evdev", Some(false));
+            privacy_readiness(ProtectionProfile::Workstation, "evdev", Some(false), false);
         assert_eq!(sandbox, "pass");
         assert_eq!(workstation_privacy, "degraded");
         assert_eq!(
@@ -1107,41 +1151,48 @@ mod tests {
             "degraded"
         );
         assert_eq!(
-            privacy_readiness(ProtectionProfile::Strict, "evdev", Some(false)),
+            privacy_readiness(ProtectionProfile::Strict, "evdev", Some(false), true),
             "fail"
         );
         assert_eq!(
-            privacy_readiness(ProtectionProfile::Strict, "evdev", Some(true)),
+            privacy_readiness(ProtectionProfile::Strict, "evdev", Some(true), true),
             "fail",
             "strict privacy rejects evdev based on its known source limitation"
         );
         assert_eq!(
-            privacy_readiness(ProtectionProfile::Workstation, "evdev", Some(true)),
+            privacy_readiness(ProtectionProfile::Workstation, "evdev", Some(true), false),
             "degraded",
             "a contradictory capability report cannot make evdev privacy-ready"
         );
         assert_eq!(
-            privacy_readiness(ProtectionProfile::Strict, "input-method", Some(true)),
+            privacy_readiness(ProtectionProfile::Strict, "input-method", Some(true), true),
             "pass"
         );
         assert_eq!(
-            privacy_readiness(ProtectionProfile::Strict, "unknown", Some(true)),
+            privacy_readiness(ProtectionProfile::Strict, "unknown", Some(true), true),
             "incomplete"
         );
         assert_eq!(
             combine_gate_readiness(&[
                 "pass",
-                privacy_readiness(ProtectionProfile::Strict, "evdev", Some(false)),
+                privacy_readiness(ProtectionProfile::Strict, "evdev", Some(false), true),
                 "pass",
                 "not_required",
             ]),
             "fail"
         );
 
-        let workstation_check =
-            input_privacy_check(ProtectionProfile::Workstation, "evdev", Some(false));
-        let strict_check = input_privacy_check(ProtectionProfile::Strict, "evdev", Some(false));
-        let unknown_check = input_privacy_check(ProtectionProfile::Strict, "unknown", None);
+        let workstation_check = input_privacy_check(
+            ProtectionProfile::Workstation,
+            "evdev",
+            Some(false),
+            false,
+            true,
+        );
+        let strict_check =
+            input_privacy_check(ProtectionProfile::Strict, "evdev", Some(false), true, true);
+        let unknown_check =
+            input_privacy_check(ProtectionProfile::Strict, "unknown", None, true, true);
         assert_eq!(workstation_check["status"], "degraded");
         assert_eq!(workstation_check["gate"], "input_privacy");
         assert_eq!(workstation_check["required"], false);
@@ -1151,6 +1202,38 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("source is unknown"));
+
+        assert_eq!(
+            privacy_readiness(ProtectionProfile::Hardened, "evdev", Some(false), true),
+            "fail",
+            "an enforced organization privacy requirement must fail even outside strict profile"
+        );
+        assert_eq!(
+            privacy_readiness(
+                ProtectionProfile::Hardened,
+                "input-method",
+                Some(false),
+                true
+            ),
+            "fail"
+        );
+        let invalid_policy = input_privacy_check(
+            ProtectionProfile::Hardened,
+            "input-method",
+            Some(true),
+            true,
+            false,
+        );
+        assert_eq!(invalid_policy["status"], "unavailable");
+        let enforced_policy = input_privacy_check(
+            ProtectionProfile::Hardened,
+            "evdev",
+            Some(false),
+            true,
+            true,
+        );
+        assert_eq!(enforced_policy["status"], "fail");
+        assert_eq!(enforced_policy["required"], true);
     }
 
     #[test]
@@ -1175,6 +1258,12 @@ mod tests {
             gate_for_check("config_permissions"),
             "configuration_integrity"
         );
+        assert_eq!(
+            gate_for_check("organization_policy_integrity"),
+            "configuration_integrity"
+        );
+        assert!(required_checks(ProtectionProfile::Workstation)
+            .contains(&"organization_policy_integrity"));
         assert_eq!(
             gate_for_check("action_broker_availability"),
             "action_broker_availability"

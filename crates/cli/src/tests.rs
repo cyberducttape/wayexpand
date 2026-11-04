@@ -883,6 +883,12 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
         .into_iter()
         .collect()
     );
+    assert_eq!(
+        crate::doctor::security::SECURITY_REPORT_SCHEMA,
+        contract["doctor_security_schema"]
+            .as_u64()
+            .expect("security report schema must be a number")
+    );
     let security_gates = contract["doctor_security_gates"]
         .as_array()
         .expect("security gate contract must be an array")

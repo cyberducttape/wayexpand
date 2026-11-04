@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Make `doctor --security` account for an enforced organization
+  `require_sensitive_focus` policy when evaluating the input-privacy gate.
+  Invalid or unreadable root policy now leaves privacy readiness incomplete,
+  and policy ownership, permissions, size, and syntax are reported under
+  configuration integrity. Identify the extended report as schema 9.
 - Report each security gate's observed health separately from whether policy
   requires it, so an unavailable optional Action Broker remains visible to
   fleet inventory without making a host with no named actions unhealthy.
