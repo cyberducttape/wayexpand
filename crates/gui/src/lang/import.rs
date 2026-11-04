@@ -273,6 +273,48 @@ impl Strings {
         }
     }
 
+    pub fn pack_maintainer(&self, maintainer: &str) -> String {
+        match self.lang {
+            Language::English => format!("Maintainer: {maintainer}"),
+            Language::Indonesian => format!("Pemelihara: {maintainer}"),
+            Language::German => format!("Betreuung: {maintainer}"),
+        }
+    }
+
+    pub fn pack_compatibility(
+        &self,
+        shells: &[String],
+        platforms: &[String],
+        tools: &[String],
+    ) -> String {
+        let shells = shells.join(", ");
+        let platforms = platforms.join(", ");
+        let tools = if tools.is_empty() {
+            "none".to_owned()
+        } else {
+            tools.join(", ")
+        };
+        match self.lang {
+            Language::English => {
+                format!("Compatibility: shells {shells}; platforms {platforms}; tools {tools}")
+            }
+            Language::Indonesian => {
+                format!("Kompatibilitas: shell {shells}; platform {platforms}; alat {tools}")
+            }
+            Language::German => format!(
+                "Kompatibilität: Shells {shells}; Plattformen {platforms}; Werkzeuge {tools}"
+            ),
+        }
+    }
+
+    pub fn pack_risk(&self, level: &str, summary: &str) -> String {
+        match self.lang {
+            Language::English => format!("Risk: {level} — {summary}"),
+            Language::Indonesian => format!("Risiko: {level} — {summary}"),
+            Language::German => format!("Risiko: {level} — {summary}"),
+        }
+    }
+
     pub fn pack_minimum_version(&self, version: &str) -> String {
         match self.lang {
             Language::English => format!("Requires WayExpand {version} or newer"),

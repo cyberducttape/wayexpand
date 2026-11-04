@@ -143,12 +143,17 @@ pub struct FormField {
     /// template rendering.
     #[serde(default)]
     pub validation: Option<FormFieldValidation>,
+    /// Explicitly documents that arbitrary text is intentional. Operational
+    /// pack linting accepts this only when a field has no domain validator.
+    #[serde(default)]
+    pub free_text: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum FormFieldValidation {
     DnsLabel,
+    DnsSubdomain,
     Hostname,
     HostPort,
     Port,
@@ -163,16 +168,23 @@ pub enum FormFieldValidation {
     ComposeService,
     ContainerImage,
     KubernetesName,
-    Duration,
     KubernetesDuration,
     SingleLine,
     ShellSingleQuoted,
+    Duration,
+    RelativeTime,
+    GitRevision,
+    SqlIdentifier,
+    Url,
+    ContainerName,
+    UrlPath,
 }
 
 impl FormFieldValidation {
     fn parse(value: &str) -> Option<Self> {
         Some(match value {
             "dns-label" => Self::DnsLabel,
+            "dns-subdomain" => Self::DnsSubdomain,
             "hostname" => Self::Hostname,
             "host-port" => Self::HostPort,
             "port" => Self::Port,
@@ -187,10 +199,16 @@ impl FormFieldValidation {
             "compose-service" => Self::ComposeService,
             "container-image" => Self::ContainerImage,
             "kubernetes-name" => Self::KubernetesName,
-            "duration" => Self::Duration,
             "kubernetes-duration" => Self::KubernetesDuration,
             "single-line" => Self::SingleLine,
             "shell-single-quoted" => Self::ShellSingleQuoted,
+            "duration" => Self::Duration,
+            "relative-time" => Self::RelativeTime,
+            "git-revision" => Self::GitRevision,
+            "sql-identifier" => Self::SqlIdentifier,
+            "url" => Self::Url,
+            "container-name" => Self::ContainerName,
+            "url-path" => Self::UrlPath,
             _ => return None,
         })
     }
@@ -198,6 +216,7 @@ impl FormFieldValidation {
     fn label(self) -> &'static str {
         match self {
             Self::DnsLabel => "DNS label",
+            Self::DnsSubdomain => "DNS subdomain",
             Self::Hostname => "hostname or IP address",
             Self::HostPort => "hostname or IP address followed by a valid port",
             Self::Port => "port from 1 to 65535",
@@ -212,16 +231,25 @@ impl FormFieldValidation {
             Self::ComposeService => "Docker Compose service name",
             Self::ContainerImage => "container image reference",
             Self::KubernetesName => "Kubernetes DNS subdomain name",
-            Self::Duration => "positive integer duration with ns, us, µs, ms, s, m, or h unit",
             Self::KubernetesDuration => "Kubernetes log duration up to 30 days",
             Self::SingleLine => "single-line value",
             Self::ShellSingleQuoted => "single-line value safe inside shell single quotes",
+            Self::Duration => "duration such as 15m or 1h30m, up to 30 days",
+            Self::RelativeTime => "relative time such as 1 hour ago",
+            Self::GitRevision => "Git revision or ref without option or shell syntax",
+            Self::SqlIdentifier => {
+                "SQL identifier, schema-qualified identifier, or identifier list"
+            }
+            Self::Url => "HTTP or HTTPS URL with a valid host and no whitespace",
+            Self::ContainerName => "Docker container name or hexadecimal ID",
+            Self::UrlPath => "single-line absolute URL path",
         }
     }
 
     fn accepts(self, value: &str) -> bool {
         match self {
             Self::DnsLabel => valid_dns_label(value, false),
+            Self::DnsSubdomain => valid_dns_subdomain(value),
             Self::Hostname => valid_host(value),
             Self::HostPort => valid_host_port(value),
             Self::Port => valid_port(value),
@@ -296,7 +324,6 @@ impl FormFieldValidation {
                         .all(|byte| byte.is_ascii_alphanumeric() || b"._/:@-".contains(&byte))
                     && !value.contains("..")
             }
-            Self::Duration => valid_positive_duration(value),
             Self::KubernetesName => valid_dns_subdomain(value),
             Self::KubernetesDuration => valid_kubernetes_duration(value),
             Self::SingleLine => !value.chars().any(char::is_control),
@@ -306,8 +333,108 @@ impl FormFieldValidation {
                         .chars()
                         .any(|character| character.is_control() || character == '\'')
             }
+            Self::Duration => valid_kubernetes_duration(value),
+            Self::RelativeTime => valid_relative_time(value),
+            Self::GitRevision => valid_git_revision(value),
+            Self::SqlIdentifier => valid_sql_identifier(value),
+            Self::Url => valid_http_url(value),
+            Self::ContainerName => {
+                !value.starts_with('-')
+                    && ((value.len() >= 12
+                        && value.len() <= 64
+                        && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+                        || (!value.is_empty()
+                            && value.len() <= 128
+                            && value.bytes().all(|byte| {
+                                byte.is_ascii_alphanumeric() || b"_.-".contains(&byte)
+                            })))
+            }
+            Self::UrlPath => {
+                value.starts_with('/')
+                    && !value.chars().any(|character| {
+                        character.is_control() || character.is_whitespace() || character == '\''
+                    })
+            }
         }
     }
+}
+
+/// A `journalctl --since`-style relative time such as `1 hour ago`.
+fn valid_relative_time(value: &str) -> bool {
+    let words = value.split(' ').collect::<Vec<_>>();
+    matches!(words.as_slice(), [number, unit, "ago"]
+        if !number.starts_with('+')
+            && number.parse::<u32>().is_ok_and(|value| value > 0)
+            && matches!(*unit, "second" | "seconds" | "minute" | "minutes" | "hour" | "hours" | "day" | "days" | "week" | "weeks"))
+}
+
+fn valid_git_revision(value: &str) -> bool {
+    !value.is_empty()
+        && !value.starts_with('-')
+        && !value.contains("..")
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"._/-~^@{}".contains(&byte))
+}
+
+fn valid_sql_identifier(value: &str) -> bool {
+    value == "*"
+        || (!value.is_empty()
+            && value.split(',').all(|item| {
+                !item.is_empty()
+                    && item.split('.').all(|part| {
+                        let mut bytes = part.bytes();
+                        bytes
+                            .next()
+                            .is_some_and(|first| first.is_ascii_alphabetic() || first == b'_')
+                            && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+                    })
+            }))
+}
+
+fn valid_http_url(value: &str) -> bool {
+    let Some(rest) = value
+        .strip_prefix("https://")
+        .or_else(|| value.strip_prefix("http://"))
+    else {
+        return false;
+    };
+    if rest.is_empty()
+        || value.chars().any(|character| {
+            character.is_control() || character.is_whitespace() || character == '\''
+        })
+    {
+        return false;
+    }
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    if authority.contains('@') {
+        return false;
+    }
+    let host = if let Some(address) = authority.strip_prefix('[') {
+        let Some((address, suffix)) = address.split_once(']') else {
+            return false;
+        };
+        if address.parse::<std::net::Ipv6Addr>().is_err() {
+            return false;
+        }
+        if suffix.is_empty() {
+            return true;
+        }
+        let Some(port) = suffix.strip_prefix(':') else {
+            return false;
+        };
+        return valid_port(port);
+    } else {
+        authority
+            .rsplit_once(':')
+            .filter(|(_, port)| port.bytes().all(|byte| byte.is_ascii_digit()))
+            .map_or(authority, |(host, _)| host)
+    };
+    valid_host(host)
+        && authority
+            .rsplit_once(':')
+            .filter(|(_, port)| port.bytes().all(|byte| byte.is_ascii_digit()))
+            .is_none_or(|(_, port)| valid_port(port))
 }
 
 fn valid_kubernetes_duration(value: &str) -> bool {
@@ -502,13 +629,6 @@ fn valid_dns_subdomain(value: &str) -> bool {
         && value.split('.').all(|label| valid_dns_label(label, false))
 }
 
-fn valid_positive_duration(value: &str) -> bool {
-    ["ns", "us", "µs", "ms", "s", "m", "h"]
-        .iter()
-        .find_map(|unit| value.strip_suffix(unit))
-        .is_some_and(|number| number.parse::<u64>().is_ok_and(|number| number > 0))
-}
-
 fn valid_host(value: &str) -> bool {
     if value.parse::<std::net::IpAddr>().is_ok() {
         return true;
@@ -543,6 +663,7 @@ struct ParsedFormAttributes {
     min_chars: Option<usize>,
     max_chars: Option<usize>,
     validation: Option<FormFieldValidation>,
+    free_text: bool,
 }
 
 fn parse_form_attributes(
@@ -553,6 +674,7 @@ fn parse_form_attributes(
     let mut min_chars = None;
     let mut max_chars = None;
     let mut validation = None;
+    let mut free_text = false;
     for attribute in attributes {
         let attribute = attribute.trim();
         if attribute == "required" && !required {
@@ -573,11 +695,16 @@ fn parse_form_attributes(
             }
             validation =
                 Some(FormFieldValidation::parse(value).ok_or(TemplateError::InvalidField)?);
+        } else if attribute == "free_text=true" && !free_text {
+            free_text = true;
         } else {
             return Err(TemplateError::InvalidField);
         }
     }
-    if min_chars.zip(max_chars).is_some_and(|(min, max)| min > max) {
+    if (!allow_length && free_text)
+        || min_chars.zip(max_chars).is_some_and(|(min, max)| min > max)
+        || (free_text && validation.is_some())
+    {
         return Err(TemplateError::InvalidField);
     }
     Ok(ParsedFormAttributes {
@@ -585,6 +712,7 @@ fn parse_form_attributes(
         min_chars,
         max_chars,
         validation,
+        free_text,
     })
 }
 
@@ -637,6 +765,7 @@ fn parse_form_field(name: &str) -> Option<Result<FormField, TemplateError>> {
             min_chars,
             max_chars,
             validation,
+            free_text,
         } = match validation {
             Ok(validation) => validation,
             Err(error) => return Some(Err(error)),
@@ -651,6 +780,7 @@ fn parse_form_field(name: &str) -> Option<Result<FormField, TemplateError>> {
             min_chars,
             max_chars,
             validation,
+            free_text,
         }));
     }
     if let Some(spec) = name.strip_prefix("datefield:") {
@@ -667,6 +797,7 @@ fn parse_form_field(name: &str) -> Option<Result<FormField, TemplateError>> {
             min_chars,
             max_chars,
             validation,
+            free_text: _,
         } = match parse_form_attributes(&attributes, false) {
             Ok(validation) => validation,
             Err(error) => return Some(Err(error)),
@@ -684,6 +815,7 @@ fn parse_form_field(name: &str) -> Option<Result<FormField, TemplateError>> {
             min_chars,
             max_chars,
             validation,
+            free_text: false,
         }));
     }
     let spec = name.strip_prefix("choice:")?;
@@ -732,6 +864,7 @@ fn parse_form_field(name: &str) -> Option<Result<FormField, TemplateError>> {
         min_chars: None,
         max_chars: None,
         validation: None,
+        free_text: false,
     }))
 }
 
@@ -1288,9 +1421,9 @@ fn evaluate<'a>(
                 field
                     .validate_value(value)
                     .map_err(|_| TemplateError::InvalidField)?;
-                // Quoting prevents shell syntax breakout, but terminal control
-                // characters can still move the cursor, submit a line, or hide
-                // portions of a preview when this text is pasted into a shell.
+                // Any control character is refused: a carriage return typed
+                // into a terminal acts as Enter and would run the command
+                // before the operator has reviewed it.
                 if value.chars().any(char::is_control) {
                     return Err(TemplateError::InvalidField);
                 }
@@ -1710,6 +1843,31 @@ pub(crate) fn civil_from_days(days_since_epoch: i64) -> (i64, i64, i64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn duration_validators_accept_only_the_syntax_their_tools_understand() {
+        let duration = FormFieldValidation::parse("duration").unwrap();
+        assert!(duration.accepts("15m"));
+        assert!(duration.accepts("1h30m"));
+        assert!(!duration.accepts("1 hour ago"));
+        assert!(!duration.accepts("0s"));
+        let relative = FormFieldValidation::parse("relative-time").unwrap();
+        assert!(relative.accepts("1 hour ago"));
+        assert!(relative.accepts("30 minutes ago"));
+        assert!(!relative.accepts("15m"));
+        assert!(!relative.accepts("+1 hour ago"));
+        assert!(!relative.accepts("1  hour ago"));
+    }
+
+    #[test]
+    fn dns_subdomain_validator_accepts_valid_names_and_rejects_hostile_values() {
+        let validator = FormFieldValidation::parse("dns-subdomain").unwrap();
+        assert!(validator.accepts("api-v2.example.net"));
+        assert!(validator.accepts("pod-1"));
+        assert!(!validator.accepts("API.example.net"));
+        assert!(!validator.accepts("api.example.net --help"));
+        assert!(!validator.accepts("api..example.net"));
+    }
 
     #[test]
     fn clipboard_variable_is_adopted_by_sensitive_storage_without_copying() {

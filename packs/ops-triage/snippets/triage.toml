@@ -3,28 +3,28 @@ trigger = ";;tls-expiry"
 description = "Show the certificate a server presents and when it expires"
 category = "Operations triage"
 tags = ["tls", "certificate"]
-replacement = "openssl s_client -connect {{field:host=example.net}}:{{field:port=443}} -servername {{field:host}} </dev/null 2>/dev/null | openssl x509 -noout -subject -issuer -dates"
+replacement = "openssl s_client -connect {{shellq:host=example.net|required|max=253|validate=hostname}}:{{shellq:port=443|required|max=5|validate=port}} -servername {{shellq:host}} </dev/null 2>/dev/null | openssl x509 -noout -subject -issuer -dates"
 
 [[expansion]]
 trigger = ";;cert-file"
 description = "Inspect a local certificate file's subject, names, and validity"
 category = "Operations triage"
 tags = ["tls", "certificate"]
-replacement = "openssl x509 -in {{field:certificate=/etc/ssl/certs/example.crt}} -noout -subject -ext subjectAltName -dates"
+replacement = "openssl x509 -in {{shellq:certificate=/etc/ssl/certs/example.crt|required|max=512|validate=absolute-path}} -noout -subject -ext subjectAltName -dates"
 
 [[expansion]]
 trigger = ";;disk-triage"
 description = "Filesystem usage, then the largest directories one level down"
 category = "Operations triage"
 tags = ["disk", "diagnostics"]
-replacement = "df -hT -x tmpfs -x devtmpfs && sudo du -xh --max-depth=1 {{field:path=/var}} 2>/dev/null | sort -rh | head -n {{field:entries=15}}"
+replacement = "df -hT -x tmpfs -x devtmpfs && sudo du -xh --max-depth=1 -- {{shellq:path=/var|required|max=512|validate=absolute-path}} 2>/dev/null | sort -rh | head -n {{shellq:entries=15|required|max=3|validate=positive-integer}}"
 
 [[expansion]]
 trigger = ";;mem-triage"
 description = "Memory summary and the processes using the most of it"
 category = "Operations triage"
 tags = ["memory", "diagnostics"]
-replacement = "free -h && ps -eo pid,user,rss,comm --sort=-rss | head -n {{field:processes=15}}"
+replacement = "free -h && ps -eo pid,user,rss,comm --sort=-rss | head -n {{shellq:processes=15|required|max=3|validate=positive-integer}}"
 
 [[expansion]]
 trigger = ";;listening"
@@ -38,7 +38,7 @@ trigger = ";;dns-check"
 description = "Resolve a name through the system resolver and one explicit server"
 category = "Operations triage"
 tags = ["dns", "network"]
-replacement = "resolvectl query {{field:name=example.net}}; dig +short {{field:name}} {{choice:type=A|AAAA|CNAME|MX|TXT}} @{{field:server=1.1.1.1}}"
+replacement = "resolvectl query {{shellq:name=example.net|required|max=253|validate=hostname}}; dig +time=3 +tries=1 +short {{shellq:name}} {{choice:type=A|AAAA|CNAME|MX|TXT}} @{{shellq:server=1.1.1.1|required|max=253|validate=hostname}}"
 
 [[expansion]]
 trigger = ";cloud-context"
@@ -46,7 +46,7 @@ description = "Review the active Kubernetes or cloud CLI identity before an oper
 category = "Operations triage"
 tags = ["cloud", "kubernetes", "target-review", "read-only"]
 replacement = """Operator-selected environment: {{choice:environment=development|staging|production;default=staging;required}}
-Expected account, project, or cluster: {{field:expected target|required|max=256}}
+Expected account, project, or cluster: {{field:expected target|required|max=256|free_text=true}}
 
 This does not infer or select your shell, SSH, container, Kubernetes, or cloud context. Review the expected target, then choose and run the matching read-only identity command in the intended session:
 {{choice:identity command=kubectl config current-context|aws sts get-caller-identity|gcloud config get-value project|az account show --output table;required}}
@@ -59,7 +59,7 @@ trigger = ";;http-check"
 description = "Status, timing, and headers for one HTTP request, without the body"
 category = "Operations triage"
 tags = ["http", "network"]
-replacement = "curl -sS -o /dev/null -D - -w 'status=%{http_code} connect=%{time_connect}s ttfb=%{time_starttransfer}s total=%{time_total}s\\n' {{field:url=https://example.net/health}}"
+replacement = "curl -sS -o /dev/null -D - -w 'status=%{http_code} connect=%{time_connect}s ttfb=%{time_starttransfer}s total=%{time_total}s\\n' -- {{shellq:url=https://example.net/health|required|max=2048|validate=url}}"
 
 [[expansion]]
 trigger = ";;nginx-test"
@@ -80,34 +80,86 @@ trigger = ";;failed-units"
 description = "List failed systemd units and the most recent errors"
 category = "Operations triage"
 tags = ["systemd", "diagnostics"]
-replacement = "systemctl --failed --no-pager && journalctl -p err -b --no-pager -n {{field:lines=50}}"
+replacement = "systemctl --failed --no-pager && journalctl -p err -b --no-pager -n {{shellq:lines=50|required|max=5|validate=positive-integer}}"
 
 [[expansion]]
 trigger = ";http503"
 description = "Review-first HTTP 503 diagnostic checklist and read-only command sequence"
 category = "Operations triage"
 tags = ["http", "incident", "diagnostics", "read-only"]
+output_file = "http503-checklist.md"
 replacement = """HTTP 503 first-response checklist (review each command before running)
 
 Operator-selected environment: {{choice:environment=development|staging|production;default=staging;required}}
-Target host (label only; WayExpand does not detect SSH, container, or sudo context): {{field:target host|required|validate=hostname|max=253}}
+Terminal session (operator-confirmed): {{choice:session context=local|remote SSH;required}}
+Expected host: {{field:target host|required|validate=hostname|max=253}}
 Service: {{field:service=nginx.service|validate=systemd-unit|required|max=255}}
+Reverse proxy unit: {{field:proxy service=nginx.service|validate=systemd-unit|required|max=255}}
 Local service port: {{field:port=8080|validate=port|required|max=5}}
 
-Confirm the current terminal is connected to the intended target before running these commands. They run on the machine of the shell where you execute them; the host label above does not connect to or select a host.
+Before running anything, confirm that this terminal is the selected local or remote SSH session and that `hostname -f` matches the expected host. WayExpand does not inspect terminal contents, detect SSH, or connect to the host. Every command below runs on the machine of the current shell.
 
 1. Confirm the affected URL, start time, scope, and whether the failure is persistent.
-2. Check local service status, recent logs, and listening sockets:
-   systemctl status --no-pager -- '{{field:service}}'
-   journalctl -u '{{field:service}}' -n 100 --no-pager
+2. Check service status, recent logs, and listening sockets:
+   ```sh
+   hostname -f
+   systemctl status --no-pager -- {{shellq:service=nginx.service|required|validate=systemd-unit|max=255}}
+   journalctl -u {{shellq:service}} -n 100 --no-pager
    ss -lntp
-3. Probe the local service port without downloading a response body:
-   curl -sS -I --connect-timeout 3 --max-time 5 'http://127.0.0.1:{{field:port}}'
-4. Check reverse-proxy and upstream errors; for Nginx, validate config without reloading:
+   ```
+3. Probe the local service port with the expected virtual host and no response body:
+   ```sh
+   curl -sS -I --connect-timeout 3 --max-time 5 -H "Host: {{field:target host}}" -- 'http://127.0.0.1:{{field:port=8080|required|validate=port|max=5}}/'
+   ```
+4. Check reverse-proxy logs and validate Nginx configuration without reloading:
+   ```sh
+   journalctl -u {{shellq:proxy service=nginx.service|required|validate=systemd-unit|max=255}} -n 100 --no-pager
    sudo nginx -t
+   ```
 5. Compare proxy/upstream health, recent deploys, capacity, and dependency status. Record evidence and escalate before making changes.
 
 These are inserted as editable text and are not executed by WayExpand. The commands inspect state; they do not restart services or change configuration. Redact credentials, tokens, and customer data before sharing output.
+"""
+
+[[expansion]]
+trigger = ";503-service"
+description = "Generate one read-only HTTP 503 service status command for the selected shell target"
+category = "Operations triage"
+tags = ["http", "incident", "systemd", "read-only"]
+replacement = """# {{choice:session context=local|remote SSH;required}} session; expected host {{field:target host|required|validate=hostname|max=253}}
+# Confirm `hostname -f` matches before running; this command uses the current shell.
+systemctl status --no-pager -- {{shellq:service=nginx.service|required|validate=systemd-unit|max=255}}
+"""
+
+[[expansion]]
+trigger = ";503-journal"
+description = "Generate one read-only HTTP 503 service journal command for the selected shell target"
+category = "Operations triage"
+tags = ["http", "incident", "journalctl", "read-only"]
+replacement = """# {{choice:session context=local|remote SSH;required}} session; expected host {{field:target host|required|validate=hostname|max=253}}
+# Confirm `hostname -f` matches before running; this command uses the current shell.
+journalctl -u {{shellq:service=nginx.service|required|validate=systemd-unit|max=255}} -n {{shellq:lines=100|required|max=5|validate=positive-integer}} --no-pager
+"""
+
+[[expansion]]
+trigger = ";503-sockets"
+description = "Generate one read-only listening socket inspection command for the selected shell target"
+category = "Operations triage"
+tags = ["http", "incident", "sockets", "read-only"]
+replacement = """# {{choice:session context=local|remote SSH;required}} session; expected host {{field:target host|required|validate=hostname|max=253}}
+# Confirm `hostname -f` matches before running; this command uses the current shell.
+ss -lntp
+"""
+
+[[expansion]]
+trigger = ";503-proxy"
+description = "Generate a read-only HTTP virtual-host probe and Nginx configuration check"
+category = "Operations triage"
+tags = ["http", "incident", "nginx", "read-only"]
+replacement = """# {{choice:session context=local|remote SSH;required}} session; expected host {{field:target host|required|validate=hostname|max=253}}
+# Confirm `hostname -f` matches before running; these commands use the current shell.
+curl -sS -I --connect-timeout 3 --max-time 5 -H "Host: {{field:target host}}" -- 'http://127.0.0.1:{{field:port=8080|required|validate=port|max=5}}/'
+sudo nginx -t
 """
 
 [[expansion]]
@@ -120,8 +172,8 @@ Target host (verify the active shell/SSH session yourself): {{field:target host|
 Apache unit: {{choice:service=apache2.service|httpd.service;default=apache2.service;required}}
 
 Review the target and run these read-only checks from the intended host:
-systemctl status --no-pager -- '{{field:service}}'
-journalctl -u '{{field:service}}' -n 100 --no-pager
+   systemctl status --no-pager -- {{shellq:service=apache2.service|required|validate=systemd-unit|max=255}}
+   journalctl -u {{shellq:service}} -n 100 --no-pager
 sudo apachectl configtest
 ss -lntp
 
@@ -154,8 +206,8 @@ Target host (verify the active shell/SSH session yourself): {{field:target host|
 Service unit: {{field:service=mariadb.service|validate=systemd-unit|required|max=255}}
 
 Review the target and confirm the approved account/context before running checks:
-systemctl status --no-pager -- '{{field:service}}'
-journalctl -u '{{field:service}}' -n 100 --no-pager
+   systemctl status --no-pager -- {{shellq:service=mariadb.service|required|validate=systemd-unit|max=255}}
+   journalctl -u {{shellq:service}} -n 100 --no-pager
 ss -lntp
 mariadb-admin --connect-timeout=5 ping
 

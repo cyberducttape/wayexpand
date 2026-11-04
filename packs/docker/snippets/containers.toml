@@ -10,7 +10,7 @@ trigger = ";;container-logs"
 description = "Read a bounded tail of container logs"
 category = "Containers"
 tags = ["docker", "podman", "logs"]
-replacement = "{{choice:engine=docker|podman}} logs --since {{field:since=15m}} --tail {{field:lines=200}} {{field:container=container-name}}"
+replacement = "{{choice:engine=docker|podman}} logs --since {{shellq:since=15m|required|max=32|validate=duration}} --tail {{shellq:lines=200|required|max=5|validate=positive-integer}} {{shellq:container=container-name|required|max=128|validate=container-name}}"
 
 [[expansion]]
 trigger = ";;compose-check"
@@ -24,4 +24,4 @@ trigger = ";;compose-service-logs"
 description = "Inspect recent logs for one Compose service"
 category = "Containers"
 tags = ["compose", "logs"]
-replacement = "{{choice:engine=docker compose|podman compose}} logs --since {{field:since=15m}} --tail {{field:lines=200}} {{field:service=service-name}}"
+replacement = "{{choice:engine=docker compose|podman compose}} logs --since {{shellq:since=15m|required|max=32|validate=duration}} --tail {{shellq:lines=200|required|max=5|validate=positive-integer}} {{shellq:service=service-name|required|max=63|validate=compose-service}}"

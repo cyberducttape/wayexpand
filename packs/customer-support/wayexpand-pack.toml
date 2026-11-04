@@ -1,12 +1,25 @@
 format_version = 1
 id = "wayexpand.customer-support"
-version = "1.1.0"
+version = "1.2.0"
 name = "Customer Support"
 publisher = "WayExpand project"
-description = "Editable support acknowledgements, status updates, maintenance notices, and ticket resolutions."
+maintainer = "WayExpand Support Pack Maintainers"
+description = "Editable customer support acknowledgements, incident updates, and maintenance communications."
 capabilities = ["forms"]
+
+[compatibility]
+shells = ["bash", "zsh", "fish"]
+platforms = ["linux", "any"]
+tools = []
+
+[risk]
+level = "low"
+summary = "Produces editable customer communications and does not execute commands or send messages."
 
 [review]
 reviewed_by = "WayExpand project review"
-reviewed_at = "2026-11-01"
-summary = "Customer-facing replies distinguish verified resolution from mitigation and capture validation, impact, and follow-up details."
+reviewed_at = "2026-11-02"
+summary = "Reviewed by WayExpand Support Pack Maintainers; content is inserted as text and never run by WayExpand. Review command targets and outputs before manual use."
+
+[verification]
+test_cases = "tests/cases.toml"

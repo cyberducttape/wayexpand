@@ -1,0 +1,25 @@
+format_version = 1
+id = "wayexpand.networking"
+version = "1.0.0"
+name = "Networking Operations"
+publisher = "WayExpand project"
+maintainer = "WayExpand Network Operations Maintainers"
+description = "Linux interface, route, socket, and bounded connectivity diagnostics."
+capabilities = ["forms"]
+
+[compatibility]
+shells = ["bash", "zsh", "fish"]
+platforms = ["linux"]
+tools = ["ip", "ss", "nc"]
+
+[risk]
+level = "moderate"
+summary = "Network probes contact explicitly supplied destinations and may disclose network topology in output."
+
+[review]
+reviewed_by = "WayExpand project review"
+reviewed_at = "2026-11-02"
+summary = "Reviewed by WayExpand Network Operations Maintainers; generated text is never run by WayExpand. Inspect targets and output before manual use."
+
+[verification]
+test_cases = "tests/cases.toml"

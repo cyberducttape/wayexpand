@@ -1,0 +1,25 @@
+format_version = 1
+id = "wayexpand.dns-tls"
+version = "1.0.0"
+name = "DNS and TLS Operations"
+publisher = "WayExpand project"
+maintainer = "WayExpand DNS and TLS Maintainers"
+description = "Review-first DNS resolution and TLS certificate inspection commands."
+capabilities = ["forms"]
+
+[compatibility]
+shells = ["bash", "zsh", "fish"]
+platforms = ["linux"]
+tools = ["dig", "resolvectl", "openssl"]
+
+[risk]
+level = "moderate"
+summary = "Queries contact selected resolvers or services and reveal queried names; certificate inspection is read-only."
+
+[review]
+reviewed_by = "WayExpand project review"
+reviewed_at = "2026-11-02"
+summary = "Reviewed by WayExpand DNS and TLS Maintainers; generated text is never run by WayExpand. Inspect targets and output before manual use."
+
+[verification]
+test_cases = "tests/cases.toml"

@@ -3,21 +3,21 @@ trigger = ";;journal-service"
 description = "Inspect recent service logs without following or modifying the unit"
 category = "Linux operations"
 tags = ["systemd", "journalctl"]
-replacement = "journalctl --user -u {{shellq:unit=example.service|required|max=255|validate=systemd-unit}} --since {{shellq:since=1 hour ago|required|max=80|validate=single-line}} --no-pager -n {{shellq:lines=100|required|max=10|validate=positive-integer}}"
+replacement = "journalctl --user -u {{shellq:unit=example.service|required|max=255|validate=systemd-unit}} --since {{shellq:since=1 hour ago|required|max=80|validate=relative-time}} --no-pager -n {{shellq:lines=100|required|max=5|validate=positive-integer}}"
 
 [[expansion]]
 trigger = ";;service-status"
 description = "Check a system service's current state"
 category = "Linux operations"
 tags = ["systemd", "status"]
-replacement = "systemctl status {{shellq:unit=example.service|required|max=255|validate=systemd-unit}} --no-pager"
+replacement = "systemctl status --no-pager -- {{shellq:unit=example.service|required|max=255|validate=systemd-unit}}"
 
 [[expansion]]
 trigger = ";;ssh-check"
 description = "Run a read-only remote host identity and uptime check"
 category = "Linux operations"
 tags = ["ssh", "diagnostics"]
-replacement = "ssh {{shellq:user=admin|required|max=32|validate=linux-user}}@{{shellq:host=host.example.net|required|max=253|validate=hostname}} 'hostname; uptime'"
+replacement = "ssh {{shellq:user=admin|required|max=32|validate=linux-user}}@{{shellq:host=host.example.net|required|max=253|validate=hostname}} 'hostname -f; uptime'"
 
 [[expansion]]
 trigger = ";;bash-safe"
@@ -45,7 +45,7 @@ Description={{field:description=Example user service|required|max=256|validate=s
 
 [Service]
 Type=simple
-ExecStart={{field:executable=/usr/bin/example|required|max=4096|validate=systemd-executable}}
+ExecStart={{field:executable=/usr/bin/example|required|max=4096|validate=systemd-executable}} {{field:arguments=--foreground|max=1024|free_text=true}}
 Restart=on-failure
 NoNewPrivileges=yes
 PrivateTmp=yes

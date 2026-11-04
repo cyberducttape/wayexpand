@@ -1,0 +1,1 @@
+curl -sS -I --max-time 5 https://example.net/health

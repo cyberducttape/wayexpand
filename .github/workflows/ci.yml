@@ -479,6 +479,8 @@ jobs:
         run: bash scripts/test-sync.sh
       - name: Signed pack test
         run: bash scripts/test-pack-signing.sh
+      - name: Reviewed pack metadata and generated-output fixtures
+        run: python3 scripts/test-curated-packs.py target/debug/wayexpand
       - name: Certification JSON contract
         run: |
           jq -e '.schema == 1 and ([.targets[].id] | sort == ["gnome", "hyprland", "kde", "sway"]) and (.required_scenarios | type == "array")' tests/certification/compositor-matrix.json

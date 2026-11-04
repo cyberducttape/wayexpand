@@ -228,7 +228,7 @@ fn curated_operations_packs_validate_command_arguments() {
             &kubernetes,
             ";;kube-rollout",
             "field:deployment",
-            FormFieldValidation::KubernetesName,
+            FormFieldValidation::DnsSubdomain,
         ),
         (
             &kubernetes,
@@ -252,7 +252,7 @@ fn curated_operations_packs_validate_command_arguments() {
             &linux,
             ";;journal-service",
             "field:since",
-            FormFieldValidation::SingleLine,
+            FormFieldValidation::RelativeTime,
         ),
         (
             &linux,
@@ -405,6 +405,15 @@ fn curated_operations_packs_validate_command_arguments() {
         "field:since".to_owned(),
         "1 hour'; touch /tmp/wayexpand-must-not-run; echo ' ago – café".to_owned(),
     );
+    assert!(render_template(
+        &journal.replacement,
+        &TemplateContext {
+            fields: Arc::new(values.clone()),
+            ..TemplateContext::default()
+        },
+    )
+    .is_err());
+    values.insert("field:since".to_owned(), "1 hour ago".to_owned());
     let rendered = render_template(
         &journal.replacement,
         &TemplateContext {
@@ -412,10 +421,8 @@ fn curated_operations_packs_validate_command_arguments() {
             ..TemplateContext::default()
         },
     )
-    .expect("quoted single-line value should render safely");
-    assert!(rendered.contains(
-        "--since '1 hour'\\''; touch /tmp/wayexpand-must-not-run; echo '\\'' ago – café'"
-    ));
+    .expect("validated relative time should render");
+    assert!(rendered.contains("--since '1 hour ago'"));
 }
 
 #[test]

@@ -36,7 +36,7 @@ pub(crate) fn control_command(requested: &str, mut args: Args) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn insert_command(args: Args) -> Result<()> {
+pub(crate) fn insert_command(args: impl Iterator<Item = String>) -> Result<()> {
     const USAGE: &str = "usage: wayexpand insert [--verified] <trigger>";
     let (verified, trigger) = match args.collect::<Vec<_>>().as_slice() {
         [trigger] if trigger != "--verified" => (false, trigger.clone()),

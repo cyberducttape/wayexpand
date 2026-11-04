@@ -17,14 +17,14 @@ trigger = ";;git-log-review"
 description = "Inspect a bounded recent commit list"
 category = "Git"
 tags = ["git", "history", "read-only"]
-replacement = "git log --oneline --decorate -{{field:count=12}} {{field:ref=HEAD}}"
+replacement = "git log --oneline --decorate -{{shellq:count=12|required|max=5|validate=positive-integer}} {{shellq:ref=HEAD|required|max=255|validate=git-revision}}"
 
 [[expansion]]
 trigger = ";;git-branch-review"
 description = "Compare a local branch with its upstream without changing refs"
 category = "Git"
 tags = ["git", "branch", "read-only"]
-replacement = "git fetch --dry-run && git log --oneline --left-right {{field:base=@{upstream}}}...{{field:branch=HEAD}}"
+replacement = "git fetch --dry-run && git log --oneline --left-right {{shellq:base=@{upstream}|required|max=255|validate=git-revision}}...{{shellq:branch=HEAD|required|max=255|validate=git-revision}}"
 
 [[expansion]]
 trigger = ";;git-commit-template"

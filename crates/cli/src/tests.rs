@@ -1247,7 +1247,7 @@ fn help_rows_share_one_summary_column() {
 fn help_lists_current_pack_and_profile_management_commands() {
     let help = help_text();
     for command in [
-        "pack search|inspect|diff",
+        "pack lint|test|diff|search|inspect",
         "rollback|import|verify|sign",
         "profile list|create|switch|remove|assign-app|unassign-app",
     ] {

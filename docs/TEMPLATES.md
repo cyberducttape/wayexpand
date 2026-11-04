@@ -178,9 +178,9 @@ the character count (text fields only). For example,
 For insert-only shell command templates, `{{shellq:NAME=DEFAULT|required|max=N}}`
 collects a text field and renders it as one POSIX shell-quoted word. Repeat it
 as `{{shellq:NAME}}` to reuse the entered value. Shell-quoted form values reject
-terminal control characters, including newlines and tabs. The same `min`, `max`,
-and `validate` constraints available on `{{field:...}}` markers can be applied
-to `{{shellq:...}}` values. Quoting
+terminal control characters, including newlines, carriage returns, tabs, and
+escape sequences. The same `min`, `max`, and `validate` constraints available
+on `{{field:...}}` markers can be applied to `{{shellq:...}}` values. Quoting
 protects shell word boundaries when an operator later runs the command; it
 does not make the command safe to execute or authorize execution. WayExpand
 inserts the completed command for review and does not press Enter. The form
@@ -344,17 +344,23 @@ different problems and should both be used for command arguments.
 Available text-field types are `dns-label`, `hostname`, `host-port`, `port`,
 `positive-integer`, `linux-user`, `ansible-role-name`, `absolute-path`,
 `yaml-string`, `ansible-host-pattern`, `compose-service`, `container-image`,
-`systemd-executable`, `systemd-unit`, `kubernetes-name`, `duration`,
-`single-line`, and `shell-single-quoted`. A Kubernetes name accepts a DNS
-subdomain; a duration accepts a positive integer followed by `ns`, `us`, `µs`,
-`ms`, `s`, `m`, or `h`. For example,
+`systemd-executable`, `systemd-unit`, `single-line`, and
+`shell-single-quoted`, `duration`, `relative-time`, `git-revision`,
+`sql-identifier`, `url`, `url-path`, and `container-name`. `duration` accepts
+Go-style durations up to 30 days such as `15m` or `1h30m` (for
+`docker logs --since` or `kubectl --timeout`); `relative-time` accepts
+`journalctl --since` values such as `1 hour ago`. The `free_text=true` marker explicitly
+documents an intentionally unrestricted text field for operational-pack lint.
+`kubernetes-name` and `dns-subdomain` accept DNS subdomains. For example,
 `{{field:port=443|required|max=5|validate=port}}` accepts only a decimal port
 from 1 through 65535.
 
 The optional `ops-triage` and `customer-support` packs provide standardized
-operational notes and replies. In particular, `;http503` inserts a host- and
-service-specific, read-only diagnostic checklist. It produces commands for
-the operator to inspect and run; WayExpand does not execute them. See
+operational notes and replies. In particular, `;http503` collects a selected
+local or remote SSH session, expected host, service, proxy unit, and port. The
+[HTTP 503 walkthrough](HTTP503_WALKTHROUGH.md) shows how to generate, validate,
+preview, and approve a reusable checklist file, or copy one command for manual
+review. WayExpand does not execute the diagnostic commands. See
 [`PACKS.md`](PACKS.md#optional-sysadmin-and-developer-libraries) for the pack
 install instructions and the included escalation, runbook, change-record,
 and ticket-resolution forms.

@@ -27,10 +27,9 @@ use wayexpand_core::{
 };
 use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
 
-use super::Args;
 use crate::*;
 
-const USAGE: &str = "usage: wayexpand new [<name> [--set NAME=VALUE]... [-o PATH|--stdout] [--gui] [--force] [--validate]] [--show NAME] [--json] [--config FILE]";
+const USAGE: &str = "usage: wayexpand new [<name> [--set NAME=VALUE]... [-o PATH|--stdout] [--gui] [--force] [--validate] [--review]] [--show NAME] [--json] [--config FILE]";
 
 /// Templates that ship with WayExpand. A snippet in the user's configuration
 /// with the same name takes precedence.
@@ -86,11 +85,12 @@ const FORM_HELPER_TIMEOUT: Duration = Duration::from_secs(600);
 const FORM_HELPER_DRAIN_TIMEOUT: Duration = Duration::from_millis(500);
 const FORM_HELPER_READS_PER_DRAIN: usize = 64;
 
-pub(crate) fn new_command(args: Args) -> Result<()> {
+pub(crate) fn new_command(args: impl Iterator<Item = String>) -> Result<()> {
     let mut rest: Vec<String> = args.collect();
     let requested_json = take_json_flag(&mut rest);
     let force = take_flag(&mut rest, "--force");
     let validate = take_flag(&mut rest, "--validate");
+    let review = take_flag(&mut rest, "--review");
     let to_stdout = take_flag(&mut rest, "--stdout");
     let gui = take_flag(&mut rest, "--gui");
     let output =
@@ -129,6 +129,7 @@ pub(crate) fn new_command(args: Args) -> Result<()> {
             || gui
             || force
             || validate
+            || review
             || !assignments.is_empty()
         {
             usage_bail!("{USAGE}");
@@ -138,7 +139,14 @@ pub(crate) fn new_command(args: Args) -> Result<()> {
         return Ok(());
     }
     let Some(name) = rest.into_iter().next() else {
-        if output.is_some() || to_stdout || gui || force || validate || !assignments.is_empty() {
+        if output.is_some()
+            || to_stdout
+            || gui
+            || force
+            || validate
+            || review
+            || !assignments.is_empty()
+        {
             usage_bail!("{USAGE}");
         }
         print_templates(&layers, requested_json);
@@ -242,6 +250,9 @@ pub(crate) fn new_command(args: Args) -> Result<()> {
             )?;
             eprintln!("Validated with {}", validator.name());
         }
+        if review {
+            review_scaffold(Path::new(directory), &files, force)?;
+        }
         write_scaffold_directory(Path::new(directory), &files, force)?;
         eprintln!("Wrote Ansible role to {directory}");
         return Ok(());
@@ -266,6 +277,12 @@ pub(crate) fn new_command(args: Args) -> Result<()> {
         let staged_path = workspace.write_file(&relative_path, rendered.as_bytes())?;
         validator.validate(workspace.path(), &ValidationTarget::File(staged_path))?;
         eprintln!("Validated with {}", validator.name());
+    }
+    if review {
+        let destination = destination.as_deref().ok_or_else(|| {
+            usage_error("reviewed generation requires a file destination; use -o PATH")
+        })?;
+        review_file(Path::new(destination), &rendered, force)?;
     }
     match destination {
         None => {
@@ -425,6 +442,92 @@ impl ArtifactValidator for NginxValidator {
 
 struct KubeconformValidator;
 
+/// Validate the built-in HTTP 503 checklist without executing any of its
+/// commands or invoking pack-defined programs.
+struct Http503ChecklistValidator;
+
+impl ArtifactValidator for Http503ChecklistValidator {
+    fn name(&self) -> &'static str {
+        "WayExpand read-only HTTP 503 checklist validator"
+    }
+
+    fn supports(&self, template_trigger: &str) -> bool {
+        template_trigger == ";http503"
+    }
+
+    fn validate(&self, _workspace: &Path, target: &ValidationTarget) -> Result<()> {
+        let ValidationTarget::File(path) = target else {
+            bail!("HTTP 503 checklist validation requires a generated file");
+        };
+        let contents = fs::read_to_string(path)?;
+        for required in ["Terminal session (operator-confirmed):", "Expected host:"] {
+            if !contents.contains(required) {
+                bail!("generated checklist is missing required review content: {required}");
+            }
+        }
+        let mut in_commands = false;
+        let mut hostname_check = false;
+        let mut service_status = false;
+        let mut journal_checks = 0usize;
+        let mut socket_check = false;
+        let mut host_probe = false;
+        let mut nginx_check = false;
+        for line in contents.lines() {
+            let line = line.trim();
+            if line == "```sh" {
+                if in_commands {
+                    bail!("generated checklist has nested shell code fences");
+                }
+                in_commands = true;
+                continue;
+            }
+            if line == "```" {
+                if !in_commands {
+                    bail!("generated checklist has an unmatched shell code fence");
+                }
+                in_commands = false;
+                continue;
+            }
+            if !in_commands || line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let readonly = [
+                "hostname -f",
+                "systemctl status --no-pager -- ",
+                "journalctl -u ",
+                "ss -lntp",
+                "curl -sS -I --connect-timeout 3 --max-time 5 -H \"Host: ",
+                "sudo nginx -t",
+            ]
+            .iter()
+            .any(|prefix| line.starts_with(prefix));
+            if !readonly {
+                bail!("generated checklist contains an unapproved shell command");
+            }
+            hostname_check |= line.starts_with("hostname -f");
+            service_status |= line.starts_with("systemctl status --no-pager -- ");
+            journal_checks += usize::from(line.starts_with("journalctl -u "));
+            socket_check |= line.starts_with("ss -lntp");
+            host_probe |=
+                line.starts_with("curl -sS -I --connect-timeout 3 --max-time 5 -H \"Host: ");
+            nginx_check |= line.starts_with("sudo nginx -t");
+        }
+        if in_commands {
+            bail!("generated checklist has an unclosed shell code fence");
+        }
+        if !(hostname_check
+            && service_status
+            && journal_checks >= 2
+            && socket_check
+            && host_probe
+            && nginx_check)
+        {
+            bail!("generated checklist is missing one or more required read-only commands");
+        }
+        Ok(())
+    }
+}
+
 impl ArtifactValidator for KubeconformValidator {
     fn name(&self) -> &'static str {
         "kubeconform -strict -summary"
@@ -495,7 +598,8 @@ fn validator_registry() -> Vec<&'static dyn ArtifactValidator> {
     };
     static NGINX: NginxValidator = NginxValidator;
     static KUBECONFORM: KubeconformValidator = KubeconformValidator;
-    let validators: [&'static dyn ArtifactValidator; 7] = [
+    static HTTP503: Http503ChecklistValidator = Http503ChecklistValidator;
+    let validators: [&'static dyn ArtifactValidator; 8] = [
         &ANSIBLE,
         &HADOLINT,
         &COMPOSE,
@@ -503,6 +607,7 @@ fn validator_registry() -> Vec<&'static dyn ArtifactValidator> {
         &ACTIONLINT,
         &NGINX,
         &KUBECONFORM,
+        &HTTP503,
     ];
     validators.into_iter().collect()
 }
@@ -1367,6 +1472,93 @@ fn write_output(path: &Path, contents: &[u8], force: bool) -> Result<()> {
     if let Err(error) = result {
         let _ = fs::remove_file(&temporary);
         return Err(error).with_context(|| format!("could not write {}", path.display()));
+    }
+    Ok(())
+}
+
+fn review_file(path: &Path, rendered: &str, force: bool) -> Result<()> {
+    println!(
+        "Mode: Generate File\nDestination: {}",
+        terminal_safe(&path.display().to_string())
+    );
+    if path.exists() {
+        if !force {
+            usage_bail!(
+                "{} already exists; add --force to replace it",
+                path.display()
+            );
+        }
+        let existing = fs::read(path)
+            .with_context(|| format!("could not read existing output {}", path.display()))?;
+        if existing.len() > wayexpand_core::limits::MAX_REPLACEMENT_BYTES {
+            usage_bail!("existing file is too large to review safely");
+        }
+        let existing = String::from_utf8_lossy(&existing);
+        print_review_diff(&existing, rendered);
+    } else {
+        print_review_diff("", rendered);
+    }
+    confirm_review("Type `write` to write this file: ")
+}
+
+fn review_scaffold(directory: &Path, files: &[(String, Vec<u8>)], force: bool) -> Result<()> {
+    println!(
+        "Mode: Generate File\nDestination directory: {}",
+        directory.display()
+    );
+    for (relative, contents) in files {
+        let path = directory.join(relative);
+        println!("\nFile: {}", terminal_safe(&path.display().to_string()));
+        if path.exists() {
+            if !force {
+                usage_bail!(
+                    "{} already exists; add --force to replace it",
+                    path.display()
+                );
+            }
+            let old = fs::read(&path)
+                .with_context(|| format!("could not read existing output {}", path.display()))?;
+            if old.len() > wayexpand_core::limits::MAX_REPLACEMENT_BYTES {
+                usage_bail!("{} is too large to review safely", path.display());
+            }
+            print_review_diff(
+                &String::from_utf8_lossy(&old),
+                &String::from_utf8_lossy(contents),
+            );
+        } else {
+            print_review_diff("", &String::from_utf8_lossy(contents));
+        }
+    }
+    confirm_review("Type `write` to write this scaffold: ")
+}
+
+fn print_review_diff(existing: &str, proposed: &str) {
+    println!("--- existing\n+++ proposed");
+    if existing == proposed {
+        println!(" (unchanged)");
+        return;
+    }
+    for line in existing.lines().take(500) {
+        println!("-{}", terminal_safe(line));
+    }
+    for line in proposed.lines().take(500) {
+        println!("+{}", terminal_safe(line));
+    }
+    if existing.lines().count() > 500 || proposed.lines().count() > 500 {
+        println!("… diff truncated after 500 lines per side");
+    }
+}
+
+fn confirm_review(prompt: &str) -> Result<()> {
+    if !io::stdin().is_terminal() {
+        usage_bail!("review approval requires an interactive terminal");
+    }
+    eprint!("{prompt}");
+    io::stderr().flush()?;
+    let mut answer = String::new();
+    io::stdin().lock().read_line(&mut answer)?;
+    if answer.trim() != "write" {
+        bail!("cancelled; no files were written");
     }
     Ok(())
 }

@@ -1,0 +1,10 @@
+format_version = 1
+
+[[case]]
+trigger = ";;ops-triage-pack-example"
+expected_output = "examples/generated.txt"
+
+[[case]]
+trigger = ";http503"
+expected_output = "examples/http503-checklist.md"
+values = { "choice:session context" = "remote SSH", "field:target host" = "web-01.example.net", "field:service" = "api.service", "field:proxy service" = "nginx.service", "field:port" = "8080" }
