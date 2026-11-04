@@ -405,6 +405,30 @@ mod tests {
     }
 
     #[test]
+    fn simultaneous_stdout_and_stderr_floods_cannot_starve_the_action_deadline() {
+        let mut command = Command::new("/bin/sh");
+        command
+            .args(["-c", "yes stdout & yes stderr >&2 & wait"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        configure_process_group(&mut command);
+        let mut child = command.spawn().expect("spawn dual-stream flood child");
+        let stdout = child.stdout.take().expect("child stdout");
+        let stderr = child.stderr.take().expect("child stderr");
+        let started = Instant::now();
+
+        let result = run_child_unix(child, Some(stdout), Some(stderr), Duration::from_millis(50));
+
+        assert!(matches!(result, Err(ChildRunError::Timeout)));
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "simultaneous output starved the timeout: {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
     fn large_stdout_and_stderr_are_both_drained_with_per_stream_caps() {
         let mut command = Command::new("/bin/sh");
         command
