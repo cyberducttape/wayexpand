@@ -191,7 +191,6 @@ pub fn import_autokey(
                     return Err(error);
                 }
                 report.skipped += 1;
-                report.unsupported += 1;
                 report.needs_review += 1;
                 report.warnings.push(AutoKeyImportWarning {
                     entry: relative,
@@ -216,7 +215,6 @@ pub fn import_autokey(
                     return Err(error);
                 }
                 report.skipped += 1;
-                report.unsupported += 1;
                 report.needs_review += 1;
                 report.warnings.push(AutoKeyImportWarning {
                     entry: sidecar
@@ -248,7 +246,6 @@ pub fn import_autokey(
                     return Err(error);
                 }
                 report.skipped += 1;
-                report.unsupported += 1;
                 report.needs_review += 1;
                 report.warnings.push(AutoKeyImportWarning {
                     entry: sidecar
@@ -650,6 +647,10 @@ mod tests {
         assert_eq!(imported.report.imported, 1);
         assert_eq!(imported.report.skipped, 2);
         assert_eq!(imported.report.needs_review, 2);
+        assert_eq!(
+            imported.report.unsupported, 0,
+            "missing and malformed source metadata are skipped entries, not unsupported phrase behavior"
+        );
         assert_eq!(imported.report.warnings.len(), 2);
         assert!(imported.report.warnings[0].entry.contains("json"));
         assert!(!imported.report.warnings[0].remediation.is_empty());

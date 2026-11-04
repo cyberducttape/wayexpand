@@ -10,6 +10,11 @@ All notable changes to WayExpand are documented here.
   Unix-socket proxies.
 - Make `wayexpand status` report when its CLI and daemon builds do not match;
   include the comparison and an actionable warning in JSON output.
+- Keep AutoKey migration counts distinct: unreadable phrase files and missing or
+  malformed sidecars count as skipped entries needing review, while
+  `unsupported` counts only phrase behavior WayExpand cannot represent. This
+  makes permissive import summaries and JSON reports accurately reflect what
+  was skipped and why.
 - Track confirmed erase and insertion progress for paced output. Report a
   distinct content-free `partial_write` outcome and counter, retain progress
   in transaction traces, and never automatically replay a partial write.
