@@ -31,7 +31,8 @@ All notable changes to WayExpand are documented here.
   checks, and per-gate unavailable evidence; retain `sandbox_readiness` as a
   compatibility alias. Keep broker confinement checks under execution
   sandboxing while broker service/socket health remains in availability, so
-  the two results stay independently actionable. Require the running daemon
+  the two results stay independently actionable. Include the input-privacy
+  check in the same top-level check list as the other gates. Require the running daemon
   to expose the CLI's expected status schema so stale runtimes cannot pass
   using incomplete security evidence, and include the daemon schema and commit
   in the report. Add a

@@ -52,6 +52,11 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         .filter(|value| value.is_object())
         .cloned()
         .unwrap_or(serde_json::Value::Null);
+    let capture_source = daemon["source"].as_str().unwrap_or("unknown");
+    let sensitive_field_detection = daemon["capture_sensitive_focus"].as_bool();
+    let input_privacy_readiness =
+        privacy_readiness(profile, capture_source, sensitive_field_detection);
+    let input_privacy_required = profile == ProtectionProfile::Strict;
 
     let local_mount_ns = namespace_inode("mnt");
     let local_uts_ns = namespace_inode("uts");
@@ -197,6 +202,11 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
             "The daemon must require cgroup containment and pass its harmless descendant-cancellation self-test in its own service context.",
         ),
     ];
+    checks.push(input_privacy_check(
+        profile,
+        capture_source,
+        sensitive_field_detection,
+    ));
 
     let broker_required = broker["required"].as_bool() == Some(true);
     let command_execution_configured = config.as_ref().is_ok_and(|config| {
@@ -303,13 +313,12 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
                 .then_some(check["name"].as_str().unwrap_or("unknown").to_owned())
         })
         .collect::<Vec<_>>();
-    let capture_source = daemon["source"].as_str().unwrap_or("unknown");
-    let sensitive_field_detection = daemon["capture_sensitive_focus"].as_bool();
     let evdev_privacy = capture_source == "evdev";
     let execution_sandbox_checks = checks_for_gate(&checks, "execution_sandbox");
     let configuration_integrity_checks = checks_for_gate(&checks, "configuration_integrity");
     let action_broker_checks = checks_for_gate(&checks, "action_broker_availability");
     let target_integrity_checks = checks_for_gate(&checks, "target_integrity");
+    let input_privacy_checks = checks_for_gate(&checks, "input_privacy");
     let execution_unverified = unverified
         .iter()
         .copied()
@@ -329,9 +338,6 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         "not_required"
     };
     let target_integrity_readiness = readiness_for(profile, &target_integrity_checks, &[]);
-    let input_privacy_readiness =
-        privacy_readiness(profile, capture_source, sensitive_field_detection);
-    let input_privacy_required = profile == ProtectionProfile::Strict;
     let readiness = combine_gate_readiness(&[
         execution_sandbox_readiness,
         input_privacy_readiness,
@@ -353,14 +359,7 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         "target_integrity_readiness": target_integrity_readiness,
         "gates": {
             "execution_sandbox": gate_report(execution_sandbox_readiness, execution_sandbox_required, &execution_sandbox_checks, &execution_unverified),
-            "input_privacy": {
-                "readiness": input_privacy_readiness,
-                "required": input_privacy_required,
-                "applicable": true,
-                "checks": ["capture_sensitive_focus"],
-                "unavailable_checks": if sensitive_field_detection.is_none() || capture_source == "unknown" { vec!["capture_sensitive_focus"] } else { Vec::<&str>::new() },
-                "verified_failures": if input_privacy_readiness == "fail" { vec!["capture_sensitive_focus"] } else { Vec::<&str>::new() },
-            },
+            "input_privacy": gate_report(input_privacy_readiness, input_privacy_required, &input_privacy_checks, &[]),
             "configuration_integrity": gate_report(configuration_integrity_readiness, configuration_integrity_required, &configuration_integrity_checks, &[]),
             "action_broker_availability": gate_report(action_broker_availability_readiness, action_broker_required, &action_broker_checks, &[]),
             "target_integrity": gate_report(target_integrity_readiness, target_integrity_required, &target_integrity_checks, &[]),
@@ -583,6 +582,7 @@ fn target_integrity_check(daemon: &serde_json::Value) -> serde_json::Value {
 fn gate_for_check(name: &str) -> &'static str {
     match name {
         "config_permissions" => "configuration_integrity",
+        "capture_sensitive_focus" => "input_privacy",
         "action_broker_availability" => "action_broker_availability",
         "automatic_replacement_target_integrity" => "target_integrity",
         // Broker confinement is still execution sandboxing. Keep it distinct
@@ -597,6 +597,36 @@ fn gate_for_check(name: &str) -> &'static str {
         | "broker_uts_namespace" => "execution_sandbox",
         _ => "execution_sandbox",
     }
+}
+
+fn input_privacy_check(
+    profile: ProtectionProfile,
+    source: &str,
+    sensitive_field_detection: Option<bool>,
+) -> serde_json::Value {
+    let readiness = privacy_readiness(profile, source, sensitive_field_detection);
+    let status = match readiness {
+        "pass" => "pass",
+        "fail" => "fail",
+        "incomplete" => "unavailable",
+        _ => "degraded",
+    };
+    let detail = if source == "evdev" {
+        "The active evdev source captures globally and cannot identify sensitive fields."
+    } else if sensitive_field_detection == Some(true) && source != "unknown" {
+        "The active capture route reports sensitive-field detection."
+    } else if sensitive_field_detection == Some(false) {
+        "The active capture route cannot identify sensitive fields."
+    } else {
+        "The active capture route did not report whether it identifies sensitive fields."
+    };
+    serde_json::json!({
+        "name": "capture_sensitive_focus",
+        "status": status,
+        "detail": detail,
+        "required": profile == ProtectionProfile::Strict,
+        "gate": "input_privacy",
+    })
 }
 
 fn checks_for_gate(checks: &[serde_json::Value], gate: &str) -> Vec<serde_json::Value> {
@@ -993,6 +1023,16 @@ mod tests {
             ]),
             "fail"
         );
+
+        let workstation_check =
+            input_privacy_check(ProtectionProfile::Workstation, "evdev", Some(false));
+        let strict_check = input_privacy_check(ProtectionProfile::Strict, "evdev", Some(false));
+        let unknown_check = input_privacy_check(ProtectionProfile::Strict, "unknown", None);
+        assert_eq!(workstation_check["status"], "degraded");
+        assert_eq!(workstation_check["gate"], "input_privacy");
+        assert_eq!(workstation_check["required"], false);
+        assert_eq!(strict_check["status"], "fail");
+        assert_eq!(unknown_check["status"], "unavailable");
     }
 
     #[test]
