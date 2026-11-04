@@ -413,6 +413,18 @@ fn stable_config_lock_serializes_writers_across_atomic_inode_replacement() {
     let target_inode = fs::metadata(&path).unwrap().ino();
     let held_lock = storage::ConfigWriteLock::acquire(&path).unwrap();
 
+    // Model the lock holder committing a write. This deliberately calls the
+    // low-level atomic replacement while retaining the lock, so the target
+    // inode changes before the competing writer opens the configuration. A
+    // lock attached to the replaceable target inode would not block it.
+    Config::save_atomic_serialized(
+        &path,
+        b"[[expansion]]\ntrigger = ':x'\nreplacement = 'lock holder'\n",
+    )
+    .unwrap();
+    assert_ne!(fs::metadata(&path).unwrap().ino(), target_inode);
+    assert_eq!(fs::metadata(&lock_path).unwrap().ino(), lock_inode);
+
     let (attempted_tx, attempted_rx) = mpsc::channel();
     let (saved_tx, saved_rx) = mpsc::channel();
     let competing_path = path.clone();
@@ -427,19 +439,8 @@ fn stable_config_lock_serializes_writers_across_atomic_inode_replacement() {
     attempted_rx.recv_timeout(Duration::from_secs(1)).unwrap();
     assert!(
         saved_rx.recv_timeout(Duration::from_millis(150)).is_err(),
-        "the competing writer must wait for the stable sibling lock"
+        "the competing writer must wait on the lock surviving target replacement"
     );
-
-    // Model the lock holder committing a write. This deliberately calls the
-    // low-level atomic replacement while retaining the lock, so the target
-    // inode changes before the competing writer acquires the lock.
-    Config::save_atomic_serialized(
-        &path,
-        b"[[expansion]]\ntrigger = ':x'\nreplacement = 'lock holder'\n",
-    )
-    .unwrap();
-    assert_ne!(fs::metadata(&path).unwrap().ino(), target_inode);
-    assert_eq!(fs::metadata(&lock_path).unwrap().ino(), lock_inode);
 
     drop(held_lock);
     assert!(saved_rx.recv_timeout(Duration::from_secs(2)).unwrap());
