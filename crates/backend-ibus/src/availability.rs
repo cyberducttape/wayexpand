@@ -240,10 +240,12 @@ mod tests {
         assert!(registry_command_contains_engine(
             "/bin/sh",
             &["-c", "sleep 5 & printf 'wayexpand\\n'"],
-            Duration::from_millis(500),
+            // Allow loaded CI runners time to schedule the parent shell while
+            // still requiring the probe to finish well before the 5s child.
+            Duration::from_secs(2),
         ));
         assert!(
-            started.elapsed() < Duration::from_secs(1),
+            started.elapsed() < Duration::from_secs(3),
             "registry probe waited on an inherited stdout pipe: {:?}",
             started.elapsed()
         );

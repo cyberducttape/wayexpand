@@ -17,6 +17,11 @@ All notable changes to WayExpand are documented here.
   database, Kubernetes, systemd, and cPanel/WHM command families so their form
   fields must use a validator, constrained choice, or explicit free-text
   justification.
+- Add a stable `matching_unavailable_reason` status field so operators and
+  automation can distinguish disconnected capture, unavailable evdev layout,
+  unsupported replacement, pause, and invalid configuration. Derive
+  `matching_available` from that same reason and bump daemon status schema to
+  23.
 - Track confirmed erase and insertion progress for paced output. Report a
   distinct content-free `partial_write` outcome and counter, retain progress
   in transaction traces, and never automatically replay a partial write.
@@ -31,7 +36,7 @@ All notable changes to WayExpand are documented here.
   evidence to trade away prompt cancellation for a more complex wait path.
   Reserve a bounded control worker for complete status
   and lifecycle requests so stalled clients cannot starve operator recovery.
-  Bump the daemon status contract to schema 22.
+  Bump the daemon status contract to schema 23.
 - Split `wayexpand doctor --security --json` readiness into independent
   execution-sandbox, input-privacy, configuration-integrity, and Action Broker
   availability gates. Report applicability, required status, contributing
