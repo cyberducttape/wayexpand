@@ -28,6 +28,19 @@ _wayexpand_context_report() {
     command wayexpand "${arguments[@]}" >/dev/null 2>&1 || :
 }
 
+_wayexpand_context_remote_heartbeat() {
+    local target=$1 stop_file=$2 interval=${3:-30} elapsed=0
+    while [[ ! -e $stop_file ]]; do
+        sleep 1
+        [[ -e $stop_file ]] && break
+        elapsed=$((elapsed + 1))
+        if ((elapsed >= interval)); then
+            WAYEXPAND_CONTEXT_REMOTE_HOST="$target" _wayexpand_context_report
+            elapsed=0
+        fi
+    done
+}
+
 # Explicit SSH wrapper: the target is the first argument, ssh options follow,
 # and `--` separates options from an optional remote command. It never guesses
 # a host from arbitrary ssh syntax or terminal output.
@@ -50,14 +63,20 @@ wayexpand-ssh() {
         command ssh "${options[@]}" "$target" "${remote_command[@]}"
         return $?
     fi
-    (while :; do sleep 30; WAYEXPAND_CONTEXT_REMOTE_HOST="$target" _wayexpand_context_report; done) &
+    local stop_file
+    stop_file=$(mktemp "${TMPDIR:-/tmp}/wayexpand-context-stop.XXXXXX") || {
+        command ssh "${options[@]}" "$target" "${remote_command[@]}"
+        return $?
+    }
+    _wayexpand_context_remote_heartbeat "$target" "$stop_file" &
     local reporter_pid=$!
     WAYEXPAND_CONTEXT_REMOTE_HOST="$target" _wayexpand_context_report
     command ssh "${options[@]}" "$target" "${remote_command[@]}"
     local ssh_status=$?
-    kill "$reporter_pid" 2>/dev/null || :
+    printf 'stop\n' >"$stop_file"
     wait "$reporter_pid" 2>/dev/null || :
     command wayexpand context clear >/dev/null 2>&1 || :
+    command rm -f -- "$stop_file"
     unset WAYEXPAND_CONTEXT_REMOTE_HOST
     _wayexpand_context_report --local
     return "$ssh_status"

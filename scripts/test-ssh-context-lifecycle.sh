@@ -26,6 +26,11 @@ case "${1:-} ${2:-}" in
                 shift
             fi
         done
+        if [[ $remote_host == race-vm ]]; then
+            printf 'report-start:%s\n' "$remote_host" >>"$WAYEXPAND_CONTEXT_TEST_LOG"
+            sleep "${WAYEXPAND_CONTEXT_TEST_REPORT_DELAY:-0.5}"
+            printf 'report-complete:%s\n' "$remote_host" >>"$WAYEXPAND_CONTEXT_TEST_LOG"
+        fi
         printf 'report:%s\n' "$remote_host" >>"$WAYEXPAND_CONTEXT_TEST_LOG"
         ;;
     *)
@@ -74,6 +79,35 @@ expected=(
 )
 [[ ${events[*]} == "${expected[*]}" ]] || {
     printf 'Unexpected SSH context lifecycle:\n%s\n' "${events[*]}" >&2
+    exit 1
+}
+
+# Stop the reporter while a remote report is in flight. It must finish before
+# the local clear and refresh so a late remote write cannot restore stale data.
+race_stop_file=$(mktemp "${TMPDIR:-/tmp}/wayexpand-context-race.XXXXXX")
+rm -f -- "$race_stop_file"
+WAYEXPAND_CONTEXT_TEST_REPORT_DELAY=0.5 \
+    _wayexpand_context_remote_heartbeat race-vm "$race_stop_file" 1 &
+race_reporter_pid=$!
+for _ in {1..50}; do
+    if grep -Fq 'report-start:race-vm' "$WAYEXPAND_CONTEXT_TEST_LOG"; then
+        break
+    fi
+    sleep 0.05
+done
+grep -Fq 'report-start:race-vm' "$WAYEXPAND_CONTEXT_TEST_LOG" || {
+    printf '%s\n' 'heartbeat did not start its remote report' >&2
+    exit 1
+}
+printf 'stop\n' >"$race_stop_file"
+wait "$race_reporter_pid"
+command wayexpand context clear >/dev/null 2>&1
+unset WAYEXPAND_CONTEXT_REMOTE_HOST
+_wayexpand_context_report --local
+race_events=$(tail -n 5 "$WAYEXPAND_CONTEXT_TEST_LOG")
+expected_race=$'report-start:race-vm\nreport-complete:race-vm\nreport:race-vm\nclear\nreport:local'
+[[ $race_events == "$expected_race" ]] || {
+    printf 'Unexpected in-flight report shutdown order:\n%s\n' "$race_events" >&2
     exit 1
 }
 
