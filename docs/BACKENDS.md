@@ -47,12 +47,14 @@ layout). Before every erase or insertion the backend applies the server's
 the character map, a paused or removed device (a keymap change replaces the
 device) refuses and reconnects. A keymap with several layouts uses the
 server-reported group or the daemon's compositor layout provider. Provider
-data is accepted only after compiling its complete XKB
-rules/model/layout/variant/options and checking every layout name and
-keycode-level keysym against the EIS keymap. Missing or inconsistent state is
-refused rather than guessed. KWin's provider reads its keyboard-layout
-service; Hyprland uses compositor-owned keyboard data. These paths still
-require live certification. A
+data is accepted only after compiling its XKB rules/model/layout/variant/
+options and checking that its ordered layout groups match the EIS keymap.
+The EIS keymap remains authoritative for actual key synthesis; requiring all
+non-text keysyms to match would reject otherwise compatible maps (for example,
+when media-key definitions differ). Missing, reordered, or ambiguous layout
+state is refused rather than guessed. KWin's provider reads its
+keyboard-layout service; Hyprland uses compositor-owned keyboard data. These
+paths still require live certification. A
 replacement
 containing an unreachable character is rejected with an error before
 anything is typed, rather than partially or incorrectly inserted. Portal use
