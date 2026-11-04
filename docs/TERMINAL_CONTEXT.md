@@ -1,10 +1,9 @@
 # Terminal and remote session context
 
-WayExpand can report the context of an opted-in local shell session. The report
-is descriptive metadata for operator visibility. It does not authorize an
-action, choose a production target, or execute commands. Generated commands
-remain reviewable text; any execution workflow must have its own explicit
-authorization and confirmation.
+WayExpand can report the context of an opted-in local shell session and use a
+fresh report to render a context-aware text snippet. The report is not an
+authorization claim. Generated commands remain preview text; `context render`
+does not type, paste, or execute them.
 
 ## Enable a shell integration
 
@@ -74,6 +73,37 @@ wayexpand context status
 ```
 
 Context values are labels reported by the local shell integration, not verified
-credentials or authorization claims.
-In particular, a Kubernetes context name does not prove the active cluster's
-identity or safety. Review the destination and generated command before use.
+credentials or authorization claims. In particular, a Kubernetes context name
+does not prove the active cluster's identity or safety.
+
+## Render shell-aware snippets
+
+Templates may use `{{context:shell}}`, `{{context:remote_host}}`,
+`{{context:environment}}`, `{{context:project_root}}`,
+`{{context:kubernetes_context}}`, and `{{context:container}}`. For values used
+as shell arguments, use the POSIX quoting form, for example
+`{{shellq:context:remote_host}}`. Context markers fail closed when there is no
+fresh report or explicit context.
+
+The reviewed `;;ssh-health` snippet demonstrates a validated multi-line,
+read-only checklist. Render it from an opted-in shell session with a fresh
+report, or supply the target explicitly before connecting:
+
+```sh
+wayexpand context render ';;ssh-health' \
+  --shell bash \
+  --remote-host web-staging \
+  --environment staging \
+  --set 'field:expected host=web-01.example.net' \
+  --set 'field:service=api.service' \
+  --set 'field:lines=75' \
+  --set 'field:port=8080'
+```
+
+The command prints the completed text to stdout and labels the selected shell,
+environment, and SSH destination. It refuses command-backed snippets. It does
+not insert text into a terminal buffer, run a command, or press Enter. Review
+the host and each line; do not paste a whole multi-line block into a shell that
+might execute pasted newlines. Copy only the individual command(s) you intend
+to run after connecting to the selected target. Use `--json` to obtain a
+machine-readable preview with `execution: "never"`.

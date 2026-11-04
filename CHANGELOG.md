@@ -38,6 +38,12 @@ All notable changes to WayExpand are documented here.
 - Allow `wayexpand library add --approved-revision FULL_COMMIT` to pin a Git
   catalog checkout to the exact commit selected during review, independent of
   a moving branch head. Content signatures remain separately verified.
+- Render shell-aware operational snippets from an opted-in fresh terminal
+  context or an explicitly selected shell, SSH destination, and environment.
+  Add validated `context:*` and `shellq:context:*` template values plus a
+  read-only multi-line `;;ssh-health` example. `wayexpand context render`
+  refuses command-backed snippets and only prints a review preview; it never
+  inserts, pastes, or executes generated text.
 - After an output failure with an uncertain target effect, quarantine queued input instead of replaying it; never continue a queued batch after a partial transaction. Expose confirmed partial insertions as a separate daemon status counter, GUI warning, and `wayexpand doctor --json` field. Bump the status contract to schema 18.
 - Show the active route's live sensitive-field signal persistently in the GUI, distinguishing verified protection from unavailable and unknown status. Keep raw evdev consent local to each machine.
 - Add a capability-based insertion strategy planner for verified atomic replacement, native text commit, short paced keys, and clipboard/manual paste. The editor preview shows the planned route and estimated paced latency. Set the default paced-keysym maximum to 8 characters (about 100 ms estimated); longer synthetic output requires an explicit setting change.

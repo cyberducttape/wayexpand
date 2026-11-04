@@ -404,6 +404,7 @@ impl ExpansionEngine {
                 .clipboard
                 .clone()
                 .filter(|_| self.config.settings.allow_clipboard && !enforcement.disable_clipboard),
+            session_context: self.template_base.session_context.clone(),
             ..crate::TemplateContext::system()
         }
     }

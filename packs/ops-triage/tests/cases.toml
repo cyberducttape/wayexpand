@@ -8,3 +8,9 @@ expected_output = "examples/generated.txt"
 trigger = ";http503"
 expected_output = "examples/http503-checklist.md"
 values = { "choice:session context" = "remote SSH", "field:target host" = "web-01.example.net", "field:service" = "api.service", "field:proxy service" = "nginx.service", "field:port" = "8080" }
+
+[[case]]
+trigger = ";;ssh-health"
+expected_output = "examples/ssh-health.sh"
+context = { shell = "bash", remote_host = "web-staging", environment = "staging" }
+values = { "field:expected host" = "web-01.example.net", "field:service" = "api.service", "field:lines" = "75", "field:port" = "8080" }

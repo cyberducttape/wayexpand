@@ -62,6 +62,10 @@ pub struct TemplateContext {
     /// Values the user entered in a snippet form, keyed by field key (see
     /// [`FormField::key`]).
     pub fields: Arc<FormValues>,
+    /// Context explicitly reported by an opted-in shell integration. Normal
+    /// desktop expansion leaves this absent and fails closed for context
+    /// variables; `wayexpand context render` supplies a fresh report.
+    pub session_context: Option<crate::SessionContextReport>,
 }
 
 /// Values a user typed into a snippet form, keyed by field key. They are
@@ -875,6 +879,12 @@ pub fn form_fields(template: &str) -> Result<Vec<FormField>, TemplateError> {
     // Whether each field so far comes only from bare references.
     let mut bare_only: Vec<bool> = Vec::new();
     for name in template_variables(template) {
+        if name
+            .strip_prefix("shellq:")
+            .is_some_and(|spec| spec.starts_with("context:"))
+        {
+            continue;
+        }
         let shellq_field = name
             .strip_prefix("shellq:")
             .map(|spec| format!("field:{spec}"));
@@ -955,6 +965,8 @@ pub enum TemplateError {
     MultipleCursors { offset: usize },
     #[error("environment variable {name:?} is not in settings.template_env")]
     EnvNotAllowed { name: String },
+    #[error("terminal context value {field:?} is unavailable or expired")]
+    SessionContextUnavailable { field: &'static str },
     #[error("{{{{snippet:...}}}} names no static snippet")]
     UnknownSnippet,
     #[error(
@@ -995,6 +1007,7 @@ impl TemplateError {
             Self::UnknownVariable { .. } => "unknown template variable",
             Self::DateArithmeticOverflow { .. } => "date arithmetic overflow",
             Self::EnvNotAllowed { .. } => "environment variable is not allowlisted",
+            Self::SessionContextUnavailable { .. } => "terminal context is unavailable or expired",
             Self::InvalidDateFormat { .. } => "unsupported date format",
             Self::InvalidRandom { .. } => "malformed random variable",
             Self::Unclosed { .. } => "unclosed template variable",
@@ -1268,11 +1281,59 @@ enum Variable {
     Cursor,
     Field(FormField),
     ShellQuotedField(FormField),
+    SessionContext(SessionContextField),
+    ShellQuotedSessionContext(SessionContextField),
     Env(String),
     Snippet(String),
     Uuid,
     NamedUuid(String),
     Random(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SessionContextField {
+    Shell,
+    RemoteHost,
+    Environment,
+    ProjectRoot,
+    KubernetesContext,
+    Container,
+}
+
+impl SessionContextField {
+    fn parse(name: &str) -> Option<Self> {
+        Some(match name.trim() {
+            "shell" => Self::Shell,
+            "remote_host" => Self::RemoteHost,
+            "environment" => Self::Environment,
+            "project_root" => Self::ProjectRoot,
+            "kubernetes_context" => Self::KubernetesContext,
+            "container" => Self::Container,
+            _ => return None,
+        })
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Shell => "shell",
+            Self::RemoteHost => "remote_host",
+            Self::Environment => "environment",
+            Self::ProjectRoot => "project_root",
+            Self::KubernetesContext => "kubernetes_context",
+            Self::Container => "container",
+        }
+    }
+
+    fn get<'a>(self, report: &'a crate::SessionContextReport) -> Option<&'a str> {
+        match self {
+            Self::Shell => report.shell.as_deref(),
+            Self::RemoteHost => report.remote_host.as_deref(),
+            Self::Environment => report.environment.as_deref(),
+            Self::ProjectRoot => report.project_root.as_deref(),
+            Self::KubernetesContext => report.kubernetes_context.as_deref(),
+            Self::Container => report.container.as_deref(),
+        }
+    }
 }
 
 fn is_clock_base(name: &str) -> bool {
@@ -1301,11 +1362,27 @@ fn parse_variable(name: &str) -> Result<Variable, TemplateError> {
             Variable::Field(parse_form_field(other).expect("prefix checked")?)
         }
         other if other.starts_with("shellq:") => {
-            let field = format!("field:{}", &other["shellq:".len()..]);
-            Variable::ShellQuotedField(
-                parse_form_field(&field).expect("the shellq field prefix is present")?,
-            )
+            let specification = &other["shellq:".len()..];
+            if let Some(name) = specification.strip_prefix("context:") {
+                Variable::ShellQuotedSessionContext(SessionContextField::parse(name).ok_or_else(
+                    || TemplateError::UnknownVariable {
+                        name: other.to_owned(),
+                    },
+                )?)
+            } else {
+                let field = format!("field:{specification}");
+                Variable::ShellQuotedField(
+                    parse_form_field(&field).expect("the shellq field prefix is present")?,
+                )
+            }
         }
+        other if other.starts_with("context:") => Variable::SessionContext(
+            SessionContextField::parse(&other["context:".len()..]).ok_or_else(|| {
+                TemplateError::UnknownVariable {
+                    name: other.to_owned(),
+                }
+            })?,
+        ),
         other if other.starts_with("env:") => {
             Variable::Env(other["env:".len()..].trim().to_owned())
         }
@@ -1349,6 +1426,19 @@ fn parse_variable(name: &str) -> Result<Variable, TemplateError> {
 /// value safe to place in a command line; it does not authorize execution.
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+/// Quote a shell word for an explicitly reported terminal shell. Fish has
+/// different single-quote escaping rules from POSIX shells.
+fn shell_quote_for_context(value: &str, shell: &str) -> Option<String> {
+    match shell {
+        "bash" | "zsh" => Some(shell_quote(value)),
+        "fish" => Some(format!(
+            "'{}'",
+            value.replace('\\', "\\\\").replace('\'', "\\'")
+        )),
+        _ => None,
+    }
 }
 
 /// The value of one variable. `name` is its source text, for errors.
@@ -1431,6 +1521,50 @@ fn evaluate<'a>(
             }
             None if context.validating => RenderValue::Borrowed("''"),
             None => return Err(TemplateError::FieldValueMissing),
+        },
+        Variable::SessionContext(field) => match context
+            .session_context
+            .as_ref()
+            .and_then(|report| field.get(report))
+        {
+            Some(value) if !value.chars().any(char::is_control) => RenderValue::Borrowed(value),
+            Some(_) => {
+                return Err(TemplateError::SessionContextUnavailable {
+                    field: field.name(),
+                })
+            }
+            None if context.validating => RenderValue::Borrowed(""),
+            None => {
+                return Err(TemplateError::SessionContextUnavailable {
+                    field: field.name(),
+                })
+            }
+        },
+        Variable::ShellQuotedSessionContext(field) => match context
+            .session_context
+            .as_ref()
+            .and_then(|report| field.get(report))
+        {
+            Some(value) if !value.chars().any(char::is_control) => {
+                let quoted = context
+                    .session_context
+                    .as_ref()
+                    .and_then(|report| report.shell.as_deref())
+                    .and_then(|shell| shell_quote_for_context(value, shell))
+                    .ok_or(TemplateError::SessionContextUnavailable { field: "shell" })?;
+                RenderValue::owned(quoted)
+            }
+            Some(_) => {
+                return Err(TemplateError::SessionContextUnavailable {
+                    field: field.name(),
+                })
+            }
+            None if context.validating => RenderValue::Borrowed("''"),
+            None => {
+                return Err(TemplateError::SessionContextUnavailable {
+                    field: field.name(),
+                })
+            }
         },
         Variable::Env(variable) => {
             RenderValue::Borrowed(context.env.get(variable).map(String::as_str).ok_or_else(
@@ -2410,6 +2544,68 @@ mod tests {
                 forbidden.chars().next().unwrap() as u32
             );
         }
+    }
+
+    #[test]
+    fn session_context_templates_fail_closed_and_shell_quote_reported_values() {
+        let report = crate::SessionContextReport {
+            terminal_id: "tty-1-2".into(),
+            session_id: "0123456789abcdef0123456789abcdef".into(),
+            shell: Some("bash".into()),
+            remote_host: Some("admin@db-prod".into()),
+            environment: Some("production".into()),
+            ..crate::SessionContextReport::default()
+        };
+        let context = TemplateContext {
+            session_context: Some(report),
+            ..TemplateContext::default()
+        };
+        assert_eq!(
+            render_template(
+                "{{context:shell}} {{context:environment}} {{shellq:context:remote_host}}",
+                &context
+            )
+            .unwrap(),
+            "bash production 'admin@db-prod'"
+        );
+
+        let absent = TemplateContext::default();
+        assert!(matches!(
+            render_template("{{context:remote_host}}", &absent),
+            Err(TemplateError::SessionContextUnavailable {
+                field: "remote_host"
+            })
+        ));
+        let validating = TemplateContext {
+            validating: true,
+            ..TemplateContext::default()
+        };
+        assert_eq!(
+            render_template("{{context:remote_host}}", &validating).unwrap(),
+            ""
+        );
+
+        let hostile = crate::SessionContextReport {
+            remote_host: Some("prod'; touch /tmp/owned; #".into()),
+            ..context.session_context.unwrap()
+        };
+        let context = TemplateContext {
+            session_context: Some(hostile),
+            ..TemplateContext::default()
+        };
+        assert_eq!(
+            render_template("ssh {{shellq:context:remote_host}}", &context).unwrap(),
+            "ssh 'prod'\\''; touch /tmp/owned; #'"
+        );
+        let mut fish = context.clone();
+        fish.session_context.as_mut().unwrap().shell = Some("fish".into());
+        assert_eq!(
+            render_template("ssh {{shellq:context:remote_host}}", &fish).unwrap(),
+            "ssh 'prod\\'; touch /tmp/owned; #'"
+        );
+        assert!(form_fields("{{shellq:context:remote_host}}")
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
