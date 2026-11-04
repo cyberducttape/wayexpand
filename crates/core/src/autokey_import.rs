@@ -5,7 +5,10 @@
 //! macros are intentionally never run during import.
 
 use crate::{
-    config::{OrganizationPolicy, MAX_CONFIG_BYTES},
+    config::{
+        OrganizationPolicy, MAX_CONFIG_BYTES, MAX_EFFECTIVE_TRIGGERS,
+        MAX_EFFECTIVE_TRIGGER_SCALARS, MAX_TOTAL_TRIGGER_CHARS,
+    },
     Config, ConfigError, ExpansionConfig, MatchMode, Settings,
 };
 use serde::Deserialize;
@@ -170,6 +173,9 @@ pub fn import_autokey(
     };
     let mut report = AutoKeyImportReport::default();
     let mut triggers = HashSet::new();
+    let mut trigger_chars = 0usize;
+    let mut effective_trigger_chars = 0usize;
+    let mut effective_trigger_count = 0usize;
     for phrase_path in phrases {
         let relative = if phrase_path == path {
             phrase_path
@@ -191,7 +197,6 @@ pub fn import_autokey(
                     return Err(error);
                 }
                 report.skipped += 1;
-                report.unsupported += 1;
                 report.needs_review += 1;
                 report.warnings.push(AutoKeyImportWarning {
                     entry: relative,
@@ -216,7 +221,6 @@ pub fn import_autokey(
                     return Err(error);
                 }
                 report.skipped += 1;
-                report.unsupported += 1;
                 report.needs_review += 1;
                 report.warnings.push(AutoKeyImportWarning {
                     entry: sidecar
@@ -248,7 +252,6 @@ pub fn import_autokey(
                     return Err(error);
                 }
                 report.skipped += 1;
-                report.unsupported += 1;
                 report.needs_review += 1;
                 report.warnings.push(AutoKeyImportWarning {
                     entry: sidecar
@@ -264,33 +267,92 @@ pub fn import_autokey(
         };
         match convert_phrase(&relative, phrase, &metadata, mode, &mut report)? {
             Some(expansion) => {
-                let duplicate = std::iter::once(&expansion.trigger)
-                    .chain(&expansion.aliases)
-                    .find(|trigger| triggers.contains(*trigger));
-                if let Some(trigger) = duplicate {
+                // Validate each phrase before adding it to the aggregate. In
+                // permissive mode, one invalid trigger/template/field must
+                // not discard otherwise importable phrases when the final
+                // Config::validate() runs.
+                let candidate = Config {
+                    expansion: vec![expansion.clone()],
+                    hotkey: Vec::new(),
+                    settings: config.settings.clone(),
+                    organization: config.organization.clone(),
+                };
+                let candidate_validation = candidate.validate();
+                if let Err(error) = candidate_validation {
                     if mode == AutoKeyImportMode::Strict {
-                        return Err(AutoKeyImportError::DuplicateTrigger {
-                            path: relative.clone(),
-                            trigger: trigger.clone(),
+                        return Err(AutoKeyImportError::StrictRejected {
+                            entry: relative,
+                            reason: error.to_string(),
                         });
                     }
-                    report.unsupported += 1;
                     report.skipped += 1;
                     report.needs_review += 1;
                     report.warnings.push(AutoKeyImportWarning {
                         entry: relative,
-                        reason: format!(
-                            "duplicate AutoKey abbreviation {trigger:?}; skipped to avoid ambiguous matching"
-                        ),
-                        remediation: "Rename the duplicate abbreviation or merge the two phrases manually."
-                            .into(),
+                        reason: error.to_string(),
+                        remediation: "Repair the phrase trigger or replacement so it satisfies WayExpand configuration validation, then retry the import.".into(),
                     });
                     continue;
                 }
-                triggers.extend(
-                    std::iter::once(expansion.trigger.clone())
-                        .chain(expansion.aliases.iter().cloned()),
+                // Keep aggregate limits and effective-trigger collisions
+                // aligned with Config::validate without repeatedly cloning
+                // the entire growing import for every phrase.
+                let configured_trigger_chars = std::iter::once(&expansion.trigger)
+                    .chain(&expansion.aliases)
+                    .map(|trigger| trigger.chars().count())
+                    .sum::<usize>();
+                let effective_triggers = expansion.effective_triggers();
+                let next_trigger_chars = trigger_chars.saturating_add(configured_trigger_chars);
+                let next_effective_chars = effective_trigger_chars.saturating_add(
+                    effective_triggers
+                        .iter()
+                        .map(|trigger| trigger.chars().count())
+                        .sum::<usize>(),
                 );
+                let next_effective_count =
+                    effective_trigger_count.saturating_add(effective_triggers.len());
+                let duplicate = effective_triggers
+                    .iter()
+                    .find(|trigger| triggers.contains(*trigger));
+                let aggregate_limit_exceeded = next_trigger_chars > MAX_TOTAL_TRIGGER_CHARS
+                    || next_effective_chars > MAX_EFFECTIVE_TRIGGER_SCALARS
+                    || next_effective_count > MAX_EFFECTIVE_TRIGGERS;
+                if duplicate.is_some() || aggregate_limit_exceeded {
+                    let reason = duplicate.map_or_else(
+                        || {
+                            "adding this phrase would exceed WayExpand's aggregate trigger limits"
+                                .to_owned()
+                        },
+                        |trigger| {
+                            format!("duplicate AutoKey abbreviation {trigger:?} (effective trigger collision)")
+                        },
+                    );
+                    if mode == AutoKeyImportMode::Strict {
+                        if let Some(trigger) = duplicate {
+                            return Err(AutoKeyImportError::DuplicateTrigger {
+                                path: relative,
+                                trigger: trigger.clone(),
+                            });
+                        }
+                        return Err(AutoKeyImportError::StrictRejected {
+                            entry: relative,
+                            reason,
+                        });
+                    }
+                    report.unsupported += usize::from(duplicate.is_some());
+                    report.skipped += 1;
+                    report.needs_review += 1;
+                    report.warnings.push(AutoKeyImportWarning {
+                        entry: relative,
+                        reason,
+                        remediation: "Rename the conflicting abbreviation or reduce the imported trigger set, then retry.".into(),
+                    });
+                    continue;
+                }
+                trigger_chars = next_trigger_chars;
+                effective_trigger_chars = next_effective_chars;
+                effective_trigger_count = next_effective_count;
+                triggers.extend(effective_triggers);
                 config.expansion.push(expansion);
                 report.imported += 1;
             }
@@ -650,6 +712,10 @@ mod tests {
         assert_eq!(imported.report.imported, 1);
         assert_eq!(imported.report.skipped, 2);
         assert_eq!(imported.report.needs_review, 2);
+        assert_eq!(
+            imported.report.unsupported, 0,
+            "missing and malformed source metadata are skipped entries, not unsupported phrase behavior"
+        );
         assert_eq!(imported.report.warnings.len(), 2);
         assert!(imported.report.warnings[0].entry.contains("json"));
         assert!(!imported.report.warnings[0].remediation.is_empty());
@@ -657,6 +723,26 @@ mod tests {
         assert!(matches!(
             import_autokey(&directory.0, AutoKeyImportMode::Strict),
             Err(AutoKeyImportError::Metadata { .. })
+        ));
+    }
+
+    #[test]
+    fn permissive_import_skips_individually_invalid_expansions_and_continues() {
+        let directory = TestDirectory::new();
+        directory.phrase("invalid.txt", "invalid trigger", &metadata(&[""]));
+        directory.phrase("valid.txt", "valid phrase", &metadata(&[";valid"]));
+
+        let imported = import_autokey(&directory.0, AutoKeyImportMode::Permissive).unwrap();
+        assert_eq!(imported.report.imported, 1);
+        assert_eq!(imported.report.skipped, 1);
+        assert_eq!(imported.report.needs_review, 1);
+        assert_eq!(imported.config.expansion[0].trigger, ";valid");
+        assert_eq!(imported.report.warnings[0].entry, "invalid.txt");
+        assert!(imported.report.warnings[0].reason.contains("empty trigger"));
+        assert!(!imported.report.warnings[0].remediation.is_empty());
+        assert!(matches!(
+            import_autokey(&directory.0, AutoKeyImportMode::Strict),
+            Err(AutoKeyImportError::StrictRejected { entry, .. }) if entry == "invalid.txt"
         ));
     }
 

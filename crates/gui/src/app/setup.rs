@@ -309,26 +309,29 @@ pub(crate) fn onboarding_step(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::process::{Command, Stdio};
-    use wayexpand_process_supervisor::configure_process_group;
+
+    struct ContinuousOutput {
+        reads: usize,
+    }
+
+    impl Read for ContinuousOutput {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            self.reads += 1;
+            buffer[0] = b'x';
+            Ok(1)
+        }
+    }
 
     #[test]
     fn setup_output_drain_yields_for_continuous_output() {
-        let mut command = Command::new("/bin/sh");
-        command
-            .args(["-c", "yes setup"])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null());
-        configure_process_group(&mut command);
-        let mut child = command.spawn().expect("spawn continuous-output child");
-        let mut stdout = child.stdout.take().expect("child stdout");
-        set_nonblocking(&stdout).expect("make stdout nonblocking");
+        let mut reader = ContinuousOutput { reads: 0 };
         let mut output = Vec::new();
-        let started = Instant::now();
-        let result = drain_setup_output(&mut stdout, &mut output);
-        assert!(result.is_ok());
-        assert!(started.elapsed() < Duration::from_secs(1));
-        let _ = child.kill();
-        let _ = child.wait();
+        assert_eq!(
+            drain_setup_output(&mut reader, &mut output),
+            Ok(false),
+            "continuously readable output must yield after the per-turn read budget"
+        );
+        assert_eq!(reader.reads, SETUP_OUTPUT_READS_PER_DRAIN);
+        assert_eq!(output.len(), SETUP_OUTPUT_READS_PER_DRAIN);
     }
 }
