@@ -51,6 +51,9 @@ All notable changes to WayExpand are documented here.
   review screens display maintainer, compatibility, and risk information.
 - Add DNS subdomain validation and apply shell-quoted, typed fields to common
   Kubernetes, container, Nginx, and sysadmin diagnostic arguments.
+- Reject terminal control characters in shell-quoted form fields, including
+  carriage returns and escape sequences that could affect a pasted command or
+  obscure its preview.
 - Move expansion transaction payloads into the serialized output worker and
   return them with completion, avoiding a second allocation of the full
   replacement text. Pending reactor state retains only the trigger needed for

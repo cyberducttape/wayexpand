@@ -290,9 +290,10 @@ impl FormFieldValidation {
             Self::SystemdExecutable => {
                 value.starts_with('/')
                     && !value.chars().any(char::is_whitespace)
-                    && value
-                        .chars()
-                        .all(|character| !character.is_control() && character != '%')
+                    && value.chars().all(|character| {
+                        !character.is_control()
+                            && !matches!(character, '%' | '\\' | '\'' | '"' | '{' | '}' | ';')
+                    })
             }
             Self::YamlString => {
                 !value.is_empty()
@@ -323,11 +324,7 @@ impl FormFieldValidation {
                         .all(|byte| byte.is_ascii_alphanumeric() || b"._/:@-".contains(&byte))
                     && !value.contains("..")
             }
-            Self::KubernetesName => {
-                !value.is_empty()
-                    && value.len() <= 253
-                    && value.split('.').all(|label| valid_dns_label(label, false))
-            }
+            Self::KubernetesName => valid_dns_subdomain(value),
             Self::KubernetesDuration => valid_kubernetes_duration(value),
             Self::SingleLine => !value.chars().any(char::is_control),
             Self::ShellSingleQuoted => {
@@ -2396,22 +2393,22 @@ mod tests {
             "curl 'example.net'\\''; touch /tmp/should-not-run; echo '\\''' 'example.net'\\''; touch /tmp/should-not-run; echo '\\'''"
         );
 
-        for hostile in [
-            "example.net\nwhoami",
-            "example.net\rwhoami",
-            "example\u{1b}[2K.net",
-        ] {
-            let values = [("field:domain".to_owned(), hostile.to_owned())]
+        for forbidden in ["\n", "\r", "\t", "\x1b", "\x07", "\x7f", "\u{0085}"] {
+            let values = [("field:domain".to_owned(), format!("before{forbidden}after"))]
                 .into_iter()
                 .collect();
             let context = TemplateContext {
                 fields: Arc::new(values),
                 ..TemplateContext::default()
             };
-            assert!(matches!(
-                render_template(template, &context),
-                Err(TemplateError::InvalidField)
-            ));
+            assert!(
+                matches!(
+                    render_template(template, &context),
+                    Err(TemplateError::InvalidField)
+                ),
+                "control character U+{:04X} should be rejected",
+                forbidden.chars().next().unwrap() as u32
+            );
         }
     }
 
@@ -2457,6 +2454,25 @@ mod tests {
                 field.validate_value(value).is_err(),
                 "{}: {value:?}",
                 field.label
+            );
+        }
+    }
+
+    #[test]
+    fn kubernetes_names_and_durations_reject_shell_and_type_confusion() {
+        let fields = form_fields(
+            "{{field:resource=api.v2|required|validate=kubernetes-name}} {{field:timeout=120s|required|validate=duration}}",
+        )
+        .unwrap();
+        assert!(fields[0].validate_value("api.v2").is_ok());
+        assert!(fields[1].validate_value("15m").is_ok());
+        assert!(fields[0].validate_value("api; touch /tmp/pwn").is_err());
+        assert!(fields[0].validate_value("api with spaces").is_err());
+        assert!(fields[0].validate_value("поды").is_err());
+        for invalid in ["120", "0s", "-1s", "1 s", "1e3s", "５s", "1m;id"] {
+            assert!(
+                fields[1].validate_value(invalid).is_err(),
+                "unexpected duration acceptance: {invalid:?}"
             );
         }
     }

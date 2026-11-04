@@ -1,5 +1,8 @@
 use std::os::unix::fs::PermissionsExt;
-use wayexpand_core::Config;
+use std::sync::Arc;
+use wayexpand_core::{
+    render_template, Config, FormFieldKind, FormFieldValidation, FormValues, TemplateContext,
+};
 
 #[test]
 fn published_executable_toml_examples_parse_as_config() {
@@ -84,7 +87,10 @@ fn sysadmin_diagnostic_pack_is_valid_and_insert_only() {
         let expansion = config
             .expansion
             .iter()
-            .find(|expansion| expansion.trigger == trigger)
+            .find(|expansion| {
+                expansion.trigger == trigger
+                    || expansion.aliases.iter().any(|alias| alias == trigger)
+            })
             .expect("the expected diagnostic expansion should exist");
         let field = wayexpand_core::form_fields(&expansion.replacement)
             .unwrap()
@@ -94,6 +100,329 @@ fn sysadmin_diagnostic_pack_is_valid_and_insert_only() {
         assert!(field.validate_value(accepted).is_ok(), "{trigger} {key}");
         assert!(field.validate_value(rejected).is_err(), "{trigger} {key}");
     }
+}
+
+#[test]
+fn curated_operations_packs_validate_command_arguments() {
+    let kubernetes = Config::parse(include_str!(
+        "../../../packs/kubernetes/snippets/kubectl.toml"
+    ))
+    .expect("Kubernetes operations pack should validate");
+    let linux = Config::parse(include_str!(
+        "../../../packs/linux-administration/snippets/operations.toml"
+    ))
+    .expect("Linux administration pack should validate");
+
+    for (config, triggers) in [
+        (
+            &kubernetes,
+            [
+                ";;kube-pods",
+                ";;kube-logs",
+                ";;kube-events",
+                ";;kube-rollout",
+            ]
+            .as_slice(),
+        ),
+        (
+            &linux,
+            [
+                ";;journal-service",
+                ";;service-status",
+                ";;ssh-check",
+                ";;bash-safe",
+            ]
+            .as_slice(),
+        ),
+    ] {
+        for trigger in triggers {
+            let expansion = config
+                .expansion
+                .iter()
+                .find(|expansion| {
+                    expansion.trigger == *trigger
+                        || expansion.aliases.iter().any(|alias| alias == *trigger)
+                })
+                .unwrap_or_else(|| panic!("missing curated shell command {trigger}"));
+            assert!(
+                !expansion.replacement.contains("{{field:"),
+                "shell arguments in {trigger} must use the shell-quoting variable"
+            );
+        }
+    }
+
+    for expansion in kubernetes.expansion.iter().chain(&linux.expansion) {
+        assert!(
+            expansion.command.is_none(),
+            "{} must remain insert-only",
+            expansion.trigger
+        );
+        let fields = wayexpand_core::form_fields(&expansion.replacement)
+            .expect("curated form markers should parse");
+        for field in fields {
+            if let FormFieldKind::Text { default } = &field.kind {
+                let validation = field.validate_value(default);
+                if field.required && default.is_empty() {
+                    assert!(
+                        validation.is_err(),
+                        "required field in {} unexpectedly accepts an empty default: {}",
+                        expansion.trigger,
+                        field.label
+                    );
+                } else {
+                    assert!(
+                        validation.is_ok(),
+                        "invalid default in {}: {}",
+                        expansion.trigger,
+                        field.label
+                    );
+                }
+            }
+        }
+    }
+
+    for (config, trigger, field_key, validation) in [
+        (
+            &kubernetes,
+            ";;kube-pods",
+            "field:namespace",
+            FormFieldValidation::DnsLabel,
+        ),
+        (
+            &kubernetes,
+            ";;kube-logs",
+            "field:namespace",
+            FormFieldValidation::DnsLabel,
+        ),
+        (
+            &kubernetes,
+            ";;kube-logs",
+            "field:pod",
+            FormFieldValidation::KubernetesName,
+        ),
+        (
+            &kubernetes,
+            ";;kube-logs",
+            "field:container",
+            FormFieldValidation::DnsLabel,
+        ),
+        (
+            &kubernetes,
+            ";;kube-logs",
+            "field:since",
+            FormFieldValidation::KubernetesDuration,
+        ),
+        (
+            &kubernetes,
+            ";;kube-logs",
+            "field:lines",
+            FormFieldValidation::PositiveInteger,
+        ),
+        (
+            &kubernetes,
+            ";;kube-events",
+            "field:namespace",
+            FormFieldValidation::DnsLabel,
+        ),
+        (
+            &kubernetes,
+            ";;kube-rollout",
+            "field:deployment",
+            FormFieldValidation::DnsSubdomain,
+        ),
+        (
+            &kubernetes,
+            ";;kube-rollout",
+            "field:namespace",
+            FormFieldValidation::DnsLabel,
+        ),
+        (
+            &kubernetes,
+            ";;kube-rollout",
+            "field:timeout",
+            FormFieldValidation::Duration,
+        ),
+        (
+            &linux,
+            ";;journal-service",
+            "field:unit",
+            FormFieldValidation::SystemdUnit,
+        ),
+        (
+            &linux,
+            ";;journal-service",
+            "field:since",
+            FormFieldValidation::RelativeTime,
+        ),
+        (
+            &linux,
+            ";;journal-service",
+            "field:lines",
+            FormFieldValidation::PositiveInteger,
+        ),
+        (
+            &linux,
+            ";;service-status",
+            "field:unit",
+            FormFieldValidation::SystemdUnit,
+        ),
+        (
+            &linux,
+            ";;ssh-check",
+            "field:user",
+            FormFieldValidation::LinuxUser,
+        ),
+        (
+            &linux,
+            ";;ssh-check",
+            "field:host",
+            FormFieldValidation::Hostname,
+        ),
+        (
+            &linux,
+            ";;bash-safe",
+            "field:target",
+            FormFieldValidation::AbsolutePath,
+        ),
+        (
+            &linux,
+            ";;systemd-unit",
+            "field:executable",
+            FormFieldValidation::SystemdExecutable,
+        ),
+        (
+            &linux,
+            ";;systemd-unit",
+            "field:description",
+            FormFieldValidation::SingleLine,
+        ),
+    ] {
+        let expansion = config
+            .expansion
+            .iter()
+            .find(|expansion| {
+                expansion.trigger == trigger
+                    || expansion.aliases.iter().any(|alias| alias == trigger)
+            })
+            .unwrap_or_else(|| panic!("missing curated snippet {trigger}"));
+        let field = wayexpand_core::form_fields(&expansion.replacement)
+            .unwrap()
+            .into_iter()
+            .find(|field| field.key == field_key)
+            .unwrap_or_else(|| panic!("missing {field_key} in {trigger}"));
+        assert_eq!(field.validation, Some(validation), "{trigger}: {field_key}");
+    }
+
+    for (config, trigger, field_key, hostile_values) in [
+        (
+            &kubernetes,
+            ";;kube-pods",
+            "field:namespace",
+            ["team space", "team;id", "team'ops", "生产"],
+        ),
+        (
+            &kubernetes,
+            ";;kube-logs",
+            "field:pod",
+            ["pod name", "pod;id", "pod'ops", "поды"],
+        ),
+        (
+            &kubernetes,
+            ";;kube-logs",
+            "field:lines",
+            ["10 lines", "10;id", "１０", "-1"],
+        ),
+        (
+            &kubernetes,
+            ";;kube-rollout",
+            "field:timeout",
+            ["120 seconds", "120s;id", "１２０s", "0s"],
+        ),
+        (
+            &linux,
+            ";;ssh-check",
+            "field:user",
+            ["admin ops", "admin';id", "-root", "üser"],
+        ),
+        (
+            &linux,
+            ";;ssh-check",
+            "field:host",
+            ["host name", "host';id", "-oProxyCommand=x", "täst.example"],
+        ),
+        (
+            &linux,
+            ";;service-status",
+            "field:unit",
+            ["bad unit", "api.service;id", "api'ops", "сервис"],
+        ),
+        (
+            &linux,
+            ";;systemd-unit",
+            "field:executable",
+            [
+                "relative/path",
+                "/usr/bin/foo bar",
+                "/usr/bin/foo\";id",
+                "/usr/bin/foo\\bar",
+            ],
+        ),
+    ] {
+        let expansion = config
+            .expansion
+            .iter()
+            .find(|expansion| {
+                expansion.trigger == trigger
+                    || expansion.aliases.iter().any(|alias| alias == trigger)
+            })
+            .unwrap();
+        let field = wayexpand_core::form_fields(&expansion.replacement)
+            .unwrap()
+            .into_iter()
+            .find(|field| field.key == field_key)
+            .unwrap();
+        for hostile in hostile_values {
+            assert!(
+                field.validate_value(hostile).is_err(),
+                "{trigger} accepted {hostile:?} for {field_key}"
+            );
+        }
+    }
+
+    let journal = linux
+        .expansion
+        .iter()
+        .find(|expansion| expansion.trigger == ";;journal-service")
+        .unwrap();
+    let mut values = FormValues::default();
+    for field in wayexpand_core::form_fields(&journal.replacement).unwrap() {
+        let FormFieldKind::Text { default } = field.kind else {
+            unreachable!("journal fields are text fields")
+        };
+        values.insert(field.key, default);
+    }
+    values.insert(
+        "field:since".to_owned(),
+        "1 hour'; touch /tmp/wayexpand-must-not-run; echo ' ago – café".to_owned(),
+    );
+    assert!(render_template(
+        &journal.replacement,
+        &TemplateContext {
+            fields: Arc::new(values.clone()),
+            ..TemplateContext::default()
+        },
+    )
+    .is_err());
+    values.insert("field:since".to_owned(), "1 hour ago".to_owned());
+    let rendered = render_template(
+        &journal.replacement,
+        &TemplateContext {
+            fields: Arc::new(values),
+            ..TemplateContext::default()
+        },
+    )
+    .expect("validated relative time should render");
+    assert!(rendered.contains("--since '1 hour ago'"));
 }
 
 #[test]

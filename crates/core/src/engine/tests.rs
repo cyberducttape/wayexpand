@@ -3693,10 +3693,15 @@ fn waiting_on_a_command_that_closed_its_output_does_not_spin() {
 #[test]
 #[cfg(unix)]
 fn command_rejects_output_when_descendant_keeps_stdout_open() {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock is after the Unix epoch")
+        .as_nanos();
     let pid_file = format!(
-        "/tmp/wayexpand-incomplete-output-{}.pid",
-        std::process::id()
+        "/tmp/wayexpand-incomplete-output-{}-{nonce}.pid",
+        std::process::id(),
     );
+    let _ = std::fs::remove_file(&pid_file);
     let command = CommandConfig {
         action: None,
         program: "/bin/sh".to_string(),
