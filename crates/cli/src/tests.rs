@@ -637,7 +637,7 @@ fn status_json_matches_documented_stable_contract() {
          backend=input-method-v2\n\
          route_id=input-method-v2\n\
          backend_mode=unknown\n\
-         status_schema=23\n\
+         status_schema=24\n\
          daemon_commit=test-commit\n\
          state=connected\n\
          route_available=true\n\
@@ -854,6 +854,94 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "automatic_selection",
             "setup_recommendation",
             "capture_readiness",
+        ]
+        .into_iter()
+        .collect()
+    );
+    let security_fields = contract["doctor_security"]
+        .as_array()
+        .expect("security doctor contract must be an array")
+        .iter()
+        .map(|field| field.as_str().unwrap())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        security_fields,
+        [
+            "schema",
+            "profile",
+            "readiness",
+            "gates",
+            "execution_sandbox_readiness",
+            "input_privacy_readiness",
+            "configuration_integrity_readiness",
+            "action_broker_availability_readiness",
+            "target_integrity_readiness",
+            "daemon_runtime",
+            "healthy",
+            "checks",
+        ]
+        .into_iter()
+        .collect()
+    );
+    assert_eq!(
+        crate::doctor::security::SECURITY_REPORT_SCHEMA,
+        contract["doctor_security_schema"]
+            .as_u64()
+            .expect("security report schema must be a number")
+    );
+    let security_gates = contract["doctor_security_gates"]
+        .as_array()
+        .expect("security gate contract must be an array")
+        .iter()
+        .map(|field| field.as_str().unwrap())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        security_gates,
+        [
+            "execution_sandbox",
+            "input_privacy",
+            "configuration_integrity",
+            "action_broker_availability",
+            "target_integrity",
+        ]
+        .into_iter()
+        .collect()
+    );
+    let gate_report_fields = contract["doctor_security_gate_report"]
+        .as_array()
+        .expect("security gate report contract must be an array")
+        .iter()
+        .map(|field| field.as_str().unwrap())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        gate_report_fields,
+        [
+            "readiness",
+            "observed_readiness",
+            "required",
+            "applicable",
+            "checks",
+            "unavailable_checks",
+            "unavailable_evidence",
+            "verified_failures",
+        ]
+        .into_iter()
+        .collect()
+    );
+    let security_runtime_fields = contract["doctor_security_runtime"]
+        .as_array()
+        .expect("security runtime contract must be an array")
+        .iter()
+        .map(|field| field.as_str().unwrap())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        security_runtime_fields,
+        [
+            "status_schema",
+            "expected_status_schema",
+            "schema_compatible",
+            "daemon_commit",
+            "upgrade",
         ]
         .into_iter()
         .collect()

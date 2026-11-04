@@ -4,12 +4,38 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Give target-integrity failures a direct recovery instruction for disabling
+  non-atomic compatibility output and restoring default refusal.
+- Treat a stale or missing daemon status schema as unavailable security
+  evidence, not a verified sandbox failure. Keep the required gate incomplete
+  until the daemon is updated or restarted; bump the security report schema to
+  10.
+- Make `doctor --security` account for an enforced organization
+  `require_sensitive_focus` policy when evaluating the input-privacy gate.
+  Invalid or unreadable root policy now leaves privacy readiness incomplete,
+  and policy ownership, permissions, size, and syntax are reported under
+  configuration integrity. Identify the extended report as schema 9.
+- Report each security gate's observed health separately from whether policy
+  requires it, so an unavailable optional Action Broker remains visible to
+  fleet inventory without making a host with no named actions unhealthy.
+- Report required but unavailable Action Broker sandbox evidence as incomplete
+  in the execution-sandbox gate, independently of the broker availability
+  failure.
+- Include the target-integrity gate in the stable doctor security JSON shape
+  contract so automation can validate every emitted security gate.
+- Clarify and test that surrounding-text verification does not make separate
+  deletion and insertion atomic; non-atomic replacement remains opt-in.
+- Include the daemon upgrade status and recovery action in security JSON so
+  stale or protocol-incompatible runtimes are actionable to fleet automation.
 - Require broker socket creation to remain private under permissive umasks and
   clarify that `deny_network` and the packaged broker policy block direct IP
   networking but do not prevent indirect egress through authorized local
   Unix-socket proxies.
 - Make `wayexpand status` report when its CLI and daemon builds do not match;
   include the comparison and an actionable warning in JSON output.
+- Place RPM build workspaces on disk-backed runner storage instead of the small
+  `/tmp` tmpfs in CI and release package builds, preventing full-workspace tests
+  from exhausting it.
 - Avoid creating asynchronous command workers for text-only configurations;
   command and hotkey worker threads now start only when an enabled action
   requires them, reducing reload churn and background threads.
@@ -34,6 +60,10 @@ All notable changes to WayExpand are documented here.
   unsupported replacement, pause, and invalid configuration. Derive
   `matching_available` from that same reason and bump daemon status schema to
   23.
+- Include safety-guard admission in matching availability. A connected
+  non-atomic route with compatibility mode disabled now reports
+  `replacement_not_admitted` instead of appearing usable; bump daemon status
+  schema to 24.
 - Track confirmed erase and insertion progress for paced output. Report a
   distinct content-free `partial_write` outcome and counter, retain progress
   in transaction traces, and never automatically replay a partial write.
@@ -53,12 +83,19 @@ All notable changes to WayExpand are documented here.
   execution-sandbox, input-privacy, configuration-integrity, and Action Broker
   availability gates. Report applicability, required status, contributing
   checks, and per-gate unavailable evidence; retain `sandbox_readiness` as a
-  compatibility alias. Require the running daemon to expose the CLI's expected
-  status schema so stale runtimes cannot pass using incomplete security
-  evidence, and include the daemon schema and commit in the report. Add a
+  compatibility alias. Keep broker confinement checks under execution
+  sandboxing while broker service/socket and mandatory audit health remain in
+  availability, so the results stay independently actionable. Require
+  configured named actions to have a running broker and the healthy mandatory
+  audit required by `Run Approved Action`. Include the input-privacy check in the same top-level
+  check list as the other gates. Report observed broker availability even when
+  the broker is optional. Require the running
+  daemon to expose the CLI's expected status schema so stale runtimes cannot
+  pass using incomplete security evidence, and include the daemon schema and
+  commit in the report. Add a
   separate target-integrity gate that fails when compatibility mode enables
   uncertified non-atomic replacement and remains incomplete for uncertified
-  atomic routes. Bump the security report schema to 7.
+  atomic routes. Bump the security report schema to 8.
 - Allow `wayexpand library add --approved-revision FULL_COMMIT` to pin a Git
   catalog checkout to the exact commit selected during review, independent of
   a moving branch head. Content signatures remain separately verified.

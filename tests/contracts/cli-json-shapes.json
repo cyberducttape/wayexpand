@@ -30,6 +30,45 @@
     "setup_recommendation",
     "capture_readiness"
   ],
+  "doctor_security": [
+    "schema",
+    "profile",
+    "readiness",
+    "gates",
+    "execution_sandbox_readiness",
+    "input_privacy_readiness",
+    "configuration_integrity_readiness",
+    "action_broker_availability_readiness",
+    "target_integrity_readiness",
+    "daemon_runtime",
+    "healthy",
+    "checks"
+  ],
+  "doctor_security_schema": 10,
+  "doctor_security_gates": [
+    "execution_sandbox",
+    "input_privacy",
+    "configuration_integrity",
+    "action_broker_availability",
+    "target_integrity"
+  ],
+  "doctor_security_gate_report": [
+    "readiness",
+    "observed_readiness",
+    "required",
+    "applicable",
+    "checks",
+    "unavailable_checks",
+    "unavailable_evidence",
+    "verified_failures"
+  ],
+  "doctor_security_runtime": [
+    "status_schema",
+    "expected_status_schema",
+    "schema_compatible",
+    "daemon_commit",
+    "upgrade"
+  ],
   "status": [
     "response",
     "source",

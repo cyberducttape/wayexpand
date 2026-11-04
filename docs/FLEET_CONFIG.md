@@ -97,13 +97,37 @@ host as passing the gate. Overall `readiness` is degraded when the sandbox
 passes but the active route lacks sensitive-field detection. The
 strict profile fails for evdev even if a route reports that capability. The
 independent gate results are also available under `gates`, including whether
-each gate is required and which checks contributed to its result. The legacy
+each gate is required and which checks contributed to its result. Each gate
+reports both policy `readiness` and `observed_readiness`: the former can be
+`not_required` when a capability is unused, while the latter always summarizes
+the checks that were actually run. For example, an unused but stopped broker
+has `readiness: "not_required"`, `required: false`, and
+`observed_readiness: "fail"`; this remains visible to inventory automation
+without making an installation that has no named actions unhealthy. The execution
+sandbox gate includes daemon and, when configured, broker confinement checks;
+if configured broker actions need a broker that is not running, that gate also
+reports `broker_runtime_security_evidence` as unavailable rather than implying
+that the broker's confinement was verified.
+the Action Broker availability gate reports service/socket health and mandatory
+audit readiness, and is required only when configured named actions need it.
+For those actions, `action_broker_mandatory_audit` must report `pass`:
+`Run Approved Action` requires a running broker with audit enabled, mandatory,
+and healthy. A
+broker can therefore be reachable while failing its audit or sandbox checks;
+the availability result covers audit, while confinement appears only under
+execution sandboxing. Input privacy and configuration integrity are evaluated
+separately as well. The top-level `schema` field is currently `10` and is
+versioned; automation should consume the stable `gates.<name>.readiness`,
+`required`, and `checks` fields and reject unrecognized schema versions. The legacy
 `sandbox_readiness` key aliases `execution_sandbox_readiness`. The
 security report's `active_route` object records the live source, backend,
 atomic replacement capability, replacement assurance, focus assurance, and
 compatibility mode. `automatic_replacement_mode` distinguishes an atomic
 capability, the default refusal for non-atomic routes, and an experimental
 compatibility override. It does not claim desktop certification.
+`daemon_runtime.upgrade` reports whether the live daemon is current, needs a
+restart, is protocol-incompatible, or cannot be verified, and includes a
+recovery action for fleet automation.
 
 Inspect the policy's enforcement view with `wayexpand policy inspect`. CI
 should use `wayexpand policy check --file ./policy.toml --json`; its exit code

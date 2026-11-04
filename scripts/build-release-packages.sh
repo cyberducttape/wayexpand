@@ -55,7 +55,8 @@ fi
 install -m 0644 "$deb" .
 sha256sum "$(basename "$deb")" > "$(basename "$deb").sha256"
 
-top=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-rpm-${version}.XXXXXXXX")
+package_tmp_root=${WAYEXPAND_PACKAGE_TMPDIR:-${RUNNER_TEMP:-${TMPDIR:-/tmp}}}
+top=$(mktemp -d "$package_tmp_root/wayexpand-rpm-${version}.XXXXXXXX")
 trap 'rm -rf "$top"' EXIT INT TERM
 source_dir="$top/sources/wayexpand-${version}"
 mkdir -p "$source_dir" "$top/rpmbuild/SOURCES"
