@@ -40,8 +40,8 @@ All notable changes to WayExpand are documented here.
   compatibility alias. Keep broker confinement checks under execution
   sandboxing while broker service/socket and mandatory audit health remain in
   availability, so the results stay independently actionable. Require
-  configured named actions to have the healthy mandatory audit required by
-  `Run Approved Action`. Include the input-privacy check in the same top-level
+  configured named actions to have a running broker and the healthy mandatory
+  audit required by `Run Approved Action`. Include the input-privacy check in the same top-level
   check list as the other gates. Report observed broker availability even when
   the broker is optional. Require the running
   daemon to expose the CLI's expected status schema so stale runtimes cannot

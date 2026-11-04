@@ -651,12 +651,16 @@ fn action_broker_audit_check(broker: &serde_json::Value, required: bool) -> serd
         None
     } else {
         match (
+            audit["running"].as_bool(),
             audit["audit_enabled"].as_bool(),
             audit["audit_required"].as_bool(),
             audit["audit_healthy"].as_bool(),
         ) {
-            (Some(true), Some(true), Some(true)) => Some(true),
-            (Some(false), _, _) | (_, Some(false), _) | (_, _, Some(false)) => Some(false),
+            (Some(true), Some(true), Some(true), Some(true)) => Some(true),
+            (Some(false), _, _, _)
+            | (_, Some(false), _, _)
+            | (_, _, Some(false), _)
+            | (_, _, _, Some(false)) => Some(false),
             _ => None,
         }
     };
@@ -668,9 +672,9 @@ fn action_broker_audit_check(broker: &serde_json::Value, required: bool) -> serd
         } else if result == Some(true) {
             "Configured named actions require the broker to persist healthy mandatory audit records."
         } else if result == Some(false) {
-            "Configured named actions require audit_enabled, audit_required, and healthy broker audit."
+            "Configured named actions require a running broker with audit_enabled, audit_required, and healthy broker audit."
         } else {
-            "Broker health evidence is unavailable, so mandatory audit readiness cannot be verified."
+            "Broker health evidence is unavailable or incomplete, so mandatory audit readiness cannot be verified."
         },
     )
 }
@@ -1188,6 +1192,7 @@ mod tests {
         let audit_ready = action_broker_audit_check(
             &serde_json::json!({
                 "audit": {
+                    "running": true,
                     "available": true,
                     "audit_enabled": true,
                     "audit_required": true,
@@ -1199,6 +1204,7 @@ mod tests {
         let audit_disabled = action_broker_audit_check(
             &serde_json::json!({
                 "audit": {
+                    "running": true,
                     "available": true,
                     "audit_enabled": false,
                     "audit_required": false,
@@ -1212,6 +1218,19 @@ mod tests {
         assert_eq!(audit_ready["status"], "pass");
         assert_eq!(audit_disabled["status"], "fail");
         assert_eq!(audit_unavailable["status"], "unavailable");
+        let stale_audit = action_broker_audit_check(
+            &serde_json::json!({
+                "audit": {
+                    "running": false,
+                    "available": true,
+                    "audit_enabled": true,
+                    "audit_required": true,
+                    "audit_healthy": true
+                }
+            }),
+            true,
+        );
+        assert_eq!(stale_audit["status"], "fail");
         assert_eq!(
             action_broker_audit_check(&serde_json::json!({"audit": {}}), false)["status"],
             "pass"

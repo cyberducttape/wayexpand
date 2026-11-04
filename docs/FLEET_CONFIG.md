@@ -102,7 +102,8 @@ sandbox gate includes daemon and, when configured, broker confinement checks;
 the Action Broker availability gate reports service/socket health and mandatory
 audit readiness, and is required only when configured named actions need it.
 For those actions, `action_broker_mandatory_audit` must report `pass`:
-`Run Approved Action` requires audit to be enabled, mandatory, and healthy. A
+`Run Approved Action` requires a running broker with audit enabled, mandatory,
+and healthy. A
 broker can therefore be reachable while failing its audit or sandbox checks;
 the availability result covers audit, while confinement appears only under
 execution sandboxing. Input privacy and configuration integrity are evaluated
