@@ -10,6 +10,9 @@ All notable changes to WayExpand are documented here.
   EIS map, while retaining fail-closed behavior for missing or mismatched
   groups. Bump the daemon status schema to 25 and update its CLI, GUI, and
   documented JSON contract fixtures.
+- Keep the GUI toolbar brand, status, and actions from overlapping at narrow
+  window widths by switching to a compact wrapped layout; retain the direct
+  profile selector inside More actions in compact mode.
 - When the daemon status schema is stale, mark all daemon-derived sandbox,
   privacy, and target-integrity capabilities unavailable and hide the old route
   snapshot. Keep independent configuration and broker evidence available; bump

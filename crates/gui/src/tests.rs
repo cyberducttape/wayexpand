@@ -1787,7 +1787,7 @@ fn diagnostics_accessibly_explains_keysym_fallback_and_separates_latency() {
         |ui| {
             let palette = Palette::for_pack(app.colorpack, app.dark_mode);
             app.render_diagnostics_body(ui, &palette);
-            app.render_toolbar_controls(ui, &palette);
+            app.render_toolbar_controls(ui, &palette, false);
         },
     );
     let semantics = format!(
