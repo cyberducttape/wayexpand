@@ -333,6 +333,14 @@ mod tests {
             "local Unix sockets should remain available"
         );
         unsafe { libc::close(unix_socket) };
+        let proxy_path = std::env::var("WAYEXPAND_TEST_PROXY_SOCKET")
+            .expect("the local proxy endpoint should be explicitly forwarded");
+        let mut proxy = std::os::unix::net::UnixStream::connect(proxy_path)
+            .expect("deny_network intentionally leaves local AF_UNIX proxy access available");
+        std::io::Write::write_all(&mut proxy, b"ping").unwrap();
+        let mut proxy_response = [0; 4];
+        std::io::Read::read_exact(&mut proxy, &mut proxy_response).unwrap();
+        assert_eq!(&proxy_response, b"pong");
         let io_uring = unsafe {
             libc::syscall(
                 libc::SYS_io_uring_setup,

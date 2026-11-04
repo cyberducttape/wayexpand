@@ -165,10 +165,12 @@ pub struct ActionSandbox {
     /// Files or directories the action may modify or create entries beneath.
     #[serde(default)]
     pub write_paths: Vec<String>,
-    /// Deny creation of IP, packet, and netlink sockets in this action.
-    /// AF_UNIX remains available for local IPC. The packaged broker service
-    /// already denies IP networking globally; this also applies when a
-    /// sandboxed broker is launched outside that systemd unit.
+    /// Deny direct creation of IP, packet, and netlink sockets in this action.
+    /// AF_UNIX remains available for local IPC, including connections to
+    /// local proxies or services that may themselves have network access.
+    /// This is not a no-egress guarantee. The packaged broker service also
+    /// blocks direct IP networking; strict egress isolation requires a
+    /// separately isolated network namespace.
     #[serde(default)]
     pub deny_network: bool,
     /// Deny device access for this action. Device paths are excluded by the

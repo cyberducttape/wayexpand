@@ -824,6 +824,7 @@ mod tests {
     }
     use crate::protocol::ActionOutput;
     use std::{
+        process::Command,
         thread,
         time::{SystemTime, UNIX_EPOCH},
     };
@@ -867,6 +868,53 @@ mod tests {
             second,
             Err(IpcError::Io(error)) if error.kind() == std::io::ErrorKind::AddrInUse
         ));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn ipc_bind_under_umask_child() {
+        let Ok(mask) = std::env::var("WAYEXPAND_TEST_SOCKET_UMASK") else {
+            return;
+        };
+        let mask = u32::from_str_radix(&mask, 8).unwrap();
+        let socket_path = PathBuf::from(std::env::var_os("WAYEXPAND_TEST_SOCKET_PATH").unwrap());
+        rustix::process::umask(rustix::fs::Mode::from_raw_mode(mask));
+
+        let server = BrokerServer::bind(&socket_path).unwrap();
+        assert_eq!(
+            std::fs::metadata(&socket_path)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600,
+            "socket must be private after bind with umask {mask:o}"
+        );
+        drop(server);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn ipc_creation_remains_private_under_common_umasks() {
+        for mask in [0o000, 0o022, 0o077] {
+            let socket_path = test_socket(&format!("umask-{mask:o}"));
+            let result = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "ipc::tests::ipc_bind_under_umask_child",
+                    "--nocapture",
+                ])
+                .env("WAYEXPAND_TEST_SOCKET_UMASK", format!("{mask:o}"))
+                .env("WAYEXPAND_TEST_SOCKET_PATH", &socket_path)
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "socket bind failed with umask {mask:o}: {}{}",
+                String::from_utf8_lossy(&result.stdout),
+                String::from_utf8_lossy(&result.stderr)
+            );
+        }
     }
 
     #[test]

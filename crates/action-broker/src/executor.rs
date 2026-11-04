@@ -1039,7 +1039,11 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn action_network_and_device_policies_are_applied_before_exec() {
-        use std::os::unix::fs::PermissionsExt;
+        use std::{
+            os::{unix::fs::PermissionsExt, unix::net::UnixListener},
+            thread,
+            time::{Duration, Instant},
+        };
 
         let directory = std::env::temp_dir().join(format!(
             "wayexpand-network-policy-{}-{}",
@@ -1054,6 +1058,39 @@ mod tests {
         let executable = directory.join("network-probe");
         std::fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
         std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let proxy_path = directory.join("local-proxy.sock");
+        let proxy_listener = UnixListener::bind(&proxy_path).unwrap();
+        proxy_listener.set_nonblocking(true).unwrap();
+        let proxy_thread = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut connected = false;
+            while Instant::now() < deadline {
+                match proxy_listener.accept() {
+                    Ok((mut stream, _)) => {
+                        stream
+                            .set_read_timeout(Some(Duration::from_secs(2)))
+                            .unwrap();
+                        let mut request = [0; 4];
+                        std::io::Read::read_exact(&mut stream, &mut request).unwrap();
+                        assert_eq!(&request, b"ping");
+                        std::io::Write::write_all(&mut stream, b"pong").unwrap();
+                        connected = true;
+                        break;
+                    }
+                    Err(error)
+                        if error.kind() == std::io::ErrorKind::WouldBlock
+                            && Instant::now() < deadline =>
+                    {
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => panic!("local proxy accept failed: {error}"),
+                }
+            }
+            assert!(
+                connected,
+                "sandboxed action did not connect to the local proxy"
+            );
+        });
         let mut config = BrokerConfig::default();
         config.actions.insert(
             "network-probe".into(),
@@ -1068,7 +1105,7 @@ mod tests {
                 parameters: std::collections::HashMap::new(),
                 timeout_ms: 5000,
                 server_env: vec![],
-                client_forward_env: vec![],
+                client_forward_env: vec!["WAYEXPAND_TEST_PROXY_SOCKET".into()],
                 allow_dangerous_env: false,
                 inherit_env: false,
                 cwd: None,
@@ -1076,6 +1113,7 @@ mod tests {
                 enabled: true,
                 description: None,
                 sandbox: Some(crate::config::ActionSandbox {
+                    read_paths: vec![directory.to_string_lossy().into_owned()],
                     deny_network: true,
                     deny_devices: true,
                     ..Default::default()
@@ -1088,13 +1126,17 @@ mod tests {
                 action_id: "network-probe".into(),
                 timeout_ms: 5000,
                 inherit_env: false,
-                env_vars: vec![],
+                env_vars: vec![format!(
+                    "WAYEXPAND_TEST_PROXY_SOCKET={}",
+                    proxy_path.display()
+                )],
                 stdout_capture: true,
                 parameters: std::collections::BTreeMap::new(),
             })
             .await;
-        std::fs::remove_dir_all(&directory).unwrap();
         let response = response.unwrap();
+        proxy_thread.join().unwrap();
+        std::fs::remove_dir_all(&directory).unwrap();
         let output = response.output().expect("probe action should succeed");
         assert_eq!(output.exit_code, 0, "{}", output.stderr);
         assert!(

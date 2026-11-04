@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Require broker socket creation to remain private under permissive umasks and
+  clarify that `deny_network` and the packaged broker policy block direct IP
+  networking but do not prevent indirect egress through authorized local
+  Unix-socket proxies.
 - Make `wayexpand status` report when its CLI and daemon builds do not match;
   include the comparison and an actionable warning in JSON output.
 - Track confirmed erase and insertion progress for paced output. Report a
