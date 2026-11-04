@@ -40,6 +40,12 @@ impl ExpansionEngine {
         }
     }
 
+    /// Forget undo state after an output with an unknown application outcome.
+    /// Retaining it could make a later undo erase text the user never saw.
+    pub fn discard_undo(&mut self) {
+        self.clear_undo_state();
+    }
+
     /// Synchronous convenience method for callers that apply the result
     /// immediately. The daemon should bracket injection with prepare/commit.
     pub fn try_undo(&mut self, chord: &KeyChord) -> Option<ExpansionResult> {
