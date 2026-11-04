@@ -178,8 +178,9 @@ the character count (text fields only). For example,
 For insert-only shell command templates, `{{shellq:NAME=DEFAULT|required|max=N}}`
 collects a text field and renders it as one POSIX shell-quoted word. Repeat it
 as `{{shellq:NAME}}` to reuse the entered value. Shell-quoted form values reject
-newlines and tabs. The same `min`, `max`, and `validate` constraints available
-on `{{field:...}}` markers can be applied to `{{shellq:...}}` values. Quoting
+terminal control characters, including newlines and tabs. The same `min`, `max`,
+and `validate` constraints available on `{{field:...}}` markers can be applied
+to `{{shellq:...}}` values. Quoting
 protects shell word boundaries when an operator later runs the command; it
 does not make the command safe to execute or authorize execution. WayExpand
 inserts the completed command for review and does not press Enter. The form

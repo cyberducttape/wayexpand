@@ -1288,7 +1288,10 @@ fn evaluate<'a>(
                 field
                     .validate_value(value)
                     .map_err(|_| TemplateError::InvalidField)?;
-                if value.contains('\n') || value.contains('\t') {
+                // Quoting prevents shell syntax breakout, but terminal control
+                // characters can still move the cursor, submit a line, or hide
+                // portions of a preview when this text is pasted into a shell.
+                if value.chars().any(char::is_control) {
                     return Err(TemplateError::InvalidField);
                 }
                 RenderValue::owned(shell_quote(value))
@@ -2232,17 +2235,23 @@ mod tests {
             "curl 'example.net'\\''; touch /tmp/should-not-run; echo '\\''' 'example.net'\\''; touch /tmp/should-not-run; echo '\\'''"
         );
 
-        let values = [("field:domain".to_owned(), "example.net\nwhoami".to_owned())]
-            .into_iter()
-            .collect();
-        let context = TemplateContext {
-            fields: Arc::new(values),
-            ..TemplateContext::default()
-        };
-        assert!(matches!(
-            render_template(template, &context),
-            Err(TemplateError::InvalidField)
-        ));
+        for forbidden in ["\n", "\r", "\t", "\x1b", "\x07", "\x7f", "\u{0085}"] {
+            let values = [("field:domain".to_owned(), format!("before{forbidden}after"))]
+                .into_iter()
+                .collect();
+            let context = TemplateContext {
+                fields: Arc::new(values),
+                ..TemplateContext::default()
+            };
+            assert!(
+                matches!(
+                    render_template(template, &context),
+                    Err(TemplateError::InvalidField)
+                ),
+                "control character U+{:04X} should be rejected",
+                forbidden.chars().next().unwrap() as u32
+            );
+        }
     }
 
     #[test]
