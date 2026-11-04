@@ -13,6 +13,15 @@ All notable changes to WayExpand are documented here.
 - Place RPM build workspaces on disk-backed runner storage instead of the small
   `/tmp` tmpfs in CI and release package builds, preventing full-workspace tests
   from exhausting it.
+- Keep AutoKey migration counts distinct: unreadable phrase files and missing or
+  malformed sidecars count as skipped entries needing review, while
+  `unsupported` counts only phrase behavior WayExpand cannot represent. This
+  makes permissive import summaries and JSON reports accurately reflect what
+  was skipped and why.
+- Keep permissive AutoKey imports going when an individual phrase fails
+  configuration validation, and report the skipped path and remediation.
+- Make the continuous setup-output fairness regression deterministic instead of
+  relying on pipe scheduling and an external `yes` process.
 - Add a stable `matching_unavailable_reason` status field so operators and
   automation can distinguish disconnected capture, unavailable evdev layout,
   unsupported replacement, pause, and invalid configuration. Derive
