@@ -15,6 +15,8 @@ All notable changes to WayExpand are documented here.
   `unsupported` counts only phrase behavior WayExpand cannot represent. This
   makes permissive import summaries and JSON reports accurately reflect what
   was skipped and why.
+- Keep permissive AutoKey imports going when an individual phrase fails
+  configuration validation, and report the skipped path and remediation.
 - Track confirmed erase and insertion progress for paced output. Report a
   distinct content-free `partial_write` outcome and counter, retain progress
   in transaction traces, and never automatically replay a partial write.
