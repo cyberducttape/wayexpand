@@ -338,12 +338,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.checkout_ref || github.ref }}
+      - name: Install supported shell interpreters
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fish zsh
       - name: ShellCheck scripts
-        run: shellcheck scripts/*.sh
+        run: shellcheck scripts/*.sh crates/cli/integrations/wayexpand.bash
       - name: Verify daemon soak environment isolation
         run: bash scripts/test-soak-isolation.sh
       - name: Verify source cleanliness path filtering
         run: bash scripts/test-source-tree-state.sh
+      - name: Verify SSH context expires when the command returns
+        run: bash scripts/test-ssh-context-lifecycle.sh
       - name: Verify isolated screenshot process cleanup
         run: bash scripts/test-private-home-cleanup.sh
       - name: Verify compositor scenario failures are recorded

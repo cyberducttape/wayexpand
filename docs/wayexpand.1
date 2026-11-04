@@ -268,6 +268,19 @@ Inspect or forget the stored libei portal restoration token. Resetting the
 local token may cause the portal to ask for access again; it does not revoke a
 portal grant already held by another session.
 .TP
+.B context integration bash|zsh|fish | context report|status|clear
+Install or operate an opt-in shell context report. The report can include the
+shell, an explicit SSH destination from the Bwayexpand-sshR wrapper,
+operator-selected environment, project root, Kubernetes context, and
+container label. Context values are not authorization claims.
+.TP
+.B context render TRIGGER [--shell SHELL] [--remote-host TARGET] [--environment NAME] [--set NAME=VALUE]... [--json]
+Render a static text snippet with fresh or explicitly supplied shell context
+and validated form fields. Command-backed snippets are refused. The command
+prints review text only; it never inserts, pastes, or executes the result.
+Review multi-line output and run selected commands manually in the intended
+session.
+.TP
 .B help | version
 Show command help or print the installed version.
 .SH FILES

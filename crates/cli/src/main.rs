@@ -201,6 +201,10 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "context report|status|clear",
                 "Report and inspect fresh terminal, remote, project, and runtime context",
             ),
+            (
+                "context render <trigger> [--set NAME=VALUE]... [--json]",
+                "Render text for the current shell and SSH context; never execute it",
+            ),
         ],
     ),
     (

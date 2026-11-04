@@ -404,6 +404,7 @@ impl ExpansionEngine {
                 .clipboard
                 .clone()
                 .filter(|_| self.config.settings.allow_clipboard && !enforcement.disable_clipboard),
+            session_context: self.template_base.session_context.clone(),
             ..crate::TemplateContext::system()
         }
     }
@@ -789,7 +790,7 @@ impl ExpansionEngine {
             template: pending.form_template.unwrap_or_else(|| Arc::from("")),
             fields,
             command: pending.command.clone(),
-            context: self.template_context(),
+            context: Box::new(self.template_context()),
             title: pending.trigger.to_string(),
             origin,
             result: ExpansionResult {
