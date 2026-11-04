@@ -287,8 +287,13 @@ fn looks_operational(replacement: &str) -> bool {
         "awk",
         "aws",
         "bash",
+        "certbot",
+        "cpapi2",
         "curl",
         "docker",
+        "dig",
+        "firewall-cmd",
+        "firewalld",
         "find",
         "git",
         "gh",
@@ -297,22 +302,30 @@ fn looks_operational(replacement: &str) -> bool {
         "iptables",
         "journalctl",
         "kubectl",
+        "kustomize",
+        "mariadb",
         "mysql",
         "nc",
         "nginx",
+        "nft",
         "openssl",
+        "pg_dump",
         "podman",
         "psql",
         "resolvectl",
+        "redis-cli",
         "rpm",
         "rsync",
         "sed",
         "sh",
         "ssh",
         "systemctl",
+        "systemd-run",
         "tee",
         "terraform",
         "ufw",
+        "uapi",
+        "whmapi1",
     ];
     let lower = replacement.to_ascii_lowercase();
     lower.contains("{{shellq:")
@@ -646,6 +659,54 @@ fn report_test_failure<T>(json: bool, pack_id: &str, message: &str) -> Result<T>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn operational_detection_covers_common_sysadmin_command_families() {
+        for command in [
+            "nft add rule inet filter input",
+            "firewall-cmd --reload",
+            "mariadb --host=db-primary",
+            "certbot certificates",
+            "kubectl get pods",
+            "whmapi1 listaccts",
+            "uapi --user=admin",
+            "systemd-run --scope",
+            "pg_dump production",
+        ] {
+            assert!(
+                looks_operational(&format!(
+                    "```sh\n{command} {{field:target=example|required}}\n```"
+                )),
+                "command family was not recognized: {command}"
+            );
+        }
+    }
+
+    #[test]
+    fn operational_fields_require_validation_or_an_explicit_free_text_reason() {
+        let unreviewed = wayexpand_core::PackExpansionReview {
+            file: "snippets/firewall.toml".into(),
+            id: "firewall".into(),
+            trigger: ";firewall".into(),
+            description: "Firewall rule".into(),
+            replacement: "nft add rule {{field:chain=filter}}".into(),
+            command: None,
+        };
+        let justified = wayexpand_core::PackExpansionReview {
+            replacement:
+                "nft add rule {{field:comment=maintenance window|required|free_text=true}}".into(),
+            ..unreviewed.clone()
+        };
+        let validated = wayexpand_core::PackExpansionReview {
+            replacement: "firewall-cmd --zone={{field:zone=public|required|validate=dns-label}}"
+                .into(),
+            ..unreviewed.clone()
+        };
+
+        let findings = operational_field_findings(&[unreviewed, justified, validated]);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0]["key"], "field:chain");
+    }
 
     #[test]
     fn reviewed_catalog_packs_pass_lint_and_output_tests() {
