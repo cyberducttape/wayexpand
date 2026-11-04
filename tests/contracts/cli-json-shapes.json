@@ -39,6 +39,7 @@
     "input_privacy_readiness",
     "configuration_integrity_readiness",
     "action_broker_availability_readiness",
+    "target_integrity_readiness",
     "daemon_runtime",
     "healthy",
     "checks"
