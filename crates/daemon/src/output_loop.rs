@@ -139,6 +139,7 @@ fn shutdown_with_deadline(
 ) {
     let (finished_sender, finished_receiver) = std::sync::mpsc::sync_channel(1);
     reap_finished_shutdown_workers();
+    let worker_guard = crate::output_health::shutdown_worker_started();
     info!(
         backend,
         event = "injector_shutdown_started",
@@ -147,7 +148,6 @@ fn shutdown_with_deadline(
     let spawn = thread::Builder::new()
         .name("wayexpand-injector-shutdown".into())
         .spawn(move || {
-            let worker_guard = crate::output_health::shutdown_worker_started();
             shutdown();
             worker_guard.acknowledge();
             let _ = finished_sender.send(());
