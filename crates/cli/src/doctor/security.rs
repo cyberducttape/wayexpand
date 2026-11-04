@@ -219,6 +219,7 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
     let broker_running = broker["service"]["active"].as_bool() == Some(true)
         && broker["socket"]["valid"].as_bool() == Some(true);
     checks.push(action_broker_availability_check(&broker, broker_required));
+    checks.push(action_broker_audit_check(&broker, broker_required));
     checks.push(target_integrity_check(&daemon));
     if broker_required && broker_running {
         let broker_mount = broker_sandbox["namespaces"]["mount"].as_u64();
@@ -274,7 +275,10 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
     for check in &mut checks {
         let name = check["name"].as_str().unwrap_or_default();
         let gate = gate_for_check(name);
-        let broker_check_required = name != "action_broker_availability" || broker_required;
+        let broker_check_required = !matches!(
+            name,
+            "action_broker_availability" | "action_broker_mandatory_audit"
+        ) || broker_required;
         check["required"] = serde_json::Value::Bool(
             (profile == ProtectionProfile::Strict || required.contains(&name))
                 && broker_check_required
@@ -333,7 +337,7 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
     let healthy = readiness == "pass";
     let route = active_route_summary(&daemon);
     let report = serde_json::json!({
-        "schema": 7,
+        "schema": 8,
         "profile": profile.name(),
         "readiness": readiness,
         "execution_sandbox_readiness": execution_sandbox_readiness,
@@ -570,7 +574,9 @@ fn gate_for_check(name: &str) -> &'static str {
     match name {
         "config_permissions" => "configuration_integrity",
         "capture_sensitive_focus" => "input_privacy",
-        "action_broker_availability" => "action_broker_availability",
+        "action_broker_availability" | "action_broker_mandatory_audit" => {
+            "action_broker_availability"
+        }
         "automatic_replacement_target_integrity" => "target_integrity",
         // Broker confinement is still execution sandboxing. Keep it distinct
         // from whether the optional broker service/socket is available.
@@ -633,6 +639,38 @@ fn action_broker_availability_check(
             "A configured named action requires a healthy, active Action Broker."
         } else {
             "No named actions require the broker; actual availability is informational."
+        },
+    )
+}
+
+fn action_broker_audit_check(broker: &serde_json::Value, required: bool) -> serde_json::Value {
+    let audit = &broker["audit"];
+    let result = if !required {
+        Some(true)
+    } else if audit["available"].as_bool() == Some(false) {
+        None
+    } else {
+        match (
+            audit["audit_enabled"].as_bool(),
+            audit["audit_required"].as_bool(),
+            audit["audit_healthy"].as_bool(),
+        ) {
+            (Some(true), Some(true), Some(true)) => Some(true),
+            (Some(false), _, _) | (_, Some(false), _) | (_, _, Some(false)) => Some(false),
+            _ => None,
+        }
+    };
+    check(
+        "action_broker_mandatory_audit",
+        result,
+        if !required {
+            "No named broker actions are configured, so mandatory broker audit is not required."
+        } else if result == Some(true) {
+            "Configured named actions require the broker to persist healthy mandatory audit records."
+        } else if result == Some(false) {
+            "Configured named actions require audit_enabled, audit_required, and healthy broker audit."
+        } else {
+            "Broker health evidence is unavailable, so mandatory audit readiness cannot be verified."
         },
     )
 }
@@ -715,6 +753,7 @@ fn required_checks(profile: ProtectionProfile) -> &'static [&'static str] {
         "daemon_command_cgroup_containment",
         "broker_command_cgroup_containment",
         "action_broker_availability",
+        "action_broker_mandatory_audit",
     ];
     const HARDENED: &[&str] = &[
         "daemon_connected",
@@ -745,6 +784,7 @@ fn required_checks(profile: ProtectionProfile) -> &'static [&'static str] {
         "daemon_command_cgroup_containment",
         "broker_command_cgroup_containment",
         "action_broker_availability",
+        "action_broker_mandatory_audit",
         "broker_seccomp",
         "broker_no_new_privileges",
         "broker_af_unix_allowed",
@@ -1102,15 +1142,21 @@ mod tests {
 
         let broker_checks = vec![
             serde_json::json!({"name": "action_broker_availability", "gate": "action_broker_availability", "required": true, "status": "pass"}),
+            serde_json::json!({"name": "action_broker_mandatory_audit", "gate": "action_broker_availability", "required": true, "status": "fail"}),
             serde_json::json!({"name": "broker_seccomp", "gate": "execution_sandbox", "required": true, "status": "fail"}),
         ];
         let availability = checks_for_gate(&broker_checks, "action_broker_availability");
         let sandbox = checks_for_gate(&broker_checks, "execution_sandbox");
-        assert_eq!(availability.len(), 1);
+        assert_eq!(availability.len(), 2);
         assert_eq!(availability[0]["name"], "action_broker_availability");
         assert_eq!(
             readiness_for(ProtectionProfile::Workstation, &availability, &[]),
-            "pass"
+            "fail",
+            "the broker may be reachable while mandatory auditing makes approved actions unavailable"
+        );
+        assert_eq!(
+            gate_for_check("action_broker_mandatory_audit"),
+            "action_broker_availability"
         );
         assert_eq!(
             readiness_for(ProtectionProfile::Workstation, &sandbox, &[]),
@@ -1137,6 +1183,38 @@ mod tests {
                 &[]
             )["readiness"],
             "not_required"
+        );
+
+        let audit_ready = action_broker_audit_check(
+            &serde_json::json!({
+                "audit": {
+                    "available": true,
+                    "audit_enabled": true,
+                    "audit_required": true,
+                    "audit_healthy": true
+                }
+            }),
+            true,
+        );
+        let audit_disabled = action_broker_audit_check(
+            &serde_json::json!({
+                "audit": {
+                    "available": true,
+                    "audit_enabled": false,
+                    "audit_required": false,
+                    "audit_healthy": true
+                }
+            }),
+            true,
+        );
+        let audit_unavailable =
+            action_broker_audit_check(&serde_json::json!({"audit": {"available": false}}), true);
+        assert_eq!(audit_ready["status"], "pass");
+        assert_eq!(audit_disabled["status"], "fail");
+        assert_eq!(audit_unavailable["status"], "unavailable");
+        assert_eq!(
+            action_broker_audit_check(&serde_json::json!({"audit": {}}), false)["status"],
+            "pass"
         );
     }
 

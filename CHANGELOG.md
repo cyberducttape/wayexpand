@@ -38,16 +38,18 @@ All notable changes to WayExpand are documented here.
   availability gates. Report applicability, required status, contributing
   checks, and per-gate unavailable evidence; retain `sandbox_readiness` as a
   compatibility alias. Keep broker confinement checks under execution
-  sandboxing while broker service/socket health remains in availability, so
-  the two results stay independently actionable. Include the input-privacy
-  check in the same top-level check list as the other gates. Report observed
-  broker availability even when the broker is optional. Require the running
+  sandboxing while broker service/socket and mandatory audit health remain in
+  availability, so the results stay independently actionable. Require
+  configured named actions to have the healthy mandatory audit required by
+  `Run Approved Action`. Include the input-privacy check in the same top-level
+  check list as the other gates. Report observed broker availability even when
+  the broker is optional. Require the running
   daemon to expose the CLI's expected status schema so stale runtimes cannot
   pass using incomplete security evidence, and include the daemon schema and
   commit in the report. Add a
   separate target-integrity gate that fails when compatibility mode enables
   uncertified non-atomic replacement and remains incomplete for uncertified
-  atomic routes. Bump the security report schema to 7.
+  atomic routes. Bump the security report schema to 8.
 - Allow `wayexpand library add --approved-revision FULL_COMMIT` to pin a Git
   catalog checkout to the exact commit selected during review, independent of
   a moving branch head. Content signatures remain separately verified.
