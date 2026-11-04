@@ -15,9 +15,9 @@ All notable changes to WayExpand are documented here.
   requires them, reducing reload churn and background threads.
 - Expand operational pack lint coverage to common IP route, socket, DNS,
   firewall, certificate, database, Kubernetes, systemd, cPanel/WHM, package
-  manager, and cloud command families, and use each pack's declared tools to
-  extend command detection, so their form fields must use a validator,
-  constrained choice, or explicit free-text justification.
+  manager, and cloud command families. Labeled shell code blocks and each
+  pack's declared tools also extend command detection, so fields in commands
+  using internal tools need a validator or explicit free-text justification.
 - Keep AutoKey migration counts distinct: unreadable phrase files and missing or
   malformed sidecars count as skipped entries needing review, while
   `unsupported` counts only phrase behavior WayExpand cannot represent. This

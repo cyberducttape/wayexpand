@@ -367,7 +367,8 @@ fn looks_operational_with_tools(replacement: &str, declared_tools: &[String]) ->
         "zypper",
     ];
     let lower = replacement.to_ascii_lowercase();
-    lower.contains("{{shellq:")
+    has_shell_code_fence(&lower)
+        || lower.contains("{{shellq:")
         || lower
             .split(|character: char| {
                 !character.is_ascii_alphanumeric() && !matches!(character, '_' | '-')
@@ -387,6 +388,30 @@ fn looks_operational_with_tools(replacement: &str, declared_tools: &[String]) ->
                     .iter()
                     .any(|directive| line.starts_with(directive))
         })
+}
+
+fn has_shell_code_fence(replacement: &str) -> bool {
+    const SHELLS: &[&str] = &[
+        "bash",
+        "console",
+        "dash",
+        "fish",
+        "ksh",
+        "powershell",
+        "pwsh",
+        "sh",
+        "shell",
+        "zsh",
+    ];
+    replacement.lines().any(|line| {
+        let Some(fence) = line.trim_start().strip_prefix("```") else {
+            return false;
+        };
+        fence
+            .split_whitespace()
+            .next()
+            .is_some_and(|language| SHELLS.contains(&language))
+    })
 }
 
 fn lint_fixture(
@@ -757,6 +782,22 @@ mod tests {
                 "command family was not recognized: {command}"
             );
         }
+    }
+
+    #[test]
+    fn unknown_commands_in_shell_fences_still_require_field_review() {
+        let expansion = wayexpand_core::PackExpansionReview {
+            file: "snippets/custom-tool.toml".into(),
+            id: "custom_tool".into(),
+            trigger: ";custom".into(),
+            description: "Run an internal operations tool".into(),
+            replacement: "```bash\ninternalctl inspect {{field:target}}\n```".into(),
+            command: None,
+        };
+
+        let findings = operational_field_findings(&[expansion], &[]);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0]["key"], "field:target");
     }
 
     #[test]
