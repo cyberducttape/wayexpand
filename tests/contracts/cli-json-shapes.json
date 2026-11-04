@@ -113,6 +113,7 @@
     "evdev_quarantined_events_total",
     "control_rejected_total",
     "memory_rss_kib",
-    "memory_high_water_kib"
+    "memory_high_water_kib",
+    "partial_write_total"
   ]
 }

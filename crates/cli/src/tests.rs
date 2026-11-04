@@ -637,7 +637,7 @@ fn status_json_matches_documented_stable_contract() {
          backend=input-method-v2\n\
          route_id=input-method-v2\n\
          backend_mode=unknown\n\
-         status_schema=20\n\
+         status_schema=21\n\
          daemon_commit=test-commit\n\
          state=connected\n\
          route_available=true\n\
@@ -706,6 +706,7 @@ fn status_json_matches_documented_stable_contract() {
          output_retiring_workers=0\n\
          output_stalled_ms=0\n\
          output_partial_total=0\n\
+         partial_write_total=0\n\
          insertion_assurance=verified\n\
          replacement_assurance=verified\n\
          compatibility_mode=off\n\
@@ -924,6 +925,7 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "output_health",
             "output_uncertain_total",
             "output_partial_total",
+            "partial_write_total",
             "output_retiring_workers",
             "output_stalled_ms",
             "insertion_assurance",
@@ -1358,6 +1360,7 @@ fn metrics_export_status_counters_without_content() {
         "config_state": "ok",
         "output_health": "ok",
         "output_partial_total": 2,
+        "partial_write_total": 2,
         "route_available": true,
         "matching_available": true,
         "paused": false,
@@ -1404,6 +1407,7 @@ fn metrics_export_status_counters_without_content() {
         "# TYPE wayexpand_daemon_output_reconnect_total counter",
         "wayexpand_daemon_output_reconnect_total 3",
         "wayexpand_daemon_output_partial_insertions_total 2",
+        "wayexpand_daemon_partial_write_total 2",
         "wayexpand_daemon_future_counter_total 7",
         "wayexpand_config_valid 1",
         "wayexpand_config_expansions 10",

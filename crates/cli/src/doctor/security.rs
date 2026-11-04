@@ -274,16 +274,21 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
                     || command_execution_configured),
         );
     }
-    let readiness = readiness_for(profile, &checks, &unverified);
-    let healthy = readiness == "pass";
     let capture_source = daemon["source"].as_str().unwrap_or("unknown");
     let sensitive_field_detection = daemon["capture_sensitive_focus"].as_bool();
     let evdev_privacy = capture_source == "evdev";
+    let sandbox_readiness = readiness_for(profile, &checks, &unverified);
+    let input_privacy_readiness =
+        privacy_readiness(profile, capture_source, sensitive_field_detection);
+    let readiness = combine_readiness(sandbox_readiness, input_privacy_readiness);
+    let healthy = readiness == "pass";
     let route = active_route_summary(&daemon);
     let report = serde_json::json!({
-        "schema": 2,
+        "schema": 3,
         "profile": profile.name(),
         "readiness": readiness,
+        "sandbox_readiness": sandbox_readiness,
+        "input_privacy_readiness": input_privacy_readiness,
         "healthy": healthy,
         "daemon_pid": sandbox.get("pid"),
         "daemon": sandbox,
@@ -291,6 +296,17 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         "input_privacy": {
             "source": capture_source,
             "sensitive_field_detection": sensitive_field_detection,
+            "readiness": input_privacy_readiness,
+            "required": profile == ProtectionProfile::Strict,
+            "reason": if input_privacy_readiness == "pass" {
+                "active capture route reports sensitive-field detection"
+            } else if evdev_privacy {
+                "evdev captures globally and cannot identify sensitive fields"
+            } else if sensitive_field_detection == Some(false) {
+                "active capture route cannot identify sensitive fields"
+            } else {
+                "active capture route did not report sensitive-field detection"
+            },
             "evdev_limitation": evdev_privacy.then_some("evdev cannot identify password or other sensitive fields; keyboard input may be observed while capture is active"),
         },
         "configuration": config_permissions,
@@ -318,6 +334,14 @@ pub(crate) fn run(config_path: &Path, json: bool, profile: ProtectionProfile) ->
         println!("WayExpand effective security report");
         println!("Protection profile: {}", profile.name());
         println!("Readiness: {}", readiness.to_ascii_uppercase());
+        println!(
+            "Sandbox readiness: {}",
+            sandbox_readiness.to_ascii_uppercase()
+        );
+        println!(
+            "Input privacy readiness: {}",
+            input_privacy_readiness.to_ascii_uppercase()
+        );
         println!("Daemon PID: {}", report["daemon_pid"]);
         println!(
             "Active route: source={}, backend={}, atomic_replace={}, replacement_assurance={}, compatibility_mode={}, focus_assurance={}",
@@ -475,6 +499,30 @@ fn readiness_for(
     }
 }
 
+fn privacy_readiness(
+    profile: ProtectionProfile,
+    source: &str,
+    sensitive_field_detection: Option<bool>,
+) -> &'static str {
+    match sensitive_field_detection {
+        Some(true) if source != "evdev" && source != "unknown" => "pass",
+        _ if profile == ProtectionProfile::Strict => "fail",
+        Some(false) => "degraded",
+        None => "degraded",
+        Some(true) => "degraded",
+    }
+}
+
+fn combine_readiness(sandbox: &str, privacy: &str) -> &'static str {
+    if sandbox == "fail" || privacy == "fail" {
+        "fail"
+    } else if sandbox != "pass" || privacy != "pass" {
+        "degraded"
+    } else {
+        "pass"
+    }
+}
+
 fn state<'a>(value: &'a serde_json::Value, path: &[&str]) -> Option<&'a str> {
     path.iter()
         .try_fold(value, |value, key| value.get(*key))
@@ -569,6 +617,35 @@ mod tests {
         assert_eq!(
             readiness_for(ProtectionProfile::Workstation, &optional_failure, &[]),
             "degraded"
+        );
+    }
+
+    #[test]
+    fn sandbox_and_input_privacy_readiness_are_independent_and_strict_rejects_evdev() {
+        let sandbox = "pass";
+        let workstation_privacy =
+            privacy_readiness(ProtectionProfile::Workstation, "evdev", Some(false));
+        assert_eq!(sandbox, "pass");
+        assert_eq!(workstation_privacy, "degraded");
+        assert_eq!(combine_readiness(sandbox, workstation_privacy), "degraded");
+        assert_eq!(
+            privacy_readiness(ProtectionProfile::Strict, "evdev", Some(false)),
+            "fail"
+        );
+        assert_eq!(
+            privacy_readiness(ProtectionProfile::Strict, "input-method", Some(true)),
+            "pass"
+        );
+        assert_eq!(
+            privacy_readiness(ProtectionProfile::Strict, "unknown", Some(true)),
+            "fail"
+        );
+        assert_eq!(
+            combine_readiness(
+                "pass",
+                privacy_readiness(ProtectionProfile::Strict, "evdev", Some(false))
+            ),
+            "fail"
         );
     }
 

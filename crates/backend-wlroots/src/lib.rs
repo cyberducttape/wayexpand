@@ -43,6 +43,14 @@ const MAX_OUTPUT_CHARS: usize = 8192;
 const INITIAL_ROUNDTRIP_TIMEOUT: Duration = Duration::from_secs(5);
 static KEYMAP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+#[derive(Clone, Copy)]
+enum ProgressKind {
+    Erase,
+    Insert,
+    Replace,
+    None,
+}
+
 fn erase_grapheme_count(text: &str) -> usize {
     text.graphemes(true).count()
 }
@@ -288,11 +296,12 @@ impl WlrootsInjector {
             .map_err(|error| WlrootsError::Flush(error.to_string()))
     }
 
-    fn send_keys<I>(&mut self, keycodes: I) -> Result<(), WlrootsError>
+    fn send_keys<I>(&mut self, keycodes: I, progress_kind: ProgressKind) -> Result<(), WlrootsError>
     where
         I: IntoIterator<Item = u32>,
     {
         let checkpoint = &self.checkpoint;
+        let progress_checkpoint = checkpoint.clone();
         let keyboard = &self.keyboard;
         let connection = &self.connection;
         let event_queue = &mut self.event_queue;
@@ -308,6 +317,15 @@ impl WlrootsInjector {
                     .flush()
                     .map_err(|error| WlrootsError::Flush(error.to_string()))?;
                 event_queue.dispatch_pending(state)?;
+                match progress_kind {
+                    ProgressKind::Erase => progress_checkpoint.record_erasure(1),
+                    ProgressKind::Insert => progress_checkpoint.record_insertion(1),
+                    ProgressKind::Replace if keycode == BACKSPACE_KEYCODE => {
+                        progress_checkpoint.record_erasure(1)
+                    }
+                    ProgressKind::Replace => progress_checkpoint.record_insertion(1),
+                    ProgressKind::None => {}
+                }
                 Ok(())
             },
         )
@@ -432,6 +450,14 @@ impl TextInjector for WlrootsInjector {
         self.checkpoint = checkpoint;
     }
 
+    fn reset_output_progress(&mut self) {
+        self.checkpoint.reset_progress();
+    }
+
+    fn output_progress(&self) -> wayexpand_core::OutputProgress {
+        self.checkpoint.progress()
+    }
+
     fn name(&self) -> &'static str {
         BACKEND_NAME
     }
@@ -456,10 +482,10 @@ impl TextInjector for WlrootsInjector {
             message: error.to_string(),
             retryable: error.is_retryable(),
         })?;
-        self.send_keys(std::iter::repeat_n(
-            BACKSPACE_KEYCODE,
-            erase_grapheme_count(trigger),
-        ))
+        self.send_keys(
+            std::iter::repeat_n(BACKSPACE_KEYCODE, erase_grapheme_count(trigger)),
+            ProgressKind::Erase,
+        )
         .map_err(|error| InjectorError {
             backend: BACKEND_NAME,
             message: error.to_string(),
@@ -478,11 +504,12 @@ impl TextInjector for WlrootsInjector {
             .chars()
             .map(|character| self.mappings[&character])
             .collect();
-        self.send_keys(keycodes).map_err(|error| InjectorError {
-            backend: BACKEND_NAME,
-            message: error.to_string(),
-            retryable: error.is_retryable(),
-        })
+        self.send_keys(keycodes, ProgressKind::Insert)
+            .map_err(|error| InjectorError {
+                backend: BACKEND_NAME,
+                message: error.to_string(),
+                retryable: error.is_retryable(),
+            })
     }
 
     fn replace(&mut self, trigger: &str, text: &str) -> Result<(), InjectorError> {
@@ -497,11 +524,12 @@ impl TextInjector for WlrootsInjector {
             })?;
         let mut keycodes = vec![BACKSPACE_KEYCODE; erase_grapheme_count(trigger)];
         keycodes.extend(text.chars().map(|character| self.mappings[&character]));
-        self.send_keys(keycodes).map_err(|error| InjectorError {
-            backend: BACKEND_NAME,
-            message: error.to_string(),
-            retryable: error.is_retryable(),
-        })
+        self.send_keys(keycodes, ProgressKind::Replace)
+            .map_err(|error| InjectorError {
+                backend: BACKEND_NAME,
+                message: error.to_string(),
+                retryable: error.is_retryable(),
+            })
     }
 
     fn move_cursor_left(&mut self, count: usize) -> Result<(), InjectorError> {
@@ -510,7 +538,7 @@ impl TextInjector for WlrootsInjector {
             message: error.to_string(),
             retryable: error.is_retryable(),
         })?;
-        self.send_keys(std::iter::repeat_n(LEFT_KEYCODE, count))
+        self.send_keys(std::iter::repeat_n(LEFT_KEYCODE, count), ProgressKind::None)
             .map_err(|error| InjectorError {
                 backend: BACKEND_NAME,
                 message: error.to_string(),

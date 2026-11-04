@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Track confirmed erase and insertion progress for paced output. Report a
+  distinct content-free `partial_write` outcome and counter, retain progress
+  in transaction traces, and never automatically replay a partial write.
+  Separate sandbox and input-privacy readiness; strict security profile now
+  rejects evdev capture. Reserve a bounded control worker for complete status
+  and lifecycle requests so stalled clients cannot starve operator recovery.
+  Bump the daemon status contract to schema 21.
 - After an output failure with an uncertain target effect, quarantine queued input instead of replaying it; never continue a queued batch after a partial transaction. Expose confirmed partial insertions as a separate daemon status counter, GUI warning, and `wayexpand doctor --json` field. Bump the status contract to schema 18.
 - Show the active route's live sensitive-field signal persistently in the GUI, distinguishing verified protection from unavailable and unknown status. Keep raw evdev consent local to each machine.
 - Add a capability-based insertion strategy planner for verified atomic replacement, native text commit, short paced keys, and clipboard/manual paste. The editor preview shows the planned route and estimated paced latency. Set the default paced-keysym maximum to 8 characters (about 100 ms estimated); longer synthetic output requires an explicit setting change.

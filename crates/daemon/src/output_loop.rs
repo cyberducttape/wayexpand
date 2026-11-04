@@ -273,6 +273,7 @@ struct AsyncInjector {
     cancel: Arc<AtomicBool>,
     failure_sender: SyncSender<OutputFailure>,
     capabilities: InjectorCapabilities,
+    output_checkpoint: wayexpand_core::OutputCheckpoint,
     replace_error_may_have_applied: bool,
     name: &'static str,
     status_detail: &'static str,
@@ -362,13 +363,14 @@ pub fn spawn_async_injector(
     // stop a paced keystroke stream that is already running, not only the
     // commands still queued behind it.
     let checkpoint_cancel = Arc::clone(&cancel);
-    backend.set_output_checkpoint(wayexpand_core::OutputCheckpoint::new(move || {
+    let output_checkpoint = wayexpand_core::OutputCheckpoint::new(move || {
         if checkpoint_cancel.load(Ordering::Acquire) {
             Err("output was cancelled while in progress; the application may contain a partial replacement".into())
         } else {
             Ok(())
         }
-    }));
+    });
+    backend.set_output_checkpoint(output_checkpoint.clone());
     let submitter = TransactionSubmitter {
         sender: sender.clone(),
         cancel: Arc::clone(&cancel),
@@ -477,6 +479,7 @@ pub fn spawn_async_injector(
         cancel,
         failure_sender,
         capabilities,
+        output_checkpoint,
         replace_error_may_have_applied,
         name,
         status_detail,
@@ -517,6 +520,14 @@ impl TextInjector for AsyncInjector {
 
     fn status_detail(&self) -> &'static str {
         self.status_detail
+    }
+
+    fn reset_output_progress(&mut self) {
+        self.output_checkpoint.reset_progress();
+    }
+
+    fn output_progress(&self) -> wayexpand_core::OutputProgress {
+        self.output_checkpoint.progress()
     }
 
     fn replace_error_may_have_applied(&self) -> bool {

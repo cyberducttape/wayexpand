@@ -106,8 +106,12 @@ policy, command execution also fails closed when containment setup is
 unavailable; process-group cleanup is used only when the operator explicitly
 sets `WAYEXPAND_PROCESS_CGROUP=disabled`. When named actions are configured it
 also checks the live Action Broker and its in-process probes. `--json` emits
-the same checks for fleet tooling (schema 2), including `readiness` (`pass`,
-`degraded`, or `fail`), the selected profile, and which checks are required.
+the same checks for fleet tooling (schema 3), including overall `readiness` and
+separate `sandbox_readiness` and `input_privacy_readiness` values (`pass`,
+`degraded`, or `fail`), the selected profile, and which checks are required. A
+workstation or hardened profile reports missing sensitive-field detection as
+`degraded`; strict profile fails unless the active non-evdev route reports
+sensitive-field detection. Sandboxing and input privacy are independent results.
 Unit-file directives alone are not treated as evidence. Kernel policy details
 that cannot be safely inspected from an unprivileged process remain listed as
 unverified instead of being reported as active.
@@ -144,7 +148,9 @@ The report also identifies the active capture source and its privacy
 capabilities. Evdev is opt-in and cannot identify password or other sensitive
 fields. Fleet policy that requires sensitive-field protection must set
 `require_sensitive_focus = true` with `safe_mode = true`; this refuses routes
-such as evdev that cannot provide that signal.
+such as evdev that cannot provide that signal. `doctor --security --profile
+strict` independently rejects evdev for input privacy even if the sandbox
+checks pass.
 
 The systemd unit is deliberately restrictive to limit the blast radius of a
 compromised or misconfigured command. Do not relax the restrictions in

@@ -41,6 +41,9 @@ pub(crate) struct FailureTrace {
     insertion_attempted: bool,
     transaction_phases: Vec<&'static str>,
     completion: &'static str,
+    progress_tracked: bool,
+    erased_units: usize,
+    inserted_units: usize,
 }
 
 #[derive(Default)]
@@ -68,7 +71,12 @@ impl<'a> TracedInjector<'a> {
         }
     }
 
-    pub(crate) fn record_outcome(self, outcome: &TransactionOutcome, phases: &[TransactionPhase]) {
+    pub(crate) fn record_outcome(
+        self,
+        outcome: &TransactionOutcome,
+        phases: &[TransactionPhase],
+        progress: wayexpand_core::OutputProgress,
+    ) {
         let completion = match outcome {
             TransactionOutcome::Applied => "applied",
             TransactionOutcome::AppliedWithCursorPositionFailure { .. } => {
@@ -76,7 +84,7 @@ impl<'a> TracedInjector<'a> {
             }
             TransactionOutcome::NotApplied { .. } => "not applied",
             TransactionOutcome::UnknownApplicationOutcome { .. } => "application outcome unknown",
-            TransactionOutcome::UnknownPartialFailure { .. } => "partial result unknown",
+            TransactionOutcome::UnknownPartialFailure { .. } => "partial_write",
         };
         let erase_acknowledged = if self.stages.erase.is_empty() {
             if self.inner.capabilities().atomic_replace {
@@ -98,6 +106,9 @@ impl<'a> TracedInjector<'a> {
             insertion_attempted: self.stages.insertion_attempted,
             transaction_phases,
             completion,
+            progress_tracked: progress.tracked,
+            erased_units: progress.erased_units,
+            inserted_units: progress.inserted_units,
         });
     }
 }
@@ -123,6 +134,9 @@ pub(crate) fn record_blocked_expansion(backend: &str, reason: &'static str) {
         insertion_attempted: false,
         transaction_phases: vec!["prepared", "failed"],
         completion: reason,
+        progress_tracked: false,
+        erased_units: 0,
+        inserted_units: 0,
     });
 }
 
@@ -230,6 +244,12 @@ impl TextInjector for TracedInjector<'_> {
     }
     fn set_output_checkpoint(&mut self, checkpoint: OutputCheckpoint) {
         self.inner.set_output_checkpoint(checkpoint)
+    }
+    fn reset_output_progress(&mut self) {
+        self.inner.reset_output_progress()
+    }
+    fn output_progress(&self) -> wayexpand_core::OutputProgress {
+        self.inner.output_progress()
     }
     fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {
         match self.inner.erase(trigger) {
@@ -346,6 +366,14 @@ fn traces_json<'a>(traces: impl Iterator<Item = &'a FailureTrace>) -> String {
                 "insertion_attempted": trace.insertion_attempted,
                 "transaction_phases": trace.transaction_phases,
                 "completion": trace.completion,
+                "recovery": if trace.completion == "partial_write" {
+                    "manual_review"
+                } else {
+                    "not_applicable"
+                },
+                "progress_tracked": trace.progress_tracked,
+                "erased_units": trace.erased_units,
+                "inserted_units": trace.inserted_units,
             })
         })
         .collect::<Vec<_>>();
@@ -366,6 +394,9 @@ pub(crate) fn saturate_for_test() {
             insertion_attempted: true,
             transaction_phases: vec!["prepared", "validated", "applying", "committed"],
             completion: "inserted; cursor placement failed",
+            progress_tracked: false,
+            erased_units: 0,
+            inserted_units: 0,
         });
     }
 }
@@ -390,6 +421,37 @@ mod tests {
         }
     }
 
+    struct PartialProgressInjector {
+        checkpoint: wayexpand_core::OutputCheckpoint,
+    }
+
+    impl TextInjector for PartialProgressInjector {
+        fn name(&self) -> &'static str {
+            "progress-test"
+        }
+        fn set_output_checkpoint(&mut self, checkpoint: wayexpand_core::OutputCheckpoint) {
+            self.checkpoint = checkpoint;
+        }
+        fn reset_output_progress(&mut self) {
+            self.checkpoint.reset_progress();
+        }
+        fn output_progress(&self) -> wayexpand_core::OutputProgress {
+            self.checkpoint.progress()
+        }
+        fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {
+            self.checkpoint.record_erasure(trigger.chars().count());
+            Ok(())
+        }
+        fn insert(&mut self, _text: &str) -> Result<(), InjectorError> {
+            self.checkpoint.record_insertion(2);
+            Err(InjectorError {
+                backend: "progress-test",
+                message: "simulated interruption".into(),
+                retryable: false,
+            })
+        }
+    }
+
     #[test]
     fn successful_outputs_do_not_evict_reported_failures() {
         let mut history = History::default();
@@ -405,6 +467,9 @@ mod tests {
                 insertion_attempted: false,
                 transaction_phases: vec!["prepared", "failed"],
                 completion: "blocked by organization policy",
+                progress_tracked: false,
+                erased_units: 0,
+                inserted_units: 0,
             },
         );
         for _ in 0..HISTORY_LIMIT * 2 {
@@ -420,6 +485,9 @@ mod tests {
                     insertion_attempted: true,
                     transaction_phases: vec!["prepared", "validated", "applying", "committed"],
                     completion: "applied",
+                    progress_tracked: false,
+                    erased_units: 0,
+                    inserted_units: 0,
                 },
             );
         }
@@ -450,7 +518,7 @@ mod tests {
                 folded_suffix_chars: 0,
             },
         );
-        traced.record_outcome(&report.outcome, &report.phases);
+        traced.record_outcome(&report.outcome, &report.phases, report.progress);
 
         let outcomes: serde_json::Value =
             serde_json::from_str(&recent_outcomes_json()).expect("outcomes should be JSON");
@@ -466,6 +534,45 @@ mod tests {
             .unwrap()
             .iter()
             .all(|trace| trace["completion"] != "applied"));
+    }
+
+    #[test]
+    fn partial_write_trace_includes_content_free_confirmed_progress() {
+        let mut injector = PartialProgressInjector {
+            checkpoint: wayexpand_core::OutputCheckpoint::default(),
+        };
+        let mut traced = TracedInjector::new(&mut injector);
+        let report = wayexpand_core::ExpansionEngine::apply_with_report(
+            &mut traced,
+            &wayexpand_core::ExpansionResult {
+                snippet_id: "test".into(),
+                trigger: ":x".into(),
+                matched_text: ":x".into(),
+                insert: "replacement".into(),
+                cursor_offset: None,
+                reinsert_after: None,
+                command_backed: false,
+                undoable: false,
+                folded_suffix_chars: 0,
+            },
+        );
+        assert!(matches!(
+            report.outcome,
+            TransactionOutcome::UnknownPartialFailure { .. }
+        ));
+        assert_eq!(report.progress.erased_units, 2);
+        assert_eq!(report.progress.inserted_units, 2);
+        traced.record_outcome(&report.outcome, &report.phases, report.progress);
+
+        let outcomes: serde_json::Value =
+            serde_json::from_str(&recent_outcomes_json()).expect("outcomes should be JSON");
+        assert!(outcomes.as_array().unwrap().iter().any(|trace| {
+            trace["completion"] == "partial_write"
+                && trace["progress_tracked"] == true
+                && trace["erased_units"] == 2
+                && trace["inserted_units"] == 2
+                && trace["backend"] == "progress-test"
+        }));
     }
 
     #[test]

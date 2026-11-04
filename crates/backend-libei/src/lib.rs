@@ -414,6 +414,7 @@ impl LibeiSession {
             self.connection
                 .flush()
                 .map_err(|error| LibeiError::Flush(error.to_string()))?;
+            self.checkpoint.record_insertion(chunk.chars().count());
         }
         Ok(())
     }
@@ -438,6 +439,7 @@ impl LibeiSession {
                     self.connection
                         .flush()
                         .map_err(|error| LibeiError::Flush(error.to_string()))?;
+                    self.checkpoint.record_insertion(1);
                 }
                 _ => current_text.push(c),
             }
@@ -519,6 +521,7 @@ impl LibeiSession {
             self.connection
                 .flush()
                 .map_err(|error| LibeiError::Flush(error.to_string()))?;
+            self.checkpoint.record_insertion(1);
             if chars.peek().is_some() {
                 std::thread::sleep(KEY_EVENT_INTERVAL);
             }
@@ -559,6 +562,7 @@ impl LibeiSession {
                 self.connection
                     .flush()
                     .map_err(|error| LibeiError::Flush(error.to_string()))
+                    .map(|()| checkpoint.record_erasure(1))
             },
         )
     }

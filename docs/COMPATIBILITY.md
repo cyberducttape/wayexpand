@@ -525,7 +525,7 @@ side never counts as a match (`commit_matches` is then `false`).
   "backend": "input-method-v2",
   "route_id": "input-method-v2",
   "backend_mode": "unknown",
-  "status_schema": 20,
+  "status_schema": 21,
   "daemon_commit": "example-commit",
   "state": "connected",
   "route_available": true,
@@ -598,6 +598,7 @@ side never counts as a match (`commit_matches` is then `false`).
   "output_health": "ok",
   "output_uncertain_total": 0,
   "output_partial_total": 0,
+  "partial_write_total": 0,
   "output_retiring_workers": 0,
   "output_stalled_ms": 0,
   "insertion_assurance": "verified",
@@ -630,7 +631,7 @@ side never counts as a match (`commit_matches` is then `false`).
 - `route_id` (string): Canonical capture/injection route ID from the shared route catalog; `"stdin-test"` identifies the stdin harness, and `"unknown"` means the active pair has no catalog entry. Consumers should use this field instead of reconstructing route identity from `source` and `backend`.
 - `backend_mode` (string): Negotiated backend capability detail. Libei reports either `"ei_text (UTF-8 insertion)"` or `"ei_keyboard keysym fallback (12ms key pacing)"`; it is `"unknown"` before a backend has negotiated a mode or for backends without submodes.
 - `sandbox_security` (object, optional): Live in-process evidence for namespace IDs, seccomp/NoNewPrivs, socket address-family probes, read-only mounts, proc restrictions, W^X, personality and SUID-bit probes, resource limits, and cgroup limits. It reports effective process state, not unit-file intent. See [SECURITY](../SECURITY.md#effective-sandbox-inspection).
-- `status_schema` (integer): Version of the daemon status contract. Certification requires a matching schema before treating runtime capabilities as current; missing or different values mean the daemon should be restarted/updated. Schema 11 adds canonical `route_id`; schema 12 adds usage-event recorded, persisted, and dropped counters; schema 13 adds precise `replacement_assurance`; schema 14 adds matcher-latency dropped-sample reporting; schema 15 adds aggregate and per-mode output-latency dropped-sample reporting; schema 16 adds capture_layout_state; schema 17 adds command cgroup cleanup health; schema 18 adds `output_partial_total`, distinguishing partial insertion from other outcomes whose target effect is unknown; schema 19 adds background connection-worker lifecycle counters and the daemon-context command containment self-test result; schema 20 adds effective route/matching availability, command-worker counts, suppressed-expansion totals, and input/output connection-attempt failure totals.
+- `status_schema` (integer): Version of the daemon status contract. Certification requires a matching schema before treating runtime capabilities as current; missing or different values mean the daemon should be restarted/updated. Schema 11 adds canonical `route_id`; schema 12 adds usage-event recorded, persisted, and dropped counters; schema 13 adds precise `replacement_assurance`; schema 14 adds matcher-latency dropped-sample reporting; schema 15 adds aggregate and per-mode output-latency dropped-sample reporting; schema 16 adds capture_layout_state; schema 17 adds command cgroup cleanup health; schema 18 adds `output_partial_total`, distinguishing partial insertion from other outcomes whose target effect is unknown; schema 19 adds background connection-worker lifecycle counters and the daemon-context command containment self-test result; schema 20 adds effective route/matching availability, command-worker counts, suppressed-expansion totals, and input/output connection-attempt failure totals; schema 21 adds a distinct partial-write counter and confirmed per-transaction erase/insert progress.
 - `state` (string): Backend connection state (e.g. `"connected"`, `"reconnecting"`)
 - `route_available` (bool): `true` only when capture is connected, evdev has a current layout snapshot when applicable, and an output route advertises replacement support.
 - `matching_available` (bool): `true` when `route_available` is true, matching is not paused, and the active configuration is healthy.
@@ -683,7 +684,8 @@ side never counts as a match (`commit_matches` is then `false`).
 - `output_health` (string): `ok`; `recovering` while a retired output worker is stopping; or `stalled` once it has outlived the 5 s base acknowledgement deadline. While any retired worker runs, the output route does not reconnect, so a late operation cannot type into the current window. `stalled` persists until the worker stops or the daemon is restarted. Added in status schema 7.
 - `output_uncertain_total` (integer): Expansions and inserts since daemon start whose effect on the target text is unknown (a non-atomic backend failed mid-transaction or did not acknowledge in time). They are never retried. Added in status schema 7.
 - `suppressed_expansions_total` (integer): Matched expansions refused by policy, output safety gates, or preparation before reaching output. It does not count keys filtered before a match is produced (for example, while paused or in a sensitive field).
-- `output_partial_total` (integer): Transactions since daemon start where insertion began before output failed, so partial text may remain. These are never retried. The GUI highlights this separately, and `wayexpand doctor --json` reports it as `partial_insertions_total`.
+- `output_partial_total` (integer): Legacy count of non-atomic transactions whose target effect may be partial. These are never retried.
+- `partial_write_total` (integer): Explicit count of transactions with a potentially partial non-atomic write. This currently aliases `output_partial_total` for compatibility. Recent outcome records identify `completion="partial_write"`, set `recovery="manual_review"`, and include `progress_tracked`, `erased_units`, and `inserted_units` when a backend can count successfully flushed units. Counts are protocol progress, not proof of what the application rendered; no automatic recovery or replay is attempted. `wayexpand doctor --json` continues to report `partial_insertions_total`.
 - `output_retiring_workers` (integer): Retired output workers still running. Added in status schema 7.
 - `output_stalled_ms` (integer): Age of the oldest retired output worker still running; `0` when there is none. Added in status schema 7.
 - `insertion_assurance` (string): What the output route promises before it erases a trigger. `verified`: the route checks the field's own text first (input-method-v2, IBus). `compatibility`: a keystroke route (libei, wlroots virtual keyboard) that erases without seeing the text, allowed by `compatibility_mode`. `blocked`: a keystroke route without that consent; typed expansions are refused. `unavailable`: no route that can replace text. Added in status schema 8.

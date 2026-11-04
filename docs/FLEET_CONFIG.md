@@ -85,8 +85,11 @@ sensitive fields. `allowed_backends` limits insertion backends and does not by
 itself identify or prohibit an evdev capture source. After starting the
 managed user service, require
 `wayexpand doctor --security --profile hardened --json` to report
-`"readiness": "pass"` before treating the host as deployment-ready.
-The security report's `active_route` object records the live source, backend,
+`"sandbox_readiness": "pass"` and `"input_privacy_readiness": "pass"` before
+treating the host as deployment-ready. Overall `readiness` is degraded when
+the sandbox passes but the active route lacks sensitive-field detection. The
+strict profile fails for evdev even if a route reports that capability. The
+security report's `active_route` object records the live source, backend,
 atomic replacement capability, replacement assurance, focus assurance, and
 compatibility mode. `automatic_replacement_mode` distinguishes an atomic
 capability, the default refusal for non-atomic routes, and an experimental

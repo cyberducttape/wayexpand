@@ -65,6 +65,7 @@ pub(crate) fn status_as_json(response: &str) -> Result<serde_json::Value> {
                         | "clipboard_read_max_duration_us"
                         | "output_uncertain_total"
                         | "output_partial_total"
+                        | "partial_write_total"
                         | "output_retiring_workers"
                         | "output_stalled_ms"
                         | "output_reconnect_total"

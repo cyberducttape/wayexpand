@@ -1,6 +1,6 @@
 {
   "schema_version": 11,
-  "daemon_control_schema": 20,
+  "daemon_control_schema": 21,
   "fields": {
     "response": "string",
     "source": "string",
@@ -107,6 +107,7 @@
     "suppressed_expansions_total": "integer",
     "input_connection_failures_total": "integer",
     "output_connection_failures_total": "integer",
-    "recent_expansion_outcomes": "array"
+    "recent_expansion_outcomes": "array",
+    "partial_write_total": "integer"
   }
 }
