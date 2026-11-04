@@ -53,19 +53,23 @@ pub(crate) fn prepare(
         .create()
         .map_err(|error| format!("could not create Landlock ruleset: {error}"))?;
 
-    // Read-only runtime paths let dynamically linked programs and interpreters
-    // start. More specific application data must be explicitly granted below.
-    for path in [
-        "/usr",
-        "/bin",
-        "/sbin",
-        "/lib",
-        "/lib64",
-        "/proc",
-        "/etc/ld.so.cache",
-    ] {
-        if Path::new(path).exists() {
-            created = add_path_rule(created, path, read_rights, abi, "runtime")?;
+    if sandbox.runtime_profile == crate::config::RuntimeProfile::Compatible {
+        // Broad read-only runtime paths preserve compatibility for actions
+        // whose dynamic dependencies are not explicitly inventoried. The
+        // minimal profile instead requires each dependency to be named in
+        // `read_paths` and never grants the shared /proc tree by default.
+        for path in [
+            "/usr",
+            "/bin",
+            "/sbin",
+            "/lib",
+            "/lib64",
+            "/proc",
+            "/etc/ld.so.cache",
+        ] {
+            if Path::new(path).exists() {
+                created = add_path_rule(created, path, read_rights, abi, "runtime")?;
+            }
         }
     }
     for path in sandbox
@@ -73,7 +77,7 @@ pub(crate) fn prepare(
         .iter()
         .map(String::as_str)
         .chain(std::iter::once(program))
-        .chain(cwd)
+        .chain(cwd.filter(|_| sandbox.runtime_profile == crate::config::RuntimeProfile::Compatible))
     {
         created = add_path_rule(created, path, read_rights, abi, "read")?;
     }
@@ -365,6 +369,14 @@ mod tests {
             std::io::Error::last_os_error().raw_os_error(),
             Some(libc::EPERM)
         );
+    }
+
+    #[test]
+    #[ignore = "invoked by ActionExecutor with the minimal runtime profile"]
+    fn minimal_runtime_profile_probe_child() {
+        let error = std::fs::read("/proc/self/status")
+            .expect_err("minimal runtime must not inherit broad /proc read access");
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
     }
 }
 

@@ -34,6 +34,11 @@ const STATUS_GAUGES: &[(&str, &str, &str)] = &[
         "Output workers still shutting down after a failure.",
     ),
     (
+        "output_partial_total",
+        "output_partial_insertions_total",
+        "Output transactions where insertion began before failing.",
+    ),
+    (
         "memory_rss_kib",
         "memory_rss_kibibytes",
         "Daemon resident memory.",

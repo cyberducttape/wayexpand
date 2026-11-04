@@ -389,6 +389,7 @@ fn write_broker_health(
         "audit_queue_dropped_total": health.dropped_events,
         "audit_write_failures_total": health.write_failures,
         "audit_healthy": audit_logger.is_none() || health.healthy(),
+        "command_containment_self_test": wayexpand_process_supervisor::containment_self_test_result(),
         "security": wayexpand_process_supervisor::effective_security_snapshot(),
     });
     let prefix = path
@@ -540,6 +541,14 @@ async fn run() -> Result<()> {
 
     // Parse command-line arguments
     let options = parse_args()?;
+    let containment_self_test = wayexpand_process_supervisor::run_containment_self_test();
+    if containment_self_test != "passed" {
+        warn!(
+            containment_self_test,
+            policy = wayexpand_process_supervisor::containment_policy_mode(),
+            "broker command containment self-test did not pass; inspect wayexpand doctor --security readiness"
+        );
+    }
     let mut shutdown_signals = ShutdownSignals::install()?;
 
     info!(
@@ -975,6 +984,10 @@ mod tests {
         let status: serde_json::Value = serde_json::from_str(&contents).expect("parse health");
         assert_eq!(status["running"], true);
         assert_eq!(status["audit_enabled"], false);
+        assert_eq!(
+            status["command_containment_self_test"],
+            wayexpand_process_supervisor::containment_self_test_result()
+        );
         assert_eq!(
             fs::metadata(&path).expect("stat health").mode() & 0o777,
             0o600

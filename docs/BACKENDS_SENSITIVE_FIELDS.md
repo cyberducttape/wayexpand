@@ -162,6 +162,13 @@ Look for the "Sensitive-field detection" line:
 - `AVAILABLE` — Your backend detects password fields
 - `UNAVAILABLE` — Your backend does not (plan accordingly)
 
+The GUI toolbar also shows the active route's live sensitive-field signal
+alongside replacement atomicity and desktop-certification state. It reports
+`verified`, `unavailable`, or `unknown` from the connected daemon status; a
+connected keyboard capture route alone is not treated as privacy protection.
+For evdev the status remains unavailable even when the local machine's
+consent marker and service are enabled.
+
 ## Future Improvements
 
 - [ ] Heuristic password-field detection based on field label/class (evdev)

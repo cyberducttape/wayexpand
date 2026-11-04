@@ -307,13 +307,15 @@ actions require a future per-action OS sandbox profile and a separate review.
 
 ### Per-action filesystem sandbox
 
-Actions may opt into a child-only Landlock filesystem profile. The broker grants the
-program and standard runtime paths read/execute access, and the configured
-working directory read access. Every other application path is denied unless
-it appears in `read_paths` or `write_paths`:
+Actions may opt into a child-only Landlock filesystem profile. The default
+`runtime_profile = "compatible"` grants the program, common system runtime
+directories (including `/proc`), and the configured working directory
+read/execute access. Every other application path is denied unless it appears
+in `read_paths` or `write_paths`:
 
 ```toml
 [actions."local-report".sandbox]
+runtime_profile = "compatible"
 read_paths = ["/home/user/reports/input"]
 write_paths = ["/home/user/reports/output"]
 deny_network = true
@@ -323,6 +325,13 @@ deny_devices = true
 Writable entries must be existing directories. The policy loader canonicalizes
 all entries and rejects filesystem root, special files, and relative paths.
 The action is refused if Landlock is unavailable or rules cannot be enforced.
+For a smaller read surface, choose `runtime_profile = "minimal"`. This omits
+the common system directories, `/proc`, and implicit working-directory grant;
+the executable and explicit `read_paths` remain available. List the dynamic
+loader and every library or data file the application needs in `read_paths`.
+This is an explicit compatibility tradeoff: an incomplete dependency list
+causes the action to fail closed when it starts or accesses a missing file.
+Add `/proc` to `read_paths` only for a reviewed action that needs it.
 When `deny_network` is true, a child seccomp filter rejects creation of
 IPv4, IPv6, packet, and netlink sockets, and rejects `io_uring_setup`; local
 `AF_UNIX` sockets remain available. The child receives no pre-opened network

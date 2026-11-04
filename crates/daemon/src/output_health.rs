@@ -19,6 +19,7 @@ use wayexpand_core::TransactionOutcome;
 pub const STALLED_AFTER: Duration = Duration::from_secs(5);
 
 static UNCERTAIN_TOTAL: AtomicU64 = AtomicU64::new(0);
+static PARTIAL_TOTAL: AtomicU64 = AtomicU64::new(0);
 static RETIRING: Mutex<Retiring> = Mutex::new(Retiring {
     workers: 0,
     oldest: None,
@@ -32,6 +33,7 @@ struct Retiring {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Snapshot {
     pub uncertain_total: u64,
+    pub partial_total: u64,
     pub retiring_workers: usize,
     pub stalled_ms: u64,
 }
@@ -55,6 +57,13 @@ pub fn note_outcome(outcome: &TransactionOutcome) {
     if is_uncertain(outcome) {
         UNCERTAIN_TOTAL.fetch_add(1, Ordering::Relaxed);
     }
+    if is_partial(outcome) {
+        PARTIAL_TOTAL.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+fn is_partial(outcome: &TransactionOutcome) -> bool {
+    matches!(outcome, TransactionOutcome::UnknownPartialFailure { .. })
 }
 
 fn is_uncertain(outcome: &TransactionOutcome) -> bool {
@@ -78,12 +87,17 @@ pub fn snapshot() -> Snapshot {
     let retiring = RETIRING
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    snapshot_of(UNCERTAIN_TOTAL.load(Ordering::Relaxed), &retiring)
+    snapshot_of(
+        UNCERTAIN_TOTAL.load(Ordering::Relaxed),
+        PARTIAL_TOTAL.load(Ordering::Relaxed),
+        &retiring,
+    )
 }
 
-fn snapshot_of(uncertain_total: u64, retiring: &Retiring) -> Snapshot {
+fn snapshot_of(uncertain_total: u64, partial_total: u64, retiring: &Retiring) -> Snapshot {
     Snapshot {
         uncertain_total,
+        partial_total,
         retiring_workers: retiring.workers,
         stalled_ms: retiring.oldest.map_or(0, |since| {
             u64::try_from(since.elapsed().as_millis()).unwrap_or(u64::MAX)
@@ -99,6 +113,7 @@ mod tests {
     fn health_distinguishes_recovering_from_stalled_workers() {
         let snapshot = |retiring_workers, stalled_ms| Snapshot {
             uncertain_total: 0,
+            partial_total: 0,
             retiring_workers,
             stalled_ms,
         };
@@ -124,7 +139,13 @@ mod tests {
         assert!(is_uncertain(&TransactionOutcome::UnknownPartialFailure {
             source: error()
         }));
+        assert!(is_partial(&TransactionOutcome::UnknownPartialFailure {
+            source: error()
+        }));
         assert!(is_uncertain(
+            &TransactionOutcome::UnknownApplicationOutcome { source: error() }
+        ));
+        assert!(!is_partial(
             &TransactionOutcome::UnknownApplicationOutcome { source: error() }
         ));
     }
@@ -135,14 +156,15 @@ mod tests {
             workers: 1,
             oldest: Some(Instant::now() - Duration::from_millis(50)),
         };
-        let snapshot = snapshot_of(3, &retiring);
+        let snapshot = snapshot_of(3, 2, &retiring);
         assert_eq!(snapshot.uncertain_total, 3);
+        assert_eq!(snapshot.partial_total, 2);
         assert_eq!(snapshot.retiring_workers, 1);
         assert!(snapshot.stalled_ms >= 50);
         let idle = Retiring {
             workers: 0,
             oldest: None,
         };
-        assert_eq!(snapshot_of(0, &idle).stalled_ms, 0);
+        assert_eq!(snapshot_of(0, 0, &idle).stalled_ms, 0);
     }
 }

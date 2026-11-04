@@ -2,7 +2,7 @@
 
 /// Version of the daemon's stable key/value control-socket status contract.
 /// Increment when a consumer must distinguish a newer required field set.
-pub const CONTROL_STATUS_SCHEMA: u32 = 17;
+pub const CONTROL_STATUS_SCHEMA: u32 = 19;
 
 pub use limits::{CommandLimits, COMMAND_LIMITS, CONTROL_MAX_RESPONSE_BYTES};
 pub use wayexpand_process_supervisor::containment_mode as command_containment_mode;
@@ -22,6 +22,7 @@ mod fleet;
 #[cfg(any(test, feature = "fuzzing"))]
 #[doc(hidden)]
 pub mod fuzzing;
+mod insertion_plan;
 mod keys;
 pub mod limits;
 mod matcher;
@@ -68,6 +69,7 @@ pub use engine::{
     WindowContext, MAX_WINDOW_INSTANCE_ID_BYTES,
 };
 pub use fleet::{FleetConfig, FleetError, Layer, MergeStats, Provenance};
+pub use insertion_plan::{plan_insertion, InsertionRouteCapabilities, InsertionStrategy};
 pub use keys::{KeyChord, KeyChordError, Modifiers};
 pub use matcher::{Matcher, MatcherBuildError};
 pub use migration::{

@@ -97,26 +97,29 @@ and prevent key merging at the compositor, a safe delay is added between each
 synthesized character. This means:
 
 - **Normal case** (ei_text available): Sub-millisecond insertion (fast)
-- **Fallback case** (ei_keyboard only): 12ms per character (slower)
+- **Fallback case** (ei_keyboard only): about 12ms per character (slower)
 
 For short snippets (signatures, small templates), this is imperceptible.
 For long replacements (multi-paragraph code blocks, long administrative text),
 the total insertion time becomes noticeable:
 
+- 8-character replacement: under 100ms by the planner estimate (default limit)
 - 100-character replacement: ~1.2 seconds
-- 250-character replacement: ~3 seconds (the default limit)
 
 Longer replacements are rejected before any erase or insertion. The limit is
-`[settings] keystroke_max_chars` (default 250, at most 5000; also under
+`[settings] keystroke_max_chars` (default 8, at most 5000; also under
 Settings > Engine in the GUI):
 
 ```toml
 [settings]
-keystroke_max_chars = 1000   # about 12 seconds of typing
+keystroke_max_chars = 1000   # explicit opt-in to longer paced output
 ```
 
-The editor preview estimates paced-keyboard insertion time from the active
-route's reported throughput. For long configuration files and runbooks, use the
+The insertion planner previews a route-native, manual-paste, or short paced-key
+strategy from active daemon capabilities and compatibility consent. Paced
+synthesis is recommended only when its estimate is at most 100 ms; this
+threshold is a routing objective, not a certified latency guarantee. For long
+configuration files and runbooks, use the
 preview's Copy action or `wayexpand new` to write a file instead of typing the
 content through the virtual keyboard. The estimate is advisory; it does not
 make an unverified or non-atomic route safe for automatic replacement.

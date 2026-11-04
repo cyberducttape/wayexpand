@@ -101,6 +101,7 @@ fn daemon_status_body_matches_documented_stable_contract() {
             "command_cleanup_pending_jobs",
             "command_containment",
             "command_containment_mode",
+            "command_containment_self_test",
             "command_failure_total",
             "command_in_flight",
             "command_queue_depth",
@@ -109,6 +110,11 @@ fn daemon_status_body_matches_documented_stable_contract() {
             "compatibility_mode",
             "config",
             "config_state",
+            "connect_workers_active",
+            "connect_workers_cancelled_total",
+            "connect_workers_completed_total",
+            "connect_workers_rejected_total",
+            "connect_workers_started_total",
             "control_rejected_total",
             "daemon_commit",
             "evdev_quarantined_events_total",
@@ -147,6 +153,7 @@ fn daemon_status_body_matches_documented_stable_contract() {
             "output_health",
             "output_last_refusal",
             "output_last_unsupported",
+            "output_partial_total",
             "output_reconnect_total",
             "output_refused_total",
             "output_retiring_workers",
@@ -175,7 +182,7 @@ fn daemon_status_body_matches_documented_stable_contract() {
         "daemon status body fields no longer match docs/COMPATIBILITY.md's documented Stable contract"
     );
     assert!(body.starts_with(&format!(
-        "source=input-method\nbackend=input-method-v2\nroute_id=input-method-v2\nbackend_mode=unknown\nstatus_schema=17\ndaemon_commit={}\nstate=connected\npaused=false\n",
+        "source=input-method\nbackend=input-method-v2\nroute_id=input-method-v2\nbackend_mode=unknown\nstatus_schema=19\ndaemon_commit={}\nstate=connected\npaused=false\n",
         super::build_info::COMMIT
     )));
     for field in [

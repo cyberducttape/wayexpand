@@ -118,11 +118,20 @@ shallow, branch-selected, and stored under
 `${XDG_DATA_HOME:-~/.local/share}/wayexpand/libraries/`:
 
 ```bash
-wayexpand library add https://example.org/team/wayexpand-packs.git --branch main
+wayexpand library add https://example.org/team/wayexpand-packs.git --branch main \
+  --approved-revision 0123456789abcdef0123456789abcdef01234567
 wayexpand library list
 wayexpand library search wayexpand-packs kubernetes
 wayexpand library path wayexpand-packs
 ```
+
+`--approved-revision` requires the full 40- or 64-character commit ID selected
+during review. It pins the local checkout to that commit even if the branch
+head moves. Use `wayexpand library list --json` to record the selected source
+revision. Commit pinning is a reproducibility and review boundary, not a
+signature: use the configured trusted pack signers and
+`wayexpand pack verify` or `pack lint --require-signature` to authenticate pack
+content before installation.
 
 Library intake uses a filtered Git fetch and checks object sizes before it
 checks out catalog files. Its default ceilings are 1 MiB per blob, 64 MiB for
