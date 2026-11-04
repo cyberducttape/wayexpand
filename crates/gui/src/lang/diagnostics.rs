@@ -721,10 +721,10 @@ impl Strings {
                 Language::Indonesian => "Hasil penerapan tidak diketahui".into(),
                 Language::German => "Anwendungsergebnis ist unbekannt".into(),
             },
-            (_, "partial result unknown") => match self.lang {
-                Language::English => "Partial output; final result is unknown".into(),
-                Language::Indonesian => "Keluaran sebagian; hasil akhir tidak diketahui".into(),
-                Language::German => "Teilausgabe; Endergebnis unbekannt".into(),
+            (_, "partial_write" | "partial result unknown") => match self.lang {
+                Language::English => "Partial write; check the target manually (not retried)".into(),
+                Language::Indonesian => "Penulisan sebagian; periksa target secara manual (tidak diulang)".into(),
+                Language::German => "Teilschreibvorgang; Ziel manuell prüfen (keine Wiederholung)".into(),
             },
             (_, "blocked by organization policy") => match self.lang {
                 Language::English => "Blocked by organization policy before output".into(),
@@ -860,6 +860,14 @@ impl Strings {
                 Language::German => "Der Formularhelfer hat seine Antwort nicht abgeschlossen. Prüfen Sie den GUI-Hilfsprozess und versuchen Sie es erneut.".into(),
             },
             _ => completion.to_owned(),
+        }
+    }
+
+    pub fn trace_progress(&self, erased: usize, inserted: usize) -> String {
+        match self.lang {
+            Language::English => format!("Confirmed output progress: {erased} erased, {inserted} inserted units"),
+            Language::Indonesian => format!("Progres keluaran terkonfirmasi: {erased} unit dihapus, {inserted} unit disisipkan"),
+            Language::German => format!("Bestätigter Ausgabefortschritt: {erased} gelöscht, {inserted} eingefügte Einheiten"),
         }
     }
 

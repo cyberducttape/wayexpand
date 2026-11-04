@@ -106,6 +106,27 @@ impl std::error::Error for EventError {
 }
 
 impl EventError {
+    /// Stable, content-free outcome label for logs and diagnostics. Backend
+    /// error messages can contain the rejected character or payload, so they
+    /// must never be formatted on an expansion path.
+    fn diagnostic_category(&self) -> &'static str {
+        match &self.source {
+            wayexpand_core::TransactionOutcome::AppliedWithCursorPositionFailure { .. } => {
+                "cursor_reposition_failed"
+            }
+            wayexpand_core::TransactionOutcome::NotApplied { source }
+            | wayexpand_core::TransactionOutcome::UnknownApplicationOutcome { source }
+            | wayexpand_core::TransactionOutcome::UnknownPartialFailure { source } => {
+                match source.kind() {
+                    wayexpand_core::InjectorErrorKind::TransportFailure => "transport_failure",
+                    wayexpand_core::InjectorErrorKind::ExpansionRejected => "expansion_rejected",
+                    wayexpand_core::InjectorErrorKind::FatalBackendFailure => "backend_failure",
+                }
+            }
+            wayexpand_core::TransactionOutcome::Applied => "applied",
+        }
+    }
+
     /// Whether the output session failed in a way that a reconnect can fix.
     /// This is independent of whether the transaction may have partially
     /// applied: callers never replay the failed expansion either way, and a

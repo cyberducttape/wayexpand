@@ -192,6 +192,7 @@ pub fn connect_input_method_with_retry(
                 return Ok(source);
             }
             Err(error) if error.is_retryable() => {
+                crate::counters::note_input_connection_failure();
                 warn!(%error, ?retry_delay, "input-method unavailable at startup; retrying");
                 // Build this through the shared status writer like every other
                 // transition. Hand-formatting it here dropped `backend_mode`
@@ -244,6 +245,7 @@ pub fn connect_evdev_with_retry(
                 return Ok(source);
             }
             Err(error) if error.is_retryable() => {
+                crate::counters::note_input_connection_failure();
                 warn!(%error, ?retry_delay, "evdev source unavailable at startup; retrying");
                 status::set_daemon_status_direct(
                     control,

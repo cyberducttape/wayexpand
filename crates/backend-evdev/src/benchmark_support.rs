@@ -130,3 +130,9 @@ impl CaptureSource {
         count
     }
 }
+
+impl Default for CaptureSource {
+    fn default() -> Self {
+        Self::new()
+    }
+}
