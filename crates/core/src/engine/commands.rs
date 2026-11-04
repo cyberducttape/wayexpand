@@ -42,6 +42,8 @@ pub enum HotkeyError {
 /// Runtime counters for command-backed expansions and hotkey actions.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CommandMetrics {
+    pub command_worker_threads: usize,
+    pub hotkey_worker_threads: usize,
     pub command_queue_depth: usize,
     pub command_in_flight: usize,
     pub expansion_command_queue_depth: usize,

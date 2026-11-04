@@ -105,12 +105,8 @@ pub(crate) fn process_key_event(
                     }
                 }
             }
-            if let Err(error) = engine.queue_hotkey(&action) {
-                warn!(
-                    chord = %action.chord,
-                    %error,
-                    "hotkey action was not queued"
-                );
+            if engine.queue_hotkey(&action).is_err() {
+                warn!("hotkey action was not queued");
             }
         }
     }
@@ -249,7 +245,7 @@ pub(crate) fn dispatch_pending_results_with_pending_buffer(
                 } else {
                     failure_trace::record_preparation_failure(active_backend, &error);
                 }
-                warn!(%error, "expansion could not be queued or completed");
+                warn!(error_kind = ?error.kind(), "expansion could not be queued or completed");
                 continue;
             }
         };

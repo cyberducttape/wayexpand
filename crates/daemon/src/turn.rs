@@ -336,7 +336,7 @@ impl Daemon {
                         self.active_backend,
                     )?;
                 }
-                Err(error) => warn!(%error, "requested snippet insert refused"),
+                Err(error) => warn!(error_kind = ?error, "requested snippet insert refused"),
             }
         }
         Ok(false)
@@ -455,6 +455,7 @@ impl Daemon {
                             self.output_worker = Some(worker_state);
                         }
                         Err(error) => {
+                            crate::counters::note_output_connection_failure();
                             self.output_retry_at = Some(Instant::now() + self.output_retry_delay);
                             self.output_retry_delay = next_retry_delay(self.output_retry_delay);
                             warn!(%error, backend = self.backend_name, "output worker unavailable; retry scheduled");
@@ -480,6 +481,7 @@ impl Daemon {
                 info!(backend = self.backend_name, "output backend reconnected");
             }
             Err(error) if error.retryable => {
+                crate::counters::note_output_connection_failure();
                 self.output_retry_at = Some(Instant::now() + self.output_retry_delay);
                 self.output_retry_delay = next_retry_delay(self.output_retry_delay);
                 warn!(%error, backend = self.backend_name, "output backend unavailable; retry scheduled");
@@ -497,7 +499,7 @@ impl Daemon {
         if error.expansion_rejected() {
             self.note_unsupported_output(&error);
             warn!(
-                error = %error,
+                outcome = error.diagnostic_category(),
                 trigger_chars = error.result.trigger.chars().count(),
                 insert_bytes = error.result.insert.len(),
                 "output backend rejected expansion; continuing"
@@ -508,7 +510,7 @@ impl Daemon {
             return Err(error.into());
         }
         warn!(
-            error = %error,
+            outcome = error.diagnostic_category(),
             trigger_chars = error.result.trigger.chars().count(),
             insert_bytes = error.result.insert.len(),
             "output failed; current expansion is not replayed"
@@ -539,7 +541,10 @@ impl Daemon {
     /// Handle a failed explicit insert. It is a user action, so a failure is
     /// logged and never fatal; the insert is never replayed.
     pub(crate) fn recover_from_insert_error(&mut self, error: &EventError) {
-        warn!(%error, "requested snippet insert failed");
+        warn!(
+            outcome = error.diagnostic_category(),
+            "requested snippet insert failed"
+        );
         if error.retryable() {
             // A timed-out or partially applied picker insert has an unknown
             // outcome. Retire this actor and wait for its worker to stop

@@ -23,6 +23,8 @@ pub(crate) fn status_as_json(response: &str) -> Result<serde_json::Value> {
                 if matches!(
                     key,
                     "command_queue_depth"
+                        | "command_worker_threads"
+                        | "hotkey_worker_threads"
                         | "command_in_flight"
                         | "expansion_command_queue_depth"
                         | "expansion_command_in_flight"
@@ -32,6 +34,9 @@ pub(crate) fn status_as_json(response: &str) -> Result<serde_json::Value> {
                         | "command_timeout_total"
                         | "command_failure_total"
                         | "status_schema"
+                        | "suppressed_expansions_total"
+                        | "input_connection_failures_total"
+                        | "output_connection_failures_total"
                         | "inject_max_text_chars"
                         | "inject_expected_throughput_chars_per_sec"
                         | "injection_latency_sample_count"

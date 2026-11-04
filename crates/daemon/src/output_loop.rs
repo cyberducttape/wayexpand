@@ -709,6 +709,7 @@ pub fn connect_output_with_retry(
                 return Ok(Some(injector));
             }
             Err(error) if error.retryable => {
+                crate::counters::note_output_connection_failure();
                 warn!(%error, backend, ?retry_delay, "output backend unavailable; retrying");
                 status::set_daemon_status_direct(
                     control,

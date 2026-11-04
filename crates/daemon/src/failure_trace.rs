@@ -7,7 +7,10 @@
 use std::{
     cell::Cell,
     collections::VecDeque,
-    sync::{Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex, OnceLock,
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -19,6 +22,13 @@ use wayexpand_core::{
 const HISTORY_LIMIT: usize = 8;
 const FAILURE_STATUS_LIMIT: usize = 3;
 const OUTCOME_STATUS_LIMIT: usize = 4;
+static SUPPRESSED_EXPANSIONS_TOTAL: AtomicU64 = AtomicU64::new(0);
+
+/// Number of matched expansions denied by a policy, safety gate, or
+/// preparation failure before reaching the output backend.
+pub(crate) fn suppressed_expansions_total() -> u64 {
+    SUPPRESSED_EXPANSIONS_TOTAL.load(Ordering::Relaxed)
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct FailureTrace {
@@ -97,6 +107,7 @@ impl<'a> TracedInjector<'a> {
 /// retained. Backend names are bounded and stripped to a small identifier set
 /// because they are serialized into the daemon status response.
 pub(crate) fn record_blocked_expansion(backend: &str, reason: &'static str) {
+    SUPPRESSED_EXPANSIONS_TOTAL.fetch_add(1, Ordering::Relaxed);
     let backend = backend
         .chars()
         .filter(|character| character.is_ascii_alphanumeric() || "-_.+".contains(*character))
