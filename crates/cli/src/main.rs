@@ -279,8 +279,8 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "Switch validated configuration profiles, or assign them to apps",
             ),
             (
-                "library add|list|path|search|remove ...",
-                "Browse signed, offline Git snippet catalogs",
+                "library add [--approved-revision FULL_COMMIT]|list|path|search|remove ...",
+                "Browse and pin offline Git snippet catalogs",
             ),
         ],
     ),
