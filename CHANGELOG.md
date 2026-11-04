@@ -10,6 +10,16 @@ All notable changes to WayExpand are documented here.
   Unix-socket proxies.
 - Make `wayexpand status` report when its CLI and daemon builds do not match;
   include the comparison and an actionable warning in JSON output.
+- Avoid creating asynchronous command workers for text-only configurations;
+  command and hotkey worker threads now start only when an enabled action
+  requires them, reducing reload churn and background threads.
+- Expand operational pack lint coverage to common IP route, socket, DNS,
+  firewall, certificate, database, Kubernetes, systemd, cPanel/WHM, package
+  manager, and cloud command families. Labeled shell and executable
+  configuration blocks and each pack's declared tools also extend command
+  detection. Tool names are matched in command position to avoid treating
+  narrative words such as "service" as commands; detected operational fields
+  need a validator or explicit free-text justification.
 - Keep AutoKey migration counts distinct: unreadable phrase files and missing or
   malformed sidecars count as skipped entries needing review, while
   `unsupported` counts only phrase behavior WayExpand cannot represent. This

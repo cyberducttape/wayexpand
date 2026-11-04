@@ -110,7 +110,12 @@ fn lint_pack(
             .as_deref()
             .unwrap_or("the merged static snippet configuration is valid"),
     );
-    let operational_fields = operational_field_findings(&inspection.expansions);
+    let declared_tools = manifest
+        .compatibility
+        .as_ref()
+        .map(|compatibility| compatibility.tools.as_slice())
+        .unwrap_or_default();
+    let operational_fields = operational_field_findings(&inspection.expansions, declared_tools);
     let operational_field_message = if operational_fields.is_empty() {
         "operational fields have a domain validator, constrained choices, or explicit free_text=true justification".to_owned()
     } else {
@@ -269,10 +274,11 @@ fn lint_pack(
 
 fn operational_field_findings(
     expansions: &[wayexpand_core::PackExpansionReview],
+    declared_tools: &[String],
 ) -> Vec<serde_json::Value> {
     expansions
         .iter()
-        .filter(|expansion| looks_operational(&expansion.replacement))
+        .filter(|expansion| looks_operational_with_tools(&expansion.replacement, declared_tools))
         .flat_map(|expansion| {
             form_fields(&expansion.replacement)
                 .unwrap_or_default()
@@ -296,49 +302,74 @@ fn operational_field_findings(
         .collect()
 }
 
-fn looks_operational(replacement: &str) -> bool {
+fn looks_operational_with_tools(replacement: &str, declared_tools: &[String]) -> bool {
     const COMMANDS: &[&str] = &[
         "ansible",
         "ansible-playbook",
         "ansible-inventory",
         "apt",
+        "apt-get",
+        "apk",
         "awk",
         "aws",
+        "az",
         "bash",
+        "certbot",
+        "cpapi2",
         "curl",
         "docker",
+        "dig",
+        "dnf",
+        "firewall-cmd",
+        "firewalld",
         "find",
+        "gcloud",
         "git",
         "gh",
         "grep",
         "helm",
         "iptables",
         "journalctl",
+        "ip",
         "kubectl",
+        "kustomize",
+        "mariadb",
         "mysql",
+        "mysqladmin",
         "nc",
         "nginx",
+        "nft",
+        "nomad",
         "openssl",
+        "pacman",
+        "pg_dump",
         "podman",
         "psql",
         "resolvectl",
+        "redis-cli",
+        "service",
+        "sudo",
         "rpm",
         "rsync",
         "sed",
         "sh",
+        "ss",
         "ssh",
         "systemctl",
+        "systemd-run",
         "tee",
         "terraform",
         "ufw",
+        "uapi",
+        "vault",
+        "whmapi1",
+        "yum",
+        "zypper",
     ];
     let lower = replacement.to_ascii_lowercase();
-    lower.contains("{{shellq:")
-        || lower
-            .split(|character: char| {
-                !character.is_ascii_alphanumeric() && !matches!(character, '_' | '-')
-            })
-            .any(|token| COMMANDS.contains(&token))
+    has_operational_code_fence(&lower)
+        || lower.contains("{{shellq:")
+        || contains_known_command(&lower, COMMANDS, declared_tools)
         || lower.lines().any(|line| {
             let line = line.trim_start();
             ["select ", "insert into ", "update ", "delete from "]
@@ -348,6 +379,94 @@ fn looks_operational(replacement: &str) -> bool {
                     .iter()
                     .any(|directive| line.starts_with(directive))
         })
+}
+
+fn contains_known_command(replacement: &str, commands: &[&str], declared_tools: &[String]) -> bool {
+    const WRAPPERS: &[&str] = &[
+        "command", "doas", "env", "exec", "if", "nohup", "sudo", "then", "time", "while",
+    ];
+    replacement.lines().any(|line| {
+        line.split([';', '|', '&']).any(|segment| {
+            let mut skip_next = false;
+            for token in segment.split_whitespace() {
+                let token = token.trim_start_matches(['#', '$', '>', '*', '!']);
+                if token.is_empty() {
+                    continue;
+                }
+                if skip_next {
+                    skip_next = false;
+                    continue;
+                }
+                if matches!(
+                    token,
+                    "-u" | "-g" | "-h" | "-C" | "-D" | "--user" | "--group" | "--host" | "--chdir"
+                ) {
+                    skip_next = true;
+                    continue;
+                }
+                if token.contains('=') || token.starts_with('-') {
+                    continue;
+                }
+                let command = token.rsplit('/').next().unwrap_or(token);
+                if WRAPPERS.contains(&command) {
+                    continue;
+                }
+                return commands.contains(&command)
+                    || declared_tools
+                        .iter()
+                        .any(|tool| tool.eq_ignore_ascii_case(command));
+            }
+            false
+        })
+    })
+}
+
+fn has_operational_code_fence(replacement: &str) -> bool {
+    const OPERATIONAL_FORMATS: &[&str] = &[
+        "bash",
+        "console",
+        "compose",
+        "conf",
+        "dash",
+        "docker",
+        "dockerfile",
+        "fish",
+        "hcl",
+        "ini",
+        "json",
+        "ksh",
+        "nginx",
+        "powershell",
+        "pwsh",
+        "sh",
+        "shell",
+        "sql",
+        "systemd",
+        "terraform",
+        "tf",
+        "toml",
+        "yaml",
+        "yml",
+        "zsh",
+    ];
+    replacement.lines().any(|line| {
+        let line = line.trim_start();
+        let Some(marker @ ('`' | '~')) = line.chars().next() else {
+            return false;
+        };
+        let fence_length = line
+            .chars()
+            .take_while(|character| *character == marker)
+            .count();
+        if fence_length < 3 {
+            return false;
+        }
+        let fence = &line[marker.len_utf8() * fence_length..];
+        fence
+            .split_whitespace()
+            .next()
+            .is_some_and(|language| OPERATIONAL_FORMATS.contains(&language))
+    })
 }
 
 fn lint_fixture(
@@ -685,6 +804,158 @@ fn report_test_failure<T>(json: bool, pack_id: &str, message: &str) -> Result<T>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn operational_detection_covers_common_sysadmin_command_families() {
+        for command in [
+            "nft add rule inet filter input",
+            "ip route get 192.0.2.1",
+            "ss -lntp",
+            "firewall-cmd --reload",
+            "mariadb --host=db-primary",
+            "certbot certificates",
+            "kubectl get pods",
+            "whmapi1 listaccts",
+            "uapi --user=admin",
+            "systemd-run --scope",
+            "pg_dump production",
+            "sudo apt-get install nginx",
+            "dnf upgrade --refresh",
+            "pacman -Syu",
+            "zypper refresh",
+            "systemctl restart nginx",
+            "kubectl config current-context",
+            "vault status",
+            "gcloud compute instances list",
+            "az vm list",
+        ] {
+            assert!(
+                looks_operational_with_tools(
+                    &format!("```sh\n{command} {{field:target=example|required}}\n```"),
+                    &[],
+                ),
+                "command family was not recognized: {command}"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_commands_and_operational_config_fences_require_field_review() {
+        for (index, replacement) in [
+            "```bash\ninternalctl inspect {{field:target}}\n```",
+            "~~~~zsh\ninternalctl inspect {{field:target}}\n~~~~",
+            "````powershell title=example\ninternalctl inspect {{field:target}}\n````",
+            "```hcl\nresource \"aws_instance\" \"web\" { ami = {{field:ami}} }\n```",
+            "~~~yaml\napiVersion: v1\ndata: {{field:config}}\n~~~",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let expansion = wayexpand_core::PackExpansionReview {
+                file: "snippets/custom-tool.toml".into(),
+                id: format!("custom_tool_{index}"),
+                trigger: format!(";custom{index}"),
+                description: "Run an internal operations tool".into(),
+                replacement: replacement.into(),
+                command: None,
+            };
+
+            let findings = operational_field_findings(&[expansion], &[]);
+            assert_eq!(findings.len(), 1, "fence or format {replacement:?}");
+            assert!(findings[0]["key"].as_str().is_some());
+        }
+    }
+
+    #[test]
+    fn operational_fields_require_validation_or_an_explicit_free_text_reason() {
+        let unreviewed = wayexpand_core::PackExpansionReview {
+            file: "snippets/firewall.toml".into(),
+            id: "firewall".into(),
+            trigger: ";firewall".into(),
+            description: "Firewall rule".into(),
+            replacement: "nft add rule {{field:chain=filter}}".into(),
+            command: None,
+        };
+        let justified = wayexpand_core::PackExpansionReview {
+            replacement:
+                "nft add rule {{field:comment=maintenance window|required|free_text=true}}".into(),
+            ..unreviewed.clone()
+        };
+        let validated = wayexpand_core::PackExpansionReview {
+            replacement: "firewall-cmd --zone={{field:zone=public|required|validate=dns-label}}"
+                .into(),
+            ..unreviewed.clone()
+        };
+
+        let findings = operational_field_findings(&[unreviewed, justified, validated], &[]);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0]["key"], "field:chain");
+    }
+
+    #[test]
+    fn narrative_service_fields_are_not_mistaken_for_commands() {
+        let support_notice = wayexpand_core::PackExpansionReview {
+            file: "snippets/replies.toml".into(),
+            id: "maintenance_notice".into(),
+            trigger: ";maintenance-notice".into(),
+            description: "Announce a maintenance window".into(),
+            replacement: "Scheduled maintenance: {{field:service=service name}}".into(),
+            command: None,
+        };
+        assert!(operational_field_findings(&[support_notice], &[]).is_empty());
+
+        let command = wayexpand_core::PackExpansionReview {
+            file: "snippets/service.toml".into(),
+            id: "service_restart".into(),
+            trigger: ";restart-service".into(),
+            description: "Restart a service".into(),
+            replacement: "sudo -u root service {{field:unit}} restart".into(),
+            command: None,
+        };
+        assert_eq!(operational_field_findings(&[command], &[]).len(), 1);
+    }
+
+    #[test]
+    fn ip_and_socket_diagnostic_fields_are_not_skipped_by_lint() {
+        let unvalidated_ip = wayexpand_core::PackExpansionReview {
+            file: "snippets/network.toml".into(),
+            id: "network".into(),
+            trigger: ";route".into(),
+            description: "Inspect a route".into(),
+            replacement: "ip route get {{field:destination}}".into(),
+            command: None,
+        };
+        let unvalidated_socket = wayexpand_core::PackExpansionReview {
+            replacement: "ss -lntp {{field:port}}".into(),
+            ..unvalidated_ip.clone()
+        };
+
+        let findings = operational_field_findings(&[unvalidated_ip, unvalidated_socket], &[]);
+        assert_eq!(findings.len(), 2);
+        assert!(findings
+            .iter()
+            .any(|finding| finding["key"] == "field:destination"));
+        assert!(findings
+            .iter()
+            .any(|finding| finding["key"] == "field:port"));
+    }
+
+    #[test]
+    fn declared_pack_tools_extend_operational_field_detection() {
+        let expansion = wayexpand_core::PackExpansionReview {
+            file: "snippets/storage.toml".into(),
+            id: "storage".into(),
+            trigger: ";disk".into(),
+            description: "Inspect a filesystem".into(),
+            replacement: "df -hT -- {{field:path=/var|required}}".into(),
+            command: None,
+        };
+        let tools = vec!["df".to_owned()];
+
+        let findings = operational_field_findings(&[expansion], &tools);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0]["key"], "field:path");
+    }
 
     #[test]
     fn reviewed_catalog_packs_pass_lint_and_output_tests() {

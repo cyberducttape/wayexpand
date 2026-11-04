@@ -465,6 +465,16 @@ impl ExpansionEngine {
         true
     }
 
+    /// Whether this configuration has enabled command expansions or hotkeys
+    /// that need the asynchronous command runtime.
+    pub fn requires_async_workers(&self) -> bool {
+        self.config
+            .expansion
+            .iter()
+            .any(|expansion| expansion.enabled && expansion.command.is_some())
+            || self.config.hotkey.iter().any(|hotkey| hotkey.enabled)
+    }
+
     /// Return completed command expansions that are still safe to apply.
     /// Any intervening input, focus, pause, or window event advances the
     /// generation and causes late output to be discarded rather than erasing
