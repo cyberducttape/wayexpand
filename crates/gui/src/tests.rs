@@ -40,7 +40,9 @@ fn route_recommendation_preserves_ibus_topology() {
     let shared_route = wayexpand_backend_selection::recommended_route(&ibus_only, true, |_| true)
         .expect("IBus is recommended when it is the only route");
     assert_eq!(shared_route.id(), "ibus");
-    let route = route_recommendation(shared_route).expect("the IBus route contract is supported");
+    let plan = wayexpand_backend_selection::plan_routes(&ibus_only, true, |_| true);
+    let route = route_recommendation(shared_route, Some(&plan))
+        .expect("the IBus route contract is supported");
     assert_eq!(route.capture, wayexpand_core::BackendKind::InputMethodV2);
     assert_eq!(route.injection, wayexpand_core::BackendKind::InputMethodV2);
     assert_eq!(route.capture_label, "ibus");

@@ -81,7 +81,10 @@ struct RouteRecommendation {
     certified: bool,
 }
 
-fn route_recommendation(route: RecommendedRoute) -> Option<RouteRecommendation> {
+fn route_recommendation(
+    route: RecommendedRoute,
+    route_plan: Option<&wayexpand_backend_selection::RoutePlan>,
+) -> Option<RouteRecommendation> {
     let contract = route.contract();
     let backend_kind = |backend: RouteBackend| match backend {
         RouteBackend::IBus | RouteBackend::InputMethodV2 => {
@@ -93,13 +96,32 @@ fn route_recommendation(route: RecommendedRoute) -> Option<RouteRecommendation> 
     };
     let capture = backend_kind(contract.capture_backend()?);
     let injection = backend_kind(contract.injection_backend()?);
+    let assessment = route_plan
+        .and_then(|plan| {
+            plan.routes
+                .iter()
+                .find(|planned| planned.contract.id == route.id())
+        })
+        .map(|planned| &planned.assessment);
+    let state = match assessment.map(|assessment| assessment.supported) {
+        Some(wayexpand_backend_selection::AssessmentEvidence::Yes) => BackendState::Available,
+        Some(wayexpand_backend_selection::AssessmentEvidence::No) => BackendState::Unavailable,
+        Some(wayexpand_backend_selection::AssessmentEvidence::RequiresAction) => {
+            BackendState::RequiresPermission
+        }
+        Some(wayexpand_backend_selection::AssessmentEvidence::Unknown) | None => {
+            BackendState::Implemented
+        }
+    };
     Some(RouteRecommendation {
         capture,
         injection,
         capture_label: &contract.capture,
         injection_label: &contract.injection,
-        capture_state: BackendState::Available,
-        injection_state: BackendState::Available,
+        // These are probe-derived support states, not claims that a daemon is
+        // connected or that a target application has passed certification.
+        capture_state: state,
+        injection_state: state,
         focus_tracking: contract.focus_tracking,
         sensitive_fields: contract.sensitive_fields,
         atomic_replace: contract.atomic_replace,
@@ -203,6 +225,7 @@ struct GuiApp {
     route_state: Option<runtime::RouteState>,
     diagnostics_open: bool,
     diagnostics_close_requested: bool,
+    test_expansion_dialog_open: bool,
     backend_test_help_open: bool,
     service_restart_confirm_open: bool,
     service_restart_unit: Option<String>,
@@ -574,6 +597,7 @@ impl GuiApp {
             route_state: None,
             diagnostics_open: false,
             diagnostics_close_requested: false,
+            test_expansion_dialog_open: false,
             backend_test_help_open: false,
             service_restart_confirm_open: false,
             service_restart_unit: None,

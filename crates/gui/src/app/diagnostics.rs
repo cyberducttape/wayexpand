@@ -66,6 +66,7 @@ impl GuiApp {
             self.diagnostics_open = open;
         }
         self.render_support_export(ctx, palette);
+        self.render_test_expansion_dialog(ctx, palette);
         self.render_backend_test_help(ctx, palette);
         self.render_service_restart_confirmation(ctx, palette);
         self.render_reset_dialog(ctx, palette);
@@ -1039,10 +1040,12 @@ impl GuiApp {
             });
             ui.horizontal_wrapped(|ui| {
                 ui.strong("Test Expansion");
-                ui.colored_label(palette.accent, "Matcher test is local and side-effect free");
-                if ui.button("Test matcher").clicked() {
-                    self.diagnostics_close_requested = true;
-                    self.try_live_open = true;
+                ui.colored_label(
+                    palette.accent,
+                    "Choose a local matcher check or a real desktop check",
+                );
+                if ui.button("Test Expansion…").clicked() {
+                    self.test_expansion_dialog_open = true;
                 }
             });
             if let Some(route) = self.recommended_route {
@@ -1150,6 +1153,65 @@ impl GuiApp {
             open = false;
         }
         self.backend_test_help_open = open;
+    }
+
+    fn render_test_expansion_dialog(&mut self, ctx: &egui::Context, palette: &Palette) {
+        if !self.test_expansion_dialog_open {
+            return;
+        }
+        let mut open = self.test_expansion_dialog_open;
+        let mut close = false;
+        let desktop_test_command = self
+            .selected_index()
+            .and_then(|index| self.config.expansion.get(index))
+            .filter(|expansion| {
+                expansion.enabled
+                    && expansion.command.is_none()
+                    && !expansion.replacement.contains("{{")
+            })
+            .map(|expansion| {
+                let trigger = expansion.trigger.replace('\'', "'\\''");
+                format!("wayexpand debug --test '{trigger}'")
+            });
+        egui::Window::new("Test Expansion")
+            .id(egui::Id::new("test_expansion_mode_picker"))
+            .order(egui::Order::Foreground)
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .default_width(520.0)
+            .show(ctx, |ui| {
+                ui.label(RichText::new("Matcher Test").strong());
+                ui.label("Checks the loaded snippets and template rendering locally. It does not read keyboard input or modify another application.");
+                if ui.button("Open Matcher Test").clicked() {
+                    self.diagnostics_close_requested = true;
+                    self.try_live_open = true;
+                    close = true;
+                }
+                ui.separator();
+                ui.label(RichText::new("Desktop Test").strong());
+                ui.label("Checks the real capture and output route in a text field. The test never presses Enter. Actual target text must be visually confirmed; protocol acceptance alone is not proof of insertion.");
+                if ui.button("Open Desktop Test and diagnostics").clicked() {
+                    self.diagnostics_close_requested = true;
+                    self.backend_test_help_open = true;
+                    close = true;
+                }
+                if let Some(command) = &desktop_test_command {
+                    if ui.button("Copy desktop test command").clicked() {
+                        ui.ctx().copy_text(command.clone());
+                    }
+                } else {
+                    ui.label("Select an enabled static snippet to get a one-shot desktop test command. Templated and command-backed snippets are excluded.");
+                }
+                ui.colored_label(palette.warning, "If the matcher succeeds but desktop insertion fails, inspect the Input and Output route assessment and run the guided backend checks.");
+                if ui.button("Close").clicked() {
+                    close = true;
+                }
+            });
+        if close {
+            open = false;
+        }
+        self.test_expansion_dialog_open = open;
     }
 
     fn render_service_restart_confirmation(&mut self, ctx: &egui::Context, palette: &Palette) {

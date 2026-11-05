@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add a GUI Test Expansion mode chooser that keeps local matcher preview
+  separate from interactive desktop testing. The desktop path exposes the
+  one-shot `wayexpand debug --test` command for a selected enabled static
+  snippet, warns that insertion must be visually verified, and directs
+  failures to backend diagnostics. Onboarding route labels now use support
+  evidence from the live route plan rather than assuming a recommended route
+  is available.
 - Add config generation and reload diagnostics to daemon status (schemas 28–29): active config path/generation, successful activation timestamps, enabled/disabled counts, sanitized reload validation errors, per-route reconnect state/reason/backoff and connection timestamps, last successful insertion, bounded event counters/drop totals, and output queue p50/p95/p99. Invalid candidates preserve the previous active generation.
 
 - Add `wayexpand check --all [--json]` for CI-oriented static configuration
