@@ -23,6 +23,7 @@ const HISTORY_LIMIT: usize = 8;
 const FAILURE_STATUS_LIMIT: usize = 3;
 const OUTCOME_STATUS_LIMIT: usize = 4;
 static SUPPRESSED_EXPANSIONS_TOTAL: AtomicU64 = AtomicU64::new(0);
+static TRANSACTION_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Number of matched expansions denied by a policy, safety gate, or
 /// preparation failure before reaching the output backend.
@@ -32,6 +33,7 @@ pub(crate) fn suppressed_expansions_total() -> u64 {
 
 #[derive(Clone, Debug)]
 pub(crate) struct FailureTrace {
+    transaction_id: String,
     at_unix: u64,
     backend: String,
     trigger_recognized: &'static str,
@@ -97,6 +99,7 @@ impl<'a> TracedInjector<'a> {
         };
         let transaction_phases = phases.iter().map(|phase| phase.as_str()).collect();
         push(FailureTrace {
+            transaction_id: next_transaction_id(),
             at_unix: now_unix(),
             backend: self.stages.backend,
             trigger_recognized: "yes",
@@ -125,6 +128,7 @@ pub(crate) fn record_blocked_expansion(backend: &str, reason: &'static str) {
         .take(64)
         .collect::<String>();
     push(FailureTrace {
+        transaction_id: next_transaction_id(),
         at_unix: now_unix(),
         backend,
         trigger_recognized: "yes",
@@ -208,6 +212,13 @@ fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| duration.as_secs())
+}
+
+/// Opaque process-local correlation key. It is independent of user text and
+/// is included only in the bounded output-transaction history.
+fn next_transaction_id() -> String {
+    let sequence = TRANSACTION_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{:x}-{:x}", std::process::id(), sequence)
 }
 
 impl TextInjector for TracedInjector<'_> {
@@ -357,6 +368,7 @@ fn traces_json<'a>(traces: impl Iterator<Item = &'a FailureTrace>) -> String {
     let traces = traces
         .map(|trace| {
             serde_json::json!({
+                "transaction_id": trace.transaction_id,
                 "at_unix": trace.at_unix,
                 "backend": trace.backend,
                 "trigger_recognized": trace.trigger_recognized,
@@ -385,6 +397,7 @@ fn traces_json<'a>(traces: impl Iterator<Item = &'a FailureTrace>) -> String {
 pub(crate) fn saturate_for_test() {
     for _ in 0..HISTORY_LIMIT {
         push(FailureTrace {
+            transaction_id: next_transaction_id(),
             at_unix: u64::MAX,
             backend: "wlroots-virtual-keyboard".into(),
             trigger_recognized: "yes",
@@ -458,6 +471,7 @@ mod tests {
         push_history(
             &mut history,
             FailureTrace {
+                transaction_id: next_transaction_id(),
                 at_unix: 1,
                 backend: "evict-check".into(),
                 trigger_recognized: "yes",
@@ -476,6 +490,7 @@ mod tests {
             push_history(
                 &mut history,
                 FailureTrace {
+                    transaction_id: next_transaction_id(),
                     at_unix: 2,
                     backend: "mock-output".into(),
                     trigger_recognized: "yes",
@@ -599,11 +614,23 @@ mod tests {
             .unwrap();
         assert!(block.get("trigger").is_none());
         assert!(block.get("replacement").is_none());
+        assert!(block["transaction_id"]
+            .as_str()
+            .is_some_and(|id| id.contains('-')));
         assert!(outcomes.as_array().unwrap().iter().any(|trace| {
             trace["backend"] == "input-method-v2"
                 && trace["completion"] == "command timed out before output"
                 && trace["insertion_attempted"] == false
         }));
+    }
+
+    #[test]
+    fn correlation_ids_are_unique_and_independent_of_content() {
+        let first = next_transaction_id();
+        let second = next_transaction_id();
+        assert_ne!(first, second);
+        assert!(!first.contains("trigger"));
+        assert!(!second.contains("replacement"));
     }
 
     #[test]

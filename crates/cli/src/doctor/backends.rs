@@ -29,8 +29,21 @@ pub(crate) fn print_evdev_consent_diagnostics() -> bool {
         Some(marker) if marker.exists() => true,
         marker => {
             println!("evdev service: enabled but inert; its consent marker is missing");
-            if let Some(marker) = marker {
-                println!("  After reviewing docs/BACKENDS_SENSITIVE_FIELDS.md, create it with: install -m 0600 /dev/null {}", marker.display());
+            let legacy = crate::setup::legacy_evdev_consent_marker()
+                .filter(|legacy| Some(legacy) != marker.as_ref() && legacy.exists());
+            match (&marker, legacy) {
+                // Older installers honored XDG_CONFIG_HOME; the unit never did.
+                (Some(marker), Some(legacy)) => println!(
+                    "  Your consent is at its old location {}; move it where the service checks: mv {} {}",
+                    legacy.display(),
+                    legacy.display(),
+                    marker.display()
+                ),
+                (Some(marker), None) => println!(
+                    "  After reviewing docs/BACKENDS_SENSITIVE_FIELDS.md, create it with: install -m 0600 /dev/null {}",
+                    marker.display()
+                ),
+                (None, _) => {}
             }
             println!("  Or disable it: systemctl --user disable wayexpand-evdev.service");
             false
@@ -151,9 +164,9 @@ pub(crate) fn print_backend_diagnostics(include_experimental_input_method: bool)
         false
     };
     let evdev_readable = live_capabilities.has_dev_input;
-    // libei needs a RemoteDesktop portal with EIS support (or an explicit
-    // LIBEI_SOCKET); probing the portal would pop a consent dialog, so this
-    // only recognizes desktops known to ship one.
+    // Portal authorization is interactive. This desktop-name check is only a
+    // provider candidate hint and is never counted as interface availability,
+    // authorization, EIS connection, or injection readiness.
     let libei_plausible = libei_portal_candidate();
 
     // These are non-invasive protocol probes, not end-to-end typing tests.

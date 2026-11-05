@@ -4,7 +4,71 @@
 
 ---
 
-Start with a non-invasive diagnostic snapshot:
+Start with the unified, content-free diagnostic report:
+
+```sh
+wayexpand debug
+wayexpand debug --json
+wayexpand debug --trigger ';http503'
+wayexpand debug --test ';hello'
+```
+
+For a short live session, explicitly enable sanitized event counters and let
+the session expire automatically (60 seconds by default, at most 300 seconds):
+
+```sh
+wayexpand debug --live
+wayexpand debug --live --seconds 120
+```
+
+Live output reports route-state changes, aggregate input-event counts, IBus
+activity counters, and output transaction IDs/states. It never records key
+values, triggers, replacement text, or clipboard contents. JSON live output is
+newline-delimited event records. A debug report does not certify insertion in
+an application; test a harmless expansion in each application class you rely
+on. A successful GTK test does not certify Qt, Electron, terminal, browser,
+remote-desktop, or sandboxed-app behavior.
+
+`debug --test TRIGGER` is an interactive desktop integration check for an
+enabled, static, non-command snippet. Review the expected text first with
+`wayexpand preview`, select the target application class, and confirm before
+typing the trigger. It waits for sanitized capture/output evidence and then
+asks you to confirm exact visible text. It never presses Enter, never retries
+an uncertain output, and does not claim coverage beyond the one test session.
+
+Finding IDs such as `WX-CONFIG-001`, `WX-IBUS-002`, `WX-INPUT-001`,
+`WX-OUTPUT-001`, `WX-SERVICE-002`, and `WX-VERSION-001` are stable references
+for support reports and automation.
+
+### WX-PORTAL-001
+
+**Portal authorization required.**
+
+WayExpand has not established the requested RemoteDesktop/EIS session. Review
+the portal prompt and approve only when you intentionally started a libei test
+or selected a route that needs it. To request a fresh session, run
+`wayexpand backend test --injection`; to clear a saved restoration token, run
+`wayexpand portal reset`. This permission does not grant evdev access.
+
+### WX-INPUT-001
+
+**Input route unavailable.**
+
+The active route cannot currently provide usable matching input. Run
+`wayexpand debug`, `wayexpand backend profile --current`, and
+`wayexpand setup --check --json`. Review the reported live capabilities and
+policy separately from the desktop profile; a profile is guidance, not proof
+that a protocol is available or certified.
+
+### WX-OUTPUT-001
+
+**Output route unavailable.**
+
+Inspect `wayexpand status` and `wayexpand debug`. If an earlier insertion is
+reported partial or uncertain, inspect the target application's text before
+retrying. Never replay an output whose effects are uncertain.
+
+For detailed backend and service snapshots:
 
 ```sh
 wayexpand --version

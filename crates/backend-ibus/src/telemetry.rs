@@ -21,6 +21,7 @@ pub const IBUS_STATUS_SCHEMA: u32 = 1;
 const STATUS_FILE_NAME: &str = "wayexpand-ibus-status.json";
 const MAX_RECENT_FIELDS: usize = 8;
 const MAX_STATUS_BYTES: u64 = 64 * 1024;
+static TRANSACTION_ID_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// What the focused client last reported about the field's type.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -123,6 +124,9 @@ pub struct IbusStatus {
     pub totals: IbusTotals,
     /// Most recent last.
     pub recent_fields: Vec<IbusFieldActivity>,
+    /// Opaque ID for the most recently emitted expansion, unrelated to text.
+    #[serde(default)]
+    pub last_transaction_id: Option<String>,
 }
 
 #[derive(Debug)]
@@ -166,6 +170,7 @@ impl IbusTelemetry {
                     engines: 0,
                     totals: IbusTotals::default(),
                     recent_fields: Vec::new(),
+                    last_transaction_id: None,
                 },
                 fields: VecDeque::new(),
                 dirty: true,
@@ -265,8 +270,14 @@ impl IbusTelemetry {
     }
 
     pub fn expansion(&self, field: Option<u64>) {
+        let transaction_id = format!(
+            "{:x}-{:x}",
+            std::process::id(),
+            TRANSACTION_ID_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        );
         self.update(|state| {
-            state.status.totals.expansions = state.status.totals.expansions.saturating_add(1)
+            state.status.totals.expansions = state.status.totals.expansions.saturating_add(1);
+            state.status.last_transaction_id = Some(transaction_id);
         });
         self.update_field(field, |field| {
             field.expansions = field.expansions.saturating_add(1)
@@ -534,6 +545,21 @@ mod tests {
             (MAX_RECENT_FIELDS + 3) as u64
         );
         assert_eq!(status.recent_fields.iter().filter(|f| f.focused).count(), 1);
+    }
+
+    #[test]
+    fn expansion_telemetry_exposes_only_an_opaque_transaction_id() {
+        let telemetry = IbusTelemetry::new();
+        let field = Some(telemetry.focus_in(None));
+        telemetry.expansion(field);
+        let status = telemetry.snapshot();
+        let id = status
+            .last_transaction_id
+            .expect("emitted expansion has an ID");
+        assert!(id.contains('-'));
+        assert_eq!(status.totals.expansions, 1);
+        assert!(!id.contains("trigger"));
+        assert!(!id.contains("replacement"));
     }
 
     #[test]

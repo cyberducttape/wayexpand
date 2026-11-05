@@ -126,7 +126,67 @@ pub struct IbusChainReport {
     pub activity: Option<IbusStatusReading>,
 }
 
+/// The separate conditions that "the IBus route works" is made of. Each
+/// one is evidence for the next, but none implies the ones after it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+pub struct IbusReadiness {
+    /// The component manifest is where the running IBus reads it.
+    pub component_installed: bool,
+    /// IBus' live registry lists the engine.
+    pub registered: bool,
+    /// An ibus-daemon is running for this user.
+    pub ibus_running: bool,
+    /// WayExpand is the active (global) input method.
+    pub selected: bool,
+    /// The engine process is running and publishing activity.
+    pub engine_running: bool,
+    /// A field sent keys and reported its text, so triggers can be verified.
+    pub text_received: bool,
+    /// At least one expansion was committed since the engine started.
+    pub expanded: bool,
+}
+
+impl IbusReadiness {
+    /// Stable names, in order, for display.
+    pub fn stages(&self) -> [(&'static str, bool); 7] {
+        [
+            ("component_installed", self.component_installed),
+            ("registered", self.registered),
+            ("ibus_running", self.ibus_running),
+            ("selected", self.selected),
+            ("engine_running", self.engine_running),
+            ("text_received", self.text_received),
+            ("expanded", self.expanded),
+        ]
+    }
+}
+
 impl IbusChainReport {
+    /// Each readiness condition on its own, from the checks and the engine's
+    /// published activity.
+    pub fn readiness(&self) -> IbusReadiness {
+        let passed = |id: &str| {
+            self.check(id)
+                .is_some_and(|check| check.state == IbusCheckState::Pass)
+        };
+        let live = self.activity.as_ref().filter(|reading| reading.live);
+        IbusReadiness {
+            component_installed: passed("component") && passed("manifest"),
+            registered: passed("registered"),
+            ibus_running: passed("daemon"),
+            selected: passed("selected"),
+            engine_running: live.is_some(),
+            text_received: live.is_some_and(|reading| {
+                reading.status.recent_fields.iter().any(|field| {
+                    field.keys > 0
+                        && field.content_type == crate::telemetry::IbusContentTypeState::Normal
+                        && field.surrounding_nonempty
+                })
+            }),
+            expanded: live.is_some_and(|reading| reading.status.totals.expansions > 0),
+        }
+    }
+
     /// True when no link is broken.
     pub fn ready(&self) -> bool {
         self.checks
@@ -750,6 +810,28 @@ mod tests {
             process.component_directories(),
             (vec![PathBuf::from("/a"), PathBuf::from("/b")], true)
         );
+    }
+
+    #[test]
+    fn readiness_reports_each_condition_separately() {
+        let report = IbusChainReport {
+            desktop: IbusDesktop::Unknown,
+            checks: vec![
+                check("component", "", IbusCheckState::Pass, "", None),
+                check("manifest", "", IbusCheckState::Pass, "", None),
+                check("registered", "", IbusCheckState::Pass, "", None),
+                check("daemon", "", IbusCheckState::Pass, "", None),
+                check("selected", "", IbusCheckState::Warn, "", None),
+            ],
+            activity: None,
+        };
+        let readiness = report.readiness();
+        // Installed and registered says nothing about selection, a running
+        // engine, received text, or expansion.
+        assert!(readiness.component_installed && readiness.registered && readiness.ibus_running);
+        assert!(!readiness.selected);
+        assert!(!readiness.engine_running && !readiness.text_received && !readiness.expanded);
+        assert_eq!(readiness.stages().len(), 7);
     }
 
     #[test]

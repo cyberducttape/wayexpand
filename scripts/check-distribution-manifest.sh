@@ -5,8 +5,10 @@ set -eu
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 for relative in \
     desktop/wayexpand-ibus.xml \
+    installer-components.toml \
     systemd/wayexpand-input-method.service \
     systemd/wayexpand-evdev.service \
+    systemd/wayexpand-control.service \
     systemd/wayexpand-action-broker.service \
     scripts/test-kwin-e2e.sh \
     scripts/kwin-e2e-session.sh \
@@ -17,6 +19,33 @@ for relative in \
     udev/69-wayexpand-evdev-uaccess.rules; do
     test -f "$project_dir/$relative" || {
         printf '%s\n' "missing required asset: $relative" >&2
+        exit 1
+    }
+done
+
+# The machine-readable component contract is shipped by every supported
+# package path, and its required payload entries must appear in each recipe.
+for manifest in "$project_dir/debian/rules" "$project_dir/PKGBUILD" \
+    "$project_dir/wayexpand.spec" "$project_dir/scripts/install-user.sh" \
+    "$project_dir/scripts/install-release.sh" "$project_dir/scripts/package-release-binaries.sh"; do
+    grep -q -F 'installer-components.toml' "$manifest" || {
+        printf '%s\n' "installer does not ship the shared component contract: $manifest" >&2
+        exit 1
+    }
+done
+for component in cli gui daemon ibus desktop icon default_config control_service input_method_service; do
+    grep -q -E "^\\[components\\.${component}\\]$" "$project_dir/installer-components.toml" || {
+        printf '%s\n' "shared installer contract is missing required component: $component" >&2
+        exit 1
+    }
+    grep -A3 -E "^\\[components\\.${component}\\]$" "$project_dir/installer-components.toml" | grep -q '^required = true$' || {
+        printf '%s\n' "shared installer contract must mark $component required" >&2
+        exit 1
+    }
+done
+for contract_field in current_link config user_units binary_links uninstall upgrade path_note; do
+    grep -q "^${contract_field} =" "$project_dir/installer-components.toml" || {
+        printf '%s\n' "installer contract is missing lifecycle field: $contract_field" >&2
         exit 1
     }
 done
@@ -152,7 +181,7 @@ fi
 # for user installs.
 # Distro packages install binaries in /usr/bin, so every packaged service must
 # be rewritten, including the Action Broker.
-package_units='wayexpand-input-method.service wayexpand-evdev.service wayexpand-action-broker.service'
+package_units='wayexpand-input-method.service wayexpand-evdev.service wayexpand-control.service wayexpand-action-broker.service'
 unit_rewrite="sed -i -e 's#%h/.local/lib/wayexpand/current/bin/#/usr/bin/#g' -e 's#%h/.local/bin/#/usr/bin/#g'"
 spec_transform=$(awk -v prefix="$unit_rewrite" 'index($0, prefix) == 1 { printing = 1 } printing && /^install/ { exit } printing { print }' "$project_dir/wayexpand.spec")
 [ -n "$spec_transform" ] || {
@@ -184,6 +213,11 @@ grep -Fx 'ExecStart=/usr/bin/wayexpand-daemon --source=input-method' \
 grep -Fx 'ExecStart=/usr/bin/wayexpand-daemon --source=evdev --backend=libei --allow-evdev-sensitive-fields' \
     "$staged_units/wayexpand-evdev.service" >/dev/null || {
     printf '%s\n' 'staged evdev unit does not use /usr/bin/wayexpand-daemon' >&2
+    exit 1
+}
+grep -Fx 'ExecStart=/usr/bin/wayexpand-daemon --source=stdin --backend=libei' \
+    "$staged_units/wayexpand-control.service" >/dev/null || {
+    printf '%s\n' 'staged control unit does not use /usr/bin/wayexpand-daemon' >&2
     exit 1
 }
 grep -Fx 'ExecStart=/usr/bin/wayexpand-action-broker --config %h/.config/wayexpand/broker.toml --socket %t/wayexpand-broker.sock' \

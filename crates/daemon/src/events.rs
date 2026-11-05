@@ -47,6 +47,16 @@ pub(crate) fn process_event_with_pending_buffer(
     pending_results: &mut Vec<wayexpand_core::PendingExpansionResult>,
     ready_results: &mut Vec<ExpansionResult>,
 ) -> std::result::Result<(), Box<EventError>> {
+    if matches!(
+        &event,
+        InputEvent::TextChar(_)
+            | InputEvent::Text(_)
+            | InputEvent::Key(_)
+            | InputEvent::Backspace
+            | InputEvent::Delimiter(_)
+    ) {
+        crate::status::record_input_event();
+    }
     if let InputEvent::Key(chord) = event {
         pending_results.clear();
         ready_results.clear();

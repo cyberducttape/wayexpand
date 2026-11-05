@@ -15,8 +15,11 @@ for argument in "$@"; do
         --service=wayexpand-evdev.service)
             service_name=wayexpand-evdev.service
             ;;
+        --service=wayexpand-control.service)
+            service_name=wayexpand-control.service
+            ;;
         --help|-h)
-            printf '%s\n' "usage: $0 [--enable] [--service=wayexpand-input-method.service|wayexpand-evdev.service]"
+            printf '%s\n' "usage: $0 [--enable] [--service=wayexpand-input-method.service|wayexpand-evdev.service|wayexpand-control.service]"
             printf '%s\n' "  --enable   daemon-reload and enable the selected user service"
             printf '%s\n' "  --service  select the service when --enable is used"
             exit 0
@@ -65,6 +68,28 @@ unit_dir="$config_home/systemd/user"
 application_dir="$HOME/.local/share/applications"
 metainfo_dir="$HOME/.local/share/metainfo"
 man_dir="$HOME/.local/share/man/man1"
+# One consent-marker location for the CLI, installers, doctor, GUI and the
+# unit: systemd evaluates ConditionPathExists before any XDG environment
+# applies, so the marker never follows XDG_CONFIG_HOME. The evdev unit is
+# inert without it, and systemd reports a skipped condition as success, so
+# refuse rather than report an enabled service that never runs; never create
+# the marker here.
+evdev_marker="$HOME/.config/wayexpand/evdev-sensitive-fields-ack"
+legacy_evdev_marker="$config_dir/evdev-sensitive-fields-ack"
+if [ "$enable_service" -eq 1 ] && [ "$service_name" = wayexpand-evdev.service ] \
+    && [ ! -e "$evdev_marker" ]; then
+    printf '%s\n' "error: wayexpand-evdev.service only starts after you accept that it captures password fields" >&2
+    if [ "$legacy_evdev_marker" != "$evdev_marker" ] && [ -e "$legacy_evdev_marker" ]; then
+        printf '%s\n' "found your consent at its old location $legacy_evdev_marker; move it to the location the service checks:" >&2
+        printf '%s\n' "  install -d -m 0700 $HOME/.config/wayexpand" >&2
+        printf '%s\n' "  mv $legacy_evdev_marker $evdev_marker" >&2
+    else
+        printf '%s\n' "review docs/BACKENDS_SENSITIVE_FIELDS.md, then create the marker and rerun:" >&2
+        printf '%s\n' "  install -d -m 0700 $HOME/.config/wayexpand" >&2
+        printf '%s\n' "  install -m 0600 /dev/null $evdev_marker" >&2
+    fi
+    exit 2
+fi
 case "$config_home" in
     /*) ;;
     *)
@@ -141,6 +166,7 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 install -d -m 0755 "$stage_dir/bin" "$stage_dir/systemd" "$stage_dir/desktop" "$stage_dir/ibus" \
+    "$stage_dir/share/wayexpand" \
     "$stage_dir/libexec/wayexpand-certification/bin"
 for binary in wayexpand-daemon wayexpand-action-broker wayexpand wayexpand-ui wayexpand-gui wayexpand-ibus; do
     install -m 0755 "$target_dir/release/$binary" "$stage_dir/bin/$binary"
@@ -158,6 +184,7 @@ install -m 0644 "$project_dir/scripts/e2e-lib.sh" \
 install -m 0644 "$project_dir"/systemd/*.service "$stage_dir/systemd/"
 install -m 0644 "$project_dir/desktop/wayexpand.desktop" "$stage_dir/desktop/wayexpand.desktop"
 install -m 0644 "$project_dir/desktop/wayexpand-ibus.xml" "$stage_dir/ibus/wayexpand.xml"
+install -m 0644 "$project_dir/installer-components.toml" "$stage_dir/share/wayexpand/installer-components.toml"
 payload_hash=$("$project_dir/scripts/hash-install-payload.sh" "$stage_dir")
 if [ "${#payload_hash}" -ne 64 ]; then
     printf '%s\n' 'error: could not determine a valid install payload hash' >&2
@@ -198,6 +225,12 @@ if [ "$enable_service" -eq 1 ] && systemctl --user is-enabled "$service_name" >/
     service_was_enabled=1
 fi
 previous_version=$(readlink "$library_dir/current" 2>/dev/null || true)
+if [ -n "$previous_version" ]; then
+    install -d -m 0700 "$state_dir"
+    rollback_tmp="$state_dir/previous-install-$$"
+    (umask 077; printf '%s\n' "$previous_version" > "$rollback_tmp")
+    mv -f "$rollback_tmp" "$state_dir/previous-install"
+fi
 next_link="$library_dir/.current-$$"
 version_switch_started=0
 restore_previous_version() {
@@ -235,7 +268,7 @@ for binary in wayexpand-daemon wayexpand-action-broker wayexpand wayexpand-ui wa
     ln -sfn "$library_dir/current/bin/$binary" "$bin_dir/$binary"
 done
 install -d -m 0755 "$unit_dir" "$application_dir"
-for unit in wayexpand-input-method.service wayexpand-evdev.service wayexpand-action-broker.service; do
+for unit in wayexpand-input-method.service wayexpand-evdev.service wayexpand-control.service wayexpand-action-broker.service; do
     ln -sfn "$library_dir/current/systemd/$unit" "$unit_dir/$unit"
 done
 # ibus-daemon never reads per-user component directories, so a manifest
@@ -311,15 +344,19 @@ printf '%s\n' ""
 printf '%s\n' "5. Edit snippets:"
 printf '%s\n' "   wayexpand edit"
 printf '%s\n' ""
-printf '%s\n' "The stdin test harness is not installed as a user service."
+printf '%s\n' "The stdin test harness is not installed as a user service; wayexpand-control.service provides the control socket beside IBus."
 
 if command -v systemctl >/dev/null 2>&1; then
-    for active_service in wayexpand-input-method.service wayexpand-evdev.service; do
+    active_upgrade=0
+    for active_service in wayexpand-input-method.service wayexpand-evdev.service wayexpand-control.service wayexpand-action-broker.service; do
         if systemctl --user is-active --quiet "$active_service" 2>/dev/null; then
-            printf '%s\n' "Active service $active_service still uses its current process; restart it after this upgrade:"
-            printf '%s\n' "  systemctl --user restart $active_service"
+            active_upgrade=1
         fi
     done
+    if [ "$active_upgrade" -eq 1 ]; then
+        printf '%s\n' 'An active WayExpand service still uses its current process. After this installation finishes, run:'
+        printf '%s\n' '  wayexpand upgrade --apply'
+    fi
 fi
 
 if [ "$enable_service" -eq 1 ]; then

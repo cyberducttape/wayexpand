@@ -70,14 +70,85 @@ fn finish_setup_process(
     Ok(status)
 }
 
+fn run_user_systemctl(
+    arguments: &[&str],
+    timeout: Duration,
+    cancelled: &AtomicBool,
+) -> Result<std::process::ExitStatus, String> {
+    let mut command = std::process::Command::new("systemctl");
+    configure_process_group(&mut command);
+    let child = command
+        .args(arguments)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|error| format!("could not start systemctl: {error}"))?;
+    let mut supervisor = ChildSupervisor::new(child);
+    let deadline = Instant::now() + timeout;
+    loop {
+        if cancelled.load(Ordering::Acquire) {
+            supervisor.kill_group();
+            let _ = supervisor.reap();
+            return Err("Service operation cancelled".into());
+        }
+        match supervisor.has_exited() {
+            Ok(true) => return supervisor.reap().map_err(|error| error.to_string()),
+            Ok(false) if Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(25));
+            }
+            Ok(false) => {
+                supervisor.kill_group();
+                let cleanup = supervisor.reap();
+                return Err(format!(
+                    "systemctl {} timed out; process cleanup {}",
+                    arguments.join(" "),
+                    if cleanup.is_ok() {
+                        "completed"
+                    } else {
+                        "failed"
+                    }
+                ));
+            }
+            Err(error) => {
+                supervisor.kill_group();
+                let cleanup = supervisor.reap();
+                return Err(format!(
+                    "could not monitor systemctl {} ({error}); process cleanup {}",
+                    arguments.join(" "),
+                    if cleanup.is_ok() {
+                        "completed"
+                    } else {
+                        "failed"
+                    }
+                ));
+            }
+        }
+    }
+}
+
 impl GuiApp {
     /// One-click setup: run `wayexpand setup --yes`, which configures only
     /// the safe Recommended mode (never raw keyboard access), off the UI
     /// thread, then refresh the daemon status.
     pub(crate) fn start_setup(&mut self) {
+        self.start_cli_task(
+            vec!["setup".into(), "--yes".into()],
+            self.strings.status_setup_running().to_owned(),
+            self.strings.status_setup_done().to_owned(),
+        );
+    }
+
+    pub(crate) fn start_cli_task(
+        &mut self,
+        arguments: Vec<String>,
+        running_message: String,
+        success_message: String,
+    ) {
         if self.setup_task.is_some() {
             return;
         }
+        self.cli_task_kind = None;
         let (sender, receiver) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
         let worker_cancel = Arc::clone(&cancel);
@@ -89,13 +160,13 @@ impl GuiApp {
             .filter(|path| path.is_file())
             .unwrap_or_else(|| PathBuf::from("wayexpand"));
         let spawned = thread::Builder::new()
-            .name("wayexpand-setup".into())
+            .name("wayexpand-cli-task".into())
             .spawn(move || {
                 let result = (|| {
                     let mut command = std::process::Command::new(&cli);
                     configure_process_group(&mut command);
                     let mut child = command
-                        .args(["setup", "--yes"])
+                        .args(&arguments)
                         .stdin(std::process::Stdio::null())
                         .stdout(std::process::Stdio::piped())
                         .stderr(std::process::Stdio::piped())
@@ -104,7 +175,7 @@ impl GuiApp {
                             if error.kind() == std::io::ErrorKind::NotFound {
                                 format!("could not find the `wayexpand` CLI at {} or on PATH; install WayExpand's CLI package and reopen the GUI", cli.display())
                             } else {
-                                format!("could not start WayExpand setup: {error}")
+                                format!("could not start WayExpand command: {error}")
                             }
                         })?;
                     let mut stdout = child
@@ -166,8 +237,12 @@ impl GuiApp {
             });
         match spawned {
             Ok(_) => {
-                self.setup_task = Some(SetupTask { receiver, cancel });
-                self.status = Status::info(self.strings.status_setup_running());
+                self.setup_task = Some(SetupTask {
+                    receiver,
+                    cancel,
+                    success_message,
+                });
+                self.status = Status::info(running_message);
             }
             Err(error) => {
                 self.status = Status::error(self.strings.status_setup_failed(&error.to_string()))
@@ -199,10 +274,26 @@ impl GuiApp {
         };
         match task.receiver.try_recv() {
             Ok(result) => {
+                let success_message = task.success_message.clone();
                 self.setup_task = None;
                 self.status = match result {
-                    Ok(_) => Status::success(self.strings.status_setup_done()),
+                    Ok(output) => {
+                        self.last_cli_task_output = Some(output.clone());
+                        match self.cli_task_kind.take().as_deref() {
+                            Some("restore-check") => {
+                                self.restore_preview = serde_json::from_str(&output).ok();
+                                self.restore_confirmed = false;
+                            }
+                            Some("restore-apply") => {
+                                self.restore_preview = None;
+                                self.restore_confirmed = false;
+                            }
+                            _ => {}
+                        }
+                        Status::success(success_message)
+                    }
                     Err(detail) => {
+                        self.cli_task_kind = None;
                         // Setup's own report names the broken link; show the
                         // same checks here instead of a one-line error.
                         self.diagnostics_open = true;
@@ -217,6 +308,56 @@ impl GuiApp {
             Err(mpsc::TryRecvError::Disconnected) => {
                 self.setup_task = None;
                 self.status = Status::error(self.strings.status_setup_failed("worker stopped"));
+            }
+        }
+    }
+
+    pub(crate) fn start_service_restart(&mut self, unit: String) {
+        if self.setup_task.is_some() {
+            return;
+        }
+        let (sender, receiver) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let worker_cancel = Arc::clone(&cancel);
+        let worker_unit = unit.clone();
+        let spawned = thread::Builder::new()
+            .name("wayexpand-service-restart".into())
+            .spawn(move || {
+                let result = (|| {
+                    let active = run_user_systemctl(
+                        &["--user", "is-active", "--quiet", worker_unit.as_str()],
+                        Duration::from_secs(5),
+                        &worker_cancel,
+                    )?;
+                    if !active.success() {
+                        return Err(format!(
+                            "{worker_unit} is not active; refusing to start a different route implicitly"
+                        ));
+                    }
+                    let status = run_user_systemctl(
+                        &["--user", "restart", worker_unit.as_str()],
+                        Duration::from_secs(60),
+                        &worker_cancel,
+                    )?;
+                    if status.success() {
+                        Ok(worker_unit)
+                    } else {
+                        Err(format!("systemctl exited with {status}"))
+                    }
+                })();
+                let _ = sender.send(result);
+            });
+        match spawned {
+            Ok(_) => {
+                self.setup_task = Some(SetupTask {
+                    receiver,
+                    cancel,
+                    success_message: format!("{unit} restarted; refreshing diagnostics."),
+                });
+                self.status = Status::info(format!("Restarting {unit}…"));
+            }
+            Err(error) => {
+                self.status = Status::error(format!("Could not start service restart: {error}"))
             }
         }
     }

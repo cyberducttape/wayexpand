@@ -8,6 +8,7 @@ pub(crate) enum CliErrorKind {
     Config,
     Daemon,
     Operational,
+    Health(u8),
 }
 
 #[derive(Debug)]
@@ -57,6 +58,7 @@ pub(crate) fn exit_code_for(error: &anyhow::Error) -> i32 {
         Some(CliErrorKind::Config) => EXIT_CONFIG,
         Some(CliErrorKind::Daemon) => EXIT_DAEMON,
         Some(CliErrorKind::Operational) | None => 1,
+        Some(CliErrorKind::Health(code)) => i32::from(code),
     }
 }
 

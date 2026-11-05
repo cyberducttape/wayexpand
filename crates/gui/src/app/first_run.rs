@@ -89,6 +89,7 @@ impl GuiApp {
             "input-method" | "input-method-v2" => {
                 Some("systemctl --user restart wayexpand-input-method.service")
             }
+            "stdin" => Some("systemctl --user restart wayexpand-control.service"),
             _ => None,
         };
         let injection = self

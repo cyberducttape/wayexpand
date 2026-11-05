@@ -1110,6 +1110,32 @@ impl Strings {
             Language::German => format!("{keys} Tasten · {expansions} Erweiterung(en)"),
         }
     }
+    pub fn ibus_readiness_stage(&self, stage: &str) -> &'static str {
+        match (stage, self.lang) {
+            ("component_installed", Language::English) => "component installed",
+            ("component_installed", Language::Indonesian) => "komponen terpasang",
+            ("component_installed", Language::German) => "Komponente installiert",
+            ("registered", Language::English) => "registered with IBus",
+            ("registered", Language::Indonesian) => "terdaftar di IBus",
+            ("registered", Language::German) => "bei IBus registriert",
+            ("ibus_running", Language::English) => "IBus running",
+            ("ibus_running", Language::Indonesian) => "IBus berjalan",
+            ("ibus_running", Language::German) => "IBus läuft",
+            ("selected", Language::English) => "selected",
+            ("selected", Language::Indonesian) => "dipilih",
+            ("selected", Language::German) => "ausgewählt",
+            ("engine_running", Language::English) => "engine running",
+            ("engine_running", Language::Indonesian) => "mesin berjalan",
+            ("engine_running", Language::German) => "Engine läuft",
+            ("text_received", Language::English) => "text received",
+            ("text_received", Language::Indonesian) => "teks diterima",
+            ("text_received", Language::German) => "Text empfangen",
+            ("expanded", Language::English) => "expanded",
+            ("expanded", Language::Indonesian) => "terekspansi",
+            ("expanded", Language::German) => "erweitert",
+            _ => "",
+        }
+    }
 }
 
 #[cfg(test)]

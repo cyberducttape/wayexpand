@@ -1,0 +1,52 @@
+# Shared user-install contract. Package recipes and install-check tests should
+# keep these runtime components in sync. Optional raw capture is consent-gated.
+[components.cli]
+path = "bin/wayexpand"
+required = true
+
+[components.gui]
+path = "bin/wayexpand-gui"
+required = true
+
+[components.daemon]
+path = "bin/wayexpand-daemon"
+required = true
+
+[components.ibus]
+path = "ibus/wayexpand.xml"
+required = true
+registration = "${XDG_DATA_HOME:-~/.local/share}/ibus/component/wayexpand.xml"
+
+[components.desktop]
+path = "desktop/wayexpand.desktop"
+required = true
+
+[components.icon]
+path = "icons/hicolor/128x128/apps/wayexpand.png"
+required = true
+
+[components.default_config]
+path = "expansions.toml"
+required = true
+
+[components.control_service]
+path = "systemd/wayexpand-control.service"
+required = true
+
+[components.input_method_service]
+path = "systemd/wayexpand-input-method.service"
+required = true
+
+[components.evdev_service]
+path = "systemd/wayexpand-evdev.service"
+required = false
+requires_consent = true
+
+[installation]
+current_link = "~/.local/lib/wayexpand/current"
+config = "${XDG_CONFIG_HOME:-~/.config}/wayexpand/expansions.toml"
+user_units = "${XDG_CONFIG_HOME:-~/.config}/systemd/user"
+binary_links = "~/.local/bin"
+uninstall = "scripts/uninstall-user.sh"
+upgrade = "content-addressed current symlink with previous-install rollback target"
+path_note = "~/.local/bin must be present in PATH for per-user installs"

@@ -6,9 +6,31 @@ use std::thread;
 use std::time::{Duration, Instant};
 use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
 
-const SETUP_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
+const DEFAULT_SETUP_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn setup_command_timeout(program: &str, arguments: &[&str]) -> Duration {
+    let joined = arguments.join(" ");
+    if program == "systemctl"
+        && (joined.contains(" is-active ")
+            || joined.starts_with("--user is-active")
+            || joined.contains(" is-enabled "))
+    {
+        Duration::from_secs(5)
+    } else if (program == "systemctl" && joined.contains(" restart "))
+        || (program == "ibus" && (joined == "restart" || joined == "exit"))
+    {
+        Duration::from_secs(60)
+    } else if program == "systemctl"
+        && (joined.contains("daemon-reload") || joined.contains("enable"))
+    {
+        Duration::from_secs(20)
+    } else {
+        DEFAULT_SETUP_COMMAND_TIMEOUT
+    }
+}
 
 pub(crate) fn run_setup_command(program: &str, arguments: &[&str]) -> Result<ExitStatus> {
+    let timeout = setup_command_timeout(program, arguments);
     let mut command = Command::new(program);
     configure_process_group(&mut command);
     let child = command
@@ -16,7 +38,7 @@ pub(crate) fn run_setup_command(program: &str, arguments: &[&str]) -> Result<Exi
         .spawn()
         .map_err(|error| anyhow::anyhow!("could not start {program}: {error}"))?;
     let mut supervisor = ChildSupervisor::new(child);
-    let deadline = Instant::now() + SETUP_COMMAND_TIMEOUT;
+    let deadline = Instant::now() + timeout;
     loop {
         match supervisor.has_exited() {
             Ok(true) => {
@@ -28,12 +50,31 @@ pub(crate) fn run_setup_command(program: &str, arguments: &[&str]) -> Result<Exi
             Ok(false) if Instant::now() < deadline => {
                 thread::sleep(Duration::from_millis(25));
             }
-            Ok(false) | Err(_) => {
+            Ok(false) => {
                 supervisor.kill_group();
-                let _ = supervisor.reap();
+                let cleanup = supervisor.reap();
                 bail!(
-                    "{program} {} timed out or could not be monitored",
-                    arguments.join(" ")
+                    "{program} {} timed out after {} seconds; process-group cleanup {}",
+                    arguments.join(" "),
+                    timeout.as_secs(),
+                    if cleanup.is_ok() {
+                        "completed"
+                    } else {
+                        "failed"
+                    }
+                );
+            }
+            Err(error) => {
+                supervisor.kill_group();
+                let cleanup = supervisor.reap();
+                bail!(
+                    "could not monitor {program} {} ({error}); process-group cleanup {}",
+                    arguments.join(" "),
+                    if cleanup.is_ok() {
+                        "completed"
+                    } else {
+                        "failed"
+                    }
                 );
             }
         }
@@ -95,7 +136,7 @@ pub(crate) fn setup_backend_for_mode(
             }
             if !capabilities.has_direct_libei_socket && !libei_portal_candidate() {
                 bail!(
-                    "Maximum compatibility requires a detected libei/EIS path or a KDE/GNOME portal candidate"
+                    "Maximum compatibility needs a direct EIS socket or a desktop provider candidate; a candidate is not proof that the portal is installed, available, or authorized"
                 )
             }
             if !setup_backend_allowed(policy, "evdev") {
@@ -126,6 +167,7 @@ pub(crate) fn setup_backend_for_mode(
                 route.standing,
                 wayexpand_backend_selection::RouteStanding::Available
                     | wayexpand_backend_selection::RouteStanding::Recommended
+                    | wayexpand_backend_selection::RouteStanding::RequiresConsent
             ) {
                 bail!(
                     "Experimental mode is unavailable for this compositor: {}",
@@ -144,6 +186,9 @@ pub(crate) fn libei_portal_candidate() -> bool {
     if std::env::var_os("LIBEI_SOCKET").is_some() {
         return false;
     }
+    // This is a discovery hint only. It allows an explicit setup flow to
+    // proceed to the authorization step; it must never be treated as EIS
+    // availability, connection, or injection readiness.
     std::env::var("XDG_CURRENT_DESKTOP")
         .unwrap_or_default()
         .to_ascii_lowercase()
@@ -177,14 +222,24 @@ pub(crate) fn configure_setup_backend(
     }
     match backend {
         "ibus" => crate::setup_ibus::configure_ibus(options)?,
-        "input-method" => enable_user_service("wayexpand-input-method.service")?,
+        "input-method" => {
+            println!("Input Method v2 setup: protocol discovery does not establish portal availability, authorization, EIS connection, or verified injection.");
+            if libei_portal_candidate() && std::env::var_os("LIBEI_SOCKET").is_none() {
+                println!("A desktop portal may request authorization when the service connects.");
+            }
+            enable_user_service("wayexpand-input-method.service")?
+        }
         "evdev" => {
+            println!("Compatibility mode: Maximum");
+            println!("Advantage: global keyboard capture can reach applications that do not use a supported input method.");
+            println!("Limitations:");
+            println!("  - Requires access to keyboard event devices and observes keyboard input globally.");
             println!(
-                "Warning: evdev is an explicit compatibility fallback, not the recommended setup."
+                "  - Cannot reliably identify password fields or verify text before replacing it."
             );
-            println!("It observes every keyboard event, including password fields; it has no password-field signal.");
-            println!("Portal consent may be requested by libei; raw-input permissions are not changed by setup.");
-            println!("Its keystroke output cannot see the text it erases, so typed expansions stay refused until you allow it:");
+            println!("  - libei may request desktop portal authorization. A KDE/GNOME desktop name only identifies a possible provider; it does not prove the portal is available or authorized.");
+            println!("Recommended for operators who understand and accept these limitations.");
+            println!("Typed expansions remain refused until you explicitly allow the compatibility mode:");
             println!("  set compatibility_mode = \"tracked-focus\" (KDE window tracker confirms focus before typing)");
             println!("  or \"untracked-focus\" under [settings], or use Settings > Engine in wayexpand-gui.");
             // The unit is inert without the consent marker, and systemd
@@ -212,6 +267,19 @@ pub(crate) fn configure_setup_backend(
 /// The marker `wayexpand-evdev.service` requires through
 /// `ConditionPathExists=%h/.config/...`. systemd expands `%h` to the home
 /// directory regardless of `XDG_CONFIG_HOME`, so this path does too.
+/// Where older installers looked for the marker when
+/// `XDG_CONFIG_HOME` was customized. The unit never read it; diagnostics use
+/// it only to tell the user where to move their consent.
+pub(crate) fn legacy_evdev_consent_marker() -> Option<PathBuf> {
+    env::var_os("XDG_CONFIG_HOME")
+        .filter(|value| !value.is_empty())
+        .map(|config| PathBuf::from(config).join("wayexpand/evdev-sensitive-fields-ack"))
+}
+
+/// The one evdev consent-marker location shared by setup, doctor, the GUI,
+/// the installers and the unit's `ConditionPathExists`. It is fixed under
+/// `$HOME/.config` because systemd evaluates unit conditions before any
+/// `XDG_CONFIG_HOME` environment applies.
 pub(crate) fn evdev_consent_marker() -> Option<PathBuf> {
     env::var_os("HOME")
         .filter(|home| !home.is_empty())
@@ -245,4 +313,30 @@ pub(crate) fn enable_user_service(service: &str) -> Result<()> {
     println!("Enabled and started {service}.");
     println!("Run `wayexpand status` and `wayexpand doctor` to verify the live integration.");
     Ok(())
+}
+
+#[cfg(test)]
+mod timeout_tests {
+    use super::setup_command_timeout;
+    use std::time::Duration;
+
+    #[test]
+    fn setup_deadlines_follow_operation_cost() {
+        assert_eq!(
+            setup_command_timeout("systemctl", &["--user", "is-active", "unit"]),
+            Duration::from_secs(5)
+        );
+        assert_eq!(
+            setup_command_timeout("systemctl", &["--user", "restart", "unit"]),
+            Duration::from_secs(60)
+        );
+        assert_eq!(
+            setup_command_timeout("systemctl", &["--user", "daemon-reload"]),
+            Duration::from_secs(20)
+        );
+        assert_eq!(
+            setup_command_timeout("unknown", &["operation"]),
+            Duration::from_secs(30)
+        );
+    }
 }

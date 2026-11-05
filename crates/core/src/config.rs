@@ -105,6 +105,22 @@ impl std::fmt::Debug for ConfigRevision {
     }
 }
 
+impl ConfigRevision {
+    /// Stable content identifier for binding a review step to an apply step.
+    /// The digest discloses no configuration text and prevents an apply from
+    /// silently using a backup or active file changed after preview.
+    pub fn fingerprint(&self) -> String {
+        use sha2::Digest;
+        use std::fmt::Write as _;
+        let digest = sha2::Sha256::digest(self.0.as_bytes());
+        let mut encoded = String::with_capacity(64);
+        for byte in digest {
+            let _ = write!(encoded, "{byte:02x}");
+        }
+        format!("sha256:{encoded}")
+    }
+}
+
 #[derive(Debug)]
 pub struct LoadedConfig {
     pub config: Config,

@@ -2,6 +2,56 @@
 
 **Navigation:** [Home](../README.md) > [Getting Started](GETTING_STARTED.md) > **Operations**
 
+## Operational health and setup deadlines
+
+`wayexpand health` reports whether the local configuration and live daemon can
+currently match expansions and whether the output worker is healthy. Its
+versioned JSON contract is available with `wayexpand health --json`
+(`schema_version: 1`). Exit codes are stable for monitoring: 0 ready, 1
+degraded, 2 daemon unavailable, 3 invalid configuration, 4 authorization
+required, and 5 internal error. “Ready” reports negotiated runtime operation
+only; it does not mean that a compositor/client combination has passed
+production certification.
+
+The GUI Diagnostics window provides quick actions for opening setup, editing
+configuration, running the local matcher preview, reviewing desktop-test
+instructions, refreshing version/capability evidence, and restarting the
+currently selected user service after confirmation. It never grants raw-input
+access or portal authorization. The desktop-test instructions distinguish
+one-shot evdev/libei checks from an end-to-end test of the currently selected
+route; an operator must still verify output in the target application.
+
+Setup subprocess deadlines depend on the operation: service-state probes have
+a five-second limit, unit enable/reload operations have a twenty-second limit,
+service or IBus restarts have a sixty-second limit, and other setup commands
+retain a thirty-second limit. Timeout errors say whether process-group cleanup
+completed; nonzero command exits remain distinct from timeouts.
+
+## Scoped recovery and configuration restore
+
+`wayexpand reset --integration|--services|--preferences --check` previews a
+scoped recovery operation. Applying requires `--apply --yes`. Integration
+reset disables installed WayExpand user services and removes remembered evdev
+and portal consent; services reset only disables services; preferences reset
+backs up and removes `gui-prefs.toml`. None of these operations removes the
+expansion library. The GUI Diagnostics panel offers the same preview and
+confirmation flow.
+
+Use `wayexpand backup [config] [destination]` to export a private, no-overwrite
+copy. Review a restore first with `wayexpand restore <backup> --check --json`;
+it validates the candidate and reports added, removed, and modified triggers
+plus settings/hotkey changes, and prints an apply command bound to the reviewed
+configuration and backup fingerprints. Run that exact command to create a
+pre-restore backup, atomically replace the active configuration only if
+neither file changed since review, then request daemon reload. The
+GUI Backup / Restore panel exposes the same review-before-apply workflow.
+
+Desktop profiles are inspected with `wayexpand backend profile --current`.
+Profiles link the shared route catalog to permissions, setup steps, known
+limitations, verified-application records, and certification status. The live
+recommendation is separately computed from capability probes and policy; a
+desktop name is not proof that its listed route is available.
+
 ## Configuration profiles
 
 Profiles are separate primary TOML libraries stored in the private
@@ -290,7 +340,14 @@ wayexpand-daemon --version
 
 ```sh
 wayexpand doctor [config]
+wayexpand check --all --json
+wayexpand config show --json
+wayexpand config validate --json
+wayexpand config diff --json old.toml new.toml
+wayexpand service status --json
 wayexpand certify --json
+wayexpand compatibility-report
+wayexpand compatibility-report --json
 wayexpand backend
 wayexpand test ';;hello'
 wayexpand preview ':today'
@@ -376,14 +433,52 @@ an unbounded restart loop.
 
 Ordinary installers do not install the stdin harness as `wayexpand.service`.
 That unit remains in the source tree only for deterministic daemon lifecycle
-tests. The packaged services are expert-selected backend units; setup should
-be the first step for a new user:
+tests. Installers and packages ship these daemon units, of which only one runs
+at a time because they share the control socket:
+
+- `wayexpand-input-method.service` — input-method-v2 capture and output.
+- `wayexpand-evdev.service` — raw evdev capture; inert without the consent
+  marker at `~/.config/wayexpand/evdev-sensitive-fields-ack` (a fixed path:
+  systemd checks it before any `XDG_CONFIG_HOME` applies).
+- `wayexpand-control.service` — no keyboard capture; the control socket,
+  quick insert and hotkeys beside the IBus route.
+
+Recovery advice in `wayexpand doctor` names the unit that is actually
+installed and enabled, or recommends `wayexpand setup` when none is. Setup
+should be the first step for a new user:
 
 ```sh
-wayexpand setup
-wayexpand status
-wayexpand edit
+wayexpand install-check --json
+wayexpand setup --check --json
+wayexpand setup --apply
+wayexpand ibus status
 ```
+
+The setup check reports installed artifacts, the current session, and a safe
+route recommendation. It is preflight only; `real_insertion_verified` remains
+false until a user checks a harmless trigger in a focused application. The
+check never grants raw-input access or portal consent. `wayexpand repair
+--check` reports missing user-unit links, and `wayexpand repair --apply` only
+creates links for the packaged control and input-method services before
+reloading the user systemd manager. It does not enable or start either service.
+
+User-scoped content-addressed installs preserve the previous payload across an
+upgrade. After installing a newer payload, run:
+
+```sh
+wayexpand upgrade --check --json
+wayexpand upgrade --apply
+```
+
+Apply validates the active configuration, restarts the active managed daemon,
+and verifies daemon build identity and status-protocol compatibility. It also
+restarts an already-active Action Broker. A failed health check restores the
+saved payload where available. `wayexpand upgrade --rollback` explicitly
+restores that payload. Package-manager installations should first be upgraded
+or rolled back with their package manager; `upgrade --rollback` applies only
+when a content-addressed per-user previous payload was saved. An IBus engine
+process belongs to `ibus-daemon`, so restarting the WayExpand user service
+does not reload it; the upgrade report calls out that separate operation.
 
 `wayexpand setup` is an interactive onboarding command. It presents the
 Recommended, Maximum compatibility, and Experimental modes, then selects the
@@ -576,8 +671,12 @@ generate the allowlisted report:
 wayexpand support-bundle --output wayexpand-support.json
 ```
 
-The file is created with mode `0600` and is never overwritten. The report
-contains health and backend capability summaries, but deliberately excludes
-configuration paths, snippet triggers and replacements, policy contents,
-credentials, and raw error strings. Review it before sharing; desktop and
-backend metadata can still identify the general workstation environment.
+The version 2 JSON file is created with mode `0600` and is never overwritten.
+It includes allowlisted route and protocol summaries, bounded IBus and daemon
+event counters, and systemd service state, restart count, exit status, and
+stable error IDs. It deliberately excludes configuration paths, snippet
+triggers and replacements, policy contents, credentials, and raw journal or
+error strings. The GUI's Diagnostics panel offers **Export Support Report**,
+shows the exact JSON for review, then saves it with owner-only permissions.
+Review the report before sharing; desktop and backend metadata can still
+identify the general workstation environment.

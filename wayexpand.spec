@@ -44,6 +44,7 @@ install -Dm755 scripts/kwin-e2e-session.sh %{buildroot}%{_libexecdir}/wayexpand-
 install -Dm644 scripts/e2e-lib.sh %{buildroot}%{_libexecdir}/wayexpand-certification/e2e-lib.sh
 install -Dm644 scripts/kwin-e2e-report.sh %{buildroot}%{_libexecdir}/wayexpand-certification/kwin-e2e-report.sh
 install -Dm644 desktop/wayexpand.desktop %{buildroot}%{_datadir}/applications/wayexpand.desktop
+install -Dm644 installer-components.toml %{buildroot}%{_datadir}/wayexpand/installer-components.toml
 install -Dm644 polkit/org.wayexpand.action.policy %{buildroot}%{_datadir}/polkit-1/actions/org.wayexpand.action.policy
 install -Dm644 desktop/wayexpand-ibus.xml %{buildroot}%{_datadir}/ibus/component/wayexpand-ibus.xml
 install -Dm644 io.github.cyberducttape.WayExpand.metainfo.xml %{buildroot}%{_datadir}/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml
@@ -53,10 +54,12 @@ for size in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
 done
 install -Dm644 systemd/wayexpand-input-method.service %{buildroot}%{_userunitdir}/wayexpand-input-method.service
 install -Dm644 systemd/wayexpand-evdev.service %{buildroot}%{_userunitdir}/wayexpand-evdev.service
+install -Dm644 systemd/wayexpand-control.service %{buildroot}%{_userunitdir}/wayexpand-control.service
 install -Dm644 systemd/wayexpand-action-broker.service %{buildroot}%{_userunitdir}/wayexpand-action-broker.service
 sed -i -e 's#%h/.local/lib/wayexpand/current/bin/#/usr/bin/#g' -e 's#%h/.local/bin/#/usr/bin/#g' \
     %{buildroot}%{_userunitdir}/wayexpand-input-method.service \
     %{buildroot}%{_userunitdir}/wayexpand-evdev.service \
+    %{buildroot}%{_userunitdir}/wayexpand-control.service \
     %{buildroot}%{_userunitdir}/wayexpand-action-broker.service
 install -Dm644 udev/71-wayexpand-evdev.rules %{buildroot}%{_datadir}/wayexpand/udev/71-wayexpand-evdev.rules
 install -Dm644 udev/69-wayexpand-evdev-uaccess.rules %{buildroot}%{_datadir}/wayexpand/udev/69-wayexpand-evdev-uaccess.rules
@@ -84,11 +87,13 @@ install -Dm644 LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
 %{_libexecdir}/wayexpand-certification/kwin-e2e-report.sh
 %{_datadir}/ibus/component/wayexpand-ibus.xml
 %{_datadir}/applications/wayexpand.desktop
+%{_datadir}/wayexpand/installer-components.toml
 %{_datadir}/polkit-1/actions/org.wayexpand.action.policy
 %{_datadir}/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml
 %{_mandir}/man1/wayexpand.1*
 %{_userunitdir}/wayexpand-input-method.service
 %{_userunitdir}/wayexpand-evdev.service
+%{_userunitdir}/wayexpand-control.service
 %{_userunitdir}/wayexpand-action-broker.service
 %{_datadir}/wayexpand/udev/71-wayexpand-evdev.rules
 %{_datadir}/wayexpand/udev/69-wayexpand-evdev-uaccess.rules

@@ -165,11 +165,16 @@ esac
 # IBus never reads per-user component directories; setup installs it.
 [ ! -e "$test_root/home/.local/share/ibus/component/wayexpand.xml" ]
 [ -f "$test_root/home/.local/lib/wayexpand/current/ibus/wayexpand.xml" ]
+[ -f "$test_root/home/.local/lib/wayexpand/current/share/wayexpand/installer-components.toml" ]
 [ -f "$test_root/home/.local/share/applications/wayexpand.desktop" ]
 [ -f "$test_root/home/.local/share/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml" ]
 [ -f "$test_root/home/.local/share/man/man1/wayexpand.1" ]
 [ -f "$test_root/config/systemd/user/wayexpand-input-method.service" ]
 [ -f "$test_root/config/systemd/user/wayexpand-evdev.service" ]
+# IBus setup enables the control-only unit, so every install ships it.
+[ -f "$test_root/config/systemd/user/wayexpand-control.service" ]
+grep -Fx 'ExecStart=%h/.local/lib/wayexpand/current/bin/wayexpand-daemon --source=stdin --backend=libei' \
+    "$test_root/config/systemd/user/wayexpand-control.service" >/dev/null
 [ -f "$test_root/config/systemd/user/wayexpand-action-broker.service" ]
 [ -f "$test_root/config/systemd/user/wayexpand-input-method.service.d/10-xdg-paths.conf" ]
 [ -f "$test_root/config/systemd/user/wayexpand-evdev.service.d/10-xdg-paths.conf" ]
@@ -228,11 +233,15 @@ HOME="$test_root/home" XDG_CONFIG_HOME="$space_config_home" \
 XDG_STATE_HOME="$space_state_home" "$project_dir/scripts/install-user.sh"
 grep -F "Environment=\"XDG_CONFIG_HOME=$space_config_systemd\"" \
     "$space_config_home/systemd/user/wayexpand-evdev.service.d/10-xdg-paths.conf"
-grep -Fx 'ConditionPathExists=' \
-    "$space_config_home/systemd/user/wayexpand-evdev.service.d/10-xdg-paths.conf"
-space_config_condition=$(printf '%s' "$space_config_systemd" | sed 's/ /\\x20/g')
-grep -F "ConditionPathExists=$space_config_condition/wayexpand/evdev-sensitive-fields-ack" \
-    "$space_config_home/systemd/user/wayexpand-evdev.service.d/10-xdg-paths.conf"
+# The consent marker never follows XDG_CONFIG_HOME: the drop-in leaves the
+# unit's fixed %h/.config condition alone, matching the CLI and installers.
+if grep -F 'ConditionPathExists' \
+    "$space_config_home/systemd/user/wayexpand-evdev.service.d/10-xdg-paths.conf"; then
+    printf '%s\n' 'the evdev drop-in must not move the consent-marker condition' >&2
+    exit 1
+fi
+grep -F 'XDG_CONFIG_HOME=' \
+    "$space_config_home/systemd/user/wayexpand-control.service.d/10-xdg-paths.conf"
 grep -F 'config with spaces%%/wayexpand/broker.toml' \
     "$space_config_home/systemd/user/wayexpand-action-broker.service.d/10-xdg-paths.conf"
 

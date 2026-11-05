@@ -30,8 +30,10 @@ install -m 0644 "$project_dir/scripts/e2e-lib.sh" \
     "$release_dir/libexec/wayexpand-certification/"
 install -m 0644 "$project_dir/systemd/wayexpand-input-method.service" "$release_dir/systemd/"
 install -m 0644 "$project_dir/systemd/wayexpand-evdev.service" "$release_dir/systemd/"
+install -m 0644 "$project_dir/systemd/wayexpand-control.service" "$release_dir/systemd/"
 install -m 0644 "$project_dir/systemd/wayexpand-action-broker.service" "$release_dir/systemd/"
 install -m 0644 "$project_dir/desktop/wayexpand.desktop" "$release_dir/desktop/"
+install -m 0644 "$project_dir/installer-components.toml" "$release_dir/installer-components.toml"
 install -m 0644 "$project_dir/desktop/wayexpand-ibus.xml" "$release_dir/ibus/component/"
 install -m 0644 "$project_dir/expansions.toml" "$release_dir/expansions.toml"
 install -m 0600 "$project_dir/broker.toml.example" "$release_dir/broker.toml.example"
@@ -114,11 +116,16 @@ esac
 # IBus never reads per-user component directories; setup installs it.
 [ ! -e "$test_root/home/.local/share/ibus/component/wayexpand.xml" ]
 [ -f "$test_root/home/.local/lib/wayexpand/current/ibus/wayexpand.xml" ]
+[ -f "$test_root/home/.local/lib/wayexpand/current/share/wayexpand/installer-components.toml" ]
 [ -f "$test_root/home/.local/share/applications/wayexpand.desktop" ]
 [ -f "$test_root/home/.local/share/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml" ]
 [ -f "$test_root/home/.local/share/man/man1/wayexpand.1" ]
 [ -f "$test_root/config/systemd/user/wayexpand-input-method.service" ]
 [ -f "$test_root/config/systemd/user/wayexpand-evdev.service" ]
+# IBus setup enables the control-only unit, so every install ships it.
+[ -f "$test_root/config/systemd/user/wayexpand-control.service" ]
+grep -Fx 'ExecStart=%h/.local/lib/wayexpand/current/bin/wayexpand-daemon --source=stdin --backend=libei' \
+    "$test_root/config/systemd/user/wayexpand-control.service" >/dev/null
 [ -f "$test_root/config/systemd/user/wayexpand-action-broker.service" ]
 [ -f "$test_root/config/systemd/user/wayexpand-input-method.service.d/10-xdg-paths.conf" ]
 [ -f "$test_root/config/systemd/user/wayexpand-evdev.service.d/10-xdg-paths.conf" ]
@@ -138,11 +145,27 @@ if PATH="$stub_bin:$PATH" SYSTEMCTL_LOG="$systemctl_log" HOME="$test_root/home" 
     printf '%s\n' 'installer enabled evdev without the consent marker' >&2
     exit 1
 fi
-grep -F 'evdev-sensitive-fields-ack' "$test_root/evdev-no-consent.out" >/dev/null
-grep -F "install -d -m 0700 $test_root/config/wayexpand" \
+# The marker lives at the unit's fixed $HOME/.config path even with a custom
+# XDG_CONFIG_HOME, because systemd checks the condition before any XDG
+# environment applies.
+grep -F "$test_root/home/.config/wayexpand/evdev-sensitive-fields-ack" \
     "$test_root/evdev-no-consent.out" >/dev/null
+# A marker at the old XDG location is not consent the service can see; the
+# installer refuses and says where to move it.
 install -d -m 0700 "$test_root/config/wayexpand"
 install -m 0600 /dev/null "$test_root/config/wayexpand/evdev-sensitive-fields-ack"
+if PATH="$stub_bin:$PATH" SYSTEMCTL_LOG="$systemctl_log" HOME="$test_root/home" \
+    XDG_CONFIG_HOME="$test_root/config" \
+    "$release_dir/scripts/install-release.sh" --enable --service=wayexpand-evdev.service \
+    >"$test_root/evdev-legacy-consent.out" 2>&1; then
+    printf '%s\n' 'installer accepted a consent marker the evdev unit cannot see' >&2
+    exit 1
+fi
+grep -F "mv $test_root/config/wayexpand/evdev-sensitive-fields-ack $test_root/home/.config/wayexpand/evdev-sensitive-fields-ack" \
+    "$test_root/evdev-legacy-consent.out" >/dev/null
+install -d -m 0700 "$test_root/home/.config/wayexpand"
+mv "$test_root/config/wayexpand/evdev-sensitive-fields-ack" \
+    "$test_root/home/.config/wayexpand/evdev-sensitive-fields-ack"
 
 PATH="$stub_bin:$PATH" \
 SYSTEMCTL_LOG="$systemctl_log" \
@@ -153,6 +176,7 @@ XDG_CONFIG_HOME="$test_root/config" \
 grep -F -- '--user daemon-reload' "$systemctl_log" >/dev/null
 grep -F -- '--user enable wayexpand-evdev.service' "$systemctl_log" >/dev/null
 grep -F -- '--user restart wayexpand-evdev.service' "$systemctl_log" >/dev/null
+[ "$(cat "$test_root/home/.local/state/wayexpand/previous-install")" = "$first_version" ]
 
 # A new release whose service fails to start must atomically restore the
 # previously active version.
@@ -250,6 +274,7 @@ grep -F "sudo $release_dir/scripts/install-evdev-permissions.sh --uninstall" "$t
 [ ! -e "$test_root/home/.local/share/man/man1/wayexpand.1" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand-input-method.service" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand-evdev.service" ]
+[ ! -e "$test_root/config/systemd/user/wayexpand-control.service" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand-input-method.service.d/10-xdg-paths.conf" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand-evdev.service.d/10-xdg-paths.conf" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand-action-broker.service.d/10-xdg-paths.conf" ]

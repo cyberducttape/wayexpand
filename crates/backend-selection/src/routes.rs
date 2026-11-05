@@ -1,6 +1,6 @@
 //! Route contracts, availability planning, and organization-policy filtering.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 
 use super::{Capabilities, Compositor};
@@ -57,6 +57,22 @@ pub struct RouteContract {
     pub setup_detail: String,
 }
 
+/// Checked-in operator guidance for one desktop environment. Technical
+/// readiness still comes from the live assessment; this profile only links
+/// that evidence to reviewed setup guidance and known limitations.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DesktopIntegrationProfile {
+    pub id: String,
+    pub desktop: String,
+    pub recommended_route_id: String,
+    pub supported_injection_backends: Vec<String>,
+    pub required_permissions: Vec<String>,
+    pub setup_instructions: Vec<String>,
+    pub known_limitations: Vec<String>,
+    pub verified_applications: Vec<String>,
+    pub last_certification_result: String,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct SensitiveFieldSupport {
     pub implemented: bool,
@@ -87,6 +103,8 @@ impl RouteContract {
 struct RouteCatalog {
     recommended_description: String,
     routes: Vec<RouteContract>,
+    #[serde(default)]
+    desktop_profiles: Vec<DesktopIntegrationProfile>,
 }
 
 static ROUTE_CATALOG: OnceLock<RouteCatalog> = OnceLock::new();
@@ -100,6 +118,16 @@ fn route_catalog() -> &'static RouteCatalog {
 
 pub fn recommended_mode_description() -> &'static str {
     &route_catalog().recommended_description
+}
+
+pub fn desktop_integration_profiles() -> &'static [DesktopIntegrationProfile] {
+    &route_catalog().desktop_profiles
+}
+
+pub fn desktop_integration_profile(id: &str) -> Option<&'static DesktopIntegrationProfile> {
+    desktop_integration_profiles()
+        .iter()
+        .find(|profile| profile.id == id)
 }
 
 pub fn injection_status_label(backend: &str) -> &str {
@@ -179,11 +207,105 @@ impl RouteStanding {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct PlannedRoute {
     pub contract: &'static RouteContract,
     pub standing: RouteStanding,
     pub reason: &'static str,
+    /// Normalized suitability and readiness facts used by CLI and GUI.
+    pub assessment: BackendAssessment,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AssessmentEvidence {
+    Yes,
+    No,
+    Unknown,
+    RequiresAction,
+}
+
+impl AssessmentEvidence {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Yes => "yes",
+            Self::No => "no",
+            Self::Unknown => "unknown",
+            Self::RequiresAction => "requires_action",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BackendLimitation {
+    GlobalKeyboardObservation,
+    NoSensitiveFieldDetection,
+    NonAtomicReplacement,
+    LayoutMayBeUnknown,
+    PortalConsentRequired,
+    NoCertifiedTargetIntegrity,
+}
+
+impl BackendLimitation {
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::GlobalKeyboardObservation => "Requires access to keyboard event devices and observes input globally.",
+            Self::NoSensitiveFieldDetection => "Cannot reliably identify password or other sensitive fields.",
+            Self::NonAtomicReplacement => "Trigger deletion and replacement insertion are separate operations.",
+            Self::LayoutMayBeUnknown => "The active keyboard layout may be unavailable; the route must refuse matching rather than guess.",
+            Self::PortalConsentRequired => "A desktop portal may request authorization before an EIS connection is available.",
+            Self::NoCertifiedTargetIntegrity => "This route has not passed real-session target-integrity certification.",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PortalAuthorization {
+    NotRequested,
+    Granted,
+    Denied,
+    Unknown,
+}
+
+impl PortalAuthorization {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NotRequested => "not_requested",
+            Self::Granted => "granted",
+            Self::Denied => "denied",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PortalProgress {
+    /// Desktop-name discovery is a candidate hint, not a provider probe.
+    pub provider_candidate: bool,
+    /// No non-interactive implementation probe is currently available.
+    pub implementation_discovered: AssessmentEvidence,
+    pub interface_available: AssessmentEvidence,
+    pub authorization: PortalAuthorization,
+    pub direct_eis_socket_configured: bool,
+    pub eis_connected: AssessmentEvidence,
+    pub injection_negotiated: AssessmentEvidence,
+    pub injection_verified: AssessmentEvidence,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BackendAssessment {
+    pub backend_id: &'static str,
+    pub installed: AssessmentEvidence,
+    pub supported: AssessmentEvidence,
+    pub authorized: AssessmentEvidence,
+    pub connected: AssessmentEvidence,
+    pub policy_allowed: bool,
+    pub certified: bool,
+    pub requires_user_action: bool,
+    pub limitations: Vec<BackendLimitation>,
+    pub portal: Option<PortalProgress>,
 }
 
 #[derive(Debug, Clone)]
@@ -214,25 +336,35 @@ fn route_availability(
     capabilities: &Capabilities,
     ibus_available: bool,
 ) -> Result<(), &'static str> {
-    let libei_reachable = capabilities.has_direct_libei_socket
-        || matches!(
-            capabilities.compositor,
-            Compositor::KdePlasma | Compositor::Gnome
-        );
+    let libei_reachable = capabilities.has_direct_libei_socket;
     match route.id.as_str() {
         "ibus" if ibus_available => Ok(()),
         "ibus" => Err("the WayExpand IBus engine is not installed or IBus is unavailable"),
         "input-method-v2" if !capabilities.has_input_method_v2 => {
             Err("the compositor does not offer zwp_input_method_manager_v2")
         }
-        "input-method-v2" if !libei_reachable => {
+        "input-method-v2"
+            if !libei_reachable
+                && !matches!(
+                    capabilities.compositor,
+                    Compositor::KdePlasma | Compositor::Gnome
+                ) =>
+        {
             Err("libei key pass-through is unavailable for the exclusive input-method grab")
         }
         "input-method-v2" => Ok(()),
         _ if route.requires_raw_input() && !capabilities.has_dev_input => {
             Err("no readable /dev/input keyboard")
         }
-        "kde-evdev-libei" if !libei_reachable => Err("no libei/EIS path was detected"),
+        "kde-evdev-libei"
+            if !libei_reachable
+                && !matches!(
+                    capabilities.compositor,
+                    Compositor::KdePlasma | Compositor::Gnome
+                ) =>
+        {
+            Err("no direct EIS socket; desktop candidate discovery is unavailable")
+        }
         "sway-evdev-wlroots" if !capabilities.has_virtual_keyboard => {
             Err("the compositor does not offer the wlroots virtual-keyboard protocol")
         }
@@ -250,23 +382,48 @@ pub fn plan_routes(
         .routes
         .iter()
         .map(|contract| {
+            let policy_allowed = allowed(contract);
             let (standing, reason) =
                 match route_availability(contract, capabilities, ibus_available) {
                     Err(reason) => (RouteStanding::Unavailable, reason),
-                    Ok(()) if !allowed(contract) => (
+                    Ok(()) if !policy_allowed => (
                         RouteStanding::BlockedByPolicy,
                         "organization policy does not allow this route",
                     ),
                     Ok(()) if contract.requires_raw_input() => (
                         RouteStanding::RequiresConsent,
-                        "raw keyboard capture needs explicit consent; never selected automatically",
+                        if uses_libei_passthrough(contract)
+                            && !capabilities.has_direct_libei_socket
+                        {
+                            "portal authorization has not been requested; desktop name is only a provider candidate"
+                        } else {
+                            "raw keyboard capture needs explicit consent; never selected automatically"
+                        },
                     ),
+                    Ok(())
+                        if uses_libei_passthrough(contract)
+                            && !capabilities.has_direct_libei_socket
+                            && matches!(capabilities.compositor, Compositor::KdePlasma | Compositor::Gnome) =>
+                    {
+                        (
+                            RouteStanding::RequiresConsent,
+                            "portal authorization has not been requested; desktop name is only a provider candidate",
+                        )
+                    }
                     Ok(()) => (RouteStanding::Available, "available"),
                 };
+            let assessment = assess_route(
+                contract,
+                capabilities,
+                ibus_available,
+                policy_allowed,
+                standing,
+            );
             PlannedRoute {
                 contract,
                 standing,
                 reason,
+                assessment,
             }
         })
         .collect();
@@ -289,6 +446,120 @@ pub fn plan_routes(
         };
     }
     RoutePlan { routes }
+}
+
+fn assess_route(
+    contract: &'static RouteContract,
+    capabilities: &Capabilities,
+    ibus_available: bool,
+    policy_allowed: bool,
+    standing: RouteStanding,
+) -> BackendAssessment {
+    let portal_candidate = matches!(
+        capabilities.compositor,
+        Compositor::KdePlasma | Compositor::Gnome
+    );
+    let ibus = contract.id == "ibus";
+    let input_method = contract.id == "input-method-v2";
+    let evdev = contract.requires_raw_input();
+    let installed = if ibus {
+        if ibus_available {
+            AssessmentEvidence::Yes
+        } else {
+            AssessmentEvidence::No
+        }
+    } else {
+        // The adapters are compiled into the WayExpand installation. Runtime
+        // availability is represented independently in `supported`.
+        AssessmentEvidence::Yes
+    };
+    let supported = if ibus {
+        if ibus_available {
+            AssessmentEvidence::Yes
+        } else {
+            AssessmentEvidence::No
+        }
+    } else if input_method {
+        if !capabilities.has_input_method_v2 {
+            AssessmentEvidence::No
+        } else if capabilities.has_direct_libei_socket {
+            AssessmentEvidence::Yes
+        } else if portal_candidate {
+            AssessmentEvidence::Unknown
+        } else {
+            AssessmentEvidence::No
+        }
+    } else if evdev && !capabilities.has_dev_input {
+        AssessmentEvidence::No
+    } else if contract.injection == "wlroots-virtual-keyboard" {
+        if capabilities.has_virtual_keyboard {
+            AssessmentEvidence::Yes
+        } else {
+            AssessmentEvidence::No
+        }
+    } else if contract.injection == "libei" && capabilities.has_direct_libei_socket {
+        AssessmentEvidence::Yes
+    } else {
+        AssessmentEvidence::Unknown
+    };
+    let uses_libei = uses_libei_passthrough(contract);
+    let portal = uses_libei.then_some(PortalProgress {
+        provider_candidate: portal_candidate,
+        implementation_discovered: AssessmentEvidence::Unknown,
+        interface_available: AssessmentEvidence::Unknown,
+        authorization: if portal_candidate && !capabilities.has_direct_libei_socket {
+            PortalAuthorization::NotRequested
+        } else {
+            PortalAuthorization::Unknown
+        },
+        direct_eis_socket_configured: capabilities.has_direct_libei_socket,
+        eis_connected: AssessmentEvidence::Unknown,
+        injection_negotiated: AssessmentEvidence::Unknown,
+        injection_verified: AssessmentEvidence::Unknown,
+    });
+    let mut limitations = Vec::new();
+    if evdev {
+        limitations.push(BackendLimitation::GlobalKeyboardObservation);
+        if !contract.sensitive_fields {
+            limitations.push(BackendLimitation::NoSensitiveFieldDetection);
+        }
+        limitations.push(BackendLimitation::LayoutMayBeUnknown);
+    }
+    if !contract.atomic_replace {
+        limitations.push(BackendLimitation::NonAtomicReplacement);
+    }
+    if !contract.is_certified() {
+        limitations.push(BackendLimitation::NoCertifiedTargetIntegrity);
+    }
+    if portal_candidate && uses_libei && !capabilities.has_direct_libei_socket {
+        limitations.push(BackendLimitation::PortalConsentRequired);
+    }
+    BackendAssessment {
+        backend_id: contract.id.as_str(),
+        installed,
+        supported,
+        authorized: match portal.as_ref().map(|progress| progress.authorization) {
+            Some(PortalAuthorization::Granted) => AssessmentEvidence::Yes,
+            Some(PortalAuthorization::Denied) => AssessmentEvidence::No,
+            Some(PortalAuthorization::NotRequested) => AssessmentEvidence::RequiresAction,
+            Some(PortalAuthorization::Unknown) | None => AssessmentEvidence::Unknown,
+        },
+        // Static probes cannot establish that the daemon has connected.
+        connected: AssessmentEvidence::Unknown,
+        policy_allowed,
+        certified: contract.is_certified(),
+        requires_user_action: evdev
+            || standing == RouteStanding::RequiresConsent
+            || portal
+                .as_ref()
+                .is_some_and(|p| p.authorization == PortalAuthorization::NotRequested),
+        limitations,
+        portal,
+    }
+}
+
+fn uses_libei_passthrough(contract: &RouteContract) -> bool {
+    contract.injection == "libei" || contract.id == "input-method-v2"
 }
 
 pub fn setup_backend_allowed(policy: &wayexpand_core::OrganizationPolicy, backend: &str) -> bool {

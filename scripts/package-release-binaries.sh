@@ -69,8 +69,10 @@ install -m 0644 "$project_dir/scripts/e2e-lib.sh" \
     "$root/libexec/wayexpand-certification/"
 install -m 0644 "$project_dir/systemd/wayexpand-input-method.service" \
     "$project_dir/systemd/wayexpand-evdev.service" \
+    "$project_dir/systemd/wayexpand-control.service" \
     "$project_dir/systemd/wayexpand-action-broker.service" "$root/systemd/"
 install -m 0644 "$project_dir/desktop/wayexpand.desktop" "$root/desktop/"
+install -m 0644 "$project_dir/installer-components.toml" "$root/installer-components.toml"
 install -m 0644 "$project_dir/desktop/wayexpand-ibus.xml" "$root/ibus/component/"
 install -m 0644 "$project_dir/io.github.cyberducttape.WayExpand.metainfo.xml" "$root/"
 for size in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do

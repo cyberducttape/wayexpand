@@ -59,8 +59,17 @@ impl GuiApp {
                         .auto_shrink([false, false])
                         .show(ui, |ui| self.render_diagnostics_body(ui, palette));
                 });
+            if self.diagnostics_close_requested {
+                open = false;
+                self.diagnostics_close_requested = false;
+            }
             self.diagnostics_open = open;
         }
+        self.render_support_export(ctx, palette);
+        self.render_backend_test_help(ctx, palette);
+        self.render_service_restart_confirmation(ctx, palette);
+        self.render_reset_dialog(ctx, palette);
+        self.render_config_backup_dialog(ctx, palette);
     }
 
     pub(crate) fn render_diagnostics_body(&mut self, ui: &mut egui::Ui, palette: &Palette) {
@@ -97,13 +106,15 @@ impl GuiApp {
             palette.muted
         };
         ui.label(RichText::new(freshness_text).small().color(freshness_color));
-        let active_route_id = compact_status_value(&self.daemon_status, "route_id");
+        let active_route_id =
+            compact_status_value(&self.daemon_status, "route_id").map(str::to_owned);
         let active_replacement = self
             .daemon_capabilities
             .as_ref()
             .and_then(|capabilities| capabilities.replacement_assurance)
             .map(|assurance| self.strings.replacement_pill(assurance).to_owned());
-        self.render_session_overview(ui, palette, active_route_id);
+        self.render_session_overview(ui, palette, active_route_id.as_deref());
+        self.render_quick_actions(ui, palette);
         self.render_ibus_route(ui, palette);
         ui.collapsing(self.strings.ranked_routes_title(), |ui| {
             ui.label(
@@ -116,7 +127,7 @@ impl GuiApp {
                     ui.group(|ui| {
                         ui.horizontal_wrapped(|ui| {
                             ui.label(RichText::new(&route.contract.label).strong());
-                            if active_route_id == Some(route.contract.id.as_str()) {
+                            if active_route_id.as_deref() == Some(route.contract.id.as_str()) {
                                 ui.colored_label(palette.accent, self.strings.active_route());
                             }
                             let standing = route.standing.as_str();
@@ -140,7 +151,7 @@ impl GuiApp {
                                 "{} capture · {} injection · {} · focus tracking {} · {}",
                                 route.contract.capture,
                                 route.contract.injection,
-                                if active_route_id == Some(route.contract.id.as_str()) {
+                                if active_route_id.as_deref() == Some(route.contract.id.as_str()) {
                                     active_replacement
                                         .as_deref()
                                         .unwrap_or(route.contract.replacement_assurance.as_str())
@@ -157,6 +168,41 @@ impl GuiApp {
                             .small()
                             .color(palette.muted),
                         );
+                        ui.label(RichText::new(format!(
+                            "Assessment · installed: {} · supported: {} · authorization: {} · connection: {} · policy: {} · certification: {}",
+                            route.assessment.installed.as_str(),
+                            route.assessment.supported.as_str(),
+                            route.assessment.authorized.as_str(),
+                            route.assessment.connected.as_str(),
+                            if route.assessment.policy_allowed { "allowed" } else { "blocked" },
+                            if route.assessment.certified { "certified" } else { "not certified" },
+                        )).small().color(palette.muted));
+                        if route.contract.requires_raw_input() {
+                            ui.label(RichText::new("Compatibility mode: Maximum").strong());
+                            ui.label("Advantage: reaches more applications through global keyboard capture.");
+                            ui.label("Recommended for operators who understand and accept these limitations:");
+                        }
+                        if !route.assessment.limitations.is_empty() {
+                            ui.label(RichText::new("Limitations").strong());
+                            for limitation in &route.assessment.limitations {
+                                ui.label(format!("• {}", limitation.description()));
+                            }
+                        }
+                        if let Some(portal) = &route.assessment.portal {
+                            if portal.provider_candidate || portal.direct_eis_socket_configured {
+                                ui.label(RichText::new(format!(
+                                    "Portal/EIS progress: provider candidate {}, implementation {}, interface {}, authorization {}, direct socket {}, EIS connection {}, injection negotiation {}, injection verification {}.",
+                                    portal.provider_candidate,
+                                    portal.implementation_discovered.as_str(),
+                                    portal.interface_available.as_str(),
+                                    portal.authorization.as_str(),
+                                    portal.direct_eis_socket_configured,
+                                    portal.eis_connected.as_str(),
+                                    portal.injection_negotiated.as_str(),
+                                    portal.injection_verified.as_str(),
+                                )).small().color(palette.warning));
+                            }
+                        }
                     });
                 }
             } else {
@@ -165,8 +211,8 @@ impl GuiApp {
         });
         let source = compact_status_value(&self.daemon_status, "source").unwrap_or("unknown");
         let backend = compact_status_value(&self.daemon_status, "backend").unwrap_or("unknown");
-        let route_id = active_route_id;
-        let active_route_certified = route_id
+        let active_route_certified = active_route_id
+            .as_deref()
             .and_then(wayexpand_backend_selection::route_contract_by_id)
             .map(|contract| contract.is_certified());
         let capabilities = self.daemon_capabilities.as_ref();
@@ -195,7 +241,7 @@ impl GuiApp {
                 dashboard_value(
                     &mut columns[0],
                     self.strings.route_id(),
-                    route_id.unwrap_or("unknown"),
+                    active_route_id.as_deref().unwrap_or("unknown"),
                     palette.muted,
                 );
                 let certification_color = match active_route_certified {
@@ -860,6 +906,593 @@ impl GuiApp {
                 }));
             });
         }
+        ui.separator();
+        if ui.button("Export Support Report").clicked() {
+            self.support_export_open = true;
+            self.support_preview = None;
+            self.support_preview_error = None;
+        }
+    }
+
+    fn render_quick_actions(&mut self, ui: &mut egui::Ui, palette: &Palette) {
+        let matching =
+            compact_status_value(&self.daemon_status, "matching_available") == Some("true");
+        let output_ok = compact_status_value(&self.daemon_status, "output_health") == Some("ok");
+        let config_ok = !self.fleet_status.starts_with("invalid:");
+        let active_service = match compact_status_value(&self.daemon_status, "source") {
+            Some("evdev") => Some("wayexpand-evdev.service"),
+            Some("input-method" | "input-method-v2") => Some("wayexpand-input-method.service"),
+            Some("ibus" | "stdin") => Some("wayexpand-control.service"),
+            _ => None,
+        };
+
+        theme::section_header(ui, "", "Quick checks and actions");
+        theme::card(ui, palette, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal_wrapped(|ui| {
+                ui.strong("Installation");
+                ui.colored_label(palette.muted, "Use guided setup checks");
+                if ui.button("Open setup").clicked() {
+                    self.diagnostics_close_requested = true;
+                    self.onboarding_visible = true;
+                    self.refresh_diagnostics(false);
+                }
+            });
+            ui.horizontal_wrapped(|ui| {
+                ui.strong("Configuration");
+                ui.colored_label(
+                    if config_ok {
+                        palette.success
+                    } else {
+                        palette.danger
+                    },
+                    if config_ok {
+                        "Valid"
+                    } else {
+                        "Needs attention"
+                    },
+                );
+                if ui.button("Edit").clicked() {
+                    // The main window is the configuration editor.
+                    self.diagnostics_close_requested = true;
+                }
+            });
+            ui.horizontal_wrapped(|ui| {
+                ui.strong("Recovery");
+                ui.label("Reset integration, services, or GUI preferences with a preview and backup where applicable.");
+                if ui.button("Reset…").clicked() {
+                    self.reset_dialog_open = true;
+                }
+                if ui.button("Backup / restore…").clicked() {
+                    self.config_backup_dialog_open = true;
+                    self.restore_preview = None;
+                    self.restore_confirmed = false;
+                }
+            });
+            ui.horizontal_wrapped(|ui| {
+                ui.strong("Input and output");
+                ui.colored_label(
+                    if matching && output_ok {
+                        palette.success
+                    } else {
+                        palette.warning
+                    },
+                    if matching && output_ok {
+                        "Available"
+                    } else {
+                        "Degraded / unavailable"
+                    },
+                );
+                if ui.button("Test").clicked() {
+                    self.backend_test_help_open = true;
+                }
+            });
+            ui.horizontal_wrapped(|ui| {
+                ui.strong("User service");
+                ui.colored_label(
+                    if self.daemon_reachable == Some(true) {
+                        palette.success
+                    } else {
+                        palette.warning
+                    },
+                    if self.daemon_reachable == Some(true) {
+                        "Daemon responding"
+                    } else {
+                        "Not responding"
+                    },
+                );
+                if let Some(unit) = active_service {
+                    if ui
+                        .add_enabled(self.setup_task.is_none(), egui::Button::new("Restart…"))
+                        .clicked()
+                    {
+                        self.service_restart_unit = Some(unit.to_owned());
+                        self.service_restart_confirm_open = true;
+                    }
+                }
+            });
+            ui.horizontal_wrapped(|ui| {
+                ui.strong("Software versions");
+                let version_state = if self.daemon_reachable != Some(true) {
+                    "Daemon unavailable"
+                } else {
+                    match runtime::daemon_build_state(&self.daemon_status) {
+                        runtime::DaemonBuildState::Current => "CLI and daemon match",
+                        runtime::DaemonBuildState::RestartRequired => "Daemon restart required",
+                        runtime::DaemonBuildState::Unverified => "Version not verified",
+                    }
+                };
+                ui.colored_label(
+                    if version_state == "CLI and daemon match" {
+                        palette.success
+                    } else {
+                        palette.warning
+                    },
+                    version_state,
+                );
+                if ui
+                    .add_enabled(!self.diagnostics_running, egui::Button::new("Check again"))
+                    .clicked()
+                {
+                    self.refresh_diagnostics(true);
+                }
+            });
+            ui.horizontal_wrapped(|ui| {
+                ui.strong("Test Expansion");
+                ui.colored_label(palette.accent, "Matcher test is local and side-effect free");
+                if ui.button("Test matcher").clicked() {
+                    self.diagnostics_close_requested = true;
+                    self.try_live_open = true;
+                }
+            });
+            if let Some(route) = self.recommended_route {
+                ui.separator();
+                ui.label(RichText::new("Capability-based recommendation").strong());
+                ui.label(format!(
+                    "{} — {}. Based on live capability probes and organization policy; desktop name alone is not treated as proof.",
+                    route.contract().label,
+                    route.contract().setup_detail,
+                ));
+            } else {
+                ui.separator();
+                ui.colored_label(
+                    palette.warning,
+                    "No policy-allowed route is currently recommended by the capability probes.",
+                );
+            }
+            let profile_id = self
+                .selection_capabilities
+                .as_ref()
+                .and_then(|capabilities| match capabilities.compositor {
+                    wayexpand_backend_selection::Compositor::KdePlasma => Some("kde-wayland"),
+                    wayexpand_backend_selection::Compositor::Gnome => Some("gnome-wayland"),
+                    wayexpand_backend_selection::Compositor::Sway => Some("sway"),
+                    wayexpand_backend_selection::Compositor::Hyprland => Some("hyprland"),
+                    _ => None,
+                });
+            if let Some(profile) =
+                profile_id.and_then(wayexpand_backend_selection::desktop_integration_profile)
+            {
+                ui.separator();
+                ui.label(
+                    RichText::new(format!("Integration profile · {}", profile.desktop)).strong(),
+                );
+                ui.label(format!(
+                    "Recommended capture route: {} · injection: {}",
+                    profile.recommended_route_id,
+                    profile.supported_injection_backends.join(", "),
+                ));
+                ui.label(
+                    RichText::new(format!(
+                        "Certification: {}",
+                        profile.last_certification_result
+                    ))
+                    .color(palette.warning),
+                );
+                ui.collapsing("Profile details", |ui| {
+                    ui.label(RichText::new("Required permissions").strong());
+                    for item in &profile.required_permissions {
+                        ui.label(format!("• {item}"));
+                    }
+                    ui.label(RichText::new("Setup").strong());
+                    for item in &profile.setup_instructions {
+                        ui.label(format!("• {item}"));
+                    }
+                    ui.label(RichText::new("Known limitations").strong());
+                    for item in &profile.known_limitations {
+                        ui.label(format!("• {item}"));
+                    }
+                    let verified_applications = if profile.verified_applications.is_empty() {
+                        "none".to_owned()
+                    } else {
+                        profile.verified_applications.join(", ")
+                    };
+                    ui.label(format!("Verified applications: {verified_applications}"));
+                });
+            }
+        });
+    }
+
+    fn render_backend_test_help(&mut self, ctx: &egui::Context, palette: &Palette) {
+        if !self.backend_test_help_open {
+            return;
+        }
+        let mut open = self.backend_test_help_open;
+        let mut close_clicked = false;
+        egui::Window::new("Desktop backend test")
+            .id(egui::Id::new("diagnostics_backend_test_help"))
+            .order(egui::Order::Foreground)
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .default_width(500.0)
+            .show(ctx, |ui| {
+                ui.label(RichText::new("Matcher Test").strong());
+                ui.label("Use the editor’s Test matcher action to check a trigger against the loaded configuration. This does not exercise desktop capture or insertion.");
+                ui.label(RichText::new("Desktop Test").strong());
+                ui.label(RichText::new("These one-shot checks test evdev capture and libei injection separately. Capture requires explicit consent and never records key values, though your typing still reaches the focused field. Injection inserts only a harmless marker after confirmation; no deletion or Enter key is sent. Neither test certifies the combined route or a specific application.").color(palette.warning));
+                ui.horizontal_wrapped(|ui| {
+                    for command in ["wayexpand backend test --capture", "wayexpand backend test --injection"] {
+                        if ui.button(format!("Copy: {command}")).clicked() {
+                            ui.ctx().copy_text(command.to_owned());
+                        }
+                    }
+                });
+                if ui.button("Copy portal help: WX-PORTAL-001").clicked() {
+                    ui.ctx().copy_text("wayexpand help finding WX-PORTAL-001".into());
+                }
+                ui.label("Run the copied command in a terminal to complete its consent and target-focus prompts. For the active route, use the harmless tutorial trigger in a normal application and inspect the exact result.");
+                if ui.button("Close").clicked() {
+                    close_clicked = true;
+                }
+            });
+        if close_clicked {
+            open = false;
+        }
+        self.backend_test_help_open = open;
+    }
+
+    fn render_service_restart_confirmation(&mut self, ctx: &egui::Context, palette: &Palette) {
+        if !self.service_restart_confirm_open {
+            return;
+        }
+        let mut open = self.service_restart_confirm_open;
+        let mut close_clicked = false;
+        egui::Window::new("Restart WayExpand service?")
+            .id(egui::Id::new("diagnostics_restart_confirmation"))
+            .order(egui::Order::Foreground)
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .show(ctx, |ui| {
+                let unit = self.service_restart_unit.as_deref().unwrap_or("unknown service");
+                ui.label(format!("Restart {unit} using your user systemd manager?"));
+                ui.colored_label(palette.warning, "The input route may be interrupted briefly. No administrator privileges or keyboard-device permissions will be requested.");
+                ui.horizontal(|ui| {
+                    if ui.button("Restart service").clicked() {
+                        if let Some(unit) = self.service_restart_unit.take() {
+                            self.start_service_restart(unit);
+                        }
+                        close_clicked = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        self.service_restart_unit = None;
+                        close_clicked = true;
+                    }
+                });
+            });
+        if close_clicked {
+            open = false;
+        }
+        self.service_restart_confirm_open = open;
+    }
+
+    fn render_reset_dialog(&mut self, ctx: &egui::Context, palette: &Palette) {
+        if self.reset_dialog_open {
+            let mut open = self.reset_dialog_open;
+            let mut close_clicked = false;
+            egui::Window::new("Preview recovery reset")
+                .id(egui::Id::new("diagnostics_reset_preview"))
+                .order(egui::Order::Foreground)
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .default_width(500.0)
+                .show(ctx, |ui| {
+                    ui.label("Choose one reset scope. Your expansion library is never removed.");
+                    ui.radio_value(&mut self.reset_scope, "integration".into(), "Integration: stop services and clear remembered route consent");
+                    ui.radio_value(&mut self.reset_scope, "services".into(), "Services: stop and disable WayExpand user services only");
+                    ui.radio_value(&mut self.reset_scope, "preferences".into(), "Preferences: back up and reset GUI-only preferences");
+                    ui.separator();
+                    match self.reset_scope.as_str() {
+                        "integration" => {
+                            ui.label("Preview: disable and stop installed WayExpand services; remove the evdev consent marker and saved portal restoration token. Keep configuration and snippets unchanged.");
+                            ui.colored_label(palette.warning, "The next evdev or libei use may require renewed permission. No administrator permission is requested.");
+                        }
+                        "services" => { ui.label("Preview: disable and stop installed WayExpand user services. Configuration, snippets, permissions, and portal token remain unchanged."); }
+                        _ => { ui.label("Preview: create a private backup of gui-prefs.toml, then remove that GUI preference file. Your expansion library is unchanged."); }
+                    }
+                    ui.horizontal(|ui| {
+                        if ui.button("Review and continue…").clicked() {
+                            self.reset_confirm_open = true;
+                        }
+                        if ui.button("Close").clicked() {
+                            close_clicked = true;
+                        }
+                    });
+                });
+            if close_clicked {
+                open = false;
+            }
+            self.reset_dialog_open = open;
+        }
+        if self.reset_confirm_open {
+            let mut open = self.reset_confirm_open;
+            let mut close_clicked = false;
+            egui::Window::new("Confirm reset")
+                .id(egui::Id::new("diagnostics_reset_confirm"))
+                .order(egui::Order::Foreground)
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.colored_label(
+                        palette.warning,
+                        format!(
+                            "Apply the {} reset now? This cannot be undone automatically.",
+                            self.reset_scope
+                        ),
+                    );
+                    ui.horizontal(|ui| {
+                        if ui
+                            .add_enabled(
+                                self.setup_task.is_none(),
+                                egui::Button::new("Apply reset"),
+                            )
+                            .clicked()
+                        {
+                            let completion = if self.reset_scope == "preferences" {
+                                "GUI preferences reset; defaults take effect next launch."
+                                    .to_owned()
+                            } else {
+                                format!(
+                                    "{} reset complete; diagnostics refreshed.",
+                                    self.reset_scope
+                                )
+                            };
+                            self.start_cli_task(
+                                vec![
+                                    "reset".into(),
+                                    format!("--{}", self.reset_scope),
+                                    "--apply".into(),
+                                    "--yes".into(),
+                                ],
+                                format!("Applying {} reset…", self.reset_scope),
+                                completion,
+                            );
+                            close_clicked = true;
+                            self.reset_dialog_open = false;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            close_clicked = true;
+                        }
+                    });
+                });
+            if close_clicked {
+                open = false;
+            }
+            self.reset_confirm_open = open;
+        }
+    }
+
+    fn render_config_backup_dialog(&mut self, ctx: &egui::Context, palette: &Palette) {
+        if !self.config_backup_dialog_open {
+            return;
+        }
+        let mut open = self.config_backup_dialog_open;
+        egui::Window::new("Configuration backup and restore")
+            .id(egui::Id::new("diagnostics_config_backup_restore"))
+            .order(egui::Order::Foreground)
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(true)
+            .default_width(560.0)
+            .show(ctx, |ui| {
+                ui.label("Export creates a private, no-overwrite backup. Restore validates the selected file and previews trigger-level differences before replacing the active configuration. The current configuration is backed up before restore.");
+                ui.separator();
+                ui.label(RichText::new("Export current configuration").strong());
+                if ui.text_edit_singleline(&mut self.config_backup_path).changed() {
+                    self.restore_preview = None;
+                    self.last_cli_task_output = None;
+                }
+                ui.horizontal(|ui| {
+                    if ui.add_enabled(self.setup_task.is_none() && !self.config_backup_path.trim().is_empty(), egui::Button::new("Export backup")).clicked() {
+                        self.start_cli_task(
+                            vec!["backup".into(), self.path.display().to_string(), self.config_backup_path.trim().to_owned()],
+                            "Creating configuration backup…".into(),
+                            "Configuration backup created.".into(),
+                        );
+                    }
+                });
+                ui.separator();
+                ui.label(RichText::new("Review a backup to restore").strong());
+                if ui.text_edit_singleline(&mut self.config_backup_path).changed() {
+                    self.restore_preview = None;
+                    self.last_cli_task_output = None;
+                }
+                if ui.add_enabled(self.setup_task.is_none() && !self.config_backup_path.trim().is_empty(), egui::Button::new("Review differences")).clicked() {
+                    self.restore_preview = None;
+                    self.restore_confirmed = false;
+                    self.start_cli_task(
+                        vec!["restore".into(), self.config_backup_path.trim().to_owned(), "--check".into(), "--json".into()],
+                        "Validating restore backup…".into(),
+                        "Restore preview validated.".into(),
+                    );
+                    self.cli_task_kind = Some("restore-check".into());
+                }
+                if let Some(report) = self.restore_preview.as_ref() {
+                    if report["valid"] == true && report["changes"].is_object() {
+                        ui.colored_label(palette.success, "Backup is valid. Review the differences:");
+                        for (label, key) in [
+                            ("Added", "added_triggers"),
+                            ("Removed", "removed_triggers"),
+                            ("Modified", "modified_triggers"),
+                        ] {
+                            let values = report["changes"][key].as_array().cloned().unwrap_or_default();
+                            ui.label(format!("{label} triggers ({}): {}", values.len(), values.iter().filter_map(serde_json::Value::as_str).collect::<Vec<_>>().join(", ")));
+                        }
+                        ui.label(format!("Settings changed: {}; hotkeys changed: {}", report["changes"]["settings_changed"], report["changes"]["hotkeys_changed"]));
+                        ui.checkbox(&mut self.restore_confirmed, "I reviewed these differences and want to restore this configuration");
+                        if ui.add_enabled(self.setup_task.is_none() && self.restore_confirmed, egui::Button::new("Restore and back up current config")).clicked() {
+                            let current_fingerprint = report["current_fingerprint"].as_str().unwrap_or_default().to_owned();
+                            let backup_fingerprint = report["backup_fingerprint"].as_str().unwrap_or_default().to_owned();
+                            self.start_cli_task(
+                                vec!["restore".into(), self.config_backup_path.trim().to_owned(), "--apply".into(), "--yes".into(), "--json".into(), format!("--expected-current={current_fingerprint}"), format!("--expected-backup={backup_fingerprint}")],
+                                "Restoring configuration…".into(),
+                                "Configuration restored; diagnostics refreshed.".into(),
+                            );
+                            self.cli_task_kind = Some("restore-apply".into());
+                        }
+                    } else {
+                        ui.colored_label(palette.danger, "Restore validation did not return an applicable backup report.");
+                    }
+                }
+                if let Some(output) = self.last_cli_task_output.as_deref() {
+                    ui.label(RichText::new(output).small().color(palette.muted));
+                }
+                if self.setup_task.is_some() { ui.spinner(); }
+            });
+        self.config_backup_dialog_open = open;
+    }
+
+    fn render_support_export(&mut self, ctx: &egui::Context, palette: &Palette) {
+        if !self.support_export_open {
+            return;
+        }
+        let mut open = self.support_export_open;
+        egui::Window::new("Export Support Report")
+            .id(egui::Id::new("support_report_export"))
+            .order(egui::Order::Foreground)
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(true)
+            .default_size(egui::vec2(640.0, 520.0))
+            .show(ctx, |ui| {
+                ui.label(RichText::new("This report includes").strong());
+                for item in [
+                    "WayExpand version and desktop session",
+                    "Backend and route availability",
+                    "Service states, exit codes, restart counts, and stable error IDs",
+                    "Bounded sanitized event counters and certification summary",
+                ] {
+                    ui.label(format!("✓ {item}"));
+                }
+                ui.add_space(6.0);
+                ui.label(RichText::new("This report excludes").strong());
+                for item in [
+                    "Typed text and keystrokes",
+                    "Snippet and replacement contents",
+                    "Clipboard contents",
+                    "Authentication tokens and raw journal messages",
+                    "Configuration paths and free-form diagnostic details",
+                ] {
+                    ui.label(format!("✓ {item}"));
+                }
+                ui.horizontal_wrapped(|ui| {
+                    if ui
+                        .add_enabled(
+                            !self.support_preview_loading,
+                            egui::Button::new("Preview Report"),
+                        )
+                        .clicked()
+                    {
+                        self.support_preview_loading = true;
+                        self.support_preview_error = None;
+                        if let Some(sender) = self.diagnostics_sender.as_ref() {
+                            if sender.try_send(runtime::Request::SupportPreview).is_err() {
+                                self.support_preview_loading = false;
+                                self.support_preview_error =
+                                    Some("The background diagnostics queue is busy.".into());
+                            }
+                        } else {
+                            self.support_preview_loading = false;
+                            self.support_preview_error =
+                                Some("Background diagnostics are unavailable.".into());
+                        }
+                    }
+                    if self.support_preview_loading {
+                        ui.spinner();
+                        ui.label("Collecting sanitized report…");
+                    }
+                    if ui
+                        .add_enabled(
+                            self.support_preview.is_some(),
+                            egui::Button::new("Save Report"),
+                        )
+                        .clicked()
+                    {
+                        match self.save_support_report() {
+                            Ok(()) => {
+                                self.support_preview_error =
+                                    Some("Report saved with owner-only permissions.".into())
+                            }
+                            Err(error) => self.support_preview_error = Some(error),
+                        }
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Save as");
+                    ui.text_edit_singleline(&mut self.support_output_path);
+                });
+                if let Some(error) = &self.support_preview_error {
+                    ui.colored_label(palette.warning, error);
+                }
+                if let Some(report) = &mut self.support_preview {
+                    ui.separator();
+                    egui::ScrollArea::vertical()
+                        .max_height(260.0)
+                        .show(ui, |ui| {
+                            ui.add(
+                                egui::TextEdit::multiline(report)
+                                    .code_editor()
+                                    .interactive(false)
+                                    .desired_rows(16)
+                                    .desired_width(f32::INFINITY),
+                            );
+                        });
+                }
+                if ui.button("Desktop test…").clicked() {
+                    self.backend_test_help_open = true;
+                }
+            });
+        self.support_export_open = open;
+    }
+
+    fn save_support_report(&mut self) -> Result<(), String> {
+        use std::{io::Write, os::unix::fs::OpenOptionsExt};
+        let path = std::path::PathBuf::from(self.support_output_path.trim());
+        if path.as_os_str().is_empty() {
+            return Err("Choose a report path first.".into());
+        }
+        let report = self
+            .support_preview
+            .as_deref()
+            .ok_or("Preview the report before saving.")?;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+            .map_err(|error| format!("Could not create report file: {error}"))?;
+        if let Err(error) = file
+            .write_all(report.as_bytes())
+            .and_then(|()| file.sync_all())
+        {
+            drop(file);
+            let _ = std::fs::remove_file(&path);
+            return Err(format!("Could not write report: {error}"));
+        }
+        Ok(())
     }
 
     /// The IBus route, link by link, with the fix for each failure and what
@@ -883,6 +1516,22 @@ impl GuiApp {
             ),
         };
         ui.label(RichText::new(summary).color(summary_color).strong());
+        // Installed, registered, running, selected, receiving text and
+        // expanding are separate facts; show each instead of one "ready".
+        ui.horizontal_wrapped(|ui| {
+            for (stage, ok) in report.readiness().stages() {
+                let color = if ok { palette.success } else { palette.muted };
+                ui.label(
+                    RichText::new(format!(
+                        "{} {}",
+                        if ok { "✓" } else { "○" },
+                        self.strings.ibus_readiness_stage(stage)
+                    ))
+                    .small()
+                    .color(color),
+                );
+            }
+        });
         egui::Frame::group(ui.style()).show(ui, |ui| {
             ui.set_width(ui.available_width());
             for check in &report.checks {

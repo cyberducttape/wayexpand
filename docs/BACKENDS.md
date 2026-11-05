@@ -15,6 +15,41 @@ The first production backend should be selected as a complete pair, not as an
 isolated injector. A text expander needs both a source of input and a safe way
 to erase and insert text.
 
+Route planning keeps installation, compositor support, authorization,
+connection, organization-policy permission, and certification as separate
+assessment fields. A route can be a useful setup candidate while still being
+unsupported, unauthorized, or unconnected in the current session. In
+particular, KDE/GNOME desktop-name detection is only a portal-provider hint;
+it does not establish that the portal interface exists, that consent was
+granted, that EIS connected, or that injection was negotiated or verified.
+Use `wayexpand setup --check --json` or `wayexpand doctor --json` to inspect
+the normalized assessment.
+
+Desktop guidance is also available in the checked-in integration profiles:
+`wayexpand backend profile` lists profiles and `wayexpand backend profile
+--current --json` combines the detected desktop profile with a separate live
+capability- and policy-based route recommendation. A profile's catalog route
+is guidance only. Its verified-applications list stays empty until accepted
+real-session certification evidence exists.
+
+For an explicit one-shot check of the two evdev+libei halves, run:
+
+```sh
+wayexpand backend test --capture
+wayexpand backend test --injection
+```
+
+The capture check requires a confirmation, opens readable keyboard devices
+for at most 15 seconds, and reports only whether sanitized activity arrived.
+It does not print or store key values; physical typing still reaches the
+focused application, so use a disposable text field. The injection check
+connects and negotiates an EIS session, then inserts a fixed harmless marker
+only after confirmation. It sends no Enter key, never retries an uncertain
+write, and counts as target-verified only after the operator confirms the
+marker appeared once. The one-shot check does not persist a new portal
+restoration token. A passing capture check and a passing injection check
+are separate evidence; neither certifies the combined route or other apps.
+
 Injectors declare how safely they erase (`ReplacementGuarantee`). Routes that
 verify the field's text (input-method-v2, IBus) replace triggers directly.
 Keystroke injectors (libei, wlroots virtual keyboard) are wrapped by the

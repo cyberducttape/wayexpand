@@ -487,7 +487,12 @@ impl GuiApp {
         let mut open_diagnostics = false;
         // The typing-route chip only means something once the service
         // answers; "Unknown" next to "Service: Not running" says nothing new.
+        // The control-only service (stdin source, stdin closed) captures no
+        // typing, so it has no typing route to report.
+        let control_only =
+            runtime::status_field(&self.daemon_status, "source").as_deref() == Some("stdin");
         if self.daemon_reachable == Some(true)
+            && !control_only
             && theme::status_chip(ui, route_label, route_color)
                 .on_hover_text(self.daemon_status.clone())
                 .clicked()

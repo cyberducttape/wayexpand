@@ -5,6 +5,7 @@
 //! command's exit status (`ibus engine` exits 1 after a successful switch to
 //! an engine whose layout is `default`).
 
+use crate::services::{ServiceInventory, UserService};
 use crate::setup::{enable_user_service, evdev_consent_marker, run_setup_command};
 use crate::*;
 use std::{
@@ -50,7 +51,7 @@ pub(crate) struct IbusSetupOptions {
 }
 
 /// Run `program` with a deadline and return its stdout when it succeeds.
-fn command_output(program: &str, arguments: &[&str]) -> Option<String> {
+pub(crate) fn command_output(program: &str, arguments: &[&str]) -> Option<String> {
     let mut command = Command::new(program);
     command
         .args(arguments)
@@ -188,7 +189,7 @@ fn install_component() -> Result<()> {
 
 /// On KDE Plasma Wayland, make KWin launch IBus as its input method; only
 /// then do Wayland apps send keys to IBus.
-fn route_kde_to_ibus() -> Result<()> {
+fn route_kde_to_ibus(snapshot: &mut SessionSnapshot) -> Result<()> {
     let configured =
         kwin_input_method().is_some_and(|value| value.to_ascii_lowercase().contains("ibus"));
     if configured && kwin_input_method_available() == Some(true) {
@@ -214,19 +215,9 @@ fn route_kde_to_ibus() -> Result<()> {
     step("Setting KWin's Virtual Keyboard to IBus Wayland");
     // KWin applies the setting from a change notification, and
     // kwriteconfig6 sends none when the stored value is unchanged.
-    let kwriteconfig = ["kwriteconfig6", "kwriteconfig5"]
-        .into_iter()
-        .find(|program| command_output("sh", &["-c", &format!("command -v {program}")]).is_some())
-        .ok_or_else(|| anyhow::anyhow!("kwriteconfig6 is not installed; set System Settings → Keyboard → Virtual Keyboard → \"IBus Wayland\" yourself, then rerun setup"))?;
-    let base = [
-        "--notify",
-        "--file",
-        "kwinrc",
-        "--group",
-        "Wayland",
-        "--key",
-        "InputMethod",
-    ];
+    let kwriteconfig = kwriteconfig().ok_or_else(|| anyhow::anyhow!("kwriteconfig6 is not installed; set System Settings → Keyboard → Virtual Keyboard → \"IBus Wayland\" yourself, then rerun setup"))?;
+    snapshot.kwin_input_method = Some(kwin_input_method());
+    let base = KWIN_INPUT_METHOD_KEY;
     let mut delete = base.to_vec();
     delete.push("--delete");
     let _ = run_setup_command(kwriteconfig, &delete);
@@ -433,22 +424,166 @@ fn ensure_replacement_consent(options: IbusSetupOptions) -> Result<()> {
     Ok(())
 }
 
-/// Cover terminals with an evdev daemon limited to `terminal_apps`.
-fn configure_terminals() -> Result<()> {
-    let apps = ensure_terminal_apps()?;
-    let marker = evdev_consent_marker()
-        .context("cannot locate the evdev consent marker: HOME is not set")?;
-    if !marker.exists() {
-        println!("  Terminals were not enabled: terminal coverage uses evdev, which reads every keystroke (it only expands in terminal_apps).");
-        println!("  After reviewing docs/BACKENDS_SENSITIVE_FIELDS.md, accept that with:");
-        println!(
-            "    install -d -m 0700 {}\n    install -m 0600 /dev/null {}",
-            marker.parent().unwrap_or(&marker).display(),
-            marker.display()
-        );
-        println!("  then rerun `wayexpand setup --backend ibus --terminals`.");
-        return Ok(());
+/// What setup may change in the running session, recorded before it changes
+/// it, so a failed activation can put the session back.
+#[derive(Debug, Default)]
+struct SessionSnapshot {
+    /// `ibus engine` before setup, if IBus was running.
+    global_engine: Option<String>,
+    /// Raw `gsettings get` value of IBus' input-method list.
+    preload_engines: Option<String>,
+    /// KWin's previous `[Wayland] InputMethod`, recorded when setup changed it.
+    kwin_input_method: Option<Option<String>>,
+    /// Units setup enabled and started that were not enabled before.
+    started_units: Vec<&'static str>,
+    /// Units setup stopped and disabled.
+    stopped_units: Vec<&'static str>,
+}
+
+impl SessionSnapshot {
+    fn capture() -> Self {
+        Self {
+            global_engine: command_output("ibus", &["engine"])
+                .map(|engine| engine.trim().to_owned())
+                .filter(|engine| !engine.is_empty()),
+            preload_engines: command_output(
+                "gsettings",
+                &["get", "org.freedesktop.ibus.general", "preload-engines"],
+            )
+            .map(|value| value.trim().to_owned()),
+            ..Self::default()
+        }
     }
+
+    /// Undo session changes in reverse order. Prepared, inert changes (the
+    /// component file, configuration consent) are kept.
+    fn rollback(&self) {
+        println!("Setup did not complete; restoring your previous input-method setup…");
+        for unit in &self.started_units {
+            let _ = run_setup_command("systemctl", &["--user", "disable", "--now", unit]);
+        }
+        for unit in &self.stopped_units {
+            let _ = run_setup_command("systemctl", &["--user", "enable", "--now", unit]);
+        }
+        if let Some(previous) = &self.kwin_input_method {
+            if let Some(kwriteconfig) = kwriteconfig() {
+                let mut arguments = KWIN_INPUT_METHOD_KEY.to_vec();
+                match previous {
+                    Some(value) => arguments.push(value),
+                    None => arguments.push("--delete"),
+                }
+                let _ = run_setup_command(kwriteconfig, &arguments);
+            }
+        }
+        if let Some(engines) = &self.preload_engines {
+            let _ = run_setup_command(
+                "gsettings",
+                &[
+                    "set",
+                    "org.freedesktop.ibus.general",
+                    "preload-engines",
+                    engines,
+                ],
+            );
+        }
+        if let Some(engine) = self
+            .global_engine
+            .as_deref()
+            .filter(|engine| *engine != "wayexpand")
+        {
+            let _ = run_setup_command("ibus", &["engine", engine]);
+        }
+    }
+}
+
+const KWIN_INPUT_METHOD_KEY: [&str; 7] = [
+    "--notify",
+    "--file",
+    "kwinrc",
+    "--group",
+    "Wayland",
+    "--key",
+    "InputMethod",
+];
+
+fn kwriteconfig() -> Option<&'static str> {
+    ["kwriteconfig6", "kwriteconfig5"]
+        .into_iter()
+        .find(|program| command_output("sh", &["-c", &format!("command -v {program}")]).is_some())
+}
+
+/// Which daemon unit runs beside IBus after setup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompanionService {
+    /// The terminal-only evdev daemon (it also serves the control socket).
+    Terminals,
+    /// The control-only daemon.
+    Control,
+    /// No companion unit is installed; IBus still expands.
+    None,
+}
+
+/// Phase 1: everything setup needs, checked before anything changes.
+fn preflight(options: IbusSetupOptions, inventory: &ServiceInventory) -> Result<CompanionService> {
+    if command_output("sh", &["-c", "command -v ibus"]).is_none() {
+        bail!("IBus is not installed; install your distribution's `ibus` package and rerun setup");
+    }
+    if engine_binary().is_none() {
+        bail!("`wayexpand-ibus` is not on PATH; reinstall WayExpand (user installs need ~/.local/bin on PATH)");
+    }
+    let path = default_config_path();
+    Config::load_versioned(&path).map_err(|error| config_load_error(&path, error))?;
+    if IbusDesktop::detect() == IbusDesktop::KdeWayland
+        && !kwin_input_method().is_some_and(|value| value.to_ascii_lowercase().contains("ibus"))
+    {
+        if !Path::new(KWIN_IBUS_INPUT_METHOD).exists() {
+            bail!(
+                "{KWIN_IBUS_INPUT_METHOD} is missing; install the IBus GTK 3 panel (for example the `ibus-gtk3` package) and rerun setup"
+            );
+        }
+        if kwriteconfig().is_none() {
+            bail!("kwriteconfig6 is not installed; set System Settings → Keyboard → Virtual Keyboard → \"IBus Wayland\" yourself, then rerun setup");
+        }
+    }
+    // Terminal coverage set up earlier stays, unless --terminals is asked
+    // for anew: enabling the control unit would stop it (Conflicts=).
+    let keep_terminals = !options.terminals
+        && terminal_drop_in().is_some_and(|path| path.exists())
+        && inventory.state(UserService::Evdev).enabled;
+    if options.terminals || keep_terminals {
+        if !inventory.installed(UserService::Evdev) {
+            bail!("wayexpand-evdev.service is not installed; reinstall WayExpand, then rerun setup with --terminals");
+        }
+        let marker = evdev_consent_marker()
+            .context("cannot locate the evdev consent marker: HOME is not set")?;
+        if !marker.exists() {
+            bail!(
+                "terminal coverage uses evdev, which reads every keystroke (it only expands in terminal_apps).\n\
+                 After reviewing docs/BACKENDS_SENSITIVE_FIELDS.md, accept that with:\n  \
+                 install -d -m 0700 {}\n  install -m 0600 /dev/null {}\n\
+                 then rerun `wayexpand setup --backend ibus --terminals`. Nothing was changed.",
+                marker.parent().unwrap_or(&marker).display(),
+                marker.display()
+            );
+        }
+        if keep_terminals {
+            step("Keeping the terminal coverage set up earlier (wayexpand-evdev.service)");
+        }
+        return Ok(CompanionService::Terminals);
+    }
+    if inventory.installed(UserService::Control) {
+        Ok(CompanionService::Control)
+    } else {
+        println!("  Note: wayexpand-control.service is not installed, so quick insert and hotkeys");
+        println!("  will not run beside IBus. Reinstall WayExpand to add it; IBus expansion works without it.");
+        Ok(CompanionService::None)
+    }
+}
+
+/// Phase 2 (part): the terminal list and the drop-in that limits the evdev
+/// daemon to it. Inert until the unit is started.
+fn prepare_terminals() -> Result<()> {
+    let apps = ensure_terminal_apps()?;
     let drop_in = terminal_drop_in().context("cannot locate the systemd user directory")?;
     if let Some(parent) = drop_in.parent() {
         fs::create_dir_all(parent)?;
@@ -460,59 +595,80 @@ fn configure_terminals() -> Result<()> {
          [Service]\nEnvironment=WAYEXPAND_TERMINAL_APPS_ONLY=1\n",
     )?;
     step(&format!(
-        "Limiting wayexpand-evdev.service to terminal_apps ({} app IDs)",
+        "Prepared wayexpand-evdev.service to expand only in terminal_apps ({} app IDs)",
         apps.len()
     ));
-    enable_user_service("wayexpand-evdev.service")?;
-    let _ = run_setup_command(
-        "systemctl",
-        &["--user", "restart", "wayexpand-evdev.service"],
-    );
-    if !wait_until(Duration::from_secs(5), || {
-        service_active("wayexpand-evdev.service")
-    }) {
-        println!("  wayexpand-evdev.service did not stay running; see `journalctl --user -u wayexpand-evdev.service` (it needs /dev/input access: scripts/install-evdev-permissions.sh)");
+    Ok(())
+}
+
+/// Enable and (re)start `service`, recording it for rollback when setup is
+/// what enabled it.
+fn start_companion(
+    service: UserService,
+    inventory: &ServiceInventory,
+    snapshot: &mut SessionSnapshot,
+) -> Result<()> {
+    let unit = service.unit();
+    let was_enabled = inventory.state(service).enabled;
+    enable_user_service(unit)?;
+    if !was_enabled {
+        snapshot.started_units.push(unit);
+    }
+    // Pick up a changed drop-in or binary in an already running unit.
+    let _ = run_setup_command("systemctl", &["--user", "restart", unit]);
+    if !wait_until(Duration::from_secs(8), || service_active(unit)) {
+        bail!(
+            "{unit} did not stay running; see `journalctl --user -u {unit} -n 50`{}",
+            if service == UserService::Evdev {
+                " (it needs /dev/input access: scripts/install-evdev-permissions.sh)"
+            } else {
+                ""
+            }
+        );
     }
     Ok(())
 }
 
 /// Stop capture daemons that would expand everywhere next to IBus.
-fn stop_global_capture(options: IbusSetupOptions) -> Result<()> {
-    let drop_in_present = terminal_drop_in().is_some_and(|path| path.exists());
-    for service in ["wayexpand-evdev.service", "wayexpand-input-method.service"] {
-        if !service_active(service) {
+fn stop_global_capture(
+    options: IbusSetupOptions,
+    companion: CompanionService,
+    snapshot: &mut SessionSnapshot,
+) -> Result<()> {
+    for service in [UserService::Evdev, UserService::InputMethod] {
+        let unit = service.unit();
+        if !service_active(unit) {
             continue;
         }
-        if service == "wayexpand-evdev.service" && drop_in_present {
+        // The terminal-only evdev daemon is the companion, not a conflict.
+        if service == UserService::Evdev && companion == CompanionService::Terminals {
             continue;
         }
-        println!("  {service} captures keys in every app; with IBus active, snippets would expand twice.");
+        println!(
+            "  {unit} captures keys in every app; with IBus active, snippets would expand twice."
+        );
         let stop = options.assume_yes
-            || prompt_yes_no(&format!("  Stop and disable {service}? [Y/n] "), true)?;
+            || prompt_yes_no(&format!("  Stop and disable {unit}? [Y/n] "), true)?;
         if stop {
-            let _ = run_setup_command("systemctl", &["--user", "disable", "--now", service]);
-            step(&format!("Stopped {service}"));
+            let _ = run_setup_command("systemctl", &["--user", "disable", "--now", unit]);
+            snapshot.stopped_units.push(unit);
+            step(&format!("Stopped {unit}"));
         } else {
-            println!(
-                "  Left {service} running; use `--terminals` to limit evdev to terminals instead."
-            );
+            bail!("{unit} would expand snippets a second time beside IBus; stop it or use `--terminals`");
         }
     }
     Ok(())
 }
 
-pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
-    if command_output("sh", &["-c", "command -v ibus"]).is_none() {
-        bail!("IBus is not installed; install your distribution's `ibus` package and rerun setup");
-    }
-    if engine_binary().is_none() {
-        bail!("`wayexpand-ibus` is not on PATH; reinstall WayExpand (user installs need ~/.local/bin on PATH)");
-    }
-    println!("Configuring the WayExpand IBus route...");
-    install_component()?;
-    let desktop = IbusDesktop::detect();
-    match desktop {
-        IbusDesktop::KdeWayland => route_kde_to_ibus()?,
+/// Phases 3 and 4: change the session, then verify it.
+fn activate_and_verify(
+    options: IbusSetupOptions,
+    companion: CompanionService,
+    inventory: &ServiceInventory,
+    snapshot: &mut SessionSnapshot,
+) -> Result<()> {
+    match IbusDesktop::detect() {
+        IbusDesktop::KdeWayland => route_kde_to_ibus(snapshot)?,
         _ => {
             if IbusDaemonProcess::find().is_none() {
                 step("Starting IBus");
@@ -524,7 +680,8 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
         }
     }
     if !wayexpand_backend_ibus::engine_available() {
-        step("Restarting IBus so it loads the WayExpand component");
+        // IBus reads components only at startup; there is no reload call.
+        step("Restarting IBus so it loads the WayExpand component (input methods pause for a moment)");
         let _ = run_setup_command("ibus", &["restart"]);
         if !wait_until(
             Duration::from_secs(15),
@@ -534,7 +691,6 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
         }
     }
     add_to_preload_engines();
-    ensure_replacement_consent(options)?;
     restart_stale_engine();
     step("Selecting WayExpand as the active input method");
     // The exit status is meaningless for `default`-layout engines; read back.
@@ -545,29 +701,70 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
     ) {
         bail!("could not select the WayExpand IBus engine; check that `ibus list-engine --name-only` lists `wayexpand`");
     }
-    if options.terminals {
-        configure_terminals()?;
-    } else {
-        stop_global_capture(options)?;
+    stop_global_capture(options, companion, snapshot)?;
+    match companion {
+        CompanionService::Terminals => {
+            step("Starting the terminal-only evdev daemon");
+            start_companion(UserService::Evdev, inventory, snapshot)?;
+        }
+        CompanionService::Control => {
+            step("Starting wayexpand-control.service for quick insert and hotkeys");
+            start_companion(UserService::Control, inventory, snapshot)?;
+        }
+        CompanionService::None => {}
     }
+    // Phase 4: verify with the same checks `wayexpand ibus status` runs.
+    let report = chain::diagnose();
+    if let Some(failure) = report.first_failure() {
+        bail!(
+            "verification failed at \"{}\": {}{}",
+            failure.title,
+            failure.detail,
+            failure
+                .fix
+                .as_deref()
+                .map(|fix| format!(" (fix: {fix})"))
+                .unwrap_or_default()
+        );
+    }
+    Ok(())
+}
+
+pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
+    let inventory = ServiceInventory::probe();
+    println!("Checking what the IBus route needs…");
+    let companion = preflight(options, &inventory)?;
+    step("Preflight passed; nothing has been changed yet");
+
+    // Phase 2: inert preparation. None of this changes the active input
+    // method or running services.
+    install_component()?;
+    ensure_replacement_consent(options)?;
+    if companion == CompanionService::Terminals && options.terminals {
+        prepare_terminals()?;
+    }
+
+    // Phases 3–5: change the session, verify, or put it back.
+    let mut snapshot = SessionSnapshot::capture();
+    if let Err(error) = activate_and_verify(options, companion, &inventory, &mut snapshot) {
+        snapshot.rollback();
+        return Err(error.context("the previous input-method setup was restored"));
+    }
+
     println!();
     let report = chain::diagnose();
     let status = crate::doctor::status::read_daemon_status()
         .ok()
         .and_then(|response| crate::doctor::status::status_as_json(&response).ok());
     let overlap = crate::commands::ibus::RouteOverlap::from_status(status.as_ref());
-    let ready = crate::commands::ibus::print_report(&report, &overlap);
+    crate::commands::ibus::print_report(&report, &overlap);
     println!();
-    if ready {
-        println!("WayExpand IBus integration is active.");
-        println!("Check any app with `wayexpand ibus watch`: switch to it and type a trigger.");
-        if !options.terminals {
-            println!("Terminals cannot use IBus; add `--terminals` to cover them as well.");
-        }
-        Ok(())
-    } else {
-        bail!("the IBus route is not ready yet; fix the first ✗ above and rerun setup")
+    println!("WayExpand IBus setup is configured; a real target-app insertion has not yet been verified.");
+    println!("To complete the first-run check, run `wayexpand ibus watch`, switch to a test application, and type a harmless trigger.");
+    if companion != CompanionService::Terminals {
+        println!("Terminals cannot use IBus; add `--terminals` to cover them as well.");
     }
+    Ok(())
 }
 
 #[cfg(test)]

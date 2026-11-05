@@ -43,6 +43,15 @@ complete right-to-left editing experience.
 
 ## Desktop coverage
 
+The shared backend route catalog also carries four desktop integration
+profiles: `gnome-wayland`, `kde-wayland`, `sway`, and `hyprland`. Inspect them
+with `wayexpand backend profile`; `wayexpand backend profile --current --json`
+combines a detected profile with the live capability and policy recommendation.
+Profiles list permissions, setup instructions, known limitations, verified
+applications, and certification state. Their verified-application lists are
+empty until the project accepts matching real-session evidence. A catalog
+recommendation is guidance and does not assert current route availability.
+
 No compositor is currently certified by automated end-to-end tests, and no
 route is currently eligible to satisfy the production release gate. The release
 workflow intentionally fails closed until a real-session route demonstrates
@@ -63,6 +72,32 @@ real-session evidence with `certification_scope: production` exists.
 | `sway` | Sway / wlroots | evdev+wlroots, input-method-v2 | none | Unavailable | Not observed | **Not certified** |
 | `hyprland` | Hyprland / wlroots | evdev+wlroots, input-method-v2 | none | Unavailable | Not observed | **Not certified** |
 <!-- generated:desktop-certification-matrix:end -->
+
+## Initial desktop and distribution validation plan
+
+This execution matrix tracks the end-to-end checks needed for the launch
+environments. “Not run” means there is no accepted real-session evidence yet;
+protocol probes, CI, and the one-shot backend tests do not change that status.
+Record exact distro, compositor, toolkit, route, and package versions with each
+run. Promote only the tested combination.
+
+| Environment | Priority | Install and activate | Plain text and Unicode | Deletion and replacement | Restart, upgrade, uninstall | Current evidence |
+| --- | --- | --- | --- | --- | --- | --- |
+| GNOME / Wayland | Critical | Not run | Not run | Not run | Not run | Not certified |
+| KDE Plasma / Wayland | Critical | Not run | Not run | Not run | Not run | Not certified |
+| Sway | High | Not run | Not run | Not run | Not run | Not certified |
+| Hyprland | High | Not run | Not run | Not run | Not run | Not certified |
+| Fedora GNOME | Critical | Not run | Not run | Not run | Not run | Not certified |
+| Ubuntu GNOME | Critical | Not run | Not run | Not run | Not run | Not certified |
+| KDE on Fedora | High | Not run | Not run | Not run | Not run | Not certified |
+
+For evdev plus libei, test the two prerequisites independently with
+`wayexpand backend test --capture` and `wayexpand backend test --injection`.
+The first confirms device access and sanitized physical-input activity; the
+second requires portal/EIS connection and operator confirmation of a harmless
+marker in a controlled field. Passing both is useful route evidence, but does
+not test their combined replacement behavior or certify the desktop route.
+Evdev remains explicit opt-in because it has no sensitive-field signal.
 
 <!-- generated:route-contract:start -->
 | Route | Capture | Injection | Replacement assurance | Focus tracking | Sensitive fields (implementation) | Protocol signal | Compositor observation | Certification | Atomic replace | App identity | Status |
