@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Give each interactive desktop test a generated content-independent diagnostic
+  ID. Aggregate capture/output counters now report activity as uncorrelated and
+  explicitly say the test trigger was not independently confirmed; any backend
+  transaction ID is labeled as time-window evidence until the user verifies
+  the target text.
 - Allow root-run evdev permission previews without `SUDO_USER` when the
   selected active-seat preview does not need an account change. Add validated
   `--user USER` selection for group-membership operations and regression tests

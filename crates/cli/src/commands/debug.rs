@@ -4,6 +4,7 @@ use anyhow::{bail, Result};
 use std::{
     collections::{HashSet, VecDeque},
     io::{self, Write},
+    sync::atomic::{AtomicU64, Ordering},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -95,11 +96,13 @@ fn desktop_test(trigger: &str) -> Result<()> {
     if expansion.command.is_some() || expansion.replacement.contains("{{") {
         bail!("desktop test is limited to static text snippets; command-backed and templated snippets are excluded")
     }
+    let test_id = diagnostic_test_id();
     println!("WayExpand Desktop Integration Test");
-    println!("Configuration: PASS — enabled static expansion found");
-    println!("Capture: pending — no input content will be recorded");
-    println!("Injection: pending — no Enter key will be sent");
-    println!("Replacement: pending — you will verify the final text in the target app");
+    println!("Diagnostic test ID: {test_id}");
+    println!("Configuration [{test_id}]: PASS — enabled static expansion found");
+    println!("Capture [{test_id}]: pending — no input content will be recorded");
+    println!("Output [{test_id}]: pending — no Enter key will be sent");
+    println!("Replacement [{test_id}]: pending — you will verify the final text in the target app");
     println!("\nReview the expected text with `wayexpand preview {trigger:?}` first.");
     println!("This test types the configured replacement into the focused application when you type {trigger:?}.");
     print!("Target application class (GTK/Qt/Electron/terminal/browser/remote/sandboxed/other): ");
@@ -137,34 +140,34 @@ fn desktop_test(trigger: &str) -> Result<()> {
         known_transactions.insert(id);
     }
     println!("\nFor the next 30 seconds, switch to the target application and type the trigger once. Do not press Enter.");
-    let mut capture_seen = false;
+    let mut capture_activity_seen = false;
     let mut output_seen = false;
     let mut transaction = None;
     let mut completion = None;
     let input_deadline = Instant::now() + Duration::from_secs(30);
     while Instant::now() < input_deadline {
         thread::sleep(Duration::from_millis(250));
-        let (_, _, input_events, keys, expansions, _) = snapshot();
+        let (_, _, input_events, keys, expansions, ibus_transaction) = snapshot();
         if input_events > base_input || keys > base_keys {
-            capture_seen = true;
+            capture_activity_seen = true;
             break;
         }
         if expansions > base_expansions {
-            capture_seen = true;
+            capture_activity_seen = true;
             output_seen = true;
+            completion = Some("activity observed (IBus aggregate counter; test trigger not independently confirmed)".into());
+            transaction = ibus_transaction;
             break;
         }
     }
-    if !capture_seen {
+    if !capture_activity_seen {
         println!(
-            "Capture: FAIL — no sanitized input activity reached WayExpand within 30 seconds."
+            "Capture [{test_id}]: FAIL — no sanitized input activity reached WayExpand within 30 seconds."
         );
         println!("Next: check the active input method with `wayexpand ibus status` and inspect `wayexpand debug --live`.");
         return Ok(());
     }
-    println!(
-        "Capture: PASS — aggregate event activity increased; text was not observed by this test."
-    );
+    println!("Capture [{test_id}]: ACTIVITY OBSERVED — test trigger not independently confirmed; aggregate counters do not correlate events to this test ID.");
     if !output_seen {
         let output_deadline = Instant::now() + Duration::from_secs(10);
         while Instant::now() < output_deadline {
@@ -172,7 +175,7 @@ fn desktop_test(trigger: &str) -> Result<()> {
             let (daemon, _, _, _, expansions, ibus_transaction) = snapshot();
             if expansions > base_expansions {
                 output_seen = true;
-                completion = Some("emitted_unverified (IBus activity counter)".into());
+                completion = Some("activity observed (IBus aggregate counter; test trigger not independently confirmed)".into());
                 transaction = ibus_transaction;
                 break;
             }
@@ -202,17 +205,18 @@ fn desktop_test(trigger: &str) -> Result<()> {
         }
     }
     if !output_seen {
-        println!("Injection: FAIL/UNCONFIRMED — no output completion was reported after capture activity.");
+        println!("Output [{test_id}]: NO CORRELATED RESULT — no output completion was reported during this test window.");
         println!("No second insertion was attempted. Inspect `wayexpand debug --live` and the target field.");
         return Ok(());
     }
     println!(
-        "Injection request: {}",
+        "Output activity [{test_id}]: {}",
         completion.as_deref().unwrap_or("completion reported")
     );
     if let Some(id) = &transaction {
-        println!("Transaction ID: {id}");
+        println!("Observed backend transaction ID (time-window only; not linked to this test trigger): {id}");
     }
+    println!("Correlation [{test_id}]: backend events are not bound to this diagnostic ID; verify the focused application's result manually.");
     if completion.as_deref().is_some_and(|value| {
         value == "partial_write" || value.contains("unknown") || value.contains("not applied")
     }) {
@@ -228,7 +232,7 @@ fn desktop_test(trigger: &str) -> Result<()> {
     io::stdin().read_line(&mut answer)?;
     let verified = matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes");
     println!(
-        "Replacement: {} — application class reported by user: {}",
+        "Replacement [{test_id}]: {} — application class reported by user: {}",
         if verified {
             "PASS"
         } else {
@@ -238,6 +242,20 @@ fn desktop_test(trigger: &str) -> Result<()> {
     );
     println!("Test scope: user-reported {} only. This does not certify other toolkits, terminals, browsers, remote sessions, or sandboxed apps.", application_class);
     Ok(())
+}
+
+fn diagnostic_test_id() -> String {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
+    let sequence = NEXT.fetch_add(1, Ordering::Relaxed);
+    format!(
+        "desktop-{:x}-{:x}-{:x}",
+        std::process::id(),
+        timestamp,
+        sequence
+    )
 }
 
 fn now_seconds() -> u64 {
@@ -437,4 +455,18 @@ fn run_live(seconds: u64, json: bool) -> Result<()> {
         println!("Live debugging expired. No keystroke, trigger, replacement, or clipboard text was recorded.");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::diagnostic_test_id;
+
+    #[test]
+    fn desktop_test_ids_are_unique_and_do_not_encode_input_content() {
+        let first = diagnostic_test_id();
+        let second = diagnostic_test_id();
+        assert!(first.starts_with("desktop-"));
+        assert_ne!(first, second);
+        assert!(!first.contains("trigger"));
+    }
 }
