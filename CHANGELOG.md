@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Allow root-run evdev permission previews without `SUDO_USER` when the
+  selected active-seat preview does not need an account change. Add validated
+  `--user USER` selection for group-membership operations and regression tests
+  for userless dry runs, missing users, and input-group previews.
 - Separate setup diagnostics into installed artifacts, desktop integration,
   and operational runtime checks. Probe loaded systemd units and their actual
   `ExecStart` executables, live IBus registration/manifest resolution, daemon

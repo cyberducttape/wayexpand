@@ -38,7 +38,16 @@ used only when that tradeoff is explicitly accepted.
 
 Before using either mode, administrators should review [SECURITY.md](../SECURITY.md),
 run the permission script with `--dry-run`, and document the grant. Remove it
-with `--uninstall` when the evdev deployment is retired.
+with `--uninstall` when the evdev deployment is retired. Active-seat dry runs
+do not need a target account, including inside a root-owned container. Any
+operation that changes `input` group membership requires a validated target;
+use `--user USER` when invoking the helper directly as root (ordinary `sudo`
+invocations use the validated `SUDO_USER`):
+
+```sh
+sudo ./scripts/install-evdev-permissions.sh --access=input-group --user operator --dry-run
+sudo ./scripts/install-evdev-permissions.sh --access=input-group --user operator
+```
 
 ## Candidate tighter mechanisms
 
