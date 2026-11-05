@@ -74,6 +74,7 @@ override_dh_install:
 	install -Dm644 scripts/kwin-e2e-report.sh debian/wayexpand/usr/libexec/wayexpand-certification/kwin-e2e-report.sh
 	dh_install --package=wayexpand desktop/wayexpand-ibus.xml usr/share/ibus/component/
 	dh_install --package=wayexpand desktop/wayexpand.desktop usr/share/applications/
+	dh_install --package=wayexpand installer-components.toml usr/share/wayexpand/
 	install -Dm644 polkit/org.wayexpand.action.policy \
 		debian/wayexpand/usr/share/polkit-1/actions/org.wayexpand.action.policy
 	dh_install --package=wayexpand io.github.cyberducttape.WayExpand.metainfo.xml usr/share/metainfo/
@@ -88,10 +89,11 @@ override_dh_install:
 	dh_install --package=wayexpand assets/icon/hicolor/512x512/apps/wayexpand.png usr/share/icons/hicolor/512x512/apps/
 	dh_install --package=wayexpand systemd/wayexpand-input-method.service usr/lib/systemd/user/
 	dh_install --package=wayexpand systemd/wayexpand-evdev.service usr/lib/systemd/user/
+	dh_install --package=wayexpand systemd/wayexpand-control.service usr/lib/systemd/user/
 	dh_install --package=wayexpand systemd/wayexpand-action-broker.service usr/lib/systemd/user/
 	# Bind packaged units to /usr/bin; never allow a stale user-local binary
 	# (~/.local/lib/wayexpand/current/bin or ~/.local/bin) to win.
-	for unit in wayexpand-input-method.service wayexpand-evdev.service wayexpand-action-broker.service; do \
+	for unit in wayexpand-input-method.service wayexpand-evdev.service wayexpand-control.service wayexpand-action-broker.service; do \
 		sed -i -e 's#%h/.local/lib/wayexpand/current/bin/#/usr/bin/#g' -e 's#%h/.local/bin/#/usr/bin/#g' debian/wayexpand/usr/lib/systemd/user/$$unit; \
 	done
 	# Keep evdev policies inert; the explicit helper activates one in /etc/udev/rules.d.

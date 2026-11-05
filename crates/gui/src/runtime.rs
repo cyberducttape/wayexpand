@@ -24,6 +24,7 @@ pub(crate) enum Request {
         config_path: PathBuf,
         announce: bool,
     },
+    SupportPreview,
     Control {
         daemon_operation: wayexpand_core::DaemonOperation,
         operation: Operation,
@@ -49,6 +50,7 @@ pub(crate) enum Operation {
 
 pub(crate) enum Completion {
     Diagnostics(Box<DiagnosticsSnapshot>),
+    SupportPreview(Result<String, String>),
     Control {
         operation: Operation,
         result: anyhow::Result<String>,
@@ -463,7 +465,7 @@ pub(crate) fn start() -> std::io::Result<(
                         request_id,
                         result: save_config(path, *candidate, *base_document, expected_revision),
                     },
-                    Request::Diagnostics { .. } => continue,
+                    Request::Diagnostics { .. } | Request::SupportPreview => continue,
                 };
                 if control_completion_sender.send(completion).is_err() {
                     break;
@@ -475,21 +477,112 @@ pub(crate) fn start() -> std::io::Result<(
         .name("wayexpand-gui-diagnostics".into())
         .spawn(move || {
             while let Ok(request) = diagnostics_receiver.recv() {
-                let Request::Diagnostics {
-                    config_path,
-                    announce,
-                } = request
-                else {
-                    continue;
+                let completion = match request {
+                    Request::Diagnostics {
+                        config_path,
+                        announce,
+                    } => Completion::Diagnostics(Box::new(run_diagnostics(config_path, announce))),
+                    Request::SupportPreview => Completion::SupportPreview(run_support_preview()),
+                    _ => continue,
                 };
-                let completion =
-                    Completion::Diagnostics(Box::new(run_diagnostics(config_path, announce)));
                 if completion_sender.send(completion).is_err() {
                     break;
                 }
             }
         })?;
     Ok((control_sender, diagnostics_sender, completion_receiver))
+}
+
+fn run_support_preview() -> Result<String, String> {
+    use std::{
+        fs,
+        os::unix::fs::DirBuilderExt,
+        process::{Command, Stdio},
+        time::{Duration, Instant},
+    };
+    use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
+
+    static PREVIEW_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    const LIMIT: u64 = 1024 * 1024;
+    let cli = std::env::current_exe()
+        .ok()
+        .and_then(|gui| gui.parent().map(|parent| parent.join("wayexpand")))
+        .filter(|path| path.is_file())
+        .ok_or_else(|| "The WayExpand CLI executable was not found beside the GUI.".to_owned())?;
+    let directory = std::env::temp_dir().join(format!(
+        "wayexpand-support-preview-{}-{}.json",
+        std::process::id(),
+        PREVIEW_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    let mut directory_builder = fs::DirBuilder::new();
+    directory_builder.recursive(false).mode(0o700);
+    directory_builder
+        .create(&directory)
+        .map_err(|error| format!("could not create a private preview directory: {error}"))?;
+    let path = directory.join("report.json");
+
+    let mut command = Command::new(cli);
+    configure_process_group(&mut command);
+    let child = match command
+        .args(["support-bundle", "--output"])
+        .arg(&path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) => {
+            let _ = fs::remove_dir_all(&directory);
+            return Err(format!(
+                "could not start support report collection: {error}"
+            ));
+        }
+    };
+    let mut supervisor = ChildSupervisor::new(child);
+    let deadline = Instant::now() + Duration::from_secs(25);
+    let status = loop {
+        if Instant::now() >= deadline {
+            supervisor.kill_group();
+            let _ = supervisor.reap();
+            let _ = fs::remove_dir_all(&directory);
+            return Err("support report collection exceeded its 25 second limit".into());
+        }
+        match supervisor.has_exited() {
+            Ok(true) => match supervisor.reap() {
+                Ok(status) => break status,
+                Err(error) => {
+                    let _ = fs::remove_dir_all(&directory);
+                    return Err(format!("could not collect support report: {error}"));
+                }
+            },
+            Ok(false) => std::thread::sleep(Duration::from_millis(20)),
+            Err(error) => {
+                supervisor.kill_group();
+                let _ = supervisor.reap();
+                let _ = fs::remove_dir_all(&directory);
+                return Err(format!("could not check report collector: {error}"));
+            }
+        }
+    };
+    if !status.success() {
+        let _ = fs::remove_dir_all(&directory);
+        return Err("support report collection failed; no report was saved".into());
+    }
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            let _ = fs::remove_dir_all(&directory);
+            return Err(format!("support report was not created: {error}"));
+        }
+    };
+    if !metadata.file_type().is_file() || metadata.len() > LIMIT {
+        let _ = fs::remove_dir_all(&directory);
+        return Err("support report is not a regular file or exceeds the size limit".into());
+    }
+    let report = fs::read_to_string(&path).map_err(|error| error.to_string());
+    let _ = fs::remove_dir_all(&directory);
+    report
 }
 
 pub(crate) fn save_config(
@@ -676,7 +769,7 @@ mod tests {
     #[test]
     fn daemon_capability_parser_preserves_unknowns_and_separates_io_guarantees() {
         let capabilities = super::DaemonCapabilities::parse(
-            "status_schema=26\nsource=evdev\ncapture_sensitive_focus=false\ncapture_exclusive=true\ncapture_composition_aware=false\ncapture_local_compose_aware=true\nwindow_tracker_connected=true\ninject_atomic_replace=false\ninject_full_unicode=true\ninject_insertion_mode=libei keysym fallback\ninject_max_text_chars=250\ninject_expected_throughput_chars_per_sec=83\n",
+            "status_schema=29\nsource=evdev\ncapture_sensitive_focus=false\ncapture_exclusive=true\ncapture_composition_aware=false\ncapture_local_compose_aware=true\nwindow_tracker_connected=true\ninject_atomic_replace=false\ninject_full_unicode=true\ninject_insertion_mode=libei keysym fallback\ninject_max_text_chars=250\ninject_expected_throughput_chars_per_sec=83\n",
         )
         .unwrap();
         assert_eq!(capabilities.injection_mode, Some("libei keysym fallback"));
@@ -734,7 +827,7 @@ mod tests {
     #[test]
     fn daemon_capability_parser_recognizes_the_negotiated_libei_fallback_label() {
         let capabilities = super::DaemonCapabilities::parse(
-            "status_schema=26\ninject_insertion_mode=ei_keyboard keysym fallback (12ms key pacing)\ninject_max_text_chars=8\ninject_expected_throughput_chars_per_sec=83\ncompatibility_mode=tracked-focus\nmatcher_latency_p50_us=12\ninjection_latency_p95_us=3400\n",
+            "status_schema=29\ninject_insertion_mode=ei_keyboard keysym fallback (12ms key pacing)\ninject_max_text_chars=8\ninject_expected_throughput_chars_per_sec=83\ncompatibility_mode=tracked-focus\nmatcher_latency_p50_us=12\ninjection_latency_p95_us=3400\n",
         )
         .unwrap();
         assert_eq!(capabilities.injection_mode, Some("libei keysym fallback"));
@@ -757,7 +850,7 @@ mod tests {
     #[test]
     fn daemon_capability_parser_reads_usage_persistence_health() {
         let capabilities = super::DaemonCapabilities::parse(
-            "status_schema=26\nusage_flush_max_duration_us=1200\nusage_flush_failures_total=2\nusage_worker_failures_total=1\nusage_queue_rejected_total=3\nusage_events_recorded_total=100\nusage_events_persisted_total=94\nusage_events_dropped_total=6\n",
+            "status_schema=29\nusage_flush_max_duration_us=1200\nusage_flush_failures_total=2\nusage_worker_failures_total=1\nusage_queue_rejected_total=3\nusage_events_recorded_total=100\nusage_events_persisted_total=94\nusage_events_dropped_total=6\n",
         )
         .unwrap();
         assert_eq!(capabilities.usage_flush_max_duration_us, Some(1200));
@@ -772,7 +865,7 @@ mod tests {
     #[test]
     fn daemon_capability_parser_reads_replacement_assurance_and_refusals() {
         let capabilities = super::DaemonCapabilities::parse(
-            "status_schema=26\nreplacement_assurance=focus-tracked-best-effort\nfocus_assurance=tracker\noutput_refused_total=4\noutput_last_refusal=focus-changed\noutput_uncertain_total=1\noutput_partial_total=1\nevdev_quarantined_events_total=7\n",
+            "status_schema=29\nreplacement_assurance=focus-tracked-best-effort\nfocus_assurance=tracker\noutput_refused_total=4\noutput_last_refusal=focus-changed\noutput_uncertain_total=1\noutput_partial_total=1\nevdev_quarantined_events_total=7\n",
         )
         .unwrap();
         assert_eq!(
@@ -790,7 +883,7 @@ mod tests {
         assert!(!capabilities.recent_expansion_outcomes_reported);
 
         let blocked = super::DaemonCapabilities::parse(
-            "status_schema=26\nreplacement_assurance=blocked\nfocus_assurance=unconfirmed\noutput_last_refusal=none\n",
+            "status_schema=29\nreplacement_assurance=blocked\nfocus_assurance=unconfirmed\noutput_last_refusal=none\n",
         )
         .unwrap();
         assert_eq!(
@@ -800,7 +893,7 @@ mod tests {
         assert_eq!(blocked.output_last_refusal, None);
 
         let traced = super::DaemonCapabilities::parse(
-            r#"status_schema=26
+            r#"status_schema=29
 recent_expansion_outcomes=[{"at_unix":1,"backend":"input-method-v2","trigger_recognized":"yes","focus_admission":"passed","backend_selected":"yes","erase_acknowledged":"atomic replacement acknowledged","insertion_attempted":true,"completion":"applied"},{"at_unix":2,"backend":"libei","trigger_recognized":"yes","focus_admission":"passed","backend_selected":"yes","erase_acknowledged":"yes","insertion_attempted":true,"completion":"partial_write","recovery":"manual_review","progress_tracked":true,"erased_units":4,"inserted_units":3}]
 "#,
         )

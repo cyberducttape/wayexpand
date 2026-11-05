@@ -25,6 +25,7 @@ wayexpand-core = { path = "../core" }
 wayexpand-broker-client = { path = "../broker-client" }
 wayexpand-process-supervisor = { path = "../process-supervisor" }
 wayexpand-backend-ibus = { path = "../backend-ibus" }
+wayexpand-backend-evdev = { path = "../backend-evdev" }
 wayexpand-backend-wlroots = { path = "../backend-wlroots" }
 wayexpand-backend-input-method = { path = "../backend-input-method" }
 wayexpand-backend-libei = { path = "../backend-libei" }

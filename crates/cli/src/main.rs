@@ -2,8 +2,10 @@ mod args;
 mod backup;
 mod build_info;
 mod commands;
+mod diagnostics;
 mod doctor;
 mod errors;
+mod services;
 mod setup;
 mod setup_ibus;
 mod sync;
@@ -24,6 +26,7 @@ use commands::system::{
     backend_command, certify_command, doctor_command, explain_backend_command, explain_command,
     policy_command, portal_command, setup_command, upgrade_status_command,
 };
+use commands::Args;
 use doctor::backends::{
     print_backend_diagnostics, print_backend_selection_explain, session_description,
 };
@@ -127,9 +130,20 @@ fn run() -> Result<()> {
         Some("backup") => backup_command(args)?,
         Some("edit") => edit_command(args)?,
         Some("setup") => setup_command(args)?,
+        Some("install-check") => commands::install::install_check(args)?,
+        Some("repair") => commands::install::repair(args)?,
+        Some("reset") => commands::reset::reset_command(args)?,
+        Some("restore") => commands::restore::restore_command(args)?,
+        Some("health") => commands::health::health_command(args)?,
+        Some("compatibility-report") => commands::compatibility::compatibility_report(args)?,
+        Some("check") => commands::check::check_command(args)?,
+        Some("service") => commands::service::service_command(args)?,
+        Some("config") => commands::config_inspect::config_command(args)?,
         Some("doctor") => doctor_command(args)?,
+        Some("debug") => commands::debug::debug_command(args)?,
         Some("policy") => policy_command(args)?,
         Some("upgrade-status") => upgrade_status_command(args)?,
+        Some("upgrade") => commands::system::upgrade_command(args)?,
         Some("explain") => explain_command(args)?,
         Some("stats") => stats_command(args)?,
         Some("sync") => sync_command(args)?,
@@ -145,8 +159,37 @@ fn run() -> Result<()> {
             control_command(requested, args)?
         }
         Some("insert") => insert_command(args)?,
-        Some("help") | Some("--help") | Some("-h") | None => print_help(),
+        Some("help") => help_command(args)?,
+        Some("--help") | Some("-h") | None => print_help(),
         Some(command) => usage_bail!("unknown command {command:?}; try `wayexpand help`"),
+    }
+    Ok(())
+}
+
+fn help_command(mut args: Args) -> Result<()> {
+    match args.next().as_deref() {
+        None => print_help(),
+        Some("finding") => {
+            let id = args
+                .next()
+                .ok_or_else(|| usage_error("usage: wayexpand help finding <WX-ID>"))?;
+            if args.next().is_some() {
+                usage_bail!("usage: wayexpand help finding <WX-ID>");
+            }
+            let (summary, action, doc) = match id.as_str() {
+                "WX-PORTAL-001" => ("Desktop input-emulation permission is required.", "Run `wayexpand backend test --injection` in a terminal and approve the portal prompt only if expected.", "docs/BACKENDS.md#libei-and-the-remotedesktop-portal"),
+                "WX-IBUS-001" => ("The WayExpand IBus component is not registered.", "Run `wayexpand install-check` then `wayexpand setup --backend ibus`.", "docs/IBUS_ENGINE.md"),
+                "WX-IBUS-002" => ("The IBus engine is registered but not selected.", "Select WayExpand in the desktop input-method menu, then run `wayexpand ibus status`.", "docs/IBUS_ENGINE.md#diagnostics"),
+                "WX-CONFIG-001" => ("The active configuration could not be loaded.", "Run `wayexpand validate` and correct the reported issue; back up before manual edits.", "docs/TROUBLESHOOTING.md#configuration-invalid"),
+                "WX-INPUT-001" => ("The active capture route cannot currently match text.", "Run `wayexpand debug` and inspect layout, capture, policy, and service findings.", "docs/TROUBLESHOOTING.md#wx-input-001"),
+                "WX-OUTPUT-001" => ("The output route is unavailable or stalled.", "Inspect `wayexpand status`; do not retry an insertion with an uncertain result.", "docs/TROUBLESHOOTING.md#wx-output-001"),
+                "WX-SERVICE-001" | "WX-SERVICE-002" => ("A required user service is missing or not responding.", "Run `wayexpand install-check` and `wayexpand setup --check`; restart only the selected installed unit.", "docs/OPERATIONS.md#operational-health-and-setup-deadlines"),
+                "WX-VERSION-001" => ("The CLI and running daemon versions differ.", "Run `wayexpand upgrade --check`; apply only after reviewing configuration validity.", "docs/OPERATIONS.md#operational-health-and-setup-deadlines"),
+                _ => bail!("unknown diagnostic finding ID {id:?}; see `wayexpand debug --json` for current findings"),
+            };
+            println!("{id} · {summary}\nNext step: {action}\nReference: {doc}");
+        }
+        _ => usage_bail!("usage: wayexpand help [finding <WX-ID>]"),
     }
     Ok(())
 }
@@ -157,13 +200,23 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
         "Getting started",
         &[
             (
-                "setup [--mode recommended|maximum|experimental] [--terminals] [--yes]",
-                "Configure a safe compatibility mode",
+                "setup --check [--json] | --apply [--mode recommended|maximum|experimental] [--terminals] [--yes]",
+                "Check setup readiness or configure a reviewed input route",
             ),
+            ("install-check [--json]", "Audit installed WayExpand components"),
+            ("health [--json]", "Report operational readiness with a stable monitoring exit code"),
+            ("compatibility-report [--json]", "Generate a reproducible desktop compatibility report"),
+            ("check --all [--json] [config]", "Run static configuration, template, file, policy, and trigger checks without executing commands"),
+            ("service status [--json] | restart --yes", "Inspect managed services or restart only the active route"),
+            ("config show|validate [--json] [config] | diff [--json] OLD NEW", "Inspect, validate, or compare configuration files"),
+            ("repair --check|--apply [--json]", "Inspect or apply safe installation repairs"),
+            ("reset --integration|--services|--preferences [--check|--apply --yes] [--json]", "Preview and apply a scoped recovery reset"),
+            ("restore <backup> [--check | --apply --yes --expected-current=HASH --expected-backup=HASH] [--json] [config]", "Review and safely restore a configuration backup"),
             (
                 "doctor [--json] [config]",
                 "Diagnose configuration, backends and the running daemon",
             ),
+            ("debug [--json] [--trigger TEXT] [--live [--seconds 1..300]]", "Explain runtime readiness and a specific trigger with sanitized live diagnostics"),
             (
                 "policy inspect|check [--file PATH] [--allow-audit-only] [--json]",
                 "Inspect policy provenance or fail CI when restrictions are not enforced",
@@ -180,6 +233,7 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "upgrade-status [--json]",
                 "Check whether the running daemon matches this CLI",
             ),
+            ("upgrade --check|--apply|--rollback [--json]", "Verify or complete a staged runtime upgrade"),
             (
                 "explain <text> [--json] [--offline] [--app ID] [config]",
                 "Explain why typed text would or would not expand",
@@ -295,7 +349,7 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
     (
         "Backends and operations",
         &[
-            ("backend", "Show backend availability"),
+            ("backend list [--json] | profile [ID|--current] [--json] | test --capture|--injection", "Inspect live route assessments, desktop guidance, or run an explicit one-shot route test"),
             ("explain-backend", "Explain automatic backend selection"),
             ("certify [--json]", "Run local compatibility certification"),
             (

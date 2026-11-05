@@ -84,6 +84,7 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
                 "certification": contract.status,
                 "replacement_assurance": contract.replacement_assurance,
                 "sensitive_field_protection": contract.sensitive_field_support.certified,
+                "assessment": &planned.assessment,
             })
         })
         .collect();
@@ -129,6 +130,7 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
         .and_then(|policy| policy.get("valid"))
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
+    let services = crate::services::ServiceInventory::probe();
     let daemon_status_snapshot = read_daemon_status()
         .ok()
         .and_then(|response| status_as_json(&response).ok());
@@ -149,9 +151,9 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
                     "state": snapshot.get("state"),
                     "source": snapshot.get("source"),
                     "backend": snapshot.get("backend"),
-                    "output": output_health_from_status(&snapshot),
+                    "output": output_health_from_status(&snapshot, &services),
                     "insertion": insertion_from_status(&snapshot),
-                    "session_capabilities": session_capabilities_from_status(&snapshot),
+                    "session_capabilities": session_capabilities_from_status(&snapshot, &services),
                     "capabilities": {
                         "exclusive_capture": snapshot.get("capture_exclusive"),
                         "sensitive_field_detection": snapshot.get("capture_sensitive_focus"),
@@ -177,7 +179,7 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
                 "compatible": false,
                 "commit_matches": false,
                 "error": error.to_string(),
-                "session_capabilities": session_capabilities_from_status(&serde_json::Value::Null),
+                "session_capabilities": session_capabilities_from_status(&serde_json::Value::Null, &services),
             }),
         },
         Err(error) => serde_json::json!({
@@ -185,7 +187,7 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
             "compatible": false,
             "commit_matches": false,
             "error": error.to_string(),
-            "session_capabilities": session_capabilities_from_status(&serde_json::Value::Null),
+            "session_capabilities": session_capabilities_from_status(&serde_json::Value::Null, &services),
         }),
     };
     let production_readiness = production_readiness(&daemon);

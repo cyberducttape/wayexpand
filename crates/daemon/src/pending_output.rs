@@ -128,6 +128,9 @@ impl Daemon {
                 OutputJob::Undo(_) => true,
             };
             if permitted {
+                if matches!(&job, OutputJob::Expansion(_)) {
+                    failure_trace::note_expansion_attempt();
+                }
                 allowed.push_back(job);
             }
         }

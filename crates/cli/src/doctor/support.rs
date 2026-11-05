@@ -14,10 +14,10 @@ use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
 const MAX_REPORT_BYTES: u64 = 1024 * 1024;
 const REPORT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Produce a privacy-preserving summary from the same doctor and certification
-/// reports operators can run independently. This is an explicit allowlist:
-/// filesystem paths, detailed errors, policy contents, triggers, and snippet
-/// replacements are never copied into the support report.
+/// Produce a privacy-preserving support report from the same doctor and
+/// certification reports operators can run independently. Every nested
+/// structure is projected field-by-field; doctor JSON subtrees are never
+/// copied wholesale.
 pub(crate) fn support_bundle(args: Args) -> Result<()> {
     let mut output_path = None;
     let mut args = args;
@@ -34,8 +34,15 @@ pub(crate) fn support_bundle(args: Args) -> Result<()> {
 
     let doctor = read_report("doctor")?;
     let certification = read_report("certify")?;
-    let report = summarize_reports(&doctor, &certification);
+    let status = crate::doctor::status::read_daemon_status()
+        .ok()
+        .and_then(|raw| crate::doctor::status::status_as_json(&raw).ok());
+    let services = service_health();
+    let report = summarize_reports(&doctor, &certification, status.as_ref(), &services);
     let bytes = serde_json::to_vec_pretty(&report).context("serializing support report")?;
+    if bytes.len() as u64 > MAX_REPORT_BYTES {
+        bail!("support report exceeded the 1 MiB output limit");
+    }
 
     if let Some(path) = output_path {
         let mut file = fs::OpenOptions::new()
@@ -148,6 +155,8 @@ fn copy(value: &serde_json::Value, key: &str) -> serde_json::Value {
 pub(crate) fn summarize_reports(
     doctor: &serde_json::Value,
     certification: &serde_json::Value,
+    status: Option<&serde_json::Value>,
+    services: &serde_json::Value,
 ) -> serde_json::Value {
     let backends = doctor["backends"]
         .as_array()
@@ -155,10 +164,10 @@ pub(crate) fn summarize_reports(
         .flatten()
         .map(|backend| {
             serde_json::json!({
-                "kind": copy(backend, "kind"),
-                "state": copy(backend, "state"),
-                "availability": copy(backend, "availability"),
-                "permission": copy(backend, "permission"),
+                "kind": safe_token(backend.get("kind")),
+                "state": safe_token(backend.get("state")),
+                "availability": safe_token(backend.get("availability")),
+                "permission": safe_token(backend.get("permission")),
                 "policy_allowed": copy(backend, "policy_allowed"),
             })
         })
@@ -166,7 +175,17 @@ pub(crate) fn summarize_reports(
 
     let mut scenario_status_counts = serde_json::Map::new();
     for check in certification["checks"].as_array().into_iter().flatten() {
-        let Some(status) = check["status"].as_str() else {
+        let Some(status) = check["status"].as_str().filter(|status| {
+            [
+                "pass",
+                "fail",
+                "not-run",
+                "unsupported",
+                "warning",
+                "skipped",
+            ]
+            .contains(status)
+        }) else {
             continue;
         };
         let count = scenario_status_counts
@@ -183,7 +202,7 @@ pub(crate) fn summarize_reports(
         .as_array()
         .into_iter()
         .flatten()
-        .map(|check| serde_json::json!({ "id": copy(check, "id"), "state": copy(check, "state") }))
+        .map(|check| serde_json::json!({ "id": safe_token(check.get("id")), "state": safe_token(check.get("state")) }))
         .collect::<Vec<_>>();
     let ibus_fields = ibus_route["activity"]["recent_fields"]
         .as_array()
@@ -191,27 +210,88 @@ pub(crate) fn summarize_reports(
         .flatten()
         .map(|field| {
             serde_json::json!({
-                "verdict": copy(field, "verdict"),
-                "content_type": copy(field, "content_type"),
+                "verdict": safe_token(field.get("verdict")),
+                "content_type": safe_token(field.get("content_type")),
                 "surrounding_capability": copy(field, "surrounding_capability"),
                 "surrounding_nonempty": copy(field, "surrounding_nonempty"),
                 "keys": copy(field, "keys"),
                 "expansions": copy(field, "expansions"),
-                "refusals": copy(field, "refusals"),
+                "refusals": refusal_counts(&field["refusals"]),
             })
         })
         .collect::<Vec<_>>();
+    let route_plan = doctor["route_plan"]["routes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|route| serde_json::json!({
+            "id": safe_token(route.get("id")),
+            "standing": safe_token(route.get("standing")),
+            "capture": safe_token(route.get("capture")),
+            "injection": safe_token(route.get("injection")),
+            "certification": safe_token(route.get("certification")),
+            "sensitive_field_protection": route.get("sensitive_field_protection").and_then(serde_json::Value::as_bool),
+            "assessment": {
+                "installed": safe_token(route["assessment"].get("installed")),
+                "supported": safe_token(route["assessment"].get("supported")),
+                "authorized": safe_token(route["assessment"].get("authorized")),
+                "connected": safe_token(route["assessment"].get("connected")),
+                "policy_allowed": route["assessment"].get("policy_allowed").and_then(serde_json::Value::as_bool),
+                "certified": route["assessment"].get("certified").and_then(serde_json::Value::as_bool),
+                "requires_user_action": route["assessment"].get("requires_user_action").and_then(serde_json::Value::as_bool),
+                "limitations": route["assessment"]["limitations"].as_array().into_iter().flatten().filter_map(|value| safe_token(Some(value))).collect::<Vec<_>>(),
+                "portal": route["assessment"].get("portal").filter(|value| value.is_object()).map(|portal| serde_json::json!({
+                    "provider_candidate": portal.get("provider_candidate").and_then(serde_json::Value::as_bool),
+                    "implementation_discovered": safe_token(portal.get("implementation_discovered")),
+                    "interface_available": safe_token(portal.get("interface_available")),
+                    "authorization": safe_token(portal.get("authorization")),
+                    "direct_eis_socket_configured": portal.get("direct_eis_socket_configured").and_then(serde_json::Value::as_bool),
+                    "eis_connected": safe_token(portal.get("eis_connected")),
+                    "injection_negotiated": safe_token(portal.get("injection_negotiated")),
+                    "injection_verified": safe_token(portal.get("injection_verified")),
+                })),
+            },
+        }))
+        .collect::<Vec<_>>();
+    let protocol_probes = [
+        "input_method_v2",
+        "wlroots_virtual_keyboard",
+        "kwin_window_tracker",
+    ]
+    .into_iter()
+    .filter_map(|name| {
+        let probe = doctor.get("protocol_probes")?.get(name)?;
+        Some((
+            name.to_owned(),
+            serde_json::json!({"status": safe_token(probe.get("status"))}),
+        ))
+    })
+    .collect::<serde_json::Map<_, _>>();
+    let recent_events = status.map_or_else(
+        || serde_json::json!({"available": false}),
+        |status| serde_json::json!({
+            "available": true,
+            "input_backend_restarts": number(status, "input_reconnect_total"),
+            "output_backend_restarts": number(status, "output_reconnect_total"),
+            "uncertain_injections": number(status, "output_uncertain_total"),
+            "partial_injections": number(status, "partial_write_total"),
+            "recent_successful_expansions": status.get("recent_expansion_outcomes").and_then(serde_json::Value::as_array)
+                .map_or(0, |outcomes| outcomes.iter().filter(|item| item.get("completion").and_then(serde_json::Value::as_str) == Some("applied")).count() as u64),
+            "suppressed_expansions": number(status, "suppressed_expansions_total"),
+        }),
+    );
+    let diagnostics = diagnostic_summaries(doctor, services);
     serde_json::json!({
-        "schema": 1,
+        "schema": 2,
         "generated_at_unix": SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs(),
         "application": {
-            "version": copy(doctor, "wayexpand_version"),
-            "commit": copy(doctor, "wayexpand_commit"),
-            "desktop": copy(doctor, "desktop"),
-            "wayland": copy(doctor, "wayland"),
+            "version": safe_token(doctor.get("wayexpand_version")),
+            "commit": safe_token(doctor.get("wayexpand_commit")),
+            "desktop": safe_desktop(copy(doctor, "desktop")),
+            "wayland": doctor.get("wayland").and_then(serde_json::Value::as_bool),
             "healthy": copy(doctor, "healthy"),
         },
         "configuration": {
@@ -221,51 +301,223 @@ pub(crate) fn summarize_reports(
         },
         "selection": {
             "automatic": {
-                "source": copy(&doctor["automatic_selection"], "source"),
-                "backend": copy(&doctor["automatic_selection"], "backend"),
+                "source": safe_token(doctor["automatic_selection"].get("source")),
+                "backend": safe_token(doctor["automatic_selection"].get("backend")),
                 "ready": copy(&doctor["automatic_selection"], "ready"),
             },
             "recommended": {
                 "mode": copy(&doctor["setup_recommendation"], "mode"),
-                "backend": copy(&doctor["setup_recommendation"], "backend"),
+                "backend": safe_token(doctor["setup_recommendation"].get("backend")),
                 "ready": copy(&doctor["setup_recommendation"], "ready"),
             },
-            "route_plan": copy(doctor, "route_plan"),
+            "route_plan": route_plan,
         },
         "daemon": {
             "available": copy(daemon, "available"),
             "compatible": copy(daemon, "compatible"),
             "commit_matches": copy(daemon, "commit_matches"),
-            "state": copy(daemon, "state"),
-            "source": copy(daemon, "source"),
-            "backend": copy(daemon, "backend"),
-            "capabilities": copy(daemon, "capabilities"),
+            "state": safe_token(daemon.get("state")),
+            "source": safe_token(daemon.get("source")),
+            "backend": safe_token(daemon.get("backend")),
+            "capabilities": {
+                "exclusive_capture": daemon["capabilities"]["exclusive_capture"].as_bool(),
+                "sensitive_field_detection": daemon["capabilities"]["sensitive_field_detection"].as_bool(),
+                "composition_awareness": daemon["capabilities"]["composition_awareness"].as_bool(),
+                "layout_awareness": daemon["capabilities"]["layout_awareness"].as_bool(),
+                "atomic_replacement": daemon["capabilities"]["atomic_replacement"].as_bool(),
+                "full_unicode": daemon["capabilities"]["full_unicode"].as_bool(),
+            },
         },
         "backends": backends,
         "ibus": {
             "installed": copy(&doctor["ibus"], "installed"),
             "ready": copy(ibus_route, "ready"),
-            "desktop": copy(ibus_route, "desktop"),
-            "first_failure": copy(ibus_route, "first_failure"),
+            "desktop": safe_desktop(copy(ibus_route, "desktop")),
+            "first_failure": safe_token(ibus_route.get("first_failure")),
             "checks": ibus_checks,
             "other_route": {
-                "scope": copy(&ibus_route["other_route"], "scope"),
-                "state": copy(&ibus_route["other_route"], "state"),
+                "scope": safe_token(ibus_route["other_route"].get("scope")),
+                "state": safe_token(ibus_route["other_route"].get("state")),
             },
             "engine_live": copy(&ibus_route["activity"], "live"),
-            "totals": copy(&ibus_route["activity"], "totals"),
+            "totals": {
+                "focus_ins": number(&ibus_route["activity"]["totals"], "focus_ins"),
+                "keys": number(&ibus_route["activity"]["totals"], "keys"),
+                "expansions": number(&ibus_route["activity"]["totals"], "expansions"),
+                "output_failures": number(&ibus_route["activity"]["totals"], "output_failures"),
+                "refusals": refusal_counts(&ibus_route["activity"]["totals"]["refusals"]),
+            },
             "recent_fields": ibus_fields,
         },
-        "protocol_probes": copy(doctor, "protocol_probes"),
+        "protocol_probes": protocol_probes,
+        "services": services,
+        "diagnostics": diagnostics,
+        "recent_events": recent_events,
         "certification": {
             "certified": copy(certification, "certified"),
-            "desktop": copy(certification, "desktop"),
-            "selected_mode": copy(certification, "selected_mode"),
+            "desktop": safe_desktop(copy(certification, "desktop")),
+            "selected_mode": safe_token(certification.get("selected_mode")),
             "required_scenario_count": certification["required_scenarios"]
                 .as_array().map_or(0, Vec::len),
             "check_status_counts": scenario_status_counts,
         },
     })
+}
+
+fn safe_token(value: Option<&serde_json::Value>) -> Option<&str> {
+    value.and_then(serde_json::Value::as_str).filter(|value| {
+        !value.is_empty()
+            && value.len() <= 80
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"._+-".contains(&byte))
+    })
+}
+
+fn safe_desktop(value: serde_json::Value) -> serde_json::Value {
+    let Some(value) = value.as_str() else {
+        return serde_json::Value::Null;
+    };
+    let desktop = ["GNOME", "KDE Plasma", "Sway", "Hyprland", "Xfce", "COSMIC"]
+        .into_iter()
+        .find(|known| value.eq_ignore_ascii_case(known));
+    desktop.map_or(serde_json::Value::Null, serde_json::Value::from)
+}
+
+fn number(value: &serde_json::Value, key: &str) -> u64 {
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0)
+}
+
+fn refusal_counts(value: &serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "no_surrounding_capability": number(value, "no_surrounding_capability"),
+        "surrounding_text_unknown": number(value, "surrounding_text_unknown"),
+        "surrounding_text_empty": number(value, "surrounding_text_empty"),
+        "surrounding_text_mismatch": number(value, "surrounding_text_mismatch"),
+        "policy": number(value, "policy"),
+    })
+}
+
+fn service_health() -> serde_json::Value {
+    let units = crate::services::UserService::ALL.map(crate::services::UserService::unit);
+    let mut args = vec![
+        "--user",
+        "show",
+        "-p",
+        "Id,ActiveState,Result,ExecMainCode,ExecMainStatus,NRestarts",
+    ];
+    args.extend(units);
+    let output = crate::setup_ibus::command_output("systemctl", &args).unwrap_or_default();
+    parse_service_health(&output)
+}
+
+fn parse_service_health(output: &str) -> serde_json::Value {
+    let mut entries = Vec::new();
+    for block in output.split("\n\n") {
+        let field = |name: &str| {
+            block
+                .lines()
+                .find_map(|line| line.strip_prefix(name)?.strip_prefix('='))
+                .unwrap_or("")
+        };
+        let Some(service) = crate::services::UserService::ALL
+            .into_iter()
+            .find(|service| service.unit() == field("Id"))
+        else {
+            continue;
+        };
+        let state = field("ActiveState");
+        let result = field("Result");
+        let exit_code = field("ExecMainStatus").parse::<i32>().ok();
+        let failed =
+            state == "failed" || (exit_code.is_some_and(|code| code != 0) && !result.is_empty());
+        let mut error_ids = Vec::new();
+        if failed {
+            error_ids.push(if exit_code.is_some_and(|code| code != 0) {
+                "WX-SERVICE-003"
+            } else {
+                "WX-SERVICE-002"
+            });
+        }
+        entries.push(serde_json::json!({
+            "unit": service.unit(),
+            "state": safe_systemd_state(state),
+            "result": safe_systemd_result(result),
+            "exit_code": exit_code,
+            "restart_count": field("NRestarts").parse::<u64>().ok(),
+            "error_ids": error_ids,
+        }));
+    }
+    serde_json::json!({"available": !entries.is_empty(), "units": entries})
+}
+
+fn safe_systemd_state(value: &str) -> Option<&str> {
+    [
+        "active",
+        "reloading",
+        "inactive",
+        "failed",
+        "activating",
+        "deactivating",
+        "maintenance",
+    ]
+    .into_iter()
+    .find(|known| *known == value)
+}
+
+fn safe_systemd_result(value: &str) -> Option<&str> {
+    [
+        "success",
+        "resources",
+        "timeout",
+        "exit-code",
+        "signal",
+        "core-dump",
+        "watchdog",
+        "protocol",
+        "start-limit-hit",
+        "unhealthy",
+        "oom-kill",
+        "exec-condition",
+        "condition",
+    ]
+    .into_iter()
+    .find(|known| *known == value)
+    .filter(|_| !value.is_empty())
+}
+
+fn diagnostic_summaries(
+    doctor: &serde_json::Value,
+    services: &serde_json::Value,
+) -> Vec<serde_json::Value> {
+    let mut findings = Vec::new();
+    if doctor["config"]["valid"].as_bool() == Some(false) {
+        findings.push(serde_json::json!({"id":"WX-CONFIG-001","severity":"error","message":"Configuration is invalid or unreadable"}));
+    }
+    if doctor["daemon"]["available"].as_bool() == Some(false) {
+        findings.push(serde_json::json!({"id":"WX-SERVICE-002","severity":"warning","message":"No WayExpand daemon responded"}));
+    }
+    if doctor["ibus"]["route"]["ready"].as_bool() == Some(false) {
+        findings.push(serde_json::json!({"id":"WX-IBUS-001","severity":"warning","message":"The IBus route is not ready"}));
+    }
+    if let Some(units) = services["units"].as_array() {
+        for id in units
+            .iter()
+            .flat_map(|unit| unit["error_ids"].as_array().into_iter().flatten())
+            .filter_map(serde_json::Value::as_str)
+        {
+            let (severity, message) = match id {
+                "WX-SERVICE-002" => ("warning", "A WayExpand service is in a failed state"),
+                "WX-SERVICE-003" => ("error", "A WayExpand service exited unsuccessfully"),
+                _ => continue,
+            };
+            findings.push(serde_json::json!({"id":id,"severity":severity,"message":message}));
+        }
+    }
+    findings
 }
 
 #[cfg(test)]
@@ -290,9 +542,14 @@ mod tests {
             "protocol_probes": {
                 "input_method_v2": {
                     "status": "unavailable",
-                    "detail": "input-method-v2 manager and Wayland seat probe"
+                    "detail": "input-method-v2 manager and Wayland seat probe /home/alice/private"
                 }
             },
+            "route_plan": {"routes": [{
+                "id":"ibus", "standing":"available", "capture":"input_method",
+                "injection":"commit", "certification":"uncertified",
+                "sensitive_field_protection":false, "reason":"/home/alice/private reason"
+            }]},
             "expansions": [{ "trigger": ":secret", "replacement": "private snippet" }]
         });
         let certification = serde_json::json!({
@@ -303,7 +560,13 @@ mod tests {
             "required_scenarios": ["password-field"],
             "checks": [{ "name": "password-field", "status": "not-run", "detail": "private" }]
         });
-        let summary = summarize_reports(&doctor, &certification);
+        let services = serde_json::json!({"available":true,"units":[{"unit":"wayexpand.service","state":"failed","exit_code":1,"restart_count":3,"error_ids":["WX-SERVICE-003"]}]});
+        let status = serde_json::json!({
+            "input_reconnect_total":2,"output_reconnect_total":3,"output_uncertain_total":1,"partial_write_total":1,
+            "suppressed_expansions_total":4,
+            "recent_expansion_outcomes":[{"completion":"applied","trigger":"private"}]
+        });
+        let summary = summarize_reports(&doctor, &certification, Some(&status), &services);
         let serialized = summary.to_string();
         for forbidden in [
             "/home/alice",
@@ -312,6 +575,8 @@ mod tests {
             "token=private",
             ":secret",
             "private snippet",
+            "/home/alice/private reason",
+            "input-method-v2 manager and Wayland seat probe",
         ] {
             assert!(!serialized.contains(forbidden), "leaked {forbidden}");
         }
@@ -324,5 +589,34 @@ mod tests {
             summary["protocol_probes"]["input_method_v2"]["status"],
             "unavailable"
         );
+        assert_eq!(summary["schema"], 2);
+        assert_eq!(summary["services"]["units"][0]["restart_count"], 3);
+        assert_eq!(summary["services"]["units"][0]["exit_code"], 1);
+        assert_eq!(summary["recent_events"]["input_backend_restarts"], 2);
+        assert_eq!(summary["recent_events"]["output_backend_restarts"], 3);
+        assert!(summary["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| { finding["id"] == "WX-SERVICE-003" }));
+        assert!(summary["route_plan"]["routes"][0].get("reason").is_none());
+        assert!(summary["protocol_probes"]["input_method_v2"]
+            .get("detail")
+            .is_none());
+    }
+
+    #[test]
+    fn service_history_parses_only_known_systemd_fields() {
+        let parsed = super::parse_service_health(
+            "Id=wayexpand-control.service\nActiveState=failed\nResult=exit-code\nExecMainStatus=7\nNRestarts=12\n",
+        );
+        assert_eq!(parsed["units"][0]["exit_code"], 7);
+        assert_eq!(parsed["units"][0]["restart_count"], 12);
+        assert_eq!(parsed["units"][0]["error_ids"][0], "WX-SERVICE-003");
+        assert!(parsed.to_string().find("ExecMainStatus").is_none());
+        let malformed = super::parse_service_health(
+            "Id=wayexpand-control.service\nActiveState=failed\nResult=some private error\nExecMainStatus=private path\nNRestarts=unknown\n",
+        );
+        assert!(malformed.to_string().find("private").is_none());
     }
 }

@@ -63,6 +63,7 @@ package() {
 
     # Install desktop entry
     install -Dm644 desktop/wayexpand.desktop "${pkgdir}/usr/share/applications/wayexpand.desktop"
+    install -Dm644 installer-components.toml "${pkgdir}/usr/share/wayexpand/installer-components.toml"
     install -Dm644 polkit/org.wayexpand.action.policy \
         "${pkgdir}/usr/share/polkit-1/actions/org.wayexpand.action.policy"
     install -Dm644 desktop/wayexpand-ibus.xml "${pkgdir}/usr/share/ibus/component/wayexpand-ibus.xml"
@@ -80,6 +81,7 @@ package() {
     # Install systemd user units
     install -Dm644 systemd/wayexpand-input-method.service "${pkgdir}/usr/lib/systemd/user/wayexpand-input-method.service"
     install -Dm644 systemd/wayexpand-evdev.service "${pkgdir}/usr/lib/systemd/user/wayexpand-evdev.service"
+    install -Dm644 systemd/wayexpand-control.service "${pkgdir}/usr/lib/systemd/user/wayexpand-control.service"
     install -Dm644 systemd/wayexpand-action-broker.service "${pkgdir}/usr/lib/systemd/user/wayexpand-action-broker.service"
     # The source units target the user-local install layout used by the
     # release scripts. Distro packages must bind them to the package-owned
@@ -87,6 +89,7 @@ package() {
     sed -i -e 's#%h/.local/lib/wayexpand/current/bin/#/usr/bin/#g' -e 's#%h/.local/bin/#/usr/bin/#g' \
         "${pkgdir}/usr/lib/systemd/user/wayexpand-input-method.service" \
         "${pkgdir}/usr/lib/systemd/user/wayexpand-evdev.service" \
+        "${pkgdir}/usr/lib/systemd/user/wayexpand-control.service" \
         "${pkgdir}/usr/lib/systemd/user/wayexpand-action-broker.service"
 
     # Ship evdev policies inertly. Installing WayExpand must not change raw

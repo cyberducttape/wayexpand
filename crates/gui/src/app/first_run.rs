@@ -56,7 +56,9 @@ impl GuiApp {
             status.kind == wayexpand_core::BackendKind::WindowTracker
                 && status.state == BackendState::Available
         });
-        let recommendation = self.recommended_route.and_then(route_recommendation);
+        let recommendation = self
+            .recommended_route
+            .and_then(|route| route_recommendation(route, self.route_plan.as_ref()));
         let (recommended_route, recommended_route_detail) =
             self.strings.onboarding_recommended_route(recommendation);
         let daemon_running = self.daemon_reachable == Some(true);
@@ -89,6 +91,7 @@ impl GuiApp {
             "input-method" | "input-method-v2" => {
                 Some("systemctl --user restart wayexpand-input-method.service")
             }
+            "stdin" => Some("systemctl --user restart wayexpand-control.service"),
             _ => None,
         };
         let injection = self

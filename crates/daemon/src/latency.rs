@@ -114,9 +114,15 @@ fn matcher_window() -> &'static Mutex<Window> {
     WINDOW.get_or_init(|| Mutex::new(Window::default()))
 }
 
+fn queue_window() -> &'static Mutex<Window> {
+    static WINDOW: OnceLock<Mutex<Window>> = OnceLock::new();
+    WINDOW.get_or_init(|| Mutex::new(Window::default()))
+}
+
 static MATCHER_DROPPED_SAMPLES: AtomicU64 = AtomicU64::new(0);
 static OUTPUT_DROPPED_SAMPLES: AtomicU64 = AtomicU64::new(0);
 static PROFILE_DROPPED_SAMPLES: AtomicU64 = AtomicU64::new(0);
+static QUEUE_DROPPED_SAMPLES: AtomicU64 = AtomicU64::new(0);
 
 /// Number of matcher timing samples skipped because a diagnostics reader held
 /// the rolling-window lock. Recording is best-effort so metrics never delay
@@ -135,6 +141,18 @@ pub fn output_dropped_samples() -> u64 {
 /// the segmented profile lock.
 pub fn profile_dropped_samples() -> u64 {
     PROFILE_DROPPED_SAMPLES.load(Ordering::Relaxed)
+}
+
+pub(crate) fn record_queue_latency(elapsed: Duration) {
+    record_nonblocking(
+        queue_window(),
+        elapsed.as_nanos().min(u64::MAX as u128) as u64,
+        &QUEUE_DROPPED_SAMPLES,
+    );
+}
+
+pub(crate) fn queue_dropped_samples() -> u64 {
+    QUEUE_DROPPED_SAMPLES.load(Ordering::Relaxed)
 }
 
 fn profile_windows() -> &'static Mutex<ProfileWindows> {
@@ -189,6 +207,14 @@ pub fn matcher_snapshot() -> Snapshot {
     static CACHE: OnceLock<Mutex<Snapshot>> = OnceLock::new();
     nonblocking_snapshot(
         matcher_window(),
+        CACHE.get_or_init(|| Mutex::new(Snapshot::default())),
+    )
+}
+
+pub(crate) fn queue_snapshot() -> Snapshot {
+    static CACHE: OnceLock<Mutex<Snapshot>> = OnceLock::new();
+    nonblocking_snapshot(
+        queue_window(),
         CACHE.get_or_init(|| Mutex::new(Snapshot::default())),
     )
 }

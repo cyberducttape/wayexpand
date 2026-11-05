@@ -4,6 +4,125 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Update the support-bundle smoke test to validate report schema 2, including
+  private file output. Pin the fuzz runner to cargo-fuzz 0.13.2 and retry its
+  installation on transient registry/build failures.
+- Make `wayexpand upgrade --apply` wait up to five seconds for the restarted
+  daemon to publish status before failing its health check. When build identity
+  remains unknown or mismatched, report the CLI and daemon revisions and give
+  specific recovery guidance before/after automatic rollback.
+- Add a regression test for failed IBus activation rollback across service state,
+  compositor input-method selection, IBus preload engines, and active engine.
+  Repair the daemon reload test fixture for expansion counts and make its
+  status-field test consume the versioned contract fixture. Bump the status
+  JSON fixture schema to 14 to include optional effective sandbox evidence.
+  Serialize process-global trace assertions in test builds so parallel daemon
+  stress tests cannot evict each other's bounded diagnostic history. Move the
+  doctor integration fixture beneath HOME, avoiding a false permission failure
+  when the checked-out workspace itself is group-writable.
+- Add a GUI Test Expansion mode chooser that keeps local matcher preview
+  separate from interactive desktop testing. The desktop path exposes the
+  one-shot `wayexpand debug --test` command for a selected enabled static
+  snippet, warns that insertion must be visually verified, and directs
+  failures to backend diagnostics. Onboarding route labels now use support
+  evidence from the live route plan rather than assuming a recommended route
+  is available.
+- Add config generation and reload diagnostics to daemon status (schemas 28–29): active config path/generation, successful activation timestamps, enabled/disabled counts, sanitized reload validation errors, per-route reconnect state/reason/backoff and connection timestamps, last successful insertion, bounded event counters/drop totals, and output queue p50/p95/p99. Invalid candidates preserve the previous active generation.
+
+- Add `wayexpand check --all [--json]` for CI-oriented static configuration
+  checks covering schema/TOML, triggers, templates, referenced library files,
+  policy, disabled or unreachable expansions, and version acceptance. Dynamic
+  command declarations are validated but never executed. Add `config show`,
+  `config validate`, and content-free `config diff`, plus `service status` and
+  confirmation-gated restart of only the active route.
+- Add `wayexpand backend list [--json]` for a live, policy-aware route inventory
+  with separate installation, support, authorization, connection, policy,
+  certification, and limitation fields. The static self-test also reports
+  disabled and application-filtered expansion counts without exposing triggers.
+- Add `wayexpand compatibility-report [--json]` with a versioned, shareable
+  desktop report. It records OS/session details and live IBus/service evidence,
+  marks toolkit and Unicode insertion scenarios NOT TESTED unless separately
+  certified, and never treats capability negotiation as proof of insertion.
+- Add route-catalog-backed desktop profiles for GNOME, KDE, Sway, and Hyprland,
+  exposed through `wayexpand backend profile`; current-session output keeps the
+  live capability/policy recommendation distinct from static guidance.
+- Add previewable `wayexpand reset --integration|--services|--preferences`
+  scopes. Applying requires explicit confirmation; preferences are backed up,
+  integration reset clears remembered consent, and no reset removes snippets.
+- Add `wayexpand restore <backup>` review/apply flow with validation, trigger-
+  level diff, current-config backup, revision-bound atomic replacement, and a
+  GUI Backup / Restore preview. Add `wayexpand help finding <WX-ID>` quick
+  guidance for stable diagnostic IDs and a GUI portal-help action.
+- Add a GUI quick-action diagnostics panel that links installation/setup,
+  configuration editing, matcher testing, desktop backend test instructions,
+  capability-based route recommendations, version checks, and confirmed
+  service restarts. Restarts verify that the selected user unit is already
+  active and refuse to start another route implicitly.
+- Add `wayexpand health [--json]` with a versioned operational-readiness report
+  and stable monitoring exit codes. Readiness reflects live matching/output
+  state and explicitly does not imply production certification. Setup commands
+  now use operation-specific deadlines and distinguish start, monitor, timeout,
+  cleanup, and nonzero-exit outcomes.
+- Add `wayexpand backend test --capture` and `--injection` as separate,
+  explicit checks for evdev and libei. Capture has a 15-second bound, requires
+  confirmation, and discards event contents. Injection inserts only a fixed
+  harmless marker after confirmation and requires operator verification;
+  uncertain outcomes are never replayed.
+- Add normalized per-route assessments shared by setup, doctor JSON, and GUI
+  diagnostics, separating installation, compositor support, authorization,
+  connection, policy, certification, user action, and limitations. Desktop
+  names now identify only a possible portal provider; they do not count as
+  EIS availability or readiness. Show portal/interface/authorization/EIS
+  stages and plain-language Maximum compatibility tradeoffs.
+- Upgrade `wayexpand support-bundle` to schema 2 with bounded service restart
+  counts, exit codes, stable service error IDs, and content-free recent event
+  counters. Route plans and protocol probes are now projected through
+  field-level allowlists rather than copied as nested doctor JSON. Add a GUI
+  support-report preview and owner-only, no-overwrite save flow.
+- Add `wayexpand debug [--json]` with stable diagnostic finding IDs and
+  `wayexpand debug --live`, a user-started session that expires within five
+  minutes and emits only aggregate input counters and content-free output
+  transaction states. Add daemon input-event totals and opaque transaction
+  correlation IDs without storing key or snippet content; advance the status
+  contract to schema 28.
+- Add `wayexpand debug --trigger TEXT` for the non-rendering matcher explanation
+  and `wayexpand debug --test TRIGGER` for an explicit, user-confirmed test in
+  a real application using a static non-command snippet. The test never sends
+  Enter and reports the specific application class tested.
+- Add a shared `installer-components.toml` contract, package it through release,
+  user, Debian, RPM and Arch installs, and check it in the distribution audit.
+- Add `wayexpand install-check`, `wayexpand setup --check [--json]`, and
+  `wayexpand repair --check|--apply`. Repair is limited to missing user-service
+  unit links; it does not grant keyboard or portal access.
+- Add `wayexpand upgrade --check|--apply|--rollback`. Installers preserve the
+  prior content-addressed payload; apply restarts active managed services,
+  verifies the daemon build and socket contract, and automatically restores
+  the previous payload after failed health verification. IBus-owned engines remain separately
+  restartable and are called out explicitly.
+- Add `wayexpand-control.service`, a daemon unit without keyboard capture that
+  serves the control socket, quick insert and hotkeys beside the IBus route.
+  All installers and the deb, RPM and Arch packages ship it; IBus setup starts
+  it (or the terminal-only evdev daemon with `--terminals`), and
+  `wayexpand ibus status` warns when IBus runs without either.
+- IBus setup runs in phases: preflight checks everything before changing the
+  session, preparation makes only inert changes, and a failed activation or
+  verification restores the previous input method, IBus input-method list,
+  KWin Virtual Keyboard, and WayExpand services. IBus is restarted only when
+  its registry lacks the engine, with a notice that input methods pause.
+- Doctor recovery advice names the WayExpand unit that is actually installed
+  and enabled (or failed, with the `journalctl` command), recommends
+  `wayexpand setup` when none is enabled, and never recommends the stdin
+  test-harness unit that ordinary installs do not ship.
+- Use one evdev consent-marker path everywhere:
+  `~/.config/wayexpand/evdev-sensitive-fields-ack`. With a custom
+  `XDG_CONFIG_HOME`, the installers previously accepted (and pointed the unit
+  at) a marker under that directory while `setup` and `doctor` checked
+  `~/.config`; installers, setup, doctor and the unit now agree, and a marker
+  left at the old location is reported with the command to move it.
+- `wayexpand ibus status --json` and the GUI report IBus readiness as separate
+  conditions: component installed, registered, IBus running, selected, engine
+  running, text received, and expanded.
+
 - GUI polish: header statuses use one chip style and a fixed row height, so
   the panels no longer shift when the service starts; every chip opens
   Diagnostics. The header recognizes a live IBus engine (`IBus: Active`)

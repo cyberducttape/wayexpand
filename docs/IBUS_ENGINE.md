@@ -102,8 +102,16 @@ wayexpand setup --backend ibus              # IBus for applications
 wayexpand setup --backend ibus --terminals  # also cover terminals (see below)
 ```
 
-Setup performs and verifies every step, reading each result back rather
-than trusting exit codes:
+Setup works in phases and reads each result back rather than trusting exit
+codes. **Preflight** checks everything it needs (IBus, the engine binary,
+the configuration, KDE's IBus Wayland launcher and `kwriteconfig6`, the
+services, and for `--terminals` the evdev unit and consent marker) and stops
+with the exact fix before changing anything. **Prepare** makes only inert
+changes. **Activate** records the session first (the active input method,
+IBus' input-method list, KWin's Virtual Keyboard, and which WayExpand
+services ran), then changes it. **Verify** runs the same checks as
+`wayexpand ibus status`; if activation or verification fails, setup restores
+the recorded session and says so. The steps are:
 
 1. Installs the component manifest where the **running** ibus-daemon reads
    components (its `IBUS_COMPONENT_PATH`, otherwise `/usr/share/ibus/component`),
@@ -115,14 +123,24 @@ than trusting exit codes:
    same as System Settings → Keyboard → Virtual Keyboard). Without it,
    Wayland applications never reach IBus. A hand-started ibus-daemon is
    replaced, because it has no Wayland input-method connection.
-3. Restarts IBus if its registry does not list the engine yet, adds
+3. Restarts IBus only if its registry does not list the engine yet (IBus
+   loads components only at startup, so input methods pause briefly), adds
    `wayexpand` to IBus' input methods, and selects it.
 4. Asks for `compatibility_mode` consent if it is `off`: IBus replacement is
    verified but not atomic, and `off` refuses every replacement. `--yes`
    never grants this consent.
 5. Stops WayExpand daemons that capture keys in every application, since they
-   would expand snippets a second time (or, with `--terminals`, limits the
-   evdev daemon to terminals).
+   would expand snippets a second time, and starts a companion service:
+   `wayexpand-control.service` (control socket, quick insert and hotkeys; it
+   captures no keys), or with `--terminals` the evdev daemon limited to
+   `terminal_apps`, which also serves the control socket. Terminal coverage
+   set up earlier is kept when setup runs again.
+
+`wayexpand ibus status --json` reports `readiness` as separate conditions —
+component installed, registered with IBus, IBus running, WayExpand selected,
+engine running, text received from a field, and expanded — because each is
+evidence for the next but none implies the ones after it. The Diagnostics
+window shows the same list.
 
 ## Diagnostics
 

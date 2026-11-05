@@ -4,12 +4,14 @@
 //! never stores triggers, replacement text, key events, or backend errors,
 //! since those strings may contain user content.
 
+#[cfg(test)]
+use std::sync::MutexGuard;
 use std::{
     cell::Cell,
     collections::VecDeque,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Mutex, OnceLock,
+        Mutex, OnceLock, TryLockError,
     },
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -23,6 +25,108 @@ const HISTORY_LIMIT: usize = 8;
 const FAILURE_STATUS_LIMIT: usize = 3;
 const OUTCOME_STATUS_LIMIT: usize = 4;
 static SUPPRESSED_EXPANSIONS_TOTAL: AtomicU64 = AtomicU64::new(0);
+static TRANSACTION_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
+static MATCHER_EVALUATIONS: AtomicU64 = AtomicU64::new(0);
+static MATCHES_FOUND: AtomicU64 = AtomicU64::new(0);
+static EXPANSION_ATTEMPTS: AtomicU64 = AtomicU64::new(0);
+static EXPANSIONS_APPLIED: AtomicU64 = AtomicU64::new(0);
+static EXPANSIONS_REJECTED: AtomicU64 = AtomicU64::new(0);
+static DIAGNOSTIC_EVENTS_DROPPED: AtomicU64 = AtomicU64::new(0);
+static LAST_SUCCESSFUL_INSERTION_UNIX: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(test)]
+static TEST_HISTORY_GATE: Mutex<()> = Mutex::new(());
+#[cfg(test)]
+std::thread_local! {
+    static TEST_HISTORY_GATE_HELD: Cell<bool> = const { Cell::new(false) };
+}
+
+#[cfg(test)]
+pub(crate) struct HistoryTestGuard {
+    _lock: MutexGuard<'static, ()>,
+}
+
+#[cfg(test)]
+impl Drop for HistoryTestGuard {
+    fn drop(&mut self) {
+        TEST_HISTORY_GATE_HELD.with(|held| held.set(false));
+    }
+}
+
+/// Keep process-global diagnostic history assertions isolated from parallel
+/// tests that exercise unrelated expansion paths. Production history remains
+/// bounded and best-effort; this gate exists only in test builds.
+#[cfg(test)]
+pub(crate) fn history_test_guard() -> HistoryTestGuard {
+    let lock = TEST_HISTORY_GATE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    TEST_HISTORY_GATE_HELD.with(|held| held.set(true));
+    HistoryTestGuard { _lock: lock }
+}
+
+#[cfg(test)]
+fn history_test_gate() -> Option<MutexGuard<'static, ()>> {
+    if TEST_HISTORY_GATE_HELD.with(Cell::get) {
+        None
+    } else {
+        Some(
+            TEST_HISTORY_GATE
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        )
+    }
+}
+
+#[cfg(not(test))]
+fn history_test_gate() -> Option<()> {
+    None
+}
+
+pub(crate) fn last_successful_insertion_unix() -> u64 {
+    LAST_SUCCESSFUL_INSERTION_UNIX.load(Ordering::Relaxed)
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct DiagnosticTotals {
+    pub matcher_evaluations: u64,
+    pub matches_found: u64,
+    pub expansion_attempts: u64,
+    pub expansions_applied: u64,
+    pub expansions_rejected: u64,
+    pub events_dropped: u64,
+}
+
+pub(crate) fn totals() -> DiagnosticTotals {
+    DiagnosticTotals {
+        matcher_evaluations: MATCHER_EVALUATIONS.load(Ordering::Relaxed),
+        matches_found: MATCHES_FOUND.load(Ordering::Relaxed),
+        expansion_attempts: EXPANSION_ATTEMPTS.load(Ordering::Relaxed),
+        expansions_applied: EXPANSIONS_APPLIED.load(Ordering::Relaxed),
+        expansions_rejected: EXPANSIONS_REJECTED.load(Ordering::Relaxed),
+        events_dropped: DIAGNOSTIC_EVENTS_DROPPED.load(Ordering::Relaxed),
+    }
+}
+
+pub(crate) fn note_matcher_evaluation() {
+    MATCHER_EVALUATIONS.fetch_add(1, Ordering::Relaxed);
+}
+
+pub(crate) fn note_matches(count: usize) {
+    MATCHES_FOUND.fetch_add(count as u64, Ordering::Relaxed);
+}
+
+pub(crate) fn note_expansion_attempt() {
+    EXPANSION_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
+}
+
+pub(crate) fn note_expansion_outcome(applied: bool) {
+    if applied {
+        EXPANSIONS_APPLIED.fetch_add(1, Ordering::Relaxed);
+    } else {
+        EXPANSIONS_REJECTED.fetch_add(1, Ordering::Relaxed);
+    }
+}
 
 /// Number of matched expansions denied by a policy, safety gate, or
 /// preparation failure before reaching the output backend.
@@ -32,6 +136,7 @@ pub(crate) fn suppressed_expansions_total() -> u64 {
 
 #[derive(Clone, Debug)]
 pub(crate) struct FailureTrace {
+    transaction_id: String,
     at_unix: u64,
     backend: String,
     trigger_recognized: &'static str,
@@ -86,6 +191,13 @@ impl<'a> TracedInjector<'a> {
             TransactionOutcome::UnknownApplicationOutcome { .. } => "application outcome unknown",
             TransactionOutcome::UnknownPartialFailure { .. } => "partial_write",
         };
+        if matches!(
+            outcome,
+            TransactionOutcome::Applied
+                | TransactionOutcome::AppliedWithCursorPositionFailure { .. }
+        ) {
+            LAST_SUCCESSFUL_INSERTION_UNIX.store(now_unix(), Ordering::Relaxed);
+        }
         let erase_acknowledged = if self.stages.erase.is_empty() {
             if self.inner.capabilities().atomic_replace {
                 "atomic replacement not acknowledged"
@@ -97,6 +209,7 @@ impl<'a> TracedInjector<'a> {
         };
         let transaction_phases = phases.iter().map(|phase| phase.as_str()).collect();
         push(FailureTrace {
+            transaction_id: next_transaction_id(),
             at_unix: now_unix(),
             backend: self.stages.backend,
             trigger_recognized: "yes",
@@ -125,6 +238,7 @@ pub(crate) fn record_blocked_expansion(backend: &str, reason: &'static str) {
         .take(64)
         .collect::<String>();
     push(FailureTrace {
+        transaction_id: next_transaction_id(),
         at_unix: now_unix(),
         backend,
         trigger_recognized: "yes",
@@ -208,6 +322,13 @@ fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| duration.as_secs())
+}
+
+/// Opaque process-local correlation key. It is independent of user text and
+/// is included only in the bounded output-transaction history.
+fn next_transaction_id() -> String {
+    let sequence = TRANSACTION_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{:x}-{:x}", std::process::id(), sequence)
 }
 
 impl TextInjector for TracedInjector<'_> {
@@ -323,10 +444,14 @@ fn push_bounded(ring: &mut VecDeque<FailureTrace>, limit: usize, trace: FailureT
 }
 
 fn push(trace: FailureTrace) {
-    let mut history = history()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    push_history(&mut history, trace);
+    let _test_gate = history_test_gate();
+    match history().try_lock() {
+        Ok(mut history) => push_history(&mut history, trace),
+        Err(TryLockError::Poisoned(poisoned)) => push_history(&mut poisoned.into_inner(), trace),
+        Err(TryLockError::WouldBlock) => {
+            DIAGNOSTIC_EVENTS_DROPPED.fetch_add(1, Ordering::Relaxed);
+        }
+    }
 }
 
 fn push_history(history: &mut History, trace: FailureTrace) {
@@ -337,6 +462,7 @@ fn push_history(history: &mut History, trace: FailureTrace) {
 }
 
 pub(crate) fn recent_json() -> String {
+    let _test_gate = history_test_gate();
     let history = history()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -347,6 +473,7 @@ pub(crate) fn recent_json() -> String {
 /// Recent successful and blocked output transactions. Each record contains
 /// only stage outcomes and backend identity, never user text.
 pub(crate) fn recent_outcomes_json() -> String {
+    let _test_gate = history_test_gate();
     let history = history()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -357,6 +484,7 @@ fn traces_json<'a>(traces: impl Iterator<Item = &'a FailureTrace>) -> String {
     let traces = traces
         .map(|trace| {
             serde_json::json!({
+                "transaction_id": trace.transaction_id,
                 "at_unix": trace.at_unix,
                 "backend": trace.backend,
                 "trigger_recognized": trace.trigger_recognized,
@@ -385,6 +513,7 @@ fn traces_json<'a>(traces: impl Iterator<Item = &'a FailureTrace>) -> String {
 pub(crate) fn saturate_for_test() {
     for _ in 0..HISTORY_LIMIT {
         push(FailureTrace {
+            transaction_id: next_transaction_id(),
             at_unix: u64::MAX,
             backend: "wlroots-virtual-keyboard".into(),
             trigger_recognized: "yes",
@@ -454,10 +583,12 @@ mod tests {
 
     #[test]
     fn successful_outputs_do_not_evict_reported_failures() {
+        let _history_guard = history_test_guard();
         let mut history = History::default();
         push_history(
             &mut history,
             FailureTrace {
+                transaction_id: next_transaction_id(),
                 at_unix: 1,
                 backend: "evict-check".into(),
                 trigger_recognized: "yes",
@@ -476,6 +607,7 @@ mod tests {
             push_history(
                 &mut history,
                 FailureTrace {
+                    transaction_id: next_transaction_id(),
                     at_unix: 2,
                     backend: "mock-output".into(),
                     trigger_recognized: "yes",
@@ -502,6 +634,7 @@ mod tests {
 
     #[test]
     fn successful_output_is_in_outcomes_and_excluded_from_failure_history() {
+        let _history_guard = history_test_guard();
         let mut injector = MockInjector;
         let mut traced = TracedInjector::new(&mut injector);
         let report = wayexpand_core::ExpansionEngine::apply_with_report(
@@ -538,6 +671,7 @@ mod tests {
 
     #[test]
     fn partial_write_trace_includes_content_free_confirmed_progress() {
+        let _history_guard = history_test_guard();
         let mut injector = PartialProgressInjector {
             checkpoint: wayexpand_core::OutputCheckpoint::default(),
         };
@@ -577,6 +711,7 @@ mod tests {
 
     #[test]
     fn pre_output_blocks_are_content_free_outcomes() {
+        let _history_guard = history_test_guard();
         record_blocked_expansion("evdev+libei", "input arrived before output");
         record_command_failure("input-method-v2", wayexpand_core::CommandErrorKind::Timeout);
 
@@ -599,6 +734,9 @@ mod tests {
             .unwrap();
         assert!(block.get("trigger").is_none());
         assert!(block.get("replacement").is_none());
+        assert!(block["transaction_id"]
+            .as_str()
+            .is_some_and(|id| id.contains('-')));
         assert!(outcomes.as_array().unwrap().iter().any(|trace| {
             trace["backend"] == "input-method-v2"
                 && trace["completion"] == "command timed out before output"
@@ -607,7 +745,17 @@ mod tests {
     }
 
     #[test]
+    fn correlation_ids_are_unique_and_independent_of_content() {
+        let first = next_transaction_id();
+        let second = next_transaction_id();
+        assert_ne!(first, second);
+        assert!(!first.contains("trigger"));
+        assert!(!second.contains("replacement"));
+    }
+
+    #[test]
     fn form_route_failure_has_a_specific_content_free_reason() {
+        let _history_guard = history_test_guard();
         record_preparation_failure(
             "evdev+libei",
             &wayexpand_core::CommandError::FormTargetUnverifiable,
@@ -625,6 +773,7 @@ mod tests {
 
     #[test]
     fn form_render_failure_has_a_specific_content_free_reason() {
+        let _history_guard = history_test_guard();
         record_command_failure(
             "evdev+libei",
             wayexpand_core::CommandErrorKind::InvalidTemplate,

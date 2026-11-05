@@ -70,6 +70,16 @@ impl GuiApp {
                         self.status = Status::success(self.strings.status_diagnostics_refreshed());
                     }
                 }
+                runtime::Completion::SupportPreview(result) => {
+                    self.support_preview_loading = false;
+                    match result {
+                        Ok(report) => {
+                            self.support_preview = Some(report);
+                            self.support_preview_error = None;
+                        }
+                        Err(error) => self.support_preview_error = Some(error),
+                    }
+                }
                 runtime::Completion::Control { operation, result } => {
                     self.pending_control = self.pending_control.saturating_sub(1);
                     match operation {

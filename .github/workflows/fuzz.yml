@@ -64,7 +64,19 @@ jobs:
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config
       - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz --locked
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if cargo install cargo-fuzz --locked --version 0.13.2; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "cargo-fuzz installation attempt $attempt failed; retrying"
+              sleep "$((attempt * 5))"
+            fi
+          done
+          echo "cargo-fuzz installation failed after three attempts" >&2
+          exit 1
       - name: Run ${{ matrix.target }}
         working-directory: fuzz
         env:

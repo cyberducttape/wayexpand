@@ -57,7 +57,7 @@ esac
 
 if command -v systemctl >/dev/null 2>&1; then
     stop_failed=0
-    for service_name in wayexpand.service wayexpand-input-method.service wayexpand-evdev.service wayexpand-action-broker.service; do
+    for service_name in wayexpand.service wayexpand-input-method.service wayexpand-evdev.service wayexpand-control.service wayexpand-action-broker.service; do
         if systemctl --user is-enabled "$service_name" >/dev/null 2>&1 \
             || systemctl --user is-active "$service_name" >/dev/null 2>&1; then
             printf '%s\n' "Stopping and disabling $service_name"
@@ -70,7 +70,7 @@ if command -v systemctl >/dev/null 2>&1; then
     if [ "$stop_failed" -ne 0 ]; then
         exit 1
     fi
-    for service_name in wayexpand.service wayexpand-input-method.service wayexpand-evdev.service wayexpand-action-broker.service; do
+    for service_name in wayexpand.service wayexpand-input-method.service wayexpand-evdev.service wayexpand-control.service wayexpand-action-broker.service; do
         if systemctl --user is-active "$service_name" >/dev/null 2>&1; then
             printf '%s\n' "error: $service_name is still active; refusing to remove installed files" >&2
             stop_failed=1
@@ -117,13 +117,13 @@ if [ -e "$ibus_component_dir/wayexpand-ibus.xml" ]; then
     printf '%s\n' "Removed $ibus_component_dir/wayexpand-ibus.xml"
 fi
 
-for unit in wayexpand.service wayexpand-input-method.service wayexpand-evdev.service wayexpand-action-broker.service; do
+for unit in wayexpand.service wayexpand-input-method.service wayexpand-evdev.service wayexpand-control.service wayexpand-action-broker.service; do
     if [ -e "$unit_dir/$unit" ]; then
         rm -f -- "$unit_dir/$unit"
         printf '%s\n' "Removed $unit_dir/$unit"
     fi
 done
-for service in wayexpand-input-method.service wayexpand-evdev.service wayexpand-action-broker.service; do
+for service in wayexpand-input-method.service wayexpand-evdev.service wayexpand-control.service wayexpand-action-broker.service; do
     dropin="$unit_dir/$service.d/10-xdg-paths.conf"
     if [ -e "$dropin" ]; then
         rm -f -- "$dropin"

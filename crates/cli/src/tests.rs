@@ -431,24 +431,27 @@ fn doctor_explains_verified_compatibility_and_blocked_insertion() {
 
 #[test]
 fn doctor_reports_current_session_capabilities_separately_with_recovery_steps() {
-    let report = crate::doctor::status::session_capabilities_from_status(&serde_json::json!({
-        "state": "connected",
-        "source": "evdev",
-        "backend": "libei",
-        "capture_exclusive": false,
-        "capture_reliable_key_state": true,
-        "capture_layout_aware": false,
-        "capture_layout_state": "unavailable",
-        "capture_sensitive_focus": false,
-        "window_tracker_connected": true,
-        "window_identity_exact": true,
-        "focus_assurance": "tracker",
-        "inject_insertion_mode": "ei_text",
-        "inject_full_unicode": true,
-        "inject_atomic_replace": false,
-        "replacement_assurance": "focus-tracked-best-effort",
-        "compatibility_mode": "tracked-focus",
-    }));
+    let report = crate::doctor::status::session_capabilities_from_status(
+        &serde_json::json!({
+            "state": "connected",
+            "source": "evdev",
+            "backend": "libei",
+            "capture_exclusive": false,
+            "capture_reliable_key_state": true,
+            "capture_layout_aware": false,
+            "capture_layout_state": "unavailable",
+            "capture_sensitive_focus": false,
+            "window_tracker_connected": true,
+            "window_identity_exact": true,
+            "focus_assurance": "tracker",
+            "inject_insertion_mode": "ei_text",
+            "inject_full_unicode": true,
+            "inject_atomic_replace": false,
+            "replacement_assurance": "focus-tracked-best-effort",
+            "compatibility_mode": "tracked-focus",
+        }),
+        &crate::services::ServiceInventory::default(),
+    );
 
     assert_eq!(report["capture_source"], "evdev");
     assert_eq!(report["injection_backend"], "libei");
@@ -475,7 +478,10 @@ fn doctor_reports_current_session_capabilities_separately_with_recovery_steps() 
 
 #[test]
 fn doctor_does_not_claim_capabilities_without_a_live_route() {
-    let report = crate::doctor::status::session_capabilities_from_status(&serde_json::Value::Null);
+    let report = crate::doctor::status::session_capabilities_from_status(
+        &serde_json::Value::Null,
+        &crate::services::ServiceInventory::default(),
+    );
     assert_eq!(report["capture"]["status"], "unavailable");
     assert_eq!(report["injection"]["status"], "unavailable");
     assert_eq!(report["focus_tracking"]["status"], "unavailable");
@@ -485,14 +491,26 @@ fn doctor_does_not_claim_capabilities_without_a_live_route() {
 
 #[test]
 fn doctor_reports_stalled_output_with_route_specific_recovery() {
-    let stalled = crate::doctor::status::output_health_from_status(&serde_json::json!({
-        "source": "evdev",
-        "output_health": "stalled",
-        "output_uncertain_total": 2,
-        "output_partial_total": 1,
-        "output_retiring_workers": 1,
-        "output_stalled_ms": 9000,
-    }));
+    let services = crate::services::ServiceInventory::from_states(vec![(
+        crate::services::UserService::Evdev,
+        crate::services::UnitState {
+            installed: true,
+            enabled: true,
+            active: true,
+            failed: false,
+        },
+    )]);
+    let stalled = crate::doctor::status::output_health_from_status(
+        &serde_json::json!({
+            "source": "evdev",
+            "output_health": "stalled",
+            "output_uncertain_total": 2,
+            "output_partial_total": 1,
+            "output_retiring_workers": 1,
+            "output_stalled_ms": 9000,
+        }),
+        &services,
+    );
     assert_eq!(stalled["health"], "stalled");
     assert_eq!(stalled["uncertain_transactions_total"], 2);
     assert_eq!(stalled["partial_insertions_total"], 1);
@@ -510,9 +528,12 @@ fn doctor_reports_stalled_output_with_route_specific_recovery() {
         .iter()
         .any(|blocker| blocker.as_str().unwrap().contains("stalled output worker")));
 
-    let recovering = crate::doctor::status::output_health_from_status(&serde_json::json!({
-        "output_health": "recovering",
-    }));
+    let recovering = crate::doctor::status::output_health_from_status(
+        &serde_json::json!({
+            "output_health": "recovering",
+        }),
+        &services,
+    );
     assert!(recovering["recovery"].is_null());
 }
 
@@ -637,7 +658,7 @@ fn status_json_matches_documented_stable_contract() {
          backend=input-method-v2\n\
          route_id=input-method-v2\n\
          backend_mode=unknown\n\
-         status_schema=26\n\
+         status_schema=29\n\
          daemon_commit=test-commit\n\
          state=connected\n\
          route_available=true\n\
@@ -646,6 +667,15 @@ fn status_json_matches_documented_stable_contract() {
          paused=false\n\
          config=/home/user/.config/wayexpand/expansions.toml\n\
          config_state=ok\n\
+         config_active_path=/home/user/.config/wayexpand/expansions.toml\n\
+         config_generation=1\n\
+         config_loaded_at_unix=1\n\
+         config_last_successful_reload_unix=1\n\
+         config_enabled_expansions=1\n\
+         config_disabled_expansions=0\n\
+         config_last_reload_failure=none\n\
+         config_validation_error_count=0\n\
+         config_validation_errors=none\n\
          capture_sensitive_focus=true\n\
          capture_exclusive=true\n\
          capture_reliable_key_state=true\n\
@@ -724,6 +754,30 @@ fn status_json_matches_documented_stable_contract() {
          recent_expansion_failures=[]\n\
          recent_expansion_outcomes=[]\n\
          suppressed_expansions_total=0\n\
+         input_events_total=42\n\
+         matcher_evaluations_total=5\n\
+         matches_found_total=2\n\
+         expansion_attempts_total=2\n\
+         expansions_applied_total=1\n\
+         expansions_rejected_total=1\n\
+         diagnostic_events_dropped_total=0\n\
+         input_connection_state=connected\n\
+         output_connection_state=connected\n\
+         input_last_connected_unix=1\n\
+         output_last_connected_unix=1\n\
+         input_last_disconnect_reason=none\n\
+         output_last_disconnect_reason=none\n\
+         input_reconnect_attempts=0\n\
+         output_reconnect_attempts=0\n\
+         input_reconnect_backoff_ms=0\n\
+         output_reconnect_backoff_ms=0\n\
+         last_successful_insertion_unix=1\n\
+         output_queue_latency_sample_count=0\n\
+         output_queue_latency_window_count=0\n\
+         output_queue_latency_p50_us=0\n\
+         output_queue_latency_p95_us=0\n\
+         output_queue_latency_p99_us=0\n\
+         output_queue_latency_dropped_total=0\n\
          output_reconnect_total=1\n\
          input_reconnect_total=2\n\
          input_connection_failures_total=0\n\
@@ -744,13 +798,14 @@ fn status_json_matches_documented_stable_contract() {
          connect_workers_completed_total=0\n\
          connect_workers_cancelled_total=0\n\
          connect_workers_rejected_total=0\n\
+         sandbox_security={\"no_new_privileges\":true}\n\
          terminal_apps_only=false";
     let value = status_as_json(daemon_response).unwrap();
     let object = value.as_object().expect("status --json returns an object");
     let contract: serde_json::Value =
         serde_json::from_str(include_str!("../../../tests/contracts/status-json.json"))
             .expect("status contract fixture must be valid JSON");
-    assert_eq!(contract["schema_version"], 12);
+    assert_eq!(contract["schema_version"], 14);
     assert_eq!(contract["daemon_control_schema"], CONTROL_STATUS_SCHEMA);
     assert_ne!(
         contract["schema_version"],

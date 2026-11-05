@@ -550,6 +550,10 @@ fn main() -> Result<()> {
         "running"
     };
     let paused = false;
+    counters::mark_initial_connections(
+        input_method.is_some() || evdev.is_some(),
+        injector.is_some() || input_method.is_some(),
+    );
     let mut status_publisher = StatusPublisher::default();
     set_daemon_status(
         &mut status_publisher,

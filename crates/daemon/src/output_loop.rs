@@ -235,6 +235,7 @@ enum OutputCommand {
     /// one outcome, so the reactor need not wait for each step.
     Transaction(
         Box<ExpansionResult>,
+        std::time::Instant,
         SyncSender<(ExpansionResult, TransactionOutcome)>,
     ),
     Shutdown,
@@ -264,7 +265,8 @@ impl TransactionSubmitter {
     ) -> Result<SubmittedTransaction, Box<(InjectorError, ExpansionResult)>> {
         let (completion, outcome) = sync_channel(1);
         let chars = transaction_keystrokes(&result);
-        let command = OutputCommand::Transaction(Box::new(result), completion);
+        let submitted_at = std::time::Instant::now();
+        let command = OutputCommand::Transaction(Box::new(result), submitted_at, completion);
         if let Err(error) = self.sender.try_send(command) {
             let (command, message) = match error {
                 TrySendError::Full(command) => (command, "serialized output queue is full"),
@@ -272,7 +274,7 @@ impl TransactionSubmitter {
                     (command, "serialized output worker stopped")
                 }
             };
-            let OutputCommand::Transaction(result, _) = command else {
+            let OutputCommand::Transaction(result, _, _) = command else {
                 unreachable!("transaction admission returned a different command")
             };
             return Err(Box::new((
@@ -471,7 +473,8 @@ pub fn spawn_async_injector(
                         backend.inject_key_event(keycode, modifiers, state),
                         completion,
                     ),
-                    OutputCommand::Transaction(result, completion) => {
+                    OutputCommand::Transaction(result, submitted_at, completion) => {
+                        crate::latency::record_queue_latency(submitted_at.elapsed());
                         let outcome = crate::latency::apply(backend.as_mut(), &result);
                         // As for single operations: a rejected expansion
                         // leaves the session healthy; any other failure

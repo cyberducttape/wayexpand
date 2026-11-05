@@ -30,6 +30,8 @@ pub(crate) enum RouteOverlap {
     None,
     /// A raw-input daemon limited to `settings.terminal_apps`.
     TerminalsOnly { source: String },
+    /// The control-only daemon: quick insert and hotkeys, no capture.
+    ControlOnly,
     /// A capturing daemon that expands everywhere: IBus and it both expand.
     Everywhere { source: String },
     /// A capturing daemon too old to report its scope.
@@ -42,6 +44,9 @@ impl RouteOverlap {
             return Self::None;
         };
         let source = status["source"].as_str().unwrap_or("").to_owned();
+        if source == "stdin" {
+            return Self::ControlOnly;
+        }
         if !matches!(source.as_str(), "evdev" | "input-method") {
             return Self::None;
         }
@@ -56,6 +61,7 @@ impl RouteOverlap {
         match self {
             Self::None => "none",
             Self::TerminalsOnly { .. } => "terminals-only",
+            Self::ControlOnly => "control-only",
             Self::Everywhere { .. } => "everywhere",
             Self::Unknown { .. } => "unknown",
         }
@@ -65,9 +71,26 @@ impl RouteOverlap {
     pub(crate) fn finding(
         &self,
         ibus_active: bool,
+        control_installed: bool,
     ) -> Option<(IbusCheckState, String, Option<String>)> {
         match self {
+            // Beside IBus, a WayExpand service still runs quick insert and
+            // hotkeys; without one those features are silently missing.
+            Self::None if ibus_active => Some((
+                IbusCheckState::Warn,
+                "no WayExpand service is running, so quick insert and hotkeys are unavailable (IBus expansion still works)".into(),
+                Some(if control_installed {
+                    "`systemctl --user enable --now wayexpand-control.service`, or rerun `wayexpand setup --backend ibus`".into()
+                } else {
+                    "reinstall WayExpand to get wayexpand-control.service, then rerun `wayexpand setup --backend ibus`".into()
+                }),
+            )),
             Self::None => None,
+            Self::ControlOnly => Some((
+                IbusCheckState::Pass,
+                "wayexpand-control.service provides quick insert and hotkeys beside IBus".into(),
+                None,
+            )),
             Self::TerminalsOnly { source } => Some((
                 IbusCheckState::Pass,
                 format!("the WayExpand daemon ({source} capture) covers terminal_apps only, beside IBus"),
@@ -86,6 +109,10 @@ impl RouteOverlap {
             )),
         }
     }
+}
+
+fn control_installed() -> bool {
+    crate::services::ServiceInventory::probe().installed(crate::services::UserService::Control)
 }
 
 fn daemon_status_json() -> Option<serde_json::Value> {
@@ -133,15 +160,17 @@ pub(crate) fn report_json(report: &IbusChainReport, overlap: &RouteOverlap) -> s
             "version": reading.status.version,
             "engines": reading.status.engines,
             "totals": reading.status.totals,
+            "last_transaction_id": reading.status.last_transaction_id,
             "recent_fields": reading.status.recent_fields.iter().map(field_json).collect::<Vec<_>>(),
         })
     });
-    let finding = overlap.finding(ibus_active(report));
+    let finding = overlap.finding(ibus_active(report), control_installed());
     serde_json::json!({
         "ready": report.ready() && !matches!(finding, Some((IbusCheckState::Fail, _, _))),
         "desktop": report.desktop.label(),
         "checks": checks,
         "first_failure": report.first_failure().map(|check| check.id),
+        "readiness": report.readiness(),
         "activity": activity,
         "other_route": {
             "scope": overlap.label(),
@@ -185,7 +214,7 @@ pub(crate) fn print_report(report: &IbusChainReport, overlap: &RouteOverlap) -> 
             check.fix.as_deref(),
         );
     }
-    let finding = overlap.finding(ibus_active(report));
+    let finding = overlap.finding(ibus_active(report), control_installed());
     if let Some((state, detail, fix)) = &finding {
         print_check(
             *state,
@@ -195,6 +224,19 @@ pub(crate) fn print_report(report: &IbusChainReport, overlap: &RouteOverlap) -> 
         );
     }
     let ready = report.ready() && !matches!(finding, Some((IbusCheckState::Fail, _, _)));
+    let stages: Vec<String> = report
+        .readiness()
+        .stages()
+        .iter()
+        .map(|(stage, ok)| {
+            format!(
+                "{} {}",
+                if *ok { "✓" } else { "✗" },
+                stage.replace('_', " ")
+            )
+        })
+        .collect();
+    println!("Readiness: {}", stages.join(" · "));
     match &report.activity {
         Some(reading) if !reading.status.recent_fields.is_empty() => {
             println!("Recent fields (newest last; no text is recorded):");
@@ -313,30 +355,48 @@ mod tests {
             }
         );
         assert!(matches!(
-            everywhere.finding(true),
+            everywhere.finding(true, true),
             Some((IbusCheckState::Fail, _, Some(_)))
         ));
         // Without IBus active there is nothing to double up with.
-        assert!(everywhere.finding(false).is_none());
+        assert!(everywhere.finding(false, true).is_none());
 
         let terminals = RouteOverlap::from_status(Some(&serde_json::json!({
             "source": "evdev",
             "terminal_apps_only": true,
         })));
         assert!(matches!(
-            terminals.finding(true),
+            terminals.finding(true, true),
             Some((IbusCheckState::Pass, _, None))
         ));
 
         let old = RouteOverlap::from_status(Some(&serde_json::json!({ "source": "evdev" })));
         assert!(matches!(
-            old.finding(true),
+            old.finding(true, true),
             Some((IbusCheckState::Warn, _, _))
         ));
 
-        let harness = RouteOverlap::from_status(Some(&serde_json::json!({ "source": "stdin" })));
-        assert_eq!(harness, RouteOverlap::None);
+        // The control-only unit runs the stdin source: no capture, no overlap.
+        let control = RouteOverlap::from_status(Some(&serde_json::json!({ "source": "stdin" })));
+        assert_eq!(control, RouteOverlap::ControlOnly);
+        assert!(matches!(
+            control.finding(true, true),
+            Some((IbusCheckState::Pass, _, None))
+        ));
         assert_eq!(RouteOverlap::from_status(None), RouteOverlap::None);
+    }
+
+    #[test]
+    fn ibus_without_any_service_explains_missing_quick_insert() {
+        let none = RouteOverlap::None;
+        let (state, detail, fix) = none.finding(true, true).unwrap();
+        assert_eq!(state, IbusCheckState::Warn);
+        assert!(detail.contains("quick insert"));
+        assert!(fix.unwrap().contains("wayexpand-control.service"));
+        let (_, _, fix) = none.finding(true, false).unwrap();
+        assert!(fix.unwrap().contains("reinstall"));
+        // Without IBus there is nothing to report about a companion service.
+        assert!(none.finding(false, true).is_none());
     }
 
     #[test]

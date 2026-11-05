@@ -81,7 +81,10 @@ struct RouteRecommendation {
     certified: bool,
 }
 
-fn route_recommendation(route: RecommendedRoute) -> Option<RouteRecommendation> {
+fn route_recommendation(
+    route: RecommendedRoute,
+    route_plan: Option<&wayexpand_backend_selection::RoutePlan>,
+) -> Option<RouteRecommendation> {
     let contract = route.contract();
     let backend_kind = |backend: RouteBackend| match backend {
         RouteBackend::IBus | RouteBackend::InputMethodV2 => {
@@ -93,13 +96,32 @@ fn route_recommendation(route: RecommendedRoute) -> Option<RouteRecommendation> 
     };
     let capture = backend_kind(contract.capture_backend()?);
     let injection = backend_kind(contract.injection_backend()?);
+    let assessment = route_plan
+        .and_then(|plan| {
+            plan.routes
+                .iter()
+                .find(|planned| planned.contract.id == route.id())
+        })
+        .map(|planned| &planned.assessment);
+    let state = match assessment.map(|assessment| assessment.supported) {
+        Some(wayexpand_backend_selection::AssessmentEvidence::Yes) => BackendState::Available,
+        Some(wayexpand_backend_selection::AssessmentEvidence::No) => BackendState::Unavailable,
+        Some(wayexpand_backend_selection::AssessmentEvidence::RequiresAction) => {
+            BackendState::RequiresPermission
+        }
+        Some(wayexpand_backend_selection::AssessmentEvidence::Unknown) | None => {
+            BackendState::Implemented
+        }
+    };
     Some(RouteRecommendation {
         capture,
         injection,
         capture_label: &contract.capture,
         injection_label: &contract.injection,
-        capture_state: BackendState::Available,
-        injection_state: BackendState::Available,
+        // These are probe-derived support states, not claims that a daemon is
+        // connected or that a target application has passed certification.
+        capture_state: state,
+        injection_state: state,
         focus_tracking: contract.focus_tracking,
         sensitive_fields: contract.sensitive_fields,
         atomic_replace: contract.atomic_replace,
@@ -202,6 +224,25 @@ struct GuiApp {
     ibus_route: Option<wayexpand_backend_ibus::chain::IbusChainReport>,
     route_state: Option<runtime::RouteState>,
     diagnostics_open: bool,
+    diagnostics_close_requested: bool,
+    test_expansion_dialog_open: bool,
+    backend_test_help_open: bool,
+    service_restart_confirm_open: bool,
+    service_restart_unit: Option<String>,
+    reset_dialog_open: bool,
+    reset_confirm_open: bool,
+    reset_scope: String,
+    config_backup_dialog_open: bool,
+    config_backup_path: String,
+    restore_preview: Option<serde_json::Value>,
+    restore_confirmed: bool,
+    cli_task_kind: Option<String>,
+    last_cli_task_output: Option<String>,
+    support_export_open: bool,
+    support_preview_loading: bool,
+    support_preview: Option<String>,
+    support_preview_error: Option<String>,
+    support_output_path: String,
     evdev_setup_open: bool,
     evdev_setup_acknowledged: bool,
     daemon_status: String,
@@ -442,6 +483,7 @@ enum SaveIntent {
 struct SetupTask {
     receiver: mpsc::Receiver<Result<String, String>>,
     cancel: Arc<AtomicBool>,
+    success_message: String,
 }
 
 impl Drop for SetupTask {
@@ -525,7 +567,7 @@ impl GuiApp {
         let settings_font_scale = prefs.font_scale;
         let strings = Strings::new(prefs.language);
         Ok(Self {
-            path,
+            path: path.clone(),
             config_revision,
             preview_library_revision,
             preview_library_snippets,
@@ -554,6 +596,32 @@ impl GuiApp {
             ibus_route: None,
             route_state: None,
             diagnostics_open: false,
+            diagnostics_close_requested: false,
+            test_expansion_dialog_open: false,
+            backend_test_help_open: false,
+            service_restart_confirm_open: false,
+            service_restart_unit: None,
+            reset_dialog_open: false,
+            reset_confirm_open: false,
+            reset_scope: "integration".into(),
+            config_backup_dialog_open: false,
+            config_backup_path: format!("{}.bak", path.display()),
+            restore_preview: None,
+            restore_confirmed: false,
+            cli_task_kind: None,
+            last_cli_task_output: None,
+            support_export_open: false,
+            support_preview_loading: false,
+            support_preview: None,
+            support_preview_error: None,
+            support_output_path: std::env::var_os("HOME")
+                .map(|home| {
+                    PathBuf::from(home)
+                        .join("wayexpand-support.json")
+                        .display()
+                        .to_string()
+                })
+                .unwrap_or_else(|| "wayexpand-support.json".into()),
             evdev_setup_open: false,
             evdev_setup_acknowledged: false,
             daemon_status: strings.not_checked().into(),

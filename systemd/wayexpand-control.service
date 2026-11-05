@@ -1,0 +1,63 @@
+[Unit]
+Description=WayExpand control service (quick insert and control socket; no keyboard capture)
+Documentation=man:wayexpand(1)
+After=graphical-session.target
+PartOf=graphical-session.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+# Every daemon unit owns the same control socket; only one may run. The IBus
+# route captures typing itself, so beside IBus this unit supplies the control
+# socket (quick insert, hotkeys, `wayexpand status`) without capturing keys.
+Conflicts=wayexpand.service wayexpand-input-method.service wayexpand-evdev.service
+
+[Service]
+Type=simple
+Environment=WAYEXPAND_PROCESS_CGROUP=required
+Delegate=yes
+Environment=WAYEXPAND_PORTAL_TOKEN_PATH=%h/.config/wayexpand/libei-portal-token
+ExecStartPre=%h/.local/lib/wayexpand/current/bin/wayexpand validate
+# The stdin source with stdin closed captures nothing; a managed daemon whose
+# input has ended stays idle under its control socket. libei types explicit
+# quick inserts after the desktop portal grants access.
+ExecStart=%h/.local/lib/wayexpand/current/bin/wayexpand-daemon --source=stdin --backend=libei
+StandardInput=null
+Restart=on-failure
+RestartSec=2s
+SuccessExitStatus=SIGTERM
+KillSignal=SIGTERM
+KillMode=control-group
+TimeoutStopSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=wayexpand-control
+NoNewPrivileges=yes
+UMask=0077
+PrivateTmp=yes
+PrivateMounts=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+SystemCallArchitectures=native
+ProtectKernelTunables=yes
+# Commands run by WayExpand are placed in delegated child cgroups so timeout
+# and cancellation also terminate descendants that call setsid().
+ProtectControlGroups=no
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_UNIX
+MemoryMax=256M
+TasksMax=32
+LimitNOFILE=64
+LimitCORE=0
+# Config is read-only except the portal token; the runtime directory holds
+# the control socket.
+ReadWritePaths=%t %h/.config/wayexpand
+ReadWritePaths=/sys/fs/cgroup
+
+[Install]
+WantedBy=graphical-session.target

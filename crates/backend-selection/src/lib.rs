@@ -17,10 +17,12 @@ mod routes;
 #[cfg(test)]
 use routes::{catalog_for_tests, route_rank};
 pub use routes::{
-    injection_status_label, plan_routes, recommended_mode_description, recommended_route,
-    route_allowed_by_policy, route_contract_by_id, route_contract_for, route_id_for,
-    setup_backend_allowed, PlannedRoute, RecommendedRoute, RouteBackend, RouteContract, RoutePlan,
-    RouteStanding, SensitiveFieldSupport,
+    desktop_integration_profile, desktop_integration_profiles, injection_status_label, plan_routes,
+    recommended_mode_description, recommended_route, route_allowed_by_policy, route_contract_by_id,
+    route_contract_for, route_id_for, setup_backend_allowed, AssessmentEvidence, BackendAssessment,
+    BackendLimitation, DesktopIntegrationProfile, PlannedRoute, PortalAuthorization,
+    PortalProgress, RecommendedRoute, RouteBackend, RouteContract, RoutePlan, RouteStanding,
+    SensitiveFieldSupport,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -685,6 +687,53 @@ mod tests {
             .routes
             .iter()
             .any(|route| route.standing == RouteStanding::RequiresConsent));
+    }
+
+    #[test]
+    fn desktop_name_is_only_a_portal_candidate_not_a_ready_eis_path() {
+        let caps = capabilities(false, true, false);
+        let plan = plan_routes(&caps, false, allow_all);
+        let route = plan
+            .routes
+            .iter()
+            .find(|route| route.contract.id == "kde-evdev-libei")
+            .unwrap();
+        assert_eq!(route.standing, RouteStanding::RequiresConsent);
+        assert_eq!(route.assessment.supported, AssessmentEvidence::Unknown);
+        assert_eq!(
+            route.assessment.authorized,
+            AssessmentEvidence::RequiresAction
+        );
+        assert_eq!(route.assessment.connected, AssessmentEvidence::Unknown);
+        let portal = route.assessment.portal.as_ref().unwrap();
+        assert!(portal.provider_candidate);
+        assert_eq!(
+            portal.implementation_discovered,
+            AssessmentEvidence::Unknown
+        );
+        assert_eq!(portal.interface_available, AssessmentEvidence::Unknown);
+        assert_eq!(portal.authorization, PortalAuthorization::NotRequested);
+        assert!(!portal.direct_eis_socket_configured);
+        assert_eq!(portal.eis_connected, AssessmentEvidence::Unknown);
+        assert_eq!(portal.injection_negotiated, AssessmentEvidence::Unknown);
+        assert_eq!(portal.injection_verified, AssessmentEvidence::Unknown);
+        assert!(route
+            .reason
+            .contains("desktop name is only a provider candidate"));
+
+        let input_method_capabilities = capabilities(true, false, false);
+        let input_method_plan = plan_routes(&input_method_capabilities, false, allow_all);
+        let input_method = input_method_plan
+            .routes
+            .iter()
+            .find(|route| route.contract.id == "input-method-v2")
+            .unwrap();
+        assert_eq!(input_method.standing, RouteStanding::RequiresConsent);
+        assert_eq!(
+            input_method.assessment.supported,
+            AssessmentEvidence::Unknown
+        );
+        assert!(input_method.assessment.portal.is_some());
     }
 
     #[test]

@@ -34,6 +34,32 @@ pub(crate) fn status_as_json(response: &str) -> Result<serde_json::Value> {
                         | "command_timeout_total"
                         | "command_failure_total"
                         | "status_schema"
+                        | "config_generation"
+                        | "config_validation_error_count"
+                        | "config_loaded_at_unix"
+                        | "config_last_successful_reload_unix"
+                        | "config_enabled_expansions"
+                        | "config_disabled_expansions"
+                        | "input_events_total"
+                        | "matcher_evaluations_total"
+                        | "matches_found_total"
+                        | "expansion_attempts_total"
+                        | "expansions_applied_total"
+                        | "expansions_rejected_total"
+                        | "diagnostic_events_dropped_total"
+                        | "input_last_connected_unix"
+                        | "output_last_connected_unix"
+                        | "input_reconnect_attempts"
+                        | "output_reconnect_attempts"
+                        | "input_reconnect_backoff_ms"
+                        | "output_reconnect_backoff_ms"
+                        | "last_successful_insertion_unix"
+                        | "output_queue_latency_sample_count"
+                        | "output_queue_latency_window_count"
+                        | "output_queue_latency_p50_us"
+                        | "output_queue_latency_p95_us"
+                        | "output_queue_latency_p99_us"
+                        | "output_queue_latency_dropped_total"
                         | "suppressed_expansions_total"
                         | "input_connection_failures_total"
                         | "output_connection_failures_total"
@@ -141,20 +167,20 @@ pub(crate) fn runtime_capabilities_from_status(snapshot: &serde_json::Value) -> 
 
 /// Output-route health from a daemon status snapshot, with recovery
 /// guidance when a retired output worker blocks reconnection.
-pub(crate) fn output_health_from_status(snapshot: &serde_json::Value) -> serde_json::Value {
+pub(crate) fn output_health_from_status(
+    snapshot: &serde_json::Value,
+    services: &crate::services::ServiceInventory,
+) -> serde_json::Value {
     let health = snapshot
         .get("output_health")
         .and_then(serde_json::Value::as_str);
-    let unit = match snapshot.get("source").and_then(serde_json::Value::as_str) {
-        Some("evdev") => "wayexpand-evdev.service",
-        Some("input-method") => "wayexpand-input-method.service",
-        _ => "wayexpand.service",
-    };
+    let restart =
+        services.restart_advice(snapshot.get("source").and_then(serde_json::Value::as_str));
     let recovery = (health == Some("stalled")).then(|| {
         format!(
             "a retired output worker is still inside a compositor or portal call, so output \
              will not reconnect (a late operation could otherwise type into another window); \
-             restart the daemon with `systemctl --user restart {unit}`"
+             {restart}"
         )
     });
     serde_json::json!({
@@ -226,7 +252,11 @@ pub(crate) fn insertion_from_status(snapshot: &serde_json::Value) -> serde_json:
 /// Explain the five operational capabilities users most need to understand.
 /// These describe the daemon's current report and deliberately do not claim
 /// real-client certification based on protocol discovery alone.
-pub(crate) fn session_capabilities_from_status(snapshot: &serde_json::Value) -> serde_json::Value {
+pub(crate) fn session_capabilities_from_status(
+    snapshot: &serde_json::Value,
+    services: &crate::services::ServiceInventory,
+) -> serde_json::Value {
+    let start_advice = services.start_advice();
     let text = |key: &str| snapshot.get(key).and_then(serde_json::Value::as_str);
     let boolean = |key: &str| snapshot.get(key).and_then(serde_json::Value::as_bool);
     let connected = matches!(text("state"), Some("connected" | "running"));
@@ -241,7 +271,7 @@ pub(crate) fn session_capabilities_from_status(snapshot: &serde_json::Value) -> 
             "unavailable",
             "No connected capture route is reported by the daemon.",
             "Physical keyboard capture is not confirmed in this session.",
-            vec!["Start the user daemon with `systemctl --user start wayexpand.service`, then run `wayexpand doctor` again."],
+            vec![start_advice.as_str()],
         )
     } else if source == Some("stdin") {
         capability(
@@ -278,7 +308,7 @@ pub(crate) fn session_capabilities_from_status(snapshot: &serde_json::Value) -> 
             "unavailable",
             "No connected injection route is reported by the daemon.",
             "Text insertion cannot be confirmed in this session.",
-            vec!["Start or reconnect the daemon with `systemctl --user restart wayexpand.service`, then run `wayexpand doctor` again."],
+            vec![start_advice.as_str()],
         )
     } else if let Some(mode) = insertion_mode {
         let full_unicode = boolean("inject_full_unicode");
@@ -648,7 +678,7 @@ pub(crate) fn print_output_health_diagnostics() -> bool {
         );
     }
     let insertion_ok = insertion["assurance"].as_str() != Some("blocked");
-    let output = output_health_from_status(&snapshot);
+    let output = output_health_from_status(&snapshot, &crate::services::ServiceInventory::probe());
     let Some(health) = output["health"].as_str() else {
         return insertion_ok && !cleanup_degraded;
     };
@@ -673,7 +703,8 @@ pub(crate) fn print_output_health_diagnostics() -> bool {
 }
 
 fn print_session_capabilities(snapshot: &serde_json::Value) {
-    let report = session_capabilities_from_status(snapshot);
+    let report =
+        session_capabilities_from_status(snapshot, &crate::services::ServiceInventory::probe());
     println!("Current-session capabilities (live status, not end-to-end certification):");
     for (key, label) in [
         ("capture", "Capture"),

@@ -125,7 +125,11 @@ systemctl --user enable --now wayexpand-input-method.service
 
 Use evdev only as an explicitly approved exception. The packaged user unit is
 disabled until you create a consent marker; this prevents a default fleet
-deployment from silently enabling raw keyboard capture:
+deployment from silently enabling raw keyboard capture. The marker is always
+`~/.config/wayexpand/evdev-sensitive-fields-ack`, even with a custom
+`XDG_CONFIG_HOME`, because systemd evaluates the unit's condition before any
+XDG environment applies; the installers, setup and doctor check the same
+path:
 
 ```bash
 install -d -m 0700 ~/.config/wayexpand

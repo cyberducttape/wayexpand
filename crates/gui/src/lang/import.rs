@@ -1201,9 +1201,9 @@ impl Strings {
 
     pub fn status_setup_running(&self) -> &'static str {
         match self.lang {
-            Language::English => "Turning on WayExpand…",
-            Language::Indonesian => "Mengaktifkan WayExpand…",
-            Language::German => "WayExpand wird eingeschaltet…",
+            Language::English => "Turning on WayExpand… (you may be asked for your password, and input methods can pause for a moment)",
+            Language::Indonesian => "Mengaktifkan WayExpand… (Anda mungkin diminta kata sandi, dan metode input dapat berhenti sejenak)",
+            Language::German => "WayExpand wird eingeschaltet… (möglicherweise wird Ihr Passwort abgefragt, und Eingabemethoden pausieren kurz)",
         }
     }
 

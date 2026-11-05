@@ -47,6 +47,16 @@ pub(crate) fn process_event_with_pending_buffer(
     pending_results: &mut Vec<wayexpand_core::PendingExpansionResult>,
     ready_results: &mut Vec<ExpansionResult>,
 ) -> std::result::Result<(), Box<EventError>> {
+    if matches!(
+        &event,
+        InputEvent::TextChar(_)
+            | InputEvent::Text(_)
+            | InputEvent::Key(_)
+            | InputEvent::Backspace
+            | InputEvent::Delimiter(_)
+    ) {
+        crate::status::record_input_event();
+    }
     if let InputEvent::Key(chord) = event {
         pending_results.clear();
         ready_results.clear();
@@ -62,7 +72,9 @@ pub(crate) fn process_event_with_pending_buffer(
         return Ok(());
     }
     // Check policy before executing deferred commands.
+    failure_trace::note_matcher_evaluation();
     latency::measure_matcher(|| engine.process_deferred_into(event, pending_results));
+    failure_trace::note_matches(pending_results.len());
     apply_pending_results_with_pending_buffer(
         engine,
         pending_results,
@@ -539,11 +551,15 @@ pub(crate) fn finish_expansion(
     outcome: wayexpand_core::TransactionOutcome,
 ) -> std::result::Result<(), Box<EventError>> {
     match outcome {
-        wayexpand_core::TransactionOutcome::Applied => {}
+        wayexpand_core::TransactionOutcome::Applied => {
+            failure_trace::note_expansion_outcome(true);
+        }
         wayexpand_core::TransactionOutcome::AppliedWithCursorPositionFailure { ref source } => {
+            failure_trace::note_expansion_outcome(true);
             warn!(%source, "expansion applied but cursor repositioning failed");
         }
         wayexpand_core::TransactionOutcome::NotApplied { .. } => {
+            failure_trace::note_expansion_outcome(false);
             engine.restore_deferred_result(&result);
             return Err(Box::new(EventError {
                 result,
@@ -551,6 +567,7 @@ pub(crate) fn finish_expansion(
             }));
         }
         wayexpand_core::TransactionOutcome::UnknownApplicationOutcome { .. } => {
+            failure_trace::note_expansion_outcome(false);
             engine.discard_deferred_result(&result);
             warn!("expansion replacement outcome is unknown; refusing automatic retry");
             return Err(Box::new(EventError {
@@ -559,6 +576,7 @@ pub(crate) fn finish_expansion(
             }));
         }
         wayexpand_core::TransactionOutcome::UnknownPartialFailure { .. } => {
+            failure_trace::note_expansion_outcome(false);
             engine.discard_deferred_result(&result);
             warn!("expansion transaction may have partially applied; refusing automatic retry");
             return Err(Box::new(EventError {
@@ -609,6 +627,7 @@ fn apply_results_iter(
         }
 
         if let Some(backend) = injector.as_deref_mut() {
+            failure_trace::note_expansion_attempt();
             let outcome = latency::apply(backend, &result);
             finish_expansion(engine, result, outcome)?;
         } else {
@@ -694,6 +713,7 @@ mod tests {
 
     #[test]
     fn organization_policy_blocks_are_recorded_without_expansion_content() {
+        let _history_guard = crate::failure_trace::history_test_guard();
         let config = wayexpand_core::Config::parse(
             r#"
             [[expansion]]
