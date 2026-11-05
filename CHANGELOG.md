@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Separate setup diagnostics into installed artifacts, desktop integration,
+  and operational runtime checks. Probe loaded systemd units and their actual
+  `ExecStart` executables, live IBus registration/manifest resolution, daemon
+  schema/build/config/output health, and CLI/PATH/running-daemon installation
+  identity. Keep target insertion explicitly `not_tested` until a real client
+  test confirms it.
 - Snapshot installed, enabled, and active state for every IBus-related user
   service. Setup now fails if a conflicting capture service cannot be stopped
   and verified inactive; rollback independently restores prior enablement and

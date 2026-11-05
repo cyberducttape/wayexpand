@@ -454,10 +454,16 @@ wayexpand setup --apply
 wayexpand ibus status
 ```
 
-The setup check reports installed artifacts, the current session, and a safe
-route recommendation. It is preflight only; `real_insertion_verified` remains
-false until a user checks a harmless trigger in a focused application. The
-check never grants raw-input access or portal consent. `wayexpand repair
+`install-check` reports the installed-artifact level only. `setup --check`
+separates installed files, live integration (including loaded systemd units,
+IBus registry/engine resolution, and PATH/CLI/daemon installation identity),
+and operational runtime evidence (daemon protocol/build/config/output health
+and IBus engine state). A mixed user-local and distribution installation is
+reported as a path-identity warning, including the resolved CLI, PATH, and
+daemon executable paths. Setup preflight still does not prove insertion:
+target insertion remains `not_tested` until a harmless trigger is checked in a
+focused application. The check never grants raw-input access or portal consent.
+`wayexpand repair
 --check` reports missing user-unit links, and `wayexpand repair --apply` only
 creates links for the packaged control and input-method services before
 reloading the user systemd manager. It does not enable or start either service.

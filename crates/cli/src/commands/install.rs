@@ -66,6 +66,245 @@ fn unit_available(name: &str) -> bool {
     .any(|dir| dir.join(name).is_file())
         || current().join("systemd").join(name).is_file()
 }
+
+#[derive(Serialize)]
+struct ReadinessCheck {
+    component: String,
+    status: String,
+    detail: String,
+    evidence: serde_json::Value,
+}
+
+fn readiness_check(
+    component: impl Into<String>,
+    status: impl Into<String>,
+    detail: impl Into<String>,
+    evidence: serde_json::Value,
+) -> ReadinessCheck {
+    ReadinessCheck {
+        component: component.into(),
+        status: status.into(),
+        detail: detail.into(),
+        evidence,
+    }
+}
+
+fn systemd_property(unit: &str, property: &str) -> Option<String> {
+    crate::setup_ibus::command_output(
+        "systemctl",
+        &["--user", "show", "--property", property, "--value", unit],
+    )
+    .map(|value| value.trim().to_owned())
+}
+
+fn exec_start_program(value: &str) -> Option<PathBuf> {
+    let path = value.split_once("path=")?.1.split(';').next()?.trim();
+    let path = path.strip_prefix('{').unwrap_or(path).trim();
+    (!path.is_empty()).then(|| PathBuf::from(path))
+}
+
+fn resolved_executable(path: &Path) -> String {
+    fs::canonicalize(path)
+        .unwrap_or_else(|_| path.to_path_buf())
+        .display()
+        .to_string()
+}
+
+fn path_executable(name: &str) -> Option<PathBuf> {
+    let path = env::var_os("PATH")?;
+    env::split_paths(&path)
+        .map(|directory| directory.join(name))
+        .find(|path| {
+            fs::metadata(path).is_ok_and(|metadata| {
+                metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+            })
+        })
+}
+
+fn installation_identity() -> serde_json::Value {
+    let cli = env::current_exe().ok();
+    let path_cli = path_executable("wayexpand");
+    let source = crate::doctor::status::read_daemon_status()
+        .ok()
+        .and_then(|response| {
+            wayexpand_core::DaemonStatus::parse(&response)
+                .field("source")
+                .map(str::to_owned)
+        });
+    let service = source
+        .as_deref()
+        .and_then(crate::services::UserService::for_source);
+    let daemon = service
+        .and_then(|service| systemd_property(service.unit(), "MainPID"))
+        .and_then(|pid| pid.parse::<u32>().ok())
+        .filter(|pid| *pid > 0)
+        .and_then(|pid| fs::read_link(format!("/proc/{pid}/exe")).ok());
+    let cli_resolved = cli.as_deref().map(resolved_executable);
+    let path_resolved = path_cli.as_deref().map(resolved_executable);
+    let daemon_resolved = daemon.as_deref().map(|path| path.display().to_string());
+    let root = |value: &str| {
+        let path = Path::new(value);
+        let text = path.to_string_lossy();
+        if text.contains("/.local/lib/wayexpand/") {
+            path.ancestors()
+                .find(|ancestor| ancestor.ends_with(".local/lib/wayexpand"))
+                .map(Path::to_path_buf)
+        } else if text.starts_with("/usr/local/") {
+            Some(PathBuf::from("/usr/local"))
+        } else if text.starts_with("/usr/") {
+            Some(PathBuf::from("/usr"))
+        } else if text.contains("/.local/") {
+            path.ancestors()
+                .find(|ancestor| ancestor.ends_with(".local"))
+                .map(Path::to_path_buf)
+        } else {
+            path.parent().map(Path::to_path_buf)
+        }
+    };
+    let path_shadow = cli_resolved
+        .as_deref()
+        .zip(path_resolved.as_deref())
+        .is_some_and(|(running, resolved)| running != resolved);
+    let mixed_cli_daemon = cli_resolved
+        .as_deref()
+        .zip(daemon_resolved.as_deref())
+        .is_some_and(|(cli, daemon)| root(cli) != root(daemon));
+    serde_json::json!({
+        "cli_executable": cli_resolved,
+        "path_executable": path_resolved,
+        "daemon_executable": daemon_resolved,
+        "daemon_service": service.map(crate::services::UserService::unit),
+        "path_shadow_detected": path_shadow,
+        "mixed_cli_daemon_installation": mixed_cli_daemon,
+    })
+}
+
+fn integrated_checks(ibus: &wayexpand_backend_ibus::chain::IbusChainReport) -> Vec<ReadinessCheck> {
+    let mut checks = Vec::new();
+    for unit in [
+        "wayexpand-control.service",
+        "wayexpand-input-method.service",
+        "wayexpand-evdev.service",
+    ] {
+        let state = systemd_property(unit, "LoadState").unwrap_or_else(|| "unavailable".into());
+        checks.push(readiness_check(
+            format!("systemd:{unit}"),
+            if state == "loaded" {
+                "pass"
+            } else {
+                "unavailable"
+            },
+            if state == "loaded" {
+                "recognized by the user systemd manager"
+            } else {
+                "not loaded by the user systemd manager"
+            },
+            serde_json::json!({"load_state":state}),
+        ));
+        let exec_start = systemd_property(unit, "ExecStart");
+        let program = exec_start.as_deref().and_then(exec_start_program);
+        let executable_ok = program.as_ref().is_some_and(|path| {
+            fs::metadata(path).is_ok_and(|metadata| {
+                metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+            })
+        });
+        checks.push(readiness_check(
+            format!("systemd_exec:{unit}"),
+            if executable_ok { "pass" } else { "fail" },
+            if executable_ok { "loaded unit ExecStart resolves to an executable" } else { "loaded unit ExecStart is missing or not executable" },
+            serde_json::json!({"program":program.map(|path| path.display().to_string()),"exec_start":exec_start}),
+        ));
+    }
+    let readiness = ibus.readiness();
+    checks.push(readiness_check(
+        "ibus_registration",
+        if readiness.registered { "pass" } else { "unavailable" },
+        "IBus live registry state and component executable contract",
+        serde_json::json!({
+            "component_installed":readiness.component_installed,
+            "registered":readiness.registered,
+            "manifest":ibus.check("manifest").map(|check| serde_json::json!({"state":format!("{:?}",check.state).to_lowercase(),"detail":check.detail})),
+        }),
+    ));
+    let identity = installation_identity();
+    let mismatch = identity["path_shadow_detected"] == true
+        || identity["mixed_cli_daemon_installation"] == true;
+    checks.push(readiness_check(
+        "installation_path_identity",
+        if mismatch { "warning" } else { "pass" },
+        if mismatch { "PATH, CLI, and running daemon resolve to different installations; check for a stale ~/.local/bin/wayexpand shadowing the system package" } else { "CLI PATH resolution and running daemon installation are consistent" },
+        identity,
+    ));
+    checks
+}
+
+fn operational_checks(
+    ibus: &wayexpand_backend_ibus::chain::IbusReadiness,
+    daemon: Option<&serde_json::Value>,
+) -> Vec<ReadinessCheck> {
+    let mut checks = Vec::new();
+    let ibus_active = ibus.selected && ibus.engine_running;
+    checks.push(readiness_check(
+        "ibus_engine",
+        if ibus_active { "pass" } else { "not_tested" },
+        if ibus_active { "selected engine process is running; target text receipt/insertion remains a separate test" } else { "IBus engine activation has not been verified" },
+        serde_json::json!({"selected":ibus.selected,"engine_running":ibus.engine_running,"text_received":ibus.text_received,"expanded":ibus.expanded}),
+    ));
+    let daemon_ready = daemon.is_some_and(|status| {
+        crate::doctor::status::status_schema_compatible(status)
+            && status
+                .get("daemon_commit")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|commit| crate::doctor::status::daemon_commit_matches(Some(commit)))
+            && status
+                .get("config_state")
+                .and_then(serde_json::Value::as_str)
+                == Some("ok")
+            && status
+                .get("config_generation")
+                .and_then(serde_json::Value::as_u64)
+                .is_some_and(|generation| generation > 0)
+            && status
+                .get("output_connection_state")
+                .and_then(serde_json::Value::as_str)
+                == Some("connected")
+            && status
+                .get("output_health")
+                .and_then(serde_json::Value::as_str)
+                == Some("ok")
+    });
+    let evidence = daemon.map_or(serde_json::Value::Null, |status| {
+        serde_json::json!({
+            "daemon_commit":status.get("daemon_commit"),
+            "status_schema":status.get("status_schema"),
+            "source":status.get("source"),
+            "backend":status.get("backend"),
+            "config_state":status.get("config_state"),
+            "config_generation":status.get("config_generation"),
+            "route_available":status.get("route_available"),
+            "matching_available":status.get("matching_available"),
+            "output_connection_state":status.get("output_connection_state"),
+            "output_health":status.get("output_health"),
+        })
+    });
+    checks.push(readiness_check(
+        "daemon_runtime",
+        if daemon_ready { "pass" } else { "unavailable" },
+        if daemon_ready {
+            "daemon status protocol, build, configuration, and output health verified"
+        } else {
+            "no healthy, version-compatible daemon status is available"
+        },
+        evidence,
+    ));
+    checks.push(readiness_check(
+        "target_insertion",
+        "not_tested",
+        "setup preflight never claims successful insertion; run the interactive desktop integration test",
+        serde_json::json!({"verified":false}),
+    ));
+    checks
+}
 pub(crate) fn checks() -> Vec<Check> {
     let mut out = Vec::new();
     for (id, relative, executable) in [
@@ -109,6 +348,19 @@ pub(crate) fn checks() -> Vec<Check> {
         status: if ibus_path.is_some() { "pass" } else { "fail" },
         path: ibus_path.map_or_else(|| "IBus component XML".into(), |p| p.display().to_string()),
         detail: "component available; engine selection remains explicit",
+    });
+    let manifest = wayexpand_backend_ibus::chain::diagnose();
+    let engine_check = manifest.check("manifest");
+    let engine_ok = engine_check
+        .is_some_and(|check| check.state == wayexpand_backend_ibus::chain::IbusCheckState::Pass);
+    out.push(Check {
+        component: "ibus_engine_executable",
+        status: if engine_ok { "pass" } else { "fail" },
+        path: engine_check.map_or_else(
+            || "IBus component exec entry".into(),
+            |check| check.detail.clone(),
+        ),
+        detail: "component bus name and referenced engine executable are valid",
     });
     let contract_path = [
         current().join("share/wayexpand/installer-components.toml"),
@@ -224,7 +476,7 @@ fn print_report(title: &str, json: bool) -> Result<bool> {
     if json {
         println!(
             "{}",
-            serde_json::json!({"schema":1,"title":title,"ready":healthy,"checks":rows})
+            serde_json::json!({"schema":1,"level":"installed","title":title,"ready":healthy,"checks":rows})
         );
     } else {
         println!("{title}");
@@ -265,7 +517,13 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
     let route_plan = wayexpand_backend_selection::plan_routes(&caps, ibus_available, |route| {
         wayexpand_backend_selection::route_allowed_by_policy(&policy, route)
     });
-    let ibus_readiness = wayexpand_backend_ibus::chain::diagnose().readiness();
+    let ibus_report = wayexpand_backend_ibus::chain::diagnose();
+    let ibus_readiness = ibus_report.readiness();
+    let daemon_status = crate::doctor::status::read_daemon_status()
+        .ok()
+        .and_then(|response| crate::doctor::status::status_as_json(&response).ok());
+    let integration = integrated_checks(&ibus_report);
+    let operational = operational_checks(&ibus_readiness, daemon_status.as_ref());
     let installed = rows.iter().all(|r| r.status != "fail");
     let route_ready = recommendation.backend != "unavailable";
     let ready = installed && route_ready;
@@ -273,7 +531,13 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
         println!(
             "{}",
             serde_json::json!({
-            "schema":1, "title":"WayExpand setup readiness", "ready":ready,
+            "schema":2, "title":"WayExpand setup readiness", "ready":ready,
+                "readiness_levels":{
+                    "installed":{"status":if installed {"pass"} else {"fail"},"checks":rows.iter().map(|row| serde_json::json!({"component":row.component,"status":row.status,"path":row.path,"detail":row.detail})).collect::<Vec<_>>()},
+                    "integrated":{"status":if integration.iter().all(|check| check.status == "pass" || check.status == "warning") {"pass"} else {"incomplete"},"checks":integration},
+                    "operational":{"status":if operational.iter().any(|check| check.component == "daemon_runtime" && check.status == "pass") || operational.iter().any(|check| check.component == "ibus_engine" && check.status == "pass") {"partial"} else {"not_ready"},"checks":operational},
+                    "target_insertion":{"status":"not_tested","verified":false}
+                },
             "installation_ready":installed, "route_ready":route_ready,
                 "installation_checks":rows,
                 "desktop":{"session":crate::doctor::backends::session_description(),"recommended_input":recommendation.label,"recommended_backend":recommendation.backend,"reason":recommendation.detail},
@@ -288,7 +552,7 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
             })
         );
     } else {
-        println!("WayExpand Setup Check\n\nInstallation:");
+        println!("WayExpand Setup Check\n\nInstalled artifacts:");
         for r in &rows {
             println!(
                 "  {:4} {} — {}",
@@ -297,8 +561,45 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
                 r.path
             );
         }
-        println!("\nDesktop: {}\nRecommended: {} ({})\nRoute readiness: {}\n\nNext: wayexpand setup --apply\n\nPreflight does not verify insertion in a target application or grant raw-input/portal consent.", crate::doctor::backends::session_description(), recommendation.label, recommendation.detail, if route_ready {"available for setup"} else {"no safe automatic route available"});
-        println!("IBus runtime stages: component={}, registered={}, running={}, selected={}, engine={}, text_received={}, expanded={}", ibus_readiness.component_installed, ibus_readiness.registered, ibus_readiness.ibus_running, ibus_readiness.selected, ibus_readiness.engine_running, ibus_readiness.text_received, ibus_readiness.expanded);
+        println!("\nIntegration:");
+        for check in &integration {
+            println!(
+                "  {:<12} {} — {}",
+                check.status.to_uppercase(),
+                check.component,
+                check.detail
+            );
+            if check.component == "installation_path_identity" {
+                println!(
+                    "    CLI: {}",
+                    check.evidence["cli_executable"]
+                        .as_str()
+                        .unwrap_or("unknown")
+                );
+                println!(
+                    "    PATH: {}",
+                    check.evidence["path_executable"]
+                        .as_str()
+                        .unwrap_or("not found")
+                );
+                println!(
+                    "    Daemon: {}",
+                    check.evidence["daemon_executable"]
+                        .as_str()
+                        .unwrap_or("not running")
+                );
+            }
+        }
+        println!("\nOperational:");
+        for check in &operational {
+            println!(
+                "  {:<12} {} — {}",
+                check.status.to_uppercase(),
+                check.component,
+                check.detail
+            );
+        }
+        println!("\nDesktop: {}\nRecommended: {} ({})\nSetup preflight: {}\nTarget insertion: NOT TESTED\n\nNext: wayexpand setup --apply\n\nPreflight does not grant raw-input/portal consent or verify target-app insertion.", crate::doctor::backends::session_description(), recommendation.label, recommendation.detail, if ready {"ready to configure"} else {"prerequisites incomplete"});
     }
     if !ready {
         bail!("setup prerequisites are incomplete; see the failed checks")
@@ -398,5 +699,18 @@ mod tests {
         let evdev = &contract["components"]["evdev_service"];
         assert_eq!(evdev["required"].as_bool(), Some(false));
         assert_eq!(evdev["requires_consent"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn systemd_exec_start_parser_reads_the_loaded_program_path() {
+        assert_eq!(
+            exec_start_program(
+                "{ path=/home/operator/.local/lib/wayexpand/current/bin/wayexpand-daemon ; argv[]=/home/operator/.local/lib/wayexpand/current/bin/wayexpand-daemon --source=stdin ; }"
+            ),
+            Some(PathBuf::from(
+                "/home/operator/.local/lib/wayexpand/current/bin/wayexpand-daemon"
+            ))
+        );
+        assert_eq!(exec_start_program(""), None);
     }
 }
