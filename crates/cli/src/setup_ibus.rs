@@ -383,17 +383,21 @@ fn ensure_terminal_apps() -> Result<Vec<String>> {
 /// IBus replacement is verified but not atomic, which the default
 /// `compatibility_mode = "off"` refuses. Ask for that consent explicitly;
 /// `--yes` never grants it on the user's behalf.
-fn ensure_replacement_consent(options: IbusSetupOptions) -> Result<()> {
+fn replacement_authorization_required(mode: wayexpand_core::CompatibilityMode) -> bool {
+    mode == wayexpand_core::CompatibilityMode::Off
+}
+
+fn ensure_replacement_consent(options: IbusSetupOptions) -> Result<bool> {
     let path = default_config_path();
     let loaded = Config::load_versioned(&path).map_err(|error| config_load_error(&path, error))?;
-    if loaded.config.settings.compatibility_mode != wayexpand_core::CompatibilityMode::Off {
-        return Ok(());
+    if !replacement_authorization_required(loaded.config.settings.compatibility_mode) {
+        return Ok(false);
     }
     println!("  IBus checks that the text before the cursor is your trigger, then deletes it and inserts");
     println!("  the snippet as two separate steps. compatibility_mode = \"off\" refuses that, so nothing would expand.");
     if options.assume_yes {
         println!("  Not changed by --yes. Enable it with compatibility_mode = \"tracked-focus\" under [settings] in {}", path.display());
-        return Ok(());
+        return Ok(true);
     }
     if !prompt_yes_no(
         "  Allow verified two-step replacement (compatibility_mode = \"tracked-focus\")? [Y/n] ",
@@ -402,7 +406,7 @@ fn ensure_replacement_consent(options: IbusSetupOptions) -> Result<()> {
         println!(
             "  Left compatibility_mode off; IBus will recognize triggers but not replace them."
         );
-        return Ok(());
+        return Ok(true);
     }
     let mut config = loaded.config;
     config.settings.compatibility_mode = wayexpand_core::CompatibilityMode::TrackedFocus;
@@ -421,7 +425,7 @@ fn ensure_replacement_consent(options: IbusSetupOptions) -> Result<()> {
             ))
         })?;
     step("Set compatibility_mode = \"tracked-focus\"");
-    Ok(())
+    Ok(false)
 }
 
 /// What setup may change in the running session, recorded before it changes
@@ -749,7 +753,7 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
     // Phase 2: inert preparation. None of this changes the active input
     // method or running services.
     install_component()?;
-    ensure_replacement_consent(options)?;
+    let replacement_authorization_required = ensure_replacement_consent(options)?;
     if companion == CompanionService::Terminals && options.terminals {
         prepare_terminals()?;
     }
@@ -769,6 +773,12 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
     let overlap = crate::commands::ibus::RouteOverlap::from_status(status.as_ref());
     crate::commands::ibus::print_report(&report, &overlap);
     println!();
+    if replacement_authorization_required {
+        println!("SETUP INCOMPLETE: WX-POLICY-001");
+        println!("IBus was configured and activated, but text replacement is disabled by policy.");
+        println!("Required user action: review and authorize compatibility_mode = \"tracked-focus\" under [settings], then rerun `wayexpand setup --backend ibus`.");
+        bail!("WX-POLICY-001: IBus is active, but replacement authorization is required before expansions can work")
+    }
     println!("WayExpand IBus setup is configured; a real target-app insertion has not yet been verified.");
     println!("To complete the first-run check, run `wayexpand ibus watch`, switch to a test application, and type a harmless trigger.");
     if companion != CompanionService::Terminals {
@@ -780,6 +790,16 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compatibility_off_is_reported_as_incomplete_setup() {
+        assert!(replacement_authorization_required(
+            wayexpand_core::CompatibilityMode::Off
+        ));
+        assert!(!replacement_authorization_required(
+            wayexpand_core::CompatibilityMode::TrackedFocus
+        ));
+    }
 
     #[test]
     fn gsettings_string_lists_round_trip() {

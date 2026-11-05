@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Make IBus setup return stable incomplete status `WX-POLICY-001` when
+  replacement remains disabled by `compatibility_mode = "off"`. The route can
+  finish activation, but `--yes` no longer leaves a misleading configured
+  success message when user authorization is still required.
 - Update the support-bundle smoke test to validate report schema 2, including
   private file output. Pin the fuzz runner to cargo-fuzz 0.13.2 and retry its
   installation on transient registry/build failures.
