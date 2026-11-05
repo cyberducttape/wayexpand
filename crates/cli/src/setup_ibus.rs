@@ -5,7 +5,7 @@
 //! command's exit status (`ibus engine` exits 1 after a successful switch to
 //! an engine whose layout is `default`).
 
-use crate::services::{ServiceInventory, UserService};
+use crate::services::{ServiceInventory, UnitState, UserService};
 use crate::setup::{enable_user_service, evdev_consent_marker, run_setup_command};
 use crate::*;
 use std::{
@@ -502,14 +502,31 @@ struct SessionSnapshot {
     preload_engines: Option<String>,
     /// KWin's previous `[Wayland] InputMethod`, recorded when setup changed it.
     kwin_input_method: Option<Option<String>>,
-    /// Units setup enabled and started that were not enabled before.
-    started_units: Vec<&'static str>,
-    /// Units setup stopped and disabled.
-    stopped_units: Vec<&'static str>,
+    /// Original service state for every route that setup may affect.
+    services: Vec<OriginalServiceState>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct OriginalServiceState {
+    service: UserService,
+    installed: bool,
+    enabled: bool,
+    active: bool,
+}
+
+impl OriginalServiceState {
+    fn capture(service: UserService, state: UnitState) -> Self {
+        Self {
+            service,
+            installed: state.installed,
+            enabled: state.enabled,
+            active: state.active,
+        }
+    }
 }
 
 impl SessionSnapshot {
-    fn capture() -> Self {
+    fn capture(inventory: &ServiceInventory) -> Self {
         Self {
             global_engine: command_output("ibus", &["engine"])
                 .map(|engine| engine.trim().to_owned())
@@ -519,6 +536,10 @@ impl SessionSnapshot {
                 &["get", "org.freedesktop.ibus.general", "preload-engines"],
             )
             .map(|value| value.trim().to_owned()),
+            services: UserService::ALL
+                .into_iter()
+                .map(|service| OriginalServiceState::capture(service, inventory.state(service)))
+                .collect(),
             ..Self::default()
         }
     }
@@ -526,22 +547,63 @@ impl SessionSnapshot {
     /// Undo session changes in reverse order. Prepared, inert changes (the
     /// component file, configuration consent) are kept.
     fn rollback(&self) {
-        self.rollback_with(kwriteconfig(), |program, arguments| {
-            let _ = run_setup_command(program, arguments);
+        let mut failures = self.rollback_with(kwriteconfig(), |program, arguments| {
+            run_setup_command(program, arguments).is_ok_and(|status| status.success())
         });
+        let restored = ServiceInventory::probe();
+        for original in &self.services {
+            if !original.installed {
+                continue;
+            }
+            let actual = restored.state(original.service);
+            if actual.installed != original.installed
+                || actual.enabled != original.enabled
+                || actual.active != original.active
+            {
+                failures.push(format!(
+                    "{} expected installed={}, enabled={}, active={} but found installed={}, enabled={}, active={}",
+                    original.service.unit(),
+                    original.installed,
+                    original.enabled,
+                    original.active,
+                    actual.installed,
+                    actual.enabled,
+                    actual.active
+                ));
+            }
+        }
+        if !failures.is_empty() {
+            eprintln!(
+                "Setup rollback could not restore every service state: {}",
+                failures.join(", ")
+            );
+        }
     }
 
     fn rollback_with(
         &self,
         kwriteconfig_program: Option<&str>,
-        mut run: impl FnMut(&str, &[&str]),
-    ) {
+        mut run: impl FnMut(&str, &[&str]) -> bool,
+    ) -> Vec<String> {
         println!("Setup did not complete; restoring your previous input-method setup…");
-        for unit in &self.started_units {
-            run("systemctl", &["--user", "disable", "--now", unit]);
-        }
-        for unit in &self.stopped_units {
-            run("systemctl", &["--user", "enable", "--now", unit]);
+        let mut failures = Vec::new();
+        for original in &self.services {
+            if !original.installed {
+                continue;
+            }
+            let unit = original.service.unit();
+            let enable_action = if original.enabled {
+                "enable"
+            } else {
+                "disable"
+            };
+            if !run("systemctl", &["--user", enable_action, unit]) {
+                failures.push(format!("{unit} enabled={}", original.enabled));
+            }
+            let active_action = if original.active { "start" } else { "stop" };
+            if !run("systemctl", &["--user", active_action, unit]) {
+                failures.push(format!("{unit} active={}", original.active));
+            }
         }
         if let (Some(previous), Some(kwriteconfig)) =
             (&self.kwin_input_method, kwriteconfig_program)
@@ -551,10 +613,12 @@ impl SessionSnapshot {
                 Some(value) => arguments.push(value),
                 None => arguments.push("--delete"),
             }
-            run(kwriteconfig, &arguments);
+            if !run(kwriteconfig, &arguments) {
+                failures.push("KWin input method".into());
+            }
         }
         if let Some(engines) = &self.preload_engines {
-            run(
+            if !run(
                 "gsettings",
                 &[
                     "set",
@@ -562,15 +626,20 @@ impl SessionSnapshot {
                     "preload-engines",
                     engines,
                 ],
-            );
+            ) {
+                failures.push("IBus preloaded engines".into());
+            }
         }
         if let Some(engine) = self
             .global_engine
             .as_deref()
             .filter(|engine| *engine != "wayexpand")
         {
-            run("ibus", &["engine", engine]);
+            if !run("ibus", &["engine", engine]) {
+                failures.push("IBus selected engine".into());
+            }
         }
+        failures
     }
 }
 
@@ -681,17 +750,9 @@ fn prepare_terminals() -> Result<()> {
 
 /// Enable and (re)start `service`, recording it for rollback when setup is
 /// what enabled it.
-fn start_companion(
-    service: UserService,
-    inventory: &ServiceInventory,
-    snapshot: &mut SessionSnapshot,
-) -> Result<()> {
+fn start_companion(service: UserService) -> Result<()> {
     let unit = service.unit();
-    let was_enabled = inventory.state(service).enabled;
     enable_user_service(unit)?;
-    if !was_enabled {
-        snapshot.started_units.push(unit);
-    }
     // Pick up a changed drop-in or binary in an already running unit. A
     // successful ActiveState probe alone does not prove this restart took
     // effect or that the intended daemon build/config/backend is serving.
@@ -726,11 +787,7 @@ fn start_companion(
 }
 
 /// Stop capture daemons that would expand everywhere next to IBus.
-fn stop_global_capture(
-    options: IbusSetupOptions,
-    companion: CompanionService,
-    snapshot: &mut SessionSnapshot,
-) -> Result<()> {
+fn stop_global_capture(options: IbusSetupOptions, companion: CompanionService) -> Result<()> {
     for service in [UserService::Evdev, UserService::InputMethod] {
         let unit = service.unit();
         if !service_active(unit) {
@@ -746,8 +803,14 @@ fn stop_global_capture(
         let stop = options.assume_yes
             || prompt_yes_no(&format!("  Stop and disable {unit}? [Y/n] "), true)?;
         if stop {
-            let _ = run_setup_command("systemctl", &["--user", "disable", "--now", unit]);
-            snapshot.stopped_units.push(unit);
+            let result = run_setup_command("systemctl", &["--user", "disable", "--now", unit])?;
+            if !result.success() {
+                bail!("could not stop and disable {unit}; refusing to activate IBus beside an active capture route");
+            }
+            let after = ServiceInventory::probe().state(service);
+            if after.active || after.enabled {
+                bail!("{unit} did not become inactive and disabled; refusing to activate IBus beside an active capture route");
+            }
             step(&format!("Stopped {unit}"));
         } else {
             bail!("{unit} would expand snippets a second time beside IBus; stop it or use `--terminals`");
@@ -760,7 +823,6 @@ fn stop_global_capture(
 fn activate_and_verify(
     options: IbusSetupOptions,
     companion: CompanionService,
-    inventory: &ServiceInventory,
     snapshot: &mut SessionSnapshot,
 ) -> Result<()> {
     match IbusDesktop::detect() {
@@ -797,15 +859,15 @@ fn activate_and_verify(
     ) {
         bail!("could not select the WayExpand IBus engine; check that `ibus list-engine --name-only` lists `wayexpand`");
     }
-    stop_global_capture(options, companion, snapshot)?;
+    stop_global_capture(options, companion)?;
     match companion {
         CompanionService::Terminals => {
             step("Starting the terminal-only evdev daemon");
-            start_companion(UserService::Evdev, inventory, snapshot)?;
+            start_companion(UserService::Evdev)?;
         }
         CompanionService::Control => {
             step("Starting wayexpand-control.service for quick insert and hotkeys");
-            start_companion(UserService::Control, inventory, snapshot)?;
+            start_companion(UserService::Control)?;
         }
         CompanionService::None => {}
     }
@@ -841,8 +903,9 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
     }
 
     // Phases 3–5: change the session, verify, or put it back.
-    let mut snapshot = SessionSnapshot::capture();
-    if let Err(error) = activate_and_verify(options, companion, &inventory, &mut snapshot) {
+    let service_snapshot = ServiceInventory::probe();
+    let mut snapshot = SessionSnapshot::capture(&service_snapshot);
+    if let Err(error) = activate_and_verify(options, companion, &mut snapshot) {
         snapshot.rollback();
         return Err(error.context("the previous input-method setup was restored"));
     }
@@ -974,16 +1037,38 @@ mod tests {
     }
 
     #[test]
-    fn failed_ibus_activation_rolls_back_services_and_session_selection() {
+    fn rollback_restores_service_enablement_and_activity_independently() {
+        let inventory = ServiceInventory::from_states(vec![
+            (
+                UserService::Evdev,
+                UnitState {
+                    installed: true,
+                    enabled: false,
+                    active: true,
+                    failed: false,
+                },
+            ),
+            (
+                UserService::Control,
+                UnitState {
+                    installed: true,
+                    enabled: true,
+                    active: false,
+                    failed: false,
+                },
+            ),
+        ]);
         let snapshot = SessionSnapshot {
             global_engine: Some("xkb:us::eng".into()),
             preload_engines: Some("['xkb:us::eng']".into()),
             kwin_input_method: Some(Some("old-input-method.so".into())),
-            started_units: vec!["wayexpand-control.service"],
-            stopped_units: vec!["wayexpand-evdev.service"],
+            services: UserService::ALL
+                .into_iter()
+                .map(|service| OriginalServiceState::capture(service, inventory.state(service)))
+                .collect(),
         };
         let mut actions = Vec::<(String, Vec<String>)>::new();
-        snapshot.rollback_with(Some("kwriteconfig6"), |program, arguments| {
+        let failures = snapshot.rollback_with(Some("kwriteconfig6"), |program, arguments| {
             actions.push((
                 program.to_owned(),
                 arguments
@@ -991,25 +1076,46 @@ mod tests {
                     .map(|argument| (*argument).to_owned())
                     .collect(),
             ));
+            true
         });
+        assert!(failures.is_empty());
 
         assert_eq!(
-            actions,
+            &actions[..4],
             [
                 (
                     "systemctl".into(),
-                    vec!["--user", "disable", "--now", "wayexpand-control.service"]
+                    vec!["--user", "disable", "wayexpand-evdev.service"]
                         .into_iter()
                         .map(str::to_owned)
                         .collect(),
                 ),
                 (
                     "systemctl".into(),
-                    vec!["--user", "enable", "--now", "wayexpand-evdev.service"]
+                    vec!["--user", "start", "wayexpand-evdev.service"]
                         .into_iter()
                         .map(str::to_owned)
                         .collect(),
                 ),
+                (
+                    "systemctl".into(),
+                    vec!["--user", "enable", "wayexpand-control.service"]
+                        .into_iter()
+                        .map(str::to_owned)
+                        .collect(),
+                ),
+                (
+                    "systemctl".into(),
+                    vec!["--user", "stop", "wayexpand-control.service"]
+                        .into_iter()
+                        .map(str::to_owned)
+                        .collect(),
+                ),
+            ]
+        );
+        assert_eq!(
+            &actions[4..],
+            [
                 (
                     "kwriteconfig6".into(),
                     KWIN_INPUT_METHOD_KEY

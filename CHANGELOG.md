@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Snapshot installed, enabled, and active state for every IBus-related user
+  service. Setup now fails if a conflicting capture service cannot be stopped
+  and verified inactive; rollback independently restores prior enablement and
+  activity, then checks the resulting systemd state.
 - Require companion service restart commands to succeed, then verify the
   serving daemon through its control status: build and schema identity, active
   config generation/path/state, expected source/backend, and live output
