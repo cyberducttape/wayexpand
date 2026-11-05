@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Require companion service restart commands to succeed, then verify the
+  serving daemon through its control status: build and schema identity, active
+  config generation/path/state, expected source/backend, and live output
+  readiness (plus evdev capture/matching readiness for terminal companions).
 - Make IBus setup return stable incomplete status `WX-POLICY-001` when
   replacement remains disabled by `compatibility_mode = "off"`. The route can
   finish activation, but `--yes` no longer leaves a misleading configured

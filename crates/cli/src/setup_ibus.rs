@@ -334,6 +334,70 @@ fn service_active(service: &str) -> bool {
         .is_ok_and(|status| status.success())
 }
 
+fn companion_readiness_error(service: UserService, status: &serde_json::Value) -> Option<String> {
+    let expected_source = match service {
+        UserService::Evdev => "evdev",
+        UserService::Control => "stdin",
+        UserService::InputMethod => return Some("IBus is not a companion service".into()),
+    };
+    let field = |name: &str| status.get(name).and_then(serde_json::Value::as_str);
+    if !crate::doctor::status::status_schema_compatible(status) {
+        return Some("daemon status schema is incompatible".into());
+    }
+    if !crate::doctor::status::daemon_commit_matches(field("daemon_commit")) {
+        return Some("daemon build identity does not match the setup CLI".into());
+    }
+    if field("source") != Some(expected_source) {
+        return Some(format!(
+            "expected source {expected_source}, found {:?}",
+            field("source")
+        ));
+    }
+    if field("backend") != Some("libei") {
+        return Some(format!(
+            "expected libei output, found {:?}",
+            field("backend")
+        ));
+    }
+    if field("config_state") != Some("ok")
+        || status
+            .get("config_generation")
+            .and_then(serde_json::Value::as_u64)
+            .is_none_or(|generation| generation == 0)
+        || field("config_active_path") != Some(default_config_path().to_string_lossy().as_ref())
+    {
+        return Some("expected configuration is not loaded and healthy".into());
+    }
+    if field("output_connection_state") != Some("connected") || field("output_health") != Some("ok")
+    {
+        return Some("libei output is not operational".into());
+    }
+    match service {
+        UserService::Evdev
+            if field("state") != Some("connected")
+                || status.get("route_available") != Some(&serde_json::Value::Bool(true))
+                || status.get("matching_available") != Some(&serde_json::Value::Bool(true))
+                || field("input_connection_state") != Some("connected") =>
+        {
+            Some("evdev capture or matching is not operational".into())
+        }
+        UserService::Control if field("state") != Some("running") => {
+            Some("control service is not running".into())
+        }
+        _ => None,
+    }
+}
+
+fn companion_status_error(service: UserService) -> Result<()> {
+    let response = crate::doctor::status::read_daemon_status()
+        .map_err(|error| anyhow::anyhow!("daemon control status is unavailable: {error}"))?;
+    let status = crate::doctor::status::status_as_json(&response)?;
+    if let Some(problem) = companion_readiness_error(service, &status) {
+        bail!("{problem}");
+    }
+    Ok(())
+}
+
 fn terminal_drop_in() -> Option<PathBuf> {
     let config_home = env::var_os("XDG_CONFIG_HOME")
         .filter(|value| !value.is_empty())
@@ -628,11 +692,29 @@ fn start_companion(
     if !was_enabled {
         snapshot.started_units.push(unit);
     }
-    // Pick up a changed drop-in or binary in an already running unit.
-    let _ = run_setup_command("systemctl", &["--user", "restart", unit]);
-    if !wait_until(Duration::from_secs(8), || service_active(unit)) {
+    // Pick up a changed drop-in or binary in an already running unit. A
+    // successful ActiveState probe alone does not prove this restart took
+    // effect or that the intended daemon build/config/backend is serving.
+    let restart = run_setup_command("systemctl", &["--user", "restart", unit])?;
+    if !restart.success() {
+        bail!("systemd failed to restart {unit}; see `journalctl --user -u {unit} -n 50`");
+    }
+    let mut readiness_detail = "service has not become active".to_owned();
+    if !wait_until(Duration::from_secs(8), || {
+        if !service_active(unit) {
+            readiness_detail = "service is not active".to_owned();
+            return false;
+        }
+        match companion_status_error(service) {
+            Ok(()) => true,
+            Err(error) => {
+                readiness_detail = error.to_string();
+                false
+            }
+        }
+    }) {
         bail!(
-            "{unit} did not stay running; see `journalctl --user -u {unit} -n 50`{}",
+            "{unit} restart completed, but daemon readiness verification failed: {readiness_detail}; see `journalctl --user -u {unit} -n 50`{}",
             if service == UserService::Evdev {
                 " (it needs /dev/input access: scripts/install-evdev-permissions.sh)"
             } else {
@@ -799,6 +881,64 @@ mod tests {
         assert!(!replacement_authorization_required(
             wayexpand_core::CompatibilityMode::TrackedFocus
         ));
+    }
+
+    fn healthy_companion_status(source: &str) -> serde_json::Value {
+        serde_json::json!({
+            "status_schema": crate::CONTROL_STATUS_SCHEMA,
+            "daemon_commit": crate::build_info::COMMIT,
+            "source": source,
+            "backend": "libei",
+            "config_state": "ok",
+            "config_generation": 1,
+            "config_active_path": default_config_path().display().to_string(),
+            "output_connection_state": "connected",
+            "output_health": "ok",
+            "state": if source == "evdev" { "connected" } else { "running" },
+            "route_available": source == "evdev",
+            "matching_available": source == "evdev",
+            "input_connection_state": if source == "evdev" { "connected" } else { "unknown" },
+        })
+    }
+
+    #[test]
+    fn companion_readiness_checks_build_schema_config_backend_and_runtime() {
+        let mut status = healthy_companion_status("evdev");
+        assert_eq!(companion_readiness_error(UserService::Evdev, &status), None);
+
+        status["daemon_commit"] = "older-build".into();
+        assert!(companion_readiness_error(UserService::Evdev, &status)
+            .unwrap()
+            .contains("build identity"));
+        status = healthy_companion_status("evdev");
+        status["status_schema"] = (crate::CONTROL_STATUS_SCHEMA - 1).into();
+        assert!(companion_readiness_error(UserService::Evdev, &status)
+            .unwrap()
+            .contains("schema"));
+        status = healthy_companion_status("evdev");
+        status["backend"] = "other".into();
+        assert!(companion_readiness_error(UserService::Evdev, &status)
+            .unwrap()
+            .contains("expected libei"));
+        status = healthy_companion_status("evdev");
+        status["config_generation"] = 0.into();
+        assert!(companion_readiness_error(UserService::Evdev, &status)
+            .unwrap()
+            .contains("configuration"));
+        status = healthy_companion_status("evdev");
+        status["matching_available"] = false.into();
+        assert!(companion_readiness_error(UserService::Evdev, &status)
+            .unwrap()
+            .contains("capture or matching"));
+    }
+
+    #[test]
+    fn control_companion_requires_healthy_output_but_not_text_capture() {
+        let status = healthy_companion_status("stdin");
+        assert_eq!(
+            companion_readiness_error(UserService::Control, &status),
+            None
+        );
     }
 
     #[test]
