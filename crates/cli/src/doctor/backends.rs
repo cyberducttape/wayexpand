@@ -38,6 +38,47 @@ pub(crate) fn print_evdev_consent_diagnostics() -> bool {
     }
 }
 
+/// One-line IBus verdict for doctor, naming the first broken link and its
+/// fix; `wayexpand ibus status` prints every check.
+fn print_ibus_route_summary(policy_allowed: bool) {
+    let report = wayexpand_backend_ibus::chain::diagnose();
+    if !report.installed_anywhere() {
+        println!("IBus WayExpand engine: not installed (install the IBus component to use it)");
+        return;
+    }
+    if !policy_allowed {
+        println!("IBus WayExpand engine: installed but disallowed by organization policy");
+        return;
+    }
+    let status = super::status::read_daemon_status()
+        .ok()
+        .and_then(|response| super::status::status_as_json(&response).ok());
+    let overlap = crate::commands::ibus::RouteOverlap::from_status(status.as_ref());
+    let route = crate::commands::ibus::report_json(&report, &overlap);
+    if route["ready"].as_bool() == Some(true) {
+        println!(
+            "IBus route: ready (sensitive-field aware, verified non-atomic replacement); check an app with `wayexpand ibus watch`"
+        );
+    } else {
+        let (title, detail, fix) = match report.first_failure() {
+            Some(check) => (check.title, check.detail.clone(), check.fix.clone()),
+            None => (
+                "No second route expands the same keys",
+                route["other_route"]["detail"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_owned(),
+                route["other_route"]["fix"].as_str().map(str::to_owned),
+            ),
+        };
+        println!("IBus route: NOT READY — {title}: {detail}");
+        if let Some(fix) = fix {
+            println!("  Fix: {fix}");
+        }
+        println!("  Run `wayexpand ibus status` for every check.");
+    }
+}
+
 pub(crate) fn print_backend_diagnostics(include_experimental_input_method: bool) -> bool {
     let backends = discover_backends();
     for status in &backends {
@@ -57,15 +98,7 @@ pub(crate) fn print_backend_diagnostics(include_experimental_input_method: bool)
     });
     let ibus_policy_allowed = setup_backend_allowed(&policy, "ibus");
     let ibus_installed = ibus_engine_available();
-    if ibus_installed && ibus_policy_allowed {
-        println!(
-            "IBus WayExpand engine: installed and ready to configure (sensitive-field aware, non-atomic replacement)"
-        );
-    } else if ibus_installed {
-        println!("IBus WayExpand engine: installed but disallowed by organization policy");
-    } else {
-        println!("IBus WayExpand engine: not installed or discoverable (install the IBus component to use it)");
-    }
+    print_ibus_route_summary(ibus_policy_allowed);
     // Doctor is also used in CI and for validating a config outside a desktop
     // session. Explain the session limitation; the caller still reports an
     // unhealthy result when no usable path can be established.

@@ -12,6 +12,8 @@ use std::{
 };
 use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
 
+/// The engine name declared in `desktop/wayexpand-ibus.xml`.
+pub(crate) const ENGINE_NAME: &str = "wayexpand";
 const MAX_IBUS_REGISTRY_OUTPUT_BYTES: usize = 64 * 1024;
 const IBUS_REGISTRY_READS_PER_DRAIN: usize = 64;
 
@@ -58,23 +60,48 @@ fn drain_registry_output(
     Ok(result)
 }
 
-/// Return whether the installed IBus component can be discovered by setup.
-/// This is intentionally an installation/provisioning probe, not an
-/// end-to-end typing guarantee.
+/// Return whether the running IBus daemon has registered the WayExpand engine.
+///
+/// A component file alone is not enough: ibus-daemon reads only its built-in
+/// component directory (or `IBUS_COMPONENT_PATH`), never a per-user data
+/// directory, so a manifest elsewhere can never be selected. This asks the
+/// live registry instead. It is a registration probe, not an end-to-end
+/// typing guarantee.
 pub fn engine_available() -> bool {
-    if !executable_in_path("ibus") || !executable_in_path("wayexpand-ibus") {
-        return false;
-    }
-
-    if component_file_present_in(&ibus_component_directories()) {
-        return true;
-    }
-
-    ibus_registry_contains_engine()
+    runtime_executables_present() && ibus_registry_contains_engine()
 }
 
-fn ibus_registry_contains_engine() -> bool {
-    registry_command_contains_engine("ibus", &["list-engine"], Duration::from_millis(500))
+/// Return whether the WayExpand component is installed where ibus-daemon
+/// loads components, so restarting IBus can register it.
+///
+/// Setup uses this before `ibus restart`; once IBus is running,
+/// [`engine_available`] is the authoritative check.
+pub fn engine_installed() -> bool {
+    runtime_executables_present() && component_file_present_in(&ibus_component_directories())
+}
+
+/// Return whether IBus reports the WayExpand engine as the global engine.
+///
+/// `ibus engine <name>` cannot confirm a switch by its exit status: for an
+/// engine whose layout is `default` (as ours is, so the user's layout is kept)
+/// the CLI switches the engine and then still exits 1 unless
+/// `use-system-keyboard-layout` is set. Reading the global engine back is the
+/// reliable check.
+pub fn global_engine_selected() -> bool {
+    executable_in_path("ibus")
+        && registry_command_contains_engine("ibus", &["engine"], Duration::from_millis(500))
+}
+
+fn runtime_executables_present() -> bool {
+    executable_in_path("ibus") && executable_in_path("wayexpand-ibus")
+}
+
+pub(crate) fn ibus_registry_contains_engine() -> bool {
+    registry_command_contains_engine(
+        "ibus",
+        &["list-engine", "--name-only"],
+        Duration::from_millis(500),
+    )
 }
 
 fn registry_command_contains_engine(program: &str, args: &[&str], timeout: Duration) -> bool {
@@ -152,10 +179,10 @@ fn registry_output_contains_engine(output: &[u8]) -> bool {
     output.len() <= MAX_IBUS_REGISTRY_OUTPUT_BYTES
         && String::from_utf8_lossy(output)
             .lines()
-            .any(|line| line.contains("wayexpand"))
+            .any(|line| line.trim() == ENGINE_NAME)
 }
 
-fn executable_in_path(name: &str) -> bool {
+pub(crate) fn executable_in_path(name: &str) -> bool {
     let Some(path) = env::var_os("PATH") else {
         return false;
     };
@@ -167,23 +194,36 @@ fn executable_in_path(name: &str) -> bool {
     })
 }
 
+/// Component manifest names: the user installer writes `wayexpand.xml`, while
+/// the deb, RPM and Arch packages install `wayexpand-ibus.xml`.
+pub(crate) const COMPONENT_FILE_NAMES: [&str; 2] = ["wayexpand.xml", "wayexpand-ibus.xml"];
+
 pub(super) fn component_file_present_in(directories: &[PathBuf]) -> bool {
-    directories
-        .iter()
-        .map(|directory| directory.join("wayexpand.xml"))
-        .any(|path| path.is_file())
+    directories.iter().any(|directory| {
+        COMPONENT_FILE_NAMES
+            .iter()
+            .any(|name| directory.join(name).is_file())
+    })
 }
 
+/// Directories ibus-daemon loads component manifests from: every entry of
+/// `IBUS_COMPONENT_PATH` when it is set (it replaces the default), otherwise
+/// the distribution's data directory. IBus does not read
+/// `$XDG_DATA_HOME/ibus/component`.
 fn ibus_component_directories() -> Vec<PathBuf> {
-    let mut directories = Vec::new();
-    if let Some(data_home) = env::var_os("XDG_DATA_HOME") {
-        directories.push(PathBuf::from(data_home).join("ibus/component"));
-    } else if let Some(home) = env::var_os("HOME") {
-        directories.push(PathBuf::from(home).join(".local/share/ibus/component"));
+    component_directories_for(env::var_os("IBUS_COMPONENT_PATH").as_deref())
+}
+
+pub(crate) fn component_directories_for(component_path: Option<&std::ffi::OsStr>) -> Vec<PathBuf> {
+    match component_path {
+        Some(path) if !path.is_empty() => env::split_paths(path)
+            .filter(|directory| directory.is_absolute())
+            .collect(),
+        _ => vec![
+            PathBuf::from("/usr/share/ibus/component"),
+            PathBuf::from("/usr/local/share/ibus/component"),
+        ],
     }
-    directories.push(PathBuf::from("/usr/local/share/ibus/component"));
-    directories.push(PathBuf::from("/usr/share/ibus/component"));
-    directories
 }
 
 #[cfg(test)]
@@ -193,18 +233,46 @@ mod tests {
         time::{Duration, Instant},
     };
 
+    use std::{ffi::OsStr, path::PathBuf};
+
     use super::{
-        drain_registry_output, registry_command_contains_engine, registry_output_contains_engine,
-        set_nonblocking, MAX_IBUS_REGISTRY_OUTPUT_BYTES,
+        component_directories_for, drain_registry_output, registry_command_contains_engine,
+        registry_output_contains_engine, set_nonblocking, MAX_IBUS_REGISTRY_OUTPUT_BYTES,
     };
 
     #[test]
     fn registry_output_is_bounded_and_requires_the_engine_name() {
         assert!(registry_output_contains_engine(b"wayexpand\n"));
         assert!(!registry_output_contains_engine(b"other-engine\n"));
+        // `--name-only` prints bare names; a longname or a lookalike engine
+        // name must not count as registration.
+        assert!(registry_output_contains_engine(b"xkb:us::eng\nwayexpand\n"));
+        assert!(!registry_output_contains_engine(b"wayexpand-legacy\n"));
+        assert!(!registry_output_contains_engine(
+            b"  wayexpand - WayExpand\n"
+        ));
         assert!(!registry_output_contains_engine(
             &[b'x'; MAX_IBUS_REGISTRY_OUTPUT_BYTES + 1]
         ));
+    }
+
+    #[test]
+    fn component_directories_follow_ibus_daemon_search_rules() {
+        let default = component_directories_for(None);
+        assert!(default.contains(&PathBuf::from("/usr/share/ibus/component")));
+        assert!(
+            default
+                .iter()
+                .all(|directory| !directory.starts_with("/home")),
+            "ibus-daemon never reads a per-user component directory: {default:?}"
+        );
+        assert_eq!(component_directories_for(Some(OsStr::new(""))), default);
+        // IBUS_COMPONENT_PATH replaces the default list; relative entries
+        // are ignored rather than resolved against our working directory.
+        assert_eq!(
+            component_directories_for(Some(OsStr::new("/opt/ibus:relative:/home/u/ibus"))),
+            vec![PathBuf::from("/opt/ibus"), PathBuf::from("/home/u/ibus")]
+        );
     }
 
     #[test]

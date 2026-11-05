@@ -7015,3 +7015,101 @@ fn failed_command_trigger_is_not_matched_again_by_following_input() {
         [";zq"]
     );
 }
+
+fn terminal_scoped_engine() -> ExpansionEngine {
+    let config = Config::parse(
+        r#"
+        [settings]
+        terminal_apps = ["Org.KDE.Konsole", "app_id_glob:*kitty*"]
+
+        [[expansion]]
+        trigger = ":ty"
+        replacement = "Thank you"
+    "#,
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    engine.set_terminal_apps_only(true);
+    engine
+}
+
+fn focus(engine: &mut ExpansionEngine, app_id: Option<&str>) {
+    engine.process(InputEvent::WindowChanged(app_id.map(|app_id| {
+        WindowContext {
+            app_id: Some(app_id.into()),
+            title: Some("org.kde.konsole".into()),
+            instance_id: None,
+        }
+    })));
+}
+
+#[test]
+fn terminal_apps_only_expands_in_listed_terminals_and_fails_closed_elsewhere() {
+    let mut engine = terminal_scoped_engine();
+    assert_eq!(engine.terminal_app_count(), 2);
+    // No focused window: fail closed.
+    assert!(type_text(&mut engine, ":ty").is_empty());
+    // Another app, even one whose (editable) title names a terminal.
+    focus(&mut engine, Some("org.kde.kate"));
+    assert!(type_text(&mut engine, ":ty").is_empty());
+    // Exact (case-normalized) and glob matches expand.
+    focus(&mut engine, Some("org.kde.konsole"));
+    assert_eq!(
+        type_text(&mut engine, ":ty").pop().unwrap().insert,
+        "Thank you"
+    );
+    focus(&mut engine, Some("net.kovidgoyal.kitty"));
+    assert_eq!(
+        type_text(&mut engine, ":ty").pop().unwrap().insert,
+        "Thank you"
+    );
+}
+
+#[test]
+fn terminal_apps_list_alone_does_not_restrict_matching() {
+    let mut engine = terminal_scoped_engine();
+    engine.set_terminal_apps_only(false);
+    focus(&mut engine, Some("org.kde.kate"));
+    assert_eq!(
+        type_text(&mut engine, ":ty").pop().unwrap().insert,
+        "Thank you"
+    );
+}
+
+#[test]
+fn terminal_apps_only_survives_a_configuration_reload() {
+    let old_engine = terminal_scoped_engine();
+    let mut reloaded = ExpansionEngine::new(
+        Config::parse("[[expansion]]\ntrigger = \":ty\"\nreplacement = \"x\"\n").unwrap(),
+    )
+    .unwrap();
+    reloaded.inherit_runtime_state(&old_engine);
+    assert!(reloaded.terminal_apps_only());
+    // The reloaded config lists no terminals, so nothing expands anywhere.
+    focus(&mut reloaded, Some("org.kde.konsole"));
+    assert!(type_text(&mut reloaded, ":ty").is_empty());
+}
+
+#[test]
+fn terminal_apps_must_be_app_ids() {
+    for bad in [
+        "terminal_apps = [\"title_contains:konsole\"]",
+        "terminal_apps = [\"\"]",
+        "terminal_apps = [\"unknown_op:konsole\"]",
+    ] {
+        let error = Config::parse(&format!("[settings]\n{bad}\n")).unwrap_err();
+        assert!(
+            matches!(error, ConfigError::InvalidTerminalApp { index: 0, .. }),
+            "{bad}: {error:?}"
+        );
+    }
+    let too_many = (0..=crate::config::MAX_TERMINAL_APPS)
+        .map(|index| format!("\"app{index}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    assert!(matches!(
+        Config::parse(&format!("[settings]\nterminal_apps = [{too_many}]\n")).unwrap_err(),
+        ConfigError::InvalidTerminalApp { .. }
+    ));
+    assert!(Config::parse("[settings]\nterminal_apps = [\"org.kde.konsole\"]\n").is_ok());
+}

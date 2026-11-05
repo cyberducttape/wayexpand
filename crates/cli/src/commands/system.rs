@@ -8,8 +8,10 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     let mut requested_backend: Option<String> = None;
     let mut requested_mode: Option<String> = None;
     let mut assume_yes = false;
+    let mut terminals = false;
     while let Some(argument) = args.next() {
         match argument.as_str() {
+            "--terminals" => terminals = true,
             "--experimental-input-method-v2" => {
                 requested_backend = Some("input-method".into());
             }
@@ -32,7 +34,7 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
             }
             _ => {
                 usage_bail!(
-                    "usage: wayexpand setup [--mode recommended|maximum|experimental] [--yes]"
+                    "usage: wayexpand setup [--mode recommended|maximum|experimental | --backend ibus|input-method|evdev] [--terminals] [--yes]"
                 )
             }
         }
@@ -101,7 +103,13 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     if !setup_backend_allowed(&policy, &backend) {
         bail!("setup backend '{backend}' is disallowed by organization policy")
     }
-    configure_setup_backend(&backend)?;
+    configure_setup_backend(
+        &backend,
+        crate::setup_ibus::IbusSetupOptions {
+            assume_yes,
+            terminals,
+        },
+    )?;
     Ok(())
 }
 

@@ -195,7 +195,18 @@ pub struct Settings {
         skip_serializing_if = "is_default_keystroke_max_chars"
     )]
     pub keystroke_max_chars: usize,
+    /// Terminal apps, as app IDs (`app_id_exact:` by default, or
+    /// `app_id_glob:`). Terminals cannot report the text before the cursor,
+    /// so input-method routes cannot replace text there. A daemon started
+    /// with `--terminal-apps-only` expands automatically only while one of
+    /// these apps is focused, which lets it cover terminals alongside IBus
+    /// without expanding twice elsewhere. Omitted when empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub terminal_apps: Vec<String>,
 }
+
+/// Upper bound on `settings.terminal_apps` entries.
+pub const MAX_TERMINAL_APPS: usize = 64;
 
 /// About 100 ms of paced typing at the measured libei keysym fallback rate.
 pub const DEFAULT_KEYSTROKE_MAX_CHARS: usize = 8;
@@ -313,6 +324,7 @@ impl Default for Settings {
             usage_stats: true,
             compatibility_mode: CompatibilityMode::Off,
             keystroke_max_chars: DEFAULT_KEYSTROKE_MAX_CHARS,
+            terminal_apps: Vec::new(),
         }
     }
 }

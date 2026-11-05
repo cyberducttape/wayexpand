@@ -106,6 +106,23 @@ impl ExpansionEngine {
         self.set_clipboard_reader(previous.clipboard_reader());
         self.set_clipboard_prefetch(previous.clipboard_prefetch());
         self.set_form_replacement_guarantee(previous.form_replacement_guarantee());
+        self.set_terminal_apps_only(previous.terminal_apps_only());
+    }
+
+    /// Restrict automatic expansion to `settings.terminal_apps`, for a
+    /// raw-input daemon that covers terminals next to an input-method route.
+    /// Explicit inserts and hotkeys are unaffected.
+    pub fn set_terminal_apps_only(&mut self, enabled: bool) {
+        self.terminal_apps_only = enabled;
+    }
+
+    pub fn terminal_apps_only(&self) -> bool {
+        self.terminal_apps_only
+    }
+
+    /// Number of configured `settings.terminal_apps` entries.
+    pub fn terminal_app_count(&self) -> usize {
+        self.terminal_app_scope.len()
     }
 
     /// Whether a snippet form is open (capture is suspended meanwhile).

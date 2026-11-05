@@ -4,6 +4,72 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- GUI polish: header statuses use one chip style and a fixed row height, so
+  the panels no longer shift when the service starts; every chip opens
+  Diagnostics. The header recognizes a live IBus engine (`IBus: Active`)
+  instead of showing a red stopped service and a `Turn on` button for a
+  working IBus setup, and hides the typing-route chip while the service is
+  not running. "Daemon" labels now read "Service". The compact header keeps
+  the wide layout's order.
+- GUI: Diagnostics includes the IBus route checks with copyable fixes and
+  recent field verdicts, and opens at a readable size; Settings uses the
+  window's height. One-click setup allows three minutes (it can wait for an
+  administrator password) and opens Diagnostics when it fails.
+- GUI: the snippet list elides long triggers, categories and descriptions to
+  the available width with an ellipsis instead of clipping them mid-word, the
+  search field lines up with the buttons above it, and `Up`/`Down` move the
+  selection through the list.
+- GUI: status chip text keeps its status hue at WCAG AA contrast on both
+  themes (it previously fell back to plain black on the light theme), and
+  typing-route and first-run route descriptions are translated into German
+  and Indonesian.
+
+- Add `wayexpand ibus status [--json]` and `wayexpand ibus watch`. Status checks
+  each link of the IBus route (tools, ibus-daemon, desktop routing to IBus,
+  the component in the running daemon's own component path, the component
+  name and engine path, registry, selection, replacement consent, the engine
+  process, and a second capture route that would expand twice) and prints the
+  fix for each failure. Watch explains per focused field why triggers do or do
+  not expand. `doctor` shows the first broken link, `doctor --json` adds
+  `ibus.route`, and the support bundle includes check states and field
+  verdicts.
+- The IBus engine publishes content-free activity (counts and states, never
+  text) to `$XDG_RUNTIME_DIR/wayexpand-ibus-status.json`, including why a
+  matched trigger was refused (no surrounding text, mismatch, policy).
+- `wayexpand setup --backend ibus` now configures the route end to end: it
+  installs the component where the running IBus reads it (pkexec), sets KWin's
+  Virtual Keyboard to IBus Wayland on Plasma, reloads the registry, adds and
+  selects the engine, asks for the `compatibility_mode` consent IBus
+  replacement needs, and stops capture daemons that would expand twice. It no
+  longer enables the stdin harness service, which user installs do not ship.
+- Add `settings.terminal_apps` and the daemon's `--terminal-apps-only` flag
+  (`WAYEXPAND_TERMINAL_APPS_ONLY=1`): automatic expansion only while a listed
+  app is focused, fail-closed otherwise. `wayexpand setup --backend ibus
+  --terminals` uses it to cover terminals with evdev beside IBus. Bump the
+  daemon status schema to 26 for the new `terminal_apps_only` field.
+- User and release installers no longer link the IBus component into
+  `~/.local/share/ibus/component`, which IBus never reads; they stage it and
+  remove a stale link from older installs.
+- Certification now checks the `ibus` entry of `allowed_backends` for the IBus
+  route instead of `input-method-v2`.
+- Add `scripts/test-ibus-e2e.sh` and the `ibus-e2e` CI job, which test the
+  engine against a private, real ibus-daemon.
+
+- Fix the IBus engine never expanding: IBus sets an engine's content type
+  through the write-only `ContentType` property, which the engine did not
+  implement, so capture never enabled. The engine now exposes that property and
+  keeps the last content type across refocus, because ibus-daemon only sets it
+  again when the focused field's type changes.
+- Fix IBus engine selection timing out: the engine process now owns the bus
+  name declared as the component name in `wayexpand-ibus.xml`, which
+  ibus-daemon waits for before creating an engine.
+- Report the IBus engine as available only when the running IBus registry lists
+  it. A component manifest under `~/.local/share/ibus/component` is never read
+  by ibus-daemon; setup now accepts only manifests in IBus' own component
+  directories (or `IBUS_COMPONENT_PATH`) before restarting IBus, and confirms
+  selection by reading the global engine back instead of trusting the
+  `ibus engine` exit status.
+
 - Report content-free reasons when libei refuses an expansion, including an
   unreachable character, an overlong paced fallback, or layout disagreement.
   Accept a compositor layout snapshot when ordered XKB layout groups match the

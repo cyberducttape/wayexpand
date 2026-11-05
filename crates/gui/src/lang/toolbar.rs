@@ -120,17 +120,17 @@ impl Strings {
 
     pub fn daemon_running_status(&self) -> &'static str {
         match self.lang {
-            Language::English => "Daemon: Running",
-            Language::Indonesian => "Daemon: Berjalan",
-            Language::German => "Daemon: Aktiv",
+            Language::English => "Service: Running",
+            Language::Indonesian => "Layanan: Berjalan",
+            Language::German => "Dienst: Aktiv",
         }
     }
 
     pub fn daemon_restart_required_status(&self) -> &'static str {
         match self.lang {
-            Language::English => "Restart daemon",
-            Language::Indonesian => "Mulai ulang daemon",
-            Language::German => "Daemon neu starten",
+            Language::English => "Restart service",
+            Language::Indonesian => "Mulai ulang layanan",
+            Language::German => "Dienst neu starten",
         }
     }
 
@@ -152,9 +152,33 @@ impl Strings {
 
     pub fn daemon_unreachable_status(&self) -> &'static str {
         match self.lang {
-            Language::English => "Daemon: Unreachable",
-            Language::Indonesian => "Daemon: Tidak dapat dijangkau",
-            Language::German => "Daemon: Nicht erreichbar",
+            Language::English => "Service: Not running",
+            Language::Indonesian => "Layanan: Tidak berjalan",
+            Language::German => "Dienst: Läuft nicht",
+        }
+    }
+
+    pub fn ibus_active_status(&self) -> &'static str {
+        match self.lang {
+            Language::English => "IBus: Active",
+            Language::Indonesian => "IBus: Aktif",
+            Language::German => "IBus: Aktiv",
+        }
+    }
+
+    pub fn ibus_active_help(&self) -> &'static str {
+        match self.lang {
+            Language::English => "The WayExpand IBus engine is expanding in your apps; no background service is needed for it. Click for the IBus route checks.",
+            Language::Indonesian => "Mesin IBus WayExpand sedang mengekspansi di aplikasi Anda; tidak perlu layanan latar belakang. Klik untuk pemeriksaan jalur IBus.",
+            Language::German => "Die WayExpand-IBus-Engine erweitert in Ihren Anwendungen; dafür ist kein Hintergrunddienst nötig. Klicken für die IBus-Prüfungen.",
+        }
+    }
+
+    pub fn daemon_status_help(&self) -> &'static str {
+        match self.lang {
+            Language::English => "The WayExpand background service captures typing on keyboard routes and runs commands. Click for diagnostics.",
+            Language::Indonesian => "Layanan latar belakang WayExpand menangkap ketikan pada jalur keyboard dan menjalankan perintah. Klik untuk diagnostik.",
+            Language::German => "Der WayExpand-Hintergrunddienst erfasst Eingaben auf Tastaturwegen und führt Befehle aus. Klicken für die Diagnose.",
         }
     }
 
@@ -168,9 +192,9 @@ impl Strings {
 
     pub fn daemon_unknown_status(&self) -> &'static str {
         match self.lang {
-            Language::English => "Daemon: Checking…",
-            Language::Indonesian => "Daemon: Memeriksa…",
-            Language::German => "Daemon: Wird geprüft…",
+            Language::English => "Service: Checking…",
+            Language::Indonesian => "Layanan: Memeriksa…",
+            Language::German => "Dienst: Wird geprüft…",
         }
     }
 
@@ -260,13 +284,25 @@ impl Strings {
         }
     }
     pub fn route_paused_status(&self) -> &'static str {
-        "Typing integration: Paused"
+        match self.lang {
+            Language::English => "Typing integration: Paused",
+            Language::Indonesian => "Integrasi pengetikan: Dijeda",
+            Language::German => "Tastaturintegration: Pausiert",
+        }
     }
     pub fn route_reconnecting_status(&self) -> &'static str {
-        "Typing integration: Reconnecting…"
+        match self.lang {
+            Language::English => "Typing integration: Reconnecting…",
+            Language::Indonesian => "Integrasi pengetikan: Menyambung ulang…",
+            Language::German => "Tastaturintegration: Verbindet neu…",
+        }
     }
     pub fn route_starting_status(&self) -> &'static str {
-        "Typing integration: Starting…"
+        match self.lang {
+            Language::English => "Typing integration: Starting…",
+            Language::Indonesian => "Integrasi pengetikan: Memulai…",
+            Language::German => "Tastaturintegration: Startet…",
+        }
     }
 
     pub fn route_permission_required_status(&self) -> &'static str {
@@ -293,16 +329,32 @@ impl Strings {
         }
     }
     pub fn route_degraded_status(&self) -> &'static str {
-        "Typing integration: Degraded"
+        match self.lang {
+            Language::English => "Typing integration: Degraded",
+            Language::Indonesian => "Integrasi pengetikan: Terganggu",
+            Language::German => "Tastaturintegration: Beeinträchtigt",
+        }
     }
     pub fn route_failed_status(&self) -> &'static str {
-        "Typing integration: Failed"
+        match self.lang {
+            Language::English => "Typing integration: Failed",
+            Language::Indonesian => "Integrasi pengetikan: Gagal",
+            Language::German => "Tastaturintegration: Fehlgeschlagen",
+        }
     }
     pub fn route_stopped_status(&self) -> &'static str {
-        "Typing integration: Stopped"
+        match self.lang {
+            Language::English => "Typing integration: Stopped",
+            Language::Indonesian => "Integrasi pengetikan: Berhenti",
+            Language::German => "Tastaturintegration: Gestoppt",
+        }
     }
     pub fn route_unknown_status(&self) -> &'static str {
-        "Typing integration: Unknown"
+        match self.lang {
+            Language::English => "Typing integration: Unknown",
+            Language::Indonesian => "Integrasi pengetikan: Tidak diketahui",
+            Language::German => "Tastaturintegration: Unbekannt",
+        }
     }
 
     pub fn technical_details(&self) -> &'static str {
@@ -443,6 +495,58 @@ impl Strings {
             Language::English => "Verify this desktop session",
             Language::Indonesian => "Periksa sesi desktop ini",
             Language::German => "Diese Desktop-Sitzung prüfen",
+        }
+    }
+
+    /// Short, localized descriptions of the typing route's live state, used
+    /// inside the first-run session sentence.
+    pub fn onboarding_route_detail(&self, key: &str) -> &'static str {
+        match (key, self.lang) {
+            ("permission_required", Language::English) => "permission required",
+            ("permission_required", Language::Indonesian) => "izin diperlukan",
+            ("permission_required", Language::German) => "Berechtigung erforderlich",
+            ("portal_revoked", Language::English) => "desktop permission was revoked",
+            ("portal_revoked", Language::Indonesian) => "izin desktop dicabut",
+            ("portal_revoked", Language::German) => "Desktop-Berechtigung wurde widerrufen",
+            ("unsupported", Language::English) => "no supported route is active",
+            ("unsupported", Language::Indonesian) => "tidak ada jalur yang didukung aktif",
+            ("unsupported", Language::German) => "kein unterstützter Weg ist aktiv",
+            ("failed", Language::English) => "route failed to start",
+            ("failed", Language::Indonesian) => "jalur gagal dimulai",
+            ("failed", Language::German) => "Weg konnte nicht starten",
+            ("reconnecting", Language::English) => "route is reconnecting",
+            ("reconnecting", Language::Indonesian) => "jalur sedang menyambung ulang",
+            ("reconnecting", Language::German) => "Weg verbindet neu",
+            ("starting", Language::English) => "route is starting",
+            ("starting", Language::Indonesian) => "jalur sedang dimulai",
+            ("starting", Language::German) => "Weg startet",
+            ("degraded", Language::English) => "route is degraded",
+            ("degraded", Language::Indonesian) => "jalur terganggu",
+            ("degraded", Language::German) => "Weg ist beeinträchtigt",
+            ("stopped", Language::English) => "route is stopped",
+            ("stopped", Language::Indonesian) => "jalur berhenti",
+            ("stopped", Language::German) => "Weg ist gestoppt",
+            ("paused", Language::English) => "WayExpand is paused",
+            ("paused", Language::Indonesian) => "WayExpand dijeda",
+            ("paused", Language::German) => "WayExpand ist pausiert",
+            ("service_not_running", Language::English) => "the background service is not running",
+            ("service_not_running", Language::Indonesian) => {
+                "layanan latar belakang tidak berjalan"
+            }
+            ("service_not_running", Language::German) => "der Hintergrunddienst läuft nicht",
+            ("waiting", Language::English) => "waiting for live route status",
+            ("waiting", Language::Indonesian) => "menunggu status jalur langsung",
+            ("waiting", Language::German) => "warte auf den Live-Status",
+            ("ibus", Language::English) => {
+                "the WayExpand IBus engine is active (no background service needed)"
+            }
+            ("ibus", Language::Indonesian) => {
+                "mesin IBus WayExpand aktif (tidak perlu layanan latar belakang)"
+            }
+            ("ibus", Language::German) => {
+                "die WayExpand-IBus-Engine ist aktiv (kein Hintergrunddienst nötig)"
+            }
+            _ => "",
         }
     }
 

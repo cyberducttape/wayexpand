@@ -1027,6 +1027,89 @@ impl Strings {
             (Language::German, BackendState::NotImplemented) => "Nicht implementiert",
         }
     }
+    pub fn ibus_route_title(&self) -> &'static str {
+        match self.lang {
+            Language::English => "IBus route",
+            Language::Indonesian => "Jalur IBus",
+            Language::German => "IBus-Weg",
+        }
+    }
+
+    pub fn ibus_route_ready(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Ready: IBus can expand in apps that report their text.",
+            Language::Indonesian => {
+                "Siap: IBus dapat mengekspansi di aplikasi yang melaporkan teksnya."
+            }
+            Language::German => {
+                "Bereit: IBus kann in Anwendungen erweitern, die ihren Text melden."
+            }
+        }
+    }
+
+    pub fn ibus_recent_fields(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Recently focused fields (no text is recorded)",
+            Language::Indonesian => "Kolom yang baru difokuskan (tidak ada teks yang direkam)",
+            Language::German => "Zuletzt fokussierte Felder (es wird kein Text aufgezeichnet)",
+        }
+    }
+
+    pub fn ibus_watch_hint(&self) -> &'static str {
+        match self.lang {
+            Language::English => "To check one app, type a trigger in it and refresh this report, or run `wayexpand ibus watch`.",
+            Language::Indonesian => "Untuk memeriksa satu aplikasi, ketik pemicu di sana lalu segarkan laporan ini, atau jalankan `wayexpand ibus watch`.",
+            Language::German => "Um eine Anwendung zu prüfen, tippen Sie dort einen Auslöser und aktualisieren diesen Bericht, oder führen Sie `wayexpand ibus watch` aus.",
+        }
+    }
+
+    pub fn fix_label(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Fix:",
+            Language::Indonesian => "Perbaikan:",
+            Language::German => "Lösung:",
+        }
+    }
+
+    pub fn copy_fix_tooltip(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Copy this fix to the clipboard",
+            Language::Indonesian => "Salin perbaikan ini ke papan klip",
+            Language::German => "Diese Lösung in die Zwischenablage kopieren",
+        }
+    }
+
+    pub fn ranked_routes_title(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Ranked input routes",
+            Language::Indonesian => "Peringkat jalur input",
+            Language::German => "Eingabewege nach Rang",
+        }
+    }
+
+    pub fn ranked_routes_subtitle(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Based on this session, organization policy, and catalog certification. Experimental routes remain uncertified.",
+            Language::Indonesian => "Berdasarkan sesi ini, kebijakan organisasi, dan sertifikasi katalog. Jalur eksperimental tetap belum tersertifikasi.",
+            Language::German => "Basierend auf dieser Sitzung, der Organisationsrichtlinie und der Katalogzertifizierung. Experimentelle Wege bleiben unzertifiziert.",
+        }
+    }
+
+    pub fn ibus_route_not_ready(&self, failed_check: &str) -> String {
+        match self.lang {
+            Language::English => format!("Not ready — fix this first: {failed_check}"),
+            Language::Indonesian => format!("Belum siap — perbaiki ini dulu: {failed_check}"),
+            Language::German => format!("Nicht bereit — zuerst beheben: {failed_check}"),
+        }
+    }
+
+    pub fn ibus_field_counts(&self, keys: u64, expansions: u64) -> String {
+        match self.lang {
+            Language::English => format!("{keys} keys · {expansions} expansion(s)"),
+            Language::Indonesian => format!("{keys} tombol · {expansions} ekspansi"),
+            Language::German => format!("{keys} Tasten · {expansions} Erweiterung(en)"),
+        }
+    }
 }
 
 #[cfg(test)]

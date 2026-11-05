@@ -5,6 +5,7 @@ mod commands;
 mod doctor;
 mod errors;
 mod setup;
+mod setup_ibus;
 mod sync;
 
 use anyhow::{bail, Context, Error, Result};
@@ -53,7 +54,9 @@ use std::{
 };
 use unicode_segmentation::UnicodeSegmentation;
 
-use wayexpand_backend_ibus::engine_available as ibus_engine_available;
+use wayexpand_backend_ibus::{
+    engine_available as ibus_engine_available, engine_installed as ibus_engine_installed,
+};
 use wayexpand_backend_input_method::InputMethodSource;
 use wayexpand_backend_libei::{portal_token_path, reset_portal_token};
 use wayexpand_backend_selection::{
@@ -137,6 +140,7 @@ fn run() -> Result<()> {
         Some("fleet") => fleet_command(args)?,
         Some("metrics") => metrics_command(args)?,
         Some("portal") => portal_command(args)?,
+        Some("ibus") => commands::ibus::ibus_command(args)?,
         Some(requested @ ("status" | "reload" | "pause" | "resume" | "stop")) => {
             control_command(requested, args)?
         }
@@ -153,7 +157,7 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
         "Getting started",
         &[
             (
-                "setup [--mode recommended|maximum|experimental] [--yes]",
+                "setup [--mode recommended|maximum|experimental] [--terminals] [--yes]",
                 "Configure a safe compatibility mode",
             ),
             (
@@ -309,6 +313,10 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
             (
                 "portal status|reset",
                 "Inspect or remove the libei portal token",
+            ),
+            (
+                "ibus status [--json]|watch [--seconds N]",
+                "Check the IBus route link by link; explain why a field expands or not",
             ),
         ],
     ),

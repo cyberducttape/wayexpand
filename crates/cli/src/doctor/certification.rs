@@ -14,7 +14,9 @@ pub(crate) fn print_certification(json: bool) -> Result<bool> {
             .as_ref()
             .is_ok_and(|policy| policy.backend_allowed(backend))
     };
-    let policy_allows_ibus = policy_allows("input-method-v2");
+    // IBus is governed as its own `ibus` entry in allowed_backends,
+    // separately from input-method-v2.
+    let policy_allows_ibus = policy_allows("ibus");
     let selection = wayexpand_backend_selection::auto_select(None, None)
         .ok()
         .filter(|selection| {
@@ -108,7 +110,7 @@ pub(crate) fn print_certification(json: bool) -> Result<bool> {
             "input-path",
             "IBus engine installed",
             "unsupported",
-            "IBus is installed but input-method-v2 is disallowed by organization policy",
+            "IBus is installed but disallowed by organization policy (allowed_backends lacks \"ibus\")",
         );
     } else {
         add_check(

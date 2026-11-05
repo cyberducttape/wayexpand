@@ -30,10 +30,18 @@ portable focused-window identity.
 ## Sensitive fields
 
 Capture is off until a field positively reports a known, non-sensitive
-content type. A new engine, `FocusIn`, `Enable`, `FocusOut`, and `Disable` all
-leave capture disabled; ibus-daemon follows every `FocusIn` with
-`SetContentType`, and only that call can enable matching. `Reset` does not
-change the field's content type. The following are treated as sensitive:
+content type. IBus delivers it by setting the engine's write-only
+`ContentType` property (`(uu)`: purpose and hints) through
+`org.freedesktop.DBus.Properties.Set`; there is no `SetContentType` method.
+Only a content type IBus has set can enable matching.
+
+A new engine has no content type, so capture starts disabled. `FocusOut` and
+`Disable` disable capture. ibus-daemon remembers the content type it last set
+on each engine and writes the property again only when a newly focused field's
+type differs, so `FocusIn` clears matcher state and then restores the engine's
+last content type: a refocused password field stays disabled, and a refocused
+ordinary field resumes matching. `Reset` does not change the field's content
+type. The following are treated as sensitive:
 
 - purposes `PASSWORD` (8) and `PIN` (9);
 - any purpose newer than this build knows (greater than `DATETIME`, 13);
@@ -85,5 +93,74 @@ match like explicit Unicode keysyms. Dead keys and Compose are resolved by the
 toolkit before IBus sees the result. These paths are unit tested; behaviour
 with real clients across layouts is not yet certified.
 
-After installing, make sure `~/.local/bin` is on `PATH`, then restart IBus and
-select `WayExpand` (`wayexpand` engine) in the desktop input-method settings.
+## Setup
+
+Run:
+
+```sh
+wayexpand setup --backend ibus              # IBus for applications
+wayexpand setup --backend ibus --terminals  # also cover terminals (see below)
+```
+
+Setup performs and verifies every step, reading each result back rather
+than trusting exit codes:
+
+1. Installs the component manifest where the **running** ibus-daemon reads
+   components (its `IBUS_COMPONENT_PATH`, otherwise `/usr/share/ibus/component`),
+   with an absolute engine path, after an administrator prompt (pkexec).
+   ibus-daemon never reads per-user directories such as
+   `~/.local/share/ibus/component`, so user installs only stage the manifest.
+   Distribution packages install it themselves.
+2. On KDE Plasma Wayland, sets KWin's Virtual Keyboard to IBus Wayland (the
+   same as System Settings → Keyboard → Virtual Keyboard). Without it,
+   Wayland applications never reach IBus. A hand-started ibus-daemon is
+   replaced, because it has no Wayland input-method connection.
+3. Restarts IBus if its registry does not list the engine yet, adds
+   `wayexpand` to IBus' input methods, and selects it.
+4. Asks for `compatibility_mode` consent if it is `off`: IBus replacement is
+   verified but not atomic, and `off` refuses every replacement. `--yes`
+   never grants this consent.
+5. Stops WayExpand daemons that capture keys in every application, since they
+   would expand snippets a second time (or, with `--terminals`, limits the
+   evdev daemon to terminals).
+
+## Diagnostics
+
+```sh
+wayexpand ibus status   # every link of the route, with the fix for each failure
+wayexpand ibus watch    # switch to an app and type: explains each field
+```
+
+`wayexpand doctor` shows the first broken link, and `wayexpand support-bundle`
+includes check states and per-field verdicts. The engine publishes
+content-free activity (counts and states only, never text) to
+`$XDG_RUNTIME_DIR/wayexpand-ibus-status.json`; field verdicts distinguish
+`expanded`, `ready`, `sensitive` (password/PIN), `no-surrounding-text`
+(typical of terminals), `text-mismatch`, `refused-by-policy`, and
+`no-content-type`.
+
+## Terminals
+
+Terminals do not report the text before the cursor, so IBus cannot replace a
+trigger there (the engine refuses rather than deleting blindly). List your
+terminals in `settings.terminal_apps` (setup fills in common terminal app IDs
+when the list is empty) and run setup with `--terminals`: the evdev daemon is
+then started with `WAYEXPAND_TERMINAL_APPS_ONLY=1` and expands only while one
+of those apps is focused (KWin window tracking; fail-closed otherwise). IBus
+keeps handling every other application, so nothing expands twice. evdev reads
+all keyboard input, so this requires the evdev consent marker described in
+[BACKENDS_SENSITIVE_FIELDS.md](BACKENDS_SENSITIVE_FIELDS.md).
+
+## Protocol notes
+
+- IBus sets an engine's content type through the write-only `ContentType`
+  property (`Properties.Set`), and only when it differs from the value it last
+  set on that engine; the engine keeps the last content type across refocus.
+- ibus-daemon launches the component's `exec` and waits for the component
+  `<name>` (`org.freedesktop.IBus.WayExpand`) to appear on its bus before it
+  calls `CreateEngine`; the engine owns exactly that name.
+- `ibus engine wayexpand` exits 1 even after a successful switch, because the
+  engine keeps the user's layout (`<layout>default</layout>`).
+
+`scripts/test-ibus-e2e.sh` exercises these against a private, real
+ibus-daemon (also run in CI).

@@ -15,6 +15,10 @@ configuration management, and configuration validation.
 Interactively choose a compatibility mode and activate the safest available
 path after displaying session capabilities and safety tradeoffs. Use
 --mode recommended|maximum|experimental and --yes for reviewed automation.
+\fB--backend ibus\fR installs the IBus component where IBus reads it (after an
+administrator prompt), routes KDE Plasma's input method to IBus, selects the
+engine, and verifies each step; add \fB--terminals\fR to also cover the apps in
+\fBsettings.terminal_apps\fR with a terminal-only evdev daemon.
 .TP
 .B edit [CONFIG]
 Open the graphical snippet editor.
@@ -262,6 +266,12 @@ Show implementation and environment status for backend paths.
 .TP
 .B explain-backend
 Explain the expert backend selection decision and its tradeoffs.
+.TP
+.B ibus status [--json] | ibus watch [--seconds N]
+Check the IBus route link by link and print the fix for the first broken one.
+\fBwatch\fR explains, per focused field, why triggers do or do not expand (for
+example password fields, or terminals that report no surrounding text). Only
+counts and states are shown; typed text is never recorded.
 .TP
 .B portal status|reset
 Inspect or forget the stored libei portal restoration token. Resetting the

@@ -133,13 +133,13 @@ impl GuiApp {
             return;
         }
         let mut open = self.settings_open;
-        let max_size = theme::dialog_max_size(ctx, 560.0);
+        let max_size = theme::dialog_max_size(ctx, 640.0);
         egui::Window::new(self.strings.settings_title())
             .order(egui::Order::Foreground)
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
-            .min_width(420.0_f32.min(max_size.x))
+            .min_width(520.0_f32.min(max_size.x))
             .max_size(max_size)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ctx, |ui| {
@@ -165,6 +165,9 @@ impl GuiApp {
                 egui::ScrollArea::vertical()
                     .id_salt("settings_scroll")
                     .auto_shrink([false, true])
+                    // Use the room the window has before scrolling; the
+                    // default left the last option rows hidden.
+                    .min_scrolled_height((max_size.y - 140.0).clamp(200.0, 520.0))
                     .show(ui, |ui| match self.settings_tab {
                         SettingsTab::Appearance => self.render_appearance_settings(ui, palette),
                         SettingsTab::Engine => self.render_engine_settings(ui, palette),

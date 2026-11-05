@@ -4409,6 +4409,7 @@ version = "1.3.3"
 dependencies = [
  "libc",
  "notify",
+ "serde",
  "serde_json",
  "thiserror 2.0.21",
  "toml",
@@ -4580,7 +4581,9 @@ version = "1.3.3"
 dependencies = [
  "anyhow",
  "rustix 1.1.6",
+ "serde",
  "serde_json",
+ "wayexpand-backend-ibus",
  "wayexpand-backend-libei",
  "wayexpand-backend-wlroots",
  "wayexpand-core",
