@@ -644,6 +644,7 @@ mod tests {
                 active_backend: "libei",
                 backend_name: "libei",
                 managed: true,
+                control_only_mode: false,
                 input_method_mode: false,
                 evdev_mode: true,
                 config,

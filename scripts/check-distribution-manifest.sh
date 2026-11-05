@@ -215,7 +215,7 @@ grep -Fx 'ExecStart=/usr/bin/wayexpand-daemon --source=evdev --backend=libei --a
     printf '%s\n' 'staged evdev unit does not use /usr/bin/wayexpand-daemon' >&2
     exit 1
 }
-grep -Fx 'ExecStart=/usr/bin/wayexpand-daemon --source=stdin --backend=libei' \
+grep -Fx 'ExecStart=/usr/bin/wayexpand-daemon --source=control --backend=libei' \
     "$staged_units/wayexpand-control.service" >/dev/null || {
     printf '%s\n' 'staged control unit does not use /usr/bin/wayexpand-daemon' >&2
     exit 1

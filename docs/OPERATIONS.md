@@ -21,6 +21,23 @@ access or portal authorization. The desktop-test instructions distinguish
 one-shot evdev/libei checks from an end-to-end test of the currently selected
 route; an operator must still verify output in the target application.
 
+For the first-run path, use `wayexpand setup --check` to inspect the detected
+desktop, installation identity, PATH resolution, and setup recommendation.
+Then run `wayexpand setup --apply`. Interactive setup offers a real-app test
+using the enabled `;;hello` sample and asks you to confirm the exact replacement
+in a focused text field. A connected backend or active service is reported
+separately and is not a successful insertion test. Automated `--yes` setup does
+not claim an insertion was verified; it prints the command for a later
+interactive test. `wayexpand install-check --json` also reports the CLI, PATH,
+and running daemon installation methods and warns when PATH shadows the current
+CLI.
+
+The `wayexpand-control.service` uses the daemon's dedicated `--source=control`
+mode. This mode runs the control socket and explicit output requests without
+starting either the stdin test reader or a keyboard capture source. The stdin
+source remains available for test harnesses and is not the control service's
+runtime.
+
 Setup subprocess deadlines depend on the operation: service-state probes have
 a five-second limit, unit enable/reload operations have a twenty-second limit,
 service or IBus restarts have a sixty-second limit, and other setup commands

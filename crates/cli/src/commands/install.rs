@@ -110,6 +110,48 @@ fn resolved_executable(path: &Path) -> String {
         .to_string()
 }
 
+fn package_managed_executable(path: &Path) -> bool {
+    let path = path.to_string_lossy().into_owned();
+    [("dpkg-query", "-S"), ("rpm", "-qf"), ("pacman", "-Qo")]
+        .into_iter()
+        .any(|(program, flag)| crate::setup_ibus::command_output(program, &[flag, &path]).is_some())
+}
+
+fn installation_method(path: Option<&Path>) -> &'static str {
+    let Some(path) = path else {
+        return "unknown";
+    };
+    let resolved = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let text = resolved.to_string_lossy();
+    if text.contains("/target/debug/") || text.contains("/target/release/") {
+        return "developer-build";
+    }
+    if let Some(origin) = resolved
+        .ancestors()
+        .find(|ancestor| ancestor.ends_with("bin"))
+        .and_then(|bin| bin.parent())
+        .and_then(|root| fs::read_to_string(root.join("share/wayexpand/install-origin")).ok())
+    {
+        match origin.trim() {
+            "distribution-package" => return "distribution-package",
+            "user-local-release-archive" => return "user-local-release-archive",
+            "source-installation" => return "source-installation",
+            "developer-build" => return "developer-build",
+            _ => {}
+        }
+    }
+    if package_managed_executable(&resolved) {
+        return "distribution-package";
+    }
+    if text.contains("/.local/lib/wayexpand/") {
+        "unknown"
+    } else if text.starts_with("/usr/local/") || text.contains("/.cargo/bin/") {
+        "source-installation"
+    } else {
+        "unknown"
+    }
+}
+
 fn path_executable(name: &str) -> Option<PathBuf> {
     let path = env::var_os("PATH")?;
     env::split_paths(&path)
@@ -142,6 +184,9 @@ fn installation_identity() -> serde_json::Value {
     let cli_resolved = cli.as_deref().map(resolved_executable);
     let path_resolved = path_cli.as_deref().map(resolved_executable);
     let daemon_resolved = daemon.as_deref().map(|path| path.display().to_string());
+    let cli_method = installation_method(cli.as_deref());
+    let path_method = installation_method(path_cli.as_deref());
+    let daemon_method = installation_method(daemon.as_deref());
     let root = |value: &str| {
         let path = Path::new(value);
         let text = path.to_string_lossy();
@@ -174,6 +219,9 @@ fn installation_identity() -> serde_json::Value {
         "path_executable": path_resolved,
         "daemon_executable": daemon_resolved,
         "daemon_service": service.map(crate::services::UserService::unit),
+        "cli_method": cli_method,
+        "path_method": path_method,
+        "daemon_method": daemon_method,
         "path_shadow_detected": path_shadow,
         "mixed_cli_daemon_installation": mixed_cli_daemon,
     })
@@ -232,7 +280,7 @@ fn integrated_checks(ibus: &wayexpand_backend_ibus::chain::IbusChainReport) -> V
     checks.push(readiness_check(
         "installation_path_identity",
         if mismatch { "warning" } else { "pass" },
-        if mismatch { "PATH, CLI, and running daemon resolve to different installations; check for a stale ~/.local/bin/wayexpand shadowing the system package" } else { "CLI PATH resolution and running daemon installation are consistent" },
+        if mismatch { "PATH, CLI, and running daemon resolve to different installations; PATH may be selecting an older executable" } else { "CLI PATH resolution and running daemon installation are consistent" },
         identity,
     ));
     checks
@@ -473,13 +521,34 @@ pub(crate) fn checks() -> Vec<Check> {
 fn print_report(title: &str, json: bool) -> Result<bool> {
     let rows = checks();
     let healthy = rows.iter().all(|r| r.status != "fail");
+    let identity = installation_identity();
     if json {
         println!(
             "{}",
-            serde_json::json!({"schema":1,"level":"installed","title":title,"ready":healthy,"checks":rows})
+            serde_json::json!({"schema":2,"level":"installed","title":title,"ready":healthy,"installation_identity":identity,"checks":rows})
         );
     } else {
         println!("{title}");
+        println!(
+            "Installation method: CLI={} PATH={} daemon={}",
+            identity["cli_method"].as_str().unwrap_or("unknown"),
+            identity["path_method"].as_str().unwrap_or("unknown"),
+            identity["daemon_method"].as_str().unwrap_or("unknown"),
+        );
+        if identity["path_shadow_detected"] == true {
+            println!("WARNING: PATH resolves a different wayexpand executable than the one running this command.");
+            println!(
+                "  CLI:  {}",
+                identity["cli_executable"].as_str().unwrap_or("unknown")
+            );
+            println!(
+                "  PATH: {}",
+                identity["path_executable"].as_str().unwrap_or("not found")
+            );
+        }
+        if identity["mixed_cli_daemon_installation"] == true {
+            println!("WARNING: CLI and running daemon belong to different installation roots.");
+        }
         for r in &rows {
             println!(
                 "{:4} {:<22} {} — {}",
@@ -519,6 +588,13 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
     });
     let ibus_report = wayexpand_backend_ibus::chain::diagnose();
     let ibus_readiness = ibus_report.readiness();
+    let hello_sample_available =
+        wayexpand_core::Config::load(wayexpand_core::default_config_path()).is_ok_and(|config| {
+            config
+                .expansion
+                .iter()
+                .any(|item| item.enabled && item.answers_to(";;hello"))
+        });
     let daemon_status = crate::doctor::status::read_daemon_status()
         .ok()
         .and_then(|response| crate::doctor::status::status_as_json(&response).ok());
@@ -548,7 +624,8 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
                     "assessment":&planned.assessment,
                 })).collect::<Vec<_>>(),
             "ibus_runtime":ibus_readiness,
-                "activation":{"required":true,"command":"wayexpand setup --apply","real_insertion_verified":false,"consent_granted":false}
+                "activation":{"required":true,"command":"wayexpand setup --apply","real_insertion_verified":false,"consent_granted":false},
+                "first_run_test":{"trigger":";;hello","command":"wayexpand debug --test ';;hello'","available":hello_sample_available,"real_application_confirmation_required":true,"verified":false}
             })
         );
     } else {
@@ -570,6 +647,20 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
                 check.detail
             );
             if check.component == "installation_path_identity" {
+                println!(
+                    "    CLI installation method: {}",
+                    check.evidence["cli_method"].as_str().unwrap_or("unknown")
+                );
+                println!(
+                    "    PATH installation method: {}",
+                    check.evidence["path_method"].as_str().unwrap_or("unknown")
+                );
+                println!(
+                    "    Daemon installation method: {}",
+                    check.evidence["daemon_method"]
+                        .as_str()
+                        .unwrap_or("unknown")
+                );
                 println!(
                     "    CLI: {}",
                     check.evidence["cli_executable"]
@@ -599,7 +690,7 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
                 check.detail
             );
         }
-        println!("\nDesktop: {}\nRecommended: {} ({})\nSetup preflight: {}\nTarget insertion: NOT TESTED\n\nNext: wayexpand setup --apply\n\nPreflight does not grant raw-input/portal consent or verify target-app insertion.", crate::doctor::backends::session_description(), recommendation.label, recommendation.detail, if ready {"ready to configure"} else {"prerequisites incomplete"});
+        println!("\nDesktop: {}\nRecommended: {} ({})\nSetup preflight: {}\nTarget insertion: NOT TESTED\nFirst-run test: {}\n\nNext: wayexpand setup --apply\n\nPreflight does not grant raw-input/portal consent or verify target-app insertion.", crate::doctor::backends::session_description(), recommendation.label, recommendation.detail, if ready {"ready to configure"} else {"prerequisites incomplete"}, if hello_sample_available {"`wayexpand debug --test ';;hello'` (requires real-app confirmation)"} else {"no enabled ;;hello sample is configured"});
     }
     if !ready {
         bail!("setup prerequisites are incomplete; see the failed checks")
@@ -673,6 +764,30 @@ pub(crate) fn repair(args: Args) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn install_origin_marker_distinguishes_source_and_release_archive() {
+        let root = env::temp_dir().join(format!(
+            "wayexpand-install-origin-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let binary = root.join("bin/wayexpand");
+        fs::create_dir_all(binary.parent().unwrap()).unwrap();
+        fs::create_dir_all(root.join("share/wayexpand")).unwrap();
+        fs::write(&binary, "test executable").unwrap();
+        for (origin, expected) in [
+            ("source-installation", "source-installation"),
+            ("user-local-release-archive", "user-local-release-archive"),
+        ] {
+            fs::write(root.join("share/wayexpand/install-origin"), origin).unwrap();
+            assert_eq!(installation_method(Some(&binary)), expected);
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn every_required_manifest_component_has_a_readiness_check() {

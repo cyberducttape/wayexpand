@@ -376,7 +376,8 @@ mod tests {
             Some((IbusCheckState::Warn, _, _))
         ));
 
-        // The control-only unit runs the stdin source: no capture, no overlap.
+        // The control-only runtime uses the no-capture stdin route for output
+        // selection, but does not spawn a stdin reader.
         let control = RouteOverlap::from_status(Some(&serde_json::json!({ "source": "stdin" })));
         assert_eq!(control, RouteOverlap::ControlOnly);
         assert!(matches!(

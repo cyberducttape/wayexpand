@@ -163,6 +163,28 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
             terminals,
         },
     )?;
+    let hello_available = Config::load(default_config_path()).is_ok_and(|config| {
+        config
+            .expansion
+            .iter()
+            .any(|expansion| expansion.enabled && expansion.answers_to(";;hello"))
+    });
+    if hello_available {
+        if assume_yes {
+            println!("Activation completed. Real application insertion: NOT TESTED.");
+            println!("Next: run `wayexpand debug --test ';;hello'` in a disposable text field and confirm the replacement.");
+        } else if crate::prompt_yes_no(
+            "Activation checks completed; a real application insertion is not yet verified. Run the `;;hello` first-run test now? [Y/n] ",
+            true,
+        )? {
+            crate::commands::debug::desktop_test(";;hello")?;
+        } else {
+            println!("Activation completed. Real application insertion: NOT TESTED.");
+            println!("Next: run `wayexpand debug --test ';;hello'` in a disposable text field and confirm the replacement.");
+        }
+    } else {
+        println!("Activation completed. No enabled `;;hello` sample was found; real application insertion remains NOT TESTED.");
+    }
     Ok(())
 }
 

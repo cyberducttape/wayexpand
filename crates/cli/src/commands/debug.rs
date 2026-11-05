@@ -80,7 +80,7 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
 
 /// Interactive, target-application test. It never sends Enter, and only
 /// accepts a static, enabled snippet without command execution or form fields.
-fn desktop_test(trigger: &str) -> Result<()> {
+pub(crate) fn desktop_test(trigger: &str) -> Result<()> {
     if trigger.is_empty() || trigger.chars().any(char::is_control) {
         bail!("test trigger must be non-empty and contain no control characters");
     }

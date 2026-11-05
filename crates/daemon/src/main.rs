@@ -197,6 +197,7 @@ struct Daemon {
     active_backend: &'static str,
     backend_name: &'static str,
     managed: bool,
+    control_only_mode: bool,
     input_method_mode: bool,
     evdev_mode: bool,
     config: ReloadableConfig,
@@ -277,6 +278,7 @@ fn main() -> Result<()> {
         allow_evdev_sensitive_fields,
         use_fleet,
         terminal_apps_only,
+        control_only_mode,
     ) = parse_args()?;
     let containment_self_test = wayexpand_process_supervisor::run_containment_self_test();
     if containment_self_test != "passed" {
@@ -289,12 +291,20 @@ fn main() -> Result<()> {
 
     // Resolve automatic and partial explicit selections once. From this point
     // onward the daemon only consumes the canonical, compatible pair.
-    let selection = auto_select(explicit_source.as_deref(), explicit_backend.as_deref())
+    let requested_source = if control_only_mode {
+        Some("stdin")
+    } else {
+        explicit_source.as_deref()
+    };
+    let selection = auto_select(requested_source, explicit_backend.as_deref())
         .map_err(|error| anyhow::anyhow!("backend selection failed: {error}"))?;
     info!("{}", selection.reason);
     let resolved_pair = selection.pair;
     let source_name = resolved_pair.source();
     let backend_name = resolved_pair.backend();
+    if control_only_mode {
+        info!("control-only runtime selected; keyboard and stdin capture are disabled");
+    }
 
     if source_name == "evdev" && !allow_evdev_sensitive_fields {
         anyhow::bail!(
@@ -570,7 +580,7 @@ fn main() -> Result<()> {
         "input source active"
     );
 
-    let receiver = if input_method.is_none() && evdev.is_none() {
+    let receiver = if !control_only_mode && input_method.is_none() && evdev.is_none() {
         Some(spawn_stdin_reader()?)
     } else {
         None
@@ -611,6 +621,7 @@ fn main() -> Result<()> {
         active_backend,
         backend_name,
         managed,
+        control_only_mode,
         input_method_mode,
         evdev_mode,
         config,
@@ -688,9 +699,17 @@ fn main() -> Result<()> {
                 Step::Stop => break,
             }
         }
-        match daemon.stdin_step(poll_interval)? {
-            Step::Next => continue,
-            Step::Stop => break,
+        if daemon.control_only_mode {
+            // Control-only is a first-class service mode with no capture
+            // reader. Keep the reactor responsive for control requests and
+            // backend maintenance without depending on a closed stdin pipe.
+            thread::sleep(poll_interval);
+            continue;
+        } else {
+            match daemon.stdin_step(poll_interval)? {
+                Step::Next => continue,
+                Step::Stop => break,
+            }
         }
     }
     warn!("input stream ended; daemon stopping");

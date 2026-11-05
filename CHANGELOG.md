@@ -4,6 +4,16 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Offer the enabled `;;hello` desktop integration test immediately after
+  interactive setup. Noninteractive setup reports activation separately and
+  gives the explicit test command; setup diagnostics distinguish real-app
+  confirmation from an unverified backend connection.
+- Report installation methods for the running CLI, PATH-resolved executable,
+  and daemon, including warnings when PATH or service payloads select a
+  different installation.
+- Add an explicit `--source=control` daemon mode for the control service. It
+  starts no stdin reader and runs a dedicated control-only reactor path instead
+  of treating closed stdin as the runtime's lifecycle mechanism.
 - Give each interactive desktop test a generated content-independent diagnostic
   ID. Aggregate capture/output counters now report activity as uncorrelated and
   explicitly say the test trigger was not independently confirmed; any backend

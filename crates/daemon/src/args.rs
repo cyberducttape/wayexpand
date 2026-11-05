@@ -3,8 +3,16 @@
 use crate::*;
 
 /// `(config path, source, backend, allow evdev sensitive fields, use fleet,
-/// terminal apps only)`.
-pub(crate) type DaemonArgs = (PathBuf, Option<String>, Option<String>, bool, bool, bool);
+/// terminal apps only, control-only runtime)`.
+pub(crate) type DaemonArgs = (
+    PathBuf,
+    Option<String>,
+    Option<String>,
+    bool,
+    bool,
+    bool,
+    bool,
+);
 
 pub(crate) fn parse_args() -> Result<DaemonArgs> {
     let env_path = env::var_os("WAYEXPAND_CONFIG").map(PathBuf::from);
@@ -12,6 +20,7 @@ pub(crate) fn parse_args() -> Result<DaemonArgs> {
     let mut explicit_path = env_path.is_some();
     let mut backend = env::var("WAYEXPAND_BACKEND").ok();
     let mut source = env::var("WAYEXPAND_SOURCE").ok();
+    let mut control_only = source.as_deref() == Some("control");
     let mut allow_evdev_sensitive_fields = false;
     // Set by the systemd drop-in that `wayexpand setup --terminals` writes,
     // so the unit's ExecStart (whose binary path differs between user and
@@ -26,12 +35,13 @@ pub(crate) fn parse_args() -> Result<DaemonArgs> {
             backend = Some(value.to_string());
         } else if let Some(value) = argument.strip_prefix("--source=") {
             source = Some(value.to_string());
+            control_only = value == "control";
         } else if argument == "--allow-evdev-sensitive-fields" {
             allow_evdev_sensitive_fields = true;
         } else if argument == "--terminal-apps-only" {
             terminal_apps_only = true;
         } else if matches!(argument.as_str(), "--help" | "-h") {
-            println!("wayexpand-daemon {}\nusage: wayexpand-daemon [--source=stdin|input-method|evdev] [--backend=none|wlroots|libei] [--allow-evdev-sensitive-fields] [--terminal-apps-only] [config]", build_info::VERSION);
+            println!("wayexpand-daemon {}\nusage: wayexpand-daemon [--source=stdin|control|input-method|evdev] [--backend=none|wlroots|libei] [--allow-evdev-sensitive-fields] [--terminal-apps-only] [config]", build_info::VERSION);
             std::process::exit(0);
         } else if matches!(argument.as_str(), "--version" | "-V") {
             println!(
@@ -57,5 +67,6 @@ pub(crate) fn parse_args() -> Result<DaemonArgs> {
         allow_evdev_sensitive_fields,
         !explicit_path,
         terminal_apps_only,
+        control_only,
     ))
 }

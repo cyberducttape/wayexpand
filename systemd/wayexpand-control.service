@@ -16,10 +16,10 @@ Environment=WAYEXPAND_PROCESS_CGROUP=required
 Delegate=yes
 Environment=WAYEXPAND_PORTAL_TOKEN_PATH=%h/.config/wayexpand/libei-portal-token
 ExecStartPre=%h/.local/lib/wayexpand/current/bin/wayexpand validate
-# The stdin source with stdin closed captures nothing; a managed daemon whose
-# input has ended stays idle under its control socket. libei types explicit
-# quick inserts after the desktop portal grants access.
-ExecStart=%h/.local/lib/wayexpand/current/bin/wayexpand-daemon --source=stdin --backend=libei
+# The control source has a dedicated control-only runtime: it never starts a
+# keyboard or stdin reader. libei types explicit quick inserts only after the
+# desktop portal grants access.
+ExecStart=%h/.local/lib/wayexpand/current/bin/wayexpand-daemon --source=control --backend=libei
 StandardInput=null
 Restart=on-failure
 RestartSec=2s

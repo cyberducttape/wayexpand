@@ -124,7 +124,7 @@ esac
 [ -f "$test_root/config/systemd/user/wayexpand-evdev.service" ]
 # IBus setup enables the control-only unit, so every install ships it.
 [ -f "$test_root/config/systemd/user/wayexpand-control.service" ]
-grep -Fx 'ExecStart=%h/.local/lib/wayexpand/current/bin/wayexpand-daemon --source=stdin --backend=libei' \
+grep -Fx 'ExecStart=%h/.local/lib/wayexpand/current/bin/wayexpand-daemon --source=control --backend=libei' \
     "$test_root/config/systemd/user/wayexpand-control.service" >/dev/null
 [ -f "$test_root/config/systemd/user/wayexpand-action-broker.service" ]
 [ -f "$test_root/config/systemd/user/wayexpand-input-method.service.d/10-xdg-paths.conf" ]

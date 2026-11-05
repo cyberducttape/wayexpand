@@ -157,6 +157,7 @@ install -m 0644 "$release_dir/systemd"/*.service "$stage_dir/systemd/"
 install -m 0644 "$release_dir/desktop/wayexpand.desktop" "$stage_dir/desktop/wayexpand.desktop"
 install -m 0644 "$release_dir/ibus/component/wayexpand-ibus.xml" "$stage_dir/ibus/wayexpand.xml"
 install -m 0644 "$release_dir/installer-components.toml" "$stage_dir/share/wayexpand/installer-components.toml"
+printf '%s\n' 'user-local-release-archive' >"$stage_dir/share/wayexpand/install-origin"
 # Name the install by its content, not only its version: a corrected archive
 # with the same version string must never reuse binaries installed earlier.
 payload_hash=$("$release_dir/scripts/hash-install-payload.sh" "$stage_dir")

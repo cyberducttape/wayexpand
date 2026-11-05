@@ -417,7 +417,7 @@ fn print_help() {
     println!("{}", help_text());
 }
 
-fn prompt_yes_no(prompt: &str, default: bool) -> Result<bool> {
+pub(crate) fn prompt_yes_no(prompt: &str, default: bool) -> Result<bool> {
     print!("{prompt}");
     io::stdout().flush()?;
     let mut answer = String::new();
