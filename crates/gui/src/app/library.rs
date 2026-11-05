@@ -190,6 +190,37 @@ impl GuiApp {
                 // frame and the same result answers both the list and the
                 // empty-state check below.
                 self.refresh_visible_indices_cache();
+                // Up/Down move the selection through the visible list while
+                // no text field or dialog has the keyboard.
+                let (up, down) = ui.input(|input| {
+                    (
+                        input.key_pressed(egui::Key::ArrowUp),
+                        input.key_pressed(egui::Key::ArrowDown),
+                    )
+                });
+                if (up || down)
+                    && !ui.ctx().egui_wants_keyboard_input()
+                    && !self.any_dialog_open()
+                    && self.pending_action.is_none()
+                {
+                    let visible = self.visible_indices();
+                    let current = self
+                        .selected_index()
+                        .and_then(|selected| visible.iter().position(|&index| index == selected));
+                    let target = match current {
+                        None => (!visible.is_empty()).then_some(0),
+                        Some(position) if down => {
+                            (position + 1 < visible.len()).then_some(position + 1)
+                        }
+                        Some(position) => position.checked_sub(1),
+                    };
+                    if let Some(position) = target {
+                        let index = visible[position];
+                        self.list_scroll_target = Some(position);
+                        self.request_action(PendingAction::Select(index));
+                    }
+                }
+                let scroll_target = self.list_scroll_target.take();
                 let visible_indices = self.visible_indices();
                 let nothing_visible = visible_indices.is_empty();
                 // Only the rows in view are laid out and painted
@@ -241,6 +272,20 @@ impl GuiApp {
                             row_height,
                             visible_indices.len(),
                             |ui, rows| {
+                                if let Some(position) = scroll_target {
+                                    // Rows outside `rows` are not laid out, so
+                                    // place the target from the row height.
+                                    let step = row_height + ui.spacing().item_spacing.y;
+                                    let top = ui.max_rect().top()
+                                        + (position as f32 - rows.start as f32) * step;
+                                    ui.scroll_to_rect(
+                                        egui::Rect::from_min_size(
+                                            egui::pos2(ui.max_rect().left(), top),
+                                            egui::vec2(1.0, row_height),
+                                        ),
+                                        None,
+                                    );
+                                }
                                 for &index in &visible_indices[rows] {
                                     let expansion = &self.config.expansion[index];
                                     // The row's `cmd` badge already marks command-backed

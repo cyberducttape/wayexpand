@@ -149,7 +149,10 @@ impl GuiApp {
                         if Instant::now() >= deadline {
                             supervisor.kill_group();
                             let _ = supervisor.reap();
-                            return Err("Setup timed out after 30 seconds".to_owned());
+                            return Err(format!(
+                                "Setup timed out after {} seconds",
+                                SETUP_TIMEOUT.as_secs()
+                            ));
                         }
                         thread::sleep(Duration::from_millis(50));
                     };
@@ -199,7 +202,12 @@ impl GuiApp {
                 self.setup_task = None;
                 self.status = match result {
                     Ok(_) => Status::success(self.strings.status_setup_done()),
-                    Err(detail) => Status::error(self.strings.status_setup_failed(&detail)),
+                    Err(detail) => {
+                        // Setup's own report names the broken link; show the
+                        // same checks here instead of a one-line error.
+                        self.diagnostics_open = true;
+                        Status::error(self.strings.status_setup_failed(&detail))
+                    }
                 };
                 self.refresh_diagnostics(false);
             }

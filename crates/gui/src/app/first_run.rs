@@ -60,12 +60,15 @@ impl GuiApp {
         let (recommended_route, recommended_route_detail) =
             self.strings.onboarding_recommended_route(recommendation);
         let daemon_running = self.daemon_reachable == Some(true);
+        // The IBus route needs no background service; a live engine means
+        // WayExpand is already on.
+        let ibus_only = !daemon_running && self.ibus_active;
         let route_connected = daemon_running
             && !self.paused
             && self.route_state == Some(runtime::RouteState::Connected);
         let daemon_build = daemon_running.then(|| runtime::daemon_build_state(&self.daemon_status));
-        let route_ready =
-            route_connected && daemon_build == Some(runtime::DaemonBuildState::Current);
+        let route_ready = ibus_only
+            || route_connected && daemon_build == Some(runtime::DaemonBuildState::Current);
         let sample_trigger = onboarding_snippet(&self.config)
             .map(|expansion| expansion.trigger.clone())
             .unwrap_or_else(|| ONBOARDING_TRIGGER.to_owned());
@@ -96,16 +99,18 @@ impl GuiApp {
             .or_else(|| status_value("backend"))
             .unwrap_or_else(|| "unknown injection".into());
         let active_route = format!("{source} → {injection}");
+        let detail = |key: &str| self.strings.onboarding_route_detail(key).to_owned();
         let route_state_detail = match self.route_state {
-            Some(runtime::RouteState::PermissionRequired) => "permission required".to_owned(),
-            Some(runtime::RouteState::PortalRevoked) => "desktop permission was revoked".to_owned(),
-            Some(runtime::RouteState::Unsupported) => "no supported route is active".to_owned(),
-            Some(runtime::RouteState::Failed) => "route failed to start".to_owned(),
-            Some(runtime::RouteState::Reconnecting) => "route is reconnecting".to_owned(),
-            Some(runtime::RouteState::Starting) => "route is starting".to_owned(),
-            Some(runtime::RouteState::Degraded) => "route is degraded".to_owned(),
-            Some(runtime::RouteState::Stopped) => "route is stopped".to_owned(),
-            Some(runtime::RouteState::Connected) if self.paused => "WayExpand is paused".to_owned(),
+            _ if ibus_only => detail("ibus"),
+            Some(runtime::RouteState::PermissionRequired) => detail("permission_required"),
+            Some(runtime::RouteState::PortalRevoked) => detail("portal_revoked"),
+            Some(runtime::RouteState::Unsupported) => detail("unsupported"),
+            Some(runtime::RouteState::Failed) => detail("failed"),
+            Some(runtime::RouteState::Reconnecting) => detail("reconnecting"),
+            Some(runtime::RouteState::Starting) => detail("starting"),
+            Some(runtime::RouteState::Degraded) => detail("degraded"),
+            Some(runtime::RouteState::Stopped) => detail("stopped"),
+            Some(runtime::RouteState::Connected) if self.paused => detail("paused"),
             Some(runtime::RouteState::Connected)
                 if daemon_build == Some(runtime::DaemonBuildState::RestartRequired) =>
             {
@@ -117,8 +122,8 @@ impl GuiApp {
                 self.strings.onboarding_unverified_daemon_state().into()
             }
             Some(runtime::RouteState::Connected) => active_route.clone(),
-            None if !daemon_running => "user service is not reachable".to_owned(),
-            None => "waiting for live route status".to_owned(),
+            None if !daemon_running => detail("service_not_running"),
+            None => detail("waiting"),
         };
         let route_assurance = self
             .daemon_capabilities
@@ -169,10 +174,12 @@ impl GuiApp {
                         palette,
                         1,
                         self.strings.onboarding_turn_on_title(),
-                        daemon_running,
+                        daemon_running || ibus_only,
                     );
                     ui.indent("first_run_service", |ui| {
-                        if daemon_running {
+                        if ibus_only {
+                            ui.colored_label(palette.success, self.strings.ibus_active_status());
+                        } else if daemon_running {
                             ui.colored_label(palette.success, self.strings.running_status());
                         } else {
                             ui.label(

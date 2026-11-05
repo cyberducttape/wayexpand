@@ -325,17 +325,70 @@ pub fn blend_over(foreground: Color32, background: Color32) -> Color32 {
     )
 }
 
+/// `preferred`, darkened or lightened just enough to reach WCAG AA against
+/// `background`. Status colors keep their hue (a danger chip stays red on a
+/// light theme) instead of collapsing to plain black or white.
 fn readable_text_color(preferred: Color32, background: Color32) -> Color32 {
     if contrast_ratio(preferred, background) >= WCAG_AA_NORMAL_TEXT {
         return preferred;
     }
-    let black_ratio = contrast_ratio(Color32::BLACK, background);
-    let white_ratio = contrast_ratio(Color32::WHITE, background);
-    if black_ratio >= white_ratio {
+    let toward = if contrast_ratio(Color32::BLACK, background)
+        >= contrast_ratio(Color32::WHITE, background)
+    {
         Color32::BLACK
     } else {
         Color32::WHITE
-    }
+    };
+    let mix = |amount: f32| {
+        let channel = |from: u8, to: u8| {
+            (f32::from(from) + (f32::from(to) - f32::from(from)) * amount).round() as u8
+        };
+        Color32::from_rgb(
+            channel(preferred.r(), toward.r()),
+            channel(preferred.g(), toward.g()),
+            channel(preferred.b(), toward.b()),
+        )
+    };
+    (1..=20)
+        .map(|step| mix(step as f32 / 20.0))
+        .find(|candidate| contrast_ratio(*candidate, background) >= WCAG_AA_NORMAL_TEXT)
+        .unwrap_or(toward)
+}
+
+/// A rounded status chip for the header: one height, one text size and a
+/// readable tinted color for every status, so the header keeps its height
+/// whichever statuses are visible. Clicking it opens details.
+pub fn status_chip(ui: &mut egui::Ui, text: &str, color: Color32) -> egui::Response {
+    let background = blend_over(tint(color, 38), ui.visuals().panel_fill);
+    let foreground = readable_text_color(color, background);
+    ui.add(
+        egui::Button::new(egui::RichText::new(text).color(foreground).size(13.0))
+            .wrap_mode(egui::TextWrapMode::Extend)
+            .fill(background)
+            .stroke(Stroke::NONE)
+            .corner_radius(CornerRadius::same(255))
+            .min_size(Vec2::new(0.0, 30.0)),
+    )
+    .on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// Lay out `text` on one line no wider than `max_width`, ending in "…" when
+/// it does not fit.
+fn elided_galley(
+    painter: &egui::Painter,
+    text: &str,
+    font: FontId,
+    color: Color32,
+    max_width: f32,
+) -> std::sync::Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::simple_singleline(text.to_owned(), font, color);
+    job.wrap = egui::text::TextWrapping {
+        max_width: max_width.max(1.0),
+        max_rows: 1,
+        break_anywhere: true,
+        overflow_character: Some('…'),
+    };
+    painter.layout_job(job)
 }
 
 /// A small, clickable rounded chip used for the category filter row --
@@ -591,27 +644,56 @@ pub fn snippet_row_scaled(
         painter.circle_filled(dot_center, 4.0 * scale, dot_color);
 
         let text_left = rect.left() + 30.0 * scale;
+        let text_right = rect.right() - 10.0 * scale;
+        // The category chip sits at the right of the trigger line; the
+        // trigger (and its cmd badge) get whatever is left of it.
+        let category_chip = (!row.category.is_empty()).then(|| {
+            let category_font = FontId::new(10.5 * scale, FontFamily::Proportional);
+            let galley = elided_galley(
+                painter,
+                row.category,
+                category_font,
+                palette.accent,
+                (text_right - text_left) * 0.45,
+            );
+            let pad = Vec2::new(8.0, 3.0) * scale;
+            let chip_size = galley.size() + pad * 2.0;
+            let chip_rect = egui::Rect::from_min_size(
+                egui::pos2(text_right - chip_size.x, rect.top() + 9.0 * scale),
+                chip_size,
+            );
+            (galley, chip_rect, pad)
+        });
+        let badge_reserve = if row.command_backed {
+            40.0 * scale
+        } else {
+            0.0
+        };
+        let trigger_limit = category_chip
+            .as_ref()
+            .map_or(text_right, |(_, chip_rect, _)| {
+                chip_rect.left() - 8.0 * scale
+            })
+            - text_left
+            - badge_reserve;
         let trigger_pos = egui::pos2(text_left, rect.top() + 9.0 * scale);
-        painter.text(
-            trigger_pos,
-            egui::Align2::LEFT_TOP,
+        let trigger_galley = elided_galley(
+            painter,
             row.trigger,
             FontId::new(14.5 * scale, FontFamily::Monospace),
             palette.text,
+            trigger_limit,
         );
+        let trigger_width = trigger_galley.size().x;
+        painter.galley(trigger_pos, trigger_galley, palette.text);
         if row.command_backed {
-            let galley = painter.layout_no_wrap(
-                row.trigger.to_owned(),
-                FontId::new(14.5 * scale, FontFamily::Monospace),
-                Color32::TRANSPARENT,
-            );
             let badge_font = FontId::new(10.0 * scale, FontFamily::Proportional);
             let text_galley =
                 painter.layout_no_wrap("cmd".to_owned(), badge_font.clone(), Color32::TRANSPARENT);
             let pad = Vec2::new(6.0, 2.0) * scale;
             let badge_size = text_galley.size() + pad * 2.0;
             let badge_rect = egui::Rect::from_min_size(
-                trigger_pos + Vec2::new(galley.size().x + 8.0 * scale, -1.0),
+                trigger_pos + Vec2::new(trigger_width + 8.0 * scale, -1.0),
                 badge_size,
             );
             painter.rect_filled(
@@ -627,41 +709,25 @@ pub fn snippet_row_scaled(
                 palette.warning,
             );
         }
-        if !row.category.is_empty() {
-            let category_font = FontId::new(10.5 * scale, FontFamily::Proportional);
-            let galley = painter.layout_no_wrap(
-                row.category.to_owned(),
-                category_font.clone(),
-                Color32::TRANSPARENT,
-            );
-            let pad = Vec2::new(8.0, 3.0) * scale;
-            let chip_size = galley.size() + pad * 2.0;
-            let chip_rect = egui::Rect::from_min_size(
-                egui::pos2(
-                    rect.right() - chip_size.x - 10.0 * scale,
-                    rect.top() + 9.0 * scale,
-                ),
-                chip_size,
-            );
+        if let Some((galley, chip_rect, pad)) = category_chip {
             painter.rect_filled(chip_rect, CornerRadius::same(255), tint(palette.accent, 30));
-            painter.text(
-                chip_rect.center(),
-                egui::Align2::CENTER_CENTER,
-                row.category,
-                category_font,
-                palette.accent,
-            );
+            painter.galley(chip_rect.min + pad, galley, palette.accent);
         }
         let detail = if row.detail.is_empty() {
             row.detail_placeholder
         } else {
             row.detail
         };
-        painter.text(
-            egui::pos2(text_left, rect.top() + 27.0 * scale),
-            egui::Align2::LEFT_TOP,
-            truncate(detail, 46),
+        let detail_galley = elided_galley(
+            painter,
+            detail,
             FontId::new(12.0 * scale, FontFamily::Proportional),
+            palette.muted,
+            text_right - text_left,
+        );
+        painter.galley(
+            egui::pos2(text_left, rect.top() + 27.0 * scale),
+            detail_galley,
             palette.muted,
         );
     }
@@ -762,15 +828,6 @@ pub fn tint(color: Color32, alpha: u8) -> Color32 {
     Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha)
 }
 
-fn truncate(text: &str, max_chars: usize) -> String {
-    if text.chars().count() <= max_chars {
-        return text.to_owned();
-    }
-    let mut truncated: String = text.chars().take(max_chars.saturating_sub(1)).collect();
-    truncated.push('…');
-    truncated
-}
-
 /// Largest size a centered dialog may take while staying fully inside the
 /// app window, leaving room for the title bar and a small margin.
 pub(crate) fn dialog_max_size(ctx: &egui::Context, preferred_height: f32) -> egui::Vec2 {
@@ -802,8 +859,25 @@ mod tests {
         let background = blend_over(tint(palette.warning, 38), Color32::WHITE);
         let foreground = readable_text_color(palette.warning, background);
 
-        assert_eq!(foreground, Color32::BLACK);
         assert!(contrast_ratio(foreground, background) >= WCAG_AA_NORMAL_TEXT);
+        // The status hue survives: still amber (red over blue), not black.
+        assert_ne!(foreground, Color32::BLACK);
+        assert!(foreground.r() > foreground.b());
+
+        // Every status color stays readable on both themes' tinted chips.
+        for dark in [false, true] {
+            let palette = Palette::for_pack(ColorPack::Default, dark);
+            for color in [
+                palette.success,
+                palette.warning,
+                palette.danger,
+                palette.muted,
+            ] {
+                let background = blend_over(tint(color, 38), palette.surface);
+                let foreground = readable_text_color(color, background);
+                assert!(contrast_ratio(foreground, background) >= WCAG_AA_NORMAL_TEXT);
+            }
+        }
     }
 
     #[test]

@@ -4,6 +4,26 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- GUI polish: header statuses use one chip style and a fixed row height, so
+  the panels no longer shift when the service starts; every chip opens
+  Diagnostics. The header recognizes a live IBus engine (`IBus: Active`)
+  instead of showing a red stopped service and a `Turn on` button for a
+  working IBus setup, and hides the typing-route chip while the service is
+  not running. "Daemon" labels now read "Service". The compact header keeps
+  the wide layout's order.
+- GUI: Diagnostics includes the IBus route checks with copyable fixes and
+  recent field verdicts, and opens at a readable size; Settings uses the
+  window's height. One-click setup allows three minutes (it can wait for an
+  administrator password) and opens Diagnostics when it fails.
+- GUI: the snippet list elides long triggers, categories and descriptions to
+  the available width with an ellipsis instead of clipping them mid-word, the
+  search field lines up with the buttons above it, and `Up`/`Down` move the
+  selection through the list.
+- GUI: status chip text keeps its status hue at WCAG AA contrast on both
+  themes (it previously fell back to plain black on the light theme), and
+  typing-route and first-run route descriptions are translated into German
+  and Indonesian.
+
 - Add `wayexpand ibus status [--json]` and `wayexpand ibus watch`. Status checks
   each link of the IBus route (tools, ibus-daemon, desktop routing to IBus,
   the component in the running daemon's own component path, the component

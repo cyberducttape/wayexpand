@@ -55,10 +55,18 @@ impl GuiApp {
                     ui.vertical(|ui| {
                         ui.horizontal_wrapped(|ui| self.render_toolbar_brand(ui, palette));
                         ui.add_space(6.0);
-                        ui.horizontal_wrapped(|ui| self.render_toolbar_controls(ui, palette, true));
+                        // Right to left, like the wide layout, so the primary
+                        // action keeps its place at the end of the row.
+                        ui.with_layout(
+                            egui::Layout::right_to_left(egui::Align::Center).with_main_wrap(true),
+                            |ui| self.render_toolbar_controls(ui, palette, true),
+                        );
                     });
                 } else {
                     ui.horizontal(|ui| {
+                        // One fixed row height, whichever chips and buttons
+                        // are visible, so the panels below never jump.
+                        ui.set_min_height(34.0);
                         self.render_toolbar_brand(ui, palette);
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             self.render_toolbar_controls(ui, palette, false);
@@ -476,23 +484,20 @@ impl GuiApp {
             egui::WidgetInfo::labeled(egui::WidgetType::Button, true, more_actions)
         });
         actions_response.on_hover_text(more_actions);
-        if ui
-            .add(
-                egui::Button::new(RichText::new(route_label).color(route_color))
-                    .wrap_mode(egui::TextWrapMode::Extend)
-                    .fill(theme::tint(route_color, 38))
-                    .stroke(egui::Stroke::NONE)
-                    .corner_radius(egui::CornerRadius::same(255))
-                    .min_size(egui::vec2(0.0, 30.0)),
-            )
-            .on_hover_text(self.daemon_status.clone())
-            .clicked()
+        let mut open_diagnostics = false;
+        // The typing-route chip only means something once the service
+        // answers; "Unknown" next to "Service: Not running" says nothing new.
+        if self.daemon_reachable == Some(true)
+            && theme::status_chip(ui, route_label, route_color)
+                .on_hover_text(self.daemon_status.clone())
+                .clicked()
         {
-            self.diagnostics_open = true;
-            self.refresh_diagnostics(true);
+            open_diagnostics = true;
         }
         if let Some((trust_label, trust_color)) = route_trust {
-            theme::pill(ui, trust_label, trust_color, theme::tint(trust_color, 34));
+            if theme::status_chip(ui, &trust_label, trust_color).clicked() {
+                open_diagnostics = true;
+            }
         }
         if let Some(count) = self
             .daemon_capabilities
@@ -501,23 +506,15 @@ impl GuiApp {
             .filter(|count| *count > 0)
         {
             let notice = self.strings.output_partial_notice(count);
-            if ui
-                .add(
-                    egui::Button::new(
-                        RichText::new(self.strings.output_partial_badge(count))
-                            .color(palette.danger),
-                    )
-                    .wrap_mode(egui::TextWrapMode::Extend)
-                    .fill(theme::tint(palette.danger, 42))
-                    .stroke(egui::Stroke::NONE)
-                    .corner_radius(egui::CornerRadius::same(255))
-                    .min_size(egui::vec2(0.0, 30.0)),
-                )
-                .on_hover_text(notice)
-                .clicked()
+            if theme::status_chip(
+                ui,
+                &self.strings.output_partial_badge(count),
+                palette.danger,
+            )
+            .on_hover_text(notice)
+            .clicked()
             {
-                self.diagnostics_open = true;
-                self.refresh_diagnostics(true);
+                open_diagnostics = true;
             }
         }
         if let Some(count) = self
@@ -527,22 +524,15 @@ impl GuiApp {
             .filter(|count| *count > 0)
         {
             let notice = self.strings.output_uncertain_notice(count);
-            if ui
-                .add(
-                    egui::Button::new(
-                        RichText::new(self.strings.output_uncertain_badge(count))
-                            .color(palette.warning),
-                    )
-                    .fill(theme::tint(palette.warning, 36))
-                    .stroke(egui::Stroke::NONE)
-                    .corner_radius(egui::CornerRadius::same(255))
-                    .min_size(egui::vec2(0.0, 30.0)),
-                )
-                .on_hover_text(notice)
-                .clicked()
+            if theme::status_chip(
+                ui,
+                &self.strings.output_uncertain_badge(count),
+                palette.warning,
+            )
+            .on_hover_text(notice)
+            .clicked()
             {
-                self.diagnostics_open = true;
-                self.refresh_diagnostics(true);
+                open_diagnostics = true;
             }
         }
         // Whether replacing a trigger is verified against the field's text or
@@ -557,55 +547,58 @@ impl GuiApp {
                     runtime::ReplacementAssurance::Unavailable => palette.muted,
                 };
                 let explanation = self.strings.replacement_explanation(assurance);
-                if ui
-                    .add(
-                        egui::Button::new(
-                            RichText::new(self.strings.replacement_pill(assurance)).color(color),
-                        )
-                        .wrap_mode(egui::TextWrapMode::Extend)
-                        .fill(theme::tint(color, 34))
-                        .stroke(egui::Stroke::NONE)
-                        .corner_radius(egui::CornerRadius::same(255))
-                        .min_size(egui::vec2(0.0, 30.0)),
-                    )
+                if theme::status_chip(ui, self.strings.replacement_pill(assurance), color)
                     .on_hover_text(explanation)
                     .clicked()
                 {
-                    self.diagnostics_open = true;
-                    self.refresh_diagnostics(true);
+                    open_diagnostics = true;
                 }
             }
         }
-        // The first-run screen has its own step for this.
-        theme::pill(
-            ui,
-            daemon_label,
-            daemon_color,
-            theme::tint(daemon_color, 38),
-        );
+        // The IBus route needs no background service: when its engine is
+        // live and the service is not running, say so instead of showing a
+        // red "not running" and a "Turn on" button for a working setup.
+        let ibus_only = self.daemon_reachable != Some(true) && self.ibus_active;
+        if ibus_only {
+            if theme::status_chip(ui, self.strings.ibus_active_status(), palette.success)
+                .on_hover_text(self.strings.ibus_active_help())
+                .clicked()
+            {
+                open_diagnostics = true;
+            }
+        } else {
+            if self.ibus_active
+                && theme::status_chip(ui, self.strings.ibus_active_status(), palette.success)
+                    .on_hover_text(self.strings.ibus_active_help())
+                    .clicked()
+            {
+                open_diagnostics = true;
+            }
+            if theme::status_chip(ui, daemon_label, daemon_color)
+                .on_hover_text(self.strings.daemon_status_help())
+                .clicked()
+            {
+                open_diagnostics = true;
+            }
+        }
         if self.daemon_reachable == Some(true)
             && runtime::daemon_build_state(&self.daemon_status)
                 == runtime::DaemonBuildState::RestartRequired
+            && theme::status_chip(
+                ui,
+                self.strings.daemon_restart_required_status(),
+                palette.warning,
+            )
+            .on_hover_text(self.strings.daemon_restart_required_help())
+            .clicked()
         {
-            let response = ui
-                .add(
-                    egui::Button::new(
-                        RichText::new(self.strings.daemon_restart_required_status())
-                            .color(palette.warning),
-                    )
-                    .wrap_mode(egui::TextWrapMode::Extend)
-                    .fill(theme::tint(palette.warning, 38))
-                    .stroke(egui::Stroke::NONE)
-                    .corner_radius(egui::CornerRadius::same(255))
-                    .min_size(egui::vec2(0.0, 30.0)),
-                )
-                .on_hover_text(self.strings.daemon_restart_required_help());
-            if response.clicked() {
-                self.diagnostics_open = true;
-                self.refresh_diagnostics(true);
-            }
+            open_diagnostics = true;
         }
-        if self.daemon_reachable == Some(false) && !self.config.expansion.is_empty() {
+        if open_diagnostics {
+            self.diagnostics_open = true;
+            self.refresh_diagnostics(true);
+        }
+        if self.daemon_reachable == Some(false) && !ibus_only && !self.config.expansion.is_empty() {
             self.turn_on_button(ui, palette);
         }
     }
@@ -638,8 +631,8 @@ impl GuiApp {
                 {
                     self.filter.clear();
                 }
-                let width =
-                    (ui.available_width() - f32::from(margin.left + margin.right)).max(40.0);
+                // egui's desired width is the outer width, margin included.
+                let width = ui.available_width().max(40.0);
                 ui.add(
                     TextEdit::singleline(&mut self.filter)
                         .id(egui::Id::new(SEARCH_FIELD_SALT))

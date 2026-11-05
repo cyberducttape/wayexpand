@@ -32,7 +32,7 @@ impl GuiApp {
     pub(crate) fn render_diagnostics(&mut self, ctx: &egui::Context, palette: &Palette) {
         if self.diagnostics_open {
             let mut open = self.diagnostics_open;
-            let max_size = theme::dialog_max_size(ctx, 560.0);
+            let max_size = theme::dialog_max_size(ctx, 720.0);
             let title = self.strings.diagnostics_title();
             egui::Window::new(title)
                 // Keep the area identity stable across egui releases; the
@@ -46,6 +46,9 @@ impl GuiApp {
                 .resizable(true)
                 .constrain(true)
                 .min_width(340.0_f32.min(max_size.x))
+                // Windows shrink to their content; open at a readable size
+                // instead of the 340 px minimum, which wrapped every row.
+                .default_size(egui::vec2(720.0_f32.min(max_size.x), max_size.y))
                 .max_size(max_size)
                 .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                 .show(ctx, |ui| {
@@ -53,7 +56,7 @@ impl GuiApp {
                     // it rather than letting the window grow off screen.
                     egui::ScrollArea::vertical()
                         .id_salt("diagnostics_scroll")
-                        .auto_shrink([false, true])
+                        .auto_shrink([false, false])
                         .show(ui, |ui| self.render_diagnostics_body(ui, palette));
                 });
             self.diagnostics_open = open;
@@ -101,13 +104,12 @@ impl GuiApp {
             .and_then(|capabilities| capabilities.replacement_assurance)
             .map(|assurance| self.strings.replacement_pill(assurance).to_owned());
         self.render_session_overview(ui, palette, active_route_id);
-        ui.collapsing("Ranked input routes", |ui| {
+        self.render_ibus_route(ui, palette);
+        ui.collapsing(self.strings.ranked_routes_title(), |ui| {
             ui.label(
-                RichText::new(
-                    "Based on this session, organization policy, and catalog certification. Experimental routes remain uncertified.",
-                )
-                .small()
-                .color(palette.muted),
+                RichText::new(self.strings.ranked_routes_subtitle())
+                    .small()
+                    .color(palette.muted),
             );
             if let Some(plan) = &self.route_plan {
                 for route in &plan.routes {
@@ -120,10 +122,16 @@ impl GuiApp {
                             let standing = route.standing.as_str();
                             let color = match route.standing {
                                 wayexpand_backend_selection::RouteStanding::Recommended
-                                | wayexpand_backend_selection::RouteStanding::Available => palette.success,
-                                wayexpand_backend_selection::RouteStanding::RequiresConsent => palette.warning,
+                                | wayexpand_backend_selection::RouteStanding::Available => {
+                                    palette.success
+                                }
+                                wayexpand_backend_selection::RouteStanding::RequiresConsent => {
+                                    palette.warning
+                                }
                                 wayexpand_backend_selection::RouteStanding::BlockedByPolicy
-                                | wayexpand_backend_selection::RouteStanding::Unavailable => palette.muted,
+                                | wayexpand_backend_selection::RouteStanding::Unavailable => {
+                                    palette.muted
+                                }
                             };
                             ui.colored_label(color, standing);
                         });
@@ -133,9 +141,9 @@ impl GuiApp {
                                 route.contract.capture,
                                 route.contract.injection,
                                 if active_route_id == Some(route.contract.id.as_str()) {
-                                    active_replacement.as_deref().unwrap_or(
-                                        route.contract.replacement_assurance.as_str(),
-                                    )
+                                    active_replacement
+                                        .as_deref()
+                                        .unwrap_or(route.contract.replacement_assurance.as_str())
                                 } else {
                                     route.contract.replacement_assurance.as_str()
                                 },
@@ -852,6 +860,107 @@ impl GuiApp {
                 }));
             });
         }
+    }
+
+    /// The IBus route, link by link, with the fix for each failure and what
+    /// the engine saw in recently focused fields. Hidden when IBus is not
+    /// installed at all.
+    fn render_ibus_route(&self, ui: &mut egui::Ui, palette: &Palette) {
+        use wayexpand_backend_ibus::chain::IbusCheckState;
+        let Some(report) = self.ibus_route.as_ref() else {
+            return;
+        };
+        if !report.installed_anywhere() && !self.ibus_active {
+            return;
+        }
+        ui.add_space(8.0);
+        theme::section_header(ui, "", self.strings.ibus_route_title());
+        let (summary, summary_color) = match report.first_failure() {
+            None => (self.strings.ibus_route_ready().to_owned(), palette.success),
+            Some(check) => (
+                self.strings.ibus_route_not_ready(check.title),
+                palette.danger,
+            ),
+        };
+        ui.label(RichText::new(summary).color(summary_color).strong());
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            for check in &report.checks {
+                let color = match check.state {
+                    IbusCheckState::Pass => palette.success,
+                    IbusCheckState::Warn => palette.warning,
+                    IbusCheckState::Fail => palette.danger,
+                    IbusCheckState::Skip => palette.muted,
+                };
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new(check.state.symbol()).color(color).strong());
+                    ui.label(RichText::new(check.title).strong());
+                });
+                ui.indent(check.id, |ui| {
+                    ui.label(RichText::new(&check.detail).small().color(palette.muted));
+                    if check.state != IbusCheckState::Pass {
+                        if let Some(fix) = &check.fix {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(
+                                    RichText::new(format!("{} {fix}", self.strings.fix_label()))
+                                        .small()
+                                        .color(color),
+                                );
+                                if ui
+                                    .small_button(self.strings.copy())
+                                    .on_hover_text(self.strings.copy_fix_tooltip())
+                                    .clicked()
+                                {
+                                    ui.ctx().copy_text(fix.clone());
+                                }
+                            });
+                        }
+                    }
+                });
+            }
+        });
+        let fields = report
+            .activity
+            .as_ref()
+            .filter(|reading| reading.live)
+            .map(|reading| reading.status.recent_fields.clone())
+            .unwrap_or_default();
+        let typed: Vec<_> = fields.iter().filter(|field| field.keys > 0).collect();
+        if !typed.is_empty() {
+            ui.label(
+                RichText::new(self.strings.ibus_recent_fields())
+                    .small()
+                    .strong(),
+            );
+            for field in typed.iter().rev().take(5) {
+                let verdict = wayexpand_backend_ibus::IbusFieldVerdict::of(field);
+                let color = match verdict {
+                    wayexpand_backend_ibus::IbusFieldVerdict::Expanded
+                    | wayexpand_backend_ibus::IbusFieldVerdict::Ready => palette.success,
+                    wayexpand_backend_ibus::IbusFieldVerdict::Sensitive
+                    | wayexpand_backend_ibus::IbusFieldVerdict::Idle => palette.muted,
+                    _ => palette.warning,
+                };
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new(verdict.label()).color(color).strong());
+                    ui.label(
+                        RichText::new(self.strings.ibus_field_counts(field.keys, field.expansions))
+                            .small()
+                            .color(palette.muted),
+                    );
+                });
+                ui.label(
+                    RichText::new(verdict.explanation())
+                        .small()
+                        .color(palette.muted),
+                );
+            }
+        }
+        ui.label(
+            RichText::new(self.strings.ibus_watch_hint())
+                .small()
+                .color(palette.muted),
+        );
     }
 
     fn render_session_overview(

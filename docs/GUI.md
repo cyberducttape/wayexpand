@@ -199,9 +199,18 @@ on WayExpand* runs `wayexpand setup --yes` in the background, which configures
 only the Recommended mode (the route planner's choice, which may be an
 experimental route such as input-method-v2 and is labelled as such) and never
 grants raw keyboard access; the result is
-shown in the status line and the daemon status refreshes. The same button
-appears in the toolbar whenever the library has snippets but no daemon is
-running.
+shown in the status line and the daemon status refreshes. Setup may wait for
+an administrator password (installing the IBus component) or for the desktop
+to start IBus, so it is allowed three minutes; if it fails, the Diagnostics
+window opens on the checks that explain why. The same button appears in the
+toolbar whenever the library has snippets, no background service is running,
+and the WayExpand IBus engine is not active.
+
+The toolbar shows one status chip per fact, all the same size and all
+clickable to open Diagnostics: `Service: Running` / `Not running` for the
+background service, `IBus: Active` when the IBus engine is serving apps (the
+IBus route needs no background service, so a stopped service is not shown as
+an error then), and the typing route's state only while the service answers.
 
 The `Settings` window is the single place for preferences and has two tabs:
 
@@ -230,14 +239,18 @@ correctly — and shows the full path of the open configuration on the right.
 the primary action stays reachable with a long replacement open.
 
 Keyboard shortcuts: `Ctrl+S` saves the selected snippet, `Ctrl+N` creates one,
-`Ctrl+F` focuses the search field, and `Esc` closes the topmost open dialog.
+`Ctrl+F` focuses the search field, `Up`/`Down` move through the snippet list
+when no text field has focus, and `Esc` closes the topmost open dialog.
 The editor accelerators are suppressed while a dialog is open. The first `Esc`
 in the import dialog discards a loaded preview rather than the dialog itself,
 so a library that took a moment to load is not lost to a stray keystroke.
 
 The `Diagnostics` window reports daemon control-socket connectivity and the
 currently discoverable input/output backends, including permission and
-Wayland-session hints. When a Wayland session is active, its refresh action
+Wayland-session hints. When IBus is installed it also lists the IBus route
+checks (the same as `wayexpand ibus status`), with a copyable fix for each
+failed link, and what the engine saw in recently focused fields (counts and
+verdicts only, never text). When a Wayland session is active, its refresh action
 also performs non-mutating input-method-v2 and wlroots virtual-keyboard
 protocol probes. It never opens a libei portal consent prompt from passive
 diagnostics. The active-route assessment summarizes capture availability,

@@ -62,7 +62,9 @@ const MAX_UNDO_HISTORY: usize = 64;
 const MAX_UNDO_BYTES: usize = 16 * 1024 * 1024;
 const MIN_FIELD_WIDTH: f32 = 120.0;
 const REPLACEMENT_EDITOR_SALT: &str = "wayexpand-replacement-editor";
-const SETUP_TIMEOUT: Duration = Duration::from_secs(30);
+/// Setup can wait on an administrator password prompt (pkexec) and on the
+/// desktop starting IBus, so allow well over a minute.
+const SETUP_TIMEOUT: Duration = Duration::from_secs(180);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct RouteRecommendation {
@@ -194,6 +196,10 @@ struct GuiApp {
     status: Status,
     paused: bool,
     daemon_reachable: Option<bool>,
+    /// The WayExpand IBus engine is running and serving input contexts.
+    ibus_active: bool,
+    /// The IBus route checks from the last diagnostics refresh.
+    ibus_route: Option<wayexpand_backend_ibus::chain::IbusChainReport>,
     route_state: Option<runtime::RouteState>,
     diagnostics_open: bool,
     evdev_setup_open: bool,
@@ -215,6 +221,9 @@ struct GuiApp {
     diagnostics_checked_at: Option<Instant>,
     pending_control: usize,
     next_status_poll: Instant,
+    /// Position in the visible snippet list to scroll into view after
+    /// keyboard navigation moved the selection.
+    list_scroll_target: Option<usize>,
     pending_action: Option<PendingAction>,
     profiles: Vec<ProfileEntry>,
     active_profile: Option<String>,
@@ -541,6 +550,8 @@ impl GuiApp {
             status: Status::info(strings.ready()),
             paused: false,
             daemon_reachable: None,
+            ibus_active: runtime::ibus_engine_active(),
+            ibus_route: None,
             route_state: None,
             diagnostics_open: false,
             evdev_setup_open: false,
@@ -562,6 +573,7 @@ impl GuiApp {
             diagnostics_checked_at: None,
             pending_control: 0,
             next_status_poll: Instant::now() + Duration::from_secs(2),
+            list_scroll_target: None,
             pending_action: None,
             profiles: Vec::new(),
             active_profile: None,

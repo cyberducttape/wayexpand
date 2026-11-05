@@ -93,7 +93,15 @@ pub(crate) struct DiagnosticsSnapshot {
     pub daemon_reachable: Option<bool>,
     pub route_state: Option<RouteState>,
     pub paused: Option<bool>,
+    pub ibus_route: wayexpand_backend_ibus::chain::IbusChainReport,
     pub announce: bool,
+}
+
+/// Whether the WayExpand IBus engine is live and serving input contexts,
+/// from its published activity file (a small, private file read).
+pub(crate) fn ibus_engine_active() -> bool {
+    wayexpand_backend_ibus::telemetry::read_status()
+        .is_some_and(|reading| reading.live && reading.status.engines > 0)
 }
 
 pub(crate) type RouteState = wayexpand_core::DaemonRouteState;
@@ -576,6 +584,7 @@ fn run_diagnostics(config_path: PathBuf, announce: bool) -> DiagnosticsSnapshot 
         Err(error) => (format!("Unavailable: {error}"), None, None, None),
     };
     let compositor_info = diagnostics::compositor_info();
+    let ibus_route = wayexpand_backend_ibus::chain::diagnose();
     let permission_health = diagnostics::permission_health(
         &backend_status,
         daemon_capabilities.as_ref(),
@@ -595,6 +604,7 @@ fn run_diagnostics(config_path: PathBuf, announce: bool) -> DiagnosticsSnapshot 
         daemon_reachable,
         route_state,
         paused,
+        ibus_route,
         announce,
     }
 }

@@ -3066,3 +3066,107 @@ fn connected_nonexclusive_capture_is_explained_in_all_languages() {
         );
     }
 }
+
+fn header_test_app(name: &str) -> GuiApp {
+    let path =
+        std::env::temp_dir().join(format!("wayexpand-gui-{name}-{}.toml", std::process::id()));
+    fs::write(
+        &path,
+        "[[expansion]]\ntrigger = \":a\"\nreplacement = \"A\"\n\n\
+         [[expansion]]\ntrigger = \":b\"\nreplacement = \"B\"\n\n\
+         [[expansion]]\ntrigger = \":c\"\nreplacement = \"C\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    let app = GuiApp::load(path.clone()).unwrap();
+    let _ = fs::remove_file(&path);
+    app
+}
+
+fn header_semantics(app: &mut GuiApp) -> String {
+    let ctx = egui::Context::default();
+    ctx.enable_accesskit();
+    let output = run_gui_test_frame(
+        &ctx,
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1200.0, 700.0),
+            )),
+            ..Default::default()
+        },
+        |ui| {
+            let palette = Palette::for_pack(app.colorpack, app.dark_mode);
+            app.render_toolbar_controls(ui, &palette, false);
+        },
+    );
+    format!(
+        "{:?}",
+        output
+            .platform_output
+            .accesskit_update
+            .expect("toolbar exposes accessible content")
+            .nodes
+    )
+}
+
+#[test]
+fn header_reports_a_live_ibus_engine_instead_of_a_stopped_service() {
+    let mut app = header_test_app("header-ibus");
+    app.daemon_reachable = Some(false);
+    app.ibus_active = true;
+    let semantics = header_semantics(&mut app);
+    assert!(semantics.contains("IBus: Active"), "{semantics}");
+    assert!(!semantics.contains("Turn on WayExpand"), "{semantics}");
+    assert!(!semantics.contains("Service: Not running"), "{semantics}");
+
+    app.ibus_active = false;
+    let semantics = header_semantics(&mut app);
+    assert!(semantics.contains("Service: Not running"), "{semantics}");
+    assert!(semantics.contains("Turn on WayExpand"), "{semantics}");
+    // Without a running service the typing-route chip has nothing to say.
+    assert!(!semantics.contains("Typing integration"), "{semantics}");
+}
+
+#[test]
+fn arrow_keys_move_the_selection_through_the_snippet_list() {
+    let mut app = header_test_app("arrow-nav");
+    let ctx = egui::Context::default();
+    let frame = |app: &mut GuiApp, key: Option<egui::Key>| {
+        let events = key
+            .map(|key| {
+                vec![egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }]
+            })
+            .unwrap_or_default();
+        run_gui_test_frame(
+            &ctx,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1000.0, 700.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                let palette = Palette::for_pack(app.colorpack, app.dark_mode);
+                app.render_snippet_list(ui, &palette);
+            },
+        );
+        assert!(app.pending_action.is_none());
+    };
+    frame(&mut app, None);
+    let first = app.selected_index();
+    frame(&mut app, Some(egui::Key::ArrowDown));
+    let second = app.selected_index();
+    assert_ne!(first, second);
+    assert!(second.is_some());
+    frame(&mut app, Some(egui::Key::ArrowUp));
+    assert_eq!(app.selected_index(), first);
+}
