@@ -4,6 +4,15 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add a regression test for failed IBus activation rollback across service state,
+  compositor input-method selection, IBus preload engines, and active engine.
+  Repair the daemon reload test fixture for expansion counts and make its
+  status-field test consume the versioned contract fixture. Bump the status
+  JSON fixture schema to 14 to include optional effective sandbox evidence.
+  Serialize process-global trace assertions in test builds so parallel daemon
+  stress tests cannot evict each other's bounded diagnostic history. Move the
+  doctor integration fixture beneath HOME, avoiding a false permission failure
+  when the checked-out workspace itself is group-writable.
 - Add a GUI Test Expansion mode chooser that keeps local matcher preview
   separate from interactive desktop testing. The desktop path exposes the
   one-shot `wayexpand debug --test` command for a selected enabled static

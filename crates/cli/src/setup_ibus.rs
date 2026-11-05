@@ -458,25 +458,35 @@ impl SessionSnapshot {
     /// Undo session changes in reverse order. Prepared, inert changes (the
     /// component file, configuration consent) are kept.
     fn rollback(&self) {
+        self.rollback_with(kwriteconfig(), |program, arguments| {
+            let _ = run_setup_command(program, arguments);
+        });
+    }
+
+    fn rollback_with(
+        &self,
+        kwriteconfig_program: Option<&str>,
+        mut run: impl FnMut(&str, &[&str]),
+    ) {
         println!("Setup did not complete; restoring your previous input-method setup…");
         for unit in &self.started_units {
-            let _ = run_setup_command("systemctl", &["--user", "disable", "--now", unit]);
+            run("systemctl", &["--user", "disable", "--now", unit]);
         }
         for unit in &self.stopped_units {
-            let _ = run_setup_command("systemctl", &["--user", "enable", "--now", unit]);
+            run("systemctl", &["--user", "enable", "--now", unit]);
         }
-        if let Some(previous) = &self.kwin_input_method {
-            if let Some(kwriteconfig) = kwriteconfig() {
-                let mut arguments = KWIN_INPUT_METHOD_KEY.to_vec();
-                match previous {
-                    Some(value) => arguments.push(value),
-                    None => arguments.push("--delete"),
-                }
-                let _ = run_setup_command(kwriteconfig, &arguments);
+        if let (Some(previous), Some(kwriteconfig)) =
+            (&self.kwin_input_method, kwriteconfig_program)
+        {
+            let mut arguments = KWIN_INPUT_METHOD_KEY.to_vec();
+            match previous {
+                Some(value) => arguments.push(value),
+                None => arguments.push("--delete"),
             }
+            run(kwriteconfig, &arguments);
         }
         if let Some(engines) = &self.preload_engines {
-            let _ = run_setup_command(
+            run(
                 "gsettings",
                 &[
                     "set",
@@ -491,7 +501,7 @@ impl SessionSnapshot {
             .as_deref()
             .filter(|engine| *engine != "wayexpand")
         {
-            let _ = run_setup_command("ibus", &["engine", engine]);
+            run("ibus", &["engine", engine]);
         }
     }
 }
@@ -801,5 +811,73 @@ mod tests {
             .map(|app| (*app).to_owned())
             .collect();
         config.validate().unwrap();
+    }
+
+    #[test]
+    fn failed_ibus_activation_rolls_back_services_and_session_selection() {
+        let snapshot = SessionSnapshot {
+            global_engine: Some("xkb:us::eng".into()),
+            preload_engines: Some("['xkb:us::eng']".into()),
+            kwin_input_method: Some(Some("old-input-method.so".into())),
+            started_units: vec!["wayexpand-control.service"],
+            stopped_units: vec!["wayexpand-evdev.service"],
+        };
+        let mut actions = Vec::<(String, Vec<String>)>::new();
+        snapshot.rollback_with(Some("kwriteconfig6"), |program, arguments| {
+            actions.push((
+                program.to_owned(),
+                arguments
+                    .iter()
+                    .map(|argument| (*argument).to_owned())
+                    .collect(),
+            ));
+        });
+
+        assert_eq!(
+            actions,
+            [
+                (
+                    "systemctl".into(),
+                    vec!["--user", "disable", "--now", "wayexpand-control.service"]
+                        .into_iter()
+                        .map(str::to_owned)
+                        .collect(),
+                ),
+                (
+                    "systemctl".into(),
+                    vec!["--user", "enable", "--now", "wayexpand-evdev.service"]
+                        .into_iter()
+                        .map(str::to_owned)
+                        .collect(),
+                ),
+                (
+                    "kwriteconfig6".into(),
+                    KWIN_INPUT_METHOD_KEY
+                        .into_iter()
+                        .chain(["old-input-method.so"])
+                        .map(str::to_owned)
+                        .collect(),
+                ),
+                (
+                    "gsettings".into(),
+                    vec![
+                        "set",
+                        "org.freedesktop.ibus.general",
+                        "preload-engines",
+                        "['xkb:us::eng']",
+                    ]
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect(),
+                ),
+                (
+                    "ibus".into(),
+                    vec!["engine", "xkb:us::eng"]
+                        .into_iter()
+                        .map(str::to_owned)
+                        .collect(),
+                ),
+            ]
+        );
     }
 }

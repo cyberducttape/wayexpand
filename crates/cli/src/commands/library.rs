@@ -935,7 +935,11 @@ mod tests {
         assert!(!root.join("oversized").exists());
         assert!(
             fs::read_dir(&root).unwrap().next().is_none(),
-            "staging data must be cleaned"
+            "staging data must be cleaned: {:?}",
+            fs::read_dir(&root)
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name())
+                .collect::<Vec<_>>()
         );
     }
 

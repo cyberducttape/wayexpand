@@ -3,9 +3,9 @@ set -eu
 
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 # Config paths are intentionally owner-checked. Keep the temporary tree under
-# the checked-out project so the test does not create an untrusted ancestor
-# when a runner's /tmp is owned by a non-root account.
-test_tmp_root="$project_dir"
+# the user's home, whose ancestry should be private/trusted; the checkout may
+# be group-writable on developer machines and would correctly fail that check.
+test_tmp_root=${HOME:?HOME must be set for doctor integration tests}
 test_root=$(mktemp -d "$test_tmp_root/wayexpand-doctor-test.XXXXXX")
 trap 'rm -rf "$test_root"' EXIT INT TERM
 
@@ -22,7 +22,11 @@ if WAYEXPAND_CONFIG="$config_path" \
 fi
 # A valid configuration can still produce an unhealthy result when the test
 # host has no usable compositor path; inspect the diagnostics separately.
-grep -F 'Config validation: OK' "$test_root/valid.out" >/dev/null
+if ! grep -F 'Config validation: OK' "$test_root/valid.out" >/dev/null; then
+    printf '%s\n' 'doctor did not validate the isolated configuration; output:' >&2
+    cat "$test_root/valid.out" >&2
+    exit 1
+fi
 
 WAYEXPAND_CONFIG="$config_path" "$project_dir/target/debug/wayexpand" doctor --json \
     >"$test_root/doctor.json" || :

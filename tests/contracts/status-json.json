@@ -1,5 +1,5 @@
 {
-  "schema_version": 13,
+  "schema_version": 14,
   "daemon_control_schema": 29,
   "fields": {
     "response": "string",
@@ -65,6 +65,7 @@
     "connect_workers_cancelled_total": "integer",
     "connect_workers_rejected_total": "integer",
     "action_broker": "object",
+    "sandbox_security": "object",
     "injection_latency_sample_count": "integer",
     "injection_latency_window_count": "integer",
     "injection_latency_p50_us": "integer",

@@ -713,6 +713,7 @@ mod tests {
 
     #[test]
     fn organization_policy_blocks_are_recorded_without_expansion_content() {
+        let _history_guard = crate::failure_trace::history_test_guard();
         let config = wayexpand_core::Config::parse(
             r#"
             [[expansion]]

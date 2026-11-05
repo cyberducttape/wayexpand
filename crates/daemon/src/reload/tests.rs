@@ -308,6 +308,8 @@ fn applying_reload_keeps_the_worker_captured_fleet_signature() {
         Ok(BuiltConfig {
             engine,
             expansions: 1,
+            enabled_expansions: 1,
+            disabled_expansions: 0,
             stamp,
             fleet_signature: captured_signature,
         }),

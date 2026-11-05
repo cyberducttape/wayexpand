@@ -4,6 +4,8 @@
 //! never stores triggers, replacement text, key events, or backend errors,
 //! since those strings may contain user content.
 
+#[cfg(test)]
+use std::sync::MutexGuard;
 use std::{
     cell::Cell,
     collections::VecDeque,
@@ -31,6 +33,55 @@ static EXPANSIONS_APPLIED: AtomicU64 = AtomicU64::new(0);
 static EXPANSIONS_REJECTED: AtomicU64 = AtomicU64::new(0);
 static DIAGNOSTIC_EVENTS_DROPPED: AtomicU64 = AtomicU64::new(0);
 static LAST_SUCCESSFUL_INSERTION_UNIX: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(test)]
+static TEST_HISTORY_GATE: Mutex<()> = Mutex::new(());
+#[cfg(test)]
+std::thread_local! {
+    static TEST_HISTORY_GATE_HELD: Cell<bool> = const { Cell::new(false) };
+}
+
+#[cfg(test)]
+pub(crate) struct HistoryTestGuard {
+    _lock: MutexGuard<'static, ()>,
+}
+
+#[cfg(test)]
+impl Drop for HistoryTestGuard {
+    fn drop(&mut self) {
+        TEST_HISTORY_GATE_HELD.with(|held| held.set(false));
+    }
+}
+
+/// Keep process-global diagnostic history assertions isolated from parallel
+/// tests that exercise unrelated expansion paths. Production history remains
+/// bounded and best-effort; this gate exists only in test builds.
+#[cfg(test)]
+pub(crate) fn history_test_guard() -> HistoryTestGuard {
+    let lock = TEST_HISTORY_GATE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    TEST_HISTORY_GATE_HELD.with(|held| held.set(true));
+    HistoryTestGuard { _lock: lock }
+}
+
+#[cfg(test)]
+fn history_test_gate() -> Option<MutexGuard<'static, ()>> {
+    if TEST_HISTORY_GATE_HELD.with(Cell::get) {
+        None
+    } else {
+        Some(
+            TEST_HISTORY_GATE
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        )
+    }
+}
+
+#[cfg(not(test))]
+fn history_test_gate() -> Option<()> {
+    None
+}
 
 pub(crate) fn last_successful_insertion_unix() -> u64 {
     LAST_SUCCESSFUL_INSERTION_UNIX.load(Ordering::Relaxed)
@@ -393,6 +444,7 @@ fn push_bounded(ring: &mut VecDeque<FailureTrace>, limit: usize, trace: FailureT
 }
 
 fn push(trace: FailureTrace) {
+    let _test_gate = history_test_gate();
     match history().try_lock() {
         Ok(mut history) => push_history(&mut history, trace),
         Err(TryLockError::Poisoned(poisoned)) => push_history(&mut poisoned.into_inner(), trace),
@@ -410,6 +462,7 @@ fn push_history(history: &mut History, trace: FailureTrace) {
 }
 
 pub(crate) fn recent_json() -> String {
+    let _test_gate = history_test_gate();
     let history = history()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -420,6 +473,7 @@ pub(crate) fn recent_json() -> String {
 /// Recent successful and blocked output transactions. Each record contains
 /// only stage outcomes and backend identity, never user text.
 pub(crate) fn recent_outcomes_json() -> String {
+    let _test_gate = history_test_gate();
     let history = history()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -529,6 +583,7 @@ mod tests {
 
     #[test]
     fn successful_outputs_do_not_evict_reported_failures() {
+        let _history_guard = history_test_guard();
         let mut history = History::default();
         push_history(
             &mut history,
@@ -579,6 +634,7 @@ mod tests {
 
     #[test]
     fn successful_output_is_in_outcomes_and_excluded_from_failure_history() {
+        let _history_guard = history_test_guard();
         let mut injector = MockInjector;
         let mut traced = TracedInjector::new(&mut injector);
         let report = wayexpand_core::ExpansionEngine::apply_with_report(
@@ -615,6 +671,7 @@ mod tests {
 
     #[test]
     fn partial_write_trace_includes_content_free_confirmed_progress() {
+        let _history_guard = history_test_guard();
         let mut injector = PartialProgressInjector {
             checkpoint: wayexpand_core::OutputCheckpoint::default(),
         };
@@ -654,6 +711,7 @@ mod tests {
 
     #[test]
     fn pre_output_blocks_are_content_free_outcomes() {
+        let _history_guard = history_test_guard();
         record_blocked_expansion("evdev+libei", "input arrived before output");
         record_command_failure("input-method-v2", wayexpand_core::CommandErrorKind::Timeout);
 
@@ -697,6 +755,7 @@ mod tests {
 
     #[test]
     fn form_route_failure_has_a_specific_content_free_reason() {
+        let _history_guard = history_test_guard();
         record_preparation_failure(
             "evdev+libei",
             &wayexpand_core::CommandError::FormTargetUnverifiable,
@@ -714,6 +773,7 @@ mod tests {
 
     #[test]
     fn form_render_failure_has_a_specific_content_free_reason() {
+        let _history_guard = history_test_guard();
         record_command_failure(
             "evdev+libei",
             wayexpand_core::CommandErrorKind::InvalidTemplate,

@@ -798,13 +798,14 @@ fn status_json_matches_documented_stable_contract() {
          connect_workers_completed_total=0\n\
          connect_workers_cancelled_total=0\n\
          connect_workers_rejected_total=0\n\
+         sandbox_security={\"no_new_privileges\":true}\n\
          terminal_apps_only=false";
     let value = status_as_json(daemon_response).unwrap();
     let object = value.as_object().expect("status --json returns an object");
     let contract: serde_json::Value =
         serde_json::from_str(include_str!("../../../tests/contracts/status-json.json"))
             .expect("status contract fixture must be valid JSON");
-    assert_eq!(contract["schema_version"], 13);
+    assert_eq!(contract["schema_version"], 14);
     assert_eq!(contract["daemon_control_schema"], CONTROL_STATUS_SCHEMA);
     assert_ne!(
         contract["schema_version"],
