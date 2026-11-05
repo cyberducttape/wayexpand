@@ -1,4 +1,7 @@
-use super::{IbusAction, IbusEngineAdapter};
+use super::{
+    telemetry::{self, IbusTelemetry},
+    IbusAction, IbusEngineAdapter,
+};
 use notify::{RecursiveMode, Watcher};
 use std::{
     collections::HashMap,
@@ -17,7 +20,11 @@ use zbus::{
     zvariant::{OwnedObjectPath, OwnedValue, StructureBuilder, Value},
 };
 
-const BUS_NAME: &str = "org.freedesktop.IBus.Engine.wayexpand";
+/// Must equal the component `<name>` in `desktop/wayexpand-ibus.xml`:
+/// ibus-daemon launches the component's `exec`, then waits for this exact
+/// name to gain an owner before it sends `CreateEngine` to the factory. Any
+/// other name leaves engine selection hanging until IBus times out.
+pub(crate) const BUS_NAME: &str = "org.freedesktop.IBus.WayExpand";
 const FACTORY_PATH: &str = "/org/freedesktop/IBus/Factory";
 const ENGINE_PATH: &str = "/org/freedesktop/IBus/Engine/WayExpand";
 
@@ -45,6 +52,8 @@ struct Factory {
     /// Wakes the completion pump with the path of an engine whose
     /// asynchronous command finished.
     completions: mpsc::Sender<OwnedObjectPath>,
+    /// Content-free activity shared by every engine of this process.
+    telemetry: Option<Arc<IbusTelemetry>>,
 }
 
 type Instances = Arc<Mutex<HashMap<OwnedObjectPath, EngineInstance>>>;
@@ -87,12 +96,16 @@ impl Factory {
         adapter.set_completion_notifier(Some(Arc::new(move || {
             let _ = completions.send(completed_path.clone());
         })));
+        if let Some(telemetry) = &self.telemetry {
+            adapter.set_telemetry(Arc::clone(telemetry));
+        }
         let adapter = Arc::new(Mutex::new(adapter));
         let engine = EngineObject {
             adapter: Arc::clone(&adapter),
             connection: Arc::clone(&self.connection),
             path: path.clone(),
             instances: Arc::clone(&self.instances),
+            telemetry: self.telemetry.clone(),
         };
         let connection = self
             .connection
@@ -106,10 +119,17 @@ impl Factory {
             .at(path.as_str(), engine)
             .await
             .map_err(zbus::fdo::Error::ZBus)?;
-        self.instances
-            .lock()
-            .map_err(|_| zbus::fdo::Error::Failed("IBus instance lock poisoned".into()))?
-            .insert(path.clone(), EngineInstance { adapter });
+        let engines = {
+            let mut instances = self
+                .instances
+                .lock()
+                .map_err(|_| zbus::fdo::Error::Failed("IBus instance lock poisoned".into()))?;
+            instances.insert(path.clone(), EngineInstance { adapter });
+            instances.len()
+        };
+        if let Some(telemetry) = &self.telemetry {
+            telemetry.set_engines(engines);
+        }
         Ok(path)
     }
 }
@@ -124,6 +144,7 @@ struct EngineObject {
     connection: Arc<Mutex<Option<Connection>>>,
     path: OwnedObjectPath,
     instances: Arc<Mutex<HashMap<OwnedObjectPath, EngineInstance>>>,
+    telemetry: Option<Arc<IbusTelemetry>>,
 }
 
 impl EngineObject {
@@ -335,14 +356,18 @@ impl EngineObject {
     /// rather than blocking it: removal takes the object tree's write lock,
     /// which a blocking call from inside a handler could wait on forever.
     async fn destroy(&self) -> zbus::fdo::Result<()> {
-        let removed = self
-            .instances
-            .lock()
-            .map_err(|_| zbus::fdo::Error::Failed("IBus instance lock poisoned".into()))?
-            .remove(&self.path)
-            .is_some();
+        let (removed, engines) = {
+            let mut instances = self
+                .instances
+                .lock()
+                .map_err(|_| zbus::fdo::Error::Failed("IBus instance lock poisoned".into()))?;
+            (instances.remove(&self.path).is_some(), instances.len())
+        };
         if !removed {
             return Ok(());
+        }
+        if let Some(telemetry) = &self.telemetry {
+            telemetry.set_engines(engines);
         }
         let connection = self
             .connection
@@ -366,7 +391,14 @@ impl EngineObject {
     }
     /// Capture is enabled only by a known non-sensitive content type; see
     /// [`crate::content_type_is_sensitive`].
-    fn set_content_type(&self, purpose: u32, hints: u32) {
+    ///
+    /// IBus delivers the content type as the write-only `ContentType`
+    /// property, set through `org.freedesktop.DBus.Properties.Set`; the
+    /// engine interface has no `SetContentType` method. A method here is
+    /// never called, which leaves capture disabled in every field.
+    #[zbus(property)]
+    fn set_content_type(&self, content_type: (u32, u32)) {
+        let (purpose, hints) = content_type;
         if let Ok(mut adapter) = self.adapter.lock() {
             adapter.set_content_type(purpose, hints);
         }
@@ -402,6 +434,8 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
         "IBus configuration loaded"
     );
     let connection_slot = Arc::new(Mutex::new(None));
+    let telemetry = Arc::new(IbusTelemetry::new());
+    start_status_writer(Arc::clone(&telemetry))?;
     let factory_config = Arc::new(Mutex::new((*initial_snapshot.config).clone()));
     let instances: Instances = Arc::new(Mutex::new(HashMap::new()));
     let (completion_sender, completion_receiver) = mpsc::channel();
@@ -412,6 +446,7 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
         instances: Arc::clone(&instances),
         next_id: AtomicU64::new(1),
         completions: completion_sender,
+        telemetry: Some(Arc::clone(&telemetry)),
     };
     let pump_instances = Arc::clone(&instances);
     let pump_connection = Arc::clone(&connection_slot);
@@ -531,6 +566,39 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
     }
 }
 
+/// Publish engine activity for `wayexpand doctor` and `wayexpand ibus`.
+/// Writes are coalesced: at most a few per second however fast keys arrive.
+fn start_status_writer(telemetry: Arc<IbusTelemetry>) -> Result<(), IbusServiceError> {
+    let Some(path) = telemetry::status_path() else {
+        warn!("XDG_RUNTIME_DIR is unset; IBus activity diagnostics are unavailable");
+        return Ok(());
+    };
+    let initial = telemetry.snapshot();
+    std::thread::Builder::new()
+        .name("wayexpand-ibus-status".into())
+        .spawn(move || {
+            let mut reported_error = false;
+            let mut publish =
+                |status: &telemetry::IbusStatus| match telemetry::write_status(&path, status) {
+                    Ok(()) => reported_error = false,
+                    Err(error) if !reported_error => {
+                        warn!(error = %error, "could not publish IBus activity diagnostics");
+                        reported_error = true;
+                    }
+                    Err(_) => {}
+                };
+            publish(&initial);
+            loop {
+                if let Some(status) = telemetry.wait_for_change(Duration::from_secs(30)) {
+                    publish(&status);
+                    std::thread::sleep(Duration::from_millis(250));
+                }
+            }
+        })
+        .map_err(|error| IbusServiceError::Thread(error.to_string()))?;
+    Ok(())
+}
+
 /// Build the serialized IBusText object with an empty attribute list. IBus
 /// represents text as a serialized object inside a D-Bus variant.
 fn ibus_text_value(text: &str) -> zbus::zvariant::Structure<'static> {
@@ -553,6 +621,17 @@ fn ibus_text_value(text: &str) -> zbus::zvariant::Structure<'static> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bus_name_matches_the_ibus_component_name() {
+        let manifest = include_str!("../../../desktop/wayexpand-ibus.xml");
+        let component_name = manifest
+            .split_once("<name>")
+            .and_then(|(_, rest)| rest.split_once("</name>"))
+            .map(|(name, _)| name.trim())
+            .expect("component manifest declares a name");
+        assert_eq!(BUS_NAME, component_name);
+    }
     use wayexpand_core::{Config, ReplacementGuarantee};
     use zbus::zvariant::DynamicType;
 
@@ -590,6 +669,7 @@ mod tests {
             instances: Arc::new(Mutex::new(HashMap::new())),
             next_id: AtomicU64::new(1),
             completions: mpsc::channel().0,
+            telemetry: None,
         };
         assert!(matches!(
             zbus::block_on(factory.create_engine("not-wayexpand")),
@@ -622,6 +702,7 @@ mod tests {
             connection: Arc::new(Mutex::new(None)),
             path,
             instances: Arc::clone(&instances),
+            telemetry: None,
         };
 
         assert!(zbus::block_on(engine.destroy()).is_err());
@@ -640,10 +721,11 @@ mod tests {
             connection: Arc::new(Mutex::new(None)),
             path: engine_path(1),
             instances: Arc::new(Mutex::new(HashMap::new())),
+            telemetry: None,
         };
-        engine.set_content_type(8, 0);
+        engine.set_content_type((8, 0));
         assert!(!zbus::block_on(engine.process_key_event('a' as u32, 0, 0)));
-        engine.set_content_type(0, 0);
+        engine.set_content_type((0, 0));
         assert!(!engine.adapter.lock().unwrap().engine().is_sensitive_focus());
     }
 
@@ -674,6 +756,7 @@ replacement = "signature"
             connection: Arc::new(Mutex::new(None)),
             path: engine_path(2),
             instances: Arc::new(Mutex::new(HashMap::new())),
+            telemetry: None,
         };
 
         // Ordinary key output fails because there is no live D-Bus transport.
@@ -775,6 +858,7 @@ replacement = "signature"
         commits: mpsc::Receiver<String>,
         deletions: mpsc::Receiver<u32>,
         instances: Instances,
+        telemetry: Arc<IbusTelemetry>,
     }
 
     impl Harness {
@@ -782,6 +866,7 @@ replacement = "signature"
             let config: Config = toml::from_str(config).unwrap();
             let connection_slot = Arc::new(Mutex::new(None));
             let instances: Instances = Arc::new(Mutex::new(HashMap::new()));
+            let telemetry = Arc::new(IbusTelemetry::new());
             let (completion_sender, completion_receiver) = mpsc::channel();
             let factory = Factory {
                 connection: Arc::clone(&connection_slot),
@@ -790,6 +875,7 @@ replacement = "signature"
                 instances: Arc::clone(&instances),
                 next_id: AtomicU64::new(1),
                 completions: completion_sender,
+                telemetry: Some(Arc::clone(&telemetry)),
             };
             let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair().unwrap();
             let server = std::thread::spawn(move || {
@@ -851,6 +937,7 @@ replacement = "signature"
                 commits,
                 deletions,
                 instances,
+                telemetry,
             }
         }
 
@@ -869,13 +956,46 @@ replacement = "signature"
                 .unwrap()
         }
 
+        /// Set the content type the way ibus-daemon does: through the
+        /// engine's write-only `ContentType` property.
+        fn set_content_type(&self, purpose: u32, hints: u32) -> zbus::Message {
+            self.client
+                .call_method(
+                    None::<&str>,
+                    self.engine.as_str(),
+                    Some("org.freedesktop.DBus.Properties"),
+                    "Set",
+                    &(
+                        "org.freedesktop.IBus.Engine",
+                        "ContentType",
+                        Value::from((purpose, hints)),
+                    ),
+                )
+                .unwrap()
+        }
+
+        fn introspect(&self) -> String {
+            self.client
+                .call_method(
+                    None::<&str>,
+                    self.engine.as_str(),
+                    Some("org.freedesktop.DBus.Introspectable"),
+                    "Introspect",
+                    &(),
+                )
+                .unwrap()
+                .body()
+                .deserialize()
+                .unwrap()
+        }
+
         /// The sequence ibus-daemon sends when an ordinary text field gains
         /// focus.
         fn focus_text_field(&self) {
             self.call("FocusIn", &());
             self.call("Enable", &());
             self.call("SetCapabilities", &(crate::IBUS_CAP_SURROUNDING_TEXT,));
-            self.call("SetContentType", &(0_u32, 0_u32));
+            self.set_content_type(0, 0);
         }
 
         /// Report `before` as the text before the cursor, then press `key`.
@@ -909,6 +1029,22 @@ replacement = "signature"
             }
             commits
         }
+    }
+
+    /// libibus declares `<property name='ContentType' type='(uu)'
+    /// access='write' />` on `org.freedesktop.IBus.Engine`, and ibus-daemon
+    /// sets it with `Properties.Set`. Pin that shape so capture cannot
+    /// silently stay disabled again.
+    #[test]
+    fn content_type_is_the_write_only_property_ibus_daemon_sets() {
+        let harness = Harness::start(BROKER_CONFIG);
+        let xml = harness.introspect();
+        assert!(
+            xml.contains(r#"<property name="ContentType" type="(uu)" access="write""#),
+            "engine introspection lacks IBus' ContentType property:\n{xml}"
+        );
+        assert!(!xml.contains(r#"name="SetContentType""#));
+        harness.set_content_type(0, 0);
     }
 
     #[test]
@@ -1062,9 +1198,70 @@ replacement = "signature"
         let harness = Harness::start(BROKER_CONFIG);
         harness.focus_text_field();
         harness.type_trigger();
-        harness.call("SetContentType", &(8_u32, 0_u32));
+        harness.set_content_type(8, 0);
         broker.answered();
         assert_eq!(harness.commits(Duration::from_millis(500)), ["o", "k"]);
+    }
+
+    /// The sequence captured from ibus-daemon 1.5.34 when focus returns to a
+    /// field whose content type equals the last one it set: FocusOut,
+    /// FocusIn and SetCapabilities, with no ContentType property write.
+    #[test]
+    fn refocus_to_a_field_of_the_same_type_keeps_capture_enabled() {
+        let harness = Harness::start(BROKER_CONFIG);
+        harness.focus_text_field();
+        harness.call("FocusOut", &());
+        harness.call("FocusIn", &());
+        harness.call("SetCapabilities", &(crate::IBUS_CAP_SURROUNDING_TEXT,));
+        harness.type_trigger();
+    }
+
+    /// Telemetry explains both outcomes seen on a real desktop: an editor
+    /// that reports its text expands, and a terminal-like client that
+    /// reports only empty text is refused with a specific reason.
+    #[test]
+    fn telemetry_distinguishes_expanding_fields_from_terminal_like_fields() {
+        let harness = Harness::start(
+            "[settings]\ncompatibility_mode = 'tracked-focus'\n\n[[expansion]]\ntrigger = ';ok'\nreplacement = 'done'\n",
+        );
+        harness.focus_text_field();
+        assert!(!harness.key(';', ""));
+        assert!(harness.key('o', ";"));
+        assert!(harness.key('k', ";o"));
+        assert_eq!(
+            harness.deletions.recv_timeout(Duration::from_secs(2)),
+            Ok(2)
+        );
+        let editor = harness.telemetry.snapshot().recent_fields.pop().unwrap();
+        assert_eq!(editor.expansions, 1);
+        assert_eq!(editor.content_type, telemetry::IbusContentTypeState::Normal);
+        assert_eq!(
+            crate::IbusFieldVerdict::of(&editor),
+            crate::IbusFieldVerdict::Expanded
+        );
+
+        // A terminal: same content type (IBus does not set it again), one
+        // empty surrounding-text report, then keys with no further reports.
+        harness.call("FocusOut", &());
+        harness.call("FocusIn", &());
+        harness.call("SetCapabilities", &(crate::IBUS_CAP_SURROUNDING_TEXT,));
+        harness.call(
+            "SetSurroundingText",
+            &(Value::from(ibus_text_value("")), 0_u32, 0_u32),
+        );
+        for key in [';', 'o', 'k'] {
+            harness.call("ProcessKeyEvent", &(key as u32, 0_u32, 0_u32));
+        }
+        let status = harness.telemetry.snapshot();
+        let terminal = status.recent_fields.last().unwrap();
+        assert_eq!(terminal.expansions, 0);
+        assert_eq!(terminal.refusals.surrounding_text_empty, 1);
+        assert_eq!(
+            crate::IbusFieldVerdict::of(terminal),
+            crate::IbusFieldVerdict::NoSurroundingText
+        );
+        assert_eq!(status.totals.expansions, 1);
+        assert_eq!(status.engines, 1);
     }
 
     #[test]

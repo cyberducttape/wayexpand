@@ -132,6 +132,7 @@ fn setting_fields_from_non_defaults(settings: &crate::Settings) -> BTreeSet<Stri
         usage_stats,
         compatibility_mode,
         keystroke_max_chars,
+        terminal_apps,
     );
     fields
 }
@@ -179,6 +180,7 @@ fn resolve_setting_candidates(
                 clipboard_mode,
                 usage_stats,
                 keystroke_max_chars,
+                terminal_apps,
             );
             sources.insert(field.clone(), candidate.provenance.clone());
         }
@@ -208,6 +210,7 @@ fn resolve_setting_candidates(
         "usage_stats",
         "compatibility_mode",
         "keystroke_max_chars",
+        "terminal_apps",
     ] {
         sources
             .entry(field.to_owned())

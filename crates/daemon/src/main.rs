@@ -270,8 +270,14 @@ fn main() -> Result<()> {
         )
         .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stdout()))
         .init();
-    let (path, explicit_source, explicit_backend, allow_evdev_sensitive_fields, use_fleet) =
-        parse_args()?;
+    let (
+        path,
+        explicit_source,
+        explicit_backend,
+        allow_evdev_sensitive_fields,
+        use_fleet,
+        terminal_apps_only,
+    ) = parse_args()?;
     let containment_self_test = wayexpand_process_supervisor::run_containment_self_test();
     if containment_self_test != "passed" {
         warn!(
@@ -344,6 +350,22 @@ fn main() -> Result<()> {
     config
         .engine
         .set_title_matching_disabled(enforcement_policy.disable_title_matching);
+    if terminal_apps_only {
+        // A terminal-only daemon with no terminals would run and never
+        // expand; refuse instead so the misconfiguration is visible.
+        if config.engine.terminal_app_count() == 0 {
+            anyhow::bail!(
+                "--terminal-apps-only requires settings.terminal_apps in {}; add your terminal's app ID, for example terminal_apps = [\"org.kde.konsole\"]",
+                path.display()
+            );
+        }
+        config.engine.set_terminal_apps_only(true);
+        status::set_terminal_apps_only(true);
+        info!(
+            terminal_apps = config.engine.terminal_app_count(),
+            "automatic expansion is limited to settings.terminal_apps"
+        );
+    }
 
     // Reject impossible deployment guarantees before opening either the input
     // source or output backend. The input-method protocol is the only shipped

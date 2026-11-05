@@ -50,7 +50,10 @@ pub(crate) fn recommended_setup_backend(
     capabilities: &wayexpand_backend_selection::Capabilities,
     policy: &OrganizationPolicy,
 ) -> SetupRecommendation {
-    recommended_setup_backend_with_ibus(capabilities, ibus_engine_available(), policy)
+    // Setup restarts IBus before selecting the engine, so a component that
+    // ibus-daemon will load on restart is enough to recommend this route.
+    let ibus_ready = ibus_engine_available() || ibus_engine_installed();
+    recommended_setup_backend_with_ibus(capabilities, ibus_ready, policy)
 }
 
 pub(crate) fn recommended_setup_backend_with_ibus(
@@ -165,28 +168,15 @@ pub(crate) fn prompt_mode_choice(
     }
 }
 
-pub(crate) fn configure_setup_backend(backend: &str) -> Result<()> {
+pub(crate) fn configure_setup_backend(
+    backend: &str,
+    options: crate::setup_ibus::IbusSetupOptions,
+) -> Result<()> {
+    if options.terminals && backend != "ibus" {
+        bail!("--terminals only applies to the IBus route (`--backend ibus`)");
+    }
     match backend {
-        "ibus" => {
-            if !ibus_engine_available() {
-                bail!("WayExpand's IBus engine is not installed or IBus is unavailable")
-            }
-            println!("Configuring the WayExpand IBus engine for the current session...");
-            let restart = run_setup_command("ibus", &["restart"])?;
-            if !restart.success() {
-                bail!("IBus restart failed; no WayExpand service was enabled")
-            }
-            let select = run_setup_command("ibus", &["engine", "wayexpand"])?;
-            if !select.success() {
-                bail!("could not select the WayExpand IBus engine")
-            }
-            // Keep the hardened daemon available as the session's control and
-            // Quick Insert broker. It runs in stdin mode, so it does not
-            // compete with IBus for keyboard capture; it only supplies the
-            // same authenticated control endpoint and approved injector.
-            enable_user_service("wayexpand.service")?;
-            println!("WayExpand IBus integration is active. Run `wayexpand doctor` to inspect the session.");
-        }
+        "ibus" => crate::setup_ibus::configure_ibus(options)?,
         "input-method" => enable_user_service("wayexpand-input-method.service")?,
         "evdev" => {
             println!(
@@ -229,7 +219,18 @@ pub(crate) fn evdev_consent_marker() -> Option<PathBuf> {
 }
 
 pub(crate) fn enable_user_service(service: &str) -> Result<()> {
-    let installed = run_setup_command("systemctl", &["--user", "cat", service])?;
+    // `systemctl cat` prints the whole unit; only its exit status matters.
+    let installed = {
+        let mut command = Command::new("systemctl");
+        command
+            .args(["--user", "cat", service])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        command
+            .status()
+            .map_err(|error| anyhow::anyhow!("could not start systemctl: {error}"))?
+    };
     if !installed.success() {
         bail!("user service {service} is not installed; run the WayExpand installer first")
     }

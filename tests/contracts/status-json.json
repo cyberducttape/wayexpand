@@ -1,6 +1,6 @@
 {
   "schema_version": 12,
-  "daemon_control_schema": 25,
+  "daemon_control_schema": 26,
   "fields": {
     "response": "string",
     "source": "string",
@@ -111,6 +111,7 @@
     "command_worker_threads": "integer",
     "hotkey_worker_threads": "integer",
     "suppressed_expansions_total": "integer",
+    "terminal_apps_only": "boolean",
     "input_connection_failures_total": "integer",
     "output_connection_failures_total": "integer",
     "recent_expansion_outcomes": "array",

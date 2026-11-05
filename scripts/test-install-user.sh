@@ -162,7 +162,9 @@ case "$("$CARGO_TARGET_DIR/release/wayexpand" --version)" in
         [ -x "$test_root/home/.local/lib/wayexpand/$first_build/bin/wayexpand-daemon" ]
         ;;
 esac
-[ -f "$test_root/home/.local/share/ibus/component/wayexpand.xml" ]
+# IBus never reads per-user component directories; setup installs it.
+[ ! -e "$test_root/home/.local/share/ibus/component/wayexpand.xml" ]
+[ -f "$test_root/home/.local/lib/wayexpand/current/ibus/wayexpand.xml" ]
 [ -f "$test_root/home/.local/share/applications/wayexpand.desktop" ]
 [ -f "$test_root/home/.local/share/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml" ]
 [ -f "$test_root/home/.local/share/man/man1/wayexpand.1" ]

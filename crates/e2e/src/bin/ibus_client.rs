@@ -1,0 +1,410 @@
+//! A scripted IBus client for `scripts/test-ibus-e2e.sh`.
+//!
+//! It talks to a real, private ibus-daemon exactly the way a toolkit does:
+//! it creates an input context, reports capabilities, content type and
+//! surrounding text, forwards key events, and applies the `CommitText` and
+//! `DeleteSurroundingText` signals it receives to its own text model. Each
+//! scenario checks the resulting text, so protocol mismatches between the
+//! WayExpand engine and the real daemon fail here instead of on a desktop.
+//!
+//! Usage: wx-e2e-ibus <status-file>   (IBUS_ADDRESS must be set)
+//! Prints one "pass|fail <scenario> <detail>" line per scenario and exits
+//! non-zero if any scenario failed.
+
+use anyhow::{bail, Context, Result};
+use std::{
+    collections::HashMap,
+    env,
+    path::PathBuf,
+    sync::mpsc,
+    thread,
+    time::{Duration, Instant},
+};
+use zbus::{
+    blocking::{Connection, MessageIterator},
+    zvariant::{OwnedObjectPath, OwnedValue, StructureBuilder, Value},
+};
+
+const IBUS: &str = "org.freedesktop.IBus";
+const IBUS_PATH: &str = "/org/freedesktop/IBus";
+const CONTEXT: &str = "org.freedesktop.IBus.InputContext";
+const CAP_PREEDIT: u32 = 1 << 0;
+const CAP_FOCUS: u32 = 1 << 3;
+const CAP_SURROUNDING_TEXT: u32 = 1 << 5;
+const PURPOSE_FREE_FORM: u32 = 0;
+const PURPOSE_PASSWORD: u32 = 8;
+const RELEASE_MASK: u32 = 1 << 30;
+const TRIGGER: &str = ";e2e";
+const REPLACEMENT: &str = "expanded";
+
+enum Event {
+    Commit(String),
+    Delete(i32, u32),
+}
+
+fn ibus_text(text: &str) -> Value<'static> {
+    let empty: HashMap<String, Value<'static>> = HashMap::new();
+    let attrs = StructureBuilder::new()
+        .add_field("IBusAttrList")
+        .add_field(empty.clone())
+        .add_field(Vec::<Value<'static>>::new())
+        .build()
+        .expect("valid attribute list");
+    Value::from(
+        StructureBuilder::new()
+            .add_field("IBusText")
+            .add_field(empty)
+            .add_field(text.to_owned())
+            .add_field(Value::from(attrs))
+            .build()
+            .expect("valid IBusText"),
+    )
+}
+
+fn text_of(value: &Value<'_>) -> Option<String> {
+    match value {
+        Value::Value(inner) => text_of(inner),
+        Value::Structure(structure) => match structure.fields() {
+            [Value::Str(name), _, Value::Str(text), ..] if name.as_str() == "IBusText" => {
+                Some(text.to_string())
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// One input context with its own document, like a text field.
+struct Field<'a> {
+    connection: &'a Connection,
+    path: OwnedObjectPath,
+    events: &'a mpsc::Receiver<(String, Event)>,
+    text: Vec<char>,
+    cursor: usize,
+    reports_text: bool,
+}
+
+impl<'a> Field<'a> {
+    fn call<B>(&self, method: &str, body: &B) -> Result<zbus::Message>
+    where
+        B: serde::Serialize + zbus::zvariant::DynamicType,
+    {
+        self.connection
+            .call_method(Some(IBUS), self.path.as_str(), Some(CONTEXT), method, body)
+            .with_context(|| format!("InputContext.{method}"))
+    }
+
+    fn set_content_type(&self, purpose: u32) -> Result<()> {
+        // Toolkits set the input context's ContentType property; ibus-daemon
+        // forwards it to the engine only when it changes.
+        self.connection
+            .call_method(
+                Some(IBUS),
+                self.path.as_str(),
+                Some("org.freedesktop.DBus.Properties"),
+                "Set",
+                &(CONTEXT, "ContentType", Value::from((purpose, 0_u32))),
+            )
+            .context("InputContext ContentType")?;
+        Ok(())
+    }
+
+    fn report_text(&self) -> Result<()> {
+        if self.reports_text {
+            let text: String = self.text.iter().collect();
+            let cursor = self.cursor as u32;
+            self.call("SetSurroundingText", &(ibus_text(&text), cursor, cursor))?;
+        }
+        Ok(())
+    }
+
+    fn clear(&mut self) -> Result<()> {
+        self.text.clear();
+        self.cursor = 0;
+        self.report_text()
+    }
+
+    /// Apply signals for this context until none arrive for `quiet`.
+    fn drain(&mut self, quiet: Duration) {
+        while let Ok((path, event)) = self.events.recv_timeout(quiet) {
+            if path != self.path.as_str() {
+                continue;
+            }
+            match event {
+                Event::Commit(text) => {
+                    for character in text.chars() {
+                        self.text.insert(self.cursor, character);
+                        self.cursor += 1;
+                    }
+                }
+                Event::Delete(offset, count) => {
+                    let start = (self.cursor as i64 + offset as i64).max(0) as usize;
+                    let end = (start + count as usize).min(self.text.len());
+                    self.text.drain(start..end);
+                    self.cursor = start;
+                }
+            }
+            let _ = self.report_text();
+        }
+    }
+
+    fn type_text(&mut self, text: &str) -> Result<()> {
+        for character in text.chars() {
+            let keyval = character as u32;
+            let handled: bool = self
+                .call("ProcessKeyEvent", &(keyval, 0_u32, 0_u32))?
+                .body()
+                .deserialize()?;
+            self.call("ProcessKeyEvent", &(keyval, 0_u32, RELEASE_MASK))?;
+            self.drain(Duration::from_millis(80));
+            if !handled {
+                // The toolkit applies keys the input method did not take.
+                self.text.insert(self.cursor, character);
+                self.cursor += 1;
+                self.report_text()?;
+            }
+        }
+        self.drain(Duration::from_millis(150));
+        Ok(())
+    }
+
+    fn contents(&self) -> String {
+        self.text.iter().collect()
+    }
+}
+
+fn create_field<'a>(
+    connection: &'a Connection,
+    events: &'a mpsc::Receiver<(String, Event)>,
+    name: &str,
+    capabilities: u32,
+    reports_text: bool,
+) -> Result<Field<'a>> {
+    let path: OwnedObjectPath = connection
+        .call_method(
+            Some(IBUS),
+            IBUS_PATH,
+            Some(IBUS),
+            "CreateInputContext",
+            &(name,),
+        )
+        .context("CreateInputContext")?
+        .body()
+        .deserialize()?;
+    let field = Field {
+        connection,
+        path,
+        events,
+        text: Vec::new(),
+        cursor: 0,
+        reports_text,
+    };
+    field.call("SetCapabilities", &(capabilities,))?;
+    Ok(field)
+}
+
+struct Results {
+    failed: bool,
+}
+
+impl Results {
+    fn check(&mut self, name: &str, passed: bool, detail: impl AsRef<str>) {
+        println!(
+            "{} {name} {}",
+            if passed { "pass" } else { "fail" },
+            detail.as_ref()
+        );
+        self.failed |= !passed;
+    }
+}
+
+fn select_engine(connection: &Connection, field: &Field<'_>) -> Result<()> {
+    field.call("FocusIn", &())?;
+    // A mismatched component name makes this call time out, because
+    // ibus-daemon waits for the component's bus name before CreateEngine.
+    connection
+        .call_method(
+            Some(IBUS),
+            IBUS_PATH,
+            Some(IBUS),
+            "SetGlobalEngine",
+            &("wayexpand",),
+        )
+        .context("SetGlobalEngine(wayexpand)")?;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let engine: OwnedValue = connection
+            .call_method(Some(IBUS), IBUS_PATH, Some(IBUS), "GetGlobalEngine", &())?
+            .body()
+            .deserialize()?;
+        // IBusEngineDesc serializes its name as the third field.
+        let name = match &*engine {
+            Value::Structure(structure) => match structure.fields().get(2) {
+                Some(Value::Str(name)) => name.to_string(),
+                _ => String::new(),
+            },
+            _ => String::new(),
+        };
+        if name == "wayexpand" {
+            return Ok(());
+        }
+        if Instant::now() > deadline {
+            bail!("global engine is {name:?}, not wayexpand");
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn main() -> Result<()> {
+    let status_file: PathBuf = env::args_os()
+        .nth(1)
+        .map(PathBuf::from)
+        .context("usage: wx-e2e-ibus <status-file>")?;
+    let address = env::var("IBUS_ADDRESS").context("IBUS_ADDRESS is not set")?;
+    let connection = zbus::blocking::connection::Builder::address(address.as_str())?.build()?;
+    let (sender, events) = mpsc::channel();
+    let messages = MessageIterator::from(&connection);
+    thread::spawn(move || {
+        for message in messages.flatten() {
+            let header = message.header();
+            let (Some(member), Some(path)) = (header.member(), header.path()) else {
+                continue;
+            };
+            let path = path.to_string();
+            let event = match member.as_str() {
+                "CommitText" => message
+                    .body()
+                    .deserialize::<(OwnedValue,)>()
+                    .ok()
+                    .and_then(|(value,)| text_of(&value))
+                    .map(Event::Commit),
+                "DeleteSurroundingText" => message
+                    .body()
+                    .deserialize::<(i32, u32)>()
+                    .ok()
+                    .map(|(offset, count)| Event::Delete(offset, count)),
+                _ => None,
+            };
+            if let Some(event) = event {
+                let _ = sender.send((path, event));
+            }
+        }
+    });
+
+    let mut results = Results { failed: false };
+    let full_caps = CAP_PREEDIT | CAP_FOCUS | CAP_SURROUNDING_TEXT;
+    let mut editor = create_field(&connection, &events, "e2e-editor", full_caps, true)?;
+    editor.set_content_type(PURPOSE_FREE_FORM)?;
+    match select_engine(&connection, &editor) {
+        Ok(()) => results.check("registered", true, "SetGlobalEngine selected wayexpand"),
+        Err(error) => {
+            results.check("registered", false, format!("{error:#}"));
+            std::process::exit(1);
+        }
+    }
+
+    editor.clear()?;
+    editor.type_text(TRIGGER)?;
+    results.check(
+        "expands",
+        editor.contents() == REPLACEMENT,
+        format!("text after typing the trigger: {:?}", editor.contents()),
+    );
+
+    // Same field type again: ibus-daemon does not set ContentType again.
+    editor.call("FocusOut", &())?;
+    editor.call("FocusIn", &())?;
+    editor.clear()?;
+    editor.type_text(TRIGGER)?;
+    results.check(
+        "refocus-same-type",
+        editor.contents() == REPLACEMENT,
+        format!("text after refocus: {:?}", editor.contents()),
+    );
+
+    editor.set_content_type(PURPOSE_PASSWORD)?;
+    editor.clear()?;
+    editor.type_text(TRIGGER)?;
+    results.check(
+        "password-field",
+        editor.contents() == TRIGGER,
+        format!(
+            "password field kept the typed text: {:?}",
+            editor.contents()
+        ),
+    );
+
+    editor.set_content_type(PURPOSE_FREE_FORM)?;
+    editor.clear()?;
+    editor.type_text(TRIGGER)?;
+    results.check(
+        "back-to-text-field",
+        editor.contents() == REPLACEMENT,
+        format!(
+            "text after leaving the password field: {:?}",
+            editor.contents()
+        ),
+    );
+    editor.call("FocusOut", &())?;
+
+    // A terminal-like client: it never reports the text before the cursor.
+    let mut terminal = create_field(
+        &connection,
+        &events,
+        "e2e-terminal",
+        CAP_PREEDIT | CAP_FOCUS,
+        false,
+    )?;
+    terminal.call("FocusIn", &())?;
+    terminal.set_content_type(PURPOSE_FREE_FORM)?;
+    terminal.type_text(TRIGGER)?;
+    results.check(
+        "no-surrounding-text",
+        terminal.contents() == TRIGGER,
+        format!(
+            "nothing deleted without surrounding text: {:?}",
+            terminal.contents()
+        ),
+    );
+    terminal.call("FocusOut", &())?;
+
+    // Telemetry: the engine published its activity, explains the terminal
+    // refusal, and never recorded typed text.
+    thread::sleep(Duration::from_millis(800));
+    match wayexpand_backend_ibus::telemetry::read_status_at(&status_file) {
+        Some(reading) => {
+            let status = reading.status;
+            let raw = std::fs::read_to_string(&status_file).unwrap_or_default();
+            results.check(
+                "telemetry-counts",
+                status.totals.expansions >= 3,
+                format!("{} expansion(s) recorded", status.totals.expansions),
+            );
+            let explained = status.recent_fields.iter().any(|field| {
+                field.refusals.no_surrounding_capability > 0
+                    && wayexpand_backend_ibus::IbusFieldVerdict::of(field)
+                        == wayexpand_backend_ibus::IbusFieldVerdict::NoSurroundingText
+            });
+            results.check(
+                "telemetry-explains-terminal",
+                explained,
+                "terminal-like field reported as no-surrounding-text",
+            );
+            results.check(
+                "telemetry-content-free",
+                !raw.contains(TRIGGER) && !raw.contains(REPLACEMENT) && !raw.contains("e2e"),
+                "status file contains no typed text, trigger, or replacement",
+            );
+        }
+        None => results.check(
+            "telemetry-counts",
+            false,
+            format!("no status at {}", status_file.display()),
+        ),
+    }
+
+    if results.failed {
+        std::process::exit(1);
+    }
+    Ok(())
+}

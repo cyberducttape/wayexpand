@@ -176,6 +176,31 @@ pub(crate) fn summarize_reports(
     }
 
     let daemon = &doctor["daemon"];
+    // IBus route: check identifiers and states only. Details can contain
+    // home-directory paths, and fields are summarized as counts and verdicts.
+    let ibus_route = &doctor["ibus"]["route"];
+    let ibus_checks = ibus_route["checks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|check| serde_json::json!({ "id": copy(check, "id"), "state": copy(check, "state") }))
+        .collect::<Vec<_>>();
+    let ibus_fields = ibus_route["activity"]["recent_fields"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|field| {
+            serde_json::json!({
+                "verdict": copy(field, "verdict"),
+                "content_type": copy(field, "content_type"),
+                "surrounding_capability": copy(field, "surrounding_capability"),
+                "surrounding_nonempty": copy(field, "surrounding_nonempty"),
+                "keys": copy(field, "keys"),
+                "expansions": copy(field, "expansions"),
+                "refusals": copy(field, "refusals"),
+            })
+        })
+        .collect::<Vec<_>>();
     serde_json::json!({
         "schema": 1,
         "generated_at_unix": SystemTime::now()
@@ -217,6 +242,20 @@ pub(crate) fn summarize_reports(
             "capabilities": copy(daemon, "capabilities"),
         },
         "backends": backends,
+        "ibus": {
+            "installed": copy(&doctor["ibus"], "installed"),
+            "ready": copy(ibus_route, "ready"),
+            "desktop": copy(ibus_route, "desktop"),
+            "first_failure": copy(ibus_route, "first_failure"),
+            "checks": ibus_checks,
+            "other_route": {
+                "scope": copy(&ibus_route["other_route"], "scope"),
+                "state": copy(&ibus_route["other_route"], "state"),
+            },
+            "engine_live": copy(&ibus_route["activity"], "live"),
+            "totals": copy(&ibus_route["activity"], "totals"),
+            "recent_fields": ibus_fields,
+        },
         "protocol_probes": copy(doctor, "protocol_probes"),
         "certification": {
             "certified": copy(certification, "certified"),

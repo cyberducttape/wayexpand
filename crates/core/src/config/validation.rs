@@ -72,6 +72,21 @@ impl Config {
                 maximum: crate::config::MAX_KEYSTROKE_MAX_CHARS,
             });
         }
+        // Terminal scoping must name app IDs: an editable window title is too
+        // weak to decide where raw-input expansion may type.
+        for (index, raw) in self.settings.terminal_apps.iter().enumerate() {
+            let valid = index < crate::config::MAX_TERMINAL_APPS
+                && matches!(
+                    crate::AppFilter::parse(raw),
+                    Some(crate::AppFilter::AppIdExact(_) | crate::AppFilter::AppIdGlob(_))
+                );
+            if !valid {
+                return Err(ConfigError::InvalidTerminalApp {
+                    index,
+                    maximum: crate::config::MAX_TERMINAL_APPS,
+                });
+            }
+        }
         let undo_chord = self
             .settings
             .undo_chord

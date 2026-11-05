@@ -111,7 +111,9 @@ case "$first_version" in
     0.0.0-*) [ "${#first_version}" -eq $((6 + 64)) ] ;;
     *) printf '%s\n' "unexpected install directory: $first_version" >&2; exit 1 ;;
 esac
-[ -f "$test_root/home/.local/share/ibus/component/wayexpand.xml" ]
+# IBus never reads per-user component directories; setup installs it.
+[ ! -e "$test_root/home/.local/share/ibus/component/wayexpand.xml" ]
+[ -f "$test_root/home/.local/lib/wayexpand/current/ibus/wayexpand.xml" ]
 [ -f "$test_root/home/.local/share/applications/wayexpand.desktop" ]
 [ -f "$test_root/home/.local/share/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml" ]
 [ -f "$test_root/home/.local/share/man/man1/wayexpand.1" ]

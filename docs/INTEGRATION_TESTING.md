@@ -183,6 +183,23 @@ Findings from Sway 1.11 that this harness surfaced:
   libei key pass-through (see [Input-method source](#input-method-source)),
   and Sway offers no libei/EIS server.
 
+## Real ibus-daemon engine test
+
+```sh
+scripts/test-ibus-e2e.sh [--keep]
+```
+
+Requires `ibus` and `dbus-daemon`. It starts a private D-Bus session and a
+private ibus-daemon (own `HOME`, runtime and component directories, in-memory
+GSettings), so it never touches the desktop's IBus, then drives the WayExpand
+engine with `wx-e2e-ibus`, a scripted client that behaves like a toolkit text
+field. Scenarios: component registration and engine selection, expansion,
+refocus to a field of the same type (no new `ContentType`), password fields,
+a client that reports no surrounding text, and the engine's content-free
+activity file. CI runs it as the `ibus-e2e` job. It verifies the IBus
+protocol, not a particular desktop's input-method routing; `wayexpand ibus
+status` checks that on a real session.
+
 ## Matcher performance baseline
 
 The matcher benchmark exercises 100, 1,000, and 10,000 configured snippets

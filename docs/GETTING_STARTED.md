@@ -216,7 +216,9 @@ Limited support due to GNOME's design (no window tracking protocol).
 **Current input routes:**
 - Mutter does not currently advertise `zwp_input_method_manager_v2`, so
   WayExpand cannot use its input-method-v2 source on GNOME.
-- The separate WayExpand IBus engine can be used when installed and selected.
+- The separate WayExpand IBus engine can be used: set it up with
+  `wayexpand setup --backend ibus` and check it with `wayexpand ibus status`
+  (see [IBUS_ENGINE.md](IBUS_ENGINE.md)).
   IBus content-purpose signals can suppress matching in sensitive fields,
   while trigger deletion is verified against surrounding text but is not
   atomic. This route is experimental and not production-certified.

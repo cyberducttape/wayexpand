@@ -83,6 +83,10 @@ pub struct ExpansionEngine {
     compatibility_mode_override: Option<crate::CompatibilityMode>,
     /// Compiled app-id globs corresponding positionally to `app_filters`.
     app_filter_globs: Vec<Vec<Option<GlobPattern>>>,
+    /// `settings.terminal_apps`, parsed and compiled.
+    terminal_app_scope: Vec<(AppFilter, Option<GlobPattern>)>,
+    /// Host restriction: expand automatically only in `terminal_apps`.
+    terminal_apps_only: bool,
     matcher: Matcher,
     /// Reused temporary storage for NFC normalization and raw-offset mapping
     /// of decomposed input suffixes.
@@ -257,6 +261,19 @@ impl ExpansionEngine {
                     .collect()
             })
             .collect();
+        let terminal_app_scope = config
+            .settings
+            .terminal_apps
+            .iter()
+            .filter_map(|raw| AppFilter::parse(raw))
+            .map(|filter| {
+                let glob = match &filter {
+                    AppFilter::AppIdGlob(pattern) => Some(GlobPattern::compile(pattern)),
+                    _ => None,
+                };
+                (filter, glob)
+            })
+            .collect();
         let template_base =
             config.template_context_with_snippets(None, Arc::clone(&validated.snippets));
         let max_buffer_chars = config.settings.max_buffer_chars;
@@ -269,6 +286,8 @@ impl ExpansionEngine {
             runtime_policy: validated.resolved_policy.clone(),
             compatibility_mode_override: None,
             app_filter_globs,
+            terminal_app_scope,
+            terminal_apps_only: false,
             matcher,
             match_scratch: MatchScratch::default(),
             buffer: VecDeque::new(),

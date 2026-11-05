@@ -12,6 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use std::sync::Arc;
 use tracing::warn;
 use wayexpand_core::{
     CompletionNotifier, Config, ExpansionEngine, ExpansionResult, InjectorCapabilities, InputEvent,
@@ -47,7 +48,10 @@ const IBUS_INPUT_HINT_HIDDEN_TEXT: u32 = 1 << 12;
 mod availability;
 #[cfg(test)]
 use availability::component_file_present_in;
-pub use availability::engine_available;
+pub use availability::{engine_available, engine_installed, global_engine_selected};
+pub mod chain;
+pub mod telemetry;
+pub use telemetry::{IbusFieldVerdict, IbusRefusal, IbusTelemetry};
 mod text;
 use text::{keysym_to_char, replacement_actions, SurroundingText};
 mod policy;
@@ -125,6 +129,17 @@ pub struct IbusEngineAdapter {
     policy: OrganizationPolicy,
     client_capabilities: u32,
     surrounding: Option<SurroundingText>,
+    /// The `(purpose, hints)` IBus last set on this engine object, if any.
+    /// ibus-daemon caches the same value per engine proxy and only sets the
+    /// property again when a focused context's type differs, so this is the
+    /// content type of a refocused field until a new one arrives.
+    content_type: Option<(u32, u32)>,
+    /// Content-free activity recorder shared by the engine process.
+    telemetry: Option<Arc<IbusTelemetry>>,
+    /// The telemetry record of the field this engine currently serves.
+    field: Option<u64>,
+    /// The client reported non-empty text at least once for this field.
+    field_text_seen: bool,
     /// Set when safe-mode policy requires guarantees this route lacks
     /// (for example `require_atomic_replace`). Expansion is then disabled.
     capability_block: Option<String>,
@@ -175,6 +190,10 @@ impl IbusEngineAdapter {
             policy,
             client_capabilities: 0,
             surrounding: None,
+            content_type: None,
+            telemetry: None,
+            field: None,
+            field_text_seen: false,
             capability_block,
             pending_output: None,
             last_expansion_outcome: None,
@@ -198,12 +217,44 @@ impl IbusEngineAdapter {
         self.engine.set_completion_notifier(notifier);
     }
 
-    /// Apply an IBus `SetContentType`. This is the only way capture is
-    /// enabled for a field.
+    /// Record this engine's activity (content-free) in `telemetry`.
+    pub fn set_telemetry(&mut self, telemetry: Arc<IbusTelemetry>) {
+        self.telemetry = Some(telemetry);
+    }
+
+    fn note(&self, record: impl FnOnce(&IbusTelemetry, Option<u64>)) {
+        if let Some(telemetry) = &self.telemetry {
+            record(telemetry, self.field);
+        }
+    }
+
+    /// Record why surrounding text did not confirm a matched trigger.
+    fn note_surrounding_refusal(&self) {
+        let refusal = telemetry::classify_surrounding_refusal(
+            self.client_capabilities & IBUS_CAP_SURROUNDING_TEXT != 0,
+            self.field_text_seen,
+            self.surrounding.is_some(),
+        );
+        self.note(|telemetry, field| telemetry.refusal(field, refusal));
+    }
+
+    /// Apply the IBus `ContentType` property. A content type IBus set is the
+    /// only way capture is enabled for a field.
     pub fn set_content_type(&mut self, purpose: u32, hints: u32) {
-        self.engine.process(InputEvent::FocusChanged {
-            sensitive: content_type_is_sensitive(purpose, hints),
-        });
+        self.content_type = Some((purpose, hints));
+        self.apply_content_type();
+    }
+
+    /// Re-derive field sensitivity from the last content type IBus set.
+    /// Without one, capture stays off.
+    fn apply_content_type(&mut self) {
+        let sensitive = self
+            .content_type
+            .is_none_or(|(purpose, hints)| content_type_is_sensitive(purpose, hints));
+        if self.content_type.is_some() {
+            self.note(|telemetry, field| telemetry.content_type(field, sensitive));
+        }
+        self.engine.process(InputEvent::FocusChanged { sensitive });
     }
 
     /// Apply an IBus `SetCapabilities`.
@@ -212,11 +263,16 @@ impl IbusEngineAdapter {
         if capabilities & IBUS_CAP_SURROUNDING_TEXT == 0 {
             self.surrounding = None;
         }
+        self.note(|telemetry, field| {
+            telemetry.capabilities(field, capabilities & IBUS_CAP_SURROUNDING_TEXT != 0)
+        });
     }
 
     /// Apply an IBus `SetSurroundingText`. `cursor` and `anchor` are in
     /// Unicode scalar values.
     pub fn set_surrounding_text(&mut self, text: &str, cursor: u32, anchor: u32) {
+        self.field_text_seen |= !text.is_empty();
+        self.note(|telemetry, field| telemetry.surrounding_text(field, !text.is_empty()));
         let text: Vec<char> = text.chars().collect();
         let (cursor, anchor) = (cursor as usize, anchor as usize);
         self.surrounding = (self.client_capabilities & IBUS_CAP_SURROUNDING_TEXT != 0
@@ -302,6 +358,7 @@ impl IbusEngineAdapter {
             // so the whole trigger (and any delimiter) is in the document.
             let (delivered, actions) = replacement_actions(&result, true);
             if !self.surrounding_confirms(delivered.as_str()) {
+                self.note_surrounding_refusal();
                 warn!("IBus surrounding text no longer matches the trigger; replacement discarded");
                 self.engine.restore_deferred_match(&result.matched_text);
                 self.reset();
@@ -315,6 +372,7 @@ impl IbusEngineAdapter {
             self.engine.commit_applied_expansion(&result);
             self.last_expansion_outcome = Some(IbusExpansionOutcome::EmittedUnverified);
             self.record_emitted(&actions);
+            self.note(|telemetry, field| telemetry.expansion(field));
             emitted += 1;
         }
         Ok(emitted)
@@ -336,8 +394,10 @@ impl IbusEngineAdapter {
 
     /// A context gained focus. This is the only lifecycle event that clears
     /// output retirement after an uncertain partial emission. ibus-daemon
-    /// follows FocusIn with Enable, SetCapabilities and SetContentType, so
-    /// capture stays off until that content type arrives.
+    /// follows FocusIn with SetCapabilities and sets the `ContentType`
+    /// property only when the field's type differs from the one it last set
+    /// on this engine. Focus therefore clears matcher state and then restores
+    /// the remembered content type; with none, capture stays off.
     pub fn focus_in(&mut self) {
         self.focus_in_for_context(None);
     }
@@ -351,6 +411,10 @@ impl IbusEngineAdapter {
         self.output_retired = false;
         self.enabled = true;
         self.surrounding = None;
+        self.field_text_seen = false;
+        if let Some(telemetry) = &self.telemetry {
+            self.field = Some(telemetry.focus_in(self.field));
+        }
         let identity = input_context_path
             .filter(|identity| {
                 !identity.is_empty()
@@ -364,9 +428,11 @@ impl IbusEngineAdapter {
         self.engine.process(InputEvent::WindowChanged(identity));
         self.engine
             .process(InputEvent::FocusChanged { sensitive: true });
+        self.apply_content_type();
     }
 
     pub fn focus_out(&mut self) {
+        self.note(|telemetry, field| telemetry.focus_out(field));
         self.enabled = false;
         self.surrounding = None;
         self.engine.process(InputEvent::WindowChanged(None));
@@ -396,6 +462,7 @@ impl IbusEngineAdapter {
     /// so an emission error cannot prove the client document is unchanged.
     /// A fresh focus lifecycle is required before matching resumes.
     pub fn output_failed(&mut self) {
+        self.note(|telemetry, field| telemetry.output_failure(field));
         if self.pending_output.take().is_some() {
             self.last_expansion_outcome = Some(IbusExpansionOutcome::UnknownPartialEmission);
         }
@@ -409,6 +476,7 @@ impl IbusEngineAdapter {
     /// provides no receipt that the client document applied those signals.
     pub fn output_succeeded(&mut self) {
         if let Some(result) = self.pending_output.take() {
+            self.note(|telemetry, field| telemetry.expansion(field));
             self.engine.commit_applied_expansion(&result);
             self.last_expansion_outcome = Some(IbusExpansionOutcome::EmittedUnverified);
         }
@@ -421,6 +489,13 @@ impl IbusEngineAdapter {
     /// Process an IBus key press. `keyval` is an XKB keysym, as specified by
     /// `org.freedesktop.IBus.Engine.ProcessKeyEvent`.
     pub fn process_key_event(&mut self, keyval: u32, keycode: u32, state: u32) -> IbusKeyResult {
+        if state & IBUS_RELEASE_MASK == 0 {
+            let captured = self.enabled
+                && self.capability_block.is_none()
+                && !self.engine.is_sensitive_focus()
+                && !self.engine.is_user_paused();
+            self.note(|telemetry, field| telemetry.key(field, captured));
+        }
         let result = self.process_key_event_inner(keyval, keycode, state);
         if state & IBUS_RELEASE_MASK == 0 {
             if result.handled {
@@ -530,6 +605,7 @@ impl IbusEngineAdapter {
                 IBUS_BACKEND_NAME,
             );
             if policy::blocks(&self.policy, violation, "expansion (pre-execution)") {
+                self.note(|telemetry, field| telemetry.refusal(field, IbusRefusal::Policy));
                 self.engine
                     .restore_deferred_match(&pending_result.matched_text);
                 policy_blocked = true;
@@ -558,6 +634,7 @@ impl IbusEngineAdapter {
                     // rest of the trigger sits right before the cursor.
                     let (delivered, replacement) = replacement_actions(&result, false);
                     if !self.surrounding_confirms(delivered.as_str()) {
+                        self.note_surrounding_refusal();
                         warn!(
                             "IBus surrounding text does not confirm the trigger; replacement refused"
                         );
@@ -569,6 +646,7 @@ impl IbusEngineAdapter {
                         .replacement_admission(self.engine.compatibility_mode())
                         == ReplacementAdmission::Refused
                     {
+                        self.note(|telemetry, field| telemetry.refusal(field, IbusRefusal::Policy));
                         self.engine.restore_deferred_match(&result.matched_text);
                         policy_blocked = true;
                         continue;
@@ -903,6 +981,12 @@ replacement = "signature"
         assert!(!component_file_present_in(std::slice::from_ref(
             &component_dir
         )));
+        std::fs::write(component_dir.join("wayexpand-ibus.xml"), "<component/>").unwrap();
+        assert!(
+            component_file_present_in(std::slice::from_ref(&component_dir)),
+            "packaged manifest name must be recognized"
+        );
+        std::fs::remove_file(component_dir.join("wayexpand-ibus.xml")).unwrap();
         std::fs::write(component_dir.join("wayexpand.xml"), "<component/>").unwrap();
         assert!(component_file_present_in(std::slice::from_ref(
             &component_dir
@@ -1571,9 +1655,22 @@ timeout_ms = 1000
     }
 
     #[test]
-    fn refocus_without_a_new_content_type_stays_sensitive() {
+    fn refocus_without_a_new_content_type_keeps_the_last_one() {
+        // ibus-daemon does not set ContentType again when the newly focused
+        // field has the same type as the last one it set on this engine.
         let mut adapter = adapter();
         assert!(!adapter.engine().is_sensitive_focus());
+        adapter.focus_out();
+        assert!(adapter.engine().is_sensitive_focus());
+        adapter.focus_in();
+        assert!(!adapter.engine().is_sensitive_focus());
+        assert!(adapter.process_key_event('a' as u32, 0, 0).handled);
+    }
+
+    #[test]
+    fn refocus_keeps_a_sensitive_content_type_sensitive() {
+        let mut adapter = adapter();
+        adapter.set_content_type(8, 0);
         adapter.focus_out();
         adapter.focus_in();
         assert!(adapter.engine().is_sensitive_focus());
@@ -1581,6 +1678,15 @@ timeout_ms = 1000
             adapter.process_key_event('a' as u32, 0, 0),
             IbusKeyResult::default()
         );
+    }
+
+    #[test]
+    fn refocus_before_any_content_type_stays_sensitive() {
+        let mut adapter = unfocused_adapter();
+        adapter.focus_in();
+        adapter.focus_out();
+        adapter.focus_in();
+        assert!(adapter.engine().is_sensitive_focus());
     }
 
     #[test]

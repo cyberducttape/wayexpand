@@ -309,6 +309,46 @@ new fields may be added compatibly.
 
 ---
 
+### `wayexpand ibus status --json`
+
+Checks the IBus route link by link and reports recent engine activity. It
+contains no typed text, triggers, or replacements. Exit code 0 when `ready`
+is true, 1 otherwise.
+
+- `ready` (bool): no check failed and no second capture route expands in the
+  same apps.
+- `desktop` (string): `kde-wayland`, `gnome`, `other-wayland`, `x11`, or
+  `unknown`.
+- `checks` (array): in order, objects with a stable `id` (`tools`, `daemon`,
+  `desktop`, `component`, `manifest`, `registered`, `selected`, `consent`,
+  `engine`), `title`, `state` (`pass`, `warn`, `fail`, or `skip`), `detail`,
+  and `fix` (string or null). The component checks read the running
+  ibus-daemon's own `IBUS_COMPONENT_PATH`, not the caller's.
+- `first_failure` (string or null): the `id` of the first failed check.
+- `activity` (object or null): the engine's published status: `live`, `pid`,
+  `version`, `engines`, `totals` (`focus_ins`, `keys`, `expansions`,
+  `refusals`, `output_failures`), and `recent_fields` (up to 8, newest last)
+  with `content_type` (`unknown`, `normal`, `sensitive`),
+  `surrounding_capability`, `surrounding_reports`, `surrounding_nonempty`,
+  `keys`, `keys_without_capture`, `expansions`, `refusals` (counts for
+  `no_surrounding_capability`, `surrounding_text_empty`,
+  `surrounding_text_unknown`, `surrounding_text_mismatch`, `policy`),
+  `last_refusal`, and a derived `verdict` (`expanded`, `ready`,
+  `no-content-type`, `sensitive`, `no-surrounding-text`, `text-mismatch`,
+  `refused-by-policy`, `idle`) with an `explanation`.
+- `other_route` (object): `scope` (`none`, `terminals-only`, `everywhere`,
+  `unknown`) of a running WayExpand capture daemon, from its
+  `terminal_apps_only` status field, with `state`, `detail`, and `fix`. A
+  daemon that expands `everywhere` while IBus is active fails readiness,
+  because snippets would expand twice.
+
+The engine publishes the `activity` data at
+`$XDG_RUNTIME_DIR/wayexpand-ibus-status.json` (mode 0600, schema 1); readers
+ignore files that are not private to the user.
+
+**Stability:** 🧪 **Experimental** — check `id`s and `state` values are
+stable; details and fixes are human-facing text.
+
 ### `wayexpand doctor --json [config]`
 
 Diagnostic output suitable for health checks and monitoring systems.
@@ -479,6 +519,7 @@ Diagnostic output suitable for health checks and monitoring systems.
 - `automatic_selection` (object): The daemon's shared source/backend resolver result; `ready` is false for the conservative stdin-only fallback.
 - `setup_recommendation` (object): The route Recommended mode would configure, chosen by the shared route planner from current capabilities, organization policy, and certification status (certified routes first, then input-method-v2 with libei key pass-through, then IBus). It may be an experimental route; it is never a raw-input (evdev) route.
 - `route_plan` (object): The full route order from the same planner, including each route's stable `id`, `standing` (`recommended`, `available`, `requires-consent`, `blocked-by-policy`, or `unavailable`), explanation `reason`, capture and injection methods, catalog `certification` status, replacement assurance, and whether sensitive-field protection is certified. This is an additive field; availability and catalog certification are distinct claims.
+- `ibus` (object): `installed` (bool, IBus' live registry lists the engine), `status`, and `route`, which has the same shape as `wayexpand ibus status --json` (below). Additive.
 - `capture_readiness` (object): Non-invasive source/output readiness after organization-policy filtering across IBus, libei, wlroots, and input-method-v2. `state` is one of `available-to-try`, `authorization-required`, `not-probed`, or `unavailable`; `end_to_end_verified` remains false until a compositor/client certification harness supplies evidence.
 - `feature_support` (object): Product-wide integration limits, separate from backend probes. `ime_preedit.status` is `unsupported`; `app_filter.status` is `kwin_only`. These are implementation-scope statements, not compositor certification.
 - `capabilities` (array): Backend feature contracts, including explicit `limitations` that consumers must display rather than infer away.
@@ -528,7 +569,7 @@ side never counts as a match (`commit_matches` is then `false`).
   "backend": "input-method-v2",
   "route_id": "input-method-v2",
   "backend_mode": "unknown",
-  "status_schema": 25,
+  "status_schema": 26,
   "daemon_commit": "example-commit",
   "client_commit": "example-commit",
   "daemon_build_matches_client": true,
@@ -624,6 +665,7 @@ side never counts as a match (`commit_matches` is then `false`).
   "recent_expansion_failures": [],
   "recent_expansion_outcomes": [],
   "suppressed_expansions_total": 0,
+  "terminal_apps_only": false,
   "output_reconnect_total": 0,
   "input_reconnect_total": 0,
   "input_connection_failures_total": 0,
@@ -643,7 +685,7 @@ side never counts as a match (`commit_matches` is then `false`).
 - `route_id` (string): Canonical capture/injection route ID from the shared route catalog; `"stdin-test"` identifies the stdin harness, and `"unknown"` means the active pair has no catalog entry. Consumers should use this field instead of reconstructing route identity from `source` and `backend`.
 - `backend_mode` (string): Negotiated backend capability detail. Libei reports either `"ei_text (UTF-8 insertion)"` or `"ei_keyboard keysym fallback (12ms key pacing)"`; it is `"unknown"` before a backend has negotiated a mode or for backends without submodes.
 - `sandbox_security` (object, optional): Live in-process evidence for namespace IDs, seccomp/NoNewPrivs, socket address-family probes, read-only mounts, proc restrictions, W^X, personality and SUID-bit probes, resource limits, and cgroup limits. It reports effective process state, not unit-file intent. See [SECURITY](../SECURITY.md#effective-sandbox-inspection).
-- `status_schema` (integer): Version of the daemon status contract. Certification requires a matching schema before treating runtime capabilities as current; missing or different values mean the daemon should be restarted/updated. Schema 11 adds canonical `route_id`; schema 12 adds usage-event recorded, persisted, and dropped counters; schema 13 adds precise `replacement_assurance`; schema 14 adds matcher-latency dropped-sample reporting; schema 15 adds aggregate and per-mode output-latency dropped-sample reporting; schema 16 adds capture_layout_state; schema 17 adds command cgroup cleanup health; schema 18 adds `output_partial_total`, distinguishing partial insertion from other outcomes whose target effect is unknown; schema 19 adds background connection-worker lifecycle counters and the daemon-context command containment self-test result; schema 20 adds effective route/matching availability, command-worker counts, suppressed-expansion totals, and input/output connection-attempt failure totals; schema 21 adds a distinct partial-write counter and confirmed per-transaction erase/insert progress; schema 22 adds active, acknowledged, timed-out, and failed backend-shutdown worker counters; schema 23 adds `matching_unavailable_reason`; schema 24 adds `replacement_not_admitted` so status reflects when the output safety guard refuses replacement.
+- `status_schema` (integer): Version of the daemon status contract. Certification requires a matching schema before treating runtime capabilities as current; missing or different values mean the daemon should be restarted/updated. Schema 11 adds canonical `route_id`; schema 12 adds usage-event recorded, persisted, and dropped counters; schema 13 adds precise `replacement_assurance`; schema 14 adds matcher-latency dropped-sample reporting; schema 15 adds aggregate and per-mode output-latency dropped-sample reporting; schema 16 adds capture_layout_state; schema 17 adds command cgroup cleanup health; schema 18 adds `output_partial_total`, distinguishing partial insertion from other outcomes whose target effect is unknown; schema 19 adds background connection-worker lifecycle counters and the daemon-context command containment self-test result; schema 20 adds effective route/matching availability, command-worker counts, suppressed-expansion totals, and input/output connection-attempt failure totals; schema 21 adds a distinct partial-write counter and confirmed per-transaction erase/insert progress; schema 22 adds active, acknowledged, timed-out, and failed backend-shutdown worker counters; schema 23 adds `matching_unavailable_reason`; schema 24 adds `replacement_not_admitted` so status reflects when the output safety guard refuses replacement; schema 26 adds `terminal_apps_only`.
 - `state` (string): Backend connection state (e.g. `"connected"`, `"reconnecting"`)
 - `route_available` (bool): `true` only when capture is connected, evdev has a current layout snapshot when applicable, and an output route advertises replacement support. This is capability/connectivity status; a route can be available while the output safety guard refuses replacement.
 - `matching_available` (bool): `true` when `route_available` is true, the output safety guard admits replacement, matching is not paused, and the active configuration is healthy.
@@ -696,6 +738,7 @@ side never counts as a match (`commit_matches` is then `false`).
 - `clipboard_read_max_duration_us` (integer): Longest completed clipboard command duration in microseconds since daemon start
 - `output_health` (string): `ok`; `recovering` while a retired output worker is stopping; or `stalled` once it has outlived the 5 s base acknowledgement deadline. While any retired worker runs, the output route does not reconnect, so a late operation cannot type into the current window. `stalled` persists until the worker stops or the daemon is restarted. Added in status schema 7.
 - `output_uncertain_total` (integer): Expansions and inserts since daemon start whose effect on the target text is unknown (a non-atomic backend failed mid-transaction or did not acknowledge in time). They are never retried. Added in status schema 7.
+- `terminal_apps_only` (bool): The daemon was started with `--terminal-apps-only` and expands automatically only while an app listed in `settings.terminal_apps` is focused (fail-closed when the focused window is unknown). Explicit inserts and hotkeys are not restricted. Diagnostics use it to tell a raw-input daemon that covers terminals beside IBus from one that would expand everywhere. Added in status schema 26.
 - `suppressed_expansions_total` (integer): Matched expansions refused by policy, output safety gates, or preparation before reaching output. It does not count keys filtered before a match is produced (for example, while paused or in a sensitive field).
 - `output_partial_total` (integer): Legacy count of non-atomic transactions whose target effect may be partial. These are never retried.
 - `partial_write_total` (integer): Explicit count of transactions with a potentially partial non-atomic write. This currently aliases `output_partial_total` for compatibility. Recent outcome records identify `completion="partial_write"`, set `recovery="manual_review"`, and include `progress_tracked`, `erased_units`, and `inserted_units` when a backend can count successfully flushed units. Counts are protocol progress, not proof of what the application rendered; no automatic recovery or replay is attempted. `wayexpand doctor --json` continues to report `partial_insertions_total`.
@@ -921,12 +964,26 @@ These fields are guaranteed present and backward-compatible. Missing fields use 
   focused window immediately before typing; `untracked-focus` allows erasing
   when no tracker can confirm focus. A detected focus change is refused in
   every mode. Only the primary config, the user layer, and the organization
-  layer can set it; curated packs cannot. Verified routes ignore it.
+  layer can set it; curated packs cannot. Atomic routes (input-method-v2)
+  ignore it. The IBus route verifies the trigger against the client's
+  surrounding text but deletes and inserts in two steps, so it also needs a
+  mode other than `off`; `wayexpand setup --backend ibus` asks for it.
 - `Settings::keystroke_max_chars` (integer 1–5000, default 8, omitted from
   saved TOML at the default) — the longest replacement a keystroke-typed
   route (the libei keysym fallback) accepts; longer ones are refused before
   anything is erased. It is reported as `inject_max_text_chars`. Older
   readers that reject unknown fields will not load a config that sets it.
+- `Settings::terminal_apps` (array of app IDs, default empty, omitted from
+  saved TOML when empty) — terminal apps, as `app_id_exact:` (the default
+  for a bare value) or `app_id_glob:` filters; `title_contains:` is
+  rejected, as are empty entries and more than 64 entries. A daemon started
+  with `--terminal-apps-only` (or `WAYEXPAND_TERMINAL_APPS_ONLY=1`, which
+  `wayexpand setup --backend ibus --terminals` sets in a systemd drop-in)
+  expands automatically only while one of these apps is focused, and fails
+  closed when the focused window is unknown; explicit inserts and hotkeys are
+  not restricted. The daemon refuses to start with the flag and an empty
+  list. Older readers that reject unknown fields will not load a config that
+  sets it.
 - `ExpansionConfig::output_file` (relative path string or absent, omitted
   from saved TOML and JSON when absent) — the file `wayexpand new` writes the
   snippet to. It may not be absolute or contain `..`, and command-backed

@@ -214,12 +214,19 @@ install -d -m 0755 "$bin_dir"
 for binary in wayexpand-daemon wayexpand-action-broker wayexpand wayexpand-ui wayexpand-gui wayexpand-ibus; do
     ln -sfn "$library_dir/current/bin/$binary" "$bin_dir/$binary"
 done
-install -d -m 0755 "$unit_dir" "$HOME/.local/share/ibus/component" "$application_dir"
+install -d -m 0755 "$unit_dir" "$application_dir"
 for unit in wayexpand-input-method.service wayexpand-evdev.service wayexpand-action-broker.service; do
     ln -sfn "$library_dir/current/systemd/$unit" "$unit_dir/$unit"
 done
-ln -sfn "$library_dir/current/ibus/wayexpand.xml" \
-    "$HOME/.local/share/ibus/component/wayexpand.xml"
+# ibus-daemon never reads per-user component directories, so a manifest
+# there cannot register the engine. Remove the link older installers made;
+# `wayexpand setup --backend ibus` installs the component where IBus reads it.
+stale_ibus_component="$HOME/.local/share/ibus/component/wayexpand.xml"
+if [ -L "$stale_ibus_component" ]; then
+    case $(readlink "$stale_ibus_component") in
+        "$library_dir"/*) rm -f -- "$stale_ibus_component" ;;
+    esac
+fi
 "$release_dir/scripts/install-xdg-systemd-dropins.sh" \
     "$unit_dir" "$config_home" "$config_dir" "$state_home" "$state_dir" "$library_dir/current/bin"
 ln -sfn "$library_dir/current/desktop/wayexpand.desktop" "$application_dir/wayexpand.desktop"
@@ -256,6 +263,7 @@ fi
 printf '%s\n' "Installed binaries in $bin_dir"
 printf '%s\n' "Installed user units in $unit_dir"
 printf '%s\n' "Installed desktop entry in $application_dir"
+printf '%s\n' "Staged IBus component in $library_dir/current/ibus (register it with \`wayexpand setup --backend ibus\`)"
 if [ -d "$release_dir/icons" ]; then
     printf '%s\n' "Installed application icon in $icon_base"
 fi

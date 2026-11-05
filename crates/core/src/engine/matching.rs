@@ -326,6 +326,9 @@ impl ExpansionEngine {
 
     fn match_allowed(&self, config_index: usize, length: usize) -> bool {
         let expansion = &self.config.expansion[config_index];
+        if self.terminal_apps_only && !self.focused_app_is_terminal() {
+            return false;
+        }
         if !self.app_filter_allows(config_index, expansion) {
             return false;
         }
@@ -343,6 +346,25 @@ impl ExpansionEngine {
             Some(_) => true,
             None => !self.buffer_truncated,
         }
+    }
+
+    /// Whether the focused window is one of `settings.terminal_apps`. Fails
+    /// closed without a known window or app ID, and with an empty list.
+    pub fn focused_app_is_terminal(&self) -> bool {
+        let Some(app_id) = self
+            .normalized_window
+            .as_ref()
+            .and_then(|window| window.app_id.as_deref())
+        else {
+            return false;
+        };
+        self.terminal_app_scope
+            .iter()
+            .any(|(filter, glob)| match filter {
+                AppFilter::AppIdExact(expected) => app_id == expected,
+                AppFilter::AppIdGlob(_) => glob.as_ref().is_some_and(|glob| glob.matches(app_id)),
+                AppFilter::TitleContains(_) => false,
+            })
     }
 
     /// An empty app filter matches everywhere. Each configured filter names

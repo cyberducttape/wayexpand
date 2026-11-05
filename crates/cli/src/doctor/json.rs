@@ -129,6 +129,9 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
         .and_then(|policy| policy.get("valid"))
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
+    let daemon_status_snapshot = read_daemon_status()
+        .ok()
+        .and_then(|response| status_as_json(&response).ok());
     let daemon = match read_daemon_status() {
         Ok(response) => match status_as_json(&response) {
             Ok(snapshot) => {
@@ -234,6 +237,12 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
             "ibus": {
                 "installed": ibus_installed,
                 "status": if ibus_installed { "available to configure" } else { "not installed" },
+                "route": crate::commands::ibus::report_json(
+                    &wayexpand_backend_ibus::chain::diagnose(),
+                    &crate::commands::ibus::RouteOverlap::from_status(
+                        daemon_status_snapshot.as_ref(),
+                    ),
+                ),
             },
             "feature_support": {
                 "ime_preedit": {

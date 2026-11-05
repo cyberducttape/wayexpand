@@ -3,6 +3,7 @@
 pub(crate) mod config;
 pub(crate) mod context;
 pub(crate) mod daemon;
+pub(crate) mod ibus;
 pub(crate) mod import_add;
 pub(crate) mod library;
 pub(crate) mod metrics;

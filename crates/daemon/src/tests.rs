@@ -202,6 +202,7 @@ fn daemon_status_body_matches_documented_stable_contract() {
             "state",
             "status_schema",
             "suppressed_expansions_total",
+            "terminal_apps_only",
             "usage_events_dropped_total",
             "usage_events_persisted_total",
             "usage_events_recorded_total",
@@ -215,7 +216,7 @@ fn daemon_status_body_matches_documented_stable_contract() {
         "daemon status body fields no longer match docs/COMPATIBILITY.md's documented Stable contract"
     );
     assert!(body.starts_with(&format!(
-        "source=input-method\nbackend=input-method-v2\nroute_id=input-method-v2\nbackend_mode=unknown\nstatus_schema=25\ndaemon_commit={}\nstate=connected\nroute_available=false\nmatching_available=false\nmatching_unavailable_reason=replacement_route_unavailable\npaused=false\n",
+        "source=input-method\nbackend=input-method-v2\nroute_id=input-method-v2\nbackend_mode=unknown\nstatus_schema=26\ndaemon_commit={}\nstate=connected\nroute_available=false\nmatching_available=false\nmatching_unavailable_reason=replacement_route_unavailable\npaused=false\n",
         super::build_info::COMMIT
     )));
     for field in [
