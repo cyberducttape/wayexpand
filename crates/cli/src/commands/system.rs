@@ -659,23 +659,31 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
         }
         bail!("{unit} restart failed; no saved payload is available for automatic rollback")
     }
-    let health = crate::doctor::status::read_daemon_status()
-        .and_then(|response| crate::doctor::status::status_as_json(&response));
-    let restarted_commit = health
-        .as_ref()
-        .ok()
-        .and_then(|verified| verified.get("daemon_commit"))
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("unknown");
+    // A successful systemd restart only means the process was launched. The
+    // daemon may still be initializing its control socket/status publisher, so
+    // give it a short bounded window before treating an unavailable snapshot
+    // as a failed upgrade.
+    let (health, restarted_commit) = wait_for_daemon_build(cli_commit);
+    let restarted_commit = restarted_commit.as_deref().unwrap_or("unknown");
     let compatible = health.as_ref().is_ok_and(|verified| {
         crate::doctor::status::upgrade_status_from_snapshot(verified)["compatible"] == true
     });
     if restarted_commit != cli_commit || !compatible {
         if rollback_file.is_file() {
             let restored = restore_previous_install(&library, &current, &rollback_file, Some(unit));
-            bail!("post-restart health check failed (daemon build {restarted_commit}); automatic rollback {}", if restored.is_ok() {"restored the previous payload"} else {"also failed; inspect the service and run `wayexpand upgrade --rollback`"})
+            bail!(upgrade_health_failure(
+                cli_commit,
+                restarted_commit,
+                health.is_ok(),
+                restored.is_ok()
+            ))
         }
-        bail!("post-restart health check failed (daemon build {restarted_commit}); no saved payload is available for automatic rollback")
+        bail!(upgrade_health_failure(
+            cli_commit,
+            restarted_commit,
+            health.is_ok(),
+            false
+        ))
     }
     let broker = "wayexpand-action-broker.service";
     if crate::setup::run_setup_command("systemctl", &["--user", "is-active", "--quiet", broker])
@@ -708,6 +716,54 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
     }
     println!("Restarted {unit}; daemon build {restarted_commit} now matches this CLI. IBus-owned engine processes require a separate IBus restart.");
     Ok(())
+}
+
+fn wait_for_daemon_build(expected_commit: &str) -> (Result<serde_json::Value>, Option<String>) {
+    const ATTEMPTS: usize = 20;
+    const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
+
+    let mut last_health = Err(anyhow::anyhow!("daemon has not published status yet"));
+    let mut last_commit = None;
+    for attempt in 0..ATTEMPTS {
+        last_health = crate::doctor::status::read_daemon_status()
+            .and_then(|response| crate::doctor::status::status_as_json(&response));
+        last_commit = last_health
+            .as_ref()
+            .ok()
+            .and_then(|snapshot| snapshot.get("daemon_commit"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned);
+        if last_commit.as_deref() == Some(expected_commit) {
+            break;
+        }
+        if attempt + 1 < ATTEMPTS {
+            std::thread::sleep(RETRY_DELAY);
+        }
+    }
+    (last_health, last_commit)
+}
+
+fn upgrade_health_failure(
+    cli_commit: &str,
+    daemon_commit: &str,
+    status_available: bool,
+    rolled_back: bool,
+) -> String {
+    let diagnosis = if !status_available {
+        "the restarted daemon did not return a readable status; inspect `systemctl --user status` and `journalctl --user` for the selected service"
+    } else if daemon_commit == "unknown" {
+        "the running daemon has no embedded source revision; reinstall/rebuild the daemon with build identity metadata, then retry"
+    } else {
+        "the running daemon revision does not match this CLI; verify both binaries came from the same installation payload"
+    };
+    format!(
+        "post-restart health check failed (CLI build {cli_commit}, daemon build {daemon_commit}); {diagnosis}; automatic rollback {}",
+        if rolled_back {
+            "restored the previous payload"
+        } else {
+            "was unavailable or failed; run `wayexpand upgrade --rollback` after inspecting the service"
+        }
+    )
 }
 
 fn restore_previous_install(
@@ -1280,7 +1336,7 @@ pub(crate) fn live_explain_build_gate(
 
 #[cfg(test)]
 mod policy_check_tests {
-    use super::policy_check_findings;
+    use super::{policy_check_findings, upgrade_health_failure};
     use wayexpand_core::OrganizationPolicy;
 
     #[test]
@@ -1316,5 +1372,19 @@ mod policy_check_tests {
         assert!(findings.iter().any(|finding| {
             finding["control"] == "require_composition_aware" && finding["status"] == "fail"
         }));
+    }
+
+    #[test]
+    fn upgrade_health_failure_explains_unknown_daemon_identity() {
+        let message = upgrade_health_failure("cli-sha", "unknown", true, true);
+        assert!(message.contains("no embedded source revision"));
+        assert!(message.contains("automatic rollback restored the previous payload"));
+    }
+
+    #[test]
+    fn upgrade_health_failure_distinguishes_unavailable_status() {
+        let message = upgrade_health_failure("cli-sha", "unknown", false, false);
+        assert!(message.contains("did not return a readable status"));
+        assert!(message.contains("run `wayexpand upgrade --rollback`"));
     }
 }

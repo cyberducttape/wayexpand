@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Make `wayexpand upgrade --apply` wait up to five seconds for the restarted
+  daemon to publish status before failing its health check. When build identity
+  remains unknown or mismatched, report the CLI and daemon revisions and give
+  specific recovery guidance before/after automatic rollback.
 - Add a regression test for failed IBus activation rollback across service state,
   compositor input-method selection, IBus preload engines, and active engine.
   Repair the daemon reload test fixture for expansion counts and make its
