@@ -46,14 +46,25 @@ impl GuiApp {
                     }),
             )
             .show(root, |ui| {
-                // Identity on the left, status and actions on the right.
-                // Search lives at the top of the snippet list it filters.
-                ui.horizontal(|ui| {
-                    self.render_toolbar_brand(ui, palette);
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        self.render_toolbar_controls(ui, palette);
+                // Keep the brand and controls on one line while there is room.
+                // At narrow widths, separate them into wrapped rows: placing a
+                // right-to-left control layout in the remainder of a horizontal
+                // row can make it overlap the brand when the labels no longer fit.
+                let compact_width = 920.0 * self.settings_font_scale.multiplier();
+                if ui.available_width() < compact_width {
+                    ui.vertical(|ui| {
+                        ui.horizontal_wrapped(|ui| self.render_toolbar_brand(ui, palette));
+                        ui.add_space(6.0);
+                        ui.horizontal_wrapped(|ui| self.render_toolbar_controls(ui, palette, true));
                     });
-                });
+                } else {
+                    ui.horizontal(|ui| {
+                        self.render_toolbar_brand(ui, palette);
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            self.render_toolbar_controls(ui, palette, false);
+                        });
+                    });
+                }
             });
     }
 
@@ -79,7 +90,12 @@ impl GuiApp {
     }
 
     /// Daemon health and the actions menu, laid out right to left.
-    pub(crate) fn render_toolbar_controls(&mut self, ui: &mut egui::Ui, palette: &Palette) {
+    pub(crate) fn render_toolbar_controls(
+        &mut self,
+        ui: &mut egui::Ui,
+        palette: &Palette,
+        compact: bool,
+    ) {
         let ctx = ui.ctx().clone();
         let (daemon_label, daemon_color) = match self.daemon_reachable {
             Some(true) => (self.strings.daemon_running_status(), palette.success),
@@ -167,7 +183,7 @@ impl GuiApp {
         // Workspace switching is a frequent action, so keep it directly in
         // the toolbar as well as in the profile-management menu. The list is
         // still sourced from the CLI's validated profile inventory.
-        if !self.profile_loaded && self.profile_receiver.is_none() {
+        if !compact && !self.profile_loaded && self.profile_receiver.is_none() {
             self.start_profile_operation(ProfileOperation::List);
         }
         let runtime_profile = runtime_selected_profile(&self.daemon_status);
@@ -180,45 +196,47 @@ impl GuiApp {
                     .map(|name| format!("{}: {name}", self.strings.profiles()))
             })
             .unwrap_or_else(|| self.strings.profiles().to_owned());
-        ui.menu_button(active_profile_label, |ui| {
-            if self.profile_receiver.is_some() {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.label(self.strings.profile_loading());
-                });
-            }
-            if let Some(name) = runtime_profile.as_deref() {
-                ui.label(self.strings.profile_automatic_active(name));
-            }
-            for profile in self.profiles.clone() {
-                let active = self.active_profile.as_deref() == Some(&profile.name);
-                let label = if profile.valid {
-                    profile.name.clone()
-                } else {
-                    format!("{} · {}", profile.name, self.strings.profile_invalid())
-                };
-                if ui
-                    .add_enabled(
-                        profile.valid && !active && self.profile_receiver.is_none(),
-                        egui::Button::new(if active {
-                            format!("✓ {label}")
-                        } else {
-                            label
-                        }),
-                    )
-                    .clicked()
-                {
-                    self.request_action(PendingAction::SwitchProfile(profile.name));
-                    ui.close();
+        if !compact {
+            ui.menu_button(active_profile_label, |ui| {
+                if self.profile_receiver.is_some() {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(self.strings.profile_loading());
+                    });
                 }
-            }
-            if self.profiles.is_empty() && self.profile_loaded {
-                ui.label(self.strings.no_profiles());
-            }
-            if let Some(error) = self.profile_error.as_deref() {
-                ui.colored_label(palette.danger, error);
-            }
-        });
+                if let Some(name) = runtime_profile.as_deref() {
+                    ui.label(self.strings.profile_automatic_active(name));
+                }
+                for profile in self.profiles.clone() {
+                    let active = self.active_profile.as_deref() == Some(&profile.name);
+                    let label = if profile.valid {
+                        profile.name.clone()
+                    } else {
+                        format!("{} · {}", profile.name, self.strings.profile_invalid())
+                    };
+                    if ui
+                        .add_enabled(
+                            profile.valid && !active && self.profile_receiver.is_none(),
+                            egui::Button::new(if active {
+                                format!("✓ {label}")
+                            } else {
+                                label
+                            }),
+                        )
+                        .clicked()
+                    {
+                        self.request_action(PendingAction::SwitchProfile(profile.name));
+                        ui.close();
+                    }
+                }
+                if self.profiles.is_empty() && self.profile_loaded {
+                    ui.label(self.strings.no_profiles());
+                }
+                if let Some(error) = self.profile_error.as_deref() {
+                    ui.colored_label(palette.danger, error);
+                }
+            });
+        }
         let more_actions = self.strings.more_actions();
         let actions_response = ui
             .menu_button(more_actions, |ui| {
@@ -461,6 +479,7 @@ impl GuiApp {
         if ui
             .add(
                 egui::Button::new(RichText::new(route_label).color(route_color))
+                    .wrap_mode(egui::TextWrapMode::Extend)
                     .fill(theme::tint(route_color, 38))
                     .stroke(egui::Stroke::NONE)
                     .corner_radius(egui::CornerRadius::same(255))
@@ -488,6 +507,7 @@ impl GuiApp {
                         RichText::new(self.strings.output_partial_badge(count))
                             .color(palette.danger),
                     )
+                    .wrap_mode(egui::TextWrapMode::Extend)
                     .fill(theme::tint(palette.danger, 42))
                     .stroke(egui::Stroke::NONE)
                     .corner_radius(egui::CornerRadius::same(255))
@@ -542,6 +562,7 @@ impl GuiApp {
                         egui::Button::new(
                             RichText::new(self.strings.replacement_pill(assurance)).color(color),
                         )
+                        .wrap_mode(egui::TextWrapMode::Extend)
                         .fill(theme::tint(color, 34))
                         .stroke(egui::Stroke::NONE)
                         .corner_radius(egui::CornerRadius::same(255))
@@ -572,6 +593,7 @@ impl GuiApp {
                         RichText::new(self.strings.daemon_restart_required_status())
                             .color(palette.warning),
                     )
+                    .wrap_mode(egui::TextWrapMode::Extend)
                     .fill(theme::tint(palette.warning, 38))
                     .stroke(egui::Stroke::NONE)
                     .corner_radius(egui::CornerRadius::same(255))
