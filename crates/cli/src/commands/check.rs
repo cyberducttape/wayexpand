@@ -101,6 +101,11 @@ pub(crate) fn check_command(args: Args) -> Result<()> {
             .filter(|entry| entry.enabled)
             .count();
         let disabled = current.expansion.len().saturating_sub(enabled);
+        let app_restricted = current
+            .expansion
+            .iter()
+            .filter(|entry| entry.enabled && !entry.app_filter.is_empty())
+            .count();
         if enabled == 0 {
             warnings.push(finding(
                 "WX-CONFIG-006",
@@ -109,10 +114,18 @@ pub(crate) fn check_command(args: Args) -> Result<()> {
                 false,
             ));
         }
+        if disabled > 0 {
+            warnings.push(finding(
+                "WX-CONFIG-008",
+                "expansions",
+                format!("{disabled} expansion(s) are disabled and cannot match until enabled"),
+                false,
+            ));
+        }
         checks.push(serde_json::json!({
             "id":"WX-CHECK-REACHABILITY", "component":"expansions", "status":if enabled == 0 {"warning"} else {"pass"},
-            "enabled":enabled, "disabled":disabled,
-            "message":if enabled == 0 {"no enabled triggers"} else {"enabled triggers are unique and reachable by the matcher"}
+            "enabled":enabled, "disabled":disabled, "application_restricted":app_restricted,
+            "message":if enabled == 0 {"no enabled triggers"} else {"enabled triggers are unique and reachable by the matcher; application-filtered entries require a matching focused application"}
         }));
         let declared_commands = current
             .expansion

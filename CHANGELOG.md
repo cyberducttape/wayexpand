@@ -19,6 +19,10 @@ All notable changes to WayExpand are documented here.
   command declarations are validated but never executed. Add `config show`,
   `config validate`, and content-free `config diff`, plus `service status` and
   confirmation-gated restart of only the active route.
+- Add `wayexpand backend list [--json]` for a live, policy-aware route inventory
+  with separate installation, support, authorization, connection, policy,
+  certification, and limitation fields. The static self-test also reports
+  disabled and application-filtered expansion counts without exposing triggers.
 - Add `wayexpand compatibility-report [--json]` with a versioned, shareable
   desktop report. It records OS/session details and live IBus/service evidence,
   marks toolkit and Unicode insertion scenarios NOT TESTED unless separately

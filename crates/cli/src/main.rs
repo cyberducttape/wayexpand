@@ -349,7 +349,7 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
     (
         "Backends and operations",
         &[
-            ("backend [profile [ID|--current] [--json] | test --capture|--injection]", "Inspect a desktop integration profile or run an explicit one-shot route test"),
+            ("backend list [--json] | profile [ID|--current] [--json] | test --capture|--injection", "Inspect live route assessments, desktop guidance, or run an explicit one-shot route test"),
             ("explain-backend", "Explain automatic backend selection"),
             ("certify [--json]", "Run local compatibility certification"),
             (

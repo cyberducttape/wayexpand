@@ -776,15 +776,99 @@ pub(crate) fn backend_command(mut args: Args) -> Result<()> {
             print_backend_selection_explain();
         }
         Some("profile") => backend_profile_command(args.collect())?,
+        Some("list") => backend_list_command(args.collect())?,
         Some("test") => match args.next().as_deref() {
             Some("--capture") if args.next().is_none() => backend_capture_test()?,
             Some("--injection") if args.next().is_none() => backend_injection_test()?,
             _ => usage_bail!("usage: wayexpand backend test --capture|--injection"),
         },
         _ => {
-            usage_bail!("usage: wayexpand backend [select --explain | profile [ID|--current] [--json] | test --capture|--injection]")
+            usage_bail!("usage: wayexpand backend [list [--json] | select --explain | profile [ID|--current] [--json] | test --capture|--injection]")
         }
     };
+    Ok(())
+}
+
+fn backend_list_command(arguments: Vec<String>) -> Result<()> {
+    let json = match arguments.as_slice() {
+        [] => false,
+        [flag] if flag == "--json" => true,
+        _ => usage_bail!("usage: wayexpand backend list [--json]"),
+    };
+    let capabilities = probe_capabilities();
+    let policy = load_policy()?;
+    let plan =
+        wayexpand_backend_selection::plan_routes(&capabilities, ibus_engine_available(), |route| {
+            route_allowed_by_policy(&policy, route)
+        });
+    let routes = plan
+        .routes
+        .iter()
+        .map(|planned| {
+            let contract = planned.contract;
+            let assessment = &planned.assessment;
+            serde_json::json!({
+                "id": contract.id,
+                "label": contract.label,
+                "capture": contract.capture,
+                "injection": contract.injection,
+                "standing": planned.standing.as_str(),
+                "reason": planned.reason,
+                "assessment": {
+                    "installed": assessment.installed.as_str(),
+                    "supported": assessment.supported.as_str(),
+                    "authorized": assessment.authorized.as_str(),
+                    "connected": assessment.connected.as_str(),
+                    "policy_allowed": assessment.policy_allowed,
+                    "certified": assessment.certified,
+                    "requires_user_action": assessment.requires_user_action,
+                    "limitations": assessment.limitations.iter().map(|item| item.description()).collect::<Vec<_>>(),
+                    "portal": assessment.portal,
+                },
+                "replacement_assurance": contract.replacement_assurance,
+                "atomic_replace": contract.atomic_replace,
+                "sensitive_field_detection": contract.sensitive_fields,
+            })
+        })
+        .collect::<Vec<_>>();
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "schema_version": 1,
+                "session": capabilities.compositor.name(),
+                "routes": routes,
+                "production_certification_claimed": false,
+            }))?
+        );
+    } else {
+        println!("Backend routes for {}:", capabilities.compositor.name());
+        for route in routes {
+            println!(
+                "{} · {} · capture={} · injection={}",
+                route["id"].as_str().unwrap_or("unknown"),
+                route["standing"].as_str().unwrap_or("unknown"),
+                route["capture"].as_str().unwrap_or("unknown"),
+                route["injection"].as_str().unwrap_or("unknown"),
+            );
+            let assessment = &route["assessment"];
+            println!(
+                "  installed={} supported={} authorized={} connected={} policy_allowed={} certified={}",
+                assessment["installed"].as_str().unwrap_or("unknown"),
+                assessment["supported"].as_str().unwrap_or("unknown"),
+                assessment["authorized"].as_str().unwrap_or("unknown"),
+                assessment["connected"].as_str().unwrap_or("unknown"),
+                assessment["policy_allowed"],
+                assessment["certified"],
+            );
+            for limitation in assessment["limitations"].as_array().into_iter().flatten() {
+                if let Some(limitation) = limitation.as_str() {
+                    println!("  limitation: {limitation}");
+                }
+            }
+        }
+        println!("Routes are not production-certified unless their certification evidence explicitly says so.");
+    }
     Ok(())
 }
 
