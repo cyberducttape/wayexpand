@@ -14,6 +14,8 @@ All notable changes to WayExpand are documented here.
 - Add an explicit `--source=control` daemon mode for the control service. It
   starts no stdin reader and runs a dedicated control-only reactor path instead
   of treating closed stdin as the runtime's lifecycle mechanism.
+- Make the release-mode IBus broker completion test wait for its correlated
+  output rather than failing when CI scheduling exceeds a short quiet window.
 - Give each interactive desktop test a generated content-independent diagnostic
   ID. Aggregate capture/output counters now report activity as uncorrelated and
   explicitly say the test trigger was not independently confirmed; any backend
