@@ -59,6 +59,7 @@ impl Daemon {
 
     /// Schedule the next input reconnect with exponential backoff.
     pub(crate) fn schedule_input_retry(&mut self) {
+        crate::counters::note_input_backoff(self.reconnect_delay);
         self.input_retry_at = Some(Instant::now() + self.reconnect_delay);
         self.reconnect_delay = next_retry_delay(self.reconnect_delay);
     }
@@ -92,6 +93,7 @@ impl Daemon {
                         "input-method reconnect failed permanently: {error}"
                     ));
                 }
+                crate::counters::note_input_reconnecting();
                 self.input_connect = Some(BackgroundConnect::start(
                     ConnectRequest {
                         backend: "libei",
@@ -186,7 +188,9 @@ impl Daemon {
                             "input-method output failed; current expansion is not replayed"
                         );
                         self.input_method = None;
+                        crate::counters::note_input_disconnected("transport_lost");
                         self.connection_state = "reconnecting";
+                        self.schedule_input_retry();
                         process_event_with_pending_buffer(
                             &mut self.config.engine,
                             InputEvent::FocusChanged { sensitive: true },
@@ -213,7 +217,9 @@ impl Daemon {
             Err(error) if error.retryable => {
                 warn!(%error, "input-method connection lost; reconnecting");
                 self.input_method = None;
+                crate::counters::note_input_disconnected("transport_lost");
                 self.connection_state = "reconnecting";
+                self.schedule_input_retry();
                 process_event_with_pending_buffer(
                     &mut self.config.engine,
                     InputEvent::FocusChanged { sensitive: true },
@@ -246,6 +252,7 @@ impl Daemon {
             if self.waiting_for_input_retry(poll_interval) {
                 return Ok(Step::Next);
             }
+            crate::counters::note_input_reconnecting();
             match EvdevSource::connect_with_layout_provider(crate::evdev_layout::provider()) {
                 Ok(source) => {
                     let mut source = source;
@@ -374,7 +381,9 @@ impl Daemon {
             Err(error) if error.retryable => {
                 warn!(%error, "evdev connection lost; reconnecting");
                 self.evdev = None;
+                crate::counters::note_input_disconnected("transport_lost");
                 self.connection_state = "reconnecting";
+                self.schedule_input_retry();
                 let _ = process_event_with_pending_buffer(
                     &mut self.config.engine,
                     InputEvent::EndOfInput,

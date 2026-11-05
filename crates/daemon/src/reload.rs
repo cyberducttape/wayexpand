@@ -17,7 +17,7 @@ use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver, TryRecvError},
-        Arc,
+        Arc, Mutex, OnceLock,
     },
     thread,
     time::{Duration, Instant, SystemTime},
@@ -33,6 +33,73 @@ const INTEGRITY_CHECK_INTERVAL: Duration = Duration::from_secs(60);
 const WATCH_DEBOUNCE: Duration = Duration::from_millis(100);
 /// How often command workers that could not start are tried again.
 const WORKER_RETRY_INTERVAL: Duration = Duration::from_secs(30);
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ConfigDiagnostics {
+    pub active_path: String,
+    pub generation: u64,
+    pub loaded_at_unix: u64,
+    pub last_successful_reload_unix: u64,
+    pub enabled_expansions: usize,
+    pub disabled_expansions: usize,
+    pub last_reload_failure: String,
+    pub validation_errors: String,
+}
+
+fn diagnostics_store() -> &'static Mutex<ConfigDiagnostics> {
+    static STORE: OnceLock<Mutex<ConfigDiagnostics>> = OnceLock::new();
+    STORE.get_or_init(|| Mutex::new(ConfigDiagnostics::default()))
+}
+
+pub(crate) fn diagnostics_snapshot() -> ConfigDiagnostics {
+    diagnostics_store()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs())
+}
+
+fn record_initial_config(path: &Path, enabled: usize, disabled: usize) {
+    let now = unix_now();
+    let mut state = diagnostics_store()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    state.generation = state.generation.saturating_add(1).max(1);
+    state.active_path = path.display().to_string();
+    state.loaded_at_unix = now;
+    state.last_successful_reload_unix = now;
+    state.enabled_expansions = enabled;
+    state.disabled_expansions = disabled;
+    state.validation_errors.clear();
+}
+
+fn record_reload_success(path: &Path, enabled: usize, disabled: usize) {
+    let now = unix_now();
+    let mut state = diagnostics_store()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    state.generation = state.generation.saturating_add(1).max(1);
+    state.active_path = path.display().to_string();
+    state.loaded_at_unix = now;
+    state.last_successful_reload_unix = now;
+    state.enabled_expansions = enabled;
+    state.disabled_expansions = disabled;
+    state.validation_errors.clear();
+}
+
+fn record_reload_failure(error: &anyhow::Error) {
+    let message = safe_reload_error(error);
+    let mut state = diagnostics_store()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    state.last_reload_failure = message.clone();
+    state.validation_errors = message;
+}
 
 pub struct ReloadableConfig {
     path: PathBuf,
@@ -85,6 +152,8 @@ struct InFlightReload {
 struct BuiltConfig {
     engine: ExpansionEngine,
     expansions: usize,
+    enabled_expansions: usize,
+    disabled_expansions: usize,
     stamp: Option<FileStamp>,
     /// Fleet metadata as it existed before this load began. If a layer is
     /// edited while the build is running or before the reactor applies it,
@@ -122,6 +191,12 @@ fn build_config(path: &Path, fleet: bool, policy: &OrganizationPolicy) -> BuildR
         }
         let (config, stamp) = loaded.map_err(BuildFailure::Load)?;
         let expansions = config.expansion.len();
+        let enabled_expansions = config
+            .expansion
+            .iter()
+            .filter(|entry| entry.enabled)
+            .count();
+        let disabled_expansions = expansions.saturating_sub(enabled_expansions);
         let snapshot = config
             .validate_snapshot()
             .map_err(|error| BuildFailure::Engine(anyhow::Error::new(error)))?;
@@ -129,6 +204,8 @@ fn build_config(path: &Path, fleet: bool, policy: &OrganizationPolicy) -> BuildR
         return Ok(BuiltConfig {
             engine,
             expansions,
+            enabled_expansions,
+            disabled_expansions,
             stamp,
             fleet_signature: fleet_after,
         });
@@ -159,10 +236,17 @@ impl ReloadableConfig {
         // contents.
         let fleet_signature = if fleet { standard_fleet_signature() } else { 0 };
         let (config, stamp) = load_for_mode(&path, fleet, &policy)?;
+        let enabled_expansions = config
+            .expansion
+            .iter()
+            .filter(|entry| entry.enabled)
+            .count();
+        let disabled_expansions = config.expansion.len().saturating_sub(enabled_expansions);
         let snapshot = config
             .validate_snapshot()
             .map_err(|error| anyhow::anyhow!("invalid configuration: {error}"))?;
         let engine = ExpansionEngine::from_validated(Arc::new(snapshot));
+        record_initial_config(&path, enabled_expansions, disabled_expansions);
         let (retired_engine_sender, retired_engine_receiver) = mpsc::channel::<RetiredEngine>();
         thread::Builder::new()
             .name("wayexpand-engine-reaper".into())
@@ -473,6 +557,8 @@ impl ReloadableConfig {
             Ok(BuiltConfig {
                 mut engine,
                 expansions,
+                enabled_expansions,
+                disabled_expansions,
                 stamp: stable_stamp,
                 fleet_signature,
             }) => {
@@ -521,10 +607,12 @@ impl ReloadableConfig {
                 self.last_integrity_check = Instant::now();
                 self.fleet_signature = fleet_signature;
                 self.healthy = true;
+                record_reload_success(&self.path, enabled_expansions, disabled_expansions);
                 info!(expansions, "configuration reloaded");
             }
             Err(BuildFailure::Engine(error)) => {
                 self.healthy = false;
+                record_reload_failure(&error);
                 error!(
                     reason = %safe_reload_error(&error),
                     "configuration reload rejected; keeping previous configuration"
@@ -532,6 +620,7 @@ impl ReloadableConfig {
             }
             Err(BuildFailure::Load(error)) => {
                 self.healthy = false;
+                record_reload_failure(&error);
                 // Keep the pre-read stamp as the observed value. If the file
                 // changed while it was being read, the next polling cycle
                 // must retry instead of considering the unstable read settled.

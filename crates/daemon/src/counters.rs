@@ -16,21 +16,157 @@ static OUTPUT_UNSUPPORTED: AtomicU64 = AtomicU64::new(0);
 static LAST_UNSUPPORTED: AtomicU8 = AtomicU8::new(0);
 static INPUT_CONNECTION_FAILURES: AtomicU64 = AtomicU64::new(0);
 static OUTPUT_CONNECTION_FAILURES: AtomicU64 = AtomicU64::new(0);
+static INPUT_LAST_CONNECTED_UNIX: AtomicU64 = AtomicU64::new(0);
+static OUTPUT_LAST_CONNECTED_UNIX: AtomicU64 = AtomicU64::new(0);
+static INPUT_BACKOFF_MS: AtomicU64 = AtomicU64::new(0);
+static OUTPUT_BACKOFF_MS: AtomicU64 = AtomicU64::new(0);
+static INPUT_CONNECTION_STATE: AtomicU8 = AtomicU8::new(0);
+static OUTPUT_CONNECTION_STATE: AtomicU8 = AtomicU8::new(0);
+static INPUT_DISCONNECT_REASON: AtomicU8 = AtomicU8::new(0);
+static OUTPUT_DISCONNECT_REASON: AtomicU8 = AtomicU8::new(0);
+static INPUT_RECONNECT_ATTEMPTS: AtomicU64 = AtomicU64::new(0);
+static OUTPUT_RECONNECT_ATTEMPTS: AtomicU64 = AtomicU64::new(0);
+
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |value| value.as_secs())
+}
+
+fn connection_state(code: u8) -> &'static str {
+    match code {
+        1 => "connected",
+        2 => "disconnected",
+        3 => "reconnecting",
+        4 => "authorization_required",
+        5 => "backoff",
+        _ => "unknown",
+    }
+}
+
+fn disconnect_reason(code: u8) -> &'static str {
+    match code {
+        1 => "transport_lost",
+        2 => "authorization_revoked",
+        3 => "connect_failed",
+        4 => "output_transaction_failed",
+        _ => "none",
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct ConnectionLifecycleSnapshot {
+    pub input_state: &'static str,
+    pub output_state: &'static str,
+    pub input_last_connected_unix: u64,
+    pub output_last_connected_unix: u64,
+    pub input_disconnect_reason: &'static str,
+    pub output_disconnect_reason: &'static str,
+    pub input_attempts: u64,
+    pub output_attempts: u64,
+    pub input_backoff_ms: u64,
+    pub output_backoff_ms: u64,
+}
+
+pub(crate) fn lifecycle_snapshot() -> ConnectionLifecycleSnapshot {
+    ConnectionLifecycleSnapshot {
+        input_state: connection_state(INPUT_CONNECTION_STATE.load(Ordering::Relaxed)),
+        output_state: connection_state(OUTPUT_CONNECTION_STATE.load(Ordering::Relaxed)),
+        input_last_connected_unix: INPUT_LAST_CONNECTED_UNIX.load(Ordering::Relaxed),
+        output_last_connected_unix: OUTPUT_LAST_CONNECTED_UNIX.load(Ordering::Relaxed),
+        input_disconnect_reason: disconnect_reason(INPUT_DISCONNECT_REASON.load(Ordering::Relaxed)),
+        output_disconnect_reason: disconnect_reason(
+            OUTPUT_DISCONNECT_REASON.load(Ordering::Relaxed),
+        ),
+        input_attempts: INPUT_RECONNECT_ATTEMPTS.load(Ordering::Relaxed),
+        output_attempts: OUTPUT_RECONNECT_ATTEMPTS.load(Ordering::Relaxed),
+        input_backoff_ms: INPUT_BACKOFF_MS.load(Ordering::Relaxed),
+        output_backoff_ms: OUTPUT_BACKOFF_MS.load(Ordering::Relaxed),
+    }
+}
+
+pub(crate) fn mark_initial_connections(input: bool, output: bool) {
+    let now = now_unix();
+    if input {
+        INPUT_CONNECTION_STATE.store(1, Ordering::Relaxed);
+        INPUT_LAST_CONNECTED_UNIX.store(now, Ordering::Relaxed);
+    }
+    if output {
+        OUTPUT_CONNECTION_STATE.store(1, Ordering::Relaxed);
+        OUTPUT_LAST_CONNECTED_UNIX.store(now, Ordering::Relaxed);
+    }
+}
+
+pub(crate) fn note_input_disconnected(reason: &'static str) {
+    INPUT_CONNECTION_STATE.store(2, Ordering::Relaxed);
+    INPUT_DISCONNECT_REASON.store(reason_code(reason), Ordering::Relaxed);
+}
+
+pub(crate) fn note_input_reconnecting() {
+    INPUT_CONNECTION_STATE.store(3, Ordering::Relaxed);
+    INPUT_RECONNECT_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
+}
+
+pub(crate) fn note_output_disconnected(reason: &'static str) {
+    OUTPUT_CONNECTION_STATE.store(2, Ordering::Relaxed);
+    OUTPUT_DISCONNECT_REASON.store(reason_code(reason), Ordering::Relaxed);
+}
+
+pub(crate) fn note_output_reconnecting() {
+    OUTPUT_CONNECTION_STATE.store(3, Ordering::Relaxed);
+    OUTPUT_RECONNECT_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
+}
+
+fn reason_code(reason: &str) -> u8 {
+    match reason {
+        "transport_lost" => 1,
+        "authorization_revoked" => 2,
+        "connect_failed" => 3,
+        "output_transaction_failed" => 4,
+        _ => 0,
+    }
+}
+
+pub(crate) fn note_input_backoff(delay: std::time::Duration) {
+    INPUT_CONNECTION_STATE.store(5, Ordering::Relaxed);
+    INPUT_BACKOFF_MS.store(
+        delay.as_millis().min(u128::from(u64::MAX)) as u64,
+        Ordering::Relaxed,
+    );
+}
+
+pub(crate) fn note_output_backoff(delay: std::time::Duration) {
+    OUTPUT_CONNECTION_STATE.store(5, Ordering::Relaxed);
+    OUTPUT_BACKOFF_MS.store(
+        delay.as_millis().min(u128::from(u64::MAX)) as u64,
+        Ordering::Relaxed,
+    );
+}
 
 pub(crate) fn note_input_connection_failure() {
     INPUT_CONNECTION_FAILURES.fetch_add(1, Ordering::Relaxed);
+    INPUT_CONNECTION_STATE.store(5, Ordering::Relaxed);
+    INPUT_DISCONNECT_REASON.store(3, Ordering::Relaxed);
 }
 
 pub(crate) fn note_output_connection_failure() {
     OUTPUT_CONNECTION_FAILURES.fetch_add(1, Ordering::Relaxed);
+    OUTPUT_CONNECTION_STATE.store(5, Ordering::Relaxed);
+    OUTPUT_DISCONNECT_REASON.store(3, Ordering::Relaxed);
 }
 
 pub(crate) fn note_output_reconnect() {
     OUTPUT_RECONNECTS.fetch_add(1, Ordering::Relaxed);
+    OUTPUT_CONNECTION_STATE.store(1, Ordering::Relaxed);
+    OUTPUT_LAST_CONNECTED_UNIX.store(now_unix(), Ordering::Relaxed);
+    OUTPUT_BACKOFF_MS.store(0, Ordering::Relaxed);
 }
 
 pub(crate) fn note_input_reconnect() {
     INPUT_RECONNECTS.fetch_add(1, Ordering::Relaxed);
+    INPUT_CONNECTION_STATE.store(1, Ordering::Relaxed);
+    INPUT_LAST_CONNECTED_UNIX.store(now_unix(), Ordering::Relaxed);
+    INPUT_BACKOFF_MS.store(0, Ordering::Relaxed);
 }
 
 pub(crate) fn note_evdev_quarantined_event() {

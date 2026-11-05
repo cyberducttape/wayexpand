@@ -9,7 +9,7 @@ use std::{
     collections::VecDeque,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Mutex, OnceLock,
+        Mutex, OnceLock, TryLockError,
     },
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -24,6 +24,58 @@ const FAILURE_STATUS_LIMIT: usize = 3;
 const OUTCOME_STATUS_LIMIT: usize = 4;
 static SUPPRESSED_EXPANSIONS_TOTAL: AtomicU64 = AtomicU64::new(0);
 static TRANSACTION_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
+static MATCHER_EVALUATIONS: AtomicU64 = AtomicU64::new(0);
+static MATCHES_FOUND: AtomicU64 = AtomicU64::new(0);
+static EXPANSION_ATTEMPTS: AtomicU64 = AtomicU64::new(0);
+static EXPANSIONS_APPLIED: AtomicU64 = AtomicU64::new(0);
+static EXPANSIONS_REJECTED: AtomicU64 = AtomicU64::new(0);
+static DIAGNOSTIC_EVENTS_DROPPED: AtomicU64 = AtomicU64::new(0);
+static LAST_SUCCESSFUL_INSERTION_UNIX: AtomicU64 = AtomicU64::new(0);
+
+pub(crate) fn last_successful_insertion_unix() -> u64 {
+    LAST_SUCCESSFUL_INSERTION_UNIX.load(Ordering::Relaxed)
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct DiagnosticTotals {
+    pub matcher_evaluations: u64,
+    pub matches_found: u64,
+    pub expansion_attempts: u64,
+    pub expansions_applied: u64,
+    pub expansions_rejected: u64,
+    pub events_dropped: u64,
+}
+
+pub(crate) fn totals() -> DiagnosticTotals {
+    DiagnosticTotals {
+        matcher_evaluations: MATCHER_EVALUATIONS.load(Ordering::Relaxed),
+        matches_found: MATCHES_FOUND.load(Ordering::Relaxed),
+        expansion_attempts: EXPANSION_ATTEMPTS.load(Ordering::Relaxed),
+        expansions_applied: EXPANSIONS_APPLIED.load(Ordering::Relaxed),
+        expansions_rejected: EXPANSIONS_REJECTED.load(Ordering::Relaxed),
+        events_dropped: DIAGNOSTIC_EVENTS_DROPPED.load(Ordering::Relaxed),
+    }
+}
+
+pub(crate) fn note_matcher_evaluation() {
+    MATCHER_EVALUATIONS.fetch_add(1, Ordering::Relaxed);
+}
+
+pub(crate) fn note_matches(count: usize) {
+    MATCHES_FOUND.fetch_add(count as u64, Ordering::Relaxed);
+}
+
+pub(crate) fn note_expansion_attempt() {
+    EXPANSION_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
+}
+
+pub(crate) fn note_expansion_outcome(applied: bool) {
+    if applied {
+        EXPANSIONS_APPLIED.fetch_add(1, Ordering::Relaxed);
+    } else {
+        EXPANSIONS_REJECTED.fetch_add(1, Ordering::Relaxed);
+    }
+}
 
 /// Number of matched expansions denied by a policy, safety gate, or
 /// preparation failure before reaching the output backend.
@@ -88,6 +140,13 @@ impl<'a> TracedInjector<'a> {
             TransactionOutcome::UnknownApplicationOutcome { .. } => "application outcome unknown",
             TransactionOutcome::UnknownPartialFailure { .. } => "partial_write",
         };
+        if matches!(
+            outcome,
+            TransactionOutcome::Applied
+                | TransactionOutcome::AppliedWithCursorPositionFailure { .. }
+        ) {
+            LAST_SUCCESSFUL_INSERTION_UNIX.store(now_unix(), Ordering::Relaxed);
+        }
         let erase_acknowledged = if self.stages.erase.is_empty() {
             if self.inner.capabilities().atomic_replace {
                 "atomic replacement not acknowledged"
@@ -334,10 +393,13 @@ fn push_bounded(ring: &mut VecDeque<FailureTrace>, limit: usize, trace: FailureT
 }
 
 fn push(trace: FailureTrace) {
-    let mut history = history()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    push_history(&mut history, trace);
+    match history().try_lock() {
+        Ok(mut history) => push_history(&mut history, trace),
+        Err(TryLockError::Poisoned(poisoned)) => push_history(&mut poisoned.into_inner(), trace),
+        Err(TryLockError::WouldBlock) => {
+            DIAGNOSTIC_EVENTS_DROPPED.fetch_add(1, Ordering::Relaxed);
+        }
+    }
 }
 
 fn push_history(history: &mut History, trace: FailureTrace) {

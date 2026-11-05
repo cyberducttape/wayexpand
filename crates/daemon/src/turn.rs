@@ -113,6 +113,7 @@ impl Daemon {
             .as_ref()
             .and_then(|failures| failures.try_recv().ok());
         if let Some(failure) = worker_failure {
+            crate::counters::note_output_disconnected("output_transaction_failed");
             warn!(
                 retryable = failure.retryable,
                 error = %failure.message,
@@ -136,6 +137,7 @@ impl Daemon {
             self.connection_state = "reconnecting";
             self.output_retry_at = Some(Instant::now());
             self.output_retry_delay = Duration::from_millis(250);
+            crate::counters::note_output_backoff(self.output_retry_delay);
         }
         if metrics.command_queue_rejected_total < self.logged_queue_rejections {
             // A successful configuration reload creates a fresh engine and
@@ -430,6 +432,7 @@ impl Daemon {
                 .output_retry_at
                 .is_some_and(|deadline| Instant::now() >= deadline)
         {
+            crate::counters::note_output_reconnecting();
             self.output_connect = Some(BackgroundConnect::start(
                 ConnectRequest {
                     backend: self.backend_name,
@@ -456,6 +459,7 @@ impl Daemon {
                         }
                         Err(error) => {
                             crate::counters::note_output_connection_failure();
+                            crate::counters::note_output_backoff(self.output_retry_delay);
                             self.output_retry_at = Some(Instant::now() + self.output_retry_delay);
                             self.output_retry_delay = next_retry_delay(self.output_retry_delay);
                             warn!(%error, backend = self.backend_name, "output worker unavailable; retry scheduled");
@@ -467,6 +471,7 @@ impl Daemon {
                 }
                 self.output_retry_at = None;
                 self.output_retry_delay = Duration::from_millis(250);
+                // The output session has been renegotiated and is usable.
                 self.connection_state = "connected";
                 set_daemon_status_with_config_state(
                     &mut self.status_publisher,
@@ -482,6 +487,7 @@ impl Daemon {
             }
             Err(error) if error.retryable => {
                 crate::counters::note_output_connection_failure();
+                crate::counters::note_output_backoff(self.output_retry_delay);
                 self.output_retry_at = Some(Instant::now() + self.output_retry_delay);
                 self.output_retry_delay = next_retry_delay(self.output_retry_delay);
                 warn!(%error, backend = self.backend_name, "output backend unavailable; retry scheduled");
@@ -509,6 +515,7 @@ impl Daemon {
         if !error.retryable() {
             return Err(error.into());
         }
+        crate::counters::note_output_disconnected("output_transaction_failed");
         warn!(
             outcome = error.diagnostic_category(),
             trigger_chars = error.result.trigger.chars().count(),
@@ -535,6 +542,7 @@ impl Daemon {
         );
         self.output_retry_at = Some(Instant::now());
         self.output_retry_delay = Duration::from_millis(250);
+        crate::counters::note_output_backoff(self.output_retry_delay);
         Ok(())
     }
 
@@ -561,6 +569,8 @@ impl Daemon {
             self.connection_state = "reconnecting";
             self.output_retry_at = Some(Instant::now());
             self.output_retry_delay = Duration::from_millis(250);
+            crate::counters::note_output_disconnected("output_transaction_failed");
+            crate::counters::note_output_backoff(self.output_retry_delay);
         }
     }
 

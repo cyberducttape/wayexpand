@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add config generation and reload diagnostics to daemon status (schemas 28–29): active config path/generation, successful activation timestamps, enabled/disabled counts, sanitized reload validation errors, per-route reconnect state/reason/backoff and connection timestamps, last successful insertion, bounded event counters/drop totals, and output queue p50/p95/p99. Invalid candidates preserve the previous active generation.
+
 - Add `wayexpand check --all [--json]` for CI-oriented static configuration
   checks covering schema/TOML, triggers, templates, referenced library files,
   policy, disabled or unreachable expansions, and version acceptance. Dynamic
@@ -55,7 +57,7 @@ All notable changes to WayExpand are documented here.
   minutes and emits only aggregate input counters and content-free output
   transaction states. Add daemon input-event totals and opaque transaction
   correlation IDs without storing key or snippet content; advance the status
-  contract to schema 27.
+  contract to schema 28.
 - Add `wayexpand debug --trigger TEXT` for the non-rendering matcher explanation
   and `wayexpand debug --test TRIGGER` for an explicit, user-confirmed test in
   a real application using a static non-command snippet. The test never sends
