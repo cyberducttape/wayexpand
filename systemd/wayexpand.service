@@ -2,7 +2,7 @@
 Description=WayExpand stdin test harness (not installed for ordinary users)
 After=graphical-session.target
 PartOf=graphical-session.target
-Conflicts=wayexpand-input-method.service wayexpand-evdev.service
+Conflicts=wayexpand-input-method.service wayexpand-evdev.service wayexpand-control.service
 StartLimitIntervalSec=60
 StartLimitBurst=5
 

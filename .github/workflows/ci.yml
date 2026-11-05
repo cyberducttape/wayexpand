@@ -777,9 +777,9 @@ jobs:
       - name: Verify backend units are mutually exclusive
         run: |
           set -eu
-          grep -Fx 'Conflicts=wayexpand-input-method.service wayexpand-evdev.service' systemd/wayexpand.service
-          grep -Fx 'Conflicts=wayexpand.service wayexpand-evdev.service' systemd/wayexpand-input-method.service
-          grep -Fx 'Conflicts=wayexpand.service wayexpand-input-method.service' systemd/wayexpand-evdev.service
+          grep -Fx 'Conflicts=wayexpand-input-method.service wayexpand-evdev.service wayexpand-control.service' systemd/wayexpand.service
+          grep -Fx 'Conflicts=wayexpand.service wayexpand-evdev.service wayexpand-control.service' systemd/wayexpand-input-method.service
+          grep -Fx 'Conflicts=wayexpand.service wayexpand-input-method.service wayexpand-control.service' systemd/wayexpand-evdev.service
       - name: Security profile analysis
         run: systemd-analyze security --offline=yes --no-pager systemd/wayexpand.service systemd/wayexpand-input-method.service systemd/wayexpand-evdev.service systemd/wayexpand-action-broker.service
       - name: Enforce hardening contract
