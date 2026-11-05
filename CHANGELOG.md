@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Update the support-bundle smoke test to validate report schema 2, including
+  private file output. Pin the fuzz runner to cargo-fuzz 0.13.2 and retry its
+  installation on transient registry/build failures.
 - Make `wayexpand upgrade --apply` wait up to five seconds for the restarted
   daemon to publish status before failing its health check. When build identity
   remains unknown or mismatched, report the CLI and daemon revisions and give

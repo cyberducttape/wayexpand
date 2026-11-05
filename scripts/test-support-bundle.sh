@@ -23,7 +23,7 @@ chmod 0600 "$config_home/wayexpand/expansions.toml"
 report="$test_dir/report.json"
 XDG_CONFIG_HOME="$config_home" "$binary" support-bundle >"$report"
 jq -e '
-  .schema == 1 and
+  .schema == 2 and
   .configuration.valid == true and
   (.application.version | type == "string") and
   .certification.required_scenario_count == 48 and
@@ -40,7 +40,7 @@ done
 umask 000
 XDG_CONFIG_HOME="$config_home" "$binary" support-bundle --output "$test_dir/private.json" >/dev/null
 [ "$(stat -c '%a' "$test_dir/private.json")" = 600 ]
-jq -e '.schema == 1' "$test_dir/private.json" >/dev/null
+jq -e '.schema == 2' "$test_dir/private.json" >/dev/null
 before=$(sha256sum "$test_dir/private.json")
 if XDG_CONFIG_HOME="$config_home" "$binary" support-bundle --output "$test_dir/private.json" >/dev/null 2>&1; then
     printf '%s\n' 'support bundle overwrote an existing file' >&2
