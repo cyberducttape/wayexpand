@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Simplify the GUI's IBus setup into a preflighted, single guided flow. It first
+  checks whether the component registration is already valid, only presents
+  administrator-registration consent when it is missing or invalid, and keeps
+  non-atomic replacement consent as a separate explicit choice.
 - Expand `wayexpand doctor --gnome` into input-capture, snippet-insertion,
   and GNOME Shell window-tracking sections. Report extension installation,
   loaded state, live build identity, D-Bus handshake, and sanitized focus-event

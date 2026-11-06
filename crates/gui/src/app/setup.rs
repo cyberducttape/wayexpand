@@ -11,6 +11,20 @@ use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
 const MAX_SETUP_OUTPUT_BYTES: usize = 128 * 1024;
 const SETUP_OUTPUT_READS_PER_DRAIN: usize = 64;
 
+fn ibus_registration_needed(report: &serde_json::Value) -> Option<bool> {
+    let checks = report.get("checks")?.as_array()?;
+    let state = |id: &str| {
+        checks
+            .iter()
+            .find(|check| check.get("id").and_then(serde_json::Value::as_str) == Some(id))
+            .and_then(|check| check.get("state"))
+            .and_then(serde_json::Value::as_str)
+    };
+    let component_valid = state("component") == Some("pass");
+    let manifest_valid = state("manifest") == Some("pass");
+    Some(!(component_valid && manifest_valid))
+}
+
 fn set_nonblocking<R: AsRawFd>(stream: &R) -> Result<(), String> {
     let fd = stream.as_raw_fd();
     let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
@@ -272,6 +286,10 @@ impl GuiApp {
         let is_setup = arguments
             .first()
             .is_some_and(|argument| argument == "setup");
+        let is_setup_preflight = arguments
+            .iter()
+            .map(String::as_str)
+            .eq(["ibus", "status", "--json"]);
         if is_setup {
             self.setup_failure_report = None;
             self.setup_failure_report_open = false;
@@ -281,6 +299,7 @@ impl GuiApp {
         let cancel = Arc::new(AtomicBool::new(false));
         let worker_cancel = Arc::clone(&cancel);
         let worker_is_setup = is_setup;
+        let worker_is_setup_preflight = is_setup_preflight;
         // Prefer the CLI installed beside this binary (release archives and
         // development builds), else whatever `wayexpand` is on PATH.
         let cli = env::current_exe()
@@ -369,7 +388,9 @@ impl GuiApp {
                         }
                         thread::sleep(Duration::from_millis(50));
                     };
-                    if status.success() {
+                    if worker_is_setup_preflight {
+                        Ok(String::from_utf8_lossy(&stdout_bytes).into_owned())
+                    } else if status.success() {
                         Ok(Self::setup_output_text(&stdout_bytes))
                     } else if worker_is_setup {
                         Err(setup_failure_report(
@@ -527,6 +548,27 @@ impl GuiApp {
         }
     }
 
+    fn setup_preflight_result(&mut self, output: &str) -> Status {
+        let Ok(report) = serde_json::from_str::<serde_json::Value>(output) else {
+            self.diagnostics_open = true;
+            return Status::error(
+                "Could not read IBus setup checks. Open Diagnostics, refresh the report, and try setup again.",
+            );
+        };
+        let Some(registration_needed) = ibus_registration_needed(&report) else {
+            self.diagnostics_open = true;
+            return Status::error(
+                "IBus setup checks were incomplete. Open Diagnostics and resolve the IBus registration check before continuing.",
+            );
+        };
+        self.setup_system_integration_required = registration_needed;
+        self.setup_system_integration_acknowledged = !registration_needed;
+        self.setup_consent_acknowledged =
+            self.config.settings.compatibility_mode != wayexpand_core::CompatibilityMode::Off;
+        self.setup_consent_open = true;
+        Status::info("Review the setup stages and any required consent to continue.")
+    }
+
     pub(crate) fn start_desktop_test(
         &mut self,
         trigger: String,
@@ -584,50 +626,59 @@ impl GuiApp {
                 self.setup_task = None;
                 self.status = match result {
                     Ok(output) => {
-                        self.last_cli_task_output = Some(output.clone());
                         let task_kind = self.cli_task_kind.take();
-                        match task_kind.as_deref() {
-                            Some("restore-check") => {
-                                self.restore_preview = serde_json::from_str(&output).ok();
-                                self.restore_confirmed = false;
-                            }
-                            Some("restore-apply") => {
-                                self.restore_preview = None;
-                                self.restore_confirmed = false;
-                            }
-                            _ => {}
+                        if task_kind.as_deref() != Some("setup-preflight") {
+                            self.last_cli_task_output = Some(output.clone());
                         }
-                        if task_kind.as_deref() == Some("desktop-test") {
-                            if output.lines().any(|line| {
-                                line.trim()
-                                    == "DESKTOP TEST RESULT: OUTPUT OBSERVED, AWAITING REVIEW"
-                            }) {
-                                self.desktop_test_review = self.pending_desktop_test.take();
-                                if let Some(review) = &mut self.desktop_test_review {
-                                    review.capture_activity_observed = output.lines().any(|line| {
-                                        line.trim_start().starts_with("Capture [")
-                                            && line.contains("ACTIVITY OBSERVED")
-                                    });
-                                    review.output_activity_observed = output.lines().any(|line| {
-                                        line.trim_start().starts_with("Output activity [")
-                                    });
-                                }
-                                self.desktop_test_review_open = self.desktop_test_review.is_some();
-                                Status::info("Activity observed but not correlated to the test trigger. Visually verify the exact target text before confirming.")
-                            } else {
-                                self.pending_desktop_test = None;
-                                self.diagnostics_open = true;
-                                Self::setup_completion_status(&output, success_message).0
-                            }
+                        if task_kind.as_deref() == Some("setup-preflight") {
+                            self.setup_preflight_result(&output)
                         } else {
-                            let (status, open_diagnostics) =
-                                Self::setup_completion_status(&output, success_message);
-                            self.diagnostics_open |= open_diagnostics;
-                            status
+                            match task_kind.as_deref() {
+                                Some("restore-check") => {
+                                    self.restore_preview = serde_json::from_str(&output).ok();
+                                    self.restore_confirmed = false;
+                                }
+                                Some("restore-apply") => {
+                                    self.restore_preview = None;
+                                    self.restore_confirmed = false;
+                                }
+                                _ => {}
+                            }
+                            if task_kind.as_deref() == Some("desktop-test") {
+                                if output.lines().any(|line| {
+                                    line.trim()
+                                        == "DESKTOP TEST RESULT: OUTPUT OBSERVED, AWAITING REVIEW"
+                                }) {
+                                    self.desktop_test_review = self.pending_desktop_test.take();
+                                    if let Some(review) = &mut self.desktop_test_review {
+                                        review.capture_activity_observed =
+                                            output.lines().any(|line| {
+                                                line.trim_start().starts_with("Capture [")
+                                                    && line.contains("ACTIVITY OBSERVED")
+                                            });
+                                        review.output_activity_observed =
+                                            output.lines().any(|line| {
+                                                line.trim_start().starts_with("Output activity [")
+                                            });
+                                    }
+                                    self.desktop_test_review_open =
+                                        self.desktop_test_review.is_some();
+                                    Status::info("Activity observed but not correlated to the test trigger. Visually verify the exact target text before confirming.")
+                                } else {
+                                    self.pending_desktop_test = None;
+                                    self.diagnostics_open = true;
+                                    Self::setup_completion_status(&output, success_message).0
+                                }
+                            } else {
+                                let (status, open_diagnostics) =
+                                    Self::setup_completion_status(&output, success_message);
+                                self.diagnostics_open |= open_diagnostics;
+                                status
+                            }
                         }
                     }
                     Err(detail) => {
-                        self.cli_task_kind = None;
+                        let task_kind = self.cli_task_kind.take();
                         self.pending_desktop_test = None;
                         if is_setup {
                             let report = if detail.starts_with("Setup diagnostic report\n") {
@@ -644,6 +695,11 @@ impl GuiApp {
                             self.setup_failure_report_open = true;
                             self.diagnostics_open = true;
                             Status::error(self.strings.status_setup_failed(&summary))
+                        } else if task_kind.as_deref() == Some("setup-preflight") {
+                            self.diagnostics_open = true;
+                            Status::error(format!(
+                                "Could not check the IBus setup stages: {detail}"
+                            ))
                         } else {
                             Status::error(self.strings.status_setup_failed(&detail))
                         }
@@ -656,6 +712,7 @@ impl GuiApp {
             }
             Err(mpsc::TryRecvError::Disconnected) => {
                 let is_setup = task.is_setup;
+                let task_kind = self.cli_task_kind.take();
                 self.setup_task = None;
                 if is_setup {
                     let report = setup_failure_report(
@@ -668,6 +725,11 @@ impl GuiApp {
                     self.setup_failure_report_open = true;
                     self.diagnostics_open = true;
                     self.status = Status::error(self.strings.status_setup_failed(&summary));
+                } else if task_kind.as_deref() == Some("setup-preflight") {
+                    self.diagnostics_open = true;
+                    self.status = Status::error(
+                        "IBus setup preflight stopped unexpectedly. Open Diagnostics and retry.",
+                    );
                 } else {
                     self.status = Status::error(self.strings.status_setup_failed("worker stopped"));
                 }
@@ -748,10 +810,14 @@ impl GuiApp {
                 .recommended_route
                 .is_some_and(|route| route.setup_backend() == "ibus");
             if ibus_route {
-                self.setup_consent_acknowledged = self.config.settings.compatibility_mode
-                    != wayexpand_core::CompatibilityMode::Off;
-                self.setup_system_integration_acknowledged = false;
-                self.setup_consent_open = true;
+                self.start_cli_task(
+                    vec!["ibus".into(), "status".into(), "--json".into()],
+                    "Checking whether IBus registration or replacement consent is needed…".into(),
+                    "IBus preflight complete.".into(),
+                );
+                if self.setup_task.is_some() {
+                    self.cli_task_kind = Some("setup-preflight".into());
+                }
             } else if self.recommended_route.is_none() {
                 self.refresh_diagnostics(false);
                 self.status = Status::info(
@@ -770,34 +836,96 @@ impl GuiApp {
         if !self.setup_consent_open {
             return;
         }
+        let (input_title, input_detail, tracking_title, tracking_detail) =
+            match wayexpand_backend_selection::Compositor::detect() {
+                wayexpand_backend_selection::Compositor::Gnome => (
+                    "Register and select the IBus source",
+                    "Keep your existing keyboard sources and layout in GNOME.",
+                    "Enable GNOME window tracking",
+                    "Used for app-specific snippets; ordinary snippets do not depend on it. No administrator access is needed.",
+                ),
+                wayexpand_backend_selection::Compositor::KdePlasma => (
+                    "Connect IBus to the KDE virtual keyboard",
+                    "WayExpand will preserve your configured keyboard layout.",
+                    "Use KWin window tracking",
+                    "Used for app-specific snippets; ordinary snippets do not depend on it.",
+                ),
+                compositor => (
+                    "Activate the IBus input source",
+                    "Your existing keyboard configuration is left in place.",
+                    "Check application window tracking",
+                    if compositor == wayexpand_backend_selection::Compositor::Unknown {
+                        "App-specific snippets need a supported window tracker; Diagnostics will show whether one is available."
+                    } else {
+                        "App-specific snippets need a supported window tracker; ordinary snippets do not depend on it."
+                    },
+                ),
+            };
         egui::Modal::new(egui::Id::new("ibus_replacement_consent")).show(ctx, |ui| {
                 ui.set_width(430.0);
-                ui.heading("Set up WayExpand with IBus?");
+                ui.heading("Set up WayExpand");
                 ui.add_space(8.0);
-                ui.label("The IBus engine manifest may need to be registered in the component directory used by your running IBus session. Application files remain in your user installation; administrator authorization is requested only if that directory is not writable by you.");
-                ui.checkbox(
-                    &mut self.setup_system_integration_acknowledged,
-                    "I want to install the IBus integration if it is missing.",
-                );
+                for (number, title, detail) in [
+                    (
+                        "1",
+                        "Prepare WayExpand",
+                        "Use the installed files and create your configuration if needed.",
+                    ),
+                    (
+                        "2",
+                        input_title,
+                        input_detail,
+                    ),
+                    (
+                        "3",
+                        "Activate and check the input engine",
+                        "Then test a real expansion in a text field.",
+                    ),
+                    (
+                        "4",
+                        tracking_title,
+                        tracking_detail,
+                    ),
+                ] {
+                    ui.horizontal_top(|ui| {
+                        ui.label(RichText::new(number).strong());
+                        ui.vertical(|ui| {
+                            ui.label(RichText::new(title).strong());
+                            ui.label(detail);
+                        });
+                    });
+                }
                 ui.add_space(8.0);
-                ui.label("Alternative: cancel and install WayExpand using your distribution package, which includes the IBus registration, or select another input route.");
+                if self.setup_system_integration_required {
+                    ui.add_space(8.0);
+                    ui.label("IBus does not yet have a valid WayExpand component registration. WayExpand will install it only if still missing; administrator authorization is requested only if the component directory requires it.");
+                    ui.checkbox(
+                        &mut self.setup_system_integration_acknowledged,
+                        "Allow WayExpand to request administrator authorization for IBus registration if needed.",
+                    );
+                } else {
+                    ui.add_space(8.0);
+                    ui.label("IBus registration is already valid. No administrator authorization is needed for this step.");
+                }
                 if self.config.settings.compatibility_mode
                     == wayexpand_core::CompatibilityMode::Off
                 {
                     ui.add_space(8.0);
-                ui.label("WayExpand checks the text before the cursor against your trigger, then deletes the trigger and inserts the snippet in two separate steps. This replacement is not atomic.");
-                ui.add_space(8.0);
-                ui.label("If focus or input changes during insertion, WayExpand cannot guarantee rollback of text already sent.");
-                ui.checkbox(
-                    &mut self.setup_consent_acknowledged,
-                    "I understand and want to enable verified two-step replacement.",
-                );
+                    ui.label("Text replacement is not atomic: WayExpand removes a recognized trigger and then inserts its snippet. If the application loses focus or insertion is interrupted, already-sent text cannot be rolled back.");
+                    ui.checkbox(
+                        &mut self.setup_consent_acknowledged,
+                        "I understand and want to enable tracked-focus text replacement.",
+                    );
+                } else {
+                    ui.add_space(8.0);
+                    ui.label("Tracked-focus text replacement is already enabled.");
                 }
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
                     if ui
                         .add_enabled(
-                            self.setup_system_integration_acknowledged
+                            (!self.setup_system_integration_required
+                                || self.setup_system_integration_acknowledged)
                                 && self.setup_consent_acknowledged
                                 && self.setup_task.is_none(),
                             egui::Button::new("Continue setup"),
@@ -809,12 +937,14 @@ impl GuiApp {
                             == wayexpand_core::CompatibilityMode::Off;
                         self.start_setup_with_replacement_consent(
                             replacement_consent,
-                            true,
+                            self.setup_system_integration_required
+                                && self.setup_system_integration_acknowledged,
                         );
                     }
                     if ui.button("Cancel").clicked() {
                         self.setup_consent_open = false;
                         self.setup_consent_acknowledged = false;
+                        self.setup_system_integration_required = false;
                         self.setup_system_integration_acknowledged = false;
                     }
                 });
@@ -892,6 +1022,30 @@ pub(crate) fn onboarding_step(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn system_registration_consent_is_needed_only_when_component_checks_fail() {
+        let registered = serde_json::json!({
+            "checks": [
+                {"id": "component", "state": "pass"},
+                {"id": "manifest", "state": "pass"}
+            ]
+        });
+        assert_eq!(ibus_registration_needed(&registered), Some(false));
+
+        let missing = serde_json::json!({
+            "checks": [
+                {"id": "component", "state": "fail"},
+                {"id": "manifest", "state": "skip"}
+            ]
+        });
+        assert_eq!(ibus_registration_needed(&missing), Some(true));
+
+        assert_eq!(
+            ibus_registration_needed(&serde_json::json!({"schema": 2})),
+            None
+        );
+    }
 
     struct ContinuousOutput {
         reads: usize,
