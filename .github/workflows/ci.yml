@@ -361,6 +361,8 @@ jobs:
         run: bash scripts/test-package-smoke-guard.sh
       - name: Verify GNOME extension state parsing
         run: bash scripts/test-gnome-extension-state.sh
+      - name: Verify GNOME extension D-Bus path compatibility
+        run: sh scripts/test-gnome-extension-dbus.sh
       - name: Check Rust dependency hygiene
         run: cargo install cargo-machete --version 0.9.2 --locked && cargo machete
       - name: Test commit identity failure handling

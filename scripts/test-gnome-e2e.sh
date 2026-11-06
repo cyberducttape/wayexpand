@@ -54,6 +54,7 @@ cat >"$work/session.sh" <<'EOF'
 #!/bin/sh
 set -eu
 . "$E2E_STATE_HELPER"
+. "$E2E_DBUS_HELPER"
 display=wayexpand-gnome-e2e
 log() { printf '%s\n' "$*"; }
 gsettings set org.gnome.shell disable-user-extensions false
@@ -70,8 +71,7 @@ finish() {
 trap finish EXIT
 
 extension_state() {
-    gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell/Extensions \
-        --method org.gnome.Shell.Extensions.GetExtensionInfo "$E2E_UUID" 2>&1 || true
+    gnome_shell_extensions_call GetExtensionInfo "$E2E_UUID" || true
 }
 tries=600
 until gnome_extension_state_active "$(extension_state)"; do
@@ -105,8 +105,10 @@ kill "$last_sink" 2>/dev/null || true
 start_sink org.wayexpand.GnomeE2eSecond
 "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --expect org.wayexpand.GnomeE2eSecond || status=1
 
-gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell/Extensions \
-    --method org.gnome.Shell.Extensions.DisableExtension "$E2E_UUID" >/dev/null
+if ! gnome_shell_extensions_call DisableExtension "$E2E_UUID" >/dev/null; then
+    log "fail extension-disabled could not disable the extension through GNOME Shell D-Bus"
+    exit 1
+fi
 tries=100
 until gnome_extension_state_inactive "$(extension_state)"; do
     tries=$((tries - 1))
@@ -140,6 +142,7 @@ env -i \
     E2E_BIN_DIR="$bin_dir" \
     E2E_UUID="$uuid" \
     E2E_STATE_HELPER="$project_dir/scripts/gnome-extension-state.sh" \
+    E2E_DBUS_HELPER="$project_dir/scripts/gnome-extension-dbus.sh" \
     dbus-run-session -- "$work/session.sh" >"$work/results.txt" 2>"$work/session.log" || status=$?
 
 cat "$work/results.txt"
