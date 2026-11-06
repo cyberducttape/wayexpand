@@ -64,6 +64,15 @@ All notable changes to WayExpand are documented here.
   daemon to publish status before failing its health check. When build identity
   remains unknown or mismatched, report the CLI and daemon revisions and give
   specific recovery guidance before/after automatic rollback.
+- Report stale IBus-owned `wayexpand-ibus` processes after an upgrade by PID and
+  executable path, including processes launched through wrappers whose kernel
+  process name differs from the engine executable. Print the explicit
+  `ibus restart` command needed to load the current engine, and include the same
+  process inventory in `upgrade --check --json`.
+- Run the headless GNOME E2E test in user session mode and support both GNOME
+  Shell extension-management D-Bus object paths. Add path-fallback regression
+  coverage; snapshot allowlisted broker environment values to keep concurrent
+  action-broker tests from mutating process-global environment state.
 - Add a regression test for failed IBus activation rollback across service state,
   compositor input-method selection, IBus preload engines, and active engine.
   Repair the daemon reload test fixture for expansion counts and make its

@@ -154,23 +154,49 @@ fn stale_engine_processes_at(
     let Ok(entries) = fs::read_dir(proc_root) else {
         return Vec::new();
     };
-    entries
+    let mut processes: Vec<_> = entries
         .flatten()
         .filter_map(|entry| {
             let pid = entry.file_name().to_str()?.parse::<i32>().ok()?;
             let proc_dir = entry.path();
             let owned = fs::metadata(&proc_dir)
                 .is_ok_and(|metadata| std::os::unix::fs::MetadataExt::uid(&metadata) == uid);
-            if !owned
-                || !fs::read_to_string(proc_dir.join("comm"))
-                    .is_ok_and(|comm| comm.trim() == "wayexpand-ibus")
-            {
+            if !owned {
                 return None;
             }
             let executable = fs::read_link(proc_dir.join("exe")).ok()?;
+            // `comm` is useful, but can differ from argv[0] when an IBus
+            // launcher or wrapper starts the engine. Check all three kernel
+            // views so the upgrade report still identifies the process that
+            // IBus must restart.
+            let comm_matches = fs::read_to_string(proc_dir.join("comm"))
+                .is_ok_and(|comm| comm.trim() == "wayexpand-ibus");
+            let exe_matches = executable
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name == "wayexpand-ibus" || name == "wayexpand-ibus (deleted)");
+            let argv_matches = fs::read(proc_dir.join("cmdline"))
+                .ok()
+                .and_then(|cmdline| {
+                    cmdline
+                        .split(|byte| *byte == 0)
+                        .find(|argument| !argument.is_empty())
+                        .map(|argument| {
+                            argument
+                                .rsplit(|byte| *byte == b'/')
+                                .next()
+                                .is_some_and(|name| name == b"wayexpand-ibus")
+                        })
+                })
+                .unwrap_or(false);
+            if !(comm_matches || exe_matches || argv_matches) {
+                return None;
+            }
             (executable != installed).then_some(StaleEngineProcess { pid, executable })
         })
-        .collect()
+        .collect();
+    processes.sort_by_key(|process| process.pid);
+    processes
 }
 
 /// Install the component where the running ibus-daemon reads components.
@@ -1068,12 +1094,18 @@ mod tests {
             (101, &installed, "wayexpand-ibus"),
             (202, &old, "wayexpand-ibus"),
             (303, &old, "other-process"),
+            (404, &old, "ibus-wrapper"),
         ] {
             let process = proc_root.join(pid.to_string());
             fs::create_dir(&process).unwrap();
             fs::write(process.join("comm"), format!("{comm}\n")).unwrap();
             symlink(executable, process.join("exe")).unwrap();
         }
+        fs::write(
+            proc_root.join("404/cmdline"),
+            b"/usr/libexec/wayexpand-ibus\0--ibus\0",
+        )
+        .unwrap();
 
         let stale = stale_engine_processes_at(
             &proc_root,
@@ -1082,10 +1114,16 @@ mod tests {
         );
         assert_eq!(
             stale,
-            vec![StaleEngineProcess {
-                pid: 202,
-                executable: old.clone(),
-            }]
+            vec![
+                StaleEngineProcess {
+                    pid: 202,
+                    executable: old.clone(),
+                },
+                StaleEngineProcess {
+                    pid: 404,
+                    executable: old.clone(),
+                }
+            ]
         );
         fs::remove_dir_all(root).unwrap();
     }
