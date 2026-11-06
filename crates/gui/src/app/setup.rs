@@ -41,6 +41,112 @@ fn drain_setup_output<R: Read>(reader: &mut R, output: &mut Vec<u8>) -> Result<b
     Ok(false)
 }
 
+fn redact_setup_text(text: &str) -> String {
+    let mut redacted = text.to_owned();
+    if let Some(home) = env::var_os("HOME") {
+        let home = home.to_string_lossy();
+        if !home.is_empty() {
+            redacted = redacted.replace(home.as_ref(), "~");
+        }
+    }
+    redacted
+}
+
+fn setup_failure_report(stdout: &[u8], stderr: &[u8], reason: &str) -> String {
+    let stdout = String::from_utf8_lossy(stdout);
+    let stderr = String::from_utf8_lossy(stderr);
+    let combined = format!("{stdout}\n{stderr}\n{reason}");
+    let summary = stderr
+        .lines()
+        .rev()
+        .find(|line| {
+            let line = line.trim();
+            !line.is_empty()
+                && !line.starts_with("Next:")
+                && !line.starts_with("Fix:")
+                && !line.starts_with("Remedy:")
+        })
+        .map(str::trim)
+        .filter(|line| !line.starts_with("Usage:"))
+        .or_else(|| {
+            stdout.lines().rev().find(|line| {
+                let line = line.trim();
+                line.starts_with("Error:")
+                    || line.starts_with("FAIL:")
+                    || line.contains(" failed:")
+                    || line.starts_with("SETUP RESULT: ACTION REQUIRED")
+            })
+        })
+        .unwrap_or(reason)
+        .trim_start_matches("Error: ");
+    let stage = stdout
+        .lines()
+        .rev()
+        .find(|line| {
+            let line = line.trim();
+            !line.is_empty()
+                && (line.starts_with("Step ")
+                    || line.starts_with("✓")
+                    || line.starts_with("•")
+                    || line.starts_with("Installing ")
+                    || line.starts_with("Checking ")
+                    || line.starts_with("Activating "))
+        })
+        .map(str::trim)
+        .unwrap_or("Setup command execution");
+    let problem_id = combined
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '-'))
+        .find(|part| part.starts_with("WX-") && part.len() > 3)
+        .unwrap_or("WX-SETUP-001");
+    let remedy = combined
+        .lines()
+        .find(|line| {
+            let line = line.trim_start();
+            line.starts_with("Next:") || line.starts_with("Fix:") || line.starts_with("Remedy:")
+        })
+        .map(str::trim)
+        .unwrap_or("Run `wayexpand setup --check` and address the reported prerequisite.");
+    let lower = combined.to_ascii_lowercase();
+    let rollback = if lower.contains("rollback was incomplete")
+        || lower.contains("rollback failed")
+        || lower.contains("rollback issues")
+    {
+        "Incomplete; review the remaining changes listed below."
+    } else if lower.contains("rollback restored:")
+        || lower.contains("rollback completed")
+        || lower.contains("no persistent setup changes needed rollback")
+    {
+        "Succeeded, or no persistent changes required rollback."
+    } else {
+        "Not reported by the setup command."
+    };
+    format!(
+        "Setup diagnostic report\n\
+         Summary: {}\n\
+         Failing stage: {}\n\
+         Problem ID: {}\n\
+         Suggested remedy: {}\n\
+         Rollback: {}\n\n\
+         --- stdout ---\n{}\n\n\
+         --- stderr ---\n{}",
+        redact_setup_text(summary.trim()),
+        redact_setup_text(stage),
+        problem_id,
+        redact_setup_text(remedy),
+        rollback,
+        redact_setup_text(stdout.trim()),
+        redact_setup_text(stderr.trim()),
+    )
+}
+
+fn setup_failure_summary(report: &str) -> String {
+    report
+        .lines()
+        .find_map(|line| line.strip_prefix("Summary: "))
+        .unwrap_or("Setup failed; open the diagnostic report for details.")
+        .to_owned()
+}
+
 fn finish_setup_process(
     supervisor: &mut ChildSupervisor,
     stdout: &mut ChildStdout,
@@ -163,10 +269,18 @@ impl GuiApp {
         if self.setup_task.is_some() {
             return;
         }
+        let is_setup = arguments
+            .first()
+            .is_some_and(|argument| argument == "setup");
+        if is_setup {
+            self.setup_failure_report = None;
+            self.setup_failure_report_open = false;
+        }
         self.cli_task_kind = None;
         let (sender, receiver) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
         let worker_cancel = Arc::clone(&cancel);
+        let worker_is_setup = is_setup;
         // Prefer the CLI installed beside this binary (release archives and
         // development builds), else whatever `wayexpand` is on PATH.
         let cli = env::current_exe()
@@ -219,7 +333,15 @@ impl GuiApp {
                         if worker_cancel.load(Ordering::Acquire) {
                             supervisor.kill_group();
                             let _ = supervisor.reap();
-                            return Err("Setup cancelled".to_owned());
+                            return Err(if worker_is_setup {
+                                setup_failure_report(
+                                    &stdout_bytes,
+                                    &stderr_bytes,
+                                    "Setup cancelled",
+                                )
+                            } else {
+                                "Command cancelled".into()
+                            });
                         }
                         if supervisor.has_exited().map_err(|error| error.to_string())? {
                             break finish_setup_process(
@@ -235,15 +357,26 @@ impl GuiApp {
                         if Instant::now() >= deadline {
                             supervisor.kill_group();
                             let _ = supervisor.reap();
-                            return Err(format!(
-                                "Setup timed out after {} seconds",
+                            let timeout = format!(
+                                "Command timed out after {} seconds",
                                 SETUP_TIMEOUT.as_secs()
-                            ));
+                            );
+                            return Err(if worker_is_setup {
+                                setup_failure_report(&stdout_bytes, &stderr_bytes, &timeout)
+                            } else {
+                                timeout
+                            });
                         }
                         thread::sleep(Duration::from_millis(50));
                     };
                     if status.success() {
                         Ok(Self::setup_output_text(&stdout_bytes))
+                    } else if worker_is_setup {
+                        Err(setup_failure_report(
+                            &stdout_bytes,
+                            &stderr_bytes,
+                            &format!("Setup exited with status {}", status),
+                        ))
                     } else {
                         Err(Self::setup_output_text(&stderr_bytes))
                     }
@@ -256,11 +389,26 @@ impl GuiApp {
                     receiver,
                     cancel,
                     success_message,
+                    is_setup,
                 });
                 self.status = Status::info(running_message);
             }
             Err(error) => {
-                self.status = Status::error(self.strings.status_setup_failed(&error.to_string()))
+                if is_setup {
+                    let report = setup_failure_report(
+                        &[],
+                        error.to_string().as_bytes(),
+                        "Could not start the setup worker",
+                    );
+                    let summary = setup_failure_summary(&report);
+                    self.setup_failure_report = Some(report);
+                    self.setup_failure_report_open = true;
+                    self.diagnostics_open = true;
+                    self.status = Status::error(self.strings.status_setup_failed(&summary));
+                } else {
+                    self.status =
+                        Status::error(self.strings.status_setup_failed(&error.to_string()));
+                }
             }
         }
     }
@@ -432,6 +580,7 @@ impl GuiApp {
         match task.receiver.try_recv() {
             Ok(result) => {
                 let success_message = task.success_message.clone();
+                let is_setup = task.is_setup;
                 self.setup_task = None;
                 self.status = match result {
                     Ok(output) => {
@@ -480,10 +629,24 @@ impl GuiApp {
                     Err(detail) => {
                         self.cli_task_kind = None;
                         self.pending_desktop_test = None;
-                        // Setup's own report names the broken link; show the
-                        // same checks here instead of a one-line error.
-                        self.diagnostics_open = true;
-                        Status::error(self.strings.status_setup_failed(&detail))
+                        if is_setup {
+                            let report = if detail.starts_with("Setup diagnostic report\n") {
+                                detail
+                            } else {
+                                setup_failure_report(
+                                    &[],
+                                    detail.as_bytes(),
+                                    "Setup could not be started",
+                                )
+                            };
+                            let summary = setup_failure_summary(&report);
+                            self.setup_failure_report = Some(report);
+                            self.setup_failure_report_open = true;
+                            self.diagnostics_open = true;
+                            Status::error(self.strings.status_setup_failed(&summary))
+                        } else {
+                            Status::error(self.strings.status_setup_failed(&detail))
+                        }
                     }
                 };
                 self.refresh_diagnostics(false);
@@ -492,8 +655,22 @@ impl GuiApp {
                 ctx.request_repaint_after(Duration::from_millis(100));
             }
             Err(mpsc::TryRecvError::Disconnected) => {
+                let is_setup = task.is_setup;
                 self.setup_task = None;
-                self.status = Status::error(self.strings.status_setup_failed("worker stopped"));
+                if is_setup {
+                    let report = setup_failure_report(
+                        &[],
+                        b"Setup worker stopped unexpectedly",
+                        "Setup worker stopped",
+                    );
+                    let summary = setup_failure_summary(&report);
+                    self.setup_failure_report = Some(report);
+                    self.setup_failure_report_open = true;
+                    self.diagnostics_open = true;
+                    self.status = Status::error(self.strings.status_setup_failed(&summary));
+                } else {
+                    self.status = Status::error(self.strings.status_setup_failed("worker stopped"));
+                }
             }
         }
     }
@@ -539,6 +716,7 @@ impl GuiApp {
                     receiver,
                     cancel,
                     success_message: format!("{unit} restarted; refreshing diagnostics."),
+                    is_setup: false,
                 });
                 self.status = Status::info(format!("Restarting {unit}…"));
             }
@@ -746,6 +924,32 @@ mod tests {
         let visible = GuiApp::setup_output_text(output);
         assert!(visible.contains("SETUP RESULT: CONFIGURED, AWAITING TEST"));
         assert!(visible.contains("Next: run wayexpand debug"));
+    }
+
+    #[test]
+    fn failed_setup_report_preserves_both_streams_and_actionable_fields() {
+        let stdout = b"Step 3: activating IBus\nSetup rollback was incomplete. Changes remaining: engine source.\n";
+        let stderr = b"Error: WX-GNOME-IBUS-RESTART: engine did not become available\nFix: run wayexpand setup --check\n";
+        let report = setup_failure_report(stdout, stderr, "Setup exited with status 1");
+        assert!(report.contains("Summary: WX-GNOME-IBUS-RESTART"));
+        assert!(report.contains("Failing stage: Step 3: activating IBus"));
+        assert!(report.contains("Problem ID: WX-GNOME-IBUS-RESTART"));
+        assert!(report.contains("Suggested remedy: Fix: run wayexpand setup --check"));
+        assert!(report.contains("Rollback: Incomplete"));
+        assert!(report.contains("--- stdout ---\nStep 3: activating IBus"));
+        assert!(report.contains("--- stderr ---\nError: WX-GNOME-IBUS-RESTART"));
+        assert_eq!(
+            setup_failure_summary(&report),
+            "WX-GNOME-IBUS-RESTART: engine did not become available"
+        );
+    }
+
+    #[test]
+    fn failed_setup_without_cli_metadata_gets_stable_problem_id_and_remedy() {
+        let report = setup_failure_report(&[], b"permission denied", "setup command failed");
+        assert!(report.contains("Problem ID: WX-SETUP-001"));
+        assert!(report.contains("Suggested remedy: Run `wayexpand setup --check`"));
+        assert!(report.contains("Rollback: Not reported"));
     }
 
     #[test]

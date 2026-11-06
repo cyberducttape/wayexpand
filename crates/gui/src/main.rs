@@ -243,6 +243,8 @@ struct GuiApp {
     restore_confirmed: bool,
     cli_task_kind: Option<String>,
     last_cli_task_output: Option<String>,
+    setup_failure_report: Option<String>,
+    setup_failure_report_open: bool,
     support_export_open: bool,
     support_preview_loading: bool,
     support_preview: Option<String>,
@@ -493,6 +495,7 @@ struct SetupTask {
     receiver: mpsc::Receiver<Result<String, String>>,
     cancel: Arc<AtomicBool>,
     success_message: String,
+    is_setup: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -633,6 +636,8 @@ impl GuiApp {
             restore_confirmed: false,
             cli_task_kind: None,
             last_cli_task_output: None,
+            setup_failure_report: None,
+            setup_failure_report_open: false,
             support_export_open: false,
             support_preview_loading: false,
             support_preview: None,

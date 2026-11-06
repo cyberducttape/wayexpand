@@ -73,6 +73,7 @@ impl GuiApp {
             self.diagnostics_open = open;
         }
         self.render_support_export(ctx, palette);
+        self.render_setup_failure_report(ctx, palette);
         self.render_test_expansion_dialog(ctx, palette);
         self.render_desktop_test_review(ctx, palette);
         self.render_backend_test_help(ctx, palette);
@@ -82,6 +83,21 @@ impl GuiApp {
     }
 
     pub(crate) fn render_diagnostics_body(&mut self, ui: &mut egui::Ui, palette: &Palette) {
+        if let Some(report) = self.setup_failure_report.as_deref() {
+            ui.group(|ui| {
+                ui.colored_label(palette.danger, "Setup failed");
+                if let Some(summary) = report
+                    .lines()
+                    .find_map(|line| line.strip_prefix("Summary: "))
+                {
+                    ui.label(summary);
+                }
+                if ui.button("View diagnostic report").clicked() {
+                    self.setup_failure_report_open = true;
+                }
+            });
+            ui.add_space(8.0);
+        }
         ui.horizontal_wrapped(|ui| {
             ui.label(
                 RichText::new(self.strings.runtime_dashboard())
@@ -1557,6 +1573,42 @@ impl GuiApp {
                 if self.setup_task.is_some() { ui.spinner(); }
             });
         self.config_backup_dialog_open = open;
+    }
+
+    fn render_setup_failure_report(&mut self, ctx: &egui::Context, palette: &Palette) {
+        if !self.setup_failure_report_open {
+            return;
+        }
+        let mut open = self.setup_failure_report_open;
+        egui::Window::new("Setup diagnostic report")
+            .id(egui::Id::new("setup_failure_diagnostic_report"))
+            .order(egui::Order::Foreground)
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(true)
+            .default_size(egui::vec2(680.0, 520.0))
+            .show(ctx, |ui| {
+                ui.label(RichText::new("Sanitized setup output; home-directory paths are shortened. No environment variables or input contents are included.").small().color(palette.muted));
+                ui.horizontal(|ui| {
+                    if ui.button("Copy report").clicked() {
+                        if let Some(report) = &self.setup_failure_report {
+                            ui.ctx().copy_text(report.clone());
+                        }
+                    }
+                    if ui.button("Open Diagnostics").clicked() {
+                        self.diagnostics_open = true;
+                    }
+                });
+                ui.separator();
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        if let Some(report) = &self.setup_failure_report {
+                            ui.add(egui::Label::new(RichText::new(report).monospace()).wrap());
+                        }
+                    });
+            });
+        self.setup_failure_report_open = open;
     }
 
     fn render_support_export(&mut self, ctx: &egui::Context, palette: &Palette) {

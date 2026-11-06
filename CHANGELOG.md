@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Preserve both stdout and stderr from failed GUI setup tasks in a bounded,
+  sanitized diagnostic report. The report identifies the last setup stage, a
+  stable problem ID, a suggested remedy, and rollback status; Diagnostics now
+  offers a “View diagnostic report” action and copyable full output.
 - Give the GNOME Shell window tracker a content-bound build identity. The
   running Shell extension reports the build identity from its loaded metadata;
   `doctor` and setup compare it with the installed extension and distinguish
