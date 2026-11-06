@@ -324,10 +324,12 @@ jobs:
       - name: Build with clean CARGO_HOME (no cache, no vendor)
         env:
           CARGO_HOME: /tmp/cargo-clean
+          WAYEXPAND_BUILD_SHA: ${{ github.sha }}
         run: cd /tmp/clean-build && cargo build --locked --release
       - name: Test with clean CARGO_HOME
         env:
           CARGO_HOME: /tmp/cargo-clean
+          WAYEXPAND_BUILD_SHA: ${{ github.sha }}
           RUST_TEST_THREADS: 4
         run: cd /tmp/clean-build && cargo test --locked --release --workspace
 
