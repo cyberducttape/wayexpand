@@ -89,9 +89,9 @@ fn gnome_support_section(doctor: &serde_json::Value) -> serde_json::Value {
         "gsettings",
         &["get", "org.gnome.desktop.input-sources", "sources"],
     );
-    let current_setting = crate::setup_ibus::command_output(
+    let mru_setting = crate::setup_ibus::command_output(
         "gsettings",
-        &["get", "org.gnome.desktop.input-sources", "current"],
+        &["get", "org.gnome.desktop.input-sources", "mru-sources"],
     );
     let parsed_sources = source_setting
         .as_deref()
@@ -99,18 +99,31 @@ fn gnome_support_section(doctor: &serde_json::Value) -> serde_json::Value {
     let wayexpand_registered = parsed_sources.as_ref().is_some_and(|sources| {
         wayexpand_backend_ibus::gnome_input_sources::wayexpand_index(sources).is_some()
     });
-    let current_index = current_setting
+    let mru_sources = mru_setting
         .as_deref()
-        .and_then(|raw| wayexpand_backend_ibus::gnome_input_sources::parse_current(raw).ok());
-    let wayexpand_index = parsed_sources
+        .and_then(|raw| wayexpand_backend_ibus::gnome_input_sources::parse_sources(raw).ok());
+    let active_source = wayexpand_backend_gnome_window::active_input_source().ok();
+    let wayexpand_is_active = active_source
         .as_ref()
-        .and_then(|sources| wayexpand_backend_ibus::gnome_input_sources::wayexpand_index(sources));
+        .map(|(kind, id)| kind == "ibus" && id == "wayexpand");
+    let mru_agrees_with_live_source = mru_sources
+        .as_ref()
+        .and_then(|sources| sources.first())
+        .zip(active_source.as_ref())
+        .map(|(mru, (kind, id))| mru.kind == *kind && mru.id == *id);
+    let active_source_summary = active_source.as_ref().map(|(kind, id)| {
+        if kind == "ibus" && id == "wayexpand" {
+            "wayexpand"
+        } else {
+            "other"
+        }
+    });
     let source_summaries = parsed_sources.as_ref().map(|sources| {
         sources
             .iter()
             .map(|source| {
                 let (kind, id) = match source.kind.as_str() {
-                    "xkb" => ("xkb", safe_engine_name(&source.id)),
+                    "xkb" => ("xkb", Some("<redacted>".to_owned())),
                     "ibus" if source.id == "wayexpand" => ("ibus", Some("wayexpand".to_owned())),
                     "ibus" => ("ibus", Some("<other-engine>".to_owned())),
                     _ => ("other", Some("<redacted>".to_owned())),
@@ -185,8 +198,9 @@ fn gnome_support_section(doctor: &serde_json::Value) -> serde_json::Value {
             "readable": parsed_sources.is_some(),
             "sources": source_summaries,
             "wayexpand_registered": wayexpand_registered,
-            "current_index": current_index,
-            "wayexpand_active": current_index.zip(wayexpand_index).is_some_and(|(current, expected)| current == expected as u32),
+            "active_source": active_source_summary,
+            "wayexpand_active": wayexpand_is_active,
+            "mru_agrees_with_live_source": mru_agrees_with_live_source,
         },
         "ibus": {
             "current_engine": current_engine,

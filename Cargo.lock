@@ -4429,6 +4429,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "wayexpand-backend-gnome-window",
  "wayexpand-core",
  "wayexpand-process-supervisor",
  "xkeysym",

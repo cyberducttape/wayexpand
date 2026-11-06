@@ -195,6 +195,21 @@ pub(crate) fn setup_gnome_window_tracker() {
     let protocol = probe_if_active(&status.state);
     let (ok, message, fix) = verify_tracker_protocol(&status.state, readiness, protocol);
     println!("  {} {message}", if ok { "✓" } else { "!" });
+    if status.state == ExtensionState::Active {
+        match wayexpand_backend_gnome_window::active_input_source() {
+            Ok((kind, id)) => {
+                let source = if kind == "ibus" && id == "wayexpand" {
+                    "WayExpand".to_owned()
+                } else {
+                    "another configured source".to_owned()
+                };
+                println!("  ✓ GNOME live input-source control: Shell reports {source}");
+            }
+            Err(error) => println!(
+                "  ! GNOME live input-source control is unavailable ({error}); a newly updated extension may require logging out and back in"
+            ),
+        }
+    }
     if status.state == ExtensionState::Unknown && status.user_extensions_enabled {
         println!("  GNOME Shell on Wayland loads newly installed extensions at login: log out and back in once, and app filters start working (it stays enabled after that).");
     } else if let Some(fix) = fix {
@@ -241,6 +256,19 @@ pub(crate) fn doctor_report() -> Option<serde_json::Value> {
         Some(ExtensionState::Other(_)) => "other",
         None => "shell-unavailable",
     };
+    let input_source_control = if state == Some(ExtensionState::Active) {
+        wayexpand_backend_gnome_window::active_input_source()
+            .ok()
+            .map(|(kind, id)| {
+                serde_json::json!({
+                    "available": true,
+                    "wayexpand_active": kind == "ibus" && id == "wayexpand",
+                })
+            })
+            .unwrap_or_else(|| serde_json::json!({"available": false, "wayexpand_active": null}))
+    } else {
+        serde_json::json!({"available": false, "wayexpand_active": null})
+    };
     Some(serde_json::json!({
         "uuid": EXTENSION_UUID,
         "installed_path": installed.map(|path| path.display().to_string()),
@@ -250,6 +278,7 @@ pub(crate) fn doctor_report() -> Option<serde_json::Value> {
         "ready": ok,
         "detail": message,
         "fix": fix,
+        "input_source_control": input_source_control,
     }))
 }
 

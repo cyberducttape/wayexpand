@@ -58,7 +58,10 @@ pub(crate) fn run(json: bool) -> Result<()> {
     }
     println!("\nSuggested diagnostic commands (content-free):");
     println!("  gsettings get org.gnome.desktop.input-sources sources");
-    println!("  gsettings get org.gnome.desktop.input-sources current");
+    println!("  gdbus call --session --dest org.gnome.Shell --object-path /org/wayexpand/ShellWindowTracker --method org.wayexpand.ShellWindowTracker1.GetActiveInputSource");
+    println!(
+        "  gsettings get org.gnome.desktop.input-sources mru-sources  # persistence evidence only"
+    );
     println!("  ibus list-engine --name-only");
     println!("  ibus engine");
     println!("  wayexpand ibus status --json");

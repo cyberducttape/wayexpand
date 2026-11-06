@@ -1549,12 +1549,16 @@ impl SessionSnapshot {
             .as_ref()
             .or(self.gnome_input_sources_original.as_ref())
         {
-            if let Err(error) = gnome.restore_with(|key, value| {
-                run(
-                    "gsettings",
-                    &["set", "org.gnome.desktop.input-sources", key, value],
-                )
-            }) {
+            if let Err(error) = gnome.restore_with(
+                |key, value| {
+                    run(
+                        "gsettings",
+                        &["set", "org.gnome.desktop.input-sources", key, value],
+                    )
+                },
+                || crate::gnome_input_sources::active_source().ok(),
+                |source| crate::gnome_input_sources::activate_source(source).is_ok(),
+            ) {
                 failures.push(format!("GNOME input sources ({error})"));
             }
         }

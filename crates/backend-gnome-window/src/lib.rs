@@ -33,6 +33,7 @@ const EXTENSIONS_PATH: &str = "/org/gnome/Shell/Extensions";
 const EXTENSIONS_IFACE: &str = "org.gnome.Shell.Extensions";
 /// The extension protocol this tracker speaks.
 const PROTOCOL_VERSION: u32 = 2;
+const INPUT_SOURCE_CONTROL_VERSION: u32 = 1;
 const DBUS_CONNECTION_TIMEOUT: Duration = Duration::from_secs(3);
 const DBUS_METHOD_TIMEOUT: Duration = Duration::from_secs(1);
 const TRACKER_HEALTH_CHECK_INTERVAL: Duration = Duration::from_secs(1);
@@ -71,6 +72,12 @@ pub enum GnomeWindowError {
     ExtensionNotActive,
     #[error("the WayExpand GNOME Shell extension speaks protocol {0}; this WayExpand needs {PROTOCOL_VERSION}")]
     ProtocolMismatch(u32),
+    #[error("GNOME Shell input-source control is unavailable; update or enable the WayExpand GNOME Shell extension")]
+    InputSourceControlUnavailable,
+    #[error("the WayExpand GNOME Shell extension speaks input-source protocol {0}; this WayExpand needs {INPUT_SOURCE_CONTROL_VERSION}")]
+    InputSourceControlProtocolMismatch(u32),
+    #[error("GNOME Shell did not activate the requested input source")]
+    InputSourceActivationFailed,
     #[error("GNOME Shell restarted; the window tracker reconnects")]
     ShellRestarted,
     #[error("window tracking setup was cancelled")]
@@ -162,6 +169,97 @@ fn shell_owner(connection: &Connection) -> Result<String, GnomeWindowError> {
         )
         .and_then(|reply| reply.body().deserialize::<String>())
         .map_err(|_| GnomeWindowError::ShellNotRunning)
+}
+
+fn input_source_control_version(
+    connection: &Connection,
+    owner: &str,
+) -> Result<u32, GnomeWindowError> {
+    let reply = connection.call_method(
+        Some(SHELL_NAME),
+        TRACKER_PATH,
+        Some("org.freedesktop.DBus.Properties"),
+        "Get",
+        &(TRACKER_IFACE, "InputSourceControlVersion"),
+    );
+    let version = match reply {
+        Ok(reply) => {
+            if reply.header().sender().map(|name| name.as_str()) != Some(owner) {
+                return Err(GnomeWindowError::ShellRestarted);
+            }
+            reply
+                .body()
+                .deserialize::<OwnedValue>()
+                .ok()
+                .and_then(|value| u32::try_from(value).ok())
+        }
+        Err(error) if is_missing_object(&error) => {
+            return Err(GnomeWindowError::InputSourceControlUnavailable)
+        }
+        Err(error) => return Err(GnomeWindowError::DBus(error)),
+    };
+    match version {
+        Some(INPUT_SOURCE_CONTROL_VERSION) => Ok(INPUT_SOURCE_CONTROL_VERSION),
+        Some(other) => Err(GnomeWindowError::InputSourceControlProtocolMismatch(other)),
+        None => Err(GnomeWindowError::InputSourceControlUnavailable),
+    }
+}
+
+/// Read the active source from GNOME Shell's live InputSourceManager. The
+/// deprecated gsettings `current` key is deliberately not consulted.
+pub fn active_input_source() -> Result<(String, String), GnomeWindowError> {
+    let connection = plain_connection()?;
+    let owner = shell_owner(&connection)?;
+    input_source_control_version(&connection, &owner)?;
+    read_active_input_source(&connection, &owner)
+}
+
+fn read_active_input_source(
+    connection: &Connection,
+    owner: &str,
+) -> Result<(String, String), GnomeWindowError> {
+    let reply = connection.call_method(
+        Some(SHELL_NAME),
+        TRACKER_PATH,
+        Some(TRACKER_IFACE),
+        "GetActiveInputSource",
+        &(),
+    )?;
+    if reply.header().sender().map(|name| name.as_str()) != Some(owner) {
+        return Err(GnomeWindowError::ShellRestarted);
+    }
+    reply
+        .body()
+        .deserialize::<(String, String)>()
+        .map_err(GnomeWindowError::DBus)
+}
+
+/// Activate an input source through GNOME Shell's own InputSourceManager,
+/// then independently read its active-source state back from that manager.
+pub fn activate_input_source(kind: &str, id: &str) -> Result<(String, String), GnomeWindowError> {
+    if !matches!(kind, "ibus" | "xkb") || id.is_empty() || id.len() > 256 {
+        return Err(GnomeWindowError::InputSourceActivationFailed);
+    }
+    let connection = plain_connection()?;
+    let owner = shell_owner(&connection)?;
+    input_source_control_version(&connection, &owner)?;
+    let reply = connection.call_method(
+        Some(SHELL_NAME),
+        TRACKER_PATH,
+        Some(TRACKER_IFACE),
+        "ActivateInputSource",
+        &(kind, id),
+    )?;
+    if reply.header().sender().map(|name| name.as_str()) != Some(owner.as_str()) {
+        return Err(GnomeWindowError::ShellRestarted);
+    }
+    let requested = (kind.to_owned(), id.to_owned());
+    let acknowledged: (String, String) = reply.body().deserialize()?;
+    let observed = read_active_input_source(&connection, &owner)?;
+    if acknowledged != requested || observed != requested {
+        return Err(GnomeWindowError::InputSourceActivationFailed);
+    }
+    Ok(observed)
 }
 
 /// What a `Version` property read says about the extension.
@@ -603,5 +701,10 @@ mod tests {
         assert!(script.contains(&format!("PROTOCOL_VERSION = {PROTOCOL_VERSION}")));
         assert!(script.contains("<method name=\"Ping\"/>"));
         assert!(script.contains("PingAsync"));
+        assert!(script.contains("<method name=\"GetActiveInputSource\">"));
+        assert!(script.contains("<method name=\"ActivateInputSource\">"));
+        assert!(script.contains("InputSourceControlVersion"));
+        assert!(script.contains("Keyboard.getInputSourceManager().currentSource"));
+        assert!(!script.contains("org.gnome.desktop.input-sources current"));
     }
 }

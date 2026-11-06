@@ -48,10 +48,15 @@ for support reports and automation.
 ### WX-GNOME-IM-001
 
 The GNOME IBus session, source registration, or active source could not be
-verified.
+verified. Active-source status comes from the live GNOME Shell
+`InputSourceManager`; the deprecated `org.gnome.desktop.input-sources current`
+key is ignored and does not prove activation. If the active-source check is
+unknown, update/enable the WayExpand GNOME Shell extension and log out and back
+in so its Shell bridge is loaded.
 Inspect the individual GNOME session, source-registration, and active-source
 checks with `wayexpand ibus status --json`. Run
-`wayexpand repair --gnome-input-source` to register and select the source.
+`wayexpand repair --gnome-input-source` to register and select the source
+through GNOME Shell, then independently verify the IBus engine.
 Configuration readiness does not prove that a text field receives input or
 that an application applied a replacement; use `wayexpand debug --test
 ';;hello'` and confirm the visible result.

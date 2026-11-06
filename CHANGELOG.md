@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Replace GNOME's deprecated, ignored `input-sources current` setting with a
+  GNOME Shell `InputSourceManager` bridge. Setup activates through Shell and
+  independently reads back the live source; diagnostics no longer infer
+  activation from a gsettings write. Rollback restores the Shell-reported
+  source while retaining unrelated user changes, and the headless GNOME E2E
+  now exercises Shell activation and readback.
 - Make interactive `wayexpand setup` finish with an explicit `WORKING`,
   `CONFIGURED, AWAITING TEST`, or `ACTION REQUIRED` result. A failed or
   unconfirmed real-app test no longer exits as a successful setup, and a

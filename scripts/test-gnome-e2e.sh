@@ -65,6 +65,7 @@ display=wayexpand-gnome-e2e
 log() { printf '%s\n' "$*"; }
 gsettings set org.gnome.shell disable-user-extensions false
 gsettings set org.gnome.shell enabled-extensions "['$E2E_UUID', '$E2E_CONTROLLER_UUID']"
+gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us'), ('xkb', 'de')]"
 gnome-shell --headless --mode=user --wayland --virtual-monitor 1280x800 --wayland-display "$display" \
     >"$E2E_WORK/gnome-shell.log" 2>&1 &
 shell_pid=$!
@@ -94,6 +95,46 @@ until gnome_extension_state_active "$(extension_state)"; do
     sleep 0.1
 done
 log "pass extension-active"
+
+# Verify source activation and readback through GNOME Shell's live
+# InputSourceManager. Then write the deprecated `current` key to request a
+# different source and assert that Shell's observed active source is unchanged.
+gdbus call --session --dest org.gnome.Shell \
+    --object-path /org/wayexpand/ShellWindowTracker \
+    --method org.wayexpand.ShellWindowTracker1.ActivateInputSource xkb de \
+    >"$E2E_WORK/source-activation.log"
+active_source=$(gdbus call --session --dest org.gnome.Shell \
+    --object-path /org/wayexpand/ShellWindowTracker \
+    --method org.wayexpand.ShellWindowTracker1.GetActiveInputSource)
+case "$active_source" in
+    *"'xkb', 'de'"*) log "pass active-input-source $active_source" ;;
+    *) log "fail active-input-source GNOME Shell reported $active_source"; exit 1 ;;
+esac
+if ! gsettings set org.gnome.desktop.input-sources current 0 \
+    >"$E2E_WORK/deprecated-current.log" 2>&1; then
+    log "fail deprecated-current-setting could not write the legacy key in the isolated session"
+    exit 1
+fi
+configured_current=$(gsettings get org.gnome.desktop.input-sources current)
+case "$configured_current" in
+    *0*) log "pass deprecated-current-readback $configured_current" ;;
+    *) log "fail deprecated-current-readback unexpected value $configured_current"; exit 1 ;;
+esac
+active_source=$(gdbus call --session --dest org.gnome.Shell \
+    --object-path /org/wayexpand/ShellWindowTracker \
+    --method org.wayexpand.ShellWindowTracker1.GetActiveInputSource)
+case "$active_source" in
+    *"'xkb', 'de'"*) log "pass ignored-current-setting $active_source" ;;
+    *) log "fail ignored-current-setting GNOME Shell reported $active_source"; exit 1 ;;
+esac
+if gdbus call --session --dest org.gnome.Shell \
+    --object-path /org/wayexpand/ShellWindowTracker \
+    --method org.wayexpand.ShellWindowTracker1.ActivateInputSource ibus wayexpand \
+    >/dev/null 2>&1; then
+    log "fail unavailable-input-source GNOME activated an unregistered IBus engine"
+    exit 1
+fi
+log "pass unavailable-input-source"
 
 start_sink() {
     WAYLAND_DISPLAY="$display" "$E2E_BIN_DIR/wx-e2e-sink" "$1" "$E2E_WORK/$1.json" \

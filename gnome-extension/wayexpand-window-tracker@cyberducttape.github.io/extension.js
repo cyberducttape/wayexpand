@@ -9,12 +9,14 @@
 // Privacy: nothing is broadcast. A process calls Subscribe() and receives
 // the current window as the reply; later changes are sent only to
 // subscribers, as method calls to their private bus names, until they call
-// Unsubscribe() or leave the bus. Flatpak-sandboxed apps cannot reach
-// org.gnome.Shell unless their sandbox grants it. Nothing is stored.
+// Unsubscribe() or leave the bus. No window information is stored. The
+// separate input-source methods expose only GNOME's configured active source
+// and delegate selection changes to GNOME Shell's own manager.
 
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Shell from 'gi://Shell';
+import * as Keyboard from 'resource:///org/gnome/shell/ui/status/keyboard.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 const TRACKER_PATH = '/org/wayexpand/ShellWindowTracker';
@@ -28,7 +30,18 @@ const TRACKER_IFACE = `
     </method>
     <method name="Unsubscribe"/>
     <method name="Ping"/>
+    <method name="GetActiveInputSource">
+      <arg type="s" direction="out" name="kind"/>
+      <arg type="s" direction="out" name="id"/>
+    </method>
+    <method name="ActivateInputSource">
+      <arg type="s" direction="in" name="kind"/>
+      <arg type="s" direction="in" name="id"/>
+      <arg type="s" direction="out" name="active_kind"/>
+      <arg type="s" direction="out" name="active_id"/>
+    </method>
     <property name="Version" type="u" access="read"/>
+    <property name="InputSourceControlVersion" type="u" access="read"/>
   </interface>
 </node>`;
 // The callback every subscriber serves (the same one WayExpand serves for
@@ -81,6 +94,62 @@ export default class WayExpandWindowTracker extends Extension {
 
     get Version() {
         return PROTOCOL_VERSION;
+    }
+
+    get InputSourceControlVersion() {
+        return 1;
+    }
+
+    GetActiveInputSourceAsync(_parameters, invocation) {
+        const source = Keyboard.getInputSourceManager().currentSource;
+        if (!source) {
+            invocation.return_dbus_error(
+                'org.wayexpand.ShellWindowTracker1.Error.NoActiveInputSource',
+                'GNOME Shell has no active input source',
+            );
+            return;
+        }
+        invocation.return_value(new GLib.Variant('(ss)', [source.type, source.id]));
+    }
+
+    ActivateInputSourceAsync([kind, id], invocation) {
+        if (!['ibus', 'xkb'].includes(kind) || !id || id.length > 256) {
+            invocation.return_dbus_error(
+                'org.wayexpand.ShellWindowTracker1.Error.InvalidInputSource',
+                'invalid GNOME input source',
+            );
+            return;
+        }
+
+        const manager = Keyboard.getInputSourceManager();
+        // GNOME Shell may have loaded the source list before a newly
+        // registered IBus engine appeared. Reload the configured list before
+        // looking up the source so activation uses Shell's live objects.
+        manager.reload();
+        const source = Object.values(manager.inputSources).find(candidate =>
+            candidate.type === kind && candidate.id === id);
+        if (!source) {
+            invocation.return_dbus_error(
+                'org.wayexpand.ShellWindowTracker1.Error.InputSourceUnavailable',
+                `GNOME input source ${kind}:${id} is unavailable`,
+            );
+            return;
+        }
+
+        // Use GNOME Shell's own source activation path. In particular this
+        // updates the live InputSourceManager and its MRU persistence; writing
+        // the deprecated gsettings "current" key does neither reliably.
+        source.activate(true);
+
+        const active = manager.currentSource;
+        if (!active || active.type !== kind || active.id !== id) {
+            invocation.return_dbus_error(
+                'org.wayexpand.ShellWindowTracker1.Error.ActivationFailed',
+                'GNOME Shell did not activate the requested input source',
+            );
+            return;
+        }
+        invocation.return_value(new GLib.Variant('(ss)', [active.type, active.id]));
     }
 
     SubscribeAsync(_parameters, invocation) {

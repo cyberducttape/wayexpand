@@ -985,13 +985,18 @@ fn ibus_daemon_check_from(
 
 fn gnome_input_source_checks() -> (IbusCheck, IbusCheck) {
     let sources = gnome_setting("sources");
-    let current = gnome_setting("current");
-    gnome_source_checks(sources.as_deref(), current.as_deref())
+    let active = wayexpand_backend_gnome_window::active_input_source().ok();
+    gnome_source_checks(
+        sources.as_deref(),
+        active
+            .as_ref()
+            .map(|(kind, id)| (kind.as_str(), id.as_str())),
+    )
 }
 
 fn gnome_source_checks(
     sources_value: Option<&str>,
-    current_value: Option<&str>,
+    active_source: Option<(&str, &str)>,
 ) -> (IbusCheck, IbusCheck) {
     let Some(raw_sources) = sources_value else {
         return (
@@ -1032,7 +1037,7 @@ fn gnome_source_checks(
             );
         }
     };
-    let Some(index) = crate::gnome_input_sources::wayexpand_index(&sources) else {
+    let Some(_) = crate::gnome_input_sources::wayexpand_index(&sources) else {
         return (
             check(
                 "gnome-source-registered",
@@ -1057,36 +1062,27 @@ fn gnome_source_checks(
         "GNOME's typed source list contains ('ibus', 'wayexpand')",
         None,
     );
-    let active = match current_value
-        .and_then(|value| crate::gnome_input_sources::parse_current(value).ok())
-    {
-        Some(current) if current as usize == index => check(
+    let active = match active_source {
+        Some(("ibus", "wayexpand")) => check(
             "gnome-source-active",
             "WayExpand selected in GNOME",
             IbusCheckState::Pass,
-            "GNOME's current source index points to WayExpand",
+            "GNOME Shell's live InputSourceManager reports WayExpand as the active source",
             None,
-        ),
-        Some(current) if (current as usize) < sources.len() => check(
-            "gnome-source-active",
-            "WayExpand selected in GNOME",
-            IbusCheckState::Warn,
-            "GNOME has another input source selected",
-            Some("select WayExpand from GNOME's input-source menu or run `wayexpand repair --gnome-input-source`".into()),
         ),
         Some(_) => check(
             "gnome-source-active",
             "WayExpand selected in GNOME",
-            IbusCheckState::Fail,
-            "GNOME's current source index is outside its source list",
-            Some("wayexpand repair --gnome-input-source".into()),
+            IbusCheckState::Warn,
+            "GNOME Shell reports a different active input source",
+            Some("select WayExpand from GNOME's input-source menu or run `wayexpand repair --gnome-input-source`".into()),
         ),
         None => check(
             "gnome-source-active",
             "WayExpand selected in GNOME",
             IbusCheckState::Unknown,
-            "GNOME's current source could not be read",
-            None,
+            "GNOME Shell's live input-source bridge is unavailable; install or enable the WayExpand GNOME Shell extension, then log out and back in if it was just updated",
+            Some("run `wayexpand setup` to install or enable the GNOME Shell integration".into()),
         ),
     };
     (registered, active)
@@ -1378,12 +1374,13 @@ mod tests {
     fn gnome_registration_and_activation_are_separate_findings() {
         let (registered, active) = gnome_source_checks(
             Some("[('xkb', 'us'), ('ibus', 'wayexpand')]"),
-            Some("uint32 1"),
+            Some(("ibus", "wayexpand")),
         );
         assert_eq!(registered.state, IbusCheckState::Pass);
         assert_eq!(active.state, IbusCheckState::Pass);
 
-        let (registered, active) = gnome_source_checks(Some("[('xkb', 'us')]"), Some("0"));
+        let (registered, active) =
+            gnome_source_checks(Some("[('xkb', 'us')]"), Some(("xkb", "us")));
         assert_eq!(registered.state, IbusCheckState::Fail);
         assert_eq!(
             registered.fix.as_deref(),
@@ -1394,10 +1391,16 @@ mod tests {
 
         let (registered, active) = gnome_source_checks(
             Some("[('xkb', 'us'), ('ibus', 'wayexpand')]"),
-            Some("uint32 0"),
+            Some(("xkb", "us")),
         );
         assert_eq!(registered.state, IbusCheckState::Pass);
         assert_eq!(active.state, IbusCheckState::Warn);
+
+        let (_, active) = gnome_source_checks(Some("[('xkb', 'us'), ('ibus', 'wayexpand')]"), None);
+        assert_eq!(active.state, IbusCheckState::Unknown);
+        assert!(active
+            .detail
+            .contains("live input-source bridge is unavailable"));
     }
 
     #[test]

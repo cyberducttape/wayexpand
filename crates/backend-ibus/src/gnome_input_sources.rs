@@ -55,15 +55,6 @@ pub fn format_sources(sources: &[InputSource]) -> String {
     format!("[{}]", values.join(", "))
 }
 
-pub fn parse_current(value: &str) -> Result<u32, String> {
-    value
-        .trim()
-        .strip_prefix("uint32 ")
-        .unwrap_or(value.trim())
-        .parse()
-        .map_err(|_| "invalid GNOME input-source current index".into())
-}
-
 pub fn wayexpand_index(sources: &[InputSource]) -> Option<usize> {
     sources
         .iter()
@@ -255,11 +246,6 @@ mod tests {
         assert!(parse_sources("[('xkb', 'bad\\uD800')]").is_err());
         assert!(parse_sources("[('xkb', 'bad\\U00110000')]").is_err());
     }
-    #[test]
-    fn parses_current_index() {
-        assert_eq!(parse_current("uint32 2").unwrap(), 2);
-    }
-
     #[test]
     fn ensure_registration_is_idempotent_and_preserves_existing_sources() {
         let keyboard = InputSource {

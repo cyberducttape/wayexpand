@@ -152,16 +152,25 @@ the recorded session and says so. The steps are:
 
 `wayexpand ibus status --json` (IBus-route schema 2) separates configuration readiness from
 operational readiness. On GNOME it independently checks the GNOME Wayland
-session (including the live Shell bus name), source registration, active GNOME
-source, and content-free input activity from a normal field. Missing evidence
-is `unknown`, never a pass. Seeing key events or emitted replacement actions
+session (including the live Shell bus name), source registration, the active
+source reported by GNOME Shell's `InputSourceManager`, and content-free input
+activity from a normal field. GNOME ignores the deprecated
+`org.gnome.desktop.input-sources current` setting; it is never used as
+activation or readiness evidence. The WayExpand GNOME Shell extension uses Shell's own source
+activation API and verifies the resulting live source; the IBus engine is
+checked independently. Missing extension/API evidence is `unknown`, never a
+pass. `mru-sources` is persistence context only and is not used to infer or
+trigger activation. Seeing key events or emitted replacement actions
 does not prove that the target application applied the edit: IBus does not
 receive an acknowledgement of the resulting document text. `ready` therefore
 remains false until target insertion is independently verified. Use
 `wayexpand debug --test ';;hello'` and confirm the result in the application.
-`wayexpand repair --gnome-input-source` repairs the GNOME source list and
-selection, then verifies the IBus engine selection; it does not claim that a
-real field insertion succeeded. The Diagnostics window shows the same
+`wayexpand repair --gnome-input-source` repairs the GNOME source list, asks
+GNOME Shell's live input-source manager to select WayExpand, reads that
+manager's selection back, then verifies the IBus engine independently; it
+does not claim that a real field insertion succeeded. If the Shell bridge is
+not active or current, setup stops and explains that the extension must be
+enabled or the session restarted. The Diagnostics window shows the same
 separate evidence.
 
 ## Diagnostics
