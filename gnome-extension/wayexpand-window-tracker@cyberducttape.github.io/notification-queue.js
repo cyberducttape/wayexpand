@@ -16,6 +16,12 @@ export function isAuthorizedTrackerClient(peerUid, currentUid, executablePath) {
     return WAYEXPAND_CLIENTS.has(executable);
 }
 
+/** Keep title access scoped to the caller's current subscription request. */
+export function setTitleAccess(state, requested) {
+    state.includeTitles = requested === true;
+    return state.includeTitles;
+}
+
 export class LatestOnlyDelivery {
     constructor(send, onFailure) {
         this._send = send;

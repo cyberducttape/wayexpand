@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
     isAuthorizedTrackerClient,
     LatestOnlyDelivery,
+    setTitleAccess,
 } from '../gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/notification-queue.js';
 
 test('subscription is limited to the current user and WayExpand executables', () => {
@@ -11,6 +12,15 @@ test('subscription is limited to the current user and WayExpand executables', ()
     assert.equal(isAuthorizedTrackerClient(1001, 1000, '/usr/bin/wayexpand'), false);
     assert.equal(isAuthorizedTrackerClient(1000, 1000, '/usr/bin/terminal'), false);
     assert.equal(isAuthorizedTrackerClient(1000, 1000, ''), false);
+});
+
+test('title access is opt-in per request and can be revoked on an active subscription', () => {
+    const subscriber = {includeTitles: false};
+    assert.equal(setTitleAccess(subscriber, true), true);
+    assert.equal(subscriber.includeTitles, true);
+    assert.equal(setTitleAccess(subscriber, false), false);
+    assert.equal(subscriber.includeTitles, false);
+    assert.equal(setTitleAccess(subscriber, 'true'), false);
 });
 
 test('slow subscribers retain only the latest update and one in-flight call', () => {

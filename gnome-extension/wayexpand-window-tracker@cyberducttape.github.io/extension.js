@@ -22,6 +22,7 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import {
     isAuthorizedTrackerClient,
     LatestOnlyDelivery,
+    setTitleAccess,
 } from './notification-queue.js';
 
 const TRACKER_PATH = '/org/wayexpand/ShellWindowTracker';
@@ -214,11 +215,14 @@ export default class WayExpandWindowTracker extends Extension {
                     });
             }, () => this._drop(subscriber));
             this._subscribers.set(subscriber, state);
-        } else if (includeTitles) {
-            this._subscribers.get(subscriber).includeTitles = true;
+        } else {
+            // Treat every subscription call as an explicit privacy mode
+            // update. In particular, Subscribe() must revoke title delivery
+            // from a connection that previously opted in.
+            setTitleAccess(this._subscribers.get(subscriber), includeTitles);
         }
-        this._watchTitle(this._focused);
         const state = this._subscribers.get(subscriber);
+        this._watchTitle(this._focused);
         invocation.return_value(new GLib.Variant('(sss)', describe(this._focused, state.includeTitles)));
     }
 

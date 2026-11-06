@@ -459,6 +459,44 @@ PY
     fi
 fi
 
+# A logout/login is also an input-method lifecycle boundary. Re-select
+# WayExpand through GNOME Shell's live manager, then repeat the real GTK
+# insertion acceptance test against the newly loaded Shell instance.
+if [ "$tries" -gt 0 ]; then
+    login_source_ok=0
+    if gdbus call --session --dest org.gnome.Shell \
+        --object-path /org/wayexpand/ShellWindowTracker \
+        --method org.wayexpand.ShellWindowTracker1.ActivateInputSource ibus wayexpand \
+        >"$E2E_WORK/ibus-source-activation-after-login.log"; then
+        active_source=$(gdbus call --session --dest org.gnome.Shell \
+            --object-path /org/wayexpand/ShellWindowTracker \
+            --method org.wayexpand.ShellWindowTracker1.GetActiveInputSource)
+        case "$active_source" in
+            *"'ibus', 'wayexpand'"*)
+                login_source_ok=1
+                log "pass gnome-ibus-source-after-login $active_source"
+                ;;
+            *) log "fail gnome-ibus-source-after-login GNOME Shell reported $active_source"; status=1 ;;
+        esac
+    else
+        log "fail gnome-ibus-source-after-login GNOME could not activate WayExpand after Shell restart"
+        status=1
+    fi
+
+    if [ "$login_source_ok" -eq 1 ] \
+        && WAYLAND_DISPLAY="$display" /usr/bin/python3 \
+            "$E2E_PROJECT_DIR/scripts/certification-clients/gtk_ibus_insertion.py" \
+            >"$E2E_WORK/gtk-insertion-after-login.log" 2>&1 \
+        && grep -Fx 'pass gtk-ibus-insertion GTK entry contains the committed replacement' \
+            "$E2E_WORK/gtk-insertion-after-login.log" >/dev/null; then
+        log "pass gtk-ibus-insertion-after-login a GTK entry received the replacement after Shell restart"
+    else
+        log "fail gtk-ibus-insertion-after-login WayExpand did not replace the trigger after Shell restart"
+        cat "$E2E_WORK/gtk-insertion-after-login.log" 2>/dev/null || true
+        status=1
+    fi
+fi
+
 if ! gnome_shell_extensions_call DisableExtension "$E2E_UUID" >/dev/null; then
     log "fail extension-disabled could not disable the extension through GNOME Shell D-Bus"
     exit 1
@@ -505,7 +543,7 @@ env -i \
     dbus-run-session -- "$work/session.sh" >"$work/results.txt" 2>"$work/session.log" || status=$?
 
 cat "$work/results.txt"
-expected_checks='extension-active extension-pre-upgrade-build extension-upgrade-not-current active-input-source deprecated-current-readback ignored-current-setting unavailable-input-source ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gtk-ibus-insertion gnome-ibus-operational extension-disabled extension-after-login'
+expected_checks='extension-active extension-pre-upgrade-build extension-upgrade-not-current active-input-source deprecated-current-readback ignored-current-setting unavailable-input-source ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gtk-ibus-insertion gnome-ibus-operational extension-disabled extension-after-login gnome-ibus-source-after-login gtk-ibus-insertion-after-login'
 missing_check=
 for check in $expected_checks; do
     if ! grep -F "pass $check" "$work/results.txt" >/dev/null; then
@@ -528,6 +566,7 @@ if [ "$status" -ne 0 ] || grep -q '^fail' "$work/results.txt" \
     for log in session.log gnome-shell.log gnome-shell-after-login.log ibus-daemon.log ibus-engines.txt \
         ibus-before-live-activation.json ibus-before-live-activation.err \
         ibus-after-gtk-insertion.json ibus-after-gtk-insertion.err \
+        ibus-source-activation-after-login.log gtk-insertion-after-login.log \
         doctor-after-extension-upgrade.json \
         doctor-after-extension-upgrade.err doctor-after-login.json \
         gtk-insertion.log sink.log; do
