@@ -223,7 +223,13 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
             "Activation checks completed; a real application insertion is not yet verified. Run the `;;hello` first-run test now? [Y/n] ",
             true,
         )? {
-            desktop_test_result = crate::commands::debug::desktop_test(";;hello")?;
+            desktop_test_result = match crate::commands::debug::desktop_test(";;hello") {
+                Ok(result) => result,
+                Err(error) => {
+                    eprintln!("SETUP RESULT: ACTION REQUIRED");
+                    return Err(error);
+                }
+            };
         } else {
             println!("Activation completed. Real application insertion: NOT TESTED.");
             println!("Next: run `wayexpand debug --test ';;hello'` in a disposable text field and confirm the replacement.");
@@ -271,7 +277,7 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
                     install_system_integration,
                 },
             ) {
-                eprintln!("OPTIONAL TERMINAL COVERAGE: ACTION REQUIRED; core IBus expansion remains working in the tested application.");
+                eprintln!("SETUP RESULT: WORKING (core IBus); optional terminal coverage: ACTION REQUIRED.");
                 return Err(error);
             }
         } else if terminals_requested {
