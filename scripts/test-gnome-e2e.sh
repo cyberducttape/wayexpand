@@ -102,6 +102,7 @@ start_sink org.wayexpand.GnomeE2eFirst
 # Mutter may refuse focus to a second window that has no activation token,
 # so the first window closes before the second opens.
 kill "$last_sink" 2>/dev/null || true
+wait "$last_sink" 2>/dev/null || true
 start_sink org.wayexpand.GnomeE2eSecond
 "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --expect org.wayexpand.GnomeE2eSecond || status=1
 

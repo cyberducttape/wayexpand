@@ -71,8 +71,10 @@ All notable changes to WayExpand are documented here.
   process inventory in `upgrade --check --json`.
 - Run the headless GNOME E2E test in user session mode and support both GNOME
   Shell extension-management D-Bus object paths. Add path-fallback regression
-  coverage; snapshot allowlisted broker environment values to keep concurrent
-  action-broker tests from mutating process-global environment state.
+  coverage, and wait for the first test window to exit before opening the next
+  so Mutter does not race focus handoff. Snapshot allowlisted broker environment
+  values to keep concurrent action-broker tests from mutating process-global
+  environment state.
 - Add a regression test for failed IBus activation rollback across service state,
   compositor input-method selection, IBus preload engines, and active engine.
   Repair the daemon reload test fixture for expansion counts and make its
