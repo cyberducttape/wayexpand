@@ -270,6 +270,22 @@ impl GuiApp {
         let lines = output.lines().collect::<Vec<_>>();
         if let Some(result) = lines
             .iter()
+            .find(|line| line.trim_start().starts_with("DESKTOP TEST RESULT:"))
+        {
+            let detail = lines.iter().find(|line| {
+                let line = line.trim_start();
+                line.starts_with("Capture [")
+                    || line.starts_with("Output activity [")
+                    || line.starts_with("Correlation [")
+                    || line.starts_with("Test scope:")
+            });
+            return detail.map_or_else(
+                || result.trim().to_owned(),
+                |detail| format!("{}\n{}", result.trim(), detail.trim()),
+            );
+        }
+        if let Some(result) = lines
+            .iter()
             .find(|line| line.trim_start().starts_with("SETUP RESULT:"))
         {
             let detail = lines
@@ -298,6 +314,31 @@ impl GuiApp {
 
     fn setup_completion_status(output: &str, fallback: String) -> (Status, bool) {
         if output
+            .lines()
+            .any(|line| line.trim() == "DESKTOP TEST RESULT: OUTPUT OBSERVED, AWAITING REVIEW")
+        {
+            (
+                Status::info(
+                    "Output activity observed. Check the target field and confirm the exact text before recording a result.",
+                ),
+                false,
+            )
+        } else if output.lines().any(|line| {
+            matches!(
+                line.trim(),
+                "DESKTOP TEST RESULT: INPUT NOT OBSERVED"
+                    | "DESKTOP TEST RESULT: NO OUTPUT OUTCOME"
+                    | "DESKTOP TEST RESULT: UNCERTAIN OUTPUT"
+                    | "DESKTOP TEST RESULT: CANCELLED"
+            )
+        }) {
+            (
+                Status::warning(
+                    "Desktop test was not verified. Inspect Diagnostics and the target field; do not retry uncertain output automatically.",
+                ),
+                true,
+            )
+        } else if output
             .lines()
             .any(|line| line.trim() == "SETUP RESULT: CONFIGURED, AWAITING TEST")
         {
@@ -332,6 +373,43 @@ impl GuiApp {
         }
     }
 
+    pub(crate) fn start_desktop_test(
+        &mut self,
+        trigger: String,
+        replacement: String,
+        application_class: String,
+    ) {
+        if self.setup_task.is_some() {
+            return;
+        }
+        let arguments = vec![
+            "debug".into(),
+            "--test".into(),
+            trigger.clone(),
+            "--application-class".into(),
+            application_class.clone(),
+            "--focus-confirmed".into(),
+            "--observe-only".into(),
+        ];
+        self.pending_desktop_test = Some(DesktopTestReview {
+            trigger,
+            replacement,
+            application_class,
+        });
+        self.start_cli_task(
+            arguments,
+            "Desktop test running; type the selected trigger once in the confirmed disposable field."
+                .into(),
+            "Desktop test finished.".into(),
+        );
+        if self.setup_task.is_some() {
+            self.cli_task_kind = Some("desktop-test".into());
+        } else {
+            self.pending_desktop_test = None;
+            self.diagnostics_open = true;
+        }
+    }
+
     pub(crate) fn cancel_setup(&mut self) {
         if let Some(task) = self.setup_task.as_ref() {
             task.cancel.store(true, Ordering::Release);
@@ -350,7 +428,8 @@ impl GuiApp {
                 self.status = match result {
                     Ok(output) => {
                         self.last_cli_task_output = Some(output.clone());
-                        match self.cli_task_kind.take().as_deref() {
+                        let task_kind = self.cli_task_kind.take();
+                        match task_kind.as_deref() {
                             Some("restore-check") => {
                                 self.restore_preview = serde_json::from_str(&output).ok();
                                 self.restore_confirmed = false;
@@ -361,13 +440,29 @@ impl GuiApp {
                             }
                             _ => {}
                         }
-                        let (status, open_diagnostics) =
-                            Self::setup_completion_status(&output, success_message);
-                        self.diagnostics_open |= open_diagnostics;
-                        status
+                        if task_kind.as_deref() == Some("desktop-test") {
+                            if output.lines().any(|line| {
+                                line.trim()
+                                    == "DESKTOP TEST RESULT: OUTPUT OBSERVED, AWAITING REVIEW"
+                            }) {
+                                self.desktop_test_review = self.pending_desktop_test.take();
+                                self.desktop_test_review_open = self.desktop_test_review.is_some();
+                                Status::info("Activity observed but not correlated to the test trigger. Visually verify the exact target text before confirming.")
+                            } else {
+                                self.pending_desktop_test = None;
+                                self.diagnostics_open = true;
+                                Self::setup_completion_status(&output, success_message).0
+                            }
+                        } else {
+                            let (status, open_diagnostics) =
+                                Self::setup_completion_status(&output, success_message);
+                            self.diagnostics_open |= open_diagnostics;
+                            status
+                        }
                     }
                     Err(detail) => {
                         self.cli_task_kind = None;
+                        self.pending_desktop_test = None;
                         // Setup's own report names the broken link; show the
                         // same checks here instead of a one-line error.
                         self.diagnostics_open = true;
@@ -645,6 +740,15 @@ mod tests {
     }
 
     #[test]
+    fn desktop_test_output_keeps_the_observed_stage_without_input_content() {
+        let output = b"For the next 30 seconds, type once.\nCapture [id]: ACTIVITY OBSERVED -- test trigger not independently confirmed.\nOutput activity [id]: uncorrelated completion.\nDESKTOP TEST RESULT: OUTPUT OBSERVED, AWAITING REVIEW\n";
+        let visible = GuiApp::setup_output_text(output);
+        assert!(visible.contains("DESKTOP TEST RESULT: OUTPUT OBSERVED, AWAITING REVIEW"));
+        assert!(visible.contains("Capture [id]: ACTIVITY OBSERVED"));
+        assert!(!visible.contains("trigger contents"));
+    }
+
+    #[test]
     fn setup_status_does_not_call_an_unverified_route_working() {
         let (status, open_diagnostics) = GuiApp::setup_completion_status(
             "SETUP RESULT: CONFIGURED, AWAITING TEST",
@@ -667,5 +771,15 @@ mod tests {
             "Working: a real insertion was confirmed in the tested application."
         );
         assert!(!open_diagnostics);
+    }
+
+    #[test]
+    fn desktop_test_without_activity_opens_diagnostics_not_success() {
+        let (status, open_diagnostics) = GuiApp::setup_completion_status(
+            "DESKTOP TEST RESULT: INPUT NOT OBSERVED",
+            "generic success".into(),
+        );
+        assert!(status.text().contains("Desktop test was not verified"));
+        assert!(open_diagnostics);
     }
 }

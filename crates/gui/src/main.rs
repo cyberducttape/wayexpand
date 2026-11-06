@@ -226,6 +226,11 @@ struct GuiApp {
     diagnostics_open: bool,
     diagnostics_close_requested: bool,
     test_expansion_dialog_open: bool,
+    desktop_test_application_class: String,
+    desktop_test_target_acknowledged: bool,
+    pending_desktop_test: Option<DesktopTestReview>,
+    desktop_test_review: Option<DesktopTestReview>,
+    desktop_test_review_open: bool,
     backend_test_help_open: bool,
     service_restart_confirm_open: bool,
     service_restart_unit: Option<String>,
@@ -490,6 +495,13 @@ struct SetupTask {
     success_message: String,
 }
 
+#[derive(Clone, Debug)]
+struct DesktopTestReview {
+    trigger: String,
+    replacement: String,
+    application_class: String,
+}
+
 impl Drop for SetupTask {
     fn drop(&mut self) {
         self.cancel.store(true, Ordering::Release);
@@ -602,6 +614,11 @@ impl GuiApp {
             diagnostics_open: false,
             diagnostics_close_requested: false,
             test_expansion_dialog_open: false,
+            desktop_test_application_class: "GTK".into(),
+            desktop_test_target_acknowledged: false,
+            pending_desktop_test: None,
+            desktop_test_review: None,
+            desktop_test_review_open: false,
             backend_test_help_open: false,
             service_restart_confirm_open: false,
             service_restart_unit: None,

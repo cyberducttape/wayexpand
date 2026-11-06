@@ -2,6 +2,13 @@
 
 use crate::*;
 
+fn desktop_test_review_instruction(review: &DesktopTestReview) -> String {
+    format!(
+        "In {}, inspect the field where you attempted to type {}. Do not type the trigger again.",
+        review.application_class, review.trigger
+    )
+}
+
 impl GuiApp {
     pub(crate) fn refresh_diagnostics(&mut self, announce: bool) {
         if self.diagnostics_running {
@@ -67,6 +74,7 @@ impl GuiApp {
         }
         self.render_support_export(ctx, palette);
         self.render_test_expansion_dialog(ctx, palette);
+        self.render_desktop_test_review(ctx, palette);
         self.render_backend_test_help(ctx, palette);
         self.render_service_restart_confirmation(ctx, palette);
         self.render_reset_dialog(ctx, palette);
@@ -1161,7 +1169,7 @@ impl GuiApp {
         }
         let mut open = self.test_expansion_dialog_open;
         let mut close = false;
-        let desktop_test_command = self
+        let desktop_test = self
             .selected_index()
             .and_then(|index| self.config.expansion.get(index))
             .filter(|expansion| {
@@ -1169,10 +1177,17 @@ impl GuiApp {
                     && expansion.command.is_none()
                     && !expansion.replacement.contains("{{")
             })
-            .map(|expansion| {
-                let trigger = expansion.trigger.replace('\'', "'\\''");
-                format!("wayexpand debug --test '{trigger}'")
-            });
+            .map(|expansion| (expansion.trigger.clone(), expansion.replacement.clone()));
+        let desktop_test_command = desktop_test.as_ref().map(|(trigger, _)| {
+            let trigger = trigger.replace('\'', "'\\''");
+            format!("wayexpand debug --test '{trigger}'")
+        });
+        let application_class_valid = !self.desktop_test_application_class.trim().is_empty()
+            && self.desktop_test_application_class.chars().count() <= 64
+            && !self
+                .desktop_test_application_class
+                .chars()
+                .any(char::is_control);
         egui::Window::new("Test Expansion")
             .id(egui::Id::new("test_expansion_mode_picker"))
             .order(egui::Order::Foreground)
@@ -1190,11 +1205,51 @@ impl GuiApp {
                 }
                 ui.separator();
                 ui.label(RichText::new("Desktop Test").strong());
-                ui.label("Checks the real capture and output route in a text field. The test never presses Enter. Actual target text must be visually confirmed; protocol acceptance alone is not proof of insertion.");
-                if ui.button("Open Desktop Test and diagnostics").clicked() {
-                    self.diagnostics_close_requested = true;
-                    self.backend_test_help_open = true;
-                    close = true;
+                ui.label("Tests the active route in a disposable text field. It never presses Enter or retries insertion. Activity counters are not tied to this test trigger; you must inspect the result and confirm it yourself.");
+                if let Some((trigger, replacement)) = &desktop_test {
+                    ui.label(format!("Trigger to type once: {trigger}"));
+                    ui.label("Expected replacement:");
+                    ui.add(
+                        egui::TextEdit::multiline(&mut replacement.as_str())
+                            .code_editor()
+                            .interactive(false)
+                            .desired_rows(3)
+                            .desired_width(f32::INFINITY),
+                    );
+                }
+                ui.horizontal(|ui| {
+                    ui.label("Application class");
+                    ui.text_edit_singleline(&mut self.desktop_test_application_class);
+                });
+                ui.checkbox(
+                    &mut self.desktop_test_target_acknowledged,
+                    "I am focused on a disposable, non-sensitive text field and will type the trigger once.",
+                );
+                let can_run_test = desktop_test.is_some()
+                    && application_class_valid
+                    && self.desktop_test_target_acknowledged
+                    && self.draft.is_none()
+                    && !self.new_draft
+                    && self.setup_task.is_none();
+                if ui
+                    .add_enabled(can_run_test, egui::Button::new("Start Desktop Test"))
+                    .clicked()
+                {
+                    if let Some((trigger, replacement)) = desktop_test.clone() {
+                        self.start_desktop_test(
+                            trigger,
+                            replacement,
+                            self.desktop_test_application_class.trim().to_owned(),
+                        );
+                        self.desktop_test_target_acknowledged = false;
+                        close = true;
+                    }
+                }
+                if self.draft.is_some() || self.new_draft {
+                    ui.colored_label(
+                        palette.warning,
+                        "Save or discard the current snippet draft before testing; the desktop test runs the saved configuration.",
+                    );
                 }
                 if let Some(command) = &desktop_test_command {
                     if ui.button("Copy desktop test command").clicked() {
@@ -1212,6 +1267,65 @@ impl GuiApp {
             open = false;
         }
         self.test_expansion_dialog_open = open;
+    }
+
+    fn render_desktop_test_review(&mut self, ctx: &egui::Context, palette: &Palette) {
+        if !self.desktop_test_review_open {
+            return;
+        }
+        let Some(review) = self.desktop_test_review.as_ref() else {
+            self.desktop_test_review_open = false;
+            return;
+        };
+        let application_class = review.application_class.clone();
+        let mut confirmed = false;
+        let mut rejected = false;
+        let mut dismissed = false;
+        egui::Modal::new(egui::Id::new("desktop_test_result_review")).show(ctx, |ui| {
+                ui.set_width(520.0);
+                ui.colored_label(
+                    palette.warning,
+                    "WayExpand observed input/output activity during the test window, but could not correlate it to this trigger. No insertion was retried.",
+                );
+                ui.label(desktop_test_review_instruction(review));
+                ui.label("Expected replacement:");
+                ui.add(
+                    egui::Label::new(RichText::new(&review.replacement).code())
+                        .wrap()
+                        .selectable(true),
+                );
+                ui.label("Did this exact text appear once, with no lost, duplicated, interleaved, or wrong-field text?");
+                ui.horizontal(|ui| {
+                    if ui.button("Yes, exact result").clicked() {
+                        confirmed = true;
+                    }
+                    if ui.button("No or unsure").clicked() {
+                        rejected = true;
+                    }
+                    if ui.button("Leave unverified").clicked() {
+                        dismissed = true;
+                    }
+                });
+            });
+        if confirmed {
+            self.status = Status::success(format!(
+                "User-confirmed exact insertion in {}. This does not certify other applications or sessions.",
+                application_class
+            ));
+            self.desktop_test_review = None;
+        } else if rejected {
+            self.status = Status::error(
+                "Desktop insertion was not confirmed. Inspect the target field and Diagnostics; do not retry automatically.",
+            );
+            self.desktop_test_review = None;
+            self.diagnostics_open = true;
+        } else if dismissed {
+            self.status = Status::warning("Desktop test result remains unverified.");
+            self.desktop_test_review = None;
+        }
+        if confirmed || rejected || dismissed {
+            self.desktop_test_review_open = false;
+        }
     }
 
     fn render_service_restart_confirmation(&mut self, ctx: &egui::Context, palette: &Palette) {
@@ -2051,5 +2165,22 @@ fn assessment_color(state: diagnostics::AssessmentState, palette: &Palette) -> C
         diagnostics::AssessmentState::Warning => palette.warning,
         diagnostics::AssessmentState::Blocked => palette.danger,
         diagnostics::AssessmentState::Unknown => palette.muted,
+    }
+}
+
+#[cfg(test)]
+mod desktop_test_review_tests {
+    use super::*;
+
+    #[test]
+    fn review_never_invites_a_second_trigger_after_observing_output() {
+        let review = DesktopTestReview {
+            trigger: ";;hello".into(),
+            replacement: "Hello from Wayland!".into(),
+            application_class: "GTK".into(),
+        };
+        let instruction = desktop_test_review_instruction(&review);
+        assert!(instruction.contains("inspect the field where you attempted to type"));
+        assert!(instruction.contains("Do not type the trigger again"));
     }
 }

@@ -1692,6 +1692,32 @@ fn escape_closes_one_dialog_at_a_time_and_keeps_a_loaded_import() {
 }
 
 #[test]
+fn dismissing_desktop_test_review_leaves_result_unverified() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-desktop-review-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    app.diagnostics_open = true;
+    app.desktop_test_review_open = true;
+    app.desktop_test_review = Some(DesktopTestReview {
+        trigger: ";;hello".into(),
+        replacement: "Hello from Wayland!".into(),
+        application_class: "GTK".into(),
+    });
+    assert!(app.any_dialog_open());
+
+    app.close_topmost_dialog();
+
+    assert!(!app.desktop_test_review_open);
+    assert!(app.desktop_test_review.is_none());
+    assert!(app.status.text().contains("remains unverified"));
+    assert!(app.diagnostics_open);
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn diagnostics_dialog_stays_inside_a_small_window() {
     let path = std::env::temp_dir().join(format!(
         "wayexpand-gui-diagnostics-fit-{}.toml",

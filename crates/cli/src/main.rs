@@ -219,7 +219,7 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "doctor [--json] [config] | --gnome [--json]",
                 "Diagnose configuration, backends and the running daemon",
             ),
-            ("debug [--json] [--trigger TEXT] [--live [--seconds 1..300]] | --gnome --interactive", "Explain runtime readiness or guide a harmless GNOME insertion test"),
+            ("debug [--json] [--trigger TEXT] [--live [--seconds 1..300]] | --test TRIGGER [--application-class CLASS --focus-confirmed [--observe-only]] | --gnome --interactive", "Explain runtime readiness or guide a harmless insertion test"),
             (
                 "policy inspect|check [--file PATH] [--allow-audit-only] [--json]",
                 "Inspect policy provenance or fail CI when restrictions are not enforced",

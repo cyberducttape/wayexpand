@@ -35,6 +35,11 @@ enabled, static, non-command snippet. Review the expected text first with
 typing the trigger. It waits for sanitized capture/output evidence and then
 asks you to confirm exact visible text. It never presses Enter, never retries
 an uncertain output, and does not claim coverage beyond the one test session.
+The GUI's **Test Expansion → Desktop Test** runs the same observation in a
+disposable field after explicit consent, then displays the expected text for a
+separate user confirmation. Activity counters are not correlated to the test
+trigger, so the GUI labels them as observed activity and never treats them as
+proof of insertion by themselves.
 
 Finding IDs such as `WX-CONFIG-001`, `WX-GNOME-IM-001`, `WX-IBUS-002`, `WX-INPUT-001`,
 `WX-OUTPUT-001`, `WX-SERVICE-002`, and `WX-VERSION-001` are stable references

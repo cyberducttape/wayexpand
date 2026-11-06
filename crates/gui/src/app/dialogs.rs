@@ -88,6 +88,8 @@ impl GuiApp {
 
     pub(crate) fn any_dialog_open(&self) -> bool {
         self.diagnostics_open
+            || self.test_expansion_dialog_open
+            || self.desktop_test_review_open
             || self.import_open
             || self.pack_dialog_open
             || self.settings_open
@@ -104,6 +106,12 @@ impl GuiApp {
         // else, so Escape answers it (as Cancel) before closing any window.
         if self.pending_action.is_some() {
             self.pending_action = None;
+        } else if self.desktop_test_review_open {
+            self.desktop_test_review_open = false;
+            self.desktop_test_review = None;
+            self.status = Status::warning("Desktop test result remains unverified.");
+        } else if self.test_expansion_dialog_open {
+            self.test_expansion_dialog_open = false;
         } else if self.setup_consent_open {
             self.setup_consent_open = false;
             self.setup_consent_acknowledged = false;

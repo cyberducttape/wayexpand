@@ -20,6 +20,10 @@ All notable changes to WayExpand are documented here.
   activating an input route without a real insertion test now opens Diagnostics
   and reports “Configured, awaiting test” instead of generic success. A
   “Working” status is reserved for a user-confirmed real insertion.
+- Run the Desktop Integration Test from the GUI after a target-field consent
+  step. The GUI shows the expected static replacement, asks the user to type
+  the trigger once, and requires a separate exact-result confirmation; it never
+  sends Enter or retries an uncertain insertion.
 - Add GNOME-specific `wayexpand doctor --gnome` conclusions and a guided
   `wayexpand debug --gnome --interactive` real-app test. The test distinguishes
   configured routing from uncorrelated activity and user-confirmed insertion;
