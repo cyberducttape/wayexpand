@@ -5,6 +5,7 @@ mod commands;
 mod diagnostics;
 mod doctor;
 mod errors;
+mod gnome_extension;
 mod services;
 mod setup;
 mod setup_ibus;
@@ -417,7 +418,7 @@ fn print_help() {
     println!("{}", help_text());
 }
 
-fn prompt_yes_no(prompt: &str, default: bool) -> Result<bool> {
+pub(crate) fn prompt_yes_no(prompt: &str, default: bool) -> Result<bool> {
     print!("{prompt}");
     io::stdout().flush()?;
     let mut answer = String::new();

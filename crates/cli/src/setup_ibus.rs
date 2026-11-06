@@ -5,7 +5,7 @@
 //! command's exit status (`ibus engine` exits 1 after a successful switch to
 //! an engine whose layout is `default`).
 
-use crate::services::{ServiceInventory, UserService};
+use crate::services::{ServiceInventory, UnitState, UserService};
 use crate::setup::{enable_user_service, evdev_consent_marker, run_setup_command};
 use crate::*;
 use std::{
@@ -130,6 +130,75 @@ fn engine_binary() -> Option<PathBuf> {
         })
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StaleEngineProcess {
+    pub(crate) pid: i32,
+    pub(crate) executable: PathBuf,
+}
+
+/// Find this user's WayExpand IBus engine processes that still map an older
+/// engine executable. IBus owns these processes, so restarting a WayExpand
+/// systemd unit cannot refresh them.
+pub(crate) fn stale_engine_processes() -> Vec<StaleEngineProcess> {
+    let Some(installed) = engine_binary().and_then(|path| fs::canonicalize(path).ok()) else {
+        return Vec::new();
+    };
+    stale_engine_processes_at(Path::new("/proc"), unsafe { libc::geteuid() }, &installed)
+}
+
+fn stale_engine_processes_at(
+    proc_root: &Path,
+    uid: u32,
+    installed: &Path,
+) -> Vec<StaleEngineProcess> {
+    let Ok(entries) = fs::read_dir(proc_root) else {
+        return Vec::new();
+    };
+    let mut processes: Vec<_> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let pid = entry.file_name().to_str()?.parse::<i32>().ok()?;
+            let proc_dir = entry.path();
+            let owned = fs::metadata(&proc_dir)
+                .is_ok_and(|metadata| std::os::unix::fs::MetadataExt::uid(&metadata) == uid);
+            if !owned {
+                return None;
+            }
+            let executable = fs::read_link(proc_dir.join("exe")).ok()?;
+            // `comm` is useful, but can differ from argv[0] when an IBus
+            // launcher or wrapper starts the engine. Check all three kernel
+            // views so the upgrade report still identifies the process that
+            // IBus must restart.
+            let comm_matches = fs::read_to_string(proc_dir.join("comm"))
+                .is_ok_and(|comm| comm.trim() == "wayexpand-ibus");
+            let exe_matches = executable
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name == "wayexpand-ibus" || name == "wayexpand-ibus (deleted)");
+            let argv_matches = fs::read(proc_dir.join("cmdline"))
+                .ok()
+                .and_then(|cmdline| {
+                    cmdline
+                        .split(|byte| *byte == 0)
+                        .find(|argument| !argument.is_empty())
+                        .map(|argument| {
+                            argument
+                                .rsplit(|byte| *byte == b'/')
+                                .next()
+                                .is_some_and(|name| name == b"wayexpand-ibus")
+                        })
+                })
+                .unwrap_or(false);
+            if !(comm_matches || exe_matches || argv_matches) {
+                return None;
+            }
+            (executable != installed).then_some(StaleEngineProcess { pid, executable })
+        })
+        .collect();
+    processes.sort_by_key(|process| process.pid);
+    processes
+}
+
 /// Install the component where the running ibus-daemon reads components.
 /// Writing there needs administrator rights, so this asks through pkexec.
 fn install_component() -> Result<()> {
@@ -238,35 +307,10 @@ fn route_kde_to_ibus(snapshot: &mut SessionSnapshot) -> Result<()> {
 /// processes that do not run the installed binary, so selecting the engine
 /// starts the current one.
 fn restart_stale_engine() {
-    let Some(installed) = engine_binary().and_then(|path| fs::canonicalize(path).ok()) else {
-        return;
-    };
-    let uid = unsafe { libc::geteuid() };
-    let Ok(entries) = fs::read_dir("/proc") else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let Some(pid) = entry
-            .file_name()
-            .to_str()
-            .and_then(|name| name.parse::<i32>().ok())
-        else {
-            continue;
-        };
-        let proc_dir = entry.path();
-        let owned = fs::metadata(&proc_dir)
-            .is_ok_and(|metadata| std::os::unix::fs::MetadataExt::uid(&metadata) == uid);
-        let is_engine = fs::read_to_string(proc_dir.join("comm"))
-            .is_ok_and(|comm| comm.trim() == "wayexpand-ibus");
-        if !owned || !is_engine {
-            continue;
-        }
-        let running = fs::read_link(proc_dir.join("exe")).unwrap_or_default();
-        if running != installed {
-            step("Stopping an IBus engine from an older installation");
-            unsafe {
-                libc::kill(pid, libc::SIGTERM);
-            }
+    for process in stale_engine_processes() {
+        step("Stopping an IBus engine from an older installation");
+        unsafe {
+            libc::kill(process.pid, libc::SIGTERM);
         }
     }
 }
@@ -334,6 +378,70 @@ fn service_active(service: &str) -> bool {
         .is_ok_and(|status| status.success())
 }
 
+fn companion_readiness_error(service: UserService, status: &serde_json::Value) -> Option<String> {
+    let expected_source = match service {
+        UserService::Evdev => "evdev",
+        UserService::Control => "stdin",
+        UserService::InputMethod => return Some("IBus is not a companion service".into()),
+    };
+    let field = |name: &str| status.get(name).and_then(serde_json::Value::as_str);
+    if !crate::doctor::status::status_schema_compatible(status) {
+        return Some("daemon status schema is incompatible".into());
+    }
+    if !crate::doctor::status::daemon_commit_matches(field("daemon_commit")) {
+        return Some("daemon build identity does not match the setup CLI".into());
+    }
+    if field("source") != Some(expected_source) {
+        return Some(format!(
+            "expected source {expected_source}, found {:?}",
+            field("source")
+        ));
+    }
+    if field("backend") != Some("libei") {
+        return Some(format!(
+            "expected libei output, found {:?}",
+            field("backend")
+        ));
+    }
+    if field("config_state") != Some("ok")
+        || status
+            .get("config_generation")
+            .and_then(serde_json::Value::as_u64)
+            .is_none_or(|generation| generation == 0)
+        || field("config_active_path") != Some(default_config_path().to_string_lossy().as_ref())
+    {
+        return Some("expected configuration is not loaded and healthy".into());
+    }
+    if field("output_connection_state") != Some("connected") || field("output_health") != Some("ok")
+    {
+        return Some("libei output is not operational".into());
+    }
+    match service {
+        UserService::Evdev
+            if field("state") != Some("connected")
+                || status.get("route_available") != Some(&serde_json::Value::Bool(true))
+                || status.get("matching_available") != Some(&serde_json::Value::Bool(true))
+                || field("input_connection_state") != Some("connected") =>
+        {
+            Some("evdev capture or matching is not operational".into())
+        }
+        UserService::Control if field("state") != Some("running") => {
+            Some("control service is not running".into())
+        }
+        _ => None,
+    }
+}
+
+fn companion_status_error(service: UserService) -> Result<()> {
+    let response = crate::doctor::status::read_daemon_status()
+        .map_err(|error| anyhow::anyhow!("daemon control status is unavailable: {error}"))?;
+    let status = crate::doctor::status::status_as_json(&response)?;
+    if let Some(problem) = companion_readiness_error(service, &status) {
+        bail!("{problem}");
+    }
+    Ok(())
+}
+
 fn terminal_drop_in() -> Option<PathBuf> {
     let config_home = env::var_os("XDG_CONFIG_HOME")
         .filter(|value| !value.is_empty())
@@ -383,17 +491,21 @@ fn ensure_terminal_apps() -> Result<Vec<String>> {
 /// IBus replacement is verified but not atomic, which the default
 /// `compatibility_mode = "off"` refuses. Ask for that consent explicitly;
 /// `--yes` never grants it on the user's behalf.
-fn ensure_replacement_consent(options: IbusSetupOptions) -> Result<()> {
+fn replacement_authorization_required(mode: wayexpand_core::CompatibilityMode) -> bool {
+    mode == wayexpand_core::CompatibilityMode::Off
+}
+
+fn ensure_replacement_consent(options: IbusSetupOptions) -> Result<bool> {
     let path = default_config_path();
     let loaded = Config::load_versioned(&path).map_err(|error| config_load_error(&path, error))?;
-    if loaded.config.settings.compatibility_mode != wayexpand_core::CompatibilityMode::Off {
-        return Ok(());
+    if !replacement_authorization_required(loaded.config.settings.compatibility_mode) {
+        return Ok(false);
     }
     println!("  IBus checks that the text before the cursor is your trigger, then deletes it and inserts");
     println!("  the snippet as two separate steps. compatibility_mode = \"off\" refuses that, so nothing would expand.");
     if options.assume_yes {
         println!("  Not changed by --yes. Enable it with compatibility_mode = \"tracked-focus\" under [settings] in {}", path.display());
-        return Ok(());
+        return Ok(true);
     }
     if !prompt_yes_no(
         "  Allow verified two-step replacement (compatibility_mode = \"tracked-focus\")? [Y/n] ",
@@ -402,7 +514,7 @@ fn ensure_replacement_consent(options: IbusSetupOptions) -> Result<()> {
         println!(
             "  Left compatibility_mode off; IBus will recognize triggers but not replace them."
         );
-        return Ok(());
+        return Ok(true);
     }
     let mut config = loaded.config;
     config.settings.compatibility_mode = wayexpand_core::CompatibilityMode::TrackedFocus;
@@ -421,7 +533,7 @@ fn ensure_replacement_consent(options: IbusSetupOptions) -> Result<()> {
             ))
         })?;
     step("Set compatibility_mode = \"tracked-focus\"");
-    Ok(())
+    Ok(false)
 }
 
 /// What setup may change in the running session, recorded before it changes
@@ -434,14 +546,31 @@ struct SessionSnapshot {
     preload_engines: Option<String>,
     /// KWin's previous `[Wayland] InputMethod`, recorded when setup changed it.
     kwin_input_method: Option<Option<String>>,
-    /// Units setup enabled and started that were not enabled before.
-    started_units: Vec<&'static str>,
-    /// Units setup stopped and disabled.
-    stopped_units: Vec<&'static str>,
+    /// Original service state for every route that setup may affect.
+    services: Vec<OriginalServiceState>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct OriginalServiceState {
+    service: UserService,
+    installed: bool,
+    enabled: bool,
+    active: bool,
+}
+
+impl OriginalServiceState {
+    fn capture(service: UserService, state: UnitState) -> Self {
+        Self {
+            service,
+            installed: state.installed,
+            enabled: state.enabled,
+            active: state.active,
+        }
+    }
 }
 
 impl SessionSnapshot {
-    fn capture() -> Self {
+    fn capture(inventory: &ServiceInventory) -> Self {
         Self {
             global_engine: command_output("ibus", &["engine"])
                 .map(|engine| engine.trim().to_owned())
@@ -451,6 +580,10 @@ impl SessionSnapshot {
                 &["get", "org.freedesktop.ibus.general", "preload-engines"],
             )
             .map(|value| value.trim().to_owned()),
+            services: UserService::ALL
+                .into_iter()
+                .map(|service| OriginalServiceState::capture(service, inventory.state(service)))
+                .collect(),
             ..Self::default()
         }
     }
@@ -458,22 +591,63 @@ impl SessionSnapshot {
     /// Undo session changes in reverse order. Prepared, inert changes (the
     /// component file, configuration consent) are kept.
     fn rollback(&self) {
-        self.rollback_with(kwriteconfig(), |program, arguments| {
-            let _ = run_setup_command(program, arguments);
+        let mut failures = self.rollback_with(kwriteconfig(), |program, arguments| {
+            run_setup_command(program, arguments).is_ok_and(|status| status.success())
         });
+        let restored = ServiceInventory::probe();
+        for original in &self.services {
+            if !original.installed {
+                continue;
+            }
+            let actual = restored.state(original.service);
+            if actual.installed != original.installed
+                || actual.enabled != original.enabled
+                || actual.active != original.active
+            {
+                failures.push(format!(
+                    "{} expected installed={}, enabled={}, active={} but found installed={}, enabled={}, active={}",
+                    original.service.unit(),
+                    original.installed,
+                    original.enabled,
+                    original.active,
+                    actual.installed,
+                    actual.enabled,
+                    actual.active
+                ));
+            }
+        }
+        if !failures.is_empty() {
+            eprintln!(
+                "Setup rollback could not restore every service state: {}",
+                failures.join(", ")
+            );
+        }
     }
 
     fn rollback_with(
         &self,
         kwriteconfig_program: Option<&str>,
-        mut run: impl FnMut(&str, &[&str]),
-    ) {
+        mut run: impl FnMut(&str, &[&str]) -> bool,
+    ) -> Vec<String> {
         println!("Setup did not complete; restoring your previous input-method setup…");
-        for unit in &self.started_units {
-            run("systemctl", &["--user", "disable", "--now", unit]);
-        }
-        for unit in &self.stopped_units {
-            run("systemctl", &["--user", "enable", "--now", unit]);
+        let mut failures = Vec::new();
+        for original in &self.services {
+            if !original.installed {
+                continue;
+            }
+            let unit = original.service.unit();
+            let enable_action = if original.enabled {
+                "enable"
+            } else {
+                "disable"
+            };
+            if !run("systemctl", &["--user", enable_action, unit]) {
+                failures.push(format!("{unit} enabled={}", original.enabled));
+            }
+            let active_action = if original.active { "start" } else { "stop" };
+            if !run("systemctl", &["--user", active_action, unit]) {
+                failures.push(format!("{unit} active={}", original.active));
+            }
         }
         if let (Some(previous), Some(kwriteconfig)) =
             (&self.kwin_input_method, kwriteconfig_program)
@@ -483,10 +657,12 @@ impl SessionSnapshot {
                 Some(value) => arguments.push(value),
                 None => arguments.push("--delete"),
             }
-            run(kwriteconfig, &arguments);
+            if !run(kwriteconfig, &arguments) {
+                failures.push("KWin input method".into());
+            }
         }
         if let Some(engines) = &self.preload_engines {
-            run(
+            if !run(
                 "gsettings",
                 &[
                     "set",
@@ -494,15 +670,20 @@ impl SessionSnapshot {
                     "preload-engines",
                     engines,
                 ],
-            );
+            ) {
+                failures.push("IBus preloaded engines".into());
+            }
         }
         if let Some(engine) = self
             .global_engine
             .as_deref()
             .filter(|engine| *engine != "wayexpand")
         {
-            run("ibus", &["engine", engine]);
+            if !run("ibus", &["engine", engine]) {
+                failures.push("IBus selected engine".into());
+            }
         }
+        failures
     }
 }
 
@@ -613,22 +794,32 @@ fn prepare_terminals() -> Result<()> {
 
 /// Enable and (re)start `service`, recording it for rollback when setup is
 /// what enabled it.
-fn start_companion(
-    service: UserService,
-    inventory: &ServiceInventory,
-    snapshot: &mut SessionSnapshot,
-) -> Result<()> {
+fn start_companion(service: UserService) -> Result<()> {
     let unit = service.unit();
-    let was_enabled = inventory.state(service).enabled;
     enable_user_service(unit)?;
-    if !was_enabled {
-        snapshot.started_units.push(unit);
+    // Pick up a changed drop-in or binary in an already running unit. A
+    // successful ActiveState probe alone does not prove this restart took
+    // effect or that the intended daemon build/config/backend is serving.
+    let restart = run_setup_command("systemctl", &["--user", "restart", unit])?;
+    if !restart.success() {
+        bail!("systemd failed to restart {unit}; see `journalctl --user -u {unit} -n 50`");
     }
-    // Pick up a changed drop-in or binary in an already running unit.
-    let _ = run_setup_command("systemctl", &["--user", "restart", unit]);
-    if !wait_until(Duration::from_secs(8), || service_active(unit)) {
+    let mut readiness_detail = "service has not become active".to_owned();
+    if !wait_until(Duration::from_secs(8), || {
+        if !service_active(unit) {
+            readiness_detail = "service is not active".to_owned();
+            return false;
+        }
+        match companion_status_error(service) {
+            Ok(()) => true,
+            Err(error) => {
+                readiness_detail = error.to_string();
+                false
+            }
+        }
+    }) {
         bail!(
-            "{unit} did not stay running; see `journalctl --user -u {unit} -n 50`{}",
+            "{unit} restart completed, but daemon readiness verification failed: {readiness_detail}; see `journalctl --user -u {unit} -n 50`{}",
             if service == UserService::Evdev {
                 " (it needs /dev/input access: scripts/install-evdev-permissions.sh)"
             } else {
@@ -640,11 +831,7 @@ fn start_companion(
 }
 
 /// Stop capture daemons that would expand everywhere next to IBus.
-fn stop_global_capture(
-    options: IbusSetupOptions,
-    companion: CompanionService,
-    snapshot: &mut SessionSnapshot,
-) -> Result<()> {
+fn stop_global_capture(options: IbusSetupOptions, companion: CompanionService) -> Result<()> {
     for service in [UserService::Evdev, UserService::InputMethod] {
         let unit = service.unit();
         if !service_active(unit) {
@@ -660,8 +847,14 @@ fn stop_global_capture(
         let stop = options.assume_yes
             || prompt_yes_no(&format!("  Stop and disable {unit}? [Y/n] "), true)?;
         if stop {
-            let _ = run_setup_command("systemctl", &["--user", "disable", "--now", unit]);
-            snapshot.stopped_units.push(unit);
+            let result = run_setup_command("systemctl", &["--user", "disable", "--now", unit])?;
+            if !result.success() {
+                bail!("could not stop and disable {unit}; refusing to activate IBus beside an active capture route");
+            }
+            let after = ServiceInventory::probe().state(service);
+            if after.active || after.enabled {
+                bail!("{unit} did not become inactive and disabled; refusing to activate IBus beside an active capture route");
+            }
             step(&format!("Stopped {unit}"));
         } else {
             bail!("{unit} would expand snippets a second time beside IBus; stop it or use `--terminals`");
@@ -674,7 +867,6 @@ fn stop_global_capture(
 fn activate_and_verify(
     options: IbusSetupOptions,
     companion: CompanionService,
-    inventory: &ServiceInventory,
     snapshot: &mut SessionSnapshot,
 ) -> Result<()> {
     match IbusDesktop::detect() {
@@ -711,15 +903,15 @@ fn activate_and_verify(
     ) {
         bail!("could not select the WayExpand IBus engine; check that `ibus list-engine --name-only` lists `wayexpand`");
     }
-    stop_global_capture(options, companion, snapshot)?;
+    stop_global_capture(options, companion)?;
     match companion {
         CompanionService::Terminals => {
             step("Starting the terminal-only evdev daemon");
-            start_companion(UserService::Evdev, inventory, snapshot)?;
+            start_companion(UserService::Evdev)?;
         }
         CompanionService::Control => {
             step("Starting wayexpand-control.service for quick insert and hotkeys");
-            start_companion(UserService::Control, inventory, snapshot)?;
+            start_companion(UserService::Control)?;
         }
         CompanionService::None => {}
     }
@@ -749,14 +941,15 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
     // Phase 2: inert preparation. None of this changes the active input
     // method or running services.
     install_component()?;
-    ensure_replacement_consent(options)?;
+    let replacement_authorization_required = ensure_replacement_consent(options)?;
     if companion == CompanionService::Terminals && options.terminals {
         prepare_terminals()?;
     }
 
     // Phases 3–5: change the session, verify, or put it back.
-    let mut snapshot = SessionSnapshot::capture();
-    if let Err(error) = activate_and_verify(options, companion, &inventory, &mut snapshot) {
+    let service_snapshot = ServiceInventory::probe();
+    let mut snapshot = SessionSnapshot::capture(&service_snapshot);
+    if let Err(error) = activate_and_verify(options, companion, &mut snapshot) {
         snapshot.rollback();
         return Err(error.context("the previous input-method setup was restored"));
     }
@@ -769,6 +962,12 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
     let overlap = crate::commands::ibus::RouteOverlap::from_status(status.as_ref());
     crate::commands::ibus::print_report(&report, &overlap);
     println!();
+    if replacement_authorization_required {
+        println!("SETUP INCOMPLETE: WX-POLICY-001");
+        println!("IBus was configured and activated, but text replacement is disabled by policy.");
+        println!("Required user action: review and authorize compatibility_mode = \"tracked-focus\" under [settings], then rerun `wayexpand setup --backend ibus`.");
+        bail!("WX-POLICY-001: IBus is active, but replacement authorization is required before expansions can work")
+    }
     println!("WayExpand IBus setup is configured; a real target-app insertion has not yet been verified.");
     println!("To complete the first-run check, run `wayexpand ibus watch`, switch to a test application, and type a harmless trigger.");
     if companion != CompanionService::Terminals {
@@ -780,6 +979,74 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compatibility_off_is_reported_as_incomplete_setup() {
+        assert!(replacement_authorization_required(
+            wayexpand_core::CompatibilityMode::Off
+        ));
+        assert!(!replacement_authorization_required(
+            wayexpand_core::CompatibilityMode::TrackedFocus
+        ));
+    }
+
+    fn healthy_companion_status(source: &str) -> serde_json::Value {
+        serde_json::json!({
+            "status_schema": crate::CONTROL_STATUS_SCHEMA,
+            "daemon_commit": crate::build_info::COMMIT,
+            "source": source,
+            "backend": "libei",
+            "config_state": "ok",
+            "config_generation": 1,
+            "config_active_path": default_config_path().display().to_string(),
+            "output_connection_state": "connected",
+            "output_health": "ok",
+            "state": if source == "evdev" { "connected" } else { "running" },
+            "route_available": source == "evdev",
+            "matching_available": source == "evdev",
+            "input_connection_state": if source == "evdev" { "connected" } else { "unknown" },
+        })
+    }
+
+    #[test]
+    fn companion_readiness_checks_build_schema_config_backend_and_runtime() {
+        let mut status = healthy_companion_status("evdev");
+        assert_eq!(companion_readiness_error(UserService::Evdev, &status), None);
+
+        status["daemon_commit"] = "older-build".into();
+        assert!(companion_readiness_error(UserService::Evdev, &status)
+            .unwrap()
+            .contains("build identity"));
+        status = healthy_companion_status("evdev");
+        status["status_schema"] = (crate::CONTROL_STATUS_SCHEMA - 1).into();
+        assert!(companion_readiness_error(UserService::Evdev, &status)
+            .unwrap()
+            .contains("schema"));
+        status = healthy_companion_status("evdev");
+        status["backend"] = "other".into();
+        assert!(companion_readiness_error(UserService::Evdev, &status)
+            .unwrap()
+            .contains("expected libei"));
+        status = healthy_companion_status("evdev");
+        status["config_generation"] = 0.into();
+        assert!(companion_readiness_error(UserService::Evdev, &status)
+            .unwrap()
+            .contains("configuration"));
+        status = healthy_companion_status("evdev");
+        status["matching_available"] = false.into();
+        assert!(companion_readiness_error(UserService::Evdev, &status)
+            .unwrap()
+            .contains("capture or matching"));
+    }
+
+    #[test]
+    fn control_companion_requires_healthy_output_but_not_text_capture() {
+        let status = healthy_companion_status("stdin");
+        assert_eq!(
+            companion_readiness_error(UserService::Control, &status),
+            None
+        );
+    }
 
     #[test]
     fn gsettings_string_lists_round_trip() {
@@ -802,6 +1069,65 @@ mod tests {
         assert!(manifest.contains("<name>org.freedesktop.IBus.WayExpand</name>"));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn stale_engine_scan_lists_only_older_wayexpand_ibus_processes() {
+        use std::os::unix::fs::symlink;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "wayexpand-stale-ibus-test-{}-{unique}",
+            std::process::id()
+        ));
+        let proc_root = root.join("proc");
+        fs::create_dir_all(&proc_root).unwrap();
+        let installed = root.join("current-engine");
+        let old = root.join("previous-engine");
+        fs::write(&installed, b"current").unwrap();
+        fs::write(&old, b"previous").unwrap();
+
+        for (pid, executable, comm) in [
+            (101, &installed, "wayexpand-ibus"),
+            (202, &old, "wayexpand-ibus"),
+            (303, &old, "other-process"),
+            (404, &old, "ibus-wrapper"),
+        ] {
+            let process = proc_root.join(pid.to_string());
+            fs::create_dir(&process).unwrap();
+            fs::write(process.join("comm"), format!("{comm}\n")).unwrap();
+            symlink(executable, process.join("exe")).unwrap();
+        }
+        fs::write(
+            proc_root.join("404/cmdline"),
+            b"/usr/libexec/wayexpand-ibus\0--ibus\0",
+        )
+        .unwrap();
+
+        let stale = stale_engine_processes_at(
+            &proc_root,
+            unsafe { libc::geteuid() },
+            &fs::canonicalize(&installed).unwrap(),
+        );
+        assert_eq!(
+            stale,
+            vec![
+                StaleEngineProcess {
+                    pid: 202,
+                    executable: old.clone(),
+                },
+                StaleEngineProcess {
+                    pid: 404,
+                    executable: old.clone(),
+                }
+            ]
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn default_terminal_apps_are_valid_terminal_app_ids() {
         let mut config =
@@ -814,16 +1140,38 @@ mod tests {
     }
 
     #[test]
-    fn failed_ibus_activation_rolls_back_services_and_session_selection() {
+    fn rollback_restores_service_enablement_and_activity_independently() {
+        let inventory = ServiceInventory::from_states(vec![
+            (
+                UserService::Evdev,
+                UnitState {
+                    installed: true,
+                    enabled: false,
+                    active: true,
+                    failed: false,
+                },
+            ),
+            (
+                UserService::Control,
+                UnitState {
+                    installed: true,
+                    enabled: true,
+                    active: false,
+                    failed: false,
+                },
+            ),
+        ]);
         let snapshot = SessionSnapshot {
             global_engine: Some("xkb:us::eng".into()),
             preload_engines: Some("['xkb:us::eng']".into()),
             kwin_input_method: Some(Some("old-input-method.so".into())),
-            started_units: vec!["wayexpand-control.service"],
-            stopped_units: vec!["wayexpand-evdev.service"],
+            services: UserService::ALL
+                .into_iter()
+                .map(|service| OriginalServiceState::capture(service, inventory.state(service)))
+                .collect(),
         };
         let mut actions = Vec::<(String, Vec<String>)>::new();
-        snapshot.rollback_with(Some("kwriteconfig6"), |program, arguments| {
+        let failures = snapshot.rollback_with(Some("kwriteconfig6"), |program, arguments| {
             actions.push((
                 program.to_owned(),
                 arguments
@@ -831,25 +1179,46 @@ mod tests {
                     .map(|argument| (*argument).to_owned())
                     .collect(),
             ));
+            true
         });
+        assert!(failures.is_empty());
 
         assert_eq!(
-            actions,
+            &actions[..4],
             [
                 (
                     "systemctl".into(),
-                    vec!["--user", "disable", "--now", "wayexpand-control.service"]
+                    vec!["--user", "disable", "wayexpand-evdev.service"]
                         .into_iter()
                         .map(str::to_owned)
                         .collect(),
                 ),
                 (
                     "systemctl".into(),
-                    vec!["--user", "enable", "--now", "wayexpand-evdev.service"]
+                    vec!["--user", "start", "wayexpand-evdev.service"]
                         .into_iter()
                         .map(str::to_owned)
                         .collect(),
                 ),
+                (
+                    "systemctl".into(),
+                    vec!["--user", "enable", "wayexpand-control.service"]
+                        .into_iter()
+                        .map(str::to_owned)
+                        .collect(),
+                ),
+                (
+                    "systemctl".into(),
+                    vec!["--user", "stop", "wayexpand-control.service"]
+                        .into_iter()
+                        .map(str::to_owned)
+                        .collect(),
+                ),
+            ]
+        );
+        assert_eq!(
+            &actions[4..],
+            [
                 (
                     "kwriteconfig6".into(),
                     KWIN_INPUT_METHOD_KEY

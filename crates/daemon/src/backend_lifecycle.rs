@@ -15,7 +15,9 @@ use std::{
     time::{Duration, Instant},
 };
 use tracing::{info, warn};
+use wayexpand_backend_gnome_window::GnomeWindowTracker;
 use wayexpand_backend_kwin_window::KwinWindowTracker;
+use wayexpand_backend_selection::WindowTrackerKind;
 use wayexpand_core::{
     window_update_channel, FocusStamp, WindowContext, WindowTracker, WindowUpdateReceiver,
     WindowUpdateSender,
@@ -86,14 +88,16 @@ impl ReconnectBackoff {
 
 /// Spawn a supervised background window tracker.
 ///
-/// The returned receiver exists even when KWin is initially unavailable;
-/// the supervisor keeps probing and reconnects with bounded exponential
-/// backoff. Until it sends a fresh focused-window snapshot, app-filtered
-/// expansions remain fail-closed.
+/// The returned receiver exists even when the desktop's bridge (KWin's
+/// scripting interface, or the WayExpand GNOME Shell extension) is initially
+/// unavailable; the supervisor keeps probing and reconnects with bounded
+/// exponential backoff. Until it sends a fresh focused-window snapshot,
+/// app-filtered expansions remain fail-closed. Desktops without a bridge get
+/// no tracker. The wlroots toplevel prototype is deliberately not part of the
+/// production daemon until its event-loop, ownership, and compositor test
+/// coverage are complete.
 pub fn spawn_window_tracker() -> Option<WindowTrackerHandle> {
-    // Try the integrated KDE Plasma backend. The wlroots toplevel prototype is
-    // deliberately not part of the production daemon until its event-loop,
-    // ownership, and compositor test coverage are complete.
+    let kind = WindowTrackerKind::for_session()?;
 
     let (sender, receiver) = window_update_channel();
     let connected = Arc::new(AtomicBool::new(false));
@@ -102,8 +106,24 @@ pub fn spawn_window_tracker() -> Option<WindowTrackerHandle> {
     let supervisor_stop = Arc::clone(&stop);
     match thread::Builder::new()
         .name("wayexpand-window-tracker-supervisor".into())
-        .spawn(move || supervise_kwin_window_tracker(sender, supervisor_connected, supervisor_stop))
-    {
+        .spawn(move || match kind {
+            WindowTrackerKind::Kwin => supervise_window_tracker(
+                sender,
+                supervisor_connected,
+                supervisor_stop,
+                kind.label(),
+                KwinWindowTracker::probe,
+                KwinWindowTracker::new,
+            ),
+            WindowTrackerKind::GnomeShell => supervise_window_tracker(
+                sender,
+                supervisor_connected,
+                supervisor_stop,
+                kind.label(),
+                GnomeWindowTracker::probe,
+                GnomeWindowTracker::new,
+            ),
+        }) {
         Ok(supervisor) => Some(WindowTrackerHandle {
             receiver,
             connected,
@@ -111,30 +131,17 @@ pub fn spawn_window_tracker() -> Option<WindowTrackerHandle> {
             supervisor: Some(supervisor),
         }),
         Err(error) => {
-            warn!(%error, "could not start KWin window tracker supervisor");
+            warn!(%error, tracker = kind.label(), "could not start window tracker supervisor");
             None
         }
     }
-}
-
-fn supervise_kwin_window_tracker(
-    sender: WindowUpdateSender,
-    connected: Arc<AtomicBool>,
-    stop: Arc<AtomicBool>,
-) {
-    supervise_window_tracker(
-        sender,
-        connected,
-        stop,
-        KwinWindowTracker::probe,
-        KwinWindowTracker::new,
-    );
 }
 
 fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
     sender: WindowUpdateSender,
     connected: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
+    label: &'static str,
     mut probe: Probe,
     mut connect: Connect,
 ) where
@@ -155,7 +162,7 @@ fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
         }
 
         if let Err(error) = probe() {
-            warn!(%error, "KWin window tracking unavailable; will reprobe");
+            warn!(%error, tracker = label, "window tracking unavailable; will reprobe");
             if !wait_for_tracker_retry(&stop, &sender, backoff.after_failure(None)) {
                 return;
             }
@@ -165,7 +172,7 @@ fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
         let mut tracker = match connect() {
             Ok(tracker) => tracker,
             Err(error) => {
-                warn!(%error, "KWin window tracker failed to connect; will retry");
+                warn!(%error, tracker = label, "window tracker failed to connect; will retry");
                 if !wait_for_tracker_retry(&stop, &sender, backoff.after_failure(None)) {
                     return;
                 }
@@ -179,7 +186,7 @@ fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
         if sender.send(None).is_err() {
             return;
         }
-        info!("window tracker connected (KWin scripting bridge)");
+        info!(tracker = label, "window tracker connected");
         let connected_at = Instant::now();
         loop {
             // The handle's Drop sets `stop` and joins this thread while the
@@ -200,7 +207,7 @@ fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
                 Ok(None) => {}
                 Err(error) => {
                     connected.store(false, Ordering::Release);
-                    warn!(%error, "KWin window tracker disconnected; will reconnect");
+                    warn!(%error, tracker = label, "window tracker disconnected; will reconnect");
                     if sender.send(None).is_err() {
                         return;
                     }
@@ -213,7 +220,8 @@ fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
         let delay = backoff.after_failure(Some(connected_at.elapsed()));
         info!(
             ?delay,
-            "waiting before reconnecting the KWin window tracker"
+            tracker = label,
+            "waiting before reconnecting the window tracker"
         );
         if !wait_for_tracker_retry(&stop, &sender, delay) {
             return;
@@ -360,6 +368,7 @@ mod tests {
                 sender,
                 supervisor_connected,
                 supervisor_stop,
+                "test tracker",
                 probe,
                 connect,
             );
@@ -401,6 +410,7 @@ mod tests {
                 sender,
                 supervisor_connected,
                 supervisor_stop,
+                "test tracker",
                 || Ok::<_, &'static str>(()),
                 || Ok::<_, &'static str>(tracker.take().unwrap()),
             );
@@ -446,6 +456,7 @@ mod tests {
                 sender,
                 supervisor_connected,
                 supervisor_stop,
+                "test tracker",
                 || Ok::<_, &'static str>(()),
                 || Ok::<_, &'static str>(IdleTracker),
             );

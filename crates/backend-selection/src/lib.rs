@@ -8,6 +8,7 @@
 use std::{env, fmt};
 use tracing::{debug, warn};
 use wayexpand_backend_evdev::readable_keyboard_available;
+use wayexpand_backend_gnome_window::GnomeWindowTracker;
 use wayexpand_backend_input_method::InputMethodSource;
 use wayexpand_backend_kwin_window::KwinWindowTracker;
 use wayexpand_backend_wlroots::WlrootsInjector;
@@ -142,6 +143,41 @@ pub struct Capabilities {
 }
 
 /// Best-effort compositor classification used in the shared explanation.
+/// The focused-window bridge a desktop session uses for `app_filter`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowTrackerKind {
+    /// KDE Plasma: a KWin script over `org.kde.kwin.Scripting`.
+    Kwin,
+    /// GNOME: the WayExpand GNOME Shell extension.
+    GnomeShell,
+}
+
+impl WindowTrackerKind {
+    /// The bridge for this session's desktop, if WayExpand has one.
+    pub fn for_session() -> Option<Self> {
+        match Compositor::detect() {
+            Compositor::KdePlasma => Some(Self::Kwin),
+            Compositor::Gnome => Some(Self::GnomeShell),
+            _ => None,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Kwin => "KWin scripting bridge",
+            Self::GnomeShell => "GNOME Shell extension",
+        }
+    }
+
+    /// A bounded, side-effect-free availability check.
+    pub fn probe(self) -> Result<(), String> {
+        match self {
+            Self::Kwin => KwinWindowTracker::probe().map_err(|error| error.to_string()),
+            Self::GnomeShell => GnomeWindowTracker::probe().map_err(|error| error.to_string()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Compositor {
     KdePlasma,
@@ -167,7 +203,7 @@ impl Compositor {
         }
     }
 
-    fn detect() -> Self {
+    pub fn detect() -> Self {
         if let Ok(desktop) = env::var("XDG_CURRENT_DESKTOP") {
             let desktop_lower = desktop.to_lowercase();
             if desktop_lower.contains("kde") {
@@ -217,11 +253,12 @@ pub fn probe_capabilities() -> Capabilities {
     // socket is safe to recognize; portal availability remains an explicit
     // startup decision and is reported by doctor.
     let has_direct_libei_socket = env::var_os("LIBEI_SOCKET").is_some();
-    // KWin window tracking is only available in KDE Plasma sessions over D-Bus.
-    // Probe is relatively fast and safe; it checks for KWin availability without
-    // interfering with the session. This ensures CLI and daemon report consistent
-    // window tracking capability.
-    let has_window_tracker = KwinWindowTracker::probe().is_ok();
+    // Focused-window tracking needs a desktop-specific bridge: KWin's
+    // scripting interface on Plasma, the WayExpand GNOME Shell extension on
+    // GNOME. Both probes are bounded and side-effect free, so the CLI and
+    // the daemon report the same capability.
+    let has_window_tracker =
+        WindowTrackerKind::for_session().is_some_and(|kind| kind.probe().is_ok());
     let capabilities = Capabilities {
         has_input_method_v2,
         has_virtual_keyboard,

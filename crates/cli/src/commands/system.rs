@@ -81,6 +81,14 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
             error.safe_summary()
         ))
     })?;
+    // Window tracking is independent of the input route, so set it up even
+    // when no capture route turns out to be available.
+    if wayexpand_backend_selection::Compositor::detect()
+        == wayexpand_backend_selection::Compositor::Gnome
+    {
+        crate::gnome_extension::setup_gnome_window_tracker();
+        println!();
+    }
     let capabilities = probe_capabilities();
     let policy = load_policy()?;
     let ibus_available = ibus_engine_available();
@@ -163,6 +171,28 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
             terminals,
         },
     )?;
+    let hello_available = Config::load(default_config_path()).is_ok_and(|config| {
+        config
+            .expansion
+            .iter()
+            .any(|expansion| expansion.enabled && expansion.answers_to(";;hello"))
+    });
+    if hello_available {
+        if assume_yes {
+            println!("Activation completed. Real application insertion: NOT TESTED.");
+            println!("Next: run `wayexpand debug --test ';;hello'` in a disposable text field and confirm the replacement.");
+        } else if crate::prompt_yes_no(
+            "Activation checks completed; a real application insertion is not yet verified. Run the `;;hello` first-run test now? [Y/n] ",
+            true,
+        )? {
+            crate::commands::debug::desktop_test(";;hello")?;
+        } else {
+            println!("Activation completed. Real application insertion: NOT TESTED.");
+            println!("Next: run `wayexpand debug --test ';;hello'` in a disposable text field and confirm the replacement.");
+        }
+    } else {
+        println!("Activation completed. No enabled `;;hello` sample was found; real application insertion remains NOT TESTED.");
+    }
     Ok(())
 }
 
@@ -236,7 +266,7 @@ pub(crate) fn doctor_command(args: Args) -> Result<()> {
         build_info::COMMIT
     );
     println!("Session: {}", session_description());
-    println!("Feature limits: IME preedit/composition is unsupported; app_filter window tracking is KWin-only (fails closed elsewhere).");
+    println!("Feature limits: IME preedit/composition is unsupported; app_filter window tracking needs KWin (KDE Plasma) or the WayExpand GNOME Shell extension (GNOME 45+); it fails closed elsewhere.");
     let config_ok = print_config_diagnostics(&config_path);
     let control_socket_ok = print_control_socket_diagnostics();
     let output_ok = crate::doctor::status::print_output_health_diagnostics();
@@ -559,13 +589,25 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
                 .map(crate::services::UserService::unit)
                 .find(|unit| service_is_active(unit))
         });
+    let stale_ibus_processes = crate::setup_ibus::stale_engine_processes();
+    let stale_ibus_processes_json: Vec<_> = stale_ibus_processes
+        .iter()
+        .map(|process| {
+            serde_json::json!({
+                "pid": process.pid,
+                "name": "wayexpand-ibus",
+                "executable": process.executable,
+            })
+        })
+        .collect();
     let report = serde_json::json!({
         "schema":1, "action":action, "cli_commit":cli_commit,
         "current_install":current_target.as_ref().map(|v|v.to_string_lossy().into_owned()).or_else(|| installed_cli.as_ref().map(|p|p.display().to_string())),
         "daemon_commit":daemon_commit, "daemon_running":status_snapshot.is_some(),
         "config_valid":config_valid, "version_mismatch":mismatch,
         "restart_service":service, "rollback_available":rollback_file.is_file(),
-        "ibus_engine_note":"An IBus engine is owned by ibus-daemon; restarting a WayExpand systemd unit does not reload that engine. Restart IBus explicitly after reviewing the impact."
+        "ibus_stale_engine_processes":stale_ibus_processes_json,
+        "ibus_engine_note":"IBus engine processes are owned by ibus-daemon; restarting a WayExpand systemd unit does not reload a stale engine."
     });
     if action == "--check" {
         if json {
@@ -594,11 +636,10 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
                     "no runtime version mismatch detected"
                 }
             );
-            if source == Some("ibus") {
-                println!(
-                    "IBus: {}",
-                    report["ibus_engine_note"].as_str().unwrap_or("")
-                );
+            if source == Some("ibus") && stale_ibus_processes.is_empty() {
+                println!("IBus: no stale WayExpand engine process was found.");
+            } else if !stale_ibus_processes.is_empty() {
+                print_ibus_engine_restart_guidance(&stale_ibus_processes);
             }
         }
         if !config_valid {
@@ -638,6 +679,9 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
             println!("Daemon build is current; restarted active {broker}.");
         } else {
             println!("No running daemon version mismatch; nothing to apply.");
+        }
+        if !stale_ibus_processes.is_empty() {
+            print_ibus_engine_restart_guidance(&stale_ibus_processes);
         }
         return Ok(());
     }
@@ -714,8 +758,24 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
             bail!("action broker health check failed; no saved payload is available for automatic rollback")
         }
     }
-    println!("Restarted {unit}; daemon build {restarted_commit} now matches this CLI. IBus-owned engine processes require a separate IBus restart.");
+    println!("Restarted {unit}; daemon build {restarted_commit} now matches this CLI.");
+    let stale_ibus_processes = crate::setup_ibus::stale_engine_processes();
+    if !stale_ibus_processes.is_empty() {
+        print_ibus_engine_restart_guidance(&stale_ibus_processes);
+    }
     Ok(())
+}
+
+fn print_ibus_engine_restart_guidance(processes: &[crate::setup_ibus::StaleEngineProcess]) {
+    println!("IBus still has WayExpand engine process(es) running the previous binary:");
+    for process in processes {
+        println!(
+            "  wayexpand-ibus (PID {}) — {}",
+            process.pid,
+            process.executable.display()
+        );
+    }
+    println!("Restart IBus to load the updated engine: `ibus restart` (input pauses briefly).");
 }
 
 fn wait_for_daemon_build(expected_commit: &str) -> (Result<serde_json::Value>, Option<String>) {

@@ -311,6 +311,8 @@ jobs:
           toolchain: 1.96.0
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config
+      - name: Record the checked-out source identity
+        run: printf 'WAYEXPAND_BUILD_SHA=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_ENV"
       - name: Create git archive (simulate release tarball)
         run: git archive --format=tar "HEAD^{tree}" | gzip -n > wayexpand.tar.gz
       - name: Extract to clean directory
@@ -328,6 +330,7 @@ jobs:
       - name: Test with clean CARGO_HOME
         env:
           CARGO_HOME: /tmp/cargo-clean
+          RUST_TEST_THREADS: 4
         run: cd /tmp/clean-build && cargo test --locked --release --workspace
 
   scripts:
@@ -356,6 +359,10 @@ jobs:
         run: sh scripts/test-production-certification-gate.sh
       - name: Verify package smoke tests refuse host execution
         run: bash scripts/test-package-smoke-guard.sh
+      - name: Verify GNOME extension state parsing
+        run: bash scripts/test-gnome-extension-state.sh
+      - name: Verify GNOME extension D-Bus path compatibility
+        run: sh scripts/test-gnome-extension-dbus.sh
       - name: Check Rust dependency hygiene
         run: cargo install cargo-machete --version 0.9.2 --locked && cargo machete
       - name: Test commit identity failure handling
@@ -584,6 +591,23 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ibus dbus-daemon libwayland-dev libxkbcommon-dev pkg-config
       - name: Test the IBus engine against a private ibus-daemon
         run: bash scripts/test-ibus-e2e.sh
+
+  gnome-e2e:
+    name: Headless GNOME Shell Window Tracking E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: 1.96.0
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Install GNOME Shell and D-Bus
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gnome-shell dconf-service dbus-daemon libglib2.0-bin libgl1-mesa-dri libwayland-dev libxkbcommon-dev pkg-config
+      - name: Test the GNOME Shell extension and tracker in a headless GNOME Shell
+        run: bash scripts/test-gnome-e2e.sh
 
   packaging:
     name: Debian and RPM Package Artifacts

@@ -36,7 +36,7 @@ complete right-to-left editing experience.
 | input-method-v2 capture | Experimental | Activation, focus, and Unicode tests |
 | evdev capture (`--source=evdev --allow-evdev-sensitive-fields`) | Experimental, best-effort, explicit opt-in | Compositor-agnostic compatibility fallback (e.g. KWin); cannot detect password or other sensitive fields and must not be described as providing input-method privacy protections. Organizations that require this signal should enforce `safe_mode = true` and `require_sensitive_focus = true`. It also cannot make rapid replacement atomic under non-exclusive capture. See [`BACKENDS.md`](BACKENDS.md), [ADR 0001](adr/0001-evdev-best-effort-semantics.md), and [`SECURITY.md`](../SECURITY.md) |
 | Global hotkeys | Experimental | Backend capture and action tests |
-| Focused-window tracking (`app_filter`) | Supported by the KDE/KWin path; awaiting independent certification | KWin tracker exists; wlroots and GNOME paths explicitly report application filters unavailable rather than guessing |
+| Focused-window tracking (`app_filter`) | Supported by the KDE/KWin path; awaiting independent certification. Implemented on GNOME 45+ through the WayExpand GNOME Shell extension; tested in a headless GNOME Shell, awaiting real-session evidence | wlroots paths explicitly report application filters unavailable rather than guessing |
 | Key pass-through | Experimental | libei-assisted lifecycle-aware press/release pass-through exists for input-method-v2; modifier chords, repetition, reconnect, and compositor/client behavior still require certification |
 | Runtime keyboard-layout switching | Route-dependent | input-method-v2 and IBus expose layout-aware input paths; KDE evdev cross-checks KWin's active group against configured XKB settings; Hyprland evdev validates compositor-reported per-device XKB settings and active group, refusing inconsistent keyboards or unknown layouts; Sway evdev matching remains unavailable because its input query omits the effective XKB settings |
 | External preedit/IME composition | **Not supported** | ⚠️ Affects CJK and active Fcitx/IBus/Rime composition (see below) |
@@ -68,7 +68,7 @@ real-session evidence with `certification_scope: production` exists.
 | Target | Desktop/session | Declared test paths | Window tracking | App filters | Sensitive fields observed | Production certification |
 | --- | --- | --- | --- | --- | --- | --- |
 | `kde` | KDE Plasma / KWin | ibus, evdev+libei | KWin application tracker | Available in declared path | Not observed | **Not certified** |
-| `gnome` | GNOME Shell / Mutter | ibus, evdev+libei | none | Unavailable | Not observed | **Not certified** |
+| `gnome` | GNOME Shell / Mutter | ibus, evdev+libei | WayExpand GNOME Shell extension (GNOME 45+) | Implemented; awaiting real-session evidence | Not observed | **Not certified** |
 | `sway` | Sway / wlroots | evdev+wlroots, input-method-v2 | none | Unavailable | Not observed | **Not certified** |
 | `hyprland` | Hyprland / wlroots | evdev+wlroots, input-method-v2 | none | Unavailable | Not observed | **Not certified** |
 <!-- generated:desktop-certification-matrix:end -->

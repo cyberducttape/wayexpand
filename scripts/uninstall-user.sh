@@ -106,6 +106,15 @@ for binary in wayexpand-daemon wayexpand wayexpand-action-broker wayexpand-ui wa
         printf '%s\n' "Removed $bin_dir/$binary"
     fi
 done
+# The GNOME Shell extension `wayexpand setup` installed for this user. Only
+# a directory holding WayExpand's own extension is removed.
+gnome_extension_dir="${XDG_DATA_HOME:-$HOME/.local/share}/gnome-shell/extensions/wayexpand-window-tracker@cyberducttape.github.io"
+if [ -f "$gnome_extension_dir/metadata.json" ] \
+    && grep -F '"uuid": "wayexpand-window-tracker@cyberducttape.github.io"' "$gnome_extension_dir/metadata.json" >/dev/null 2>&1; then
+    rm -f -- "$gnome_extension_dir/metadata.json" "$gnome_extension_dir/extension.js"
+    rmdir -- "$gnome_extension_dir" 2>/dev/null || true
+    printf '%s\n' "Removed $gnome_extension_dir"
+fi
 if [ -e "$ibus_component_dir/wayexpand.xml" ]; then
     rm -f -- "$ibus_component_dir/wayexpand.xml"
     printf '%s\n' "Removed $ibus_component_dir/wayexpand.xml"

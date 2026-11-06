@@ -27,17 +27,65 @@ assert_contains() {
 
 "$script" --help >/dev/null
 
+# Simulate a root invocation in a container without SUDO_USER. No privileged
+# operation runs because this is a dry run; the fake id only exercises the
+# script's root/user-selection branch.
+fake_bin=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-evdev-root-preview.XXXXXX")
+trap 'rm -rf "$fake_bin"' EXIT INT TERM
+cat >"$fake_bin/id" <<'EOF'
+#!/bin/sh
+if [ "$#" -eq 1 ] && [ "$1" = -u ]; then
+    printf '0\n'
+else
+    exec /usr/bin/id "$@"
+fi
+EOF
+chmod 0755 "$fake_bin/id"
+root_preview=$(env PATH="$fake_bin:$PATH" SUDO_USER= "$script" --dry-run)
+assert_contains root-without-sudo-user '(dry run; no changes made)' "$root_preview"
+assert_contains root-without-sudo-user-no-account-change 'no account membership change' "$root_preview"
+if env PATH="$fake_bin:$PATH" SUDO_USER= "$script" --access=input-group --dry-run >/dev/null 2>&1; then
+    printf '%s\n' 'root input-group preview accepted a missing target user' >&2
+    exit 1
+fi
+
 out=$("$script" --dry-run)
 assert_contains default-header 'This will:' "$out"
 assert_contains default-dry-run '(dry run; no changes made)' "$out"
 assert_contains default-active-seat 'Active-seat mode relies on systemd-logind' "$out"
 seat_out=$("$script" --access=active-seat --dry-run)
 assert_contains explicit-active-seat 'Active-seat mode' "$seat_out"
-assert_contains explicit-active-seat-membership 'leave pre-existing input-group membership unchanged' "$seat_out"
+case "$seat_out" in
+    *'leave pre-existing input-group membership unchanged'*|\
+    *'no account membership change'*)
+        ;;
+    *)
+        printf '%s\n' "$seat_out" >&2
+        printf '%s\n' 'active-seat preview did not explain its membership behavior' >&2
+        exit 1
+        ;;
+esac
+
+# An explicit account is accepted and validated for a group-mode preview.
+preview_user=$(id -un)
+group_preview=$("$script" --access=input-group --user "$preview_user" --dry-run)
+assert_contains group-preview-user "$preview_user" "$group_preview"
+if "$script" --access=input-group --dry-run >/dev/null 2>&1; then
+    printf '%s\n' 'input-group preview accepted a missing target user' >&2
+    exit 1
+fi
+if "$script" --dry-run --user wayexpand-user-that-does-not-exist >/dev/null 2>&1; then
+    printf '%s\n' 'evdev helper accepted a nonexistent target user' >&2
+    exit 1
+fi
+if [ "$(id -u)" -eq 0 ]; then
+    root_preview=$(env SUDO_USER= "$script" --dry-run)
+    assert_contains root-preview '(dry run; no changes made)' "$root_preview"
+fi
 
 empty_dir=
 policy_dir=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-evdev-policy-test.XXXXXX")
-trap 'rm -rf "$policy_dir" "$empty_dir"' EXIT INT TERM
+trap 'rm -rf "$policy_dir" "$empty_dir" "$fake_bin"' EXIT INT TERM
 group_rule="$policy_dir/71-wayexpand-evdev.rules"
 seat_rule="$policy_dir/69-wayexpand-evdev-uaccess.rules"
 state_file="$policy_dir/evdev-permissions.state"
@@ -49,7 +97,7 @@ assert_contains remove-group-rule "remove $group_rule" "$exclusive_seat_out"
 printf '%s\n' 'stale active-seat rule' >"$seat_rule"
 exclusive_group_out=$(WAYEXPAND_EVDEV_RULE_DEST="$group_rule" \
     WAYEXPAND_EVDEV_UACCESS_RULE_DEST="$seat_rule" \
-    "$script" --access=input-group --dry-run)
+    "$script" --access=input-group --user "$preview_user" --dry-run)
 assert_contains remove-seat-rule "remove $seat_rule" "$exclusive_group_out"
 
 # A recorded membership grant is owned by WayExpand and is removed when an
@@ -59,7 +107,7 @@ printf '%s\n' 'access_mode=input-group' "target_user=$(id -un)" 'added_input_gro
 owned_migration_out=$(WAYEXPAND_EVDEV_RULE_DEST="$group_rule" \
     WAYEXPAND_EVDEV_UACCESS_RULE_DEST="$seat_rule" \
     WAYEXPAND_EVDEV_STATE_FILE="$state_file" \
-    "$script" --access=active-seat --dry-run)
+    "$script" --access=active-seat --user "$(id -un)" --dry-run)
 # The result is intentionally dependent on the runner's actual group list:
 # remove a membership only when it exists, otherwise leave it untouched. Do
 # not make CI depend on whether its image happens to define or grant `input`.
@@ -78,7 +126,7 @@ printf '%s\n' 'access_mode=input-group' "target_user=$(id -un)" 'added_input_gro
 unowned_migration_out=$(WAYEXPAND_EVDEV_RULE_DEST="$group_rule" \
     WAYEXPAND_EVDEV_UACCESS_RULE_DEST="$seat_rule" \
     WAYEXPAND_EVDEV_STATE_FILE="$state_file" \
-    "$script" --access=active-seat --dry-run)
+    "$script" --access=active-seat --user "$(id -un)" --dry-run)
 assert_contains unowned-membership 'leave pre-existing input-group membership unchanged' "$unowned_migration_out"
 
 if [ "$(id -u)" -eq 0 ]; then

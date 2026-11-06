@@ -1029,6 +1029,30 @@ replacement = "signature"
             }
             commits
         }
+
+        /// Wait for the correlated asynchronous result instead of treating a
+        /// short quiet period after the trigger commits as proof that the
+        /// completion pump has finished. Release-mode workspace tests can
+        /// schedule the action worker later under load.
+        fn commits_through(&self, expected: &str, timeout: Duration) -> Vec<String> {
+            let deadline = std::time::Instant::now() + timeout;
+            let mut commits = Vec::new();
+            while std::time::Instant::now() < deadline {
+                let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+                match self.commits.recv_timeout(remaining) {
+                    Ok(text) => {
+                        let matched = text == expected;
+                        commits.push(text);
+                        if matched {
+                            commits.extend(self.commits.try_iter());
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+            commits
+        }
     }
 
     /// libibus declares `<property name='ContentType' type='(uu)'
@@ -1173,7 +1197,7 @@ replacement = "signature"
         harness.type_trigger();
         assert_eq!(broker.answered(), "status");
         assert_eq!(
-            harness.commits(Duration::from_secs(2)),
+            harness.commits_through("from-broker", Duration::from_secs(8)),
             ["o", "k", "from-broker"]
         );
     }

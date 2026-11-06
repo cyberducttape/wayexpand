@@ -21,6 +21,23 @@ access or portal authorization. The desktop-test instructions distinguish
 one-shot evdev/libei checks from an end-to-end test of the currently selected
 route; an operator must still verify output in the target application.
 
+For the first-run path, use `wayexpand setup --check` to inspect the detected
+desktop, installation identity, PATH resolution, and setup recommendation.
+Then run `wayexpand setup --apply`. Interactive setup offers a real-app test
+using the enabled `;;hello` sample and asks you to confirm the exact replacement
+in a focused text field. A connected backend or active service is reported
+separately and is not a successful insertion test. Automated `--yes` setup does
+not claim an insertion was verified; it prints the command for a later
+interactive test. `wayexpand install-check --json` also reports the CLI, PATH,
+and running daemon installation methods and warns when PATH shadows the current
+CLI.
+
+The `wayexpand-control.service` uses the daemon's dedicated `--source=control`
+mode. This mode runs the control socket and explicit output requests without
+starting either the stdin test reader or a keyboard capture source. The stdin
+source remains available for test harnesses and is not the control service's
+runtime.
+
 Setup subprocess deadlines depend on the operation: service-state probes have
 a five-second limit, unit enable/reload operations have a twenty-second limit,
 service or IBus restarts have a sixty-second limit, and other setup commands
@@ -454,10 +471,16 @@ wayexpand setup --apply
 wayexpand ibus status
 ```
 
-The setup check reports installed artifacts, the current session, and a safe
-route recommendation. It is preflight only; `real_insertion_verified` remains
-false until a user checks a harmless trigger in a focused application. The
-check never grants raw-input access or portal consent. `wayexpand repair
+`install-check` reports the installed-artifact level only. `setup --check`
+separates installed files, live integration (including loaded systemd units,
+IBus registry/engine resolution, and PATH/CLI/daemon installation identity),
+and operational runtime evidence (daemon protocol/build/config/output health
+and IBus engine state). A mixed user-local and distribution installation is
+reported as a path-identity warning, including the resolved CLI, PATH, and
+daemon executable paths. Setup preflight still does not prove insertion:
+target insertion remains `not_tested` until a harmless trigger is checked in a
+focused application. The check never grants raw-input access or portal consent.
+`wayexpand repair
 --check` reports missing user-unit links, and `wayexpand repair --apply` only
 creates links for the packaged control and input-method services before
 reloading the user systemd manager. It does not enable or start either service.

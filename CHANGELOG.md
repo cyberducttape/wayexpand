@@ -4,6 +4,59 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add GNOME window tracking: a bundled GNOME Shell extension (GNOME 45+,
+  `wayexpand-window-tracker@cyberducttape.github.io`) reports the focused
+  window's app ID, title and Mutter window ID to subscribers only, and the new
+  `wayexpand-backend-gnome-window` tracker accepts reports only from the
+  process that owns `org.gnome.Shell`. The daemon, `wayexpand doctor`, backend
+  selection and the GUI's app detection use it on GNOME, so `app_filter`
+  snippets work there. `wayexpand setup` installs and enables the extension
+  (packages ship it under `/usr/share/gnome-shell/extensions/`), and doctor
+  reports its state with a fix (`gnome_window_tracker` in `doctor --json`).
+  `doctor --json` reports `feature_support.app_filter.status` as
+  `kwin_or_gnome_extension`. The support matrix lists GNOME app filters as
+  implemented and awaiting real-session evidence. `scripts/test-gnome-e2e.sh`
+  and the `gnome-e2e` CI job test the extension in a headless GNOME Shell.
+
+- Offer the enabled `;;hello` desktop integration test immediately after
+  interactive setup. Noninteractive setup reports activation separately and
+  gives the explicit test command; setup diagnostics distinguish real-app
+  confirmation from an unverified backend connection.
+- Report installation methods for the running CLI, PATH-resolved executable,
+  and daemon, including warnings when PATH or service payloads select a
+  different installation.
+- Add an explicit `--source=control` daemon mode for the control service. It
+  starts no stdin reader and runs a dedicated control-only reactor path instead
+  of treating closed stdin as the runtime's lifecycle mechanism.
+- Make the release-mode IBus broker completion test wait for its correlated
+  output rather than failing when CI scheduling exceeds a short quiet window.
+- Give each interactive desktop test a generated content-independent diagnostic
+  ID. Aggregate capture/output counters now report activity as uncorrelated and
+  explicitly say the test trigger was not independently confirmed; any backend
+  transaction ID is labeled as time-window evidence until the user verifies
+  the target text.
+- Allow root-run evdev permission previews without `SUDO_USER` when the
+  selected active-seat preview does not need an account change. Add validated
+  `--user USER` selection for group-membership operations and regression tests
+  for userless dry runs, missing users, and input-group previews.
+- Separate setup diagnostics into installed artifacts, desktop integration,
+  and operational runtime checks. Probe loaded systemd units and their actual
+  `ExecStart` executables, live IBus registration/manifest resolution, daemon
+  schema/build/config/output health, and CLI/PATH/running-daemon installation
+  identity. Keep target insertion explicitly `not_tested` until a real client
+  test confirms it.
+- Snapshot installed, enabled, and active state for every IBus-related user
+  service. Setup now fails if a conflicting capture service cannot be stopped
+  and verified inactive; rollback independently restores prior enablement and
+  activity, then checks the resulting systemd state.
+- Require companion service restart commands to succeed, then verify the
+  serving daemon through its control status: build and schema identity, active
+  config generation/path/state, expected source/backend, and live output
+  readiness (plus evdev capture/matching readiness for terminal companions).
+- Make IBus setup return stable incomplete status `WX-POLICY-001` when
+  replacement remains disabled by `compatibility_mode = "off"`. The route can
+  finish activation, but `--yes` no longer leaves a misleading configured
+  success message when user authorization is still required.
 - Update the support-bundle smoke test to validate report schema 2, including
   private file output. Pin the fuzz runner to cargo-fuzz 0.13.2 and retry its
   installation on transient registry/build failures.
@@ -11,6 +64,19 @@ All notable changes to WayExpand are documented here.
   daemon to publish status before failing its health check. When build identity
   remains unknown or mismatched, report the CLI and daemon revisions and give
   specific recovery guidance before/after automatic rollback.
+- Report stale IBus-owned `wayexpand-ibus` processes after an upgrade by PID and
+  executable path, including processes launched through wrappers whose kernel
+  process name differs from the engine executable. Print the explicit
+  `ibus restart` command needed to load the current engine, and include the same
+  process inventory in `upgrade --check --json`.
+- Run the headless GNOME E2E test in user session mode and support both GNOME
+  Shell extension-management D-Bus object paths. Add path-fallback regression
+  coverage and a test-only Shell extension that activates mapped test windows,
+  allowing the tracker test to verify compositor-reported app-to-app focus
+  transitions and focus loss deterministically. This does not certify physical
+  activation behavior in a user session. Snapshot allowlisted broker
+  environment values to keep concurrent action-broker tests from mutating
+  process-global environment state.
 - Add a regression test for failed IBus activation rollback across service state,
   compositor input-method selection, IBus preload engines, and active engine.
   Repair the daemon reload test fixture for expansion counts and make its

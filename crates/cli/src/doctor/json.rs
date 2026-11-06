@@ -246,14 +246,15 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
                     ),
                 ),
             },
+            "gnome_window_tracker": crate::gnome_extension::doctor_report(),
             "feature_support": {
                 "ime_preedit": {
                     "status": "unsupported",
                     "detail": "Only committed text is processed; finish IME, dead-key, or Compose composition before typing a trigger.",
                 },
                 "app_filter": {
-                    "status": "kwin_only",
-                    "detail": "Focused-window tracking is currently provided by the KWin bridge; filtered snippets fail closed when tracking is unavailable.",
+                    "status": "kwin_or_gnome_extension",
+                    "detail": "Focused-window tracking is provided by the KWin bridge on KDE Plasma and by the WayExpand GNOME Shell extension (GNOME 45+) on GNOME; filtered snippets fail closed when tracking is unavailable.",
                 },
             },
             "policy": policy_json,

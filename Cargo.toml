@@ -11,6 +11,7 @@ members = [
     "crates/backend-libei",
     "crates/backend-evdev",
     "crates/backend-kwin-window",
+    "crates/backend-gnome-window",
     "crates/backend-selection",
     "crates/backend-ibus",
     "crates/action-broker",

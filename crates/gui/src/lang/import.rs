@@ -612,9 +612,9 @@ impl Strings {
 
     pub fn app_filter_advanced_help(&self) -> &'static str {
         match self.lang {
-            Language::English => "Advanced syntax: bare values or app_id_exact:<id> match one normalized desktop app ID. app_id_glob:<pattern> and title_contains:<text> intentionally use weaker matching. Filters currently require the KWin window tracker.",
-            Language::Indonesian => "Sintaks lanjutan: nilai biasa atau app_id_exact:<id> cocok dengan satu ID aplikasi desktop yang dinormalisasi. app_id_glob:<pattern> dan title_contains:<text> sengaja menggunakan pencocokan yang lebih lemah. Filter saat ini memerlukan pelacak jendela KWin.",
-            Language::German => "Erweiterte Syntax: Einzelwerte oder app_id_exact:<id> gleichen eine normalisierte Desktop-App-ID exakt ab. app_id_glob:<Muster> und title_contains:<Text> verwenden absichtlich schwächeres Matching. Filter benötigen derzeit den KWin-Fenster-Tracker.",
+            Language::English => "Advanced syntax: bare values or app_id_exact:<id> match one normalized desktop app ID. app_id_glob:<pattern> and title_contains:<text> intentionally use weaker matching. Filters require a window tracker: KWin on KDE Plasma, or the WayExpand GNOME Shell extension on GNOME.",
+            Language::Indonesian => "Sintaks lanjutan: nilai biasa atau app_id_exact:<id> cocok dengan satu ID aplikasi desktop yang dinormalisasi. app_id_glob:<pattern> dan title_contains:<text> sengaja menggunakan pencocokan yang lebih lemah. Filter memerlukan pelacak jendela: KWin di KDE Plasma, atau ekstensi GNOME Shell WayExpand di GNOME.",
+            Language::German => "Erweiterte Syntax: Einzelwerte oder app_id_exact:<id> gleichen eine normalisierte Desktop-App-ID exakt ab. app_id_glob:<Muster> und title_contains:<Text> verwenden absichtlich schwächeres Matching. Filter benötigen eine Fensterverfolgung: KWin unter KDE Plasma oder die WayExpand-Erweiterung für GNOME Shell unter GNOME.",
         }
     }
 

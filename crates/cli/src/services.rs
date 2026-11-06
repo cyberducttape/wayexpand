@@ -29,8 +29,9 @@ impl UserService {
         match source {
             "evdev" => Some(Self::Evdev),
             "input-method" => Some(Self::InputMethod),
-            // The control unit runs the stdin source with stdin closed.
+            // The control unit runs without an input reader.
             "stdin" => Some(Self::Control),
+            "control" => Some(Self::Control),
             _ => None,
         }
     }

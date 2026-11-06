@@ -464,8 +464,8 @@ Diagnostic output suitable for health checks and monitoring systems.
       "detail": "Only committed text is processed; finish IME, dead-key, or Compose composition before typing a trigger."
     },
     "app_filter": {
-      "status": "kwin_only",
-      "detail": "Focused-window tracking is currently provided by the KWin bridge; filtered snippets fail closed when tracking is unavailable."
+      "status": "kwin_or_gnome_extension",
+      "detail": "Focused-window tracking is provided by the KWin bridge on KDE Plasma and by the WayExpand GNOME Shell extension (GNOME 45+) on GNOME; filtered snippets fail closed when tracking is unavailable."
     }
   },
   "capture_readiness": {
@@ -523,9 +523,10 @@ Diagnostic output suitable for health checks and monitoring systems.
 - `automatic_selection` (object): The daemon's shared source/backend resolver result; `ready` is false for the conservative stdin-only fallback.
 - `setup_recommendation` (object): The route Recommended mode would configure, chosen by the shared route planner from current capabilities, organization policy, and certification status (certified routes first, then input-method-v2 with libei key pass-through, then IBus). It may be an experimental route; it is never a raw-input (evdev) route.
 - `route_plan` (object): The full route order from the same planner, including each route's stable `id`, `standing` (`recommended`, `available`, `requires-consent`, `blocked-by-policy`, or `unavailable`), explanation `reason`, capture and injection methods, catalog `certification` status, replacement assurance, and whether sensitive-field protection is certified. Each route also contains a normalized `assessment` with independent `installed`, `supported`, `authorized`, and `connected` evidence (`yes`, `no`, `unknown`, or `requires_action`), `policy_allowed`, `certified`, `requires_user_action`, and explicit limitations. The optional `portal` assessment separates provider-candidate discovery from implementation/interface availability, authorization, direct socket configuration, EIS connection, negotiated injection, and verified injection. Desktop-name discovery is only a candidate hint. This is an additive field; availability and catalog certification are distinct claims.
+- `gnome_window_tracker` (object or null): `null` outside GNOME. On GNOME: `uuid`, `installed_path` (the copy GNOME Shell loads, user copy first), `installed_matches_bundled`, `state` (`active`, `inactive`, `error`, `out-of-date`, `not-loaded`, `other`, or `shell-unavailable`), `user_extensions_enabled`, `ready`, `detail`, and `fix`. Additive.
 - `ibus` (object): `installed` (bool, IBus' live registry lists the engine), `status`, and `route`, which has the same shape as `wayexpand ibus status --json` (below). Additive.
 - `capture_readiness` (object): Non-invasive source/output readiness after organization-policy filtering across IBus, libei, wlroots, and input-method-v2. `state` is one of `available-to-try`, `authorization-required`, `not-probed`, or `unavailable`; `end_to_end_verified` remains false until a compositor/client certification harness supplies evidence.
-- `feature_support` (object): Product-wide integration limits, separate from backend probes. `ime_preedit.status` is `unsupported`; `app_filter.status` is `kwin_only`. These are implementation-scope statements, not compositor certification.
+- `feature_support` (object): Product-wide integration limits, separate from backend probes. `ime_preedit.status` is `unsupported`; `app_filter.status` is `kwin_or_gnome_extension` (KWin on KDE Plasma, the WayExpand GNOME Shell extension on GNOME 45+; it was `kwin_only` before GNOME support). These are implementation-scope statements, not compositor certification.
 - `capabilities` (array): Backend feature contracts, including explicit `limitations` that consumers must display rather than infer away.
 
 The graphical diagnostics view uses the same IBus installation probe as the

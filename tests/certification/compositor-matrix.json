@@ -38,8 +38,8 @@
       "production_certification_required": false,
       "certification_status": "not-certified",
       "certification_evidence": null,
-      "application_filter": "unavailable",
-      "window_tracker": "none"
+      "application_filter": "implemented",
+      "window_tracker": "WayExpand GNOME Shell extension (GNOME 45+)"
     },
     {
       "id": "sway",

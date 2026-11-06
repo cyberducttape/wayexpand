@@ -20,7 +20,7 @@
 #
 # Usage:
 #   sudo ./scripts/install-evdev-permissions.sh [--access=input-group|active-seat]
-#       [--dry-run] [--uninstall]
+#       [--user USER] [--dry-run] [--uninstall]
 set -eu
 
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
@@ -41,8 +41,11 @@ access_mode=active-seat
 access_explicit=0
 dry_run=0
 do_uninstall=0
+requested_user=
 
-for argument in "$@"; do
+while [ "$#" -gt 0 ]; do
+    argument=$1
+    shift
     case "$argument" in
         --access=input-group|--access=active-seat)
             access_mode=${argument#--access=}
@@ -54,11 +57,27 @@ for argument in "$@"; do
         --uninstall)
             do_uninstall=1
             ;;
+        --user)
+            if [ "$#" -eq 0 ] || [ -n "$requested_user" ]; then
+                printf '%s\n' "error: --user requires exactly one username" >&2
+                exit 2
+            fi
+            requested_user=$1
+            shift
+            ;;
+        --user=*)
+            if [ -n "$requested_user" ]; then
+                printf '%s\n' "error: --user may only be specified once" >&2
+                exit 2
+            fi
+            requested_user=${argument#--user=}
+            ;;
         --help|-h)
-            printf '%s\n' "usage: sudo $0 [--access=input-group|active-seat] [--dry-run] [--uninstall]"
+            printf '%s\n' "usage: sudo $0 [--access=input-group|active-seat] [--user USER] [--dry-run] [--uninstall]"
             printf '%s\n' "  --access=active-seat  logind/uaccess ACL; no group membership change (default)"
             printf '%s\n' "  --access=input-group  broad legacy input-group grant"
             printf '%s\n' "  --dry-run    print what would change without changing anything"
+            printf '%s\n' "  --user USER  target account; required when changing input-group membership"
             printf '%s\n' "  --uninstall  remove the udev rule and the input group grant instead"
             exit 0
             ;;
@@ -92,20 +111,6 @@ if [ "$dry_run" -eq 0 ] || [ "$do_uninstall" -eq 1 ]; then
     fi
 fi
 
-if [ "$(id -u)" -eq 0 ]; then
-    target_user=${SUDO_USER:-}
-    if [ -z "$target_user" ]; then
-        printf '%s\n' "error: could not determine which user to grant access to; run via sudo as your desktop user, not as root directly" >&2
-        exit 1
-    fi
-else
-    target_user=$(id -un)
-fi
-
-is_member() {
-    id -nG "$target_user" 2>/dev/null | tr '[:space:]' '\n' | grep -qx input
-}
-
 state_added_input_group=0
 state_user=
 state_mode=
@@ -125,6 +130,50 @@ if [ "$do_uninstall" -eq 1 ] && [ "$access_explicit" -eq 0 ] && [ -n "$state_mod
     access_mode=$state_mode
 fi
 
+# Resolve a user only when a user-specific action needs one. In particular,
+# previewing the default active-seat udev rule is safe as root without a
+# SUDO_USER because it changes no account membership.
+target_user=${requested_user:-${SUDO_USER:-}}
+target_explicit=0
+if [ -n "$requested_user" ] || [ -n "${SUDO_USER:-}" ]; then
+    target_explicit=1
+fi
+if [ -z "$target_user" ] && [ "$(id -u)" -ne 0 ] && [ "$access_mode" != input-group ]; then
+    target_user=$(id -un)
+fi
+if [ -n "$target_user" ]; then
+    case "$target_user" in
+        -*|*[!a-zA-Z0-9_.@\$-]*)
+            printf '%s\n' "error: invalid target username; use --user with a local account name" >&2
+            exit 2
+            ;;
+    esac
+    if ! id -u "$target_user" >/dev/null 2>&1; then
+        printf '%s\n' "error: target user '$target_user' does not exist" >&2
+        exit 1
+    fi
+fi
+if [ "$access_mode" = input-group ] && [ -z "$target_user" ]; then
+    printf '%s\n' "error: input-group mode changes account membership; provide --user USER (or run via sudo with SUDO_USER set)" >&2
+    exit 1
+fi
+if [ "$state_added_input_group" -eq 1 ] && [ -n "$state_user" ] \
+    && { [ "$do_uninstall" -eq 1 ] || [ "$access_mode" = active-seat ]; } \
+    && [ "$target_explicit" -eq 0 ]; then
+    printf '%s\n' "error: this change must remove a previously recorded input-group grant; provide --user $state_user" >&2
+    exit 1
+fi
+if [ "$state_added_input_group" -eq 1 ] && [ -n "$state_user" ] \
+    && { [ "$do_uninstall" -eq 1 ] || [ "$access_mode" = active-seat ]; } \
+    && [ "$target_user" != "$state_user" ]; then
+    printf '%s\n' "error: the recorded input-group grant belongs to '$state_user'; use --user $state_user to remove it" >&2
+    exit 1
+fi
+
+is_member() {
+    [ -n "$target_user" ] && id -nG "$target_user" 2>/dev/null | tr '[:space:]' '\n' | grep -qx input
+}
+
 if [ "$access_mode" = input-group ] && [ "$dry_run" -eq 0 ] && ! getent group input >/dev/null 2>&1; then
     printf '%s\n' "error: the \`input\` group does not exist on this system; cannot continue" >&2
     exit 1
@@ -143,8 +192,10 @@ if [ "$do_uninstall" -eq 1 ]; then
         printf '%s\n' "  - leave $uaccess_rule_dest alone (not present)"
     fi
     if [ "$access_mode" = input-group ] && [ "$state_added_input_group" -eq 1 ] \
-        && [ "$state_user" = "$target_user" ] && is_member; then
+        && [ -n "$target_user" ] && [ "$state_user" = "$target_user" ] && is_member; then
         printf '%s\n' "  - remove $target_user from the \`input\` group"
+    elif [ -z "$target_user" ]; then
+        printf '%s\n' "  - no input-group membership change (target user not needed for this preview)"
     else
         printf '%s\n' "  - leave $target_user's existing \`input\` group membership unchanged"
     fi
@@ -208,8 +259,11 @@ if [ "$access_mode" = active-seat ]; then
     else
         printf '%s\n' "  - install $uaccess_rule_dest and reload udev rules"
     fi
-    if [ "$state_added_input_group" -eq 1 ] && [ "$state_user" = "$target_user" ] && is_member; then
+    if [ "$state_added_input_group" -eq 1 ] && [ -n "$target_user" ] \
+        && [ "$state_user" = "$target_user" ] && is_member; then
         printf '%s\n' "  - remove the input-group membership previously added by WayExpand"
+    elif [ -z "$target_user" ]; then
+        printf '%s\n' "  - no account membership change; an explicit user is only needed to remove a recorded grant"
     else
         printf '%s\n' "  - leave pre-existing input-group membership unchanged"
     fi
