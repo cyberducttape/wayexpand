@@ -221,7 +221,11 @@ export default class WayExpandWindowTracker extends Extension {
             // Treat every subscription call as an explicit privacy mode
             // update. In particular, Subscribe() must revoke title delivery
             // from a connection that previously opted in.
-            setTitleAccess(this._subscribers.get(subscriber), includeTitles);
+            setTitleAccess(
+                this._subscribers.get(subscriber),
+                includeTitles,
+                new GLib.Variant('(sss)', describe(this._focused, false)),
+            );
         }
         const state = this._subscribers.get(subscriber);
         this._watchTitle(this._focused);

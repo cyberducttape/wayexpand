@@ -16,9 +16,13 @@ export function isAuthorizedTrackerClient(peerUid, currentUid, executablePath) {
     return WAYEXPAND_CLIENTS.has(executable);
 }
 
-/** Keep title access scoped to the caller's current subscription request. */
-export function setTitleAccess(state, requested) {
+/** Keep title access scoped to the caller's current request and clear any
+ * queued title-bearing update when an active subscription opts out. */
+export function setTitleAccess(state, requested, titleFreeSnapshot = null) {
+    const wasEnabled = state.includeTitles;
     state.includeTitles = requested === true;
+    if (wasEnabled && !state.includeTitles && titleFreeSnapshot !== null)
+        state.delivery.enqueue(titleFreeSnapshot);
     return state.includeTitles;
 }
 

@@ -24,6 +24,26 @@ test('title access is opt-in per request and can be revoked on an active subscri
     assert.equal(setTitleAccess(subscriber, 'true'), false);
 });
 
+test('revoking title access replaces a queued title-bearing notification', () => {
+    let finish;
+    const sent = [];
+    const delivery = new LatestOnlyDelivery((value, done) => {
+        sent.push(value);
+        finish = done;
+    }, () => assert.fail('healthy test subscriber was dropped'));
+    const subscriber = {includeTitles: true, delivery};
+
+    delivery.enqueue(['org.example.Editor', 'first title', 'window-1']);
+    delivery.enqueue(['org.example.Editor', 'queued secret title', 'window-1']);
+    setTitleAccess(subscriber, false, ['org.example.Editor', '', 'window-1']);
+    finish(null);
+
+    assert.deepEqual(sent, [
+        ['org.example.Editor', 'first title', 'window-1'],
+        ['org.example.Editor', '', 'window-1'],
+    ]);
+});
+
 test('title-free snapshots exclude titles while preserving app and instance identity', () => {
     assert.deepEqual(
         subscriberSnapshot('org.example.Editor', 'secret document title', 'window-7'),
