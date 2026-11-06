@@ -11,6 +11,7 @@
 set -eu
 
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+# shellcheck disable=SC1091
 . "$project_dir/scripts/gnome-extension-state.sh"
 uuid=wayexpand-window-tracker@cyberducttape.github.io
 keep=0
@@ -52,6 +53,7 @@ cp "$project_dir/gnome-extension/$uuid/metadata.json" "$project_dir/gnome-extens
 cat >"$work/session.sh" <<'EOF'
 #!/bin/sh
 set -eu
+. "$E2E_STATE_HELPER"
 display=wayexpand-gnome-e2e
 log() { printf '%s\n' "$*"; }
 gsettings set org.gnome.shell disable-user-extensions false
@@ -137,6 +139,7 @@ env -i \
     E2E_WORK="$work" \
     E2E_BIN_DIR="$bin_dir" \
     E2E_UUID="$uuid" \
+    E2E_STATE_HELPER="$project_dir/scripts/gnome-extension-state.sh" \
     dbus-run-session -- "$work/session.sh" >"$work/results.txt" 2>"$work/session.log" || status=$?
 
 cat "$work/results.txt"

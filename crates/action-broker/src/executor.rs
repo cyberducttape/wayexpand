@@ -14,6 +14,7 @@ use crate::{
     protocol::{ActionError, ActionOutput, ActionRequest, ActionResponse},
 };
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsString;
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
 use std::process::{Child, Command, Stdio};
@@ -27,6 +28,7 @@ use wayexpand_process_supervisor::{configure_process_group, ChildCgroup};
 
 pub struct ActionExecutor {
     config: BrokerConfig,
+    server_environment: HashMap<String, OsString>,
     authorization_gate: AuthorizationGate,
 }
 
@@ -169,10 +171,30 @@ impl Drop for AuthorizationPermit<'_> {
 
 impl ActionExecutor {
     pub fn new(config: &BrokerConfig) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::new_with_server_environment(config, None)
+    }
+
+    fn new_with_server_environment(
+        config: &BrokerConfig,
+        server_environment: Option<HashMap<String, OsString>>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let mut config = config.clone();
         config.validate_and_canonicalize()?;
+        // Capture explicitly allowlisted broker values once, when the executor
+        // is created. Besides avoiding process-global environment reads while
+        // actions run concurrently, this keeps an action's server-owned
+        // environment stable for the executor's lifetime.
+        let server_environment = server_environment.unwrap_or_else(|| {
+            config
+                .actions
+                .values()
+                .flat_map(|action| action.server_env.iter())
+                .filter_map(|key| std::env::var_os(key).map(|value| (key.clone(), value)))
+                .collect()
+        });
         Ok(Self {
             config,
+            server_environment,
             authorization_gate: AuthorizationGate::default(),
         })
     }
@@ -428,7 +450,7 @@ impl ActionExecutor {
             }
         }
         for key in &action_config.server_env {
-            if let Some(value) = std::env::var_os(key) {
+            if let Some(value) = self.server_environment.get(key) {
                 cmd.env(key, value);
             }
         }
@@ -1833,7 +1855,6 @@ mod tests {
 
     #[tokio::test]
     async fn executor_reads_server_environment_and_rejects_client_override() {
-        std::env::set_var("WAYEXPAND_BROKER_TEST_VALUE", "broker-owned");
         let mut config = BrokerConfig::default();
         config.actions.insert(
             "print-env".to_string(),
@@ -1853,7 +1874,14 @@ mod tests {
                 description: None,
             },
         );
-        let executor = ActionExecutor::new(&config).unwrap();
+        let executor = ActionExecutor::new_with_server_environment(
+            &config,
+            Some(HashMap::from([(
+                "WAYEXPAND_BROKER_TEST_VALUE".to_string(),
+                OsString::from("broker-owned"),
+            )])),
+        )
+        .unwrap();
         let response = executor
             .execute(ActionRequest {
                 action_id: "print-env".to_string(),
@@ -1874,7 +1902,6 @@ mod tests {
             .any(|line| line == "WAYEXPAND_BROKER_TEST_VALUE=broker-owned"));
         assert!(stdout.lines().any(|line| line == "CLIENT_VALUE=accepted"));
         assert!(!stdout.lines().any(|line| line.contains("client-spoof")));
-        std::env::remove_var("WAYEXPAND_BROKER_TEST_VALUE");
     }
 
     #[cfg(unix)]
