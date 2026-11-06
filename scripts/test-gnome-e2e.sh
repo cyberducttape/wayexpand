@@ -100,6 +100,19 @@ start_sink org.wayexpand.GnomeE2eSecond
 
 gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell/Extensions \
     --method org.gnome.Shell.Extensions.DisableExtension "$E2E_UUID" >/dev/null
+tries=100
+until gnome_extension_state_inactive "$(extension_state)"; do
+    tries=$((tries - 1))
+    if [ "$tries" -le 0 ] || ! kill -0 "$shell_pid" 2>/dev/null; then
+        log "fail extension-disabled GNOME Shell did not disable the extension: $(extension_state)"
+        status=1
+        break
+    fi
+    sleep 0.1
+done
+if [ "$tries" -gt 0 ]; then
+    log "pass extension-disabled"
+fi
 "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --expect-unavailable || status=1
 exit "$status"
 EOF
@@ -123,8 +136,14 @@ env -i \
 
 cat "$work/results.txt"
 if [ "$status" -ne 0 ] || grep -q '^fail' "$work/results.txt" \
-    || [ "$(grep -c '^pass' "$work/results.txt")" -ne 4 ]; then
+    || [ "$(grep -c '^pass' "$work/results.txt")" -ne 5 ]; then
     printf '%s\n' "GNOME window-tracking end-to-end test FAILED; logs:" >&2
+    failure=$(grep '^fail ' "$work/results.txt" | tail -n 1 || true)
+    if [ -z "$failure" ]; then
+        failure="test exited with status $status; pass count $(grep -c '^pass' "$work/results.txt")"
+    fi
+    failure=$(printf '%s' "$failure" | sed 's/%/%25/g; s/\r/%0D/g; s/\n/%0A/g')
+    printf '::error title=GNOME window tracking E2E::%s\n' "$failure" >&2
     for log in session.log gnome-shell.log sink.log; do
         printf '%s\n' "--- $log" >&2
         tail -n 60 "$work/$log" >&2 2>/dev/null || true

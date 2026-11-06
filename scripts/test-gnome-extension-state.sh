@@ -6,6 +6,11 @@ project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 
 gnome_extension_state_active "({'state': <1>, 'uuid': <'wayexpand'>},)"
 gnome_extension_state_active "({'state': <uint32 1>, 'uuid': <'wayexpand'>},)"
+gnome_extension_state_active "({'state': <1.0>, 'uuid': <'wayexpand'>},)"
+gnome_extension_state_active "({'state': <uint32 1.00>, 'uuid': <'wayexpand'>},)"
+
+gnome_extension_state_inactive "({'state': <2>, 'uuid': <'wayexpand'>},)"
+gnome_extension_state_inactive "({'state': <2.0>, 'uuid': <'wayexpand'>},)"
 
 if gnome_extension_state_active "({'state': <0>, 'uuid': <'wayexpand'>},)"; then
     printf '%s\n' 'disabled extension was reported active' >&2
@@ -13,6 +18,10 @@ if gnome_extension_state_active "({'state': <0>, 'uuid': <'wayexpand'>},)"; then
 fi
 if gnome_extension_state_active "({'state': <11>, 'uuid': <'wayexpand'>},)"; then
     printf '%s\n' 'unrecognized extension state was reported active' >&2
+    exit 1
+fi
+if gnome_extension_state_inactive "({'state': <12>, 'uuid': <'wayexpand'>},)"; then
+    printf '%s\n' 'unrecognized extension state was reported inactive' >&2
     exit 1
 fi
 if gnome_extension_state_active "({'error': <'extension not found'>},)"; then

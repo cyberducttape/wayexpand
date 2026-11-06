@@ -1,7 +1,12 @@
 #!/bin/sh
 
-# gdbus renders the extension State enum as an integer variant. Depending on
-# GLib/GJS versions it may include the uint32 type name, so accept both forms.
+# gdbus renders the extension State enum using the numeric type selected by
+# GNOME Shell's GJS/D-Bus bridge. Accept its integer and floating-point forms,
+# with or without the uint32 annotation, but match the complete enum value.
 gnome_extension_state_active() {
-    printf '%s\n' "$1" | grep -Eq "'state': <(uint32 )?1>"
+    printf '%s\n' "$1" | grep -Eq "'state': <(uint32 )?1([.]0+)?>"
+}
+
+gnome_extension_state_inactive() {
+    printf '%s\n' "$1" | grep -Eq "'state': <(uint32 )?2([.]0+)?>"
 }
