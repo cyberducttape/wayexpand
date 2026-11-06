@@ -63,6 +63,29 @@ if printf '%s\n' "$ibus_contract" | grep -q '\.local/share/ibus/component'; then
     printf '%s\n' 'IBus contract must not advertise an ordinary per-user component directory' >&2
     exit 1
 fi
+printf '%s\n' "$ibus_contract" | grep -q '^package_path = "/usr/share/ibus/component/wayexpand-ibus.xml"$'
+printf '%s\n' "$ibus_contract" | grep -q '^package_install_exec = "wayexpand-ibus"$'
+printf '%s\n' "$ibus_contract" | grep -q '^package_install_exec_path = "/usr/bin/wayexpand-ibus"$'
+grep -q -F '<exec>wayexpand-ibus</exec>' "$project_dir/desktop/wayexpand-ibus.xml" || {
+    printf '%s\n' 'packaged IBus manifest exec must match the shared component contract' >&2
+    exit 1
+}
+for manifest in "$project_dir/debian/rules" "$project_dir/PKGBUILD" \
+    "$project_dir/wayexpand.spec"; do
+    grep -q -F 'ibus/component' "$manifest" || {
+        printf '%s\n' "package recipe does not install the shared IBus manifest: $manifest" >&2
+        exit 1
+    }
+    grep -q -F 'expansions.toml.example' "$manifest" || {
+        printf '%s\n' "package recipe does not bundle the default config template: $manifest" >&2
+        exit 1
+    }
+done
+grep -q '^package_path = "/etc/wayexpand/expansions.toml.example"$' \
+    "$project_dir/installer-components.toml" || {
+    printf '%s\n' 'default config package path is missing from the shared contract' >&2
+    exit 1
+}
 for installer in "$project_dir/scripts/install-user.sh" "$project_dir/scripts/install-release.sh"; do
     grep -q -F '"$stage_dir/expansions.toml"' "$installer" || {
         printf '%s\n' "user installer does not stage the default configuration template: $installer" >&2

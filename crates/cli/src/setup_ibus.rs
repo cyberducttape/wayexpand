@@ -196,6 +196,62 @@ fn shared_engine_path() -> PathBuf {
     )
 }
 
+fn package_engine_path() -> PathBuf {
+    let contract: toml::Value = toml::from_str(include_str!("../../../installer-components.toml"))
+        .expect("checked-in installer component contract must be valid TOML");
+    PathBuf::from(
+        contract["components"]["ibus"]["package_install_exec_path"]
+            .as_str()
+            .expect("IBus package_install_exec_path must be a string"),
+    )
+}
+
+fn package_engine_is_trusted() -> bool {
+    use std::os::unix::fs::MetadataExt;
+    fs::symlink_metadata(package_engine_path()).is_ok_and(|metadata| {
+        metadata.file_type().is_file()
+            && metadata.uid() == 0
+            && metadata.permissions().mode() & 0o111 != 0
+    })
+}
+
+fn manifest_exec(contents: &[u8]) -> Option<&str> {
+    let contents = std::str::from_utf8(contents).ok()?;
+    let start = contents.find("<exec>")? + "<exec>".len();
+    let end = contents[start..].find("</exec>")? + start;
+    Some(contents[start..end].trim())
+}
+
+fn is_package_manifest_exec(exec: &str) -> bool {
+    let contract: toml::Value = toml::from_str(include_str!("../../../installer-components.toml"))
+        .expect("checked-in installer component contract must be valid TOML");
+    exec == contract["components"]["ibus"]["package_install_exec"]
+        .as_str()
+        .expect("IBus package_install_exec must be a string")
+        || exec
+            == contract["components"]["ibus"]["package_install_exec_path"]
+                .as_str()
+                .expect("IBus package_install_exec_path must be a string")
+}
+
+fn preserve_package_registration(
+    component_ok: bool,
+    manifest_ok: bool,
+    package_trusted: bool,
+    exec: Option<&str>,
+) -> bool {
+    exec.is_some_and(is_package_manifest_exec) && component_ok && manifest_ok && package_trusted
+}
+
+fn preserve_shared_registration(
+    component_ok: bool,
+    manifest_ok: bool,
+    shared_trusted: bool,
+    exec: Option<&str>,
+) -> bool {
+    exec == shared_engine_path().to_str() && component_ok && manifest_ok && shared_trusted
+}
+
 fn shared_engine_is_trusted() -> bool {
     let path = shared_engine_path();
     let Ok(metadata) = fs::symlink_metadata(&path) else {
@@ -741,16 +797,38 @@ fn install_component(
     let manifest_ok = report
         .check("manifest")
         .is_some_and(|check| check.state == IbusCheckState::Pass);
-    let shared_exec = format!("<exec>{}</exec>", shared_engine_path().display());
-    let legacy_user_manifest = journal.original.as_ref().is_some_and(|state| {
-        let contents = String::from_utf8_lossy(&state.bytes);
-        contents.contains("<exec>") && !contents.contains(&shared_exec)
-    });
-    if component_ok
-        && manifest_ok
-        && !legacy_user_manifest
-        && (journal.original.is_none() || shared_engine_is_trusted())
+    let original_exec = journal
+        .original
+        .as_ref()
+        .and_then(|state| manifest_exec(&state.bytes))
+        .map(str::to_owned);
+    if original_exec
+        .as_deref()
+        .is_some_and(is_package_manifest_exec)
     {
+        // Distribution packages own this registration. A per-user source
+        // install must never replace the package's shared executable mapping.
+        if preserve_package_registration(
+            component_ok,
+            manifest_ok,
+            package_engine_is_trusted(),
+            original_exec.as_deref(),
+        ) {
+            step("The distribution-owned IBus component and engine are already valid; preserving them");
+            return Ok(());
+        }
+        bail!("WX-IBUS-PACKAGE-001: the distribution-owned IBus component is present but its engine is unavailable or untrusted. Repair or reinstall WayExpand with the package manager; a per-user source install will not replace the shared package registration.");
+    }
+    if preserve_shared_registration(
+        component_ok,
+        manifest_ok,
+        shared_engine_is_trusted(),
+        original_exec.as_deref(),
+    ) {
+        step("The shared IBus component and engine are already valid; preserving the system-wide registration");
+        return Ok(());
+    }
+    if component_ok && manifest_ok && journal.original.is_none() {
         step("The IBus component is installed where IBus reads it");
         return Ok(());
     }
@@ -2407,9 +2485,65 @@ mod tests {
         assert!(
             alice_manifest.contains(&format!("<exec>{}</exec>", shared_engine_path().display()))
         );
+        let alice_exec = manifest_exec(alice_manifest.as_bytes());
+        let bob_exec = manifest_exec(bob_manifest.as_bytes());
+        assert!(preserve_shared_registration(true, true, true, alice_exec));
+        assert!(preserve_shared_registration(true, true, true, bob_exec));
+        assert!(!preserve_shared_registration(
+            true,
+            true,
+            true,
+            Some("/home/alice/.local/bin/wayexpand-ibus")
+        ));
         assert!(!alice_manifest.contains("/home/alice"));
         assert!(!alice_manifest.contains("/home/bob"));
         assert!(alice_manifest.contains("<name>org.freedesktop.IBus.WayExpand</name>"));
+    }
+
+    #[test]
+    fn package_owned_ibus_exec_is_recognized_and_never_migrated_as_a_user_manifest() {
+        let contract: toml::Value =
+            toml::from_str(include_str!("../../../installer-components.toml")).unwrap();
+        let package_exec = contract["components"]["ibus"]["package_install_exec"]
+            .as_str()
+            .unwrap();
+        let package_path = contract["components"]["ibus"]["package_install_exec_path"]
+            .as_str()
+            .unwrap();
+        assert_eq!(
+            manifest_exec(COMPONENT_TEMPLATE.as_bytes()),
+            Some(package_exec)
+        );
+        let packaged_xml = format!("<component><exec>{package_exec}</exec></component>");
+        let absolute_packaged_xml = format!("<component><exec>{package_path}</exec></component>");
+        assert_eq!(manifest_exec(packaged_xml.as_bytes()), Some(package_exec));
+        assert!(is_package_manifest_exec(package_exec));
+        assert!(is_package_manifest_exec(package_path));
+        assert!(!is_package_manifest_exec(
+            "/home/alice/.local/bin/wayexpand-ibus"
+        ));
+        assert_eq!(
+            manifest_exec(absolute_packaged_xml.as_bytes()),
+            Some(package_path)
+        );
+        assert!(preserve_package_registration(
+            true,
+            true,
+            true,
+            Some(package_exec)
+        ));
+        assert!(!preserve_package_registration(
+            true,
+            false,
+            true,
+            Some(package_exec)
+        ));
+        assert!(!preserve_package_registration(
+            true,
+            true,
+            false,
+            Some(package_exec)
+        ));
     }
 
     #[cfg(unix)]

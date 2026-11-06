@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Keep distro-owned IBus component registrations intact when a per-user source
+  install runs; distinguish the package engine path from the root-owned shared
+  source-install engine path in the installation contract. Make `install-check`
+  validate the staged engine independently from live IBus registration, use
+  contract-declared package paths for the default config and IBus manifest, and
+  resolve empty/invalid XDG roots consistently with the installers.
 - Keep GNOME activation checks tied to the registered source and the live
   Shell `InputSourceManager` bridge. The deprecated `current` setting and
   `mru-sources` history cannot establish activation; support reports now use

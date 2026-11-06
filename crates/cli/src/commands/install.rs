@@ -21,35 +21,85 @@ fn home() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/"))
 }
-fn data_home() -> PathBuf {
-    env::var_os("XDG_DATA_HOME")
+fn resolve_xdg_home(value: Option<&std::ffi::OsStr>, fallback: PathBuf) -> PathBuf {
+    value
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| home().join(".local/share"))
+        .filter(|value| value.is_absolute())
+        .unwrap_or(fallback)
+}
+fn xdg_home_is_valid(value: Option<&std::ffi::OsStr>) -> bool {
+    value
+        .filter(|value| !value.is_empty())
+        .is_none_or(|value| Path::new(value).is_absolute())
+}
+fn data_home() -> PathBuf {
+    resolve_xdg_home(
+        env::var_os("XDG_DATA_HOME").as_deref(),
+        home().join(".local/share"),
+    )
 }
 fn data_home_is_valid() -> bool {
-    env::var_os("XDG_DATA_HOME")
-        .filter(|value| !value.is_empty())
-        .is_none_or(|value| Path::new(&value).is_absolute())
+    xdg_home_is_valid(env::var_os("XDG_DATA_HOME").as_deref())
 }
 fn config_home() -> PathBuf {
-    env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home().join(".config"))
+    resolve_xdg_home(
+        env::var_os("XDG_CONFIG_HOME").as_deref(),
+        home().join(".config"),
+    )
+}
+fn config_home_is_valid() -> bool {
+    xdg_home_is_valid(env::var_os("XDG_CONFIG_HOME").as_deref())
 }
 fn current() -> PathBuf {
     home().join(".local/lib/wayexpand/current")
 }
 
+fn component_contract_path(component: &str, field: &str) -> Option<PathBuf> {
+    let contract: toml::Value =
+        toml::from_str(include_str!("../../../../installer-components.toml")).ok()?;
+    contract
+        .get("components")?
+        .get(component)?
+        .get(field)?
+        .as_str()
+        .map(PathBuf::from)
+}
+
 fn ibus_component_candidates() -> Vec<PathBuf> {
     let system_directory = wayexpand_backend_ibus::chain::component_install_directory();
-    vec![
+    let mut candidates = vec![
         current().join("ibus/wayexpand.xml"),
         system_directory.join("wayexpand.xml"),
         system_directory.join("wayexpand-ibus.xml"),
-        PathBuf::from("/usr/share/ibus/component/wayexpand-ibus.xml"),
-        PathBuf::from("/usr/local/share/ibus/component/wayexpand-ibus.xml"),
-    ]
+    ];
+    if let Some(path) = component_contract_path("ibus", "package_path") {
+        candidates.push(path);
+    }
+    candidates.push(PathBuf::from(
+        "/usr/local/share/ibus/component/wayexpand-ibus.xml",
+    ));
+    candidates
+}
+
+fn ibus_engine_candidates() -> Vec<PathBuf> {
+    let mut candidates = vec![current().join("bin/wayexpand-ibus")];
+    if let Some(path) = component_contract_path("ibus", "package_install_exec_path") {
+        candidates.push(path);
+    }
+    candidates.extend(candidates_for_binary("wayexpand-ibus"));
+    candidates
+}
+
+fn candidates_for_binary(name: &str) -> Vec<PathBuf> {
+    let mut paths = vec![
+        PathBuf::from("/usr/bin").join(name),
+        PathBuf::from("/usr/local/bin").join(name),
+    ];
+    if let Some(path) = env::var_os("PATH") {
+        paths.extend(env::split_paths(&path).map(|dir| dir.join(name)));
+    }
+    paths
 }
 
 fn candidates(relative: &str) -> Vec<PathBuf> {
@@ -373,6 +423,16 @@ fn operational_checks(
 pub(crate) fn checks() -> Vec<Check> {
     let mut out = Vec::new();
     out.push(Check {
+        component: "xdg_config_home",
+        status: if config_home_is_valid() {
+            "pass"
+        } else {
+            "fail"
+        },
+        path: config_home().display().to_string(),
+        detail: "XDG_CONFIG_HOME is absolute or defaults to ~/.config",
+    });
+    out.push(Check {
         component: "xdg_data_home",
         status: if data_home_is_valid() { "pass" } else { "fail" },
         path: data_home().display().to_string(),
@@ -416,18 +476,18 @@ pub(crate) fn checks() -> Vec<Check> {
         path: ibus_path.map_or_else(|| "IBus component XML".into(), |p| p.display().to_string()),
         detail: "staged or shared system component available; XDG per-user component paths are not treated as registered",
     });
-    let manifest = wayexpand_backend_ibus::chain::diagnose();
-    let engine_check = manifest.check("manifest");
-    let engine_ok = engine_check
-        .is_some_and(|check| check.state == wayexpand_backend_ibus::chain::IbusCheckState::Pass);
+    let engine = ibus_engine_candidates().into_iter().find(|path| {
+        fs::metadata(path)
+            .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+    });
     out.push(Check {
         component: "ibus_engine_executable",
-        status: if engine_ok { "pass" } else { "fail" },
-        path: engine_check.map_or_else(
-            || "IBus component exec entry".into(),
-            |check| check.detail.clone(),
+        status: if engine.is_some() { "pass" } else { "fail" },
+        path: engine.map_or_else(
+            || "bin/wayexpand-ibus".into(),
+            |path| path.display().to_string(),
         ),
-        detail: "component bus name and referenced engine executable are valid",
+        detail: "IBus engine executable is installed",
     });
     let contract_path = [
         current().join("share/wayexpand/installer-components.toml"),
@@ -466,14 +526,17 @@ pub(crate) fn checks() -> Vec<Check> {
         ),
         detail: "application icon",
     });
-    let default_config_template = [
-        current().join("expansions.toml"),
-        PathBuf::from("/etc/wayexpand/expansions.toml.example"),
+    let mut default_config_candidates = component_contract_path("default_config_template", "path")
+        .map(|path| vec![current().join(path)])
+        .unwrap_or_else(|| vec![current().join("expansions.toml")]);
+    if let Some(path) = component_contract_path("default_config_template", "package_path") {
+        default_config_candidates.push(path);
+    }
+    default_config_candidates.extend([
         PathBuf::from("/usr/share/wayexpand/expansions.toml"),
         PathBuf::from("/usr/local/share/wayexpand/expansions.toml"),
-    ]
-    .into_iter()
-    .find(|p| p.is_file());
+    ]);
+    let default_config_template = default_config_candidates.into_iter().find(|p| p.is_file());
     out.push(Check {
         component: "default_config_template",
         status: if default_config_template.is_some() {
@@ -813,6 +876,38 @@ mod tests {
     use super::*;
 
     #[test]
+    fn xdg_home_resolution_matches_installers_for_empty_and_custom_values() {
+        let fallback = PathBuf::from("/home/operator/.config");
+        assert_eq!(resolve_xdg_home(None, fallback.clone()), fallback);
+        assert_eq!(
+            resolve_xdg_home(Some(std::ffi::OsStr::new("")), PathBuf::from("/fallback")),
+            PathBuf::from("/fallback")
+        );
+        assert_eq!(
+            resolve_xdg_home(
+                Some(std::ffi::OsStr::new("relative/config")),
+                PathBuf::from("/fallback")
+            ),
+            PathBuf::from("/fallback")
+        );
+        assert_eq!(
+            resolve_xdg_home(
+                Some(std::ffi::OsStr::new("/srv/operator/config")),
+                PathBuf::from("/fallback")
+            ),
+            PathBuf::from("/srv/operator/config")
+        );
+        assert!(xdg_home_is_valid(None));
+        assert!(xdg_home_is_valid(Some(std::ffi::OsStr::new(""))));
+        assert!(!xdg_home_is_valid(Some(std::ffi::OsStr::new(
+            "relative/config"
+        ))));
+        assert!(xdg_home_is_valid(Some(std::ffi::OsStr::new(
+            "/srv/operator/config"
+        ))));
+    }
+
+    #[test]
     fn install_origin_marker_distinguishes_source_and_release_archive() {
         let root = env::temp_dir().join(format!(
             "wayexpand-install-origin-{}-{}",
@@ -880,11 +975,31 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("system-wide"));
+        assert_eq!(ibus["path"].as_str(), Some("ibus/wayexpand.xml"));
+        assert_eq!(
+            ibus["package_path"].as_str(),
+            Some("/usr/share/ibus/component/wayexpand-ibus.xml")
+        );
+        assert_eq!(
+            ibus["package_install_exec"].as_str(),
+            Some("wayexpand-ibus")
+        );
+        assert_eq!(
+            ibus["package_install_exec_path"].as_str(),
+            Some("/usr/bin/wayexpand-ibus")
+        );
+        assert!(ibus_engine_candidates().contains(&PathBuf::from("/usr/bin/wayexpand-ibus")));
         let candidates = ibus_component_candidates();
         assert!(!candidates.contains(&data_home().join("ibus/component/wayexpand.xml")));
         assert!(candidates.contains(
             &wayexpand_backend_ibus::chain::component_install_directory().join("wayexpand.xml")
         ));
+        let default_config = &contract["components"]["default_config_template"];
+        assert_eq!(default_config["path"].as_str(), Some("expansions.toml"));
+        assert_eq!(
+            default_config["package_path"].as_str(),
+            Some("/etc/wayexpand/expansions.toml.example")
+        );
     }
 
     #[test]

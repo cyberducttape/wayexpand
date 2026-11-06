@@ -15,12 +15,14 @@ required = true
 
 [components.ibus]
 path = "ibus/wayexpand.xml"
+package_path = "/usr/share/ibus/component/wayexpand-ibus.xml"
 required = true
 registration = "system-wide component directory selected by the running ibus-daemon; install with wayexpand setup --backend ibus"
 user_registration = false
 user_install_exec = "/usr/local/libexec/wayexpand/wayexpand-ibus"
 user_install_exec_owner = "root"
-package_install_exec = "/usr/bin/wayexpand-ibus"
+package_install_exec = "wayexpand-ibus"
+package_install_exec_path = "/usr/bin/wayexpand-ibus"
 package_install_exec_owner = "package-manager"
 
 [components.desktop]
@@ -33,6 +35,7 @@ required = true
 
 [components.default_config_template]
 path = "expansions.toml"
+package_path = "/etc/wayexpand/expansions.toml.example"
 required = true
 
 [components.control_service]

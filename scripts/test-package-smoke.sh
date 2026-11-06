@@ -85,9 +85,44 @@ check_installed() {
     # The CLI validates the shipped example as an unprivileged user, the way
     # a new user would start from it.
     id wxsmoke >/dev/null 2>&1 || useradd --create-home wxsmoke
-    install -o wxsmoke -m 0600 /etc/wayexpand/expansions.toml.example \
-        /home/wxsmoke/expansions.toml
-    su wxsmoke -s /bin/sh -c 'cd && wayexpand validate expansions.toml'
+    id wxsmoke2 >/dev/null 2>&1 || useradd --create-home wxsmoke2
+    package_manifest=/usr/share/ibus/component/wayexpand-ibus.xml
+    package_manifest_hash=$(sha256sum "$package_manifest" | cut -d ' ' -f 1)
+    grep -Fx '<exec>wayexpand-ibus</exec>' "$package_manifest" >/dev/null
+    install -D -o wxsmoke -m 0600 /etc/wayexpand/expansions.toml.example \
+        /home/wxsmoke/.config/wayexpand/expansions.toml
+    su wxsmoke -s /bin/sh -c 'wayexpand validate "$HOME/.config/wayexpand/expansions.toml"'
+    install_report=$(su wxsmoke -s /bin/sh -c 'wayexpand install-check --json' 2>/dev/null || true)
+    printf '%s\n' "$install_report" | python3 -c '
+import json, sys
+report = json.load(sys.stdin)
+checks = {check["component"]: check for check in report["checks"]}
+assert report["ready"] is True, checks
+for component in ("cli", "gui", "daemon", "desktop", "ibus", "ibus_engine_executable",
+                  "installer_contract", "default_config_template", "control_service",
+                  "input_method_service", "active_configuration", "xdg_config_home", "xdg_data_home"):
+    assert checks[component]["status"] == "pass", (component, checks.get(component))
+'
+    second_config=/tmp/wayexpand-wxsmoke2-config
+    second_data=/tmp/wayexpand-wxsmoke2-data
+    install -d -o wxsmoke2 -m 0700 "$second_config/wayexpand" "$second_data"
+    install -o wxsmoke2 -m 0600 /etc/wayexpand/expansions.toml.example \
+        "$second_config/wayexpand/expansions.toml"
+    second_report=$(su wxsmoke2 -s /bin/sh -c \
+        "XDG_CONFIG_HOME=$second_config XDG_DATA_HOME=$second_data wayexpand install-check --json" \
+        2>/dev/null || true)
+    printf '%s\n' "$second_report" | python3 -c '
+import json, sys
+report = json.load(sys.stdin)
+checks = {check["component"]: check for check in report["checks"]}
+assert report["ready"] is True, checks
+for component in ("ibus", "ibus_engine_executable", "installer_contract",
+                  "default_config_template", "active_configuration", "xdg_config_home",
+                  "xdg_data_home"):
+    assert checks[component]["status"] == "pass", (component, checks.get(component))
+'
+    test "$(sha256sum "$package_manifest" | cut -d ' ' -f 1)" = "$package_manifest_hash"
+    rm -rf -- "$second_config" "$second_data"
 }
 
 install_package

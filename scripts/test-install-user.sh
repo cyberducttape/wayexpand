@@ -176,8 +176,11 @@ printf '%s\n' "$install_report" | python3 -c '
 import json, sys
 report = json.load(sys.stdin)
 checks = {check["component"]: check for check in report["checks"]}
+assert report["ready"] is True, checks
 assert checks["default_config_template"]["status"] == "pass", checks["default_config_template"]
 assert checks["active_configuration"]["status"] == "pass", checks["active_configuration"]
+assert checks["ibus_engine_executable"]["status"] == "pass", checks["ibus_engine_executable"]
+assert checks["xdg_config_home"]["status"] == "pass", checks["xdg_config_home"]
 '
 [ -f "$test_root/home/.local/share/applications/wayexpand.desktop" ]
 [ -f "$test_root/home/.local/share/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml" ]
@@ -215,9 +218,13 @@ custom_install_report=$(HOME="$test_root/home" XDG_CONFIG_HOME="$test_root/confi
     "$test_root/home/.local/bin/wayexpand" install-check --json 2>/dev/null || true)
 printf '%s\n' "$custom_install_report" | python3 -c '
 import json, sys
-checks = {check["component"]: check for check in json.load(sys.stdin)["checks"]}
+report = json.load(sys.stdin)
+checks = {check["component"]: check for check in report["checks"]}
+assert report["ready"] is True, checks
 assert checks["desktop"]["status"] == "pass", checks["desktop"]
 assert checks["icon"]["status"] == "pass", checks["icon"]
+assert checks["xdg_data_home"]["status"] == "pass", checks["xdg_data_home"]
+assert checks["xdg_config_home"]["status"] == "pass", checks["xdg_config_home"]
 '
 grep -F "ReadWritePaths=%t \"$test_root/config/wayexpand\" \"$custom_state_home/wayexpand\"" \
     "$test_root/config/systemd/user/wayexpand-action-broker.service.d/10-xdg-paths.conf"

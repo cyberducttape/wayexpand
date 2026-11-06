@@ -2,6 +2,14 @@
 set -eu
 
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+if [ -x "${WAYEXPAND_CLI:-$project_dir/target/debug/wayexpand}" ]; then
+    install_check_cli=${WAYEXPAND_CLI:-$project_dir/target/debug/wayexpand}
+elif [ -x "$project_dir/target/release/wayexpand" ]; then
+    install_check_cli="$project_dir/target/release/wayexpand"
+else
+    printf '%s\n' 'error: build wayexpand before running the release installer check' >&2
+    exit 1
+fi
 test_root=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-release-test.XXXXXX")
 trap 'rm -rf "$test_root"' EXIT INT TERM
 # Never reach the invoking user's real systemd manager or session bus, even
@@ -13,7 +21,7 @@ export XDG_RUNTIME_DIR="$isolated_runtime"
 export DBUS_SESSION_BUS_ADDRESS="unix:path=$isolated_runtime/bus"
 
 release_dir="$test_root/wayexpand-0.0.0-linux-x86_64"
-mkdir -p "$release_dir/bin" "$release_dir/systemd" "$release_dir/desktop" "$release_dir/docs" "$release_dir/scripts" "$release_dir/udev" "$release_dir/ibus/component" "$release_dir/libexec/wayexpand-certification/bin"
+mkdir -p "$release_dir/bin" "$release_dir/systemd" "$release_dir/desktop" "$release_dir/docs" "$release_dir/scripts" "$release_dir/udev" "$release_dir/ibus/component" "$release_dir/icons" "$release_dir/libexec/wayexpand-certification/bin"
 for binary in wayexpand-daemon wayexpand wayexpand-action-broker wayexpand-ui wayexpand-gui wayexpand-ibus; do
     printf '#!/bin/sh\nexit 0\n' >"$release_dir/bin/$binary"
     chmod 0755 "$release_dir/bin/$binary"
@@ -33,6 +41,7 @@ install -m 0644 "$project_dir/systemd/wayexpand-evdev.service" "$release_dir/sys
 install -m 0644 "$project_dir/systemd/wayexpand-control.service" "$release_dir/systemd/"
 install -m 0644 "$project_dir/systemd/wayexpand-action-broker.service" "$release_dir/systemd/"
 install -m 0644 "$project_dir/desktop/wayexpand.desktop" "$release_dir/desktop/"
+cp -a "$project_dir/assets/icon/hicolor" "$release_dir/icons/"
 install -m 0644 "$project_dir/installer-components.toml" "$release_dir/installer-components.toml"
 install -m 0644 "$project_dir/desktop/wayexpand-ibus.xml" "$release_dir/ibus/component/"
 install -m 0644 "$project_dir/expansions.toml" "$release_dir/expansions.toml"
@@ -139,6 +148,19 @@ grep -Fx 'ExecStart=%h/.local/lib/wayexpand/current/bin/wayexpand-daemon --sourc
 [ ! -e "$test_root/config/systemd/user/wayexpand.service" ]
 [ -f "$test_root/config/wayexpand/expansions.toml" ]
 [ -f "$test_root/config/wayexpand/broker.toml" ]
+release_install_report=$(HOME="$test_root/home" XDG_CONFIG_HOME="$test_root/config" \
+    XDG_DATA_HOME="$test_root/custom-data" PATH="$test_root/home/.local/bin:$PATH" \
+    "$install_check_cli" install-check --json 2>/dev/null || true)
+printf '%s\n' "$release_install_report" | python3 -c '
+import json, sys
+report = json.load(sys.stdin)
+checks = {check["component"]: check for check in report["checks"]}
+assert report["ready"] is True, checks
+for component in ("ibus", "ibus_engine_executable", "installer_contract",
+                  "default_config_template", "active_configuration", "xdg_config_home",
+                  "xdg_data_home"):
+    assert checks[component]["status"] == "pass", (component, checks.get(component))
+'
 
 # Enabling evdev without its consent marker would leave an inert unit that
 # systemd reports as started.
