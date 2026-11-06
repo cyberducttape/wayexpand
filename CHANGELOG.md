@@ -36,7 +36,8 @@ All notable changes to WayExpand are documented here.
 - Perform GNOME tracker subscriber credential checks asynchronously so the
   Shell main loop does not block on session-bus replies. Bound and deduplicate
   pending authorization requests, and cancel pending subscriptions on client
-  unsubscribe or extension shutdown.
+  unsubscribe or extension shutdown. The headless GNOME session test verifies
+  that a generic session-bus peer receives an explicit access-denied response.
 - Reduce GNOME focus-data exposure: default tracker subscriptions return app
   and opaque instance IDs without window titles. Only verified WayExpand
   executables can subscribe. The daemon now requests titles only while an

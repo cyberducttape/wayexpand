@@ -158,6 +158,23 @@ until gnome_extension_state_active "$(extension_state)"; do
 done
 log "pass extension-active"
 
+# A generic session-bus client must not subscribe to focused-window metadata,
+# especially title-bearing snapshots. Check the explicit authorization error
+# rather than accepting any failure as evidence that access was denied.
+if gdbus call --session --dest org.gnome.Shell \
+    --object-path /org/wayexpand/ShellWindowTracker \
+    --method org.wayexpand.ShellWindowTracker1.SubscribeWithTitles true \
+    >"$E2E_WORK/unauthorized-tracker-subscription.log" 2>&1; then
+    log "fail unauthorized-tracker-subscription a generic session-bus client received tracker access"
+    exit 1
+elif grep -qi 'AccessDenied' "$E2E_WORK/unauthorized-tracker-subscription.log"; then
+    log "pass unauthorized-tracker-subscription GNOME Shell denied the non-WayExpand peer"
+else
+    log "fail unauthorized-tracker-subscription the request failed without an access-denied result"
+    cat "$E2E_WORK/unauthorized-tracker-subscription.log"
+    exit 1
+fi
+
 # Start Shell with an older on-disk identity, then install the current
 # metadata while that extension remains loaded. Diagnostics must identify
 # the stale in-memory instance as logout-required, not trust the new files.
@@ -543,7 +560,7 @@ env -i \
     dbus-run-session -- "$work/session.sh" >"$work/results.txt" 2>"$work/session.log" || status=$?
 
 cat "$work/results.txt"
-expected_checks='extension-active extension-pre-upgrade-build extension-upgrade-not-current active-input-source deprecated-current-readback ignored-current-setting unavailable-input-source ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gtk-ibus-insertion gnome-ibus-operational extension-disabled extension-after-login gnome-ibus-source-after-login gtk-ibus-insertion-after-login'
+expected_checks='extension-active unauthorized-tracker-subscription extension-pre-upgrade-build extension-upgrade-not-current active-input-source deprecated-current-readback ignored-current-setting unavailable-input-source ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gtk-ibus-insertion gnome-ibus-operational extension-disabled extension-after-login gnome-ibus-source-after-login gtk-ibus-insertion-after-login'
 missing_check=
 for check in $expected_checks; do
     if ! grep -F "pass $check" "$work/results.txt" >/dev/null; then
@@ -567,6 +584,7 @@ if [ "$status" -ne 0 ] || grep -q '^fail' "$work/results.txt" \
         ibus-before-live-activation.json ibus-before-live-activation.err \
         ibus-after-gtk-insertion.json ibus-after-gtk-insertion.err \
         ibus-source-activation-after-login.log gtk-insertion-after-login.log \
+        unauthorized-tracker-subscription.log \
         doctor-after-extension-upgrade.json \
         doctor-after-extension-upgrade.err doctor-after-login.json \
         gtk-insertion.log sink.log; do
