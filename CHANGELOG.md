@@ -21,6 +21,12 @@ All notable changes to WayExpand are documented here.
   uninstall, and `install-check` for desktop entries, icons, metainfo, manuals,
   and GNOME integration. Reject relative data roots and test installations
   with a custom data directory.
+- Extend the headless GNOME session test to register the IBus component,
+  register and activate the GNOME IBus source through Shell, then verify that
+  the already active WayExpand engine expands a trigger in a controlled IBus
+  input context. The test explicitly reports GTK application insertion as
+  unverified and checks named lifecycle checkpoints instead of a stale,
+  hard-coded pass count.
 - Simplify the GUI's IBus setup into a preflighted, single guided flow. It first
   checks whether the component registration is already valid, only presents
   administrator-registration consent when it is missing or invalid, and keeps

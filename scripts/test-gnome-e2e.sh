@@ -1,12 +1,12 @@
 #!/bin/sh
-# End-to-end test of GNOME window tracking: a private, headless GNOME Shell
-# runs the bundled WayExpand extension, Wayland windows take focus, and
-# WayExpand's GNOME tracker must report their app IDs. Nothing touches the
-# desktop session: the shell gets its own D-Bus session, HOME, runtime
-# directory, data directory (with the extension) and dconf settings.
+# End-to-end test of GNOME source activation, the IBus engine, and window
+# tracking in a private headless GNOME Shell session. It verifies GNOME source
+# registration/activation followed by an IBus replacement transaction and
+# focus tracking. The replacement uses a controlled IBus protocol client,
+# not a GTK application, so this is not desktop certification.
 #
 # Usage: scripts/test-gnome-e2e.sh [--keep]
-#   E2E_BIN=DIR        use prebuilt wx-e2e-sink and wx-e2e-gnome-tracker
+#   E2E_BIN=DIR        use prebuilt wayexpand-ibus and wx-e2e-* binaries
 #   E2E_SKIP_BUILD=1   do not run cargo build
 set -eu
 
@@ -31,7 +31,9 @@ done
 
 bin_dir=${E2E_BIN:-"$project_dir/target/debug"}
 if [ "${E2E_SKIP_BUILD:-0}" != 1 ]; then
-    cargo build --locked --quiet -p wayexpand-e2e --bin wx-e2e-sink --bin wx-e2e-gnome-tracker
+    cargo build --locked --quiet \
+        -p wayexpand-backend-ibus --bin wayexpand-ibus \
+        -p wayexpand-e2e --bin wx-e2e-sink --bin wx-e2e-gnome-tracker --bin wx-e2e-ibus
 fi
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-gnome-e2e.XXXXXX")
@@ -47,7 +49,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 chmod 0700 "$runtime"
-mkdir -p "$work/home" "$work/config" "$work/cache" \
+mkdir -p "$work/home" "$work/config/wayexpand" "$work/cache" "$work/component" \
     "$work/data/gnome-shell/extensions/$uuid" \
     "$work/data/gnome-shell/extensions/$controller_uuid"
 cp "$project_dir/gnome-extension/$uuid/metadata.json" "$project_dir/gnome-extension/$uuid/extension.js" \
@@ -56,6 +58,19 @@ cp "$project_dir/gnome-extension/$uuid/metadata.json" "$project_dir/gnome-extens
 cp "$project_dir/scripts/gnome-e2e-focus-controller/metadata.json" \
     "$project_dir/scripts/gnome-e2e-focus-controller/extension.js" \
     "$work/data/gnome-shell/extensions/$controller_uuid/"
+cat >"$work/config/wayexpand/expansions.toml" <<'EOF'
+[settings]
+compatibility_mode = "tracked-focus"
+
+[[expansion]]
+trigger = ";e2e"
+replacement = "expanded"
+EOF
+chmod 0700 "$work/config" "$work/config/wayexpand"
+chmod 0600 "$work/config/wayexpand/expansions.toml"
+sed "s|<exec>wayexpand-ibus</exec>|<exec>$bin_dir/wayexpand-ibus</exec>|" \
+    "$project_dir/desktop/wayexpand-ibus.xml" >"$work/component/wayexpand.xml"
+chmod 0700 "$work/component"
 
 cat >"$work/session.sh" <<'EOF'
 #!/bin/sh
@@ -67,6 +82,29 @@ log() { printf '%s\n' "$*"; }
 gsettings set org.gnome.shell disable-user-extensions false
 gsettings set org.gnome.shell enabled-extensions "['$E2E_UUID', '$E2E_CONTROLLER_UUID']"
 gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us'), ('xkb', 'de')]"
+socket="$XDG_RUNTIME_DIR/ibus.sock"
+ibus-daemon --single --panel=disable --emoji-extension=disable --config=disable \
+    --cache=none --address="unix:path=$socket" >"$E2E_WORK/ibus-daemon.log" 2>&1 &
+ibus_pid=$!
+tries=100
+while [ ! -S "$socket" ] && [ "$tries" -gt 0 ]; do
+    sleep 0.1
+    tries=$((tries - 1))
+done
+if [ ! -S "$socket" ]; then
+    log "fail ibus-started private ibus-daemon did not create its socket"
+    kill "$ibus_pid" 2>/dev/null || true
+    exit 1
+fi
+export IBUS_ADDRESS="unix:path=$socket"
+if ! ibus list-engine --name-only >"$E2E_WORK/ibus-engines.txt" 2>&1 \
+    || ! grep -Fx wayexpand "$E2E_WORK/ibus-engines.txt" >/dev/null; then
+    log "fail ibus-engine-registered WayExpand engine is missing from the private IBus registry"
+    cat "$E2E_WORK/ibus-engines.txt"
+    kill "$ibus_pid" 2>/dev/null || true
+    exit 1
+fi
+log "pass ibus-engine-registered"
 gnome-shell --headless --mode=user --wayland --virtual-monitor 1280x800 --wayland-display "$display" \
     >"$E2E_WORK/gnome-shell.log" 2>&1 &
 shell_pid=$!
@@ -75,6 +113,16 @@ finish() {
     for pid in $sinks; do kill "$pid" 2>/dev/null || true; done
     kill "$shell_pid" 2>/dev/null || true
     wait "$shell_pid" 2>/dev/null || true
+    if [ -f "$XDG_RUNTIME_DIR/wayexpand-ibus-status.json" ]; then
+        engine_pid=$(sed -n 's/.*"pid":\([0-9][0-9]*\).*/\1/p' \
+            "$XDG_RUNTIME_DIR/wayexpand-ibus-status.json")
+        if [ -n "$engine_pid" ] \
+            && [ "$(cat "/proc/$engine_pid/comm" 2>/dev/null)" = wayexpand-ibus ]; then
+            kill "$engine_pid" 2>/dev/null || true
+        fi
+    fi
+    kill "$ibus_pid" 2>/dev/null || true
+    wait "$ibus_pid" 2>/dev/null || true
 }
 trap finish EXIT
 
@@ -136,6 +184,43 @@ if gdbus call --session --dest org.gnome.Shell \
     exit 1
 fi
 log "pass unavailable-input-source"
+
+# Register in GNOME's typed source list without disturbing the keyboard
+# layouts, activate through Shell's live manager, then prove the already
+# selected IBus engine performs a trigger replacement in its input context.
+gsettings set org.gnome.desktop.input-sources sources \
+    "[('xkb', 'us'), ('xkb', 'de'), ('ibus', 'wayexpand')]"
+registered_sources=$(gsettings get org.gnome.desktop.input-sources sources)
+case "$registered_sources" in
+    *"'ibus', 'wayexpand'"*) log "pass gnome-ibus-source-registered $registered_sources" ;;
+    *) log "fail gnome-ibus-source-registered GNOME returned $registered_sources"; exit 1 ;;
+esac
+gdbus call --session --dest org.gnome.Shell \
+    --object-path /org/wayexpand/ShellWindowTracker \
+    --method org.wayexpand.ShellWindowTracker1.ActivateInputSource ibus wayexpand \
+    >"$E2E_WORK/ibus-source-activation.log"
+active_source=$(gdbus call --session --dest org.gnome.Shell \
+    --object-path /org/wayexpand/ShellWindowTracker \
+    --method org.wayexpand.ShellWindowTracker1.GetActiveInputSource)
+case "$active_source" in
+    *"'ibus', 'wayexpand'"*) log "pass gnome-ibus-source-active $active_source" ;;
+    *) log "fail gnome-ibus-source-active GNOME Shell reported $active_source"; exit 1 ;;
+esac
+if ! "$E2E_BIN_DIR/wx-e2e-ibus" "$XDG_RUNTIME_DIR/wayexpand-ibus-status.json" \
+    --expect-active >"$E2E_WORK/ibus-transaction-results.txt" 2>&1; then
+    log "fail ibus-expansion-after-gnome-activation"
+    cat "$E2E_WORK/ibus-transaction-results.txt"
+    exit 1
+fi
+if ! grep -Fx 'pass gnome-selected-engine the engine selected by GNOME was already active in IBus' \
+    "$E2E_WORK/ibus-transaction-results.txt" >/dev/null \
+    || ! grep -F 'pass expands text after typing the trigger: "expanded"' \
+        "$E2E_WORK/ibus-transaction-results.txt" >/dev/null; then
+    log "fail ibus-expansion-after-gnome-activation GNOME-selected engine did not expand the trigger"
+    cat "$E2E_WORK/ibus-transaction-results.txt"
+    exit 1
+fi
+log "pass ibus-expansion-after-gnome-activation GTK_UNVERIFIED"
 
 start_sink() {
     WAYLAND_DISPLAY="$display" "$E2E_BIN_DIR/wx-e2e-sink" "$1" "$E2E_WORK/$1.json" \
@@ -256,6 +341,7 @@ env -i \
     XDG_DATA_HOME="$work/data" \
     XDG_DATA_DIRS="${XDG_DATA_DIRS:-/usr/local/share:/usr/share}" \
     XDG_RUNTIME_DIR="$runtime" \
+    IBUS_COMPONENT_PATH="$work/component" \
     XDG_CURRENT_DESKTOP=GNOME \
     XDG_SESSION_TYPE=wayland \
     E2E_WORK="$work" \
@@ -267,16 +353,28 @@ env -i \
     dbus-run-session -- "$work/session.sh" >"$work/results.txt" 2>"$work/session.log" || status=$?
 
 cat "$work/results.txt"
+expected_checks='extension-active active-input-source deprecated-current-readback ignored-current-setting unavailable-input-source ibus-engine-registered gnome-ibus-source-registered gnome-ibus-source-active ibus-expansion-after-gnome-activation extension-disabled'
+missing_check=
+for check in $expected_checks; do
+    if ! grep -F "pass $check" "$work/results.txt" >/dev/null; then
+        missing_check=$check
+        break
+    fi
+done
 if [ "$status" -ne 0 ] || grep -q '^fail' "$work/results.txt" \
-    || [ "$(grep -c '^pass' "$work/results.txt")" -ne 6 ]; then
+    || [ -n "$missing_check" ] \
+    || ! grep -F 'pass focus transition to org.wayexpand.GnomeE2eFirst' "$work/results.txt" >/dev/null \
+    || ! grep -F 'pass focus transition to org.wayexpand.GnomeE2eSecond' "$work/results.txt" >/dev/null \
+    || ! grep -F 'pass focus-loss transition' "$work/results.txt" >/dev/null; then
     printf '%s\n' "GNOME window-tracking end-to-end test FAILED; logs:" >&2
     failure=$(grep '^fail ' "$work/results.txt" | tail -n 1 || true)
     if [ -z "$failure" ]; then
-        failure="test exited with status $status; pass count $(grep -c '^pass' "$work/results.txt")"
+        failure="test exited with status $status; missing checkpoint=${missing_check:-focus-transition}; pass count $(grep -c '^pass' "$work/results.txt")"
     fi
     failure=$(printf '%s' "$failure" | sed 's/%/%25/g; s/\r/%0D/g; s/\n/%0A/g')
     printf '::error title=GNOME window tracking E2E::%s\n' "$failure" >&2
-    for log in session.log gnome-shell.log sink.log; do
+    for log in session.log gnome-shell.log ibus-daemon.log ibus-engines.txt \
+        ibus-transaction-results.txt sink.log; do
         printf '%s\n' "--- $log" >&2
         tail -n 60 "$work/$log" >&2 2>/dev/null || true
         if [ -s "$work/$log" ]; then
@@ -286,4 +384,4 @@ if [ "$status" -ne 0 ] || grep -q '^fail' "$work/results.txt" \
     done
     exit 1
 fi
-printf '%s\n' "GNOME window-tracking end-to-end test passed"
+printf '%s\n' "Headless GNOME Shell and IBus integration passed; GTK application insertion remains unverified"

@@ -64,10 +64,14 @@ passes by a green CI run.
 
 `tests/certification/gnome-ibus-matrix.json` defines the platform and client
 coverage required before making GNOME IBus support claims. The existing
-`test-ibus-e2e.sh` verifies the IBus engine protocol with a controlled client;
-`test-gnome-e2e.sh` verifies GNOME window tracking. Neither proves GNOME input
-source routing or replacement in a real application. They must not be counted
-as a pass in the table below.
+`test-gnome-e2e.sh` now runs a private IBus daemon and GNOME Shell together. It
+checks component discovery, GNOME source registration, Shell activation, an
+already-active WayExpand engine, a controlled IBus input-context replacement,
+and window tracking. `test-ibus-e2e.sh` additionally exercises IBus engine
+focus, content-type and telemetry cases. These controlled clients are not GTK
+applications, and the private headless session does not prove real desktop
+keyboard routing, login persistence, or replacement in GTK/Qt/browser/terminal
+applications. They must not be counted as passes in the platform matrix below.
 
 | Platform/session | GTK 3 | GTK 4 | Qt | Browser | Terminal | Install/activation lifecycle | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |

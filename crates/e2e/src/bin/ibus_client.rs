@@ -7,7 +7,7 @@
 //! scenario checks the resulting text, so protocol mismatches between the
 //! WayExpand engine and the real daemon fail here instead of on a desktop.
 //!
-//! Usage: wx-e2e-ibus <status-file>   (IBUS_ADDRESS must be set)
+//! Usage: wx-e2e-ibus <status-file> [--expect-active]   (IBUS_ADDRESS must be set)
 //! Prints one "pass|fail <scenario> <detail>" line per scenario and exits
 //! non-zero if any scenario failed.
 
@@ -15,7 +15,7 @@ use anyhow::{bail, Context, Result};
 use std::{
     collections::HashMap,
     env,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::mpsc,
     thread,
     time::{Duration, Instant},
@@ -218,19 +218,21 @@ impl Results {
     }
 }
 
-fn select_engine(connection: &Connection, field: &Field<'_>) -> Result<()> {
+fn select_engine(connection: &Connection, field: &Field<'_>, expect_active: bool) -> Result<()> {
     field.call("FocusIn", &())?;
-    // A mismatched component name makes this call time out, because
-    // ibus-daemon waits for the component's bus name before CreateEngine.
-    connection
-        .call_method(
-            Some(IBUS),
-            IBUS_PATH,
-            Some(IBUS),
-            "SetGlobalEngine",
-            &("wayexpand",),
-        )
-        .context("SetGlobalEngine(wayexpand)")?;
+    if !expect_active {
+        // A mismatched component name makes this call time out, because
+        // ibus-daemon waits for the component's bus name before CreateEngine.
+        connection
+            .call_method(
+                Some(IBUS),
+                IBUS_PATH,
+                Some(IBUS),
+                "SetGlobalEngine",
+                &("wayexpand",),
+            )
+            .context("SetGlobalEngine(wayexpand)")?;
+    }
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let engine: OwnedValue = connection
@@ -255,11 +257,46 @@ fn select_engine(connection: &Connection, field: &Field<'_>) -> Result<()> {
     }
 }
 
+/// Wait for content-free engine telemetry to confirm that IBus has created
+/// and focused the actual engine context. `GetGlobalEngine` can return the
+/// selected descriptor before the first input context is fully attached.
+fn wait_for_focused_engine(status_file: &Path) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if let Some(reading) = wayexpand_backend_ibus::telemetry::read_status_at(status_file) {
+            let status = reading.status;
+            if status.engines > 0
+                && status.recent_fields.iter().any(|field| {
+                    field.focused
+                        && field.content_type
+                            == wayexpand_backend_ibus::telemetry::IbusContentTypeState::Normal
+                        && field.surrounding_capability
+                })
+            {
+                return Ok(());
+            }
+        }
+        if Instant::now() >= deadline {
+            bail!("IBus selected WayExpand but no focused, safe surrounding-text engine context became ready");
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
 fn main() -> Result<()> {
-    let status_file: PathBuf = env::args_os()
-        .nth(1)
+    let mut arguments = env::args_os().skip(1);
+    let status_file: PathBuf = arguments
+        .next()
         .map(PathBuf::from)
-        .context("usage: wx-e2e-ibus <status-file>")?;
+        .context("usage: wx-e2e-ibus <status-file> [--expect-active]")?;
+    let expect_active = match arguments.next().as_deref().and_then(|arg| arg.to_str()) {
+        None => false,
+        Some("--expect-active") => true,
+        Some(_) => bail!("usage: wx-e2e-ibus <status-file> [--expect-active]"),
+    };
+    if arguments.next().is_some() {
+        bail!("usage: wx-e2e-ibus <status-file> [--expect-active]");
+    }
     let address = env::var("IBUS_ADDRESS").context("IBUS_ADDRESS is not set")?;
     let connection = zbus::blocking::connection::Builder::address(address.as_str())?.build()?;
     let (sender, events) = mpsc::channel();
@@ -295,10 +332,26 @@ fn main() -> Result<()> {
     let full_caps = CAP_PREEDIT | CAP_FOCUS | CAP_SURROUNDING_TEXT;
     let mut editor = create_field(&connection, &events, "e2e-editor", full_caps, true)?;
     editor.set_content_type(PURPOSE_FREE_FORM)?;
-    match select_engine(&connection, &editor) {
+    match select_engine(&connection, &editor, expect_active) {
+        Ok(()) if expect_active => results.check(
+            "gnome-selected-engine",
+            true,
+            "the engine selected by GNOME was already active in IBus",
+        ),
         Ok(()) => results.check("registered", true, "SetGlobalEngine selected wayexpand"),
         Err(error) => {
             results.check("registered", false, format!("{error:#}"));
+            std::process::exit(1);
+        }
+    }
+    match wait_for_focused_engine(&status_file) {
+        Ok(()) => results.check(
+            "engine-context-ready",
+            true,
+            "IBus reports a focused normal-text context with surrounding-text capability",
+        ),
+        Err(error) => {
+            results.check("engine-context-ready", false, format!("{error:#}"));
             std::process::exit(1);
         }
     }

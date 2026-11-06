@@ -595,7 +595,7 @@ jobs:
         run: bash scripts/test-ibus-e2e.sh
 
   gnome-e2e:
-    name: Headless GNOME Shell Window Tracking E2E
+    name: Headless GNOME Shell, IBus, and Window Tracking E2E
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -607,8 +607,8 @@ jobs:
           toolchain: 1.96.0
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Install GNOME Shell and D-Bus
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gnome-shell dconf-service dbus-daemon libglib2.0-bin libgl1-mesa-dri libwayland-dev libxkbcommon-dev pkg-config
-      - name: Test the GNOME Shell extension and tracker in a headless GNOME Shell
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gnome-shell ibus dconf-service dbus-daemon libglib2.0-bin libgl1-mesa-dri libwayland-dev libxkbcommon-dev pkg-config
+      - name: Test GNOME source activation, IBus replacement, and window tracking in one private session
         run: bash scripts/test-gnome-e2e.sh
 
   packaging:
