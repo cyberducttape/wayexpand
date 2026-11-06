@@ -28,6 +28,10 @@ All notable changes to WayExpand are documented here.
   subscriber has at most one in-flight D-Bus call plus one latest pending
   snapshot, and subscribers that time out are disconnected. A 100,000-update
   stress test covers stalled and delayed subscribers.
+- Treat GNOME window-title access as a per-request opt-in: switching an active
+  tracker connection back to the title-free subscription revokes title delivery
+  immediately. Extend the isolated GNOME upgrade/logout test to re-activate the
+  IBus source through GNOME Shell and verify GTK insertion after Shell reload.
 - Reduce GNOME focus-data exposure: default tracker subscriptions return app
   and opaque instance IDs without window titles. Only verified WayExpand
   executables can subscribe. The daemon now requests titles only while an
