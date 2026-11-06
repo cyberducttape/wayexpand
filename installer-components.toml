@@ -1,5 +1,6 @@
-# Shared user-install contract. Package recipes and install-check tests should
-# keep these runtime components in sync. Optional raw capture is consent-gated.
+# Shared installation contract. `path` describes staged/package artifacts;
+# IBus `registration` describes where the running daemon must find the shared
+# component. Optional raw capture is consent-gated.
 [components.cli]
 path = "bin/wayexpand"
 required = true
@@ -15,7 +16,12 @@ required = true
 [components.ibus]
 path = "ibus/wayexpand.xml"
 required = true
-registration = "${XDG_DATA_HOME:-~/.local/share}/ibus/component/wayexpand.xml"
+registration = "system-wide component directory selected by the running ibus-daemon; install with wayexpand setup --backend ibus"
+user_registration = false
+user_install_exec = "/usr/local/libexec/wayexpand/wayexpand-ibus"
+user_install_exec_owner = "root"
+package_install_exec = "/usr/bin/wayexpand-ibus"
+package_install_exec_owner = "package-manager"
 
 [components.desktop]
 path = "desktop/wayexpand.desktop"

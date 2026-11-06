@@ -45,6 +45,23 @@ for component in cli gui daemon ibus desktop icon default_config_template contro
         exit 1
     }
 done
+ibus_contract=$(sed -n '/^\[components\.ibus\]$/,/^$/p' "$project_dir/installer-components.toml")
+printf '%s\n' "$ibus_contract" | grep -q '^registration = "system-wide component directory selected by the running ibus-daemon;' || {
+    printf '%s\n' 'IBus contract must describe system-wide daemon registration' >&2
+    exit 1
+}
+printf '%s\n' "$ibus_contract" | grep -q '^user_registration = false$' || {
+    printf '%s\n' 'IBus contract must explicitly disallow per-user registration' >&2
+    exit 1
+}
+printf '%s\n' "$ibus_contract" | grep -q '^user_install_exec = "/usr/local/libexec/wayexpand/wayexpand-ibus"$' || {
+    printf '%s\n' 'IBus user-install executable contract is missing or inconsistent' >&2
+    exit 1
+}
+if printf '%s\n' "$ibus_contract" | grep -q '\.local/share/ibus/component'; then
+    printf '%s\n' 'IBus contract must not advertise an ordinary per-user component directory' >&2
+    exit 1
+fi
 for installer in "$project_dir/scripts/install-user.sh" "$project_dir/scripts/install-release.sh"; do
     grep -q -F '"$stage_dir/expansions.toml"' "$installer" || {
         printf '%s\n' "user installer does not stage the default configuration template: $installer" >&2

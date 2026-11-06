@@ -8,6 +8,10 @@ All notable changes to WayExpand are documented here.
   the active user configuration in `wayexpand install-check`. Source and
   release-archive installers now include the template in each immutable
   payload, and installer tests verify both template and active-config files.
+- Correct the shared installer contract to describe system-wide IBus
+  registration and its system-owned executable paths. `install-check` no
+  longer treats an ordinary per-user IBus component directory as registration
+  evidence; contract tests guard this boundary.
 - Register user-installed IBus engines through one root-owned executable at
   `/usr/local/libexec/wayexpand/wayexpand-ibus`; shared component XML no longer
   points into the installing user's home directory. Setup journals the shared

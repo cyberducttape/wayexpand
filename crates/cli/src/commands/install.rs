@@ -35,6 +35,17 @@ fn current() -> PathBuf {
     home().join(".local/lib/wayexpand/current")
 }
 
+fn ibus_component_candidates() -> Vec<PathBuf> {
+    let system_directory = wayexpand_backend_ibus::chain::component_install_directory();
+    vec![
+        current().join("ibus/wayexpand.xml"),
+        system_directory.join("wayexpand.xml"),
+        system_directory.join("wayexpand-ibus.xml"),
+        PathBuf::from("/usr/share/ibus/component/wayexpand-ibus.xml"),
+        PathBuf::from("/usr/local/share/ibus/component/wayexpand-ibus.xml"),
+    ]
+}
+
 fn candidates(relative: &str) -> Vec<PathBuf> {
     let name = Path::new(relative).file_name().unwrap_or_default();
     let mut paths = vec![
@@ -384,18 +395,14 @@ pub(crate) fn checks() -> Vec<Check> {
             },
         });
     }
-    let ibus_path = [
-        data_home().join("ibus/component/wayexpand.xml"),
-        current().join("ibus/wayexpand.xml"),
-        PathBuf::from("/usr/share/ibus/component/wayexpand-ibus.xml"),
-    ]
-    .into_iter()
-    .find(|p| p.is_file());
+    let ibus_path = ibus_component_candidates()
+        .into_iter()
+        .find(|p| p.is_file());
     out.push(Check {
         component: "ibus",
         status: if ibus_path.is_some() { "pass" } else { "fail" },
         path: ibus_path.map_or_else(|| "IBus component XML".into(), |p| p.display().to_string()),
-        detail: "component available; engine selection remains explicit",
+        detail: "staged or shared system component available; XDG per-user component paths are not treated as registered",
     });
     let manifest = wayexpand_backend_ibus::chain::diagnose();
     let engine_check = manifest.check("manifest");
@@ -849,6 +856,23 @@ mod tests {
         assert!(template.detail.contains("template"));
         assert!(active.detail.contains("active configuration"));
         assert_ne!(template.component, active.component);
+    }
+
+    #[test]
+    fn ibus_contract_and_install_check_exclude_per_user_registration() {
+        let contract: toml::Value =
+            toml::from_str(include_str!("../../../../installer-components.toml")).unwrap();
+        let ibus = &contract["components"]["ibus"];
+        assert_eq!(ibus["user_registration"].as_bool(), Some(false));
+        assert!(ibus["registration"]
+            .as_str()
+            .unwrap()
+            .contains("system-wide"));
+        let candidates = ibus_component_candidates();
+        assert!(!candidates.contains(&data_home().join("ibus/component/wayexpand.xml")));
+        assert!(candidates.contains(
+            &wayexpand_backend_ibus::chain::component_install_directory().join("wayexpand.xml")
+        ));
     }
 
     #[test]

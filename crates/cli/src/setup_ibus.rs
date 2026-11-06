@@ -29,7 +29,6 @@ const COMMAND_OUTPUT_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_COMMAND_OUTPUT: u64 = 64 * 1024;
 const MAX_COMPONENT_BYTES: u64 = 64 * 1024;
 const MAX_SHARED_ENGINE_BYTES: u64 = 512 * 1024 * 1024;
-const SHARED_ENGINE: &str = "/usr/local/libexec/wayexpand/wayexpand-ibus";
 const TERMINAL_DROP_IN: &str = "30-terminal-apps-only.conf";
 /// Common terminal app IDs (normalized), used when `terminal_apps` is empty.
 pub(crate) const DEFAULT_TERMINAL_APPS: &[&str] = &[
@@ -177,15 +176,29 @@ fn xml_escape(text: &str) -> String {
 
 /// The system component must never bind to one user's home directory.
 pub(crate) fn component_manifest() -> String {
+    let engine_path = shared_engine_path();
     COMPONENT_TEMPLATE.replace(
         "<exec>wayexpand-ibus</exec>",
-        &format!("<exec>{}</exec>", xml_escape(SHARED_ENGINE)),
+        &format!(
+            "<exec>{}</exec>",
+            xml_escape(&engine_path.display().to_string())
+        ),
+    )
+}
+
+fn shared_engine_path() -> PathBuf {
+    let contract: toml::Value = toml::from_str(include_str!("../../../installer-components.toml"))
+        .expect("checked-in installer component contract must be valid TOML");
+    PathBuf::from(
+        contract["components"]["ibus"]["user_install_exec"]
+            .as_str()
+            .expect("IBus user_install_exec must be a string"),
     )
 }
 
 fn shared_engine_is_trusted() -> bool {
-    let path = Path::new(SHARED_ENGINE);
-    let Ok(metadata) = fs::symlink_metadata(path) else {
+    let path = shared_engine_path();
+    let Ok(metadata) = fs::symlink_metadata(&path) else {
         return false;
     };
     let Some(parent) = path.parent() else {
@@ -728,9 +741,10 @@ fn install_component(
     let manifest_ok = report
         .check("manifest")
         .is_some_and(|check| check.state == IbusCheckState::Pass);
+    let shared_exec = format!("<exec>{}</exec>", shared_engine_path().display());
     let legacy_user_manifest = journal.original.as_ref().is_some_and(|state| {
         let contents = String::from_utf8_lossy(&state.bytes);
-        contents.contains("<exec>") && !contents.contains(&format!("<exec>{SHARED_ENGINE}</exec>"))
+        contents.contains("<exec>") && !contents.contains(&shared_exec)
     });
     if component_ok
         && manifest_ok
@@ -776,7 +790,7 @@ fn install_component(
             "  - IBus must read a component manifest from {}.",
             journal.target.display()
         );
-        println!("  - The shared engine executable will be installed at {SHARED_ENGINE}; the manifest will not refer to your home directory.");
+        println!("  - The shared engine executable will be installed at {}; the manifest will not refer to your home directory.", shared_engine_path().display());
         println!("  - Registering it requires a one-time administrator authorization.");
         if original_has_other_owner {
             println!("  - The existing manifest is owned by another account; authorization also preserves its original ownership during rollback.");
@@ -1346,7 +1360,7 @@ impl SetupTransaction {
             // All persistent snapshots are taken before the first mutation.
             component: ComponentInstallJournal::capture()?,
             shared_engine: ComponentInstallJournal::capture_limited(
-                PathBuf::from(SHARED_ENGINE),
+                shared_engine_path(),
                 MAX_SHARED_ENGINE_BYTES,
             )?,
             config: ConfigMutationJournal::capture()?,
@@ -2390,7 +2404,9 @@ mod tests {
         let alice_manifest = component_manifest();
         let bob_manifest = component_manifest();
         assert_eq!(alice_manifest, bob_manifest);
-        assert!(alice_manifest.contains("<exec>/usr/local/libexec/wayexpand/wayexpand-ibus</exec>"));
+        assert!(
+            alice_manifest.contains(&format!("<exec>{}</exec>", shared_engine_path().display()))
+        );
         assert!(!alice_manifest.contains("/home/alice"));
         assert!(!alice_manifest.contains("/home/bob"));
         assert!(alice_manifest.contains("<name>org.freedesktop.IBus.WayExpand</name>"));
