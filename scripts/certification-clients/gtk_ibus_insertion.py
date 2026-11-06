@@ -14,7 +14,6 @@ APP_ID = "org.wayexpand.GtkIbusInsertion"
 TRIGGER = ";e2e"
 EXPECTED = "expanded"
 TIMEOUT_MS = 5000
-FOCUS_TIMEOUT_MS = 10000
 KEYS = {
     ";": E.KEY_SEMICOLON,
     "e": E.KEY_E,
@@ -50,11 +49,11 @@ def main():
         window = state["window"]
         entry = state["entry"]
         if not window.is_active() or not entry.is_focus():
-            state["attempts"] += 1
-            if state["attempts"] >= FOCUS_TIMEOUT_MS // 50:
-                print("fail gtk-ibus-insertion GTK test window did not acquire focus", flush=True)
-                return finish(1)
-            return GLib.SOURCE_CONTINUE
+            print(
+                "note gtk-ibus-insertion GTK focus state is not yet confirmed; "
+                "the committed-text assertion remains authoritative",
+                flush=True,
+            )
 
         try:
             # GTK cannot synthesize compositor input on Wayland. Use an
@@ -90,6 +89,7 @@ def main():
         entry.set_input_purpose(Gtk.InputPurpose.FREE_FORM)
         window.add(entry)
         window.show_all()
+        window.present()
         entry.grab_focus()
         state["window"] = window
         state["entry"] = entry

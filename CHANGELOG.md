@@ -16,7 +16,8 @@ All notable changes to WayExpand are documented here.
   keyboard. Wayland correctly rejects GTK's in-process synthetic key helper;
   the virtual keyboard now sends the harmless trigger through Mutter, the
   active IBus source, and the GTK input-method context. Give the GTK test app
-  a stable ID and activate it through the test Shell controller before input.
+  a stable ID, present it, and activate it through the test Shell controller
+  before input.
 - Pin both GDK and GTK to version 3 in the GTK3 IBus acceptance client so
   newer runner images cannot load GDK4 before the GTK3 insertion test.
 - Extend `wayexpand doctor --gnome` with a running daemon build/schema check and
