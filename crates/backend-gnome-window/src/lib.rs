@@ -434,6 +434,20 @@ impl GnomeWindowTracker {
     /// Subscribe to the extension. `cancelled` lets a UI give up between the
     /// bounded setup steps.
     pub fn new_cancellable(cancelled: Option<&AtomicBool>) -> Result<Self, GnomeWindowError> {
+        Self::new_cancellable_with_titles(cancelled, false)
+    }
+
+    /// Subscribe without window titles by default. `include_titles` is used
+    /// only when the active snippet configuration has a `title_contains`
+    /// filter; ordinary app-ID filtering needs no title metadata.
+    pub fn new_with_titles(include_titles: bool) -> Result<Self, GnomeWindowError> {
+        Self::new_cancellable_with_titles(None, include_titles)
+    }
+
+    pub fn new_cancellable_with_titles(
+        cancelled: Option<&AtomicBool>,
+        include_titles: bool,
+    ) -> Result<Self, GnomeWindowError> {
         let check_cancelled = || {
             if cancelled.is_some_and(|flag| flag.load(Ordering::Acquire)) {
                 Err(GnomeWindowError::Cancelled)
@@ -468,16 +482,23 @@ impl GnomeWindowTracker {
             VersionAnswer::Missing => return Err(GnomeWindowError::ExtensionNotActive),
             VersionAnswer::Unanswered(error) => return Err(GnomeWindowError::DBus(error)),
         }
-        let reply = connection.call_method(
-            Some(SHELL_NAME),
-            TRACKER_PATH,
-            Some(TRACKER_IFACE),
-            // Title-based filters are an explicit request from the trusted
-            // WayExpand client. Default session-bus subscriptions receive
-            // app IDs without window titles.
-            "SubscribeWithTitles",
-            &(true,),
-        )?;
+        let reply = if include_titles {
+            connection.call_method(
+                Some(SHELL_NAME),
+                TRACKER_PATH,
+                Some(TRACKER_IFACE),
+                "SubscribeWithTitles",
+                &(true,),
+            )?
+        } else {
+            connection.call_method(
+                Some(SHELL_NAME),
+                TRACKER_PATH,
+                Some(TRACKER_IFACE),
+                "Subscribe",
+                &(),
+            )?
+        };
         // The reply comes from whoever owns org.gnome.Shell now; if that
         // changed since setup began, start over rather than trust it.
         if reply.header().sender().map(|name| name.as_str()) != Some(shell_owner.as_str()) {

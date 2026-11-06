@@ -30,8 +30,9 @@ All notable changes to WayExpand are documented here.
   stress test covers stalled and delayed subscribers.
 - Reduce GNOME focus-data exposure: default tracker subscriptions return app
   and opaque instance IDs without window titles. Only verified WayExpand
-  executables can subscribe, and the WayExpand tracker explicitly opts in to
-  titles for configured `title_contains` matching. The extension build
+  executables can subscribe. The daemon now requests titles only while an
+  enabled `title_contains` snippet filter needs them, and reconnects the GNOME
+  tracker when a config reload changes that requirement. The extension build
   identity covers every imported implementation module.
 - Honor `XDG_DATA_HOME` consistently in source and release-archive installs,
   uninstall, and `install-check` for desktop entries, icons, metainfo, manuals,
@@ -40,11 +41,12 @@ All notable changes to WayExpand are documented here.
 - Extend the headless GNOME session test to register the IBus component,
   register and activate the GNOME IBus source through Shell, then verify that
   the already active WayExpand engine expands a trigger in a controlled IBus
-  input context. It also writes the deprecated `current` index for the
-  registered WayExpand source and asserts that CLI readiness does not report
-  activation until Shell's live source changes. The test explicitly reports
-  GTK application insertion as unverified and checks named lifecycle
-  checkpoints instead of a stale, hard-coded pass count.
+  input context and a GTK 3 entry. It writes the deprecated `current` index
+  and asserts CLI readiness still requires live Shell activation. It also
+  simulates updating extension files while an older build is loaded, checks
+  for `logout-required`, restarts Shell, and verifies the loaded build matches.
+  The test explicitly keeps physical-session certification unverified and
+  checks named lifecycle checkpoints instead of a hard-coded pass count.
 - Simplify the GUI's IBus setup into a preflighted, single guided flow. It first
   checks whether the component registration is already valid, only presents
   administrator-registration consent when it is missing or invalid, and keeps

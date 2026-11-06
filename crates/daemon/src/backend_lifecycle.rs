@@ -34,12 +34,24 @@ pub struct WindowTrackerHandle {
     pub receiver: WindowUpdateReceiver,
     connected: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
+    title_matching: Option<Arc<AtomicBool>>,
     supervisor: Option<JoinHandle<()>>,
 }
 
 impl WindowTrackerHandle {
     pub fn is_connected(&self) -> bool {
         self.connected.load(Ordering::Acquire)
+    }
+
+    /// Enable title delivery only when the active config explicitly needs
+    /// `title_contains` matching. The supervisor reconnects the GNOME bridge
+    /// to apply changes; KWin never sends titles through this contract.
+    pub fn set_title_matching_required(&self, required: bool) {
+        if let Some(enabled) = &self.title_matching {
+            if enabled.load(Ordering::Acquire) != required {
+                enabled.store(required, Ordering::Release);
+            }
+        }
     }
 
     /// A tracker fed by a test through the sender side of `receiver`.
@@ -49,6 +61,7 @@ impl WindowTrackerHandle {
             receiver,
             connected: Arc::new(AtomicBool::new(true)),
             stop: Arc::new(AtomicBool::new(false)),
+            title_matching: None,
             supervisor: None,
         }
     }
@@ -96,7 +109,7 @@ impl ReconnectBackoff {
 /// no tracker. The wlroots toplevel prototype is deliberately not part of the
 /// production daemon until its event-loop, ownership, and compositor test
 /// coverage are complete.
-pub fn spawn_window_tracker() -> Option<WindowTrackerHandle> {
+pub fn spawn_window_tracker(requires_titles: bool) -> Option<WindowTrackerHandle> {
     let kind = WindowTrackerKind::for_session()?;
 
     let (sender, receiver) = window_update_channel();
@@ -104,6 +117,9 @@ pub fn spawn_window_tracker() -> Option<WindowTrackerHandle> {
     let supervisor_connected = Arc::clone(&connected);
     let stop = Arc::new(AtomicBool::new(false));
     let supervisor_stop = Arc::clone(&stop);
+    let title_matching =
+        (kind == WindowTrackerKind::GnomeShell).then(|| Arc::new(AtomicBool::new(requires_titles)));
+    let supervisor_title_matching = title_matching.clone();
     match thread::Builder::new()
         .name("wayexpand-window-tracker-supervisor".into())
         .spawn(move || match kind {
@@ -113,7 +129,8 @@ pub fn spawn_window_tracker() -> Option<WindowTrackerHandle> {
                 supervisor_stop,
                 kind.label(),
                 KwinWindowTracker::probe,
-                KwinWindowTracker::new,
+                |_| KwinWindowTracker::new(),
+                None,
             ),
             WindowTrackerKind::GnomeShell => supervise_window_tracker(
                 sender,
@@ -121,13 +138,15 @@ pub fn spawn_window_tracker() -> Option<WindowTrackerHandle> {
                 supervisor_stop,
                 kind.label(),
                 GnomeWindowTracker::probe,
-                GnomeWindowTracker::new,
+                GnomeWindowTracker::new_with_titles,
+                supervisor_title_matching,
             ),
         }) {
         Ok(supervisor) => Some(WindowTrackerHandle {
             receiver,
             connected,
             stop,
+            title_matching,
             supervisor: Some(supervisor),
         }),
         Err(error) => {
@@ -144,11 +163,12 @@ fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
     label: &'static str,
     mut probe: Probe,
     mut connect: Connect,
+    title_matching: Option<Arc<AtomicBool>>,
 ) where
     T: WindowTracker,
     Probe: FnMut() -> Result<(), ProbeError>,
     ProbeError: std::fmt::Display,
-    Connect: FnMut() -> Result<T, ConnectError>,
+    Connect: FnMut(bool) -> Result<T, ConnectError>,
     ConnectError: std::fmt::Display,
 {
     let mut backoff = ReconnectBackoff::default();
@@ -169,7 +189,10 @@ fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
             continue;
         }
 
-        let mut tracker = match connect() {
+        let current_title_requirement = title_matching
+            .as_ref()
+            .is_some_and(|required| required.load(Ordering::Acquire));
+        let mut tracker = match connect(current_title_requirement) {
             Ok(tracker) => tracker,
             Err(error) => {
                 warn!(%error, tracker = label, "window tracker failed to connect; will retry");
@@ -196,6 +219,15 @@ fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
             if stop.load(Ordering::Acquire) {
                 connected.store(false, Ordering::Release);
                 return;
+            }
+            if title_matching.as_ref().is_some_and(|required| {
+                required.load(Ordering::Acquire) != current_title_requirement
+            }) {
+                connected.store(false, Ordering::Release);
+                if sender.send(None).is_err() {
+                    return;
+                }
+                break;
             }
             match tracker.next_window_timeout(TRACKER_POLL_INTERVAL) {
                 Ok(Some(window)) => {
@@ -358,7 +390,7 @@ mod tests {
                 failure_delay: Duration::from_millis(50),
             },
         ]);
-        let connect = move || Ok::<_, &'static str>(trackers.pop_front().unwrap());
+        let connect = move |_| Ok::<_, &'static str>(trackers.pop_front().unwrap());
         let connected = Arc::new(AtomicBool::new(false));
         let supervisor_connected = Arc::clone(&connected);
         let stop = Arc::new(AtomicBool::new(false));
@@ -371,6 +403,7 @@ mod tests {
                 "test tracker",
                 probe,
                 connect,
+                None,
             );
         });
 
@@ -412,7 +445,8 @@ mod tests {
                 supervisor_stop,
                 "test tracker",
                 || Ok::<_, &'static str>(()),
-                || Ok::<_, &'static str>(tracker.take().unwrap()),
+                |_| Ok::<_, &'static str>(tracker.take().unwrap()),
+                None,
             );
         });
 
@@ -458,7 +492,8 @@ mod tests {
                 supervisor_stop,
                 "test tracker",
                 || Ok::<_, &'static str>(()),
-                || Ok::<_, &'static str>(IdleTracker),
+                |_| Ok::<_, &'static str>(IdleTracker),
+                None,
             );
         });
         let deadline = Instant::now() + Duration::from_secs(1);
@@ -477,6 +512,40 @@ mod tests {
             "supervisor took {:?} to stop",
             stopping.elapsed()
         );
+        drop(receiver);
+    }
+
+    #[test]
+    fn title_requirement_changes_reconnect_the_tracker_with_new_privacy_mode() {
+        let (sender, receiver) = window_update_channel();
+        let connected = Arc::new(AtomicBool::new(false));
+        let supervisor_connected = Arc::clone(&connected);
+        let stop = Arc::new(AtomicBool::new(false));
+        let supervisor_stop = Arc::clone(&stop);
+        let title_requirement = Arc::new(AtomicBool::new(false));
+        let supervisor_title_requirement = Arc::clone(&title_requirement);
+        let (mode_sender, mode_receiver) = mpsc::channel();
+        let supervisor = thread::spawn(move || {
+            supervise_window_tracker(
+                sender,
+                supervisor_connected,
+                supervisor_stop,
+                "test tracker",
+                || Ok::<_, &'static str>(()),
+                move |include_titles| {
+                    mode_sender.send(include_titles).unwrap();
+                    Ok::<_, &'static str>(IdleTracker)
+                },
+                Some(supervisor_title_requirement),
+            );
+        });
+
+        assert!(!mode_receiver.recv_timeout(Duration::from_secs(1)).unwrap());
+        title_requirement.store(true, Ordering::Release);
+        assert!(mode_receiver.recv_timeout(Duration::from_secs(2)).unwrap());
+
+        stop.store(true, Ordering::Release);
+        supervisor.join().unwrap();
         drop(receiver);
     }
 

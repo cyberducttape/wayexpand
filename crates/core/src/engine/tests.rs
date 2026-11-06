@@ -70,6 +70,50 @@ fn engine_uses_the_parsed_filters_and_chords_from_validation() {
 }
 
 #[test]
+fn window_titles_are_required_only_for_explicit_title_filters() {
+    let ordinary = ExpansionEngine::new(
+        Config::parse(
+            r#"[[expansion]]
+trigger = ":mail"
+replacement = "person@example.com"
+app_filter = ["app_id_exact:org.example.editor"]"#,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(!ordinary.requires_window_titles());
+
+    let title_filter = ExpansionEngine::new(
+        Config::parse(
+            r#"[[expansion]]
+trigger = ":mail"
+replacement = "person@example.com"
+app_filter = ["title_contains:mail"]"#,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(title_filter.requires_window_titles());
+
+    let disabled_title_filter = ExpansionEngine::new(
+        Config::parse(
+            r#"[[expansion]]
+trigger = ":mail"
+replacement = "person@example.com"
+app_filter = ["title_contains:mail"]
+enabled = false"#,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(!disabled_title_filter.requires_window_titles());
+
+    let mut policy_disabled = title_filter;
+    policy_disabled.set_title_matching_disabled(true);
+    assert!(!policy_disabled.requires_window_titles());
+}
+
+#[test]
 fn match_plans_share_identity_and_command_metadata_from_validated_snapshot() {
     let config = Config::parse(
         r#"

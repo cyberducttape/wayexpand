@@ -56,6 +56,18 @@ mkdir -p "$work/home" "$work/config/wayexpand" "$work/cache" "$work/component" \
 cp "$project_dir/gnome-extension/$uuid/metadata.json" "$project_dir/gnome-extension/$uuid/extension.js" \
     "$project_dir/gnome-extension/$uuid/notification-queue.js" \
     "$work/data/gnome-shell/extensions/$uuid/"
+python3 - "$work/data/gnome-shell/extensions/$uuid/metadata.json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as source:
+    metadata = json.load(source)
+metadata["x-wayexpand-build-id"] = "sha256:pre-upgrade-e2e-fixture"
+with open(path, "w", encoding="utf-8") as destination:
+    json.dump(metadata, destination)
+    destination.write("\n")
+PY
 cp "$project_dir/scripts/gnome-e2e-focus-controller/metadata.json" \
     "$project_dir/scripts/gnome-e2e-focus-controller/extension.js" \
     "$work/data/gnome-shell/extensions/$controller_uuid/"
@@ -145,6 +157,44 @@ until gnome_extension_state_active "$(extension_state)"; do
     sleep 0.1
 done
 log "pass extension-active"
+
+# Start Shell with an older on-disk identity, then install the current
+# metadata while that extension remains loaded. Diagnostics must identify
+# the stale in-memory instance as logout-required, not trust the new files.
+live_build=$(gdbus call --session --dest org.gnome.Shell \
+    --object-path /org/wayexpand/ShellWindowTracker \
+    --method org.freedesktop.DBus.Properties.Get \
+    org.wayexpand.ShellWindowTracker1 BuildIdentity)
+case "$live_build" in
+    *sha256:pre-upgrade-e2e-fixture*) log "pass extension-pre-upgrade-build $live_build" ;;
+    *) log "fail extension-pre-upgrade-build unexpected live identity: $live_build"; exit 1 ;;
+esac
+cp "$E2E_PROJECT_DIR/gnome-extension/$E2E_UUID/metadata.json" \
+    "$E2E_WORK/data/gnome-shell/extensions/$E2E_UUID/metadata.json"
+"$E2E_BIN_DIR/wayexpand" doctor --gnome --json \
+    >"$E2E_WORK/doctor-after-extension-upgrade.json" \
+    2>"$E2E_WORK/doctor-after-extension-upgrade.err" || true
+if ! python3 - "$E2E_WORK/doctor-after-extension-upgrade.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    report = json.load(source)
+check = next(
+    item for item in report["sections"]["window_tracking"]["checks"]
+    if item["id"] == "window-extension-build"
+)
+assert check["state"] == "warn", check
+assert "logout" in check["detail"].lower(), check
+assert "sha256:pre-upgrade-e2e-fixture" in check["detail"], check
+assert "log out" in (check["remedy"] or "").lower(), check
+print("pass extension-upgrade-logout-required installed build differs from the loaded Shell build")
+PY
+then
+    log "fail extension-upgrade-logout-required diagnostics did not report the stale loaded build"
+    cat "$E2E_WORK/doctor-after-extension-upgrade.json"
+    exit 1
+fi
 
 # Verify source activation and readback through GNOME Shell's live
 # InputSourceManager. Then write the deprecated `current` key to request a
@@ -253,7 +303,19 @@ if ! grep -Fx 'pass gnome-selected-engine the engine selected by GNOME was alrea
     cat "$E2E_WORK/ibus-transaction-results.txt"
     exit 1
 fi
-log "pass ibus-expansion-after-gnome-activation GTK_UNVERIFIED"
+log "pass ibus-expansion-after-gnome-activation IBus input-context transaction passed"
+
+if WAYLAND_DISPLAY="$display" /usr/bin/python3 \
+    "$E2E_PROJECT_DIR/scripts/certification-clients/gtk_ibus_insertion.py" \
+    >"$E2E_WORK/gtk-insertion.log" 2>&1 \
+    && grep -Fx 'pass gtk-ibus-insertion GTK entry contains the committed replacement' \
+        "$E2E_WORK/gtk-insertion.log" >/dev/null; then
+    log "pass gtk-ibus-insertion real GTK3 entry received WayExpand's IBus commit"
+else
+    log "fail gtk-ibus-insertion GTK did not receive the expected IBus replacement"
+    cat "$E2E_WORK/gtk-insertion.log"
+    exit 1
+fi
 
 start_sink() {
     WAYLAND_DISPLAY="$display" "$E2E_BIN_DIR/wx-e2e-sink" "$1" "$E2E_WORK/$1.json" \
@@ -343,6 +405,52 @@ else
     status=1
 fi
 
+# Restarting Shell in this isolated session models the logout/login needed
+# after a GNOME extension update. The newly loaded runtime identity must now
+# match the installed files and become ready without changing the binary.
+kill "$shell_pid" 2>/dev/null || true
+wait "$shell_pid" 2>/dev/null || true
+sleep 0.2
+gnome-shell --headless --mode=user --wayland --virtual-monitor 1280x800 --wayland-display "$display" \
+    >"$E2E_WORK/gnome-shell-after-login.log" 2>&1 &
+shell_pid=$!
+tries=600
+until gnome_extension_state_active "$(extension_state)"; do
+    tries=$((tries - 1))
+    if [ "$tries" -le 0 ] || ! kill -0 "$shell_pid" 2>/dev/null; then
+        log "fail extension-after-login GNOME Shell did not reload the installed extension"
+        status=1
+        break
+    fi
+    sleep 0.1
+done
+if [ "$tries" -gt 0 ]; then
+    "$E2E_BIN_DIR/wayexpand" doctor --gnome --json \
+        >"$E2E_WORK/doctor-after-login.json" \
+        2>"$E2E_WORK/doctor-after-login.err" || true
+    if python3 - "$E2E_WORK/doctor-after-login.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    report = json.load(source)
+check = next(
+    item for item in report["sections"]["window_tracking"]["checks"]
+    if item["id"] == "window-extension-build"
+)
+assert check["state"] == "pass", check
+assert "running the installed build" in check["detail"], check
+print("pass extension-after-login the reloaded GNOME Shell runs the upgraded extension")
+PY
+    then
+        :
+    else
+        log "fail extension-after-login installed and loaded extension builds still differ"
+        cat "$E2E_WORK/doctor-after-login.json"
+        status=1
+    fi
+fi
+
 if ! gnome_shell_extensions_call DisableExtension "$E2E_UUID" >/dev/null; then
     log "fail extension-disabled could not disable the extension through GNOME Shell D-Bus"
     exit 1
@@ -375,10 +483,13 @@ env -i \
     XDG_DATA_DIRS="${XDG_DATA_DIRS:-/usr/local/share:/usr/share}" \
     XDG_RUNTIME_DIR="$runtime" \
     IBUS_COMPONENT_PATH="$work/component" \
+    GTK_IM_MODULE=ibus \
+    GDK_BACKEND=wayland \
     XDG_CURRENT_DESKTOP=GNOME \
     XDG_SESSION_TYPE=wayland \
     E2E_WORK="$work" \
     E2E_BIN_DIR="$bin_dir" \
+    E2E_PROJECT_DIR="$project_dir" \
     E2E_UUID="$uuid" \
     E2E_CONTROLLER_UUID="$controller_uuid" \
     E2E_STATE_HELPER="$project_dir/scripts/gnome-extension-state.sh" \
@@ -386,7 +497,7 @@ env -i \
     dbus-run-session -- "$work/session.sh" >"$work/results.txt" 2>"$work/session.log" || status=$?
 
 cat "$work/results.txt"
-expected_checks='extension-active active-input-source deprecated-current-readback ignored-current-setting unavailable-input-source ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active ibus-expansion-after-gnome-activation extension-disabled'
+expected_checks='extension-active extension-pre-upgrade-build extension-upgrade-logout-required active-input-source deprecated-current-readback ignored-current-setting unavailable-input-source ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active ibus-expansion-after-gnome-activation gtk-ibus-insertion extension-disabled extension-after-login'
 missing_check=
 for check in $expected_checks; do
     if ! grep -F "pass $check" "$work/results.txt" >/dev/null; then
@@ -406,9 +517,11 @@ if [ "$status" -ne 0 ] || grep -q '^fail' "$work/results.txt" \
     fi
     failure=$(printf '%s' "$failure" | sed 's/%/%25/g; s/\r/%0D/g; s/\n/%0A/g')
     printf '::error title=GNOME window tracking E2E::%s\n' "$failure" >&2
-    for log in session.log gnome-shell.log ibus-daemon.log ibus-engines.txt \
+    for log in session.log gnome-shell.log gnome-shell-after-login.log ibus-daemon.log ibus-engines.txt \
         ibus-before-live-activation.json ibus-before-live-activation.err \
-        ibus-transaction-results.txt sink.log; do
+        ibus-transaction-results.txt doctor-after-extension-upgrade.json \
+        doctor-after-extension-upgrade.err doctor-after-login.json \
+        gtk-insertion.log sink.log; do
         printf '%s\n' "--- $log" >&2
         tail -n 60 "$work/$log" >&2 2>/dev/null || true
         if [ -s "$work/$log" ]; then
@@ -418,4 +531,4 @@ if [ "$status" -ne 0 ] || grep -q '^fail' "$work/results.txt" \
     done
     exit 1
 fi
-printf '%s\n' "Headless GNOME Shell and IBus integration passed; GTK application insertion remains unverified"
+printf '%s\n' "Headless GNOME input activation, GTK3 IBus insertion, and extension upgrade/logout tests passed; physical desktop certification remains unverified"
