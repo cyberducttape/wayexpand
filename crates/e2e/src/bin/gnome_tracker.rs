@@ -1,22 +1,23 @@
-//! `wx-e2e-gnome-tracker --expect APP_ID | --expect-empty | --expect-unavailable`
+//! `wx-e2e-gnome-tracker --expect-transition APP_ID | --expect-transition-empty | --expect-unavailable`
 //!
 //! For `scripts/test-gnome-e2e.sh`: connects WayExpand's GNOME window
 //! tracker to a private, headless GNOME Shell running the WayExpand
-//! extension. `--expect` waits until the focused window reports APP_ID (the
-//! initial snapshot from Subscribe counts) and prints its identity;
-//! `--expect-empty` waits until GNOME Shell reports that no toplevel is
-//! focused. `--expect-unavailable` checks that the tracker refuses to
-//! connect, for example after the extension was disabled. Prints one
+//! extension. The transition checks subscribe before the test controller
+//! changes focus, so their success depends on a GNOME Shell update event and
+//! not only the initial snapshot. `--expect-unavailable` checks that the
+//! tracker refuses to connect, for example after the extension was disabled. Prints one
 //! "pass|fail <detail>" line and exits non-zero on failure.
 
-use std::time::{Duration, Instant};
+use std::{
+    io::Write,
+    time::{Duration, Instant},
+};
 
 use wayexpand_backend_gnome_window::GnomeWindowTracker;
 use wayexpand_core::WindowTracker;
 
 const CONNECT_DEADLINE: Duration = Duration::from_secs(20);
 const FOCUS_DEADLINE: Duration = Duration::from_secs(15);
-const EMPTY_FOCUS_DEADLINE: Duration = Duration::from_secs(5);
 
 fn fail(detail: impl std::fmt::Display) -> ! {
     println!("fail {detail}");
@@ -26,14 +27,14 @@ fn fail(detail: impl std::fmt::Display) -> ! {
 fn main() {
     let mut arguments = std::env::args().skip(1);
     match (arguments.next().as_deref(), arguments.next()) {
-        (Some("--expect"), Some(app_id)) => expect(&app_id),
-        (Some("--expect-empty"), None) => expect_empty(),
+        (Some("--expect-transition"), Some(app_id)) => expect_transition(&app_id),
+        (Some("--expect-transition-empty"), None) => expect_transition_empty(),
         (Some("--expect-unavailable"), None) => match GnomeWindowTracker::probe() {
             Ok(()) => fail("tracker still available"),
             Err(error) => println!("pass tracker unavailable: {error}"),
         },
         _ => fail(
-            "usage: wx-e2e-gnome-tracker --expect APP_ID | --expect-empty | --expect-unavailable",
+            "usage: wx-e2e-gnome-tracker --expect-transition APP_ID | --expect-transition-empty | --expect-unavailable",
         ),
     }
 }
@@ -52,8 +53,26 @@ fn connect_tracker() -> GnomeWindowTracker {
     }
 }
 
-fn expect(app_id: &str) {
+fn initial_snapshot(tracker: &mut GnomeWindowTracker) -> Option<wayexpand_core::WindowContext> {
+    match tracker.next_window_timeout(Duration::from_secs(5)) {
+        Ok(Some(window)) => window,
+        Ok(None) => fail("tracker did not deliver the initial focus snapshot"),
+        Err(error) => fail(format!(
+            "tracker failed before the initial focus snapshot: {error}"
+        )),
+    }
+}
+
+fn expect_transition(app_id: &str) {
     let mut tracker = connect_tracker();
+    let initial = initial_snapshot(&mut tracker);
+    if initial.as_ref().and_then(|window| window.app_id.as_deref()) == Some(app_id) {
+        fail(format!(
+            "initial focus already reports {app_id}; an actual focus transition is required"
+        ));
+    }
+    println!("ready waiting for focused app {app_id}");
+    let _ = std::io::stdout().flush();
     let deadline = Instant::now() + FOCUS_DEADLINE;
     let mut last = None;
     while Instant::now() < deadline {
@@ -62,7 +81,7 @@ fn expect(app_id: &str) {
                 if window.app_id.as_deref() == Some(app_id) {
                     match window.instance_id.as_deref() {
                         Some(instance) if instance.starts_with("mutter:") => {
-                            println!("pass focused {app_id} ({instance})");
+                            println!("pass focus transition to {app_id} ({instance})");
                             return;
                         }
                         other => fail(format!("{app_id} has no Mutter window ID: {other:?}")),
@@ -76,18 +95,24 @@ fn expect(app_id: &str) {
         }
     }
     fail(format!(
-        "focused window never became {app_id}; last report: {last:?}"
+        "GNOME did not report a focus transition to {app_id}; last report: {last:?}"
     ));
 }
 
-fn expect_empty() {
+fn expect_transition_empty() {
     let mut tracker = connect_tracker();
-    let deadline = Instant::now() + EMPTY_FOCUS_DEADLINE;
-    let mut last = None;
+    let initial = initial_snapshot(&mut tracker);
+    if initial.is_none() {
+        fail("initial focus snapshot is already empty; a focus-loss transition is required");
+    }
+    println!("ready waiting for focus loss");
+    let _ = std::io::stdout().flush();
+    let deadline = Instant::now() + FOCUS_DEADLINE;
+    let mut last = initial;
     while Instant::now() < deadline {
         match tracker.next_window_timeout(Duration::from_millis(250)) {
             Ok(Some(None)) => {
-                println!("pass focus cleared");
+                println!("pass focus-loss transition");
                 return;
             }
             Ok(Some(Some(window))) => last = Some(window),

@@ -14,6 +14,7 @@ project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 # shellcheck disable=SC1091
 . "$project_dir/scripts/gnome-extension-state.sh"
 uuid=wayexpand-window-tracker@cyberducttape.github.io
+controller_uuid=wayexpand-e2e-focus-controller@cyberducttape.github.io
 keep=0
 for argument in "$@"; do
     case "$argument" in
@@ -46,9 +47,14 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 chmod 0700 "$runtime"
-mkdir -p "$work/home" "$work/config" "$work/cache" "$work/data/gnome-shell/extensions/$uuid"
+mkdir -p "$work/home" "$work/config" "$work/cache" \
+    "$work/data/gnome-shell/extensions/$uuid" \
+    "$work/data/gnome-shell/extensions/$controller_uuid"
 cp "$project_dir/gnome-extension/$uuid/metadata.json" "$project_dir/gnome-extension/$uuid/extension.js" \
     "$work/data/gnome-shell/extensions/$uuid/"
+cp "$project_dir/scripts/gnome-e2e-focus-controller/metadata.json" \
+    "$project_dir/scripts/gnome-e2e-focus-controller/extension.js" \
+    "$work/data/gnome-shell/extensions/$controller_uuid/"
 
 cat >"$work/session.sh" <<'EOF'
 #!/bin/sh
@@ -58,7 +64,7 @@ set -eu
 display=wayexpand-gnome-e2e
 log() { printf '%s\n' "$*"; }
 gsettings set org.gnome.shell disable-user-extensions false
-gsettings set org.gnome.shell enabled-extensions "['$E2E_UUID']"
+gsettings set org.gnome.shell enabled-extensions "['$E2E_UUID', '$E2E_CONTROLLER_UUID']"
 gnome-shell --headless --mode=user --wayland --virtual-monitor 1280x800 --wayland-display "$display" \
     >"$E2E_WORK/gnome-shell.log" 2>&1 &
 shell_pid=$!
@@ -96,16 +102,86 @@ start_sink() {
     last_sink=$!
 }
 
+start_transition_tracker() {
+    mode=$1
+    target=$2
+    label=$3
+    tracker_log="$E2E_WORK/tracker-$label.log"
+    if [ -n "$target" ]; then
+        "$E2E_BIN_DIR/wx-e2e-gnome-tracker" "$mode" "$target" \
+            >"$tracker_log" 2>&1 &
+    else
+        "$E2E_BIN_DIR/wx-e2e-gnome-tracker" "$mode" >"$tracker_log" 2>&1 &
+    fi
+    tracker_pid=$!
+    tries=500
+    until grep -q '^ready ' "$tracker_log"; do
+        tries=$((tries - 1))
+        if [ "$tries" -le 0 ] || ! kill -0 "$tracker_pid" 2>/dev/null; then
+            cat "$tracker_log"
+            log "fail tracker-ready GNOME tracker did not subscribe before the focus action"
+            return 1
+        fi
+        sleep 0.05
+    done
+}
+
+activate_window() {
+    tries=100
+    while :; do
+        if gdbus call --session --dest org.gnome.Shell \
+            --object-path /org/wayexpand/GnomeE2eFocusController \
+            --method org.wayexpand.GnomeE2eFocusController.ActivateWindow "$1" \
+            >/dev/null 2>&1; then
+            return 0
+        fi
+        tries=$((tries - 1))
+        [ "$tries" -gt 0 ] || return 1
+        sleep 0.05
+    done
+}
+
+check_focus_transition() {
+    app_id=$1
+    label=$2
+    if ! start_transition_tracker --expect-transition "$app_id" "$label"; then
+        return 1
+    fi
+    if ! activate_window "$app_id"; then
+        kill "$tracker_pid" 2>/dev/null || true
+        wait "$tracker_pid" 2>/dev/null || true
+        cat "$E2E_WORK/tracker-$label.log"
+        return 1
+    fi
+    tracker_status=0
+    wait "$tracker_pid" || tracker_status=$?
+    cat "$E2E_WORK/tracker-$label.log"
+    return "$tracker_status"
+}
+
 status=0
 start_sink org.wayexpand.GnomeE2eFirst
-"$E2E_BIN_DIR/wx-e2e-gnome-tracker" --expect org.wayexpand.GnomeE2eFirst || status=1
+start_sink org.wayexpand.GnomeE2eSecond
+# Establish a known baseline before checking transitions. This avoids relying
+# on whichever client Mutter happens to focus when the headless session starts.
+activate_window org.wayexpand.GnomeE2eSecond || status=1
+check_focus_transition org.wayexpand.GnomeE2eFirst first || status=1
+check_focus_transition org.wayexpand.GnomeE2eSecond second || status=1
+
 # A headless client cannot steal focus from another toplevel without a user
-# activation token. Exercise the real focus-loss update by closing the focused
-# client and checking that GNOME reports no focused window. App-to-app focus
-# changes remain part of physical-session certification.
-kill "$last_sink" 2>/dev/null || true
-wait "$last_sink" 2>/dev/null || true
-"$E2E_BIN_DIR/wx-e2e-gnome-tracker" --expect-empty || status=1
+# activation token, so a test-only GNOME Shell extension performs activation.
+# This exercises actual focus notifications without claiming that a real user
+# session or physical activation flow is certified.
+if start_transition_tracker --expect-transition-empty "" empty; then
+    for pid in $sinks; do kill "$pid" 2>/dev/null || true; done
+    for pid in $sinks; do wait "$pid" 2>/dev/null || true; done
+    tracker_status=0
+    wait "$tracker_pid" || tracker_status=$?
+    cat "$E2E_WORK/tracker-empty.log"
+    [ "$tracker_status" -eq 0 ] || status=1
+else
+    status=1
+fi
 
 if ! gnome_shell_extensions_call DisableExtension "$E2E_UUID" >/dev/null; then
     log "fail extension-disabled could not disable the extension through GNOME Shell D-Bus"
@@ -143,13 +219,14 @@ env -i \
     E2E_WORK="$work" \
     E2E_BIN_DIR="$bin_dir" \
     E2E_UUID="$uuid" \
+    E2E_CONTROLLER_UUID="$controller_uuid" \
     E2E_STATE_HELPER="$project_dir/scripts/gnome-extension-state.sh" \
     E2E_DBUS_HELPER="$project_dir/scripts/gnome-extension-dbus.sh" \
     dbus-run-session -- "$work/session.sh" >"$work/results.txt" 2>"$work/session.log" || status=$?
 
 cat "$work/results.txt"
 if [ "$status" -ne 0 ] || grep -q '^fail' "$work/results.txt" \
-    || [ "$(grep -c '^pass' "$work/results.txt")" -ne 5 ]; then
+    || [ "$(grep -c '^pass' "$work/results.txt")" -ne 6 ]; then
     printf '%s\n' "GNOME window-tracking end-to-end test FAILED; logs:" >&2
     failure=$(grep '^fail ' "$work/results.txt" | tail -n 1 || true)
     if [ -z "$failure" ]; then

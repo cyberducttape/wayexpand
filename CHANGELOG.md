@@ -71,11 +71,12 @@ All notable changes to WayExpand are documented here.
   process inventory in `upgrade --check --json`.
 - Run the headless GNOME E2E test in user session mode and support both GNOME
   Shell extension-management D-Bus object paths. Add path-fallback regression
-  coverage, wait for the focused test window to exit, and verify that GNOME
-  reports focus cleared. Headless app-to-app focus changes remain unverified
-  without a user activation token. Snapshot allowlisted broker environment
-  values to keep concurrent action-broker tests from mutating process-global
-  environment state.
+  coverage and a test-only Shell extension that activates mapped test windows,
+  allowing the tracker test to verify compositor-reported app-to-app focus
+  transitions and focus loss deterministically. This does not certify physical
+  activation behavior in a user session. Snapshot allowlisted broker
+  environment values to keep concurrent action-broker tests from mutating
+  process-global environment state.
 - Add a regression test for failed IBus activation rollback across service state,
   compositor input-method selection, IBus preload engines, and active engine.
   Repair the daemon reload test fixture for expansion counts and make its
