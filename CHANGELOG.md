@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Continue permissive AutoKey imports when an individual nested directory or
+  directory entry cannot be read. Preserve accessible phrases and report each
+  skipped path with a remediation; strict imports still fail on the same
+  errors. An import with only inaccessible entries now returns its skipped
+  report instead of a generic no-phrases error.
 - Add GNOME window tracking: a bundled GNOME Shell extension (GNOME 45+,
   `wayexpand-window-tracker@cyberducttape.github.io`) reports the focused
   window's app ID, title and Mutter window ID to subscribers only, and the new
