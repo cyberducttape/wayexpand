@@ -589,13 +589,25 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
                 .map(crate::services::UserService::unit)
                 .find(|unit| service_is_active(unit))
         });
+    let stale_ibus_processes = crate::setup_ibus::stale_engine_processes();
+    let stale_ibus_processes_json: Vec<_> = stale_ibus_processes
+        .iter()
+        .map(|process| {
+            serde_json::json!({
+                "pid": process.pid,
+                "name": "wayexpand-ibus",
+                "executable": process.executable,
+            })
+        })
+        .collect();
     let report = serde_json::json!({
         "schema":1, "action":action, "cli_commit":cli_commit,
         "current_install":current_target.as_ref().map(|v|v.to_string_lossy().into_owned()).or_else(|| installed_cli.as_ref().map(|p|p.display().to_string())),
         "daemon_commit":daemon_commit, "daemon_running":status_snapshot.is_some(),
         "config_valid":config_valid, "version_mismatch":mismatch,
         "restart_service":service, "rollback_available":rollback_file.is_file(),
-        "ibus_engine_note":"An IBus engine is owned by ibus-daemon; restarting a WayExpand systemd unit does not reload that engine. Restart IBus explicitly after reviewing the impact."
+        "ibus_stale_engine_processes":stale_ibus_processes_json,
+        "ibus_engine_note":"IBus engine processes are owned by ibus-daemon; restarting a WayExpand systemd unit does not reload a stale engine."
     });
     if action == "--check" {
         if json {
@@ -624,11 +636,8 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
                     "no runtime version mismatch detected"
                 }
             );
-            if source == Some("ibus") {
-                println!(
-                    "IBus: {}",
-                    report["ibus_engine_note"].as_str().unwrap_or("")
-                );
+            if source == Some("ibus") || !stale_ibus_processes.is_empty() {
+                print_ibus_engine_restart_guidance(&stale_ibus_processes);
             }
         }
         if !config_valid {
@@ -669,6 +678,7 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
         } else {
             println!("No running daemon version mismatch; nothing to apply.");
         }
+        print_ibus_engine_restart_guidance(&stale_ibus_processes);
         return Ok(());
     }
     let Some(unit) = service else {
@@ -744,8 +754,25 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
             bail!("action broker health check failed; no saved payload is available for automatic rollback")
         }
     }
-    println!("Restarted {unit}; daemon build {restarted_commit} now matches this CLI. IBus-owned engine processes require a separate IBus restart.");
+    println!("Restarted {unit}; daemon build {restarted_commit} now matches this CLI.");
+    print_ibus_engine_restart_guidance(&crate::setup_ibus::stale_engine_processes());
     Ok(())
+}
+
+fn print_ibus_engine_restart_guidance(processes: &[crate::setup_ibus::StaleEngineProcess]) {
+    if processes.is_empty() {
+        println!("IBus: no stale WayExpand engine process was found.");
+        return;
+    }
+    println!("IBus still has WayExpand engine process(es) running the previous binary:");
+    for process in processes {
+        println!(
+            "  wayexpand-ibus (PID {}) — {}",
+            process.pid,
+            process.executable.display()
+        );
+    }
+    println!("Restart IBus to load the updated engine: `ibus restart` (input pauses briefly).");
 }
 
 fn wait_for_daemon_build(expected_commit: &str) -> (Result<serde_json::Value>, Option<String>) {

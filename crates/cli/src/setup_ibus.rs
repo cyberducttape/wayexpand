@@ -130,6 +130,49 @@ fn engine_binary() -> Option<PathBuf> {
         })
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StaleEngineProcess {
+    pub(crate) pid: i32,
+    pub(crate) executable: PathBuf,
+}
+
+/// Find this user's WayExpand IBus engine processes that still map an older
+/// engine executable. IBus owns these processes, so restarting a WayExpand
+/// systemd unit cannot refresh them.
+pub(crate) fn stale_engine_processes() -> Vec<StaleEngineProcess> {
+    let Some(installed) = engine_binary().and_then(|path| fs::canonicalize(path).ok()) else {
+        return Vec::new();
+    };
+    stale_engine_processes_at(Path::new("/proc"), unsafe { libc::geteuid() }, &installed)
+}
+
+fn stale_engine_processes_at(
+    proc_root: &Path,
+    uid: u32,
+    installed: &Path,
+) -> Vec<StaleEngineProcess> {
+    let Ok(entries) = fs::read_dir(proc_root) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let pid = entry.file_name().to_str()?.parse::<i32>().ok()?;
+            let proc_dir = entry.path();
+            let owned = fs::metadata(&proc_dir)
+                .is_ok_and(|metadata| std::os::unix::fs::MetadataExt::uid(&metadata) == uid);
+            if !owned
+                || !fs::read_to_string(proc_dir.join("comm"))
+                    .is_ok_and(|comm| comm.trim() == "wayexpand-ibus")
+            {
+                return None;
+            }
+            let executable = fs::read_link(proc_dir.join("exe")).ok()?;
+            (executable != installed).then_some(StaleEngineProcess { pid, executable })
+        })
+        .collect()
+}
+
 /// Install the component where the running ibus-daemon reads components.
 /// Writing there needs administrator rights, so this asks through pkexec.
 fn install_component() -> Result<()> {
@@ -238,35 +281,10 @@ fn route_kde_to_ibus(snapshot: &mut SessionSnapshot) -> Result<()> {
 /// processes that do not run the installed binary, so selecting the engine
 /// starts the current one.
 fn restart_stale_engine() {
-    let Some(installed) = engine_binary().and_then(|path| fs::canonicalize(path).ok()) else {
-        return;
-    };
-    let uid = unsafe { libc::geteuid() };
-    let Ok(entries) = fs::read_dir("/proc") else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let Some(pid) = entry
-            .file_name()
-            .to_str()
-            .and_then(|name| name.parse::<i32>().ok())
-        else {
-            continue;
-        };
-        let proc_dir = entry.path();
-        let owned = fs::metadata(&proc_dir)
-            .is_ok_and(|metadata| std::os::unix::fs::MetadataExt::uid(&metadata) == uid);
-        let is_engine = fs::read_to_string(proc_dir.join("comm"))
-            .is_ok_and(|comm| comm.trim() == "wayexpand-ibus");
-        if !owned || !is_engine {
-            continue;
-        }
-        let running = fs::read_link(proc_dir.join("exe")).unwrap_or_default();
-        if running != installed {
-            step("Stopping an IBus engine from an older installation");
-            unsafe {
-                libc::kill(pid, libc::SIGTERM);
-            }
+    for process in stale_engine_processes() {
+        step("Stopping an IBus engine from an older installation");
+        unsafe {
+            libc::kill(process.pid, libc::SIGTERM);
         }
     }
 }
@@ -1023,6 +1041,53 @@ mod tests {
         let manifest = component_manifest(Path::new("/home/a&b/.local/bin/wayexpand-ibus"));
         assert!(manifest.contains("<exec>/home/a&amp;b/.local/bin/wayexpand-ibus</exec>"));
         assert!(manifest.contains("<name>org.freedesktop.IBus.WayExpand</name>"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stale_engine_scan_lists_only_older_wayexpand_ibus_processes() {
+        use std::os::unix::fs::symlink;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "wayexpand-stale-ibus-test-{}-{unique}",
+            std::process::id()
+        ));
+        let proc_root = root.join("proc");
+        fs::create_dir_all(&proc_root).unwrap();
+        let installed = root.join("current-engine");
+        let old = root.join("previous-engine");
+        fs::write(&installed, b"current").unwrap();
+        fs::write(&old, b"previous").unwrap();
+
+        for (pid, executable, comm) in [
+            (101, &installed, "wayexpand-ibus"),
+            (202, &old, "wayexpand-ibus"),
+            (303, &old, "other-process"),
+        ] {
+            let process = proc_root.join(pid.to_string());
+            fs::create_dir(&process).unwrap();
+            fs::write(process.join("comm"), format!("{comm}\n")).unwrap();
+            symlink(executable, process.join("exe")).unwrap();
+        }
+
+        let stale = stale_engine_processes_at(
+            &proc_root,
+            unsafe { libc::geteuid() },
+            &fs::canonicalize(&installed).unwrap(),
+        );
+        assert_eq!(
+            stale,
+            vec![StaleEngineProcess {
+                pid: 202,
+                executable: old.clone(),
+            }]
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
