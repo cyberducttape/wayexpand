@@ -58,7 +58,7 @@ display=wayexpand-gnome-e2e
 log() { printf '%s\n' "$*"; }
 gsettings set org.gnome.shell disable-user-extensions false
 gsettings set org.gnome.shell enabled-extensions "['$E2E_UUID']"
-gnome-shell --headless --wayland --virtual-monitor 1280x800 --wayland-display "$display" \
+gnome-shell --headless --mode=user --wayland --virtual-monitor 1280x800 --wayland-display "$display" \
     >"$E2E_WORK/gnome-shell.log" 2>&1 &
 shell_pid=$!
 sinks=
