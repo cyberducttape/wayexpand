@@ -472,8 +472,11 @@ impl GnomeWindowTracker {
             Some(SHELL_NAME),
             TRACKER_PATH,
             Some(TRACKER_IFACE),
-            "Subscribe",
-            &(),
+            // Title-based filters are an explicit request from the trusted
+            // WayExpand client. Default session-bus subscriptions receive
+            // app IDs without window titles.
+            "SubscribeWithTitles",
+            &(true,),
         )?;
         // The reply comes from whoever owns org.gnome.Shell now; if that
         // changed since setup began, start over rather than trust it.
@@ -795,6 +798,9 @@ mod tests {
         assert!(script.contains("PingAsync"));
         assert!(script.contains("<method name=\"GetActiveInputSource\">"));
         assert!(script.contains("<method name=\"ActivateInputSource\">"));
+        assert!(script.contains("<method name=\"SubscribeWithTitles\">"));
+        assert!(script.contains("this._subscribe(invocation, false)"));
+        assert!(script.contains("isAuthorizedTrackerClient(uid, GLib.get_user_id(), executable)"));
         assert!(script.contains("InputSourceControlVersion"));
         assert!(script.contains("Keyboard.getInputSourceManager().currentSource"));
         assert!(!script.contains("org.gnome.desktop.input-sources current"));

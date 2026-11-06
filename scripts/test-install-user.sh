@@ -198,12 +198,27 @@ grep -Fx 'ExecStart=%h/.local/lib/wayexpand/current/bin/wayexpand-daemon --sourc
 [ ! -e "$test_root/config/systemd/user/wayexpand.service" ]
 
 custom_state_home="$test_root/custom-state"
+custom_data_home="$test_root/custom-data"
 HOME="$test_root/home" \
 XDG_CONFIG_HOME="$test_root/config" \
 XDG_STATE_HOME="$custom_state_home" \
+XDG_DATA_HOME="$custom_data_home" \
 "$project_dir/scripts/install-user.sh"
 [ -d "$custom_state_home/wayexpand" ]
 [ "$(stat -c '%a' "$custom_state_home/wayexpand")" = 700 ]
+[ -L "$custom_data_home/applications/wayexpand.desktop" ]
+[ -f "$custom_data_home/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml" ]
+[ -f "$custom_data_home/man/man1/wayexpand.1" ]
+[ -f "$custom_data_home/icons/hicolor/128x128/apps/wayexpand.png" ]
+custom_install_report=$(HOME="$test_root/home" XDG_CONFIG_HOME="$test_root/config" \
+    XDG_DATA_HOME="$custom_data_home" PATH="$test_root/home/.local/bin:$PATH" \
+    "$test_root/home/.local/bin/wayexpand" install-check --json 2>/dev/null || true)
+printf '%s\n' "$custom_install_report" | python3 -c '
+import json, sys
+checks = {check["component"]: check for check in json.load(sys.stdin)["checks"]}
+assert checks["desktop"]["status"] == "pass", checks["desktop"]
+assert checks["icon"]["status"] == "pass", checks["icon"]
+'
 grep -F "ReadWritePaths=%t \"$test_root/config/wayexpand\" \"$custom_state_home/wayexpand\"" \
     "$test_root/config/systemd/user/wayexpand-action-broker.service.d/10-xdg-paths.conf"
 grep -F "WAYEXPAND_PORTAL_TOKEN_PATH=$test_root/config/wayexpand/libei-portal-token" \
@@ -219,6 +234,16 @@ fi
 if HOME="$test_root/home" XDG_CONFIG_HOME=relative \
     "$project_dir/scripts/uninstall-user.sh" >/dev/null 2>&1; then
     echo "uninstaller accepted a relative XDG_CONFIG_HOME" >&2
+    exit 1
+fi
+if HOME="$test_root/home" XDG_DATA_HOME=relative \
+    "$project_dir/scripts/install-user.sh" >/dev/null 2>&1; then
+    echo "installer accepted a relative XDG_DATA_HOME" >&2
+    exit 1
+fi
+if HOME="$test_root/home" XDG_DATA_HOME=relative \
+    "$project_dir/scripts/uninstall-user.sh" >/dev/null 2>&1; then
+    echo "uninstaller accepted a relative XDG_DATA_HOME" >&2
     exit 1
 fi
 

@@ -51,6 +51,7 @@ install -m 0644 "$project_dir/udev/69-wayexpand-evdev-uaccess.rules" "$release_d
 
 mkdir -p "$test_root/home" "$test_root/config"
 chmod 0700 "$test_root/config"
+export XDG_DATA_HOME="$test_root/custom-data"
 install -m 0644 "$project_dir/io.github.cyberducttape.WayExpand.metainfo.xml" \
     "$release_dir/io.github.cyberducttape.WayExpand.metainfo.xml"
 install -m 0644 "$project_dir/docs/wayexpand.1" "$release_dir/docs/wayexpand.1"
@@ -115,14 +116,14 @@ case "$first_version" in
     *) printf '%s\n' "unexpected install directory: $first_version" >&2; exit 1 ;;
 esac
 # IBus never reads per-user component directories; setup installs it.
-[ ! -e "$test_root/home/.local/share/ibus/component/wayexpand.xml" ]
+[ ! -e "$test_root/custom-data/ibus/component/wayexpand.xml" ]
 [ -f "$test_root/home/.local/lib/wayexpand/current/ibus/wayexpand.xml" ]
 [ -f "$test_root/home/.local/lib/wayexpand/current/share/wayexpand/installer-components.toml" ]
 [ -f "$test_root/home/.local/lib/wayexpand/current/expansions.toml" ]
 [ -f "$test_root/config/wayexpand/expansions.toml" ]
-[ -f "$test_root/home/.local/share/applications/wayexpand.desktop" ]
-[ -f "$test_root/home/.local/share/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml" ]
-[ -f "$test_root/home/.local/share/man/man1/wayexpand.1" ]
+[ -L "$test_root/custom-data/applications/wayexpand.desktop" ]
+[ -f "$test_root/custom-data/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml" ]
+[ -f "$test_root/custom-data/man/man1/wayexpand.1" ]
 [ -f "$test_root/config/systemd/user/wayexpand-input-method.service" ]
 [ -f "$test_root/config/systemd/user/wayexpand-evdev.service" ]
 # IBus setup enables the control-only unit, so every install ships it.
@@ -251,7 +252,7 @@ EOF
 chmod 0755 "$stub_bin/systemctl"
 
 touch "$test_root/71-wayexpand-evdev.rules" "$test_root/69-wayexpand-evdev-uaccess.rules"
-gnome_extension_dir="$test_root/home/.local/share/gnome-shell/extensions/wayexpand-window-tracker@cyberducttape.github.io"
+gnome_extension_dir="$test_root/custom-data/gnome-shell/extensions/wayexpand-window-tracker@cyberducttape.github.io"
 mkdir -p "$gnome_extension_dir"
 printf '%s\n' '{"uuid": "wayexpand-window-tracker@cyberducttape.github.io"}' \
     >"$gnome_extension_dir/metadata.json"
@@ -277,13 +278,13 @@ grep -F "sudo $release_dir/scripts/install-evdev-permissions.sh --uninstall" "$t
 [ ! -e "$test_root/home/.local/bin/wayexpand-ui" ]
 [ ! -e "$test_root/home/.local/bin/wayexpand-gui" ]
 [ ! -e "$test_root/home/.local/bin/wayexpand-ibus" ]
-[ ! -e "$test_root/home/.local/share/ibus/component/wayexpand.xml" ]
+[ ! -e "$test_root/custom-data/ibus/component/wayexpand.xml" ]
 [ ! -e "$gnome_extension_dir/metadata.json" ]
 [ ! -e "$gnome_extension_dir/extension.js" ]
 [ ! -e "$gnome_extension_dir/notification-queue.js" ]
-[ ! -e "$test_root/home/.local/share/applications/wayexpand.desktop" ]
-[ ! -e "$test_root/home/.local/share/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml" ]
-[ ! -e "$test_root/home/.local/share/man/man1/wayexpand.1" ]
+[ ! -e "$test_root/custom-data/applications/wayexpand.desktop" ]
+[ ! -e "$test_root/custom-data/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml" ]
+[ ! -e "$test_root/custom-data/man/man1/wayexpand.1" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand-input-method.service" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand-evdev.service" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand-control.service" ]

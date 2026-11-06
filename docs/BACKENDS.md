@@ -274,6 +274,14 @@ result. Use `wayexpand doctor` (or `wayland-info`) after configuring the
 intended input method before choosing a route. See
 [KDE's Virtual Keyboard settings](https://docs.kde.org/stable_kf6/en/kwin/kcontrol/kwinvirtualkeyboard/).
 
+On GNOME, the WayExpand Shell extension authorizes tracker subscriptions by
+session UID and executable identity. The default D-Bus `Subscribe()` reply
+contains the app ID and opaque window instance ID, but no title. WayExpand
+explicitly requests titles only to support configured `title_contains` filters.
+This is a privacy reduction for unrelated session-bus clients, not isolation
+from malicious software running as the same user: same-UID processes remain
+within the desktop session's trust boundary.
+
 `wayexpand-backend-kwin-window` bridges this gap for KDE Plasma the only
 way currently available: KWin's scripting engine, reached over the session
 D-Bus (`org.kde.kwin.Scripting`). This is the same mechanism community

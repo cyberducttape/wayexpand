@@ -23,8 +23,14 @@ fn home() -> PathBuf {
 }
 fn data_home() -> PathBuf {
     env::var_os("XDG_DATA_HOME")
+        .filter(|value| !value.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| home().join(".local/share"))
+}
+fn data_home_is_valid() -> bool {
+    env::var_os("XDG_DATA_HOME")
+        .filter(|value| !value.is_empty())
+        .is_none_or(|value| Path::new(&value).is_absolute())
 }
 fn config_home() -> PathBuf {
     env::var_os("XDG_CONFIG_HOME")
@@ -366,6 +372,12 @@ fn operational_checks(
 }
 pub(crate) fn checks() -> Vec<Check> {
     let mut out = Vec::new();
+    out.push(Check {
+        component: "xdg_data_home",
+        status: if data_home_is_valid() { "pass" } else { "fail" },
+        path: data_home().display().to_string(),
+        detail: "XDG_DATA_HOME is absolute or defaults to ~/.local/share",
+    });
     for (id, relative, executable) in [
         ("cli", "bin/wayexpand", true),
         ("gui", "bin/wayexpand-gui", true),
@@ -375,7 +387,7 @@ pub(crate) fn checks() -> Vec<Check> {
         let path = if id == "desktop" {
             [
                 current().join(relative),
-                home().join(".local/share/applications/wayexpand.desktop"),
+                data_home().join("applications/wayexpand.desktop"),
                 PathBuf::from("/usr/share/applications/wayexpand.desktop"),
                 PathBuf::from("/usr/local/share/applications/wayexpand.desktop"),
             ]

@@ -44,6 +44,7 @@ if [ "$enable_service" -eq 1 ] && ! command -v systemctl >/dev/null 2>&1; then
 fi
 config_home=${XDG_CONFIG_HOME:-"$HOME/.config"}
 config_dir="$config_home/wayexpand"
+data_home=${XDG_DATA_HOME:-"$HOME/.local/share"}
 state_home=${XDG_STATE_HOME:-"$HOME/.local/state"}
 state_dir="$state_home/wayexpand"
 unit_dir="$config_home/systemd/user"
@@ -51,6 +52,13 @@ case "$config_home" in
     /*) ;;
     *)
         printf '%s\n' "error: XDG_CONFIG_HOME must be an absolute path" >&2
+        exit 1
+        ;;
+esac
+case "$data_home" in
+    /*) ;;
+    *)
+        printf '%s\n' "error: XDG_DATA_HOME must be an absolute path" >&2
         exit 1
         ;;
 esac
@@ -106,9 +114,9 @@ if [ -z "$version" ]; then
     printf '%s\n' 'error: release directory name must be wayexpand-VERSION-linux-ARCH' >&2
     exit 1
 fi
-application_dir="$HOME/.local/share/applications"
-metainfo_dir="$HOME/.local/share/metainfo"
-man_dir="$HOME/.local/share/man/man1"
+application_dir="$data_home/applications"
+metainfo_dir="$data_home/metainfo"
+man_dir="$data_home/man/man1"
 config_path="$config_dir/expansions.toml"
 if [ "$enable_service" -eq 1 ]; then
     validation_path=
@@ -244,7 +252,7 @@ done
 # ibus-daemon never reads per-user component directories, so a manifest
 # there cannot register the engine. Remove the link older installers made;
 # `wayexpand setup --backend ibus` installs the component where IBus reads it.
-stale_ibus_component="$HOME/.local/share/ibus/component/wayexpand.xml"
+stale_ibus_component="$data_home/ibus/component/wayexpand.xml"
 if [ -L "$stale_ibus_component" ]; then
     case $(readlink "$stale_ibus_component") in
         "$library_dir"/*) rm -f -- "$stale_ibus_component" ;;
@@ -261,7 +269,7 @@ if [ -f "$release_dir/docs/wayexpand.1" ]; then
     install -Dm644 "$release_dir/docs/wayexpand.1" "$man_dir/wayexpand.1"
 fi
 
-icon_base="$HOME/.local/share/icons/hicolor"
+icon_base="$data_home/icons/hicolor"
 for size in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
     icon_src="$release_dir/icons/hicolor/$size/apps/wayexpand.png"
     if [ -f "$icon_src" ]; then

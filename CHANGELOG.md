@@ -12,6 +12,15 @@ All notable changes to WayExpand are documented here.
   subscriber has at most one in-flight D-Bus call plus one latest pending
   snapshot, and subscribers that time out are disconnected. A 100,000-update
   stress test covers stalled and delayed subscribers.
+- Reduce GNOME focus-data exposure: default tracker subscriptions return app
+  and opaque instance IDs without window titles. Only verified WayExpand
+  executables can subscribe, and the WayExpand tracker explicitly opts in to
+  titles for configured `title_contains` matching. The extension build
+  identity covers every imported implementation module.
+- Honor `XDG_DATA_HOME` consistently in source and release-archive installs,
+  uninstall, and `install-check` for desktop entries, icons, metainfo, manuals,
+  and GNOME integration. Reject relative data roots and test installations
+  with a custom data directory.
 - Simplify the GUI's IBus setup into a preflighted, single guided flow. It first
   checks whether the component registration is already valid, only presents
   administrator-registration consent when it is missing or invalid, and keeps
