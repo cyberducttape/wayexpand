@@ -89,28 +89,23 @@ fn gnome_support_section(doctor: &serde_json::Value) -> serde_json::Value {
         "gsettings",
         &["get", "org.gnome.desktop.input-sources", "sources"],
     );
-    let mru_setting = crate::setup_ibus::command_output(
-        "gsettings",
-        &["get", "org.gnome.desktop.input-sources", "mru-sources"],
-    );
     let parsed_sources = source_setting
         .as_deref()
         .and_then(|raw| wayexpand_backend_ibus::gnome_input_sources::parse_sources(raw).ok());
     let wayexpand_registered = parsed_sources.as_ref().is_some_and(|sources| {
         wayexpand_backend_ibus::gnome_input_sources::wayexpand_index(sources).is_some()
     });
-    let mru_sources = mru_setting
-        .as_deref()
-        .and_then(|raw| wayexpand_backend_ibus::gnome_input_sources::parse_sources(raw).ok());
     let active_source = wayexpand_backend_gnome_window::active_input_source().ok();
-    let wayexpand_is_active = active_source
-        .as_ref()
-        .map(|(kind, id)| kind == "ibus" && id == "wayexpand");
-    let mru_agrees_with_live_source = mru_sources
-        .as_ref()
-        .and_then(|sources| sources.first())
-        .zip(active_source.as_ref())
-        .map(|(mru, (kind, id))| mru.kind == *kind && mru.id == *id);
+    // Use the same evidence contract as `wayexpand ibus status`: the source
+    // must be registered and GNOME Shell's live InputSourceManager bridge
+    // must report it active. Settings such as `current` and `mru-sources`
+    // describe configuration/history; neither can prove activation.
+    let wayexpand_is_active = support_activation_result(
+        parsed_sources.as_ref().map(|sources| {
+            wayexpand_backend_ibus::gnome_input_sources::wayexpand_index(sources).is_some()
+        }),
+        active_source.as_ref(),
+    );
     let active_source_summary = active_source.as_ref().map(|(kind, id)| {
         if kind == "ibus" && id == "wayexpand" {
             "wayexpand"
@@ -200,7 +195,6 @@ fn gnome_support_section(doctor: &serde_json::Value) -> serde_json::Value {
             "wayexpand_registered": wayexpand_registered,
             "active_source": active_source_summary,
             "wayexpand_active": wayexpand_is_active,
-            "mru_agrees_with_live_source": mru_agrees_with_live_source,
         },
         "ibus": {
             "current_engine": current_engine,
@@ -217,6 +211,17 @@ fn gnome_support_section(doctor: &serde_json::Value) -> serde_json::Value {
         "error_ids": errors,
         "privacy": {"keystrokes": "excluded", "snippet_contents": "excluded", "clipboard": "excluded", "environment_secrets": "excluded"},
     })
+}
+
+fn support_activation_result(
+    registered: Option<bool>,
+    live_source: Option<&(String, String)>,
+) -> Option<bool> {
+    match registered {
+        Some(false) => Some(false),
+        Some(true) => live_source.map(|(kind, id)| kind == "ibus" && id == "wayexpand"),
+        None => None,
+    }
 }
 
 fn gnome_problem_for(check: &wayexpand_backend_ibus::chain::IbusCheck) -> Option<&'static str> {
@@ -258,7 +263,7 @@ fn safe_version(value: &str) -> Option<String> {
 
 #[cfg(test)]
 mod gnome_redaction_tests {
-    use super::{safe_engine_name, safe_version};
+    use super::{safe_engine_name, safe_version, support_activation_result};
 
     #[test]
     fn gnome_support_tokens_reject_paths_and_unbounded_values() {
@@ -267,6 +272,24 @@ mod gnome_redaction_tests {
         assert!(safe_engine_name(&"x".repeat(81)).is_none());
         assert_eq!(safe_version("49.2"), Some("49.2".into()));
         assert!(safe_version("49.2 secret=token").is_none());
+    }
+
+    #[test]
+    fn deprecated_current_value_cannot_confirm_gnome_activation() {
+        let live_source_unavailable = support_activation_result(Some(true), None);
+        assert_eq!(live_source_unavailable, None);
+
+        // Registration plus an independently observed live Shell source is
+        // required for PASS; the deprecated `current` readback is not input
+        // to this decision.
+        assert_eq!(
+            support_activation_result(Some(true), Some(&("ibus".into(), "wayexpand".into()))),
+            Some(true)
+        );
+        assert_eq!(
+            support_activation_result(Some(true), Some(&("xkb".into(), "de".into()))),
+            Some(false)
+        );
     }
 }
 

@@ -6,7 +6,7 @@
 # not a GTK application, so this is not desktop certification.
 #
 # Usage: scripts/test-gnome-e2e.sh [--keep]
-#   E2E_BIN=DIR        use prebuilt wayexpand-ibus and wx-e2e-* binaries
+#   E2E_BIN=DIR        use prebuilt wayexpand, wayexpand-ibus, and wx-e2e-* binaries
 #   E2E_SKIP_BUILD=1   do not run cargo build
 set -eu
 
@@ -32,6 +32,7 @@ done
 bin_dir=${E2E_BIN:-"$project_dir/target/debug"}
 if [ "${E2E_SKIP_BUILD:-0}" != 1 ]; then
     cargo build --locked --quiet \
+        -p wayexpand --bin wayexpand \
         -p wayexpand-backend-ibus --bin wayexpand-ibus \
         -p wayexpand-e2e --bin wx-e2e-sink --bin wx-e2e-gnome-tracker --bin wx-e2e-ibus
 fi
@@ -195,6 +196,38 @@ case "$registered_sources" in
     *"'ibus', 'wayexpand'"*) log "pass gnome-ibus-source-registered $registered_sources" ;;
     *) log "fail gnome-ibus-source-registered GNOME returned $registered_sources"; exit 1 ;;
 esac
+# Request WayExpand by its deprecated list index while the live source is
+# still xkb/de. The CLI readiness check must use Shell's active-source bridge,
+# not accept the setting's successful readback as activation evidence.
+gsettings set org.gnome.desktop.input-sources current 2
+active_source=$(gdbus call --session --dest org.gnome.Shell \
+    --object-path /org/wayexpand/ShellWindowTracker \
+    --method org.wayexpand.ShellWindowTracker1.GetActiveInputSource)
+case "$active_source" in
+    *"'xkb', 'de'"*) ;;
+    *) log "fail deprecated-current-no-activation GNOME Shell reported $active_source"; exit 1 ;;
+esac
+"$E2E_BIN_DIR/wayexpand" ibus status --json \
+    >"$E2E_WORK/ibus-before-live-activation.json" 2>"$E2E_WORK/ibus-before-live-activation.err" || true
+if ! python3 - "$E2E_WORK/ibus-before-live-activation.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as report_file:
+    report = json.load(report_file)
+check = next(item for item in report["checks"] if item["id"] == "gnome-source-active")
+if check["state"] == "pass":
+    raise SystemExit("deprecated current readback incorrectly produced an activation PASS")
+if check["state"] not in {"warn", "fail", "unknown"}:
+    raise SystemExit(f"unexpected activation state: {check['state']!r}")
+print(f"pass deprecated-current-no-activation readiness={check['state']}")
+PY
+then
+    log "fail deprecated-current-no-activation CLI accepted the deprecated index as active"
+    cat "$E2E_WORK/ibus-before-live-activation.json"
+    exit 1
+fi
+
 gdbus call --session --dest org.gnome.Shell \
     --object-path /org/wayexpand/ShellWindowTracker \
     --method org.wayexpand.ShellWindowTracker1.ActivateInputSource ibus wayexpand \
@@ -353,7 +386,7 @@ env -i \
     dbus-run-session -- "$work/session.sh" >"$work/results.txt" 2>"$work/session.log" || status=$?
 
 cat "$work/results.txt"
-expected_checks='extension-active active-input-source deprecated-current-readback ignored-current-setting unavailable-input-source ibus-engine-registered gnome-ibus-source-registered gnome-ibus-source-active ibus-expansion-after-gnome-activation extension-disabled'
+expected_checks='extension-active active-input-source deprecated-current-readback ignored-current-setting unavailable-input-source ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active ibus-expansion-after-gnome-activation extension-disabled'
 missing_check=
 for check in $expected_checks; do
     if ! grep -F "pass $check" "$work/results.txt" >/dev/null; then
@@ -374,6 +407,7 @@ if [ "$status" -ne 0 ] || grep -q '^fail' "$work/results.txt" \
     failure=$(printf '%s' "$failure" | sed 's/%/%25/g; s/\r/%0D/g; s/\n/%0A/g')
     printf '::error title=GNOME window tracking E2E::%s\n' "$failure" >&2
     for log in session.log gnome-shell.log ibus-daemon.log ibus-engines.txt \
+        ibus-before-live-activation.json ibus-before-live-activation.err \
         ibus-transaction-results.txt sink.log; do
         printf '%s\n' "--- $log" >&2
         tail -n 60 "$work/$log" >&2 2>/dev/null || true

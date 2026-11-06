@@ -1395,12 +1395,24 @@ mod tests {
         );
         assert_eq!(registered.state, IbusCheckState::Pass);
         assert_eq!(active.state, IbusCheckState::Warn);
+    }
 
+    #[test]
+    fn deprecated_current_value_cannot_confirm_gnome_activation() {
+        // `current` may read back the requested index while GNOME continues
+        // using another source. The diagnostic intentionally accepts no
+        // setting value as activation evidence.
         let (_, active) = gnome_source_checks(Some("[('xkb', 'us'), ('ibus', 'wayexpand')]"), None);
         assert_eq!(active.state, IbusCheckState::Unknown);
         assert!(active
             .detail
             .contains("live input-source bridge is unavailable"));
+
+        let (_, active) = gnome_source_checks(
+            Some("[('xkb', 'us'), ('ibus', 'wayexpand')]"),
+            Some(("xkb", "de")),
+        );
+        assert_eq!(active.state, IbusCheckState::Warn);
     }
 
     #[test]

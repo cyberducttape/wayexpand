@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Keep GNOME activation checks tied to the registered source and the live
+  Shell `InputSourceManager` bridge. The deprecated `current` setting and
+  `mru-sources` history cannot establish activation; support reports now use
+  the same live evidence contract and tests cover legacy-setting readback.
 - Let setup complete when `;;hello` is absent. It now offers a configured,
   enabled, non-command expansion for the optional real-app test, and reports
   `CONFIGURED, AWAITING TEST` when no suitable trigger exists instead of
@@ -24,9 +28,11 @@ All notable changes to WayExpand are documented here.
 - Extend the headless GNOME session test to register the IBus component,
   register and activate the GNOME IBus source through Shell, then verify that
   the already active WayExpand engine expands a trigger in a controlled IBus
-  input context. The test explicitly reports GTK application insertion as
-  unverified and checks named lifecycle checkpoints instead of a stale,
-  hard-coded pass count.
+  input context. It also writes the deprecated `current` index for the
+  registered WayExpand source and asserts that CLI readiness does not report
+  activation until Shell's live source changes. The test explicitly reports
+  GTK application insertion as unverified and checks named lifecycle
+  checkpoints instead of a stale, hard-coded pass count.
 - Simplify the GUI's IBus setup into a preflighted, single guided flow. It first
   checks whether the component registration is already valid, only presents
   administrator-registration consent when it is missing or invalid, and keeps
