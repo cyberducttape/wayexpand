@@ -266,14 +266,70 @@ impl GuiApp {
     }
 
     pub(crate) fn setup_output_text(bytes: &[u8]) -> String {
-        String::from_utf8_lossy(bytes)
-            .lines()
+        let output = String::from_utf8_lossy(bytes);
+        let lines = output.lines().collect::<Vec<_>>();
+        if let Some(result) = lines
+            .iter()
+            .find(|line| line.trim_start().starts_with("SETUP RESULT:"))
+        {
+            let detail = lines
+                .iter()
+                .find(|line| line.trim_start().starts_with("Next:"))
+                .or_else(|| {
+                    lines.iter().find(|line| {
+                        line.trim_start()
+                            .starts_with("A real expansion was user-confirmed")
+                    })
+                });
+            return detail.map_or_else(
+                || result.trim().to_owned(),
+                |detail| format!("{}\n{}", result.trim(), detail.trim()),
+            );
+        }
+        lines
+            .into_iter()
             .rev()
             .find(|line| !line.trim().is_empty())
             .unwrap_or_default()
             .trim()
             .trim_start_matches("Error: ")
             .to_owned()
+    }
+
+    fn setup_completion_status(output: &str, fallback: String) -> (Status, bool) {
+        if output
+            .lines()
+            .any(|line| line.trim() == "SETUP RESULT: CONFIGURED, AWAITING TEST")
+        {
+            (
+                Status::info(
+                    "Configured, awaiting test: run Desktop Integration Test to verify a real insertion.",
+                ),
+                true,
+            )
+        } else if output
+            .lines()
+            .any(|line| line.trim() == "SETUP RESULT: WORKING")
+        {
+            (
+                Status::success(
+                    "Working: a real insertion was confirmed in the tested application.",
+                ),
+                false,
+            )
+        } else if output
+            .lines()
+            .any(|line| line.trim() == "SETUP RESULT: ACTION REQUIRED")
+        {
+            (
+                Status::warning(
+                    "Setup needs action. Review Diagnostics for the failing prerequisite.",
+                ),
+                true,
+            )
+        } else {
+            (Status::success(fallback), false)
+        }
     }
 
     pub(crate) fn cancel_setup(&mut self) {
@@ -305,7 +361,10 @@ impl GuiApp {
                             }
                             _ => {}
                         }
-                        Status::success(success_message)
+                        let (status, open_diagnostics) =
+                            Self::setup_completion_status(&output, success_message);
+                        self.diagnostics_open |= open_diagnostics;
+                        status
                     }
                     Err(detail) => {
                         self.cli_task_kind = None;
@@ -567,5 +626,46 @@ mod tests {
         );
         assert_eq!(reader.reads, SETUP_OUTPUT_READS_PER_DRAIN);
         assert_eq!(output.len(), SETUP_OUTPUT_READS_PER_DRAIN);
+    }
+
+    #[test]
+    fn setup_output_retains_operational_result_and_next_step() {
+        let output = b"WayExpand setup\nSETUP RESULT: CONFIGURED, AWAITING TEST\nNext: run wayexpand debug --test ';;hello'.\n";
+        let visible = GuiApp::setup_output_text(output);
+        assert!(visible.contains("SETUP RESULT: CONFIGURED, AWAITING TEST"));
+        assert!(visible.contains("Next: run wayexpand debug"));
+    }
+
+    #[test]
+    fn setup_output_retains_real_test_result_even_if_optional_steps_follow() {
+        let output = b"SETUP RESULT: WORKING\nA real expansion was user-confirmed in the tested application.\nOptional terminal coverage is not configured.\n";
+        let visible = GuiApp::setup_output_text(output);
+        assert!(visible.contains("SETUP RESULT: WORKING"));
+        assert!(visible.contains("A real expansion was user-confirmed"));
+    }
+
+    #[test]
+    fn setup_status_does_not_call_an_unverified_route_working() {
+        let (status, open_diagnostics) = GuiApp::setup_completion_status(
+            "SETUP RESULT: CONFIGURED, AWAITING TEST",
+            "generic success".into(),
+        );
+        assert_eq!(
+            status.text(),
+            "Configured, awaiting test: run Desktop Integration Test to verify a real insertion."
+        );
+        assert!(!status.is_error());
+        assert!(open_diagnostics);
+    }
+
+    #[test]
+    fn setup_status_reports_working_only_after_a_confirmed_test() {
+        let (status, open_diagnostics) =
+            GuiApp::setup_completion_status("SETUP RESULT: WORKING", "generic success".into());
+        assert_eq!(
+            status.text(),
+            "Working: a real insertion was confirmed in the tested application."
+        );
+        assert!(!open_diagnostics);
     }
 }

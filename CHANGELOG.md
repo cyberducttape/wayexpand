@@ -16,6 +16,10 @@ All notable changes to WayExpand are documented here.
   evidence and explain that setup will register the component itself.
 - Preserve GNOME input-source identifiers faithfully when parsing and restoring
   GVariant escaped, Unicode, and control characters.
+- Keep the GUI's first-run status aligned with the CLI's explicit setup result;
+  activating an input route without a real insertion test now opens Diagnostics
+  and reports “Configured, awaiting test” instead of generic success. A
+  “Working” status is reserved for a user-confirmed real insertion.
 - Add GNOME-specific `wayexpand doctor --gnome` conclusions and a guided
   `wayexpand debug --gnome --interactive` real-app test. The test distinguishes
   configured routing from uncorrelated activity and user-confirmed insertion;
