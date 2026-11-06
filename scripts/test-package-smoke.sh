@@ -94,7 +94,7 @@ check_installed() {
     wxsmoke_home=$(getent passwd wxsmoke | cut -d: -f6)
     # $1 must expand in the target user's `su` shell, not in this installer.
     # shellcheck disable=SC2016
-    su wxsmoke -s /bin/sh -c 'wayexpand validate "$1"' wayexpand \
+    su wxsmoke -s /bin/sh -c 'wayexpand config validate "$1"' wayexpand \
         "$wxsmoke_home/.config/wayexpand/expansions.toml"
     install_report=$(su wxsmoke -s /bin/sh -c 'wayexpand install-check --json' 2>/dev/null || true)
     printf '%s\n' "$install_report" | python3 -c '

@@ -7,13 +7,16 @@ All notable changes to WayExpand are documented here.
 - Make the GNOME GTK insertion acceptance helper acknowledge window activation
   only after Mutter reports the target window focused, with bounded retries and
   a specific timeout error. This prevents the test from sending its IBus trigger
-  to an unfocused GTK client. The GTK client also waits for its own active-window
-  and entry-focus events before sending input, failing at that stage if focus
-  never reaches the test field. The harness stops retrying after the controller's
+  to an unfocused GTK client. The GTK client waits for entry focus before sending
+  input; it no longer blocks on GTK's top-level active flag, which remains false
+  in the headless GNOME session even after Mutter confirms focus. The harness
+  stops retrying after the controller's
   bounded focus timeout, preventing a five-second failure from being multiplied
-  into a several-minute loop. The GTK client waits for the toplevel activation
-  event before requesting child-entry focus, since an early Wayland focus request
-  can be ignored before Mutter activates the window.
+  into a several-minute loop. The GTK client retries child-entry focus requests
+  while waiting for Mutter's confirmed toplevel activation, since an early
+  Wayland focus request can be ignored before Mutter activates the window.
+- Use the current `wayexpand config validate` command in the package install
+  smoke test so Debian and Fedora package checks reach the installation audit.
 - Preserve isolated IBus and GNOME end-to-end logs as short-retention CI
   artifacts, including on test failure, so input activation and GTK insertion
   regressions have actionable diagnostics tied to the tested commit.
