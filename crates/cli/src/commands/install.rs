@@ -447,25 +447,26 @@ pub(crate) fn checks() -> Vec<Check> {
         ),
         detail: "application icon",
     });
-    let default_config = [
+    let default_config_template = [
         current().join("expansions.toml"),
         PathBuf::from("/etc/wayexpand/expansions.toml.example"),
         PathBuf::from("/usr/share/wayexpand/expansions.toml"),
+        PathBuf::from("/usr/local/share/wayexpand/expansions.toml"),
     ]
     .into_iter()
     .find(|p| p.is_file());
     out.push(Check {
-        component: "default_config",
-        status: if default_config.is_some() {
+        component: "default_config_template",
+        status: if default_config_template.is_some() {
             "pass"
         } else {
             "fail"
         },
-        path: default_config.map_or_else(
+        path: default_config_template.map_or_else(
             || "packaged default expansions.toml".into(),
             |p| p.display().to_string(),
         ),
-        detail: "default configuration template available",
+        detail: "bundled starter configuration template available",
     });
     for (id, unit) in [
         ("control_service", "wayexpand-control.service"),
@@ -493,10 +494,10 @@ pub(crate) fn checks() -> Vec<Check> {
     let config = wayexpand_core::default_config_path();
     let valid = config.is_file() && wayexpand_core::Config::load(&config).is_ok();
     out.push(Check {
-        component: "configuration",
+        component: "active_configuration",
         status: if valid { "pass" } else { "fail" },
         path: config.display().to_string(),
-        detail: "configuration exists and parses",
+        detail: "user's active configuration exists and parses",
     });
     let contract: toml::Value =
         toml::from_str(include_str!("../../../../installer-components.toml"))
@@ -832,6 +833,22 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn installation_audit_separates_bundled_template_from_active_configuration() {
+        let rows = checks();
+        let template = rows
+            .iter()
+            .find(|check| check.component == "default_config_template")
+            .expect("bundled template check is present");
+        let active = rows
+            .iter()
+            .find(|check| check.component == "active_configuration")
+            .expect("active configuration check is present");
+        assert!(template.detail.contains("template"));
+        assert!(active.detail.contains("active configuration"));
+        assert_ne!(template.component, active.component);
     }
 
     #[test]

@@ -50,6 +50,7 @@ install -m 0644 "$project_dir/udev/69-wayexpand-evdev-uaccess.rules" "$release_d
 "$release_dir/scripts/install-evdev-permissions.sh" --dry-run >/dev/null
 
 mkdir -p "$test_root/home" "$test_root/config"
+chmod 0700 "$test_root/config"
 install -m 0644 "$project_dir/io.github.cyberducttape.WayExpand.metainfo.xml" \
     "$release_dir/io.github.cyberducttape.WayExpand.metainfo.xml"
 install -m 0644 "$project_dir/docs/wayexpand.1" "$release_dir/docs/wayexpand.1"
@@ -117,6 +118,8 @@ esac
 [ ! -e "$test_root/home/.local/share/ibus/component/wayexpand.xml" ]
 [ -f "$test_root/home/.local/lib/wayexpand/current/ibus/wayexpand.xml" ]
 [ -f "$test_root/home/.local/lib/wayexpand/current/share/wayexpand/installer-components.toml" ]
+[ -f "$test_root/home/.local/lib/wayexpand/current/expansions.toml" ]
+[ -f "$test_root/config/wayexpand/expansions.toml" ]
 [ -f "$test_root/home/.local/share/applications/wayexpand.desktop" ]
 [ -f "$test_root/home/.local/share/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml" ]
 [ -f "$test_root/home/.local/share/man/man1/wayexpand.1" ]

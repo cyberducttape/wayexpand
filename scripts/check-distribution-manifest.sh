@@ -35,13 +35,19 @@ for manifest in "$project_dir/debian/rules" "$project_dir/PKGBUILD" \
         exit 1
     }
 done
-for component in cli gui daemon ibus desktop icon default_config control_service input_method_service; do
+for component in cli gui daemon ibus desktop icon default_config_template control_service input_method_service; do
     grep -q -E "^\\[components\\.${component}\\]$" "$project_dir/installer-components.toml" || {
         printf '%s\n' "shared installer contract is missing required component: $component" >&2
         exit 1
     }
     grep -A3 -E "^\\[components\\.${component}\\]$" "$project_dir/installer-components.toml" | grep -q '^required = true$' || {
         printf '%s\n' "shared installer contract must mark $component required" >&2
+        exit 1
+    }
+done
+for installer in "$project_dir/scripts/install-user.sh" "$project_dir/scripts/install-release.sh"; do
+    grep -q -F '"$stage_dir/expansions.toml"' "$installer" || {
+        printf '%s\n' "user installer does not stage the default configuration template: $installer" >&2
         exit 1
     }
 done

@@ -475,7 +475,12 @@ wayexpand ibus status
 separates installed files, live integration (including loaded systemd units,
 IBus registry/engine resolution, and PATH/CLI/daemon installation identity),
 and operational runtime evidence (daemon protocol/build/config/output health
-and IBus engine state). A mixed user-local and distribution installation is
+and IBus engine state). Its `default_config_template` check means a starter
+template shipped with the installation is present; `active_configuration`
+separately means the user's selected config exists and parses. Source and
+release-archive installs include the template in the versioned payload, while
+the active config remains under the user's XDG configuration directory. A
+mixed user-local and distribution installation is
 reported as a path-identity warning, including the resolved CLI, PATH, and
 daemon executable paths. Setup preflight still does not prove insertion:
 target insertion remains `not_tested` until a harmless trigger is checked in a

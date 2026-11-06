@@ -47,6 +47,7 @@ export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-"$project_dir/target"}"
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
 
 mkdir -p "$test_root/home" "$test_root/config"
+chmod 0700 "$test_root/config"
 
 # The immutable install identity must change for any staged asset, including
 # edits that do not alter Cargo's commit-stamped binary version.
@@ -166,6 +167,18 @@ esac
 [ ! -e "$test_root/home/.local/share/ibus/component/wayexpand.xml" ]
 [ -f "$test_root/home/.local/lib/wayexpand/current/ibus/wayexpand.xml" ]
 [ -f "$test_root/home/.local/lib/wayexpand/current/share/wayexpand/installer-components.toml" ]
+[ -f "$test_root/home/.local/lib/wayexpand/current/expansions.toml" ]
+[ -f "$test_root/config/wayexpand/expansions.toml" ]
+install_report=$(HOME="$test_root/home" XDG_CONFIG_HOME="$test_root/config" \
+    PATH="$test_root/home/.local/bin:$PATH" \
+    "$test_root/home/.local/bin/wayexpand" install-check --json 2>/dev/null || true)
+printf '%s\n' "$install_report" | python3 -c '
+import json, sys
+report = json.load(sys.stdin)
+checks = {check["component"]: check for check in report["checks"]}
+assert checks["default_config_template"]["status"] == "pass", checks["default_config_template"]
+assert checks["active_configuration"]["status"] == "pass", checks["active_configuration"]
+'
 [ -f "$test_root/home/.local/share/applications/wayexpand.desktop" ]
 [ -f "$test_root/home/.local/share/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml" ]
 [ -f "$test_root/home/.local/share/man/man1/wayexpand.1" ]

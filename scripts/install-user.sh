@@ -185,6 +185,7 @@ install -m 0644 "$project_dir"/systemd/*.service "$stage_dir/systemd/"
 install -m 0644 "$project_dir/desktop/wayexpand.desktop" "$stage_dir/desktop/wayexpand.desktop"
 install -m 0644 "$project_dir/desktop/wayexpand-ibus.xml" "$stage_dir/ibus/wayexpand.xml"
 install -m 0644 "$project_dir/installer-components.toml" "$stage_dir/share/wayexpand/installer-components.toml"
+install -m 0644 "$project_dir/expansions.toml" "$stage_dir/expansions.toml"
 printf '%s\n' 'source-installation' >"$stage_dir/share/wayexpand/install-origin"
 payload_hash=$("$project_dir/scripts/hash-install-payload.sh" "$stage_dir")
 if [ "${#payload_hash}" -ne 64 ]; then

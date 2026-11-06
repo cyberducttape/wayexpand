@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Separate the bundled default-configuration template check from validation of
+  the active user configuration in `wayexpand install-check`. Source and
+  release-archive installers now include the template in each immutable
+  payload, and installer tests verify both template and active-config files.
 - Register user-installed IBus engines through one root-owned executable at
   `/usr/local/libexec/wayexpand/wayexpand-ibus`; shared component XML no longer
   points into the installing user's home directory. Setup journals the shared
