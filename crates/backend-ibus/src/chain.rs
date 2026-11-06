@@ -21,6 +21,7 @@ use std::{
     fs,
     os::unix::{ffi::OsStrExt, fs::MetadataExt, fs::PermissionsExt},
     path::{Path, PathBuf},
+    process::Command,
     sync::mpsc,
     thread,
     time::Duration,
@@ -613,6 +614,12 @@ pub fn diagnose() -> IbusChainReport {
         IbusDesktop::Unknown => check("desktop", "The desktop sends input to IBus", IbusCheckState::Skip, "no graphical session detected", None),
     });
 
+    // GNOME keeps a separate typed input-source list; IBus preload/selection
+    // alone does not make the engine survive GNOME source switching.
+    if desktop == IbusDesktop::Gnome {
+        checks.push(gnome_input_source_check());
+    }
+
     // 4. The component manifest, where *this daemon* reads components.
     let (directories, from_daemon) = daemon
         .as_ref()
@@ -758,6 +765,71 @@ pub fn diagnose() -> IbusChainReport {
         desktop,
         checks,
         activity,
+    }
+}
+
+fn gnome_input_source_check() -> IbusCheck {
+    let read = |key: &str| {
+        Command::new("gsettings")
+            .args(["get", "org.gnome.desktop.input-sources", key])
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .and_then(|output| String::from_utf8(output.stdout).ok())
+            .map(|value| value.trim().to_owned())
+    };
+    let Some(raw_sources) = read("sources") else {
+        return check(
+            "gnome-source",
+            "GNOME input source is registered",
+            IbusCheckState::Fail,
+            "could not read GNOME's input-source list",
+            Some("run `wayexpand setup --backend ibus` in the GNOME session".into()),
+        );
+    };
+    let sources = match crate::gnome_input_sources::parse_sources(&raw_sources) {
+        Ok(sources) => sources,
+        Err(error) => {
+            return check(
+                "gnome-source",
+                "GNOME input source is registered",
+                IbusCheckState::Fail,
+                format!("GNOME returned an invalid input-source tuple array: {error}"),
+                Some("run `wayexpand setup --backend ibus` to repair registration".into()),
+            )
+        }
+    };
+    let Some(index) = crate::gnome_input_sources::wayexpand_index(&sources) else {
+        return check("gnome-source", "GNOME input source is registered", IbusCheckState::Fail,
+            "GNOME's input-source list does not contain ('ibus', 'wayexpand')", Some("run `wayexpand setup --backend ibus` to add WayExpand while preserving existing sources".into()));
+    };
+    let Some(current) =
+        read("current").and_then(|value| crate::gnome_input_sources::parse_current(&value).ok())
+    else {
+        return check(
+            "gnome-source",
+            "GNOME input source is registered",
+            IbusCheckState::Warn,
+            "WayExpand is registered, but GNOME's active source could not be read",
+            None,
+        );
+    };
+    if current as usize == index {
+        check(
+            "gnome-source",
+            "GNOME input source is registered and active",
+            IbusCheckState::Pass,
+            "GNOME lists WayExpand and currently selects it",
+            None,
+        )
+    } else {
+        check(
+            "gnome-source",
+            "GNOME input source is registered",
+            IbusCheckState::Warn,
+            "WayExpand is registered in GNOME, but a different input source is currently active",
+            Some("select WayExpand from GNOME's input-source menu".into()),
+        )
     }
 }
 

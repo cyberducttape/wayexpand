@@ -6,6 +6,7 @@ mod diagnostics;
 mod doctor;
 mod errors;
 mod gnome_extension;
+mod gnome_input_sources;
 mod services;
 mod setup;
 mod setup_ibus;

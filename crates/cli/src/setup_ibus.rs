@@ -546,6 +546,8 @@ struct SessionSnapshot {
     preload_engines: Option<String>,
     /// KWin's previous `[Wayland] InputMethod`, recorded when setup changed it.
     kwin_input_method: Option<Option<String>>,
+    /// GNOME's typed input-source list and active source, when applicable.
+    gnome_input_sources: Option<crate::gnome_input_sources::Snapshot>,
     /// Original service state for every route that setup may affect.
     services: Vec<OriginalServiceState>,
 }
@@ -580,6 +582,9 @@ impl SessionSnapshot {
                 &["get", "org.freedesktop.ibus.general", "preload-engines"],
             )
             .map(|value| value.trim().to_owned()),
+            gnome_input_sources: (IbusDesktop::detect() == IbusDesktop::Gnome)
+                .then(crate::gnome_input_sources::Snapshot::capture)
+                .and_then(Result::ok),
             services: UserService::ALL
                 .into_iter()
                 .map(|service| OriginalServiceState::capture(service, inventory.state(service)))
@@ -672,6 +677,16 @@ impl SessionSnapshot {
                 ],
             ) {
                 failures.push("IBus preloaded engines".into());
+            }
+        }
+        if let Some(gnome) = &self.gnome_input_sources {
+            if let Err(error) = gnome.restore_with(|key, value| {
+                run(
+                    "gsettings",
+                    &["set", "org.gnome.desktop.input-sources", key, value],
+                )
+            }) {
+                failures.push(format!("GNOME input sources ({error})"));
             }
         }
         if let Some(engine) = self
@@ -869,6 +884,16 @@ fn activate_and_verify(
     companion: CompanionService,
     snapshot: &mut SessionSnapshot,
 ) -> Result<()> {
+    if IbusDesktop::detect() == IbusDesktop::Gnome {
+        // Capture must succeed before mutating the GNOME list; this snapshot
+        // is also used if any later activation step fails.
+        if snapshot.gnome_input_sources.is_none() {
+            snapshot.gnome_input_sources =
+                Some(crate::gnome_input_sources::Snapshot::capture().context(
+                    "GNOME input-source settings are unavailable; refusing partial IBus setup",
+                )?);
+        }
+    }
     match IbusDesktop::detect() {
         IbusDesktop::KdeWayland => route_kde_to_ibus(snapshot)?,
         _ => {
@@ -895,6 +920,14 @@ fn activate_and_verify(
     add_to_preload_engines();
     restart_stale_engine();
     step("Selecting WayExpand as the active input method");
+    if IbusDesktop::detect() == IbusDesktop::Gnome {
+        snapshot
+            .gnome_input_sources
+            .as_ref()
+            .expect("captured above")
+            .register_and_activate()?;
+        step("Registered and activated WayExpand in GNOME input sources");
+    }
     // The exit status is meaningless for `default`-layout engines; read back.
     let _ = run_setup_command("ibus", &["engine", "wayexpand"]);
     if !wait_until(
@@ -1165,6 +1198,7 @@ mod tests {
             global_engine: Some("xkb:us::eng".into()),
             preload_engines: Some("['xkb:us::eng']".into()),
             kwin_input_method: Some(Some("old-input-method.so".into())),
+            gnome_input_sources: None,
             services: UserService::ALL
                 .into_iter()
                 .map(|service| OriginalServiceState::capture(service, inventory.state(service)))

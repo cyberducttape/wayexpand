@@ -50,6 +50,7 @@ mod availability;
 use availability::component_file_present_in;
 pub use availability::{engine_available, engine_installed, global_engine_selected};
 pub mod chain;
+pub mod gnome_input_sources;
 pub mod telemetry;
 pub use telemetry::{IbusFieldVerdict, IbusRefusal, IbusTelemetry};
 mod text;

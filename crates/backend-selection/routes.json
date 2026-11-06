@@ -6,8 +6,8 @@
       "desktop": "GNOME / Wayland",
       "recommended_route_id": "ibus",
       "supported_injection_backends": ["ibus"],
-      "required_permissions": ["Select the WayExpand IBus engine in desktop input settings"],
-      "setup_instructions": ["Run wayexpand setup --check", "Run wayexpand setup --apply", "Select WayExpand in the IBus input source menu"],
+      "required_permissions": ["Allow WayExpand to add and select its IBus source in GNOME input settings"],
+      "setup_instructions": ["Run wayexpand setup --check", "Run wayexpand setup --apply to preserve existing sources and add WayExpand", "Verify WayExpand appears in GNOME's input-source menu; reselect it after changing input sources if needed"],
       "known_limitations": ["Active preedit/IME composition is unsupported", "Desktop end-to-end certification is pending"],
       "verified_applications": [],
       "last_certification_result": "Not certified; no accepted GNOME physical-desktop evidence"

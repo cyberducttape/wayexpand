@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Register the WayExpand IBus engine in GNOME's typed input-source list while
+  preserving existing keyboard sources and order. Setup selects the GNOME
+  source, verifies the saved registration and active source, and restores the
+  prior GNOME settings if activation later fails. IBus diagnostics now report
+  GNOME source registration and selection separately from IBus preload state.
 - Continue permissive AutoKey imports when an individual nested directory or
   directory entry cannot be read. Preserve accessible phrases and report each
   skipped path with a remediation; strict imports still fail on the same
