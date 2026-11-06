@@ -22,6 +22,11 @@ export function setTitleAccess(state, requested) {
     return state.includeTitles;
 }
 
+/** Shape a per-subscriber snapshot without leaking titles by default. */
+export function subscriberSnapshot(appId, title, instanceId, includeTitles = false) {
+    return [appId, includeTitles ? title : '', instanceId];
+}
+
 export class LatestOnlyDelivery {
     constructor(send, onFailure) {
         this._send = send;

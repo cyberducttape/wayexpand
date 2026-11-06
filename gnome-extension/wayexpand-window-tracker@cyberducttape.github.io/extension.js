@@ -23,6 +23,7 @@ import {
     isAuthorizedTrackerClient,
     LatestOnlyDelivery,
     setTitleAccess,
+    subscriberSnapshot,
 } from './notification-queue.js';
 
 const TRACKER_PATH = '/org/wayexpand/ShellWindowTracker';
@@ -81,7 +82,8 @@ function describe(window, includeTitle = false) {
         appId = desktopId.replace(/\.desktop$/, '');
     if (!appId)
         appId = window.get_gtk_application_id() || window.get_wm_class() || '';
-    return [appId, includeTitle ? (window.get_title() || '') : '', String(window.get_id())];
+    const title = includeTitle ? (window.get_title() || '') : '';
+    return subscriberSnapshot(appId, title, String(window.get_id()), includeTitle);
 }
 
 export default class WayExpandWindowTracker extends Extension {

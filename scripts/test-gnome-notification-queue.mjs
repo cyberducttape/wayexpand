@@ -4,6 +4,7 @@ import {
     isAuthorizedTrackerClient,
     LatestOnlyDelivery,
     setTitleAccess,
+    subscriberSnapshot,
 } from '../gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/notification-queue.js';
 
 test('subscription is limited to the current user and WayExpand executables', () => {
@@ -21,6 +22,17 @@ test('title access is opt-in per request and can be revoked on an active subscri
     assert.equal(setTitleAccess(subscriber, false), false);
     assert.equal(subscriber.includeTitles, false);
     assert.equal(setTitleAccess(subscriber, 'true'), false);
+});
+
+test('title-free snapshots exclude titles while preserving app and instance identity', () => {
+    assert.deepEqual(
+        subscriberSnapshot('org.example.Editor', 'secret document title', 'window-7'),
+        ['org.example.Editor', '', 'window-7'],
+    );
+    assert.deepEqual(
+        subscriberSnapshot('org.example.Editor', 'configured title match', 'window-7', true),
+        ['org.example.Editor', 'configured title match', 'window-7'],
+    );
 });
 
 test('slow subscribers retain only the latest update and one in-flight call', () => {
