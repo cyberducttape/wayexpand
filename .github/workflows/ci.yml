@@ -311,6 +311,8 @@ jobs:
           toolchain: 1.96.0
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config
+      - name: Record the checked-out source identity
+        run: printf 'WAYEXPAND_BUILD_SHA=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_ENV"
       - name: Create git archive (simulate release tarball)
         run: git archive --format=tar "HEAD^{tree}" | gzip -n > wayexpand.tar.gz
       - name: Extract to clean directory
@@ -324,12 +326,10 @@ jobs:
       - name: Build with clean CARGO_HOME (no cache, no vendor)
         env:
           CARGO_HOME: /tmp/cargo-clean
-          WAYEXPAND_BUILD_SHA: ${{ github.sha }}
         run: cd /tmp/clean-build && cargo build --locked --release
       - name: Test with clean CARGO_HOME
         env:
           CARGO_HOME: /tmp/cargo-clean
-          WAYEXPAND_BUILD_SHA: ${{ github.sha }}
           RUST_TEST_THREADS: 4
         run: cd /tmp/clean-build && cargo test --locked --release --workspace
 
