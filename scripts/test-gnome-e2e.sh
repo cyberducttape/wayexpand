@@ -96,7 +96,7 @@ gsettings set org.gnome.shell disable-user-extensions false
 gsettings set org.gnome.shell enabled-extensions "['$E2E_UUID', '$E2E_CONTROLLER_UUID']"
 gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us'), ('xkb', 'de')]"
 socket="$XDG_RUNTIME_DIR/ibus.sock"
-ibus-daemon --single --panel=disable --emoji-extension=disable --config=disable \
+ibus-daemon --single --panel=disable --emoji-extension=disable \
     --cache=none --address="unix:path=$socket" >"$E2E_WORK/ibus-daemon.log" 2>&1 &
 ibus_pid=$!
 tries=100
@@ -378,6 +378,25 @@ case "$active_source" in
     *"'ibus', 'wayexpand'"*) log "pass gnome-ibus-source-active $active_source" ;;
     *) log "fail gnome-ibus-source-active GNOME Shell reported $active_source"; exit 1 ;;
 esac
+# GNOME's active-source manager and IBus engine selection are separate
+# observations. Wait for IBus to confirm the selected engine before driving a
+# GTK client; this catches activation that only changed Shell's UI state.
+tries=100
+while :; do
+    active_engine=$(ibus engine 2>/dev/null || true)
+    case "$active_engine" in
+        *wayexpand*)
+            log "pass ibus-engine-active $active_engine"
+            break
+            ;;
+    esac
+    tries=$((tries - 1))
+    if [ "$tries" -le 0 ]; then
+        log "fail ibus-engine-active GNOME selected WayExpand but IBus did not confirm its engine: $active_engine"
+        exit 1
+    fi
+    sleep 0.1
+done
 # Let a real GTK input context receive a trigger from the compositor's
 # keyboard path. The direct IBus protocol transaction is covered separately.
 if ! run_gtk_insertion before-shell-restart; then
