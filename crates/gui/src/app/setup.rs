@@ -252,6 +252,8 @@ impl GuiApp {
     /// is included only after the user explicitly accepts IBus replacement
     /// and the possible system-wide IBus manifest registration.
     pub(crate) fn start_setup(&mut self) {
+        self.desktop_test_verified = false;
+        self.desktop_test_verified_application = None;
         self.start_setup_with_replacement_consent(false, false);
     }
 
@@ -272,6 +274,42 @@ impl GuiApp {
             self.strings.status_setup_running().to_owned(),
             self.strings.status_setup_done().to_owned(),
         );
+    }
+
+    pub(crate) fn start_guided_setup(&mut self) {
+        let ibus_route = self
+            .recommended_route
+            .is_some_and(|route| route.setup_backend() == "ibus");
+        if ibus_route {
+            self.start_cli_task(
+                vec!["ibus".into(), "status".into(), "--json".into()],
+                "Checking the IBus component, GNOME source, and replacement authorization…".into(),
+                "Setup preflight complete.".into(),
+            );
+            if self.setup_task.is_some() {
+                self.cli_task_kind = Some("setup-preflight".into());
+            }
+        } else if self.recommended_route.is_none() {
+            self.guided_setup_waiting_for_route = true;
+            self.refresh_diagnostics(false);
+            self.status = Status::info(
+                "Checking available input routes. Setup will continue automatically when preflight finishes.",
+            );
+        } else {
+            self.guided_setup_waiting_for_route = false;
+            self.start_setup();
+        }
+    }
+
+    pub(crate) fn retry_gnome_source_activation(&mut self) {
+        self.start_cli_task(
+            vec!["repair".into(), "--gnome-input-source".into()],
+            "Selecting WayExpand in GNOME…".into(),
+            "WayExpand was selected; refreshing the GNOME checks.".into(),
+        );
+        if self.setup_task.is_some() {
+            self.cli_task_kind = Some("gnome-source-repair".into());
+        }
     }
 
     pub(crate) fn start_cli_task(
@@ -574,6 +612,37 @@ impl GuiApp {
         Status::info("Review the setup stages and any required consent to continue.")
     }
 
+    fn select_default_desktop_test(&mut self) -> bool {
+        let selected_is_testable = self
+            .selected_index()
+            .and_then(|index| self.config.expansion.get(index))
+            .is_some_and(|expansion| {
+                expansion.enabled
+                    && expansion.command.is_none()
+                    && !expansion.replacement.contains("{{")
+            });
+        if selected_is_testable {
+            if let Some(expansion) = self
+                .selected_index()
+                .and_then(|index| self.config.expansion.get(index))
+            {
+                self.desktop_test_trigger = expansion.trigger.clone();
+                return true;
+            }
+        }
+        if let Some(expansion) = self.config.expansion.iter().find(|expansion| {
+            expansion.enabled
+                && expansion.command.is_none()
+                && !expansion.replacement.contains("{{")
+        }) {
+            self.desktop_test_trigger = expansion.trigger.clone();
+            true
+        } else {
+            self.desktop_test_trigger.clear();
+            false
+        }
+    }
+
     pub(crate) fn start_desktop_test(
         &mut self,
         trigger: String,
@@ -639,6 +708,10 @@ impl GuiApp {
                         }
                         if task_kind.as_deref() == Some("setup-preflight") {
                             self.setup_preflight_result(&output)
+                        } else if task_kind.as_deref() == Some("gnome-source-repair") {
+                            self.desktop_test_verified = false;
+                            self.desktop_test_verified_application = None;
+                            Status::success("WayExpand was selected in GNOME. Refreshing source and IBus readiness; run the optional real-app test when ready.")
                         } else {
                             match task_kind.as_deref() {
                                 Some("restore-check") => {
@@ -679,8 +752,19 @@ impl GuiApp {
                             } else {
                                 let (status, open_diagnostics) =
                                     Self::setup_completion_status(&output, success_message);
-                                self.diagnostics_open |= open_diagnostics;
-                                status
+                                if is_setup
+                                    && output.lines().any(|line| {
+                                        line.trim() == "SETUP RESULT: CONFIGURED, AWAITING TEST"
+                                    })
+                                {
+                                    self.select_default_desktop_test();
+                                    self.test_expansion_dialog_open = true;
+                                    self.diagnostics_open = false;
+                                    Status::info("WayExpand is configured and the input route is active. The real-app test is optional; choose a saved harmless snippet or close this dialog to test later.")
+                                } else {
+                                    self.diagnostics_open |= open_diagnostics;
+                                    status
+                                }
                             }
                         }
                     }
@@ -707,6 +791,17 @@ impl GuiApp {
                             Status::error(format!(
                                 "Could not check the IBus setup stages: {detail}"
                             ))
+                        } else if task_kind.as_deref() == Some("gnome-source-repair") {
+                            let report = setup_failure_report(
+                                &[],
+                                detail.as_bytes(),
+                                "GNOME input-source activation failed",
+                            );
+                            let summary = setup_failure_summary(&report);
+                            self.setup_failure_report = Some(report);
+                            self.setup_failure_report_open = true;
+                            self.diagnostics_open = true;
+                            Status::error(self.strings.status_setup_failed(&summary))
                         } else {
                             Status::error(self.strings.status_setup_failed(&detail))
                         }
@@ -813,26 +908,7 @@ impl GuiApp {
             .inner
             .on_hover_text(self.strings.turn_on_tooltip());
         if response.clicked() {
-            let ibus_route = self
-                .recommended_route
-                .is_some_and(|route| route.setup_backend() == "ibus");
-            if ibus_route {
-                self.start_cli_task(
-                    vec!["ibus".into(), "status".into(), "--json".into()],
-                    "Checking whether IBus registration or replacement consent is needed…".into(),
-                    "IBus preflight complete.".into(),
-                );
-                if self.setup_task.is_some() {
-                    self.cli_task_kind = Some("setup-preflight".into());
-                }
-            } else if self.recommended_route.is_none() {
-                self.refresh_diagnostics(false);
-                self.status = Status::info(
-                    "Checking the recommended input route. Try setup again when that check finishes.",
-                );
-            } else {
-                self.start_setup();
-            }
+            self.start_guided_setup();
         }
         if running && ui.small_button(self.strings.cancel()).clicked() {
             self.cancel_setup();
@@ -905,14 +981,14 @@ impl GuiApp {
                 ui.add_space(8.0);
                 if self.setup_system_integration_required {
                     ui.add_space(8.0);
-                    ui.label("IBus does not yet have a valid WayExpand component registration. WayExpand will install it only if still missing; administrator authorization is requested only if the component directory requires it.");
+                    ui.label("WayExpand needs one system-wide input-method registration. An administrator prompt may appear to install the shared registration and engine; this does not grant raw keyboard-device access. You can cancel if you prefer to install a distribution package instead.");
                     ui.checkbox(
                         &mut self.setup_system_integration_acknowledged,
                         "Allow WayExpand to request administrator authorization for IBus registration if needed.",
                     );
                 } else {
                     ui.add_space(8.0);
-                    ui.label("IBus registration is already valid. No administrator authorization is needed for this step.");
+                    ui.label("The shared input-method registration is already valid. No administrator authorization is needed for this step.");
                 }
                 if self.config.settings.compatibility_mode
                     == wayexpand_core::CompatibilityMode::Off

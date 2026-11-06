@@ -2,6 +2,18 @@
 
 use crate::*;
 
+fn desktop_test_options(expansions: &[ExpansionConfig]) -> Vec<(String, String)> {
+    expansions
+        .iter()
+        .filter(|expansion| {
+            expansion.enabled
+                && expansion.command.is_none()
+                && !expansion.replacement.contains("{{")
+        })
+        .map(|expansion| (expansion.trigger.clone(), expansion.replacement.clone()))
+        .collect()
+}
+
 fn desktop_test_review_instruction(review: &DesktopTestReview) -> String {
     format!(
         "In {}, inspect the field where you attempted to type {}. Do not type the trigger again.",
@@ -1185,15 +1197,27 @@ impl GuiApp {
         }
         let mut open = self.test_expansion_dialog_open;
         let mut close = false;
-        let desktop_test = self
-            .selected_index()
-            .and_then(|index| self.config.expansion.get(index))
-            .filter(|expansion| {
-                expansion.enabled
-                    && expansion.command.is_none()
-                    && !expansion.replacement.contains("{{")
-            })
-            .map(|expansion| (expansion.trigger.clone(), expansion.replacement.clone()));
+        let desktop_tests = desktop_test_options(&self.config.expansion);
+        if !desktop_tests
+            .iter()
+            .any(|(trigger, _)| trigger == &self.desktop_test_trigger)
+        {
+            self.desktop_test_trigger = self
+                .selected_index()
+                .and_then(|index| self.config.expansion.get(index))
+                .filter(|expansion| {
+                    expansion.enabled
+                        && expansion.command.is_none()
+                        && !expansion.replacement.contains("{{")
+                })
+                .map(|expansion| expansion.trigger.clone())
+                .or_else(|| desktop_tests.first().map(|(trigger, _)| trigger.clone()))
+                .unwrap_or_default();
+        }
+        let desktop_test = desktop_tests
+            .iter()
+            .find(|(trigger, _)| trigger == &self.desktop_test_trigger)
+            .cloned();
         let desktop_test_command = desktop_test.as_ref().map(|(trigger, _)| {
             let trigger = trigger.replace('\'', "'\\''");
             format!("wayexpand debug --test '{trigger}'")
@@ -1212,6 +1236,7 @@ impl GuiApp {
             .resizable(false)
             .default_width(520.0)
             .show(ctx, |ui| {
+                ui.label(RichText::new("A real insertion test is optional. It is the only stage that verifies text in a target application.").color(palette.muted));
                 ui.label(RichText::new("Matcher Test").strong());
                 ui.label("Checks the loaded snippets and template rendering locally. It does not read keyboard input or modify another application.");
                 if ui.button("Open Matcher Test").clicked() {
@@ -1222,6 +1247,23 @@ impl GuiApp {
                 ui.separator();
                 ui.label(RichText::new("Desktop Test").strong());
                 ui.label("Tests the active route in a disposable text field. It never presses Enter or retries insertion. Activity counters are not tied to this test trigger; you must inspect the result and confirm it yourself.");
+                if desktop_tests.len() > 1 {
+                    egui::ComboBox::from_id_salt("desktop_test_trigger_choice")
+                        .selected_text(if self.desktop_test_trigger.is_empty() {
+                            "Choose a saved static snippet"
+                        } else {
+                            &self.desktop_test_trigger
+                        })
+                        .show_ui(ui, |ui| {
+                            for (trigger, _) in &desktop_tests {
+                                ui.selectable_value(
+                                    &mut self.desktop_test_trigger,
+                                    trigger.clone(),
+                                    trigger,
+                                );
+                            }
+                        });
+                }
                 if let Some((trigger, replacement)) = &desktop_test {
                     ui.label(format!("Trigger to type once: {trigger}"));
                     ui.label("Expected replacement:");
@@ -1272,7 +1314,7 @@ impl GuiApp {
                         ui.ctx().copy_text(command.clone());
                     }
                 } else {
-                    ui.label("Select an enabled static snippet to get a one-shot desktop test command. Templated and command-backed snippets are excluded.");
+                    ui.label("No enabled static snippet is available for the optional desktop test. Setup is complete; save or enable a harmless static snippet, then open Test Expansion again. Templated and command-backed snippets are excluded.");
                 }
                 ui.colored_label(palette.warning, "If the matcher succeeds but desktop insertion fails, inspect the Input and Output route assessment and run the guided backend checks.");
                 if ui.button("Close").clicked() {
@@ -1752,7 +1794,7 @@ impl GuiApp {
     /// installed at all.
     fn render_ibus_route(&mut self, ui: &mut egui::Ui, palette: &Palette) {
         use wayexpand_backend_ibus::chain::IbusCheckState;
-        let Some(report) = self.ibus_route.as_ref() else {
+        let Some(report) = self.ibus_route.clone() else {
             return;
         };
         if !report.installed_anywhere() && !self.ibus_active {
@@ -1840,6 +1882,37 @@ impl GuiApp {
                 }
             }
         });
+        if report.desktop == wayexpand_backend_ibus::chain::IbusDesktop::Gnome {
+            let source_registered = report
+                .check("gnome-source-registered")
+                .is_some_and(|check| {
+                    check.state == wayexpand_backend_ibus::chain::IbusCheckState::Pass
+                });
+            let source_active = report.check("gnome-source-active").is_some_and(|check| {
+                check.state == wayexpand_backend_ibus::chain::IbusCheckState::Pass
+            }) && report.check("selected").is_some_and(|check| {
+                check.state == wayexpand_backend_ibus::chain::IbusCheckState::Pass
+            });
+            if !source_active {
+                ui.group(|ui| {
+                    ui.label(RichText::new("Finish GNOME input-source selection").strong());
+                    if source_registered {
+                        ui.label("WayExpand is registered, but GNOME is using another input source. Open the keyboard/layout selector in the GNOME top bar and choose WayExpand. Your existing keyboard layouts remain available.");
+                        if ui.button("Try selecting WayExpand").clicked() {
+                            self.retry_gnome_source_activation();
+                        }
+                    } else {
+                        ui.label("WayExpand is not yet registered as a GNOME input source. Continue the guided setup to register it and activate it; any required administrator prompt is explained before it appears.");
+                        if ui.button("Continue guided setup").clicked() {
+                            self.start_guided_setup();
+                        }
+                    }
+                    if ui.small_button("Recheck input-source status").clicked() {
+                        self.refresh_diagnostics(true);
+                    }
+                });
+            }
+        }
         ui.horizontal_wrapped(|ui| {
             ui.label(format!(
                 "{}: {}",
@@ -2295,6 +2368,36 @@ fn assessment_color(state: diagnostics::AssessmentState, palette: &Palette) -> C
 #[cfg(test)]
 mod desktop_test_review_tests {
     use super::*;
+
+    #[test]
+    fn desktop_test_picker_uses_any_enabled_static_snippet_without_a_sample_trigger() {
+        let config = Config::parse(
+            r#"[[expansion]]
+trigger = ";custom-check"
+replacement = "read-only check"
+
+[[expansion]]
+trigger = ";disabled"
+replacement = "not available"
+enabled = false
+
+[[expansion]]
+trigger = ";form"
+replacement = "{{field:value}}"
+
+[[expansion]]
+trigger = ";action"
+replacement = "action"
+[expansion.command]
+program = "/usr/bin/true"
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            desktop_test_options(&config.expansion),
+            vec![(";custom-check".into(), "read-only check".into())]
+        );
+    }
 
     #[test]
     fn review_never_invites_a_second_trigger_after_observing_output() {

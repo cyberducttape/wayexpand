@@ -49,6 +49,11 @@ All notable changes to WayExpand are documented here.
   checks whether the component registration is already valid, only presents
   administrator-registration consent when it is missing or invalid, and keeps
   non-atomic replacement consent as a separate explicit choice.
+- Continue the GUI setup automatically after route preflight, explain the
+  administrator registration step before consent, guide users to GNOME's
+  input-source selector when WayExpand is registered but inactive, and offer
+  an optional real-app expansion test using any eligible saved static snippet;
+  setup does not depend on the `;;hello` sample.
 - Expand `wayexpand doctor --gnome` into input-capture, snippet-insertion,
   and GNOME Shell window-tracking sections. Report extension installation,
   loaded state, live build identity, D-Bus handshake, and sanitized focus-event
