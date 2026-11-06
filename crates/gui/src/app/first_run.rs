@@ -140,6 +140,30 @@ impl GuiApp {
             .show(ui, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.add_space(12.0);
+
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(format!(
+                            "Installed: {}",
+                            if env::current_exe().is_ok() {
+                                "yes"
+                            } else {
+                                "unknown"
+                            }
+                        ));
+                        ui.label(format!(
+                            "Configured: {}",
+                            if route_ready { "ready" } else { "incomplete" }
+                        ));
+                        ui.label(format!(
+                            "Verified working: {}",
+                            if self.desktop_test_verified {
+                                "yes"
+                            } else {
+                                "not tested"
+                            }
+                        ));
+                    });
+                    ui.add_space(8.0);
                     theme::brand_mark(ui, 36.0, palette.accent);
                     ui.label(
                         RichText::new(self.strings.welcome_title())
@@ -381,6 +405,7 @@ impl GuiApp {
                                 )
                                 .clicked()
                                 {
+                                    self.desktop_test_verified = true;
                                     self.finish_onboarding();
                                 }
                                 if theme::secondary_button(

@@ -46,6 +46,9 @@ pub(crate) const DEFAULT_TERMINAL_APPS: &[&str] = &[
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct IbusSetupOptions {
     pub(crate) assume_yes: bool,
+    /// Explicit user acceptance of IBus's verified but non-atomic replacement.
+    /// This is intentionally separate from `assume_yes`.
+    pub(crate) accept_non_atomic_replacement: bool,
     /// Also cover terminals with a terminal-only evdev daemon.
     pub(crate) terminals: bool,
 }
@@ -503,11 +506,11 @@ fn ensure_replacement_consent(options: IbusSetupOptions) -> Result<bool> {
     }
     println!("  IBus checks that the text before the cursor is your trigger, then deletes it and inserts");
     println!("  the snippet as two separate steps. compatibility_mode = \"off\" refuses that, so nothing would expand.");
-    if options.assume_yes {
+    if !options.accept_non_atomic_replacement && options.assume_yes {
         println!("  Not changed by --yes. Enable it with compatibility_mode = \"tracked-focus\" under [settings] in {}", path.display());
         return Ok(true);
     }
-    if !prompt_yes_no(
+    if !options.accept_non_atomic_replacement && !prompt_yes_no(
         "  Allow verified two-step replacement (compatibility_mode = \"tracked-focus\")? [Y/n] ",
         true,
     )? {

@@ -245,6 +245,9 @@ struct GuiApp {
     support_output_path: String,
     evdev_setup_open: bool,
     evdev_setup_acknowledged: bool,
+    setup_consent_open: bool,
+    setup_consent_acknowledged: bool,
+    desktop_test_verified: bool,
     daemon_status: String,
     daemon_capabilities: Option<runtime::DaemonCapabilities>,
     fleet_status: String,
@@ -624,6 +627,9 @@ impl GuiApp {
                 .unwrap_or_else(|| "wayexpand-support.json".into()),
             evdev_setup_open: false,
             evdev_setup_acknowledged: false,
+            setup_consent_open: false,
+            setup_consent_acknowledged: false,
+            desktop_test_verified: false,
             daemon_status: strings.not_checked().into(),
             daemon_capabilities: None,
             fleet_status: strings.not_checked().into(),
@@ -834,6 +840,7 @@ impl eframe::App for GuiApp {
         self.render_editor(root, &palette);
         self.render_pending_action(ctx, &palette);
         self.render_evdev_setup(ctx, &palette);
+        self.render_setup_consent(ctx);
         if self.any_dialog_open() {
             // Dim the window behind an open dialog so it reads as one.
             // Dialog windows are in the Foreground order, so a Middle layer

@@ -92,6 +92,7 @@ impl GuiApp {
             || self.pack_dialog_open
             || self.settings_open
             || self.evdev_setup_open
+            || self.setup_consent_open
     }
 
     /// Escape closes one dialog at a time, most recently opened first. The
@@ -103,6 +104,9 @@ impl GuiApp {
         // else, so Escape answers it (as Cancel) before closing any window.
         if self.pending_action.is_some() {
             self.pending_action = None;
+        } else if self.setup_consent_open {
+            self.setup_consent_open = false;
+            self.setup_consent_acknowledged = false;
         } else if self.evdev_setup_open {
             self.evdev_setup_open = false;
         } else if self.settings_open {

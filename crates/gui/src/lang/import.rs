@@ -1193,9 +1193,9 @@ impl Strings {
 
     pub fn turn_on_tooltip(&self) -> &'static str {
         match self.lang {
-            Language::English => "Runs `wayexpand setup --yes`: enables the safest detected input path for this desktop. It never grants raw keyboard access; your desktop may ask for permission.",
-            Language::Indonesian => "Menjalankan `wayexpand setup --yes`: mengaktifkan jalur masukan teraman yang terdeteksi untuk desktop ini. Ini tidak pernah memberikan akses papan ketik mentah; desktop Anda mungkin meminta izin.",
-            Language::German => "Führt `wayexpand setup --yes` aus: aktiviert den sichersten erkannten Eingabeweg. Es wird nie roher Tastaturzugriff gewährt; der Desktop fragt eventuell nach Erlaubnis.",
+            Language::English => "Sets up the recommended input path. If IBus needs non-atomic replacement, WayExpand asks for explicit consent first; it never grants raw keyboard access automatically.",
+            Language::Indonesian => "Menyiapkan jalur masukan yang direkomendasikan. Jika IBus memerlukan penggantian nonatomik, WayExpand meminta persetujuan terlebih dahulu; akses papan ketik mentah tidak diberikan otomatis.",
+            Language::German => "Richtet den empfohlenen Eingabeweg ein. Wenn IBus eine nicht atomare Ersetzung benötigt, fragt WayExpand vorher ausdrücklich nach; roher Tastaturzugriff wird nie automatisch gewährt.",
         }
     }
 
@@ -1217,9 +1217,9 @@ impl Strings {
 
     pub fn status_setup_done(&self) -> &'static str {
         match self.lang {
-            Language::English => "WayExpand is on · try a normal text field in an app you use; see Desktop details for route limits",
-            Language::Indonesian => "WayExpand aktif · coba kolom teks biasa di aplikasi yang Anda gunakan; lihat Detail desktop untuk batasan rute",
-            Language::German => "WayExpand ist aktiv · probieren Sie ein normales Textfeld in einer verwendeten App; siehe Desktop-Details für Einschränkungen",
+            Language::English => "Setup configured the input route. Desktop insertion is not yet verified; test it in a normal text field.",
+            Language::Indonesian => "Rute masukan telah dikonfigurasi. Penyisipan desktop belum diverifikasi; uji di kolom teks biasa.",
+            Language::German => "Der Eingabeweg ist konfiguriert. Die Desktop-Einfügung ist noch nicht verifiziert; testen Sie ein normales Textfeld.",
         }
     }
 

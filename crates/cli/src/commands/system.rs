@@ -8,6 +8,7 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     let mut requested_backend: Option<String> = None;
     let mut requested_mode: Option<String> = None;
     let mut assume_yes = false;
+    let mut accept_non_atomic_replacement = false;
     let mut terminals = false;
     let mut check_only = false;
     let mut apply_requested = false;
@@ -22,6 +23,7 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
                 requested_backend = Some("input-method".into());
             }
             "--yes" | "-y" => assume_yes = true,
+            "--accept-non-atomic-replacement" => accept_non_atomic_replacement = true,
             "--backend" => {
                 requested_backend = Some(args.next().ok_or_else(|| {
                     usage_error("--backend requires ibus, input-method, or evdev")
@@ -40,7 +42,7 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
             }
             _ => {
                 usage_bail!(
-                    "usage: wayexpand setup [--mode recommended|maximum|experimental | --backend ibus|input-method|evdev] [--terminals] [--yes]"
+                    "usage: wayexpand setup [--mode recommended|maximum|experimental | --backend ibus|input-method|evdev] [--terminals] [--yes] [--accept-non-atomic-replacement]"
                 )
             }
         }
@@ -49,7 +51,12 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
         usage_bail!("choose either `wayexpand setup --check` or `wayexpand setup --apply`");
     }
     if check_only {
-        if requested_backend.is_some() || requested_mode.is_some() || terminals || assume_yes {
+        if requested_backend.is_some()
+            || requested_mode.is_some()
+            || terminals
+            || assume_yes
+            || accept_non_atomic_replacement
+        {
             usage_bail!("usage: wayexpand setup --check [--json]");
         }
         return crate::commands::install::setup_check(json);
@@ -164,10 +171,14 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     if !setup_backend_allowed(&policy, &backend) {
         bail!("setup backend '{backend}' is disallowed by organization policy")
     }
+    if accept_non_atomic_replacement && backend != "ibus" {
+        usage_bail!("--accept-non-atomic-replacement applies only to the IBus backend");
+    }
     configure_setup_backend(
         &backend,
         crate::setup_ibus::IbusSetupOptions {
             assume_yes,
+            accept_non_atomic_replacement,
             terminals,
         },
     )?;

@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Replace the GUI's IBus setup consent dead end with a pre-setup explanation and
+  explicit checkbox. The GUI passes `--accept-non-atomic-replacement` only
+  after that choice; `--yes` alone still cannot authorize replacement. Setup
+  completion now distinguishes route configuration from a verified real-app
+  insertion, and first-run status shows Installed, Configured, and Verified
+  working separately.
 - Register the WayExpand IBus engine in GNOME's typed input-source list while
   preserving existing keyboard sources and order. Setup selects the GNOME
   source, verifies the saved registration and active source, and restores the

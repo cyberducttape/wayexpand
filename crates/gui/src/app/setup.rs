@@ -128,12 +128,19 @@ fn run_user_systemctl(
 }
 
 impl GuiApp {
-    /// One-click setup: run `wayexpand setup --yes`, which configures only
-    /// the safe Recommended mode (never raw keyboard access), off the UI
-    /// thread, then refresh the daemon status.
+    /// Run the safe recommended setup off the UI thread. The additional flag
+    /// is included only after the user explicitly accepts IBus replacement.
     pub(crate) fn start_setup(&mut self) {
+        self.start_setup_with_replacement_consent(false);
+    }
+
+    fn start_setup_with_replacement_consent(&mut self, consent: bool) {
+        let mut arguments = vec!["setup".into(), "--yes".into()];
+        if consent {
+            arguments.push("--accept-non-atomic-replacement".into());
+        }
         self.start_cli_task(
-            vec!["setup".into(), "--yes".into()],
+            arguments,
             self.strings.status_setup_running().to_owned(),
             self.strings.status_setup_done().to_owned(),
         );
@@ -380,11 +387,62 @@ impl GuiApp {
             .inner
             .on_hover_text(self.strings.turn_on_tooltip());
         if response.clicked() {
-            self.start_setup();
+            let needs_ibus_consent = self.config.settings.compatibility_mode
+                == wayexpand_core::CompatibilityMode::Off
+                && self
+                    .recommended_route
+                    .is_some_and(|route| route.setup_backend() == "ibus");
+            if needs_ibus_consent {
+                self.setup_consent_acknowledged = false;
+                self.setup_consent_open = true;
+            } else if self.recommended_route.is_none() {
+                self.refresh_diagnostics(false);
+                self.status = Status::info(
+                    "Checking the recommended input route. Try setup again when that check finishes.",
+                );
+            } else {
+                self.start_setup();
+            }
         }
         if running && ui.small_button(self.strings.cancel()).clicked() {
             self.cancel_setup();
         }
+    }
+
+    pub(crate) fn render_setup_consent(&mut self, ctx: &egui::Context) {
+        if !self.setup_consent_open {
+            return;
+        }
+        egui::Modal::new(egui::Id::new("ibus_replacement_consent")).show(ctx, |ui| {
+                ui.set_width(430.0);
+                ui.heading("Enable text expansion in IBus?");
+                ui.add_space(8.0);
+                ui.label("WayExpand checks the text before the cursor against your trigger, then deletes the trigger and inserts the snippet in two separate steps. This replacement is not atomic.");
+                ui.add_space(8.0);
+                ui.label("If focus or input changes during insertion, WayExpand cannot guarantee rollback of text already sent.");
+                ui.add_space(8.0);
+                ui.checkbox(
+                    &mut self.setup_consent_acknowledged,
+                    "I understand and want to enable verified two-step replacement.",
+                );
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(
+                            self.setup_consent_acknowledged && self.setup_task.is_none(),
+                            egui::Button::new("Continue setup"),
+                        )
+                        .clicked()
+                    {
+                        self.setup_consent_open = false;
+                        self.start_setup_with_replacement_consent(true);
+                    }
+                    if ui.button("Cancel").clicked() {
+                        self.setup_consent_open = false;
+                        self.setup_consent_acknowledged = false;
+                    }
+                });
+            });
     }
 
     pub(crate) fn render_evdev_setup(&mut self, ctx: &egui::Context, palette: &Palette) {
