@@ -172,17 +172,14 @@ impl Parser {
                         '\'' => result.push('\''),
                         '"' => result.push('"'),
                         '?' => result.push('?'),
-                        'x' => result.push(self.hex_escape(2)?),
+                        '\n' => {}
                         'u' => result.push(self.hex_escape(4)?),
                         'U' => result.push(self.hex_escape(8)?),
-                        '0'..='7' => {
-                            self.at -= 1;
-                            result.push(self.octal_escape()?);
-                        }
                         other => {
-                            return Err(format!(
-                                "unsupported escape \\{other} in GNOME input-source tuple"
-                            ));
+                            // GVariant copies otherwise-unrecognized escaped
+                            // characters literally, dropping the backslash.
+                            // Serialization only emits quote and backslash.
+                            result.push(other);
                         }
                     }
                 }
@@ -207,26 +204,6 @@ impl Parser {
         self.at = end;
         char::from_u32(value)
             .ok_or_else(|| "invalid Unicode scalar in GNOME input-source tuple".into())
-    }
-
-    fn octal_escape(&mut self) -> Result<char, String> {
-        let start = self.at;
-        let mut value = 0_u32;
-        let mut digits = 0;
-        while digits < 3 {
-            let Some(c @ '0'..='7') = self.peek() else {
-                break;
-            };
-            value = value * 8 + (c as u32 - '0' as u32);
-            self.at += 1;
-            digits += 1;
-        }
-        if digits == 0 || value > 0xff {
-            self.at = start;
-            return Err("invalid octal escape in GNOME input-source tuple".into());
-        }
-        char::from_u32(value)
-            .ok_or_else(|| "invalid octal escape in GNOME input-source tuple".into())
     }
 }
 
@@ -266,18 +243,17 @@ mod tests {
     }
 
     #[test]
-    fn parses_gvariant_unicode_hex_and_octal_escapes() {
+    fn parses_gvariant_unicode_escapes_and_preserves_other_escapes() {
         let parsed =
-            parse_sources("[('xkb', 'de\\u00e9'), ('custom', 'line\\n\\x41\\101\\U0001f642')]")
-                .unwrap();
+            parse_sources("[('xkb', 'de\\u00e9'), ('custom', 'line\\n\\q\\U0001f642')]").unwrap();
         assert_eq!(parsed[0].id, "deé");
-        assert_eq!(parsed[1].id, "line\nAA🙂");
+        assert_eq!(parsed[1].id, "line\nq🙂");
     }
 
     #[test]
-    fn rejects_invalid_gvariant_escapes() {
-        assert!(parse_sources("[('xkb', 'bad\\q')]").is_err());
+    fn rejects_invalid_gvariant_unicode_escapes() {
         assert!(parse_sources("[('xkb', 'bad\\uD800')]").is_err());
+        assert!(parse_sources("[('xkb', 'bad\\U00110000')]").is_err());
     }
     #[test]
     fn parses_current_index() {
