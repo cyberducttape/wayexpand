@@ -287,9 +287,8 @@ case "$active_source" in
     *) log "fail gnome-ibus-source-active GNOME Shell reported $active_source"; exit 1 ;;
 esac
 # Let a real GTK input context activate the GNOME-selected engine. The direct
-# IBus protocol transaction is covered by test-ibus-e2e.sh; creating that
-# protocol-only context here before any text client caused a false failure
-# when the engine correctly had no focused field yet.
+# IBus protocol transaction is covered by test-ibus-e2e.sh; a protocol-only
+# client did not establish the GNOME toolkit path this acceptance test needs.
 if WAYLAND_DISPLAY="$display" /usr/bin/python3 \
     "$E2E_PROJECT_DIR/scripts/certification-clients/gtk_ibus_insertion.py" \
     >"$E2E_WORK/gtk-insertion.log" 2>&1 \
