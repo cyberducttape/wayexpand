@@ -9,6 +9,7 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     let mut requested_mode: Option<String> = None;
     let mut assume_yes = false;
     let mut accept_non_atomic_replacement = false;
+    let mut install_system_integration = false;
     let mut terminals = false;
     let mut check_only = false;
     let mut apply_requested = false;
@@ -24,6 +25,7 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
             }
             "--yes" | "-y" => assume_yes = true,
             "--accept-non-atomic-replacement" => accept_non_atomic_replacement = true,
+            "--install-system-integration" => install_system_integration = true,
             "--backend" => {
                 requested_backend = Some(args.next().ok_or_else(|| {
                     usage_error("--backend requires ibus, input-method, or evdev")
@@ -42,7 +44,7 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
             }
             _ => {
                 usage_bail!(
-                    "usage: wayexpand setup [--mode recommended|maximum|experimental | --backend ibus|input-method|evdev] [--terminals] [--yes] [--accept-non-atomic-replacement]"
+                    "usage: wayexpand setup [--mode recommended|maximum|experimental | --backend ibus|input-method|evdev] [--terminals] [--yes] [--accept-non-atomic-replacement] [--install-system-integration]"
                 )
             }
         }
@@ -56,6 +58,7 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
             || terminals
             || assume_yes
             || accept_non_atomic_replacement
+            || install_system_integration
         {
             usage_bail!("usage: wayexpand setup --check [--json]");
         }
@@ -174,12 +177,16 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     if accept_non_atomic_replacement && backend != "ibus" {
         usage_bail!("--accept-non-atomic-replacement applies only to the IBus backend");
     }
+    if install_system_integration && backend != "ibus" {
+        usage_bail!("--install-system-integration applies only to the IBus backend");
+    }
     configure_setup_backend(
         &backend,
         crate::setup_ibus::IbusSetupOptions {
             assume_yes,
             accept_non_atomic_replacement,
             terminals,
+            install_system_integration,
         },
     )?;
     let hello_available = Config::load(default_config_path()).is_ok_and(|config| {

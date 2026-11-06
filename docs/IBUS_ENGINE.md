@@ -113,12 +113,24 @@ services ran), then changes it. **Verify** runs the same checks as
 `wayexpand ibus status`; if activation or verification fails, setup restores
 the recorded session and says so. The steps are:
 
-1. Installs the component manifest where the **running** ibus-daemon reads
-   components (its `IBUS_COMPONENT_PATH`, otherwise `/usr/share/ibus/component`),
-   with an absolute engine path, after an administrator prompt (pkexec).
-   ibus-daemon never reads per-user directories such as
-   `~/.local/share/ibus/component`, so user installs only stage the manifest.
-   Distribution packages install it themselves.
+1. Checks whether the **running** ibus-daemon already reads the component
+   manifest (its `IBUS_COMPONENT_PATH`, otherwise the distribution directory).
+   Distribution packages own and install this file themselves. A user/tarball
+   install displays a plan before requesting one-time desktop authorization to
+   register the manifest when the running daemon's component directory is not
+   writable by the user. An explicitly configured writable
+   `IBUS_COMPONENT_PATH` can be used without elevation; WayExpand does not
+   assume the ordinary XDG data directory is read by IBus. This does not
+   install application files system-wide or grant keyboard-device access. The
+   GUI has a separate checkbox for that
+   authorization. In scripts, `--yes` alone deliberately skips the privileged
+   step; pass `--install-system-integration` only when that change is intended.
+   If authorization is unavailable, install the distribution package, restore
+   the desktop `pkexec` authorization path, or select another supported input
+   route. No ordinary per-user IBus component directory is assumed to work.
+   Setup removes its private staged XML on success and failure. After resolving
+   the authorization problem, the supported retry is
+   `wayexpand setup --backend ibus --install-system-integration`.
 2. On KDE Plasma Wayland, sets KWin's Virtual Keyboard to IBus Wayland (the
    same as System Settings → Keyboard → Virtual Keyboard). Without it,
    Wayland applications never reach IBus. A hand-started ibus-daemon is

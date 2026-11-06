@@ -4,6 +4,15 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Make missing system IBus registration an explicit setup choice. User installs
+  show the registration plan and ask separately before a one-time administrator
+  authorization; `--yes` alone cannot invoke it, while
+  `--install-system-integration` is the explicit scripted retry. The GUI also
+  asks separately from non-atomic replacement consent. Explain alternatives
+  when `pkexec` is unavailable and remove private staged manifests with an
+  automatic cleanup guard on every exit path. Document GNOME IBus certification
+  coverage by Fedora, Ubuntu LTS, GNOME Shell range, and GTK 3/GTK 4/Qt/browser/
+  terminal clients; all remain untested pending real-session evidence.
 - Journal the IBus component's original bytes, SHA-256, mode, and ownership
   before setup replaces it. On failed activation, restore the prior component
   or remove a newly installed one, restore setup-written consent and terminal

@@ -3,6 +3,7 @@ set -eu
 
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 matrix="$project_dir/tests/certification/compositor-matrix.json"
+gnome_ibus_matrix="$project_dir/tests/certification/gnome-ibus-matrix.json"
 
 command -v jq >/dev/null 2>&1
 
@@ -11,7 +12,9 @@ jq -e '
   (.outcome_types == ["pass", "fail", "unsupported-by-design", "UNVERIFIED"]) and
   ([.out_of_scope_capabilities[] | select(.id == "active-ime-preedit" and .status == "unsupported-by-design")] | length == 1) and
   ([.targets[].id] | sort == ["gnome", "hyprland", "kde", "sway"]) and
-  ([.targets[] | select((.input_paths | length) > 0 and (.toolkits | sort == ["GTK", "Qt"]) and (.required_client_markers | sort == ["browser", "editor", "electron", "gtk", "password", "qt", "terminal"]) and (.requires_password_field_check == true))] | length == 4) and
+  ([.targets[] | select((.input_paths | length) > 0 and (.toolkits | sort == ["GTK", "Qt"]) and (.requires_password_field_check == true))] | length == 4) and
+  ([.targets[] | select(.id != "gnome" and (.required_client_markers | sort == ["browser", "editor", "electron", "gtk", "password", "qt", "terminal"]))] | length == 3) and
+  ([.targets[] | select(.id == "gnome" and (.required_client_markers | sort == ["browser", "editor", "electron", "gtk3", "gtk4", "password", "qt", "terminal"]))] | length == 1) and
   ([.targets[] | select((.id == "kde" or .id == "gnome") and (.input_paths | index("ibus")) and (.input_paths | index("evdev+libei")))] | length == 2) and
   ([.targets[] | select((.certification_status == "certified" and (.certification_evidence | type == "string")) or (.certification_status == "not-certified" and .certification_evidence == null))] | length == 4) and
   ([.targets[] | select((.certification_backend as $backend | (.input_paths | index($backend)) != null) and (.production_certification_required != true or .certification_backend == "input-method-v2"))] | length == 4) and
@@ -26,6 +29,15 @@ jq -e '
   ([.required_scenarios[]] | index("backspace") != null and index("escape") != null and index("arrow-navigation") != null and index("function-keys") != null and index("held-modifiers") != null and index("repeated-keys") != null and index("ctrl-alt-super-chords") != null and index("application-shortcuts") != null and index("compositor-shortcuts") != null and index("media-keys") != null and index("held-modifier-unsupported-key") != null and index("caps-lock") != null and index("fast-typing") != null and index("second-trigger-during-nonatomic-replacement") != null and index("modifier-during-nonatomic-replacement") != null and index("focus-change-during-expansion") != null and index("target-closes-during-expansion") != null and index("bluetooth-keyboard-reconnect") != null and index("key-pass-through-injector-failure") != null and index("key-pass-through-reconnect") != null and index("key-pass-through-cancellation") != null and index("key-pass-through-daemon-crash") != null and index("key-pass-through-compositor-restart") != null and index("dead-key-committed-text") != null and index("compose-committed-text") != null and index("expansion-after-committed-composition") != null and index("multiple-keyboards") != null and index("suspend-resume") != null and index("daemon-restart-during-typing") != null and index("command-timeout") != null and index("expansion-cancellation") != null and index("keyboard-hotplug") != null and index("keyboard-hotplug-during-nonatomic-replacement") != null and index("portal-revocation") != null and index("picker-same-app-title-focus-isolation") != null and index("ime-preedit") == null) and
   ([.required_layout_profiles[]] | unique | sort == ["altgr", "de", "fr", "multi-layout-switching", "us"])
 ' "$matrix" >/dev/null
+
+jq -e '
+  .schema == 1 and
+  .initial_status == "not-tested" and
+  ([.platforms[].id] | sort == ["fedora-gnome", "gnome-newest-supported-shell", "gnome-oldest-supported-shell", "ubuntu-24.04-gnome", "ubuntu-26.04-gnome"]) and
+  (.application_classes | sort == ["browser", "gtk3", "gtk4", "qt", "terminal"]) and
+  ([.required_lifecycle_scenarios[]] | unique | sort == ["clean-user-install", "component-registration", "gnome-source-registration-and-activation", "logout-login-persistence", "real-trigger-replacement", "switch-away-and-back", "uninstall-preserves-original-desktop-settings", "upgrade-preserves-input-sources"]) and
+  (.evidence_requirement | contains("exact package") and contains("GNOME Shell version") and contains("physical-session evidence"))
+' "$gnome_ibus_matrix" >/dev/null
 
 workflow="$project_dir/.github/workflows/certification.yml"
 gate_script="$project_dir/scripts/check-production-certification.sh"

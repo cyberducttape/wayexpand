@@ -107,6 +107,7 @@ impl GuiApp {
         } else if self.setup_consent_open {
             self.setup_consent_open = false;
             self.setup_consent_acknowledged = false;
+            self.setup_system_integration_acknowledged = false;
         } else if self.evdev_setup_open {
             self.evdev_setup_open = false;
         } else if self.settings_open {

@@ -53,6 +53,44 @@ pub(crate) struct IbusSetupOptions {
     pub(crate) accept_non_atomic_replacement: bool,
     /// Also cover terminals with a terminal-only evdev daemon.
     pub(crate) terminals: bool,
+    /// Explicit authorization to attempt the one-time privileged component
+    /// registration. `--yes` does not imply this authorization.
+    pub(crate) install_system_integration: bool,
+}
+
+struct PrivateStagingFile(Option<PathBuf>);
+
+impl PrivateStagingFile {
+    fn path(&self) -> &Path {
+        self.0
+            .as_deref()
+            .expect("staging path is present until cleanup")
+    }
+
+    fn cleanup(&mut self) -> Result<()> {
+        let Some(path) = self.0.as_deref() else {
+            return Ok(());
+        };
+        match fs::remove_file(path) {
+            Ok(()) => {
+                self.0 = None;
+                Ok(())
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                self.0 = None;
+                Ok(())
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
+}
+
+impl Drop for PrivateStagingFile {
+    fn drop(&mut self) {
+        if let Some(path) = self.0.take() {
+            let _ = fs::remove_file(path);
+        }
+    }
 }
 
 /// Run `program` with a deadline and return its stdout when it succeeds.
@@ -184,6 +222,47 @@ fn sha256_hex(bytes: &[u8]) -> String {
         })
 }
 
+fn run_component_admin_command(
+    privileged: bool,
+    program: &str,
+    arguments: &[&str],
+) -> Result<std::process::ExitStatus> {
+    if privileged {
+        let mut elevated_arguments = Vec::with_capacity(arguments.len() + 1);
+        elevated_arguments.push(program);
+        elevated_arguments.extend_from_slice(arguments);
+        run_setup_command("pkexec", &elevated_arguments)
+    } else {
+        run_setup_command(program, arguments)
+    }
+}
+
+/// Check the closest existing parent, so an explicitly configured writable
+/// `IBUS_COMPONENT_PATH` can be used without a privilege prompt. The ordinary
+/// XDG data directory is not considered unless the running daemon selected it.
+fn component_path_writable(target: &Path) -> bool {
+    use std::{ffi::CString, os::unix::ffi::OsStrExt};
+    let Some(mut parent) = target.parent() else {
+        return false;
+    };
+    while !parent.exists() {
+        let Some(ancestor) = parent.parent() else {
+            return false;
+        };
+        parent = ancestor;
+    }
+    let Ok(path) = CString::new(parent.as_os_str().as_bytes()) else {
+        return false;
+    };
+    // SAFETY: path is a valid NUL-terminated path; access retains no pointer.
+    unsafe { libc::access(path.as_ptr(), libc::W_OK | libc::X_OK) == 0 }
+}
+
+fn current_uid_gid() -> (u32, u32) {
+    // SAFETY: geteuid/getegid have no preconditions and only read process state.
+    unsafe { (libc::geteuid(), libc::getegid()) }
+}
+
 /// Journal the system-wide component file separately from the running-session
 /// snapshot so setup can restore a replacement or remove a newly installed
 /// manifest if later activation fails.
@@ -193,6 +272,7 @@ struct ComponentInstallJournal {
     original: Option<ComponentFileState>,
     installed: Option<ComponentFileState>,
     install_attempted: bool,
+    install_used_privilege: bool,
     installed_state_known: bool,
     missing_directories: Vec<PathBuf>,
 }
@@ -216,6 +296,7 @@ impl ComponentInstallJournal {
             original: original.clone(),
             installed: original,
             install_attempted: false,
+            install_used_privilege: false,
             installed_state_known: true,
             missing_directories,
         })
@@ -242,16 +323,17 @@ impl ComponentInstallJournal {
                 );
             }
             if let Some(original) = &self.original {
-                let staged = write_private_staging_file("ibus-component-restore", &original.bytes)?;
+                let mut staged =
+                    write_private_staging_file("ibus-component-restore", &original.bytes)?;
                 let mode = format!("{:o}", original.mode);
                 let uid = original.uid.to_string();
                 let gid = original.gid.to_string();
                 let target = self.target.display().to_string();
-                let staged_arg = staged.display().to_string();
-                let result = run_setup_command(
-                    "pkexec",
+                let staged_arg = staged.path().display().to_string();
+                let result = run_component_admin_command(
+                    self.install_used_privilege,
+                    "/usr/bin/install",
                     &[
-                        "/usr/bin/install",
                         "-D",
                         "-o",
                         &uid,
@@ -263,10 +345,11 @@ impl ComponentInstallJournal {
                         &target,
                     ],
                 );
-                let _ = fs::remove_file(&staged);
+                let cleanup = staged.cleanup();
                 let status = result.context(
                     "could not restore the original IBus component through the administrator prompt",
                 )?;
+                cleanup.context("could not remove the private staged IBus component backup")?;
                 if !status.success() {
                     bail!("administrator command did not restore the original IBus component (exit {status})");
                 }
@@ -275,8 +358,12 @@ impl ComponentInstallJournal {
                 }
             } else {
                 let target = self.target.display().to_string();
-                let status = run_setup_command("pkexec", &["/usr/bin/rm", "-f", "--", &target])
-                    .context("could not remove the IBus component installed by this setup")?;
+                let status = run_component_admin_command(
+                    self.install_used_privilege,
+                    "/usr/bin/rm",
+                    &["-f", "--", &target],
+                )
+                .context("could not remove the IBus component installed by this setup")?;
                 if !status.success() {
                     bail!(
                         "administrator command did not remove the IBus component (exit {status})"
@@ -293,8 +380,12 @@ impl ComponentInstallJournal {
                 continue;
             }
             let path = directory.display().to_string();
-            let status = run_setup_command("pkexec", &["/usr/bin/rmdir", "--", &path])
-                .context("could not remove an empty system directory created during setup")?;
+            let status = run_component_admin_command(
+                self.install_used_privilege,
+                "/usr/bin/rmdir",
+                &["--", &path],
+            )
+            .context("could not remove an empty system directory created during setup")?;
             if !status.success() {
                 bail!("setup-created system directory {} is not empty or could not be removed; leaving it intact", directory.display());
             }
@@ -475,7 +566,7 @@ fn restore_file_owner(path: &Path, uid: u32, gid: u32) -> Result<()> {
     Ok(())
 }
 
-fn write_private_staging_file(prefix: &str, bytes: &[u8]) -> Result<PathBuf> {
+fn write_private_staging_file(prefix: &str, bytes: &[u8]) -> Result<PrivateStagingFile> {
     use std::os::unix::fs::OpenOptionsExt;
     let runtime = env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
@@ -492,7 +583,7 @@ fn write_private_staging_file(prefix: &str, bytes: &[u8]) -> Result<PathBuf> {
         let _ = fs::remove_file(&path);
         return Err(error.into());
     }
-    Ok(path)
+    Ok(PrivateStagingFile(Some(path)))
 }
 
 fn engine_binary() -> Option<PathBuf> {
@@ -577,7 +668,10 @@ fn stale_engine_processes_at(
 
 /// Install the component where the running ibus-daemon reads components.
 /// Writing there needs administrator rights, so this asks through pkexec.
-fn install_component(journal: &mut ComponentInstallJournal) -> Result<()> {
+fn install_component(
+    journal: &mut ComponentInstallJournal,
+    options: IbusSetupOptions,
+) -> Result<()> {
     let report = chain::diagnose();
     let component_ok = report
         .check("component")
@@ -592,33 +686,68 @@ fn install_component(journal: &mut ComponentInstallJournal) -> Result<()> {
     let engine = engine_binary().ok_or_else(|| {
         anyhow::anyhow!("`wayexpand-ibus` is not on PATH; reinstall WayExpand (user installs need ~/.local/bin on PATH)")
     })?;
+    let (uid, gid) = current_uid_gid();
+    let original_has_other_owner = journal
+        .original
+        .as_ref()
+        .is_some_and(|original| original.uid != uid || original.gid != gid);
+    let privileged = !component_path_writable(&journal.target) || original_has_other_owner;
+    if privileged && !executable_on_path("pkexec") {
+        bail!("WX-IBUS-AUTH-001: no `pkexec` desktop authorization helper is available. WayExpand cannot register the system IBus component nonprivileged because the running IBus daemon does not read the ordinary per-user component directory. Install WayExpand with your distribution package manager, restore `pkexec` and its desktop authorization agent, or choose another supported input route. You can safely retry with `wayexpand setup --backend ibus --install-system-integration` after that is resolved.");
+    }
+    let system_install_consent = if !privileged {
+        step(&format!(
+            "The configured IBus component directory {} is writable by this user; registering without administrator privileges",
+            journal.target.parent().unwrap_or(&journal.target).display()
+        ));
+        true
+    } else if options.install_system_integration {
+        true
+    } else if options.assume_yes {
+        bail!("WX-IBUS-INTEGRATION-CONSENT: the IBus manifest is not registered. `--yes` does not authorize a system-wide integration change. Review the plan, then rerun `wayexpand setup --backend ibus --install-system-integration`, or install WayExpand through your distribution package manager.");
+    } else {
+        println!("WayExpand IBus installation plan:");
+        println!("  - Application files remain in your user installation.");
+        println!(
+            "  - IBus must read a component manifest from {}.",
+            journal.target.display()
+        );
+        println!("  - Registering it requires a one-time administrator authorization.");
+        if original_has_other_owner {
+            println!("  - The existing manifest is owned by another account; authorization also preserves its original ownership during rollback.");
+        }
+        println!("  - No keyboard permissions or replacement consent are granted by this step.");
+        println!("Alternative: install the distribution package (which owns the manifest) or choose another supported input route.");
+        prompt_yes_no(
+            "Install the IBus integration now using the desktop authorization prompt? [y/N] ",
+            false,
+        )?
+    };
+    if !system_install_consent {
+        bail!("IBus integration was not installed. No session activation was attempted; rerun `wayexpand setup --backend ibus --install-system-integration` when ready, or use a distribution package/another input route.");
+    }
+    journal.install_used_privilege = privileged;
     let manifest = component_manifest(&engine);
-    let staged = write_private_staging_file("ibus-component", manifest.as_bytes())?;
+    let mut staged = write_private_staging_file("ibus-component", manifest.as_bytes())?;
     step(&format!(
         "Installing the IBus component to {} (IBus never reads per-user component folders; you will be asked for an administrator password)",
         journal.target.display()
     ));
-    let staged_arg = staged.display().to_string();
+    let staged_arg = staged.path().display().to_string();
     let target_arg = journal.target.display().to_string();
     journal.install_attempted = true;
-    let result = run_setup_command(
-        "pkexec",
-        &[
-            "/usr/bin/install",
-            "-D",
-            "-m",
-            "0644",
-            &staged_arg,
-            &target_arg,
-        ],
+    let result = run_component_admin_command(
+        privileged,
+        "/usr/bin/install",
+        &["-D", "-m", "0644", &staged_arg, &target_arg],
     );
     let observation = journal.observe_after_install();
-    let _ = fs::remove_file(&staged);
-    let status =
-        result.context("could not run the administrator prompt to install the IBus component")?;
+    let cleanup = staged.cleanup();
+    let status = result.context(if privileged { "could not start IBus component registration through the desktop authorization helper. Check that a polkit authentication agent is running, then retry `wayexpand setup --backend ibus --install-system-integration`; alternatively install the distribution package or select another input route" } else { "could not register the IBus component in the configured user-writable component directory" })?;
+    cleanup.context("could not remove the private staged IBus component manifest")?;
     observation.context("could not verify the IBus component after installation")?;
     if !status.success() {
-        bail!("the administrator command exited with {status}; the component transaction will be rolled back");
+        bail!("WX-IBUS-AUTH-002: IBus component registration did not complete (authorization may have been denied, or {} may be read-only). Setup will roll back any partial file change. Retry with `wayexpand setup --backend ibus --install-system-integration` after resolving authorization, or install the distribution package/use another input route", journal.target.display());
     }
     let installed = journal.installed.as_ref().ok_or_else(|| {
         anyhow::anyhow!("the administrator command succeeded but the IBus component is missing")
@@ -627,6 +756,17 @@ fn install_component(journal: &mut ComponentInstallJournal) -> Result<()> {
         bail!("the installed IBus component did not match the requested manifest hash and mode");
     }
     Ok(())
+}
+
+fn executable_on_path(program: &str) -> bool {
+    env::var_os("PATH").is_some_and(|path| {
+        env::split_paths(&path).any(|directory| {
+            let candidate = directory.join(program);
+            fs::metadata(candidate).is_ok_and(|metadata| {
+                metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+            })
+        })
+    })
 }
 
 /// On KDE Plasma Wayland, make KWin launch IBus as its input method; only
@@ -1276,12 +1416,22 @@ impl SessionSnapshot {
         })
     }
 
-    /// Undo session changes in reverse order. Prepared, inert changes (the
-    /// component file, configuration consent) are kept.
+    /// Undo runtime session changes. Persistent component and config changes
+    /// are restored by the enclosing `SetupTransaction`.
     fn rollback(&self) -> Vec<String> {
-        let mut failures = self.rollback_with(kwriteconfig(), |program, arguments| {
-            run_setup_command(program, arguments).is_ok_and(|status| status.success())
-        });
+        let mut failures = self.rollback_with(
+            kwriteconfig(),
+            |program, arguments| {
+                run_setup_command(program, arguments).is_ok_and(|status| status.success())
+            },
+            |program, arguments| {
+                if program == "ibus" && arguments == ["engine"] {
+                    command_output_with_status(program, arguments).map(|(_, output)| output)
+                } else {
+                    command_output(program, arguments)
+                }
+            },
+        );
         let restored = ServiceInventory::probe();
         for original in &self.services {
             if !original.installed {
@@ -1323,6 +1473,7 @@ impl SessionSnapshot {
         &self,
         kwriteconfig_program: Option<&str>,
         mut run: impl FnMut(&str, &[&str]) -> bool,
+        mut read: impl FnMut(&str, &[&str]) -> Option<String>,
     ) -> Vec<String> {
         println!("Setup did not complete; restoring your previous input-method setup…");
         let mut failures = Vec::new();
@@ -1359,7 +1510,7 @@ impl SessionSnapshot {
         if let (Some(expected), Some(original)) =
             (&self.preload_engines_after, &self.preload_engines)
         {
-            let current = command_output(
+            let current = read(
                 "gsettings",
                 &["get", "org.freedesktop.ibus.general", "preload-engines"],
             )
@@ -1403,8 +1554,7 @@ impl SessionSnapshot {
             .filter(|engine| *engine != "wayexpand")
         {
             let requested = run("ibus", &["engine", engine]);
-            let selected = command_output_with_status("ibus", &["engine"])
-                .map(|(_, value)| value.trim().to_owned());
+            let selected = read("ibus", &["engine"]).map(|value| value.trim().to_owned());
             if selected
                 .as_deref()
                 .is_some_and(|selected| selected != engine)
@@ -1888,9 +2038,19 @@ pub(crate) fn repair_gnome_input_source() -> Result<()> {
         Ok(())
     })();
     if let Err(error) = activation {
-        let failures = snapshot.rollback_with(None, |program, arguments| {
-            run_setup_command(program, arguments).is_ok_and(|status| status.success())
-        });
+        let failures = snapshot.rollback_with(
+            None,
+            |program, arguments| {
+                run_setup_command(program, arguments).is_ok_and(|status| status.success())
+            },
+            |program, arguments| {
+                if program == "ibus" && arguments == ["engine"] {
+                    command_output_with_status(program, arguments).map(|(_, output)| output)
+                } else {
+                    command_output(program, arguments)
+                }
+            },
+        );
         bail!(
             "GNOME source repair failed ({error}); prior settings were restored{}",
             if failures.is_empty() {
@@ -1913,7 +2073,7 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
     // mutation; activation state is captured immediately before it changes.
     let mut transaction = SetupTransaction::capture(companion == CompanionService::Terminals)?;
     let preparation = (|| -> Result<bool> {
-        install_component(&mut transaction.component)?;
+        install_component(&mut transaction.component, options)?;
         let authorization_required = ensure_replacement_consent(options, &mut transaction.config)?;
         if companion == CompanionService::Terminals && options.terminals {
             prepare_terminals(
@@ -1995,6 +2155,17 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn private_staging_manifest_is_removed_when_scope_ends() {
+        let path = env::temp_dir().join(format!(
+            "wayexpand-staged-manifest-test-{}",
+            std::process::id()
+        ));
+        fs::write(&path, b"<component />").unwrap();
+        drop(PrivateStagingFile(Some(path.clone())));
+        assert!(!path.exists());
+    }
 
     #[test]
     fn compatibility_off_is_reported_as_incomplete_setup() {
@@ -2191,17 +2362,32 @@ mod tests {
                 .collect(),
         };
         let mut actions = Vec::<(String, Vec<String>)>::new();
-        let failures = snapshot.rollback_with(Some("kwriteconfig6"), |program, arguments| {
-            actions.push((
-                program.to_owned(),
-                arguments
-                    .iter()
-                    .map(|argument| (*argument).to_owned())
-                    .collect(),
-            ));
-            true
-        });
-        assert!(failures.is_empty());
+        let failures = snapshot.rollback_with(
+            Some("kwriteconfig6"),
+            |program, arguments| {
+                actions.push((
+                    program.to_owned(),
+                    arguments
+                        .iter()
+                        .map(|argument| (*argument).to_owned())
+                        .collect(),
+                ));
+                true
+            },
+            |program, arguments| {
+                if program == "ibus" && arguments == ["engine"] {
+                    Some("xkb:us::eng".to_owned())
+                } else if program == "gsettings"
+                    && arguments.first() == Some(&"get")
+                    && arguments.get(2) == Some(&"preload-engines")
+                {
+                    Some("['xkb:us::eng', 'wayexpand']".to_owned())
+                } else {
+                    None
+                }
+            },
+        );
+        assert!(failures.is_empty(), "rollback failures: {failures:?}");
 
         assert_eq!(
             &actions[..4],

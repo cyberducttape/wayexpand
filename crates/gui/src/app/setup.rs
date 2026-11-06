@@ -129,15 +129,23 @@ fn run_user_systemctl(
 
 impl GuiApp {
     /// Run the safe recommended setup off the UI thread. The additional flag
-    /// is included only after the user explicitly accepts IBus replacement.
+    /// is included only after the user explicitly accepts IBus replacement
+    /// and the possible system-wide IBus manifest registration.
     pub(crate) fn start_setup(&mut self) {
-        self.start_setup_with_replacement_consent(false);
+        self.start_setup_with_replacement_consent(false, false);
     }
 
-    fn start_setup_with_replacement_consent(&mut self, consent: bool) {
+    fn start_setup_with_replacement_consent(
+        &mut self,
+        replacement_consent: bool,
+        system_integration_consent: bool,
+    ) {
         let mut arguments = vec!["setup".into(), "--yes".into()];
-        if consent {
+        if replacement_consent {
             arguments.push("--accept-non-atomic-replacement".into());
+        }
+        if system_integration_consent {
+            arguments.push("--install-system-integration".into());
         }
         self.start_cli_task(
             arguments,
@@ -387,13 +395,13 @@ impl GuiApp {
             .inner
             .on_hover_text(self.strings.turn_on_tooltip());
         if response.clicked() {
-            let needs_ibus_consent = self.config.settings.compatibility_mode
-                == wayexpand_core::CompatibilityMode::Off
-                && self
-                    .recommended_route
-                    .is_some_and(|route| route.setup_backend() == "ibus");
-            if needs_ibus_consent {
-                self.setup_consent_acknowledged = false;
+            let ibus_route = self
+                .recommended_route
+                .is_some_and(|route| route.setup_backend() == "ibus");
+            if ibus_route {
+                self.setup_consent_acknowledged = self.config.settings.compatibility_mode
+                    != wayexpand_core::CompatibilityMode::Off;
+                self.setup_system_integration_acknowledged = false;
                 self.setup_consent_open = true;
             } else if self.recommended_route.is_none() {
                 self.refresh_diagnostics(false);
@@ -415,31 +423,50 @@ impl GuiApp {
         }
         egui::Modal::new(egui::Id::new("ibus_replacement_consent")).show(ctx, |ui| {
                 ui.set_width(430.0);
-                ui.heading("Enable text expansion in IBus?");
+                ui.heading("Set up WayExpand with IBus?");
                 ui.add_space(8.0);
+                ui.label("The IBus engine manifest may need to be registered in the component directory used by your running IBus session. Application files remain in your user installation; administrator authorization is requested only if that directory is not writable by you.");
+                ui.checkbox(
+                    &mut self.setup_system_integration_acknowledged,
+                    "I want to install the IBus integration if it is missing.",
+                );
+                ui.add_space(8.0);
+                ui.label("Alternative: cancel and install WayExpand using your distribution package, which includes the IBus registration, or select another input route.");
+                if self.config.settings.compatibility_mode
+                    == wayexpand_core::CompatibilityMode::Off
+                {
+                    ui.add_space(8.0);
                 ui.label("WayExpand checks the text before the cursor against your trigger, then deletes the trigger and inserts the snippet in two separate steps. This replacement is not atomic.");
                 ui.add_space(8.0);
                 ui.label("If focus or input changes during insertion, WayExpand cannot guarantee rollback of text already sent.");
-                ui.add_space(8.0);
                 ui.checkbox(
                     &mut self.setup_consent_acknowledged,
                     "I understand and want to enable verified two-step replacement.",
                 );
+                }
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
                     if ui
                         .add_enabled(
-                            self.setup_consent_acknowledged && self.setup_task.is_none(),
+                            self.setup_system_integration_acknowledged
+                                && self.setup_consent_acknowledged
+                                && self.setup_task.is_none(),
                             egui::Button::new("Continue setup"),
                         )
                         .clicked()
                     {
                         self.setup_consent_open = false;
-                        self.start_setup_with_replacement_consent(true);
+                        let replacement_consent = self.config.settings.compatibility_mode
+                            == wayexpand_core::CompatibilityMode::Off;
+                        self.start_setup_with_replacement_consent(
+                            replacement_consent,
+                            true,
+                        );
                     }
                     if ui.button("Cancel").clicked() {
                         self.setup_consent_open = false;
                         self.setup_consent_acknowledged = false;
+                        self.setup_system_integration_acknowledged = false;
                     }
                 });
             });
