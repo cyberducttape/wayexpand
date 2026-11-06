@@ -31,6 +31,33 @@ export function subscriberSnapshot(appId, title, instanceId, includeTitles = fal
     return [appId, includeTitles ? title : '', instanceId];
 }
 
+/** Bound authorization requests while allowing active subscribers to reconfigure. */
+export class SubscriptionReservations {
+    constructor(limit) {
+        this._limit = limit;
+        this._pending = new Set();
+    }
+
+    reserve(sender, activeCount) {
+        if (this._pending.has(sender) || activeCount + this._pending.size >= this._limit)
+            return false;
+        this._pending.add(sender);
+        return true;
+    }
+
+    release(sender) {
+        return this._pending.delete(sender);
+    }
+
+    clear() {
+        this._pending.clear();
+    }
+
+    get size() {
+        return this._pending.size;
+    }
+}
+
 export class LatestOnlyDelivery {
     constructor(send, onFailure) {
         this._send = send;

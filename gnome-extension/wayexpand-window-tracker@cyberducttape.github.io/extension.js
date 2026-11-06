@@ -23,6 +23,7 @@ import {
     isAuthorizedTrackerClient,
     LatestOnlyDelivery,
     setTitleAccess,
+    SubscriptionReservations,
     subscriberSnapshot,
 } from './notification-queue.js';
 
@@ -89,6 +90,8 @@ function describe(window, includeTitle = false) {
 export default class WayExpandWindowTracker extends Extension {
     enable() {
         this._subscribers = new Map();
+        this._pendingSubscriptions = new Map();
+        this._subscriptionReservations = new SubscriptionReservations(MAX_SUBSCRIBERS);
         this._focused = null;
         this._notifySource = 0;
         this._latestNotification = null;
@@ -110,6 +113,14 @@ export default class WayExpandWindowTracker extends Extension {
             subscriber.delivery.close();
             Gio.bus_unwatch_name(subscriber.watchId);
         }
+        for (const invocation of this._pendingSubscriptions.values()) {
+            invocation.return_dbus_error(
+                'org.wayexpand.ShellWindowTracker1.Error.Unavailable',
+                'the GNOME window tracker was disabled during subscription',
+            );
+        }
+        this._pendingSubscriptions.clear();
+        this._subscriptionReservations.clear();
         this._subscribers = null;
         this._exported.unexport();
         this._exported = null;
@@ -190,50 +201,89 @@ export default class WayExpandWindowTracker extends Extension {
 
     _subscribe(invocation, includeTitles) {
         const subscriber = invocation.get_sender();
-        if (!this._isAuthorizedSubscriber(subscriber)) {
-            invocation.return_error_literal(Gio.DBusError, Gio.DBusError.ACCESS_DENIED,
-                'window tracker subscriptions are limited to WayExpand executables');
+        if (!this._subscribers) {
+            invocation.return_dbus_error(
+                'org.wayexpand.ShellWindowTracker1.Error.Unavailable',
+                'the GNOME window tracker is not enabled',
+            );
             return;
         }
-        if (!this._subscribers.has(subscriber)) {
-            if (this._subscribers.size >= MAX_SUBSCRIBERS) {
-                invocation.return_error_literal(Gio.DBusError, Gio.DBusError.LIMITS_EXCEEDED,
-                    'too many WayExpand window-tracker subscribers');
-                return;
-            }
-            const watchId = Gio.bus_watch_name_on_connection(Gio.DBus.session, subscriber,
-                Gio.BusNameWatcherFlags.NONE, null, () => this._drop(subscriber));
-            const state = {watchId, delivery: null, includeTitles};
-            state.delivery = new LatestOnlyDelivery((parameters, complete) => {
-                Gio.DBus.session.call(subscriber, CLIENT_PATH, CLIENT_IFACE, 'WindowChanged',
-                    parameters, null, Gio.DBusCallFlags.NO_AUTO_START, CALL_TIMEOUT_MS, null,
-                    (connection, result) => {
-                        try {
-                            connection.call_finish(result);
-                            complete(null);
-                        } catch (error) {
-                            complete(error);
-                        }
-                    });
-            }, () => this._drop(subscriber));
-            this._subscribers.set(subscriber, state);
-        } else {
+        const active = this._subscribers.get(subscriber);
+        if (active) {
             // Treat every subscription call as an explicit privacy mode
-            // update. In particular, Subscribe() must revoke title delivery
-            // from a connection that previously opted in.
+            // update. In particular, Subscribe() revokes future and queued
+            // title delivery from a connection that previously opted in.
             setTitleAccess(
-                this._subscribers.get(subscriber),
+                active,
                 includeTitles,
                 new GLib.Variant('(sss)', describe(this._focused, false)),
             );
+            this._watchTitle(this._focused);
+            invocation.return_value(new GLib.Variant('(sss)', describe(this._focused, active.includeTitles)));
+            return;
         }
-        const state = this._subscribers.get(subscriber);
-        this._watchTitle(this._focused);
-        invocation.return_value(new GLib.Variant('(sss)', describe(this._focused, state.includeTitles)));
+        if (this._pendingSubscriptions.has(subscriber)
+            || !this._subscriptionReservations.reserve(subscriber, this._subscribers.size)) {
+            invocation.return_error_literal(Gio.DBusError, Gio.DBusError.LIMITS_EXCEEDED,
+                'too many pending or active WayExpand window-tracker subscribers');
+            return;
+        }
+        this._pendingSubscriptions.set(subscriber, invocation);
+        this._isAuthorizedSubscriber(subscriber, authorized => {
+            if (this._pendingSubscriptions.get(subscriber) !== invocation)
+                return;
+            this._pendingSubscriptions.delete(subscriber);
+            this._subscriptionReservations.release(subscriber);
+            if (!this._subscribers) {
+                invocation.return_dbus_error(
+                    'org.wayexpand.ShellWindowTracker1.Error.Unavailable',
+                    'the GNOME window tracker was disabled during subscription',
+                );
+                return;
+            }
+            if (!authorized) {
+                invocation.return_error_literal(Gio.DBusError, Gio.DBusError.ACCESS_DENIED,
+                    'window tracker subscriptions are limited to WayExpand executables');
+                return;
+            }
+            this._addSubscriber(subscriber, includeTitles);
+            const state = this._subscribers.get(subscriber);
+            this._watchTitle(this._focused);
+            invocation.return_value(new GLib.Variant('(sss)', describe(this._focused, state.includeTitles)));
+        });
+    }
+
+    _addSubscriber(subscriber, includeTitles) {
+        const watchId = Gio.bus_watch_name_on_connection(Gio.DBus.session, subscriber,
+            Gio.BusNameWatcherFlags.NONE, null, () => this._drop(subscriber));
+        const state = {watchId, delivery: null, includeTitles};
+        state.delivery = new LatestOnlyDelivery((parameters, complete) => {
+            Gio.DBus.session.call(subscriber, CLIENT_PATH, CLIENT_IFACE, 'WindowChanged',
+                parameters, null, Gio.DBusCallFlags.NO_AUTO_START, CALL_TIMEOUT_MS, null,
+                (connection, result) => {
+                    try {
+                        connection.call_finish(result);
+                        complete(null);
+                    } catch (error) {
+                        complete(error);
+                    }
+                });
+        }, () => this._drop(subscriber));
+        this._subscribers.set(subscriber, state);
     }
 
     UnsubscribeAsync(_parameters, invocation) {
-        this._drop(invocation.get_sender());
+        const subscriber = invocation.get_sender();
+        const pending = this._pendingSubscriptions.get(subscriber);
+        if (pending) {
+            this._pendingSubscriptions.delete(subscriber);
+            this._subscriptionReservations.release(subscriber);
+            pending.return_dbus_error(
+                'org.wayexpand.ShellWindowTracker1.Error.Cancelled',
+                'the WayExpand client cancelled its pending tracker subscription',
+            );
+        }
+        this._drop(subscriber);
         invocation.return_value(null);
     }
 
@@ -256,21 +306,46 @@ export default class WayExpandWindowTracker extends Extension {
         this._watchTitle(this._focused);
     }
 
-    _isAuthorizedSubscriber(subscriber) {
+    _isAuthorizedSubscriber(subscriber, complete) {
+        let completed = false;
+        const finish = authorized => {
+            if (completed)
+                return;
+            completed = true;
+            complete(authorized);
+        };
         try {
-            const userReply = Gio.DBus.session.call_sync(DBUS_NAME, DBUS_PATH, DBUS_NAME,
+            Gio.DBus.session.call(DBUS_NAME, DBUS_PATH, DBUS_NAME,
                 'GetConnectionUnixUser', new GLib.Variant('(s)', [subscriber]),
-                new GLib.VariantType('(u)'), Gio.DBusCallFlags.NONE, 500, null);
-            const [uid] = userReply.deep_unpack();
-            const pidReply = Gio.DBus.session.call_sync(DBUS_NAME, DBUS_PATH, DBUS_NAME,
-                'GetConnectionUnixProcessID', new GLib.Variant('(s)', [subscriber]),
-                new GLib.VariantType('(u)'), Gio.DBusCallFlags.NONE, 500, null);
-            const [pid] = pidReply.deep_unpack();
-            const executable = GLib.file_read_link(`/proc/${pid}/exe`);
-            return isAuthorizedTrackerClient(uid, GLib.get_user_id(), executable);
+                new GLib.VariantType('(u)'), Gio.DBusCallFlags.NONE, 500, null,
+                (connection, userResult) => {
+                    let uid;
+                    try {
+                        [uid] = connection.call_finish(userResult).deep_unpack();
+                    } catch {
+                        // Unknown peer identity must not gain access to focus metadata.
+                        finish(false);
+                        return;
+                    }
+                    try {
+                        Gio.DBus.session.call(DBUS_NAME, DBUS_PATH, DBUS_NAME,
+                            'GetConnectionUnixProcessID', new GLib.Variant('(s)', [subscriber]),
+                            new GLib.VariantType('(u)'), Gio.DBusCallFlags.NONE, 500, null,
+                            (pidConnection, pidResult) => {
+                                try {
+                                    const [pid] = pidConnection.call_finish(pidResult).deep_unpack();
+                                    const executable = GLib.file_read_link(`/proc/${pid}/exe`);
+                                    finish(isAuthorizedTrackerClient(uid, GLib.get_user_id(), executable));
+                                } catch {
+                                    finish(false);
+                                }
+                            });
+                    } catch {
+                        finish(false);
+                    }
+                });
         } catch {
-            // Unknown peer identity must not gain access to focus metadata.
-            return false;
+            finish(false);
         }
     }
 

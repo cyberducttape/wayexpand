@@ -1,11 +1,18 @@
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import test from 'node:test';
 import {
     isAuthorizedTrackerClient,
     LatestOnlyDelivery,
+    SubscriptionReservations,
     setTitleAccess,
     subscriberSnapshot,
 } from '../gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/notification-queue.js';
+
+const extensionSource = readFileSync(
+    new URL('../gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/extension.js', import.meta.url),
+    'utf8',
+);
 
 test('subscription is limited to the current user and WayExpand executables', () => {
     assert.equal(isAuthorizedTrackerClient(1000, 1000, '/usr/bin/wayexpand-daemon'), true);
@@ -13,6 +20,27 @@ test('subscription is limited to the current user and WayExpand executables', ()
     assert.equal(isAuthorizedTrackerClient(1001, 1000, '/usr/bin/wayexpand'), false);
     assert.equal(isAuthorizedTrackerClient(1000, 1000, '/usr/bin/terminal'), false);
     assert.equal(isAuthorizedTrackerClient(1000, 1000, ''), false);
+});
+
+test('pending authorization reservations are deduplicated, bounded, and released', () => {
+    const reservations = new SubscriptionReservations(2);
+    assert.equal(reservations.reserve(':1.1', 0), true);
+    assert.equal(reservations.reserve(':1.1', 0), false);
+    assert.equal(reservations.reserve(':1.2', 0), true);
+    assert.equal(reservations.reserve(':1.3', 0), false);
+    assert.equal(reservations.size, 2);
+    assert.equal(reservations.release(':1.1'), true);
+    assert.equal(reservations.reserve(':1.3', 0), true);
+    assert.equal(reservations.reserve(':1.4', 1), false);
+    assert.equal(reservations.size, 2);
+    reservations.clear();
+    assert.equal(reservations.size, 0);
+});
+
+test('GNOME Shell peer authorization uses asynchronous D-Bus calls', () => {
+    assert.match(extensionSource, /GetConnectionUnixUser/);
+    assert.match(extensionSource, /GetConnectionUnixProcessID/);
+    assert.doesNotMatch(extensionSource, /\.call_sync\s*\(/);
 });
 
 test('title access is opt-in per request and can be revoked on an active subscription', () => {

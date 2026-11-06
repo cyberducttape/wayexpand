@@ -33,6 +33,10 @@ All notable changes to WayExpand are documented here.
   snapshots, and test that title-free D-Bus snapshots contain no window title.
   Extend the isolated GNOME upgrade/logout test to re-activate the IBus source
   through GNOME Shell and verify GTK insertion after Shell reload.
+- Perform GNOME tracker subscriber credential checks asynchronously so the
+  Shell main loop does not block on session-bus replies. Bound and deduplicate
+  pending authorization requests, and cancel pending subscriptions on client
+  unsubscribe or extension shutdown.
 - Reduce GNOME focus-data exposure: default tracker subscriptions return app
   and opaque instance IDs without window titles. Only verified WayExpand
   executables can subscribe. The daemon now requests titles only while an
