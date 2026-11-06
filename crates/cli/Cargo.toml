@@ -30,6 +30,7 @@ wayexpand-backend-wlroots = { path = "../backend-wlroots" }
 wayexpand-backend-input-method = { path = "../backend-input-method" }
 wayexpand-backend-libei = { path = "../backend-libei" }
 wayexpand-backend-selection = { path = "../backend-selection" }
+wayexpand-backend-gnome-window = { path = "../backend-gnome-window" }
 
 [build-dependencies]
 wayexpand-build-info = { path = "../build-info" }

@@ -248,6 +248,11 @@ EOF
 chmod 0755 "$stub_bin/systemctl"
 
 touch "$test_root/71-wayexpand-evdev.rules" "$test_root/69-wayexpand-evdev-uaccess.rules"
+gnome_extension_dir="$test_root/home/.local/share/gnome-shell/extensions/wayexpand-window-tracker@cyberducttape.github.io"
+mkdir -p "$gnome_extension_dir"
+printf '%s\n' '{"uuid": "wayexpand-window-tracker@cyberducttape.github.io"}' \
+    >"$gnome_extension_dir/metadata.json"
+printf '%s\n' '// WayExpand GNOME tracker' >"$gnome_extension_dir/extension.js"
 PATH="$stub_bin:$PATH" \
 HOME="$test_root/home" \
 XDG_CONFIG_HOME="$test_root/config" \
@@ -269,6 +274,8 @@ grep -F "sudo $release_dir/scripts/install-evdev-permissions.sh --uninstall" "$t
 [ ! -e "$test_root/home/.local/bin/wayexpand-gui" ]
 [ ! -e "$test_root/home/.local/bin/wayexpand-ibus" ]
 [ ! -e "$test_root/home/.local/share/ibus/component/wayexpand.xml" ]
+[ ! -e "$gnome_extension_dir/metadata.json" ]
+[ ! -e "$gnome_extension_dir/extension.js" ]
 [ ! -e "$test_root/home/.local/share/applications/wayexpand.desktop" ]
 [ ! -e "$test_root/home/.local/share/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml" ]
 [ ! -e "$test_root/home/.local/share/man/man1/wayexpand.1" ]

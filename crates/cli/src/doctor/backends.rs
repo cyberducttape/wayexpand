@@ -109,6 +109,20 @@ pub(crate) fn print_backend_diagnostics(include_experimental_input_method: bool)
         allowed_backends: vec!["none".into()],
         ..OrganizationPolicy::default()
     });
+    if let Some(report) = crate::gnome_extension::doctor_report() {
+        println!(
+            "GNOME window tracker: {} — {}",
+            if report["ready"] == true {
+                "ready"
+            } else {
+                "NOT READY"
+            },
+            report["detail"].as_str().unwrap_or("")
+        );
+        if let Some(fix) = report["fix"].as_str() {
+            println!("  Fix: {fix}");
+        }
+    }
     let ibus_policy_allowed = setup_backend_allowed(&policy, "ibus");
     let ibus_installed = ibus_engine_available();
     print_ibus_route_summary(ibus_policy_allowed);

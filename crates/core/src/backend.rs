@@ -961,7 +961,20 @@ fn discover_window_tracker(wayland: bool) -> (BackendState, String) {
         );
     }
     let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
-    if desktop.to_lowercase().contains("kde") {
+    let gnome = desktop
+        .to_lowercase()
+        .split(':')
+        .any(|part| part == "gnome");
+    if gnome {
+        (
+            BackendState::Implemented,
+            "GNOME detected; uses the WayExpand GNOME Shell extension (GNOME 45+), because \
+             Mutter exposes no window-listing Wayland protocol and limits \
+             org.gnome.Shell.Introspect to allowlisted callers; `wayexpand setup` installs and \
+             enables it"
+                .into(),
+        )
+    } else if desktop.to_lowercase().contains("kde") {
         (
             BackendState::Implemented,
             "KDE Plasma detected; uses KWin's scripting D-Bus interface (org.kde.kwin.Scripting), \
@@ -974,7 +987,8 @@ fn discover_window_tracker(wayland: bool) -> (BackendState, String) {
             BackendState::NotImplemented,
             format!(
                 "app_filter-scoped expansions need a compositor-specific window tracker; \
-                 only KDE Plasma (KWin) is implemented so far (detected desktop: {})",
+                 KDE Plasma (KWin) and GNOME (WayExpand Shell extension) are implemented \
+                 (detected desktop: {})",
                 if desktop.is_empty() {
                     "unknown"
                 } else {

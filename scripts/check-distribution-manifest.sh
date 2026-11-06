@@ -5,6 +5,8 @@ set -eu
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 for relative in \
     desktop/wayexpand-ibus.xml \
+    gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/metadata.json \
+    gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/extension.js \
     installer-components.toml \
     systemd/wayexpand-input-method.service \
     systemd/wayexpand-evdev.service \
@@ -225,6 +227,15 @@ grep -Fx 'ExecStart=/usr/bin/wayexpand-action-broker --config %h/.config/wayexpa
     printf '%s\n' 'staged Action Broker unit does not use /usr/bin/wayexpand-action-broker' >&2
     exit 1
 }
+
+# GNOME window tracking needs the Shell extension installed system-wide by
+# every distribution package.
+for manifest in debian/rules wayexpand.spec PKGBUILD; do
+    grep -F 'gnome-shell/extensions/wayexpand-window-tracker@cyberducttape.github.io' "$project_dir/$manifest" >/dev/null || {
+        printf '%s\n' "$manifest does not install the GNOME Shell extension" >&2
+        exit 1
+    }
+done
 
 # License files must be declared at the same path where each package installs
 # them. This catches RPM's easy-to-miss distinction between the source file

@@ -306,9 +306,31 @@ is not currently shipped. A previous prototype was removed from the production
 workspace because its constructor was disabled and its event-loop/lifetime
 behavior was not ready for compositor use. A future implementation must be
 feature-gated, tested against real Sway/Hyprland/river sessions, and prove
-safe handle removal before it is reconsidered. GNOME (Mutter) exposes no
-equivalent bridge without a shell extension, so no fully evidence-based path
-exists there today.
+safe handle removal before it is reconsidered.
+
+GNOME (Mutter) exposes no Wayland protocol or public D-Bus API for the focused
+window: `org.gnome.Shell.Introspect` answers only allowlisted callers and
+`org.gnome.Shell.Eval` is disabled. WayExpand therefore ships a small GNOME
+Shell extension (`gnome-extension/wayexpand-window-tracker@cyberducttape.github.io`,
+GNOME 45 or newer) that runs inside GNOME Shell. A tracker calls its
+`Subscribe()` method and gets the focused window (app ID, title, Mutter window
+ID) in the reply; later focus and title changes are pushed only to
+subscribers, by calling `WindowChanged` on their private bus connection.
+Nothing is broadcast on the session bus or stored. WayExpand accepts those
+calls only from the process that owns `org.gnome.Shell`. The app ID is the
+desktop-file ID (without `.desktop`), falling back to the Wayland app ID or
+WM class for windows GNOME cannot match to an application; the Mutter window
+ID is the exact window identity. When the overview or a Shell menu has focus,
+no window is reported, so app filters fail closed.
+
+`wayexpand setup` installs the extension for the user (or uses the system
+copy that distribution packages install under
+`/usr/share/gnome-shell/extensions/`), adds it to GNOME's enabled extensions,
+and enables it at once when GNOME Shell already knows it. GNOME Shell on
+Wayland loads a newly installed extension at the next login, which setup and
+`wayexpand doctor` say explicitly. `scripts/test-gnome-e2e.sh` (CI's
+`gnome-e2e`) runs the extension and tracker in a private, headless GNOME
+Shell.
 
 ## wlroots virtual keyboard and uinput
 

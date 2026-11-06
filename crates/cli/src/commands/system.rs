@@ -81,6 +81,14 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
             error.safe_summary()
         ))
     })?;
+    // Window tracking is independent of the input route, so set it up even
+    // when no capture route turns out to be available.
+    if wayexpand_backend_selection::Compositor::detect()
+        == wayexpand_backend_selection::Compositor::Gnome
+    {
+        crate::gnome_extension::setup_gnome_window_tracker();
+        println!();
+    }
     let capabilities = probe_capabilities();
     let policy = load_policy()?;
     let ibus_available = ibus_engine_available();
@@ -258,7 +266,7 @@ pub(crate) fn doctor_command(args: Args) -> Result<()> {
         build_info::COMMIT
     );
     println!("Session: {}", session_description());
-    println!("Feature limits: IME preedit/composition is unsupported; app_filter window tracking is KWin-only (fails closed elsewhere).");
+    println!("Feature limits: IME preedit/composition is unsupported; app_filter window tracking needs KWin (KDE Plasma) or the WayExpand GNOME Shell extension (GNOME 45+); it fails closed elsewhere.");
     let config_ok = print_config_diagnostics(&config_path);
     let control_socket_ok = print_control_socket_diagnostics();
     let output_ok = crate::doctor::status::print_output_health_diagnostics();

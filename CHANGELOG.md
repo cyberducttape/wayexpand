@@ -4,6 +4,20 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add GNOME window tracking: a bundled GNOME Shell extension (GNOME 45+,
+  `wayexpand-window-tracker@cyberducttape.github.io`) reports the focused
+  window's app ID, title and Mutter window ID to subscribers only, and the new
+  `wayexpand-backend-gnome-window` tracker accepts reports only from the
+  process that owns `org.gnome.Shell`. The daemon, `wayexpand doctor`, backend
+  selection and the GUI's app detection use it on GNOME, so `app_filter`
+  snippets work there. `wayexpand setup` installs and enables the extension
+  (packages ship it under `/usr/share/gnome-shell/extensions/`), and doctor
+  reports its state with a fix (`gnome_window_tracker` in `doctor --json`).
+  `doctor --json` reports `feature_support.app_filter.status` as
+  `kwin_or_gnome_extension`. The support matrix lists GNOME app filters as
+  implemented and awaiting real-session evidence. `scripts/test-gnome-e2e.sh`
+  and the `gnome-e2e` CI job test the extension in a headless GNOME Shell.
+
 - Offer the enabled `;;hello` desktop integration test immediately after
   interactive setup. Noninteractive setup reports activation separately and
   gives the explicit test command; setup diagnostics distinguish real-app

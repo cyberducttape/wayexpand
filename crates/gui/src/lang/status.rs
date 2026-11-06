@@ -483,12 +483,12 @@ impl Strings {
 
     pub fn status_detection_unavailable(&self) -> &'static str {
         match self.lang {
-            Language::English => "Window detection is unavailable here (KDE Plasma only for now)",
+            Language::English => "Window detection is unavailable here (KDE Plasma, or GNOME with the WayExpand extension: run `wayexpand setup`)",
             Language::Indonesian => {
-                "Deteksi jendela tidak tersedia di sini (saat ini hanya KDE Plasma)"
+                "Deteksi jendela tidak tersedia di sini (KDE Plasma, atau GNOME dengan ekstensi WayExpand: jalankan `wayexpand setup`)"
             }
             Language::German => {
-                "Fenstererkennung ist hier nicht verfügbar (derzeit nur KDE Plasma)"
+                "Fenstererkennung ist hier nicht verfügbar (KDE Plasma oder GNOME mit der WayExpand-Erweiterung: `wayexpand setup` ausführen)"
             }
         }
     }

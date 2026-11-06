@@ -19,5 +19,6 @@ wayexpand-core = { path = "../core" }
 wayexpand-backend-ibus = { path = "../backend-ibus" }
 wayexpand-backend-input-method = { path = "../backend-input-method" }
 wayexpand-backend-kwin-window = { path = "../backend-kwin-window" }
+wayexpand-backend-gnome-window = { path = "../backend-gnome-window" }
 wayexpand-backend-wlroots = { path = "../backend-wlroots" }
 wayexpand-backend-evdev = { path = "../backend-evdev" }

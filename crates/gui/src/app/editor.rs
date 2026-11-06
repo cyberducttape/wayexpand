@@ -870,8 +870,31 @@ impl GuiApp {
             // bounded D-Bus calls and a total readiness deadline,
             // but a slow session bus can still consume several
             // seconds. The receiver is polled below on every frame.
+            use wayexpand_backend_gnome_window::GnomeWindowTracker;
             use wayexpand_backend_kwin_window::KwinWindowTracker;
+            use wayexpand_backend_selection::WindowTrackerKind;
             use wayexpand_core::WindowTracker;
+            fn detect_with<T: WindowTracker>(
+                tracker: Result<T, impl std::fmt::Display>,
+                cancelled: &AtomicBool,
+            ) -> AppDetection {
+                match tracker {
+                    Ok(mut tracker) => {
+                        if cancelled.load(Ordering::Acquire) {
+                            return AppDetection::Unavailable;
+                        }
+                        // The editor itself is focused when the button
+                        // is clicked; wait for the user to click the app
+                        // the snippet is for.
+                        crate::dialogs::wait_for_other_app(
+                            crate::dialogs::APP_DETECTION_WINDOW,
+                            cancelled,
+                            |wait| tracker.next_window_timeout(wait),
+                        )
+                    }
+                    Err(_) => AppDetection::Unavailable,
+                }
+            }
             let (sender, receiver) = mpsc::channel();
             let cancelled = Arc::new(AtomicBool::new(false));
             let worker_cancel = Arc::clone(&cancelled);
@@ -882,22 +905,17 @@ impl GuiApp {
             let spawned = thread::Builder::new()
                 .name("wayexpand-app-detection".into())
                 .spawn(move || {
-                    let detection = match KwinWindowTracker::new_cancellable(Some(&worker_cancel)) {
-                        Ok(mut tracker) => {
-                            if worker_cancel.load(Ordering::Acquire) {
-                                let _ = sender.send(AppDetection::Unavailable);
-                                return;
-                            }
-                            // The editor itself is focused when the button
-                            // is clicked; wait for the user to click the
-                            // app the snippet is for.
-                            crate::dialogs::wait_for_other_app(
-                                crate::dialogs::APP_DETECTION_WINDOW,
-                                &worker_cancel,
-                                |wait| tracker.next_window_timeout(wait),
-                            )
-                        }
-                        Err(_) => AppDetection::Unavailable,
+                    // KWin on Plasma, the WayExpand extension on GNOME.
+                    let detection = match WindowTrackerKind::for_session() {
+                        Some(WindowTrackerKind::Kwin) => detect_with(
+                            KwinWindowTracker::new_cancellable(Some(&worker_cancel)),
+                            &worker_cancel,
+                        ),
+                        Some(WindowTrackerKind::GnomeShell) => detect_with(
+                            GnomeWindowTracker::new_cancellable(Some(&worker_cancel)),
+                            &worker_cancel,
+                        ),
+                        None => AppDetection::Unavailable,
                     };
                     // The GUI may have given up waiting (Cancel, or the
                     // window closed) by the time this send happens; that is

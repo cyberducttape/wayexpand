@@ -90,7 +90,9 @@ def render(matrix: dict[str, object], route_catalog: dict[str, object]) -> str:
             )
         if not isinstance(tracker, str) or not tracker:
             raise ValueError(f"{target_id}: window_tracker must be a non-empty string")
-        if app_filter not in {"supported", "unavailable"}:
+        # "implemented": the tracker ships and is tested headlessly, but no
+        # real-session evidence exists yet.
+        if app_filter not in {"supported", "implemented", "unavailable"}:
             raise ValueError(f"{target_id}: invalid application_filter status")
         if certification not in VALID_CERTIFICATION:
             raise ValueError(f"{target_id}: invalid certification_status")
@@ -107,7 +109,11 @@ def render(matrix: dict[str, object], route_catalog: dict[str, object]) -> str:
                 raise ValueError(f"{target_id}: evidence does not certify a declared backend")
         elif evidence_path is not None:
             raise ValueError(f"{target_id}: not-certified targets must not claim an evidence artifact")
-        app_label = "Available in declared path" if app_filter == "supported" else "Unavailable"
+        app_label = {
+            "supported": "Available in declared path",
+            "implemented": "Implemented; awaiting real-session evidence",
+            "unavailable": "Unavailable",
+        }[app_filter]
         observation_label = {
             "not-observed": "Not observed",
             "observed": "Observed",

@@ -211,7 +211,8 @@ wayexpand doctor  # Shows what your session can use
 
 ### GNOME Shell Wayland — limited/uncertified
 
-Limited support due to GNOME's design (no window tracking protocol).
+Limited, uncertified support. GNOME has no window-tracking protocol, so
+WayExpand ships a GNOME Shell extension for app-specific snippets.
 
 **Current input routes:**
 - Mutter does not currently advertise `zwp_input_method_manager_v2`, so
@@ -223,10 +224,17 @@ Limited support due to GNOME's design (no window tracking protocol).
   while trigger deletion is verified against surrounding text but is not
   atomic. This route is experimental and not production-certified.
 
+**Window-specific snippets (app_filter):**
+- `wayexpand setup` installs and enables the WayExpand GNOME Shell extension
+  (GNOME 45 or newer, so Ubuntu 24.04 and later). Log out and back in once
+  after the first install; `wayexpand doctor` shows its state as
+  "GNOME window tracker". It is tested in a headless GNOME Shell but has no
+  real-session certification yet.
+- The extension sends the focused app's ID and window title only to
+  processes that subscribe to it; nothing is broadcast or stored.
+
 **What doesn't work:**
-- ❌ Window-specific snippets (app_filter)
-- ❌ Atomic replacement, exact window tracking, and production-certified
-  password-field protection
+- ❌ Atomic replacement and production-certified password-field protection
 
 **Recommendation:**
 - Use **global hotkeys** instead of trigger-based expansion, or test the
