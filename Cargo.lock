@@ -4412,6 +4412,7 @@ version = "1.3.3"
 dependencies = [
  "async-io",
  "futures-lite",
+ "sha2",
  "thiserror 2.0.21",
  "wayexpand-core",
  "zbus",

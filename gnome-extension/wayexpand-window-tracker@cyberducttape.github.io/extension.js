@@ -41,6 +41,7 @@ const TRACKER_IFACE = `
       <arg type="s" direction="out" name="active_id"/>
     </method>
     <property name="Version" type="u" access="read"/>
+    <property name="BuildIdentity" type="s" access="read"/>
     <property name="InputSourceControlVersion" type="u" access="read"/>
   </interface>
 </node>`;
@@ -94,6 +95,10 @@ export default class WayExpandWindowTracker extends Extension {
 
     get Version() {
         return PROTOCOL_VERSION;
+    }
+
+    get BuildIdentity() {
+        return this.metadata['x-wayexpand-build-id'] || '';
     }
 
     get InputSourceControlVersion() {

@@ -119,6 +119,14 @@ pub(crate) fn print_backend_diagnostics(include_experimental_input_method: bool)
             },
             report["detail"].as_str().unwrap_or("")
         );
+        if let Some(build) = report.get("build_identity") {
+            println!(
+                "  extension build: {} (disk {}, live {})",
+                build["runtime_state"].as_str().unwrap_or("unknown"),
+                build["on_disk"].as_str().unwrap_or("unavailable"),
+                build["live"].as_str().unwrap_or("unverified")
+            );
+        }
         if let Some(fix) = report["fix"].as_str() {
             println!("  Fix: {fix}");
         }

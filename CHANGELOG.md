@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Give the GNOME Shell window tracker a content-bound build identity. The
+  running Shell extension reports the build identity from its loaded metadata;
+  `doctor` and setup compare it with the installed extension and distinguish
+  `current`, `update-required`, and `logout-required`. The daemon refuses to
+  use a tracker whose loaded build identity is missing or stale.
 - Separate the bundled default-configuration template check from validation of
   the active user configuration in `wayexpand install-check`. Source and
   release-archive installers now include the template in each immutable

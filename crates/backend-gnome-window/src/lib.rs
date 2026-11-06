@@ -11,6 +11,7 @@
 //! or title change. Calls are accepted only from the process that owns
 //! `org.gnome.Shell`, so another local client cannot forge window identity.
 
+use sha2::{Digest, Sha256};
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -72,6 +73,10 @@ pub enum GnomeWindowError {
     ExtensionNotActive,
     #[error("the WayExpand GNOME Shell extension speaks protocol {0}; this WayExpand needs {PROTOCOL_VERSION}")]
     ProtocolMismatch(u32),
+    #[error("the loaded WayExpand GNOME Shell extension does not expose a build identity; log out and back in to load the installed version")]
+    BuildIdentityUnavailable,
+    #[error("the loaded WayExpand GNOME Shell extension build does not match this WayExpand installation (loaded {0}); log out and back in")]
+    BuildIdentityMismatch(String),
     #[error("GNOME Shell input-source control is unavailable; update or enable the WayExpand GNOME Shell extension")]
     InputSourceControlUnavailable,
     #[error("the WayExpand GNOME Shell extension speaks input-source protocol {0}; this WayExpand needs {INPUT_SOURCE_CONTROL_VERSION}")]
@@ -214,6 +219,70 @@ pub fn active_input_source() -> Result<(String, String), GnomeWindowError> {
     read_active_input_source(&connection, &owner)
 }
 
+/// Build identity reported by the currently loaded extension instance. GNOME
+/// retains the extension metadata in memory across on-disk updates, so this
+/// distinguishes the loaded code from newly installed files.
+pub fn extension_build_identity() -> Result<String, GnomeWindowError> {
+    let connection = plain_connection()?;
+    let owner = shell_owner(&connection)?;
+    read_build_identity(&connection, &owner)
+}
+
+fn read_build_identity(connection: &Connection, owner: &str) -> Result<String, GnomeWindowError> {
+    let reply = connection.call_method(
+        Some(SHELL_NAME),
+        TRACKER_PATH,
+        Some("org.freedesktop.DBus.Properties"),
+        "Get",
+        &(TRACKER_IFACE, "BuildIdentity"),
+    );
+    let identity = match reply {
+        Ok(reply) => {
+            if reply.header().sender().map(|name| name.as_str()) != Some(owner) {
+                return Err(GnomeWindowError::ShellRestarted);
+            }
+            reply
+                .body()
+                .deserialize::<OwnedValue>()
+                .ok()
+                .and_then(|value| String::try_from(value).ok())
+        }
+        Err(error) if is_missing_object(&error) => {
+            return Err(GnomeWindowError::BuildIdentityUnavailable)
+        }
+        Err(error) => return Err(GnomeWindowError::DBus(error)),
+    };
+    identity
+        .filter(|identity| !identity.is_empty())
+        .ok_or(GnomeWindowError::BuildIdentityUnavailable)
+}
+
+fn ensure_current_build_identity(
+    connection: &Connection,
+    owner: &str,
+) -> Result<(), GnomeWindowError> {
+    let identity = read_build_identity(connection, owner)?;
+    let expected = bundled_extension_build_identity();
+    if identity == expected {
+        Ok(())
+    } else {
+        Err(GnomeWindowError::BuildIdentityMismatch(identity))
+    }
+}
+
+/// SHA-256 identity of the bundled extension implementation. The metadata
+/// carries the same identity for GNOME Shell to expose from its loaded copy.
+pub fn bundled_extension_build_identity() -> String {
+    use std::fmt::Write as _;
+    Sha256::digest(EXTENSION_SCRIPT.as_bytes()).iter().fold(
+        String::from("sha256:"),
+        |mut identity, byte| {
+            let _ = write!(identity, "{byte:02x}");
+            identity
+        },
+    )
+}
+
 fn read_active_input_source(
     connection: &Connection,
     owner: &str,
@@ -332,9 +401,11 @@ impl GnomeWindowTracker {
     /// extension answers with a compatible protocol version.
     pub fn probe() -> Result<(), GnomeWindowError> {
         let connection = plain_connection()?;
-        shell_owner(&connection)?;
+        let owner = shell_owner(&connection)?;
         match read_version(&connection) {
-            VersionAnswer::Version(PROTOCOL_VERSION) => Ok(()),
+            VersionAnswer::Version(PROTOCOL_VERSION) => {
+                ensure_current_build_identity(&connection, &owner)
+            }
             VersionAnswer::Version(other) => Err(GnomeWindowError::ProtocolMismatch(other)),
             VersionAnswer::Missing => Err(GnomeWindowError::ExtensionNotActive),
             VersionAnswer::Unanswered(error) => Err(GnomeWindowError::DBus(error)),
@@ -375,7 +446,9 @@ impl GnomeWindowTracker {
         )?;
         check_cancelled()?;
         match read_version(&connection) {
-            VersionAnswer::Version(PROTOCOL_VERSION) => {}
+            VersionAnswer::Version(PROTOCOL_VERSION) => {
+                ensure_current_build_identity(&connection, &shell_owner)?;
+            }
             VersionAnswer::Version(other) => return Err(GnomeWindowError::ProtocolMismatch(other)),
             VersionAnswer::Missing => return Err(GnomeWindowError::ExtensionNotActive),
             VersionAnswer::Unanswered(error) => return Err(GnomeWindowError::DBus(error)),
@@ -699,6 +772,10 @@ mod tests {
         assert!(script.contains(TRACKER_IFACE));
         assert!(script.contains("org.wayexpand.WindowTracker1"));
         assert!(script.contains(&format!("PROTOCOL_VERSION = {PROTOCOL_VERSION}")));
+        let build_id = bundled_extension_build_identity();
+        assert!(metadata.contains(&format!("\"x-wayexpand-build-id\": \"{build_id}\"")));
+        assert!(script.contains("get BuildIdentity()"));
+        assert!(script.contains("this.metadata['x-wayexpand-build-id']"));
         assert!(script.contains("<method name=\"Ping\"/>"));
         assert!(script.contains("PingAsync"));
         assert!(script.contains("<method name=\"GetActiveInputSource\">"));

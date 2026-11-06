@@ -179,6 +179,15 @@ not active or current, setup stops and explains that the extension must be
 enabled or the session restarted. The Diagnostics window shows the same
 separate evidence.
 
+The GNOME extension also exposes a build identity from the metadata loaded by
+the running Shell process. `wayexpand doctor --json` reports the bundled,
+on-disk, and live identities. If the installed files are current but Shell is
+still running an older identity (or cannot report one), diagnostics say
+`logout-required`; logging out and back in loads the installed extension. The
+`x-wayexpand-build-id` metadata value is the SHA-256 of `extension.js`; the
+backend test verifies the pair, so extension code changes must refresh that
+metadata identity before packaging.
+
 ## Diagnostics
 
 On GNOME Wayland, `wayexpand setup` performs component registration,
