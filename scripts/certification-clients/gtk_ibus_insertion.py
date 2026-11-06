@@ -29,12 +29,17 @@ def main():
     entry.grab_focus()
 
     def send_trigger():
+        unhandled = 0
         for character in TRIGGER:
             keyval = Gdk.unicode_to_keyval(ord(character))
+            # This reports whether a GTK widget handler claimed the event,
+            # not whether the input-method context delivered it. Send the
+            # whole harmless trigger and use the actual committed entry text
+            # as the acceptance result.
             if not Gtk.test_widget_send_key(entry, keyval, Gdk.ModifierType(0)):
-                print("fail gtk-ibus-insertion GTK rejected a synthetic test key")
-                Gtk.main_quit()
-                return GLib.SOURCE_REMOVE
+                unhandled += 1
+        if unhandled:
+            print(f"note gtk-ibus-insertion {unhandled} GTK key events were not claimed by the widget")
         GLib.timeout_add(50, check_result)
         return GLib.SOURCE_REMOVE
 
