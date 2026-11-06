@@ -28,6 +28,8 @@ const COMPONENT_TEMPLATE: &str = include_str!("../../../desktop/wayexpand-ibus.x
 const COMMAND_OUTPUT_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_COMMAND_OUTPUT: u64 = 64 * 1024;
 const MAX_COMPONENT_BYTES: u64 = 64 * 1024;
+const MAX_SHARED_ENGINE_BYTES: u64 = 512 * 1024 * 1024;
+const SHARED_ENGINE: &str = "/usr/local/libexec/wayexpand/wayexpand-ibus";
 const TERMINAL_DROP_IN: &str = "30-terminal-apps-only.conf";
 /// Common terminal app IDs (normalized), used when `terminal_apps` is empty.
 pub(crate) const DEFAULT_TERMINAL_APPS: &[&str] = &[
@@ -173,13 +175,34 @@ fn xml_escape(text: &str) -> String {
         .replace('>', "&gt;")
 }
 
-/// The component manifest with an absolute engine path, so IBus finds the
-/// engine however the desktop starts it (its PATH may lack ~/.local/bin).
-pub(crate) fn component_manifest(engine: &Path) -> String {
+/// The system component must never bind to one user's home directory.
+pub(crate) fn component_manifest() -> String {
     COMPONENT_TEMPLATE.replace(
         "<exec>wayexpand-ibus</exec>",
-        &format!("<exec>{}</exec>", xml_escape(&engine.display().to_string())),
+        &format!("<exec>{}</exec>", xml_escape(SHARED_ENGINE)),
     )
+}
+
+fn shared_engine_is_trusted() -> bool {
+    let path = Path::new(SHARED_ENGINE);
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return false;
+    };
+    let Some(parent) = path.parent() else {
+        return false;
+    };
+    let ancestors_are_trusted = std::iter::successors(Some(parent), |directory| directory.parent())
+        .all(|directory| {
+            fs::symlink_metadata(directory).is_ok_and(|metadata| {
+                metadata.file_type().is_dir()
+                    && metadata.uid() == 0
+                    && metadata.permissions().mode() & 0o022 == 0
+            })
+        });
+    metadata.file_type().is_file()
+        && metadata.uid() == 0
+        && metadata.permissions().mode() & 0o111 != 0
+        && ancestors_are_trusted
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -193,20 +216,24 @@ struct ComponentFileState {
 
 impl ComponentFileState {
     fn read(path: &Path) -> Result<Option<Self>> {
+        Self::read_limited(path, MAX_COMPONENT_BYTES)
+    }
+
+    fn read_limited(path: &Path, limit: u64) -> Result<Option<Self>> {
         let metadata = match fs::symlink_metadata(path) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error.into()),
         };
-        if !metadata.file_type().is_file() || metadata.len() > MAX_COMPONENT_BYTES {
+        if !metadata.file_type().is_file() || metadata.len() > limit {
             bail!(
                 "IBus component {} is not a regular file within the {}-byte transaction limit",
                 path.display(),
-                MAX_COMPONENT_BYTES
+                limit
             );
         }
         let bytes = fs::read(path)?;
-        if bytes.len() as u64 > MAX_COMPONENT_BYTES {
+        if bytes.len() as u64 > limit {
             bail!(
                 "IBus component {} exceeds the transaction size limit",
                 path.display()
@@ -285,13 +312,17 @@ struct ComponentInstallJournal {
     install_used_privilege: bool,
     installed_state_known: bool,
     missing_directories: Vec<PathBuf>,
+    max_bytes: u64,
 }
 
 impl ComponentInstallJournal {
-    fn capture() -> Result<Self> {
-        let target = chain::component_install_directory().join("wayexpand.xml");
-        let original = ComponentFileState::read(&target)
-            .with_context(|| format!("could not snapshot IBus component {}", target.display()))?;
+    fn capture_at(target: PathBuf) -> Result<Self> {
+        Self::capture_limited(target, MAX_COMPONENT_BYTES)
+    }
+
+    fn capture_limited(target: PathBuf, max_bytes: u64) -> Result<Self> {
+        let original = ComponentFileState::read_limited(&target, max_bytes)
+            .with_context(|| format!("could not snapshot transaction file {}", target.display()))?;
         let mut missing_directories = Vec::new();
         let mut parent = target.parent();
         while let Some(directory) = parent {
@@ -309,12 +340,17 @@ impl ComponentInstallJournal {
             install_used_privilege: false,
             installed_state_known: true,
             missing_directories,
+            max_bytes,
         })
+    }
+
+    fn capture() -> Result<Self> {
+        Self::capture_at(chain::component_install_directory().join("wayexpand.xml"))
     }
 
     fn observe_after_install(&mut self) -> Result<()> {
         self.installed_state_known = false;
-        self.installed = ComponentFileState::read(&self.target)?;
+        self.installed = ComponentFileState::read_limited(&self.target, self.max_bytes)?;
         self.installed_state_known = true;
         Ok(())
     }
@@ -323,7 +359,7 @@ impl ComponentInstallJournal {
         if !self.install_attempted {
             return Ok(false);
         }
-        let current = ComponentFileState::read(&self.target)?;
+        let current = ComponentFileState::read_limited(&self.target, self.max_bytes)?;
         let file_changed = self.installed != self.original || current != self.original;
         if file_changed {
             if !self.installed_state_known || current != self.installed {
@@ -363,7 +399,9 @@ impl ComponentInstallJournal {
                 if !status.success() {
                     bail!("administrator command did not restore the original IBus component (exit {status})");
                 }
-                if ComponentFileState::read(&self.target)?.as_ref() != Some(original) {
+                if ComponentFileState::read_limited(&self.target, self.max_bytes)?.as_ref()
+                    != Some(original)
+                {
                     bail!("restored IBus component did not match its recorded SHA-256 and mode");
                 }
             } else {
@@ -379,7 +417,7 @@ impl ComponentInstallJournal {
                         "administrator command did not remove the IBus component (exit {status})"
                     );
                 }
-                if ComponentFileState::read(&self.target)?.is_some() {
+                if ComponentFileState::read_limited(&self.target, self.max_bytes)?.is_some() {
                     bail!("the IBus component remains after the removal command");
                 }
             }
@@ -680,6 +718,7 @@ fn stale_engine_processes_at(
 /// Writing there needs administrator rights, so this asks through pkexec.
 fn install_component(
     journal: &mut ComponentInstallJournal,
+    engine_journal: &mut ComponentInstallJournal,
     options: IbusSetupOptions,
 ) -> Result<()> {
     let report = chain::diagnose();
@@ -689,7 +728,15 @@ fn install_component(
     let manifest_ok = report
         .check("manifest")
         .is_some_and(|check| check.state == IbusCheckState::Pass);
-    if component_ok && manifest_ok {
+    let legacy_user_manifest = journal.original.as_ref().is_some_and(|state| {
+        let contents = String::from_utf8_lossy(&state.bytes);
+        contents.contains("<exec>") && !contents.contains(&format!("<exec>{SHARED_ENGINE}</exec>"))
+    });
+    if component_ok
+        && manifest_ok
+        && !legacy_user_manifest
+        && (journal.original.is_none() || shared_engine_is_trusted())
+    {
         step("The IBus component is installed where IBus reads it");
         return Ok(());
     }
@@ -701,7 +748,14 @@ fn install_component(
         .original
         .as_ref()
         .is_some_and(|original| original.uid != uid || original.gid != gid);
-    let privileged = !component_path_writable(&journal.target) || original_has_other_owner;
+    let engine_has_other_owner = engine_journal
+        .original
+        .as_ref()
+        .is_some_and(|original| original.uid != uid || original.gid != gid);
+    let privileged = !component_path_writable(&journal.target)
+        || !component_path_writable(&engine_journal.target)
+        || original_has_other_owner
+        || engine_has_other_owner;
     if privileged && !executable_on_path("pkexec") {
         bail!("WX-IBUS-AUTH-001: no `pkexec` desktop authorization helper is available. WayExpand cannot register the system IBus component nonprivileged because the running IBus daemon does not read the ordinary per-user component directory. Install WayExpand with your distribution package manager, restore `pkexec` and its desktop authorization agent, or choose another supported input route. You can safely retry with `wayexpand setup --backend ibus --install-system-integration` after that is resolved.");
     }
@@ -722,6 +776,7 @@ fn install_component(
             "  - IBus must read a component manifest from {}.",
             journal.target.display()
         );
+        println!("  - The shared engine executable will be installed at {SHARED_ENGINE}; the manifest will not refer to your home directory.");
         println!("  - Registering it requires a one-time administrator authorization.");
         if original_has_other_owner {
             println!("  - The existing manifest is owned by another account; authorization also preserves its original ownership during rollback.");
@@ -737,7 +792,45 @@ fn install_component(
         bail!("IBus integration was not installed. No session activation was attempted; rerun `wayexpand setup --backend ibus --install-system-integration` when ready, or use a distribution package/another input route.");
     }
     journal.install_used_privilege = privileged;
-    let manifest = component_manifest(&engine);
+    engine_journal.install_used_privilege = privileged;
+    let manifest = component_manifest();
+    let engine_metadata = fs::metadata(&engine)?;
+    if !engine_metadata.is_file()
+        || engine_metadata.len() > MAX_SHARED_ENGINE_BYTES
+        || engine_metadata.permissions().mode() & 0o111 == 0
+    {
+        bail!("the current wayexpand-ibus executable is not a regular executable within the shared-engine size limit");
+    }
+    let engine_contents = fs::read(&engine)?;
+    let mut staged_engine = write_private_staging_file("ibus-engine", &engine_contents)?;
+    let engine_target_arg = engine_journal.target.display().to_string();
+    let staged_engine_arg = staged_engine.path().display().to_string();
+    engine_journal.install_attempted = true;
+    let engine_result = run_component_admin_command(
+        privileged,
+        "/usr/bin/install",
+        &["-D", "-m", "0755", &staged_engine_arg, &engine_target_arg],
+    );
+    let engine_observation = engine_journal.observe_after_install();
+    let engine_cleanup = staged_engine.cleanup();
+    let engine_status =
+        engine_result.context("could not install the shared IBus engine executable")?;
+    engine_cleanup.context("could not remove the staged shared IBus engine")?;
+    engine_observation.context("could not verify the shared IBus engine")?;
+    if !engine_status.success() {
+        bail!(
+            "could not install shared IBus engine at {}; setup will roll back",
+            engine_journal.target.display()
+        );
+    }
+    let source_engine_hash = sha256_hex(&engine_contents);
+    if engine_journal.installed.as_ref().is_none_or(|state| {
+        state.sha256 != source_engine_hash || state.mode & 0o111 == 0 || state.uid != 0
+    }) {
+        bail!(
+            "the shared IBus engine did not match the installed user binary or is not root-owned"
+        );
+    }
     let mut staged = write_private_staging_file("ibus-component", manifest.as_bytes())?;
     step(&format!(
         "Installing the IBus component to {} (IBus never reads per-user component folders; you will be asked for an administrator password)",
@@ -1225,6 +1318,7 @@ struct TransactionRollback {
 #[derive(Debug)]
 struct SetupTransaction {
     component: ComponentInstallJournal,
+    shared_engine: ComponentInstallJournal,
     config: ConfigMutationJournal,
     prepared_file: Option<PreparedFileJournal>,
     gnome_input_sources_original: Option<crate::gnome_input_sources::Snapshot>,
@@ -1251,6 +1345,10 @@ impl SetupTransaction {
         Ok(Self {
             // All persistent snapshots are taken before the first mutation.
             component: ComponentInstallJournal::capture()?,
+            shared_engine: ComponentInstallJournal::capture_limited(
+                PathBuf::from(SHARED_ENGINE),
+                MAX_SHARED_ENGINE_BYTES,
+            )?,
             config: ConfigMutationJournal::capture()?,
             prepared_file,
             gnome_input_sources_original,
@@ -1303,6 +1401,19 @@ impl SetupTransaction {
             Err(error) => report.remaining.push(format!(
                 "IBus component {}: {error}",
                 self.component.target.display()
+            )),
+        }
+        match self.shared_engine.restore() {
+            Ok(true) if self.shared_engine.original.is_some() => report
+                .restored
+                .push("original shared IBus engine restored".into()),
+            Ok(true) => report
+                .restored
+                .push("new shared IBus engine removed".into()),
+            Ok(false) => {}
+            Err(error) => report.remaining.push(format!(
+                "shared IBus engine {}: {error}",
+                self.shared_engine.target.display()
             )),
         }
         report
@@ -2087,7 +2198,11 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
     // mutation; activation state is captured immediately before it changes.
     let mut transaction = SetupTransaction::capture(companion == CompanionService::Terminals)?;
     let preparation = (|| -> Result<bool> {
-        install_component(&mut transaction.component, options)?;
+        install_component(
+            &mut transaction.component,
+            &mut transaction.shared_engine,
+            options,
+        )?;
         let authorization_required = ensure_replacement_consent(options, &mut transaction.config)?;
         if companion == CompanionService::Terminals && options.terminals {
             prepare_terminals(
@@ -2271,10 +2386,14 @@ mod tests {
     }
 
     #[test]
-    fn installed_manifest_names_the_engine_by_absolute_path() {
-        let manifest = component_manifest(Path::new("/home/a&b/.local/bin/wayexpand-ibus"));
-        assert!(manifest.contains("<exec>/home/a&amp;b/.local/bin/wayexpand-ibus</exec>"));
-        assert!(manifest.contains("<name>org.freedesktop.IBus.WayExpand</name>"));
+    fn installed_manifest_uses_stable_system_engine_for_multiple_users() {
+        let alice_manifest = component_manifest();
+        let bob_manifest = component_manifest();
+        assert_eq!(alice_manifest, bob_manifest);
+        assert!(alice_manifest.contains("<exec>/usr/local/libexec/wayexpand/wayexpand-ibus</exec>"));
+        assert!(!alice_manifest.contains("/home/alice"));
+        assert!(!alice_manifest.contains("/home/bob"));
+        assert!(alice_manifest.contains("<name>org.freedesktop.IBus.WayExpand</name>"));
     }
 
     #[cfg(unix)]

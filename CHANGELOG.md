@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Register user-installed IBus engines through one root-owned executable at
+  `/usr/local/libexec/wayexpand/wayexpand-ibus`; shared component XML no longer
+  points into the installing user's home directory. Setup journals the shared
+  executable and component together for rollback, verifies trusted ownership
+  and permissions, and reuses the same registration for later users.
 - Replace GNOME's deprecated, ignored `input-sources current` setting with a
   GNOME Shell `InputSourceManager` bridge. Setup activates through Shell and
   independently reads back the live source; diagnostics no longer infer

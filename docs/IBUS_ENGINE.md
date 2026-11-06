@@ -122,7 +122,13 @@ the recorded session and says so. The steps are:
    `IBUS_COMPONENT_PATH` can be used without elevation; WayExpand does not
    assume the ordinary XDG data directory is read by IBus. This does not
    install application files system-wide or grant keyboard-device access. The
-   GUI has a separate checkbox for that
+   shared manifest points to the root-owned
+   `/usr/local/libexec/wayexpand/wayexpand-ibus` executable, never to the
+   installing user's home directory. Setup stages the current engine there,
+   verifies ownership and permissions, and journals it with the manifest so
+   failed activation can restore both. Later users reuse the same system
+   registration rather than replacing it with a home-specific path.
+   The GUI has a separate checkbox for that
    authorization. In scripts, `--yes` alone deliberately skips the privileged
    step; pass `--install-system-integration` only when that change is intended.
    If authorization is unavailable, install the distribution package, restore
