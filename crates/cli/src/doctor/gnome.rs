@@ -35,6 +35,11 @@ pub(crate) fn run(json: bool) -> Result<()> {
             })).collect::<Vec<_>>(),
         });
         println!("{}", serde_json::to_string_pretty(&value)?);
+        if conclusion != "operational_evidence_available" {
+            anyhow::bail!(
+                "GNOME readiness is {conclusion}; inspect the structured checks and problem_id"
+            );
+        }
         return Ok(());
     }
 
@@ -58,6 +63,9 @@ pub(crate) fn run(json: bool) -> Result<()> {
     println!("  ibus engine");
     println!("  wayexpand ibus status --json");
     println!("\nA passing engine connection does not prove insertion in an application. Use `wayexpand debug --gnome --interactive` for a user-verified test.");
+    if conclusion != "operational_evidence_available" {
+        anyhow::bail!("GNOME readiness is {conclusion}; follow the reported problem and retest");
+    }
     Ok(())
 }
 

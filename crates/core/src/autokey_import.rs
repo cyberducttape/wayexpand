@@ -774,7 +774,7 @@ mod tests {
         fs::create_dir(&restricted).unwrap();
         fs::write(restricted.join("hidden.txt"), "not readable").unwrap();
         fs::write(restricted.join(".hidden.json"), metadata(&[";hidden"])).unwrap();
-        fs::set_permissions(&restricted, fs::Permissions::from_mode(0)).unwrap();
+        fs::set_permissions(&restricted, fs::Permissions::from_mode(0o0)).unwrap();
 
         // Root-run test environments bypass Unix directory read permissions;
         // hosted CI and ordinary desktop users exercise the denied traversal.
@@ -801,7 +801,7 @@ mod tests {
 
         fs::remove_file(directory.0.join("available.txt")).unwrap();
         fs::remove_file(directory.0.join(".available.json")).unwrap();
-        fs::set_permissions(&restricted, fs::Permissions::from_mode(0)).unwrap();
+        fs::set_permissions(&restricted, fs::Permissions::from_mode(0o0)).unwrap();
         let only_unreadable = import_autokey(&directory.0, AutoKeyImportMode::Permissive);
         fs::set_permissions(&restricted, fs::Permissions::from_mode(0o700)).unwrap();
         let only_unreadable = only_unreadable.unwrap();

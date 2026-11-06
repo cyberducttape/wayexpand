@@ -242,6 +242,20 @@ fn safe_version(value: &str) -> Option<String> {
     .then(|| value.to_owned())
 }
 
+#[cfg(test)]
+mod gnome_redaction_tests {
+    use super::{safe_engine_name, safe_version};
+
+    #[test]
+    fn gnome_support_tokens_reject_paths_and_unbounded_values() {
+        assert_eq!(safe_engine_name("wayexpand"), Some("wayexpand".into()));
+        assert!(safe_engine_name("/home/alice/custom-engine").is_none());
+        assert!(safe_engine_name(&"x".repeat(81)).is_none());
+        assert_eq!(safe_version("49.2"), Some("49.2".into()));
+        assert!(safe_version("49.2 secret=token").is_none());
+    }
+}
+
 fn read_report(command_name: &str) -> Result<serde_json::Value> {
     let executable = std::env::current_exe().context("locating the WayExpand executable")?;
     let mut command = Command::new(executable);
