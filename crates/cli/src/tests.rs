@@ -1236,6 +1236,20 @@ fn recommended_mode_never_selects_evdev_even_when_available() {
 }
 
 #[test]
+fn setup_can_recommend_ibus_when_the_component_is_installed_but_not_loaded_yet() {
+    let capabilities = wayexpand_backend_selection::Capabilities {
+        compositor: wayexpand_backend_selection::Compositor::Gnome,
+        ..Default::default()
+    };
+    let recommendation = crate::setup::recommended_setup_backend_with_ibus(
+        &capabilities,
+        true,
+        &OrganizationPolicy::default(),
+    );
+    assert_eq!(recommendation.backend, "ibus");
+}
+
+#[test]
 fn capture_readiness_never_promotes_a_probe_to_verified() {
     let capabilities = wayexpand_backend_selection::Capabilities {
         has_input_method_v2: true,

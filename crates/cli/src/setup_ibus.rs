@@ -102,6 +102,13 @@ pub(crate) fn command_output(program: &str, arguments: &[&str]) -> Option<String
     status.success().then_some(output)
 }
 
+/// Whether setup has the client and engine binaries needed to provision an
+/// IBus integration. This is intentionally separate from live IBus readiness:
+/// setup can register a missing component and refresh an existing session.
+pub(crate) fn setup_route_available() -> bool {
+    executable_on_path("ibus") && engine_binary().is_some()
+}
+
 /// Return bounded stdout and the exit status. Some IBus commands print the
 /// active engine successfully but exit nonzero for default-layout engines.
 pub(crate) fn command_output_with_status(

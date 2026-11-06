@@ -10,6 +10,10 @@ All notable changes to WayExpand are documented here.
   verified result names the tested scope while preserving the distinction
   between that app and broader desktop certification. GNOME Wayland setup
   explains that existing keyboard sources/layout remain in place.
+- Let bare `wayexpand setup` recommend IBus when its client and WayExpand engine
+  are installed but the running IBus registry has not loaded the component
+  yet. Keep route diagnostics grounded in actual installation/registration
+  evidence and explain that setup will register the component itself.
 - Add GNOME-specific `wayexpand doctor --gnome` conclusions and a guided
   `wayexpand debug --gnome --interactive` real-app test. The test distinguishes
   configured routing from uncorrelated activity and user-confirmed insertion;

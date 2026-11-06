@@ -109,12 +109,22 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     }
     let capabilities = probe_capabilities();
     let policy = load_policy()?;
-    let ibus_available = ibus_engine_available();
-    let automatic = recommended_setup_backend_with_ibus(&capabilities, ibus_available, &policy);
+    // A packaged IBus component can be installed but absent from the running
+    // registry until setup refreshes IBus. Treat that as an available setup
+    // route so the one-command first-run flow can register/activate it.
+    let ibus_setup_available = crate::setup_ibus::setup_route_available()
+        || ibus_engine_available()
+        || ibus_engine_installed();
+    let ibus_route_ready = ibus_engine_available() || ibus_engine_installed();
+    let automatic =
+        recommended_setup_backend_with_ibus(&capabilities, ibus_setup_available, &policy);
     let route_plan =
-        wayexpand_backend_selection::plan_routes(&capabilities, ibus_available, |route| {
+        wayexpand_backend_selection::plan_routes(&capabilities, ibus_route_ready, |route| {
             route_allowed_by_policy(&policy, route)
         });
+    if automatic.backend == "ibus" && !ibus_route_ready && ibus_setup_available {
+        println!("IBus is ready to configure, but its component is not registered in the running session yet. Setup will register it and refresh IBus; no IBus shell commands are needed.");
+    }
     println!();
     println!("Compatibility modes");
     println!("  Recommended         safest detected path; run doctor/certify for verification");

@@ -91,9 +91,12 @@ pub(crate) fn recommended_setup_backend(
     capabilities: &wayexpand_backend_selection::Capabilities,
     policy: &OrganizationPolicy,
 ) -> SetupRecommendation {
-    // Setup restarts IBus before selecting the engine, so a component that
-    // ibus-daemon will load on restart is enough to recommend this route.
-    let ibus_ready = ibus_engine_available() || ibus_engine_installed();
+    // Setup can install the component and refresh IBus, so the executable
+    // client/engine pair is enough to offer IBus as the setup route. Live
+    // registration remains a separate readiness check.
+    let ibus_ready = crate::setup_ibus::setup_route_available()
+        || ibus_engine_available()
+        || ibus_engine_installed();
     recommended_setup_backend_with_ibus(capabilities, ibus_ready, policy)
 }
 
