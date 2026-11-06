@@ -19,7 +19,9 @@ All notable changes to WayExpand are documented here.
   smoke test so Debian and Fedora package checks reach the installation audit.
 - Keep IBus's normal configuration engine enabled in the GNOME acceptance
   session, and wait for IBus itself to confirm WayExpand activation before the
-  GTK insertion check.
+  GTK insertion check. Preserve the system IBus component directory alongside
+  the private test component so GNOME can resolve its configured keyboard
+  layout engines.
 - Preserve isolated IBus and GNOME end-to-end logs as short-retention CI
   artifacts, including on test failure, so input activation and GTK insertion
   regressions have actionable diagnostics tied to the tested commit.

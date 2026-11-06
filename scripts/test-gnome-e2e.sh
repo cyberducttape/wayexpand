@@ -617,7 +617,9 @@ env -i \
     XDG_DATA_HOME="$work/data" \
     XDG_DATA_DIRS="${XDG_DATA_DIRS:-/usr/local/share:/usr/share}" \
     XDG_RUNTIME_DIR="$runtime" \
-    IBUS_COMPONENT_PATH="$work/component" \
+    # Keep WayExpand's private test component while retaining the system IBus
+    # engines GNOME needs for the configured xkb sources.
+    IBUS_COMPONENT_PATH="$work/component:/usr/share/ibus/component" \
     GTK_IM_MODULE=ibus \
     GDK_BACKEND=wayland \
     XDG_CURRENT_DESKTOP=GNOME \
