@@ -151,6 +151,7 @@ fn run() -> Result<()> {
         Some("sync") => sync_command(args)?,
         Some("certify") => certify_command(args)?,
         Some("support-bundle") => support_bundle(args)?,
+        Some("support") => support_bundle(args)?,
         Some("backend") => backend_command(args)?,
         Some("explain-backend") => explain_backend_command(args)?,
         Some("fleet") => fleet_command(args)?,
@@ -215,10 +216,10 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ("reset --integration|--services|--preferences [--check|--apply --yes] [--json]", "Preview and apply a scoped recovery reset"),
             ("restore <backup> [--check | --apply --yes --expected-current=HASH --expected-backup=HASH] [--json] [config]", "Review and safely restore a configuration backup"),
             (
-                "doctor [--json] [config]",
+                "doctor [--json] [config] | --gnome [--json]",
                 "Diagnose configuration, backends and the running daemon",
             ),
-            ("debug [--json] [--trigger TEXT] [--live [--seconds 1..300]]", "Explain runtime readiness and a specific trigger with sanitized live diagnostics"),
+            ("debug [--json] [--trigger TEXT] [--live [--seconds 1..300]] | --gnome --interactive", "Explain runtime readiness or guide a harmless GNOME insertion test"),
             (
                 "policy inspect|check [--file PATH] [--allow-audit-only] [--json]",
                 "Inspect policy provenance or fail CI when restrictions are not enforced",
@@ -354,6 +355,10 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ("backend list [--json] | profile [ID|--current] [--json] | test --capture|--injection", "Inspect live route assessments, desktop guidance, or run an explicit one-shot route test"),
             ("explain-backend", "Explain automatic backend selection"),
             ("certify [--json]", "Run local compatibility certification"),
+            (
+                "support [--gnome] [--output FILE]",
+                "Write a sanitized GNOME-focused support report",
+            ),
             (
                 "support-bundle [--output FILE]",
                 "Write redacted diagnostic JSON for support",

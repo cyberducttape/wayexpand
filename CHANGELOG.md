@@ -4,6 +4,14 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add GNOME-specific `wayexpand doctor --gnome` conclusions and a guided
+  `wayexpand debug --gnome --interactive` real-app test. The test distinguishes
+  configured routing from uncorrelated activity and user-confirmed insertion;
+  it never logs entered or replacement text. Add `wayexpand support --gnome`
+  with GNOME/IBus source, sanitized component-location, service, policy, test,
+  and stable error-ID data (support schema 3). Make terminal evdev coverage an
+  optional follow-up offered only after the core IBus insertion is confirmed;
+  `--yes` cannot implicitly enable raw keyboard capture.
 - Make missing system IBus registration an explicit setup choice. User installs
   show the registration plan and ask separately before a one-time administrator
   authorization; `--yes` alone cannot invoke it, while

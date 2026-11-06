@@ -20,15 +20,18 @@ const REPORT_TIMEOUT: Duration = Duration::from_secs(10);
 /// copied wholesale.
 pub(crate) fn support_bundle(args: Args) -> Result<()> {
     let mut output_path = None;
+    let mut gnome = false;
     let mut args = args;
     while let Some(argument) = args.next() {
-        if argument == "--output" && output_path.is_none() {
+        if argument == "--gnome" && !gnome {
+            gnome = true;
+        } else if argument == "--output" && output_path.is_none() {
             output_path =
                 Some(PathBuf::from(args.next().ok_or_else(|| {
                     usage_error("--output requires a new file path")
                 })?));
         } else {
-            usage_bail!("usage: wayexpand support-bundle [--output FILE]");
+            usage_bail!("usage: wayexpand support [--gnome] [--output FILE]");
         }
     }
 
@@ -38,7 +41,10 @@ pub(crate) fn support_bundle(args: Args) -> Result<()> {
         .ok()
         .and_then(|raw| crate::doctor::status::status_as_json(&raw).ok());
     let services = service_health();
-    let report = summarize_reports(&doctor, &certification, status.as_ref(), &services);
+    let mut report = summarize_reports(&doctor, &certification, status.as_ref(), &services);
+    if gnome {
+        report["gnome"] = gnome_support_section(&doctor);
+    }
     let bytes = serde_json::to_vec_pretty(&report).context("serializing support report")?;
     if bytes.len() as u64 > MAX_REPORT_BYTES {
         bail!("support report exceeded the 1 MiB output limit");
@@ -61,6 +67,179 @@ pub(crate) fn support_bundle(args: Args) -> Result<()> {
         println!("{}", String::from_utf8_lossy(&bytes));
     }
     Ok(())
+}
+
+fn gnome_support_section(doctor: &serde_json::Value) -> serde_json::Value {
+    use wayexpand_backend_ibus::chain::{IbusDaemonProcess, IbusManifest};
+
+    let desktop = wayexpand_backend_ibus::chain::IbusDesktop::detect();
+    let route = wayexpand_backend_ibus::chain::diagnose();
+    let checks = [
+        "gnome-session",
+        "daemon",
+        "component",
+        "registered",
+        "gnome-source-registered",
+        "gnome-source-active",
+        "consent",
+        "field-input",
+        "target-insertion",
+    ];
+    let source_setting = crate::setup_ibus::command_output(
+        "gsettings",
+        &["get", "org.gnome.desktop.input-sources", "sources"],
+    );
+    let current_setting = crate::setup_ibus::command_output(
+        "gsettings",
+        &["get", "org.gnome.desktop.input-sources", "current"],
+    );
+    let parsed_sources = source_setting
+        .as_deref()
+        .and_then(|raw| wayexpand_backend_ibus::gnome_input_sources::parse_sources(raw).ok());
+    let wayexpand_registered = parsed_sources.as_ref().is_some_and(|sources| {
+        wayexpand_backend_ibus::gnome_input_sources::wayexpand_index(sources).is_some()
+    });
+    let current_index = current_setting
+        .as_deref()
+        .and_then(|raw| wayexpand_backend_ibus::gnome_input_sources::parse_current(raw).ok());
+    let wayexpand_index = parsed_sources
+        .as_ref()
+        .and_then(|sources| wayexpand_backend_ibus::gnome_input_sources::wayexpand_index(sources));
+    let source_summaries = parsed_sources.as_ref().map(|sources| {
+        sources
+            .iter()
+            .map(|source| {
+                let (kind, id) = match source.kind.as_str() {
+                    "xkb" => ("xkb", safe_engine_name(&source.id)),
+                    "ibus" if source.id == "wayexpand" => ("ibus", Some("wayexpand".to_owned())),
+                    "ibus" => ("ibus", Some("<other-engine>".to_owned())),
+                    _ => ("other", Some("<redacted>".to_owned())),
+                };
+                serde_json::json!({"kind":kind, "id":id})
+            })
+            .collect::<Vec<_>>()
+    });
+    let component_dirs = IbusDaemonProcess::find()
+        .map(|daemon| daemon.component_directories().0)
+        .unwrap_or_else(|| vec![wayexpand_backend_ibus::chain::component_install_directory()]);
+    let locations = component_dirs
+        .iter()
+        .map(|path| {
+            if path == std::path::Path::new("/usr/share/ibus/component")
+                || path == std::path::Path::new("/usr/local/share/ibus/component")
+            {
+                serde_json::json!({"kind":"system_component_directory","path":path})
+            } else {
+                serde_json::json!({"kind":"custom_component_directory","path":"<redacted>"})
+            }
+        })
+        .collect::<Vec<_>>();
+    let manifest = IbusManifest::find_in(&component_dirs);
+    let current_engine = crate::setup_ibus::command_output_with_status("ibus", &["engine"])
+        .and_then(|(_, value)| safe_engine_name(&value));
+    let version = crate::setup_ibus::command_output("gnome-shell", &["--version"])
+        .and_then(|value| value.split_whitespace().last().and_then(safe_version));
+    let os = fs::read_to_string("/etc/os-release")
+        .ok()
+        .map(|content| {
+            let get = |key: &str| {
+                content
+                    .lines()
+                    .find_map(|line| line.strip_prefix(&format!("{key}=")))
+                    .map(|value| value.trim_matches('"'))
+                    .and_then(safe_engine_name)
+            };
+            serde_json::json!({"id": get("ID"), "version_id": get("VERSION_ID")})
+        })
+        .unwrap_or(serde_json::Value::Null);
+    let check_map = checks
+        .iter()
+        .filter_map(|id| {
+            route.check(id).map(|check| {
+                (
+                    (*id).to_owned(),
+                    serde_json::json!({"state":check.state.label(), "problem_id":gnome_problem_for(check)}),
+                )
+            })
+        })
+        .collect::<serde_json::Map<_, _>>();
+    let errors = check_map
+        .values()
+        .filter_map(|check| check["problem_id"].as_str())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "session": {
+            "desktop": if desktop == wayexpand_backend_ibus::chain::IbusDesktop::Gnome { "gnome" } else { "other_or_unknown" },
+            "wayland": std::env::var("XDG_SESSION_TYPE").ok().is_some_and(|value| value.eq_ignore_ascii_case("wayland")),
+            "shell_version": version,
+            "os": os,
+        },
+        "services": {
+            "ibus_daemon_detected": check_map.get("daemon").is_some_and(|check| check["state"] == "pass"),
+            "wayexpand_control": doctor["daemon"]["available"].as_bool(),
+            "wayexpand_build": {"version": safe_token(doctor.get("wayexpand_version")), "commit": safe_token(doctor.get("wayexpand_commit"))},
+        },
+        "input_sources": {
+            "readable": parsed_sources.is_some(),
+            "sources": source_summaries,
+            "wayexpand_registered": wayexpand_registered,
+            "current_index": current_index,
+            "wayexpand_active": current_index.zip(wayexpand_index).is_some_and(|(current, expected)| current == expected as u32),
+        },
+        "ibus": {
+            "current_engine": current_engine,
+            "component_directories": locations,
+            "wayexpand_component_present": manifest.is_some(),
+            "component_path": manifest.as_ref().map(|found| if found.path.starts_with("/usr/share/") || found.path.starts_with("/usr/local/share/") { "system_component" } else { "custom_path_redacted" }),
+        },
+        "policy": {
+            "valid": doctor["policy"]["policy"]["valid"].as_bool(),
+            "enforcement_enabled": doctor["policy"]["policy"]["safe_mode"].as_bool(),
+            "replacement_authorized": check_map.get("consent").is_some_and(|check| check["state"] == "pass"),
+        },
+        "test_outcomes": check_map,
+        "error_ids": errors,
+        "privacy": {"keystrokes": "excluded", "snippet_contents": "excluded", "clipboard": "excluded", "environment_secrets": "excluded"},
+    })
+}
+
+fn gnome_problem_for(check: &wayexpand_backend_ibus::chain::IbusCheck) -> Option<&'static str> {
+    use wayexpand_backend_ibus::chain::IbusCheckState;
+    if matches!(check.state, IbusCheckState::Pass | IbusCheckState::Skip) {
+        return None;
+    }
+    Some(match check.id {
+        "gnome-session" => "WX-GNOME-SESSION-001",
+        "daemon" => "WX-GNOME-IBUS-001",
+        "component" | "registered" => "WX-IBUS-001",
+        "gnome-source-registered" => "WX-GNOME-IM-001",
+        "gnome-source-active" => "WX-GNOME-IM-002",
+        "consent" => "WX-POLICY-001",
+        "field-input" => "WX-GNOME-IM-003",
+        "target-insertion" => "WX-GNOME-IM-004",
+        _ => check.problem_id.unwrap_or("WX-GNOME-IM-001"),
+    })
+}
+
+fn safe_engine_name(value: &str) -> Option<String> {
+    let value = value.trim().trim_matches('"');
+    (!value.is_empty()
+        && value.len() <= 80
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"._+-".contains(&byte)))
+    .then(|| value.to_owned())
+}
+
+fn safe_version(value: &str) -> Option<String> {
+    (!value.is_empty()
+        && value.len() <= 32
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b".-+".contains(&byte)))
+    .then(|| value.to_owned())
 }
 
 fn read_report(command_name: &str) -> Result<serde_json::Value> {
@@ -288,7 +467,7 @@ pub(crate) fn summarize_reports(
     );
     let diagnostics = diagnostic_summaries(doctor, services);
     serde_json::json!({
-        "schema": 2,
+        "schema": 3,
         "generated_at_unix": SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -626,7 +805,7 @@ mod tests {
             summary["protocol_probes"]["input_method_v2"]["status"],
             "unavailable"
         );
-        assert_eq!(summary["schema"], 2);
+        assert_eq!(summary["schema"], 3);
         assert_eq!(summary["services"]["units"][0]["restart_count"], 3);
         assert_eq!(summary["services"]["units"][0]["exit_code"], 1);
         assert_eq!(summary["recent_events"]["input_backend_restarts"], 2);

@@ -99,7 +99,7 @@ Run:
 
 ```sh
 wayexpand setup --backend ibus              # IBus for applications
-wayexpand setup --backend ibus --terminals  # also cover terminals (see below)
+wayexpand setup --backend ibus               # optional terminal setup follows a verified insertion test
 ```
 
 Setup works in phases and reads each result back rather than trusting exit
@@ -142,11 +142,13 @@ the recorded session and says so. The steps are:
    verified but not atomic, and `off` refuses every replacement. `--yes`
    never grants this consent.
 5. Stops WayExpand daemons that capture keys in every application, since they
-   would expand snippets a second time, and starts a companion service:
+   would expand snippets a second time, and starts the core companion service:
    `wayexpand-control.service` (control socket, quick insert and hotkeys; it
-   captures no keys), or with `--terminals` the evdev daemon limited to
-   `terminal_apps`, which also serves the control socket. Terminal coverage
-   set up earlier is kept when setup runs again.
+   captures no keys). Optional terminal coverage uses a separate evdev daemon
+   restricted to `terminal_apps`; setup offers it only after the user confirms
+   a real IBus insertion. It is never enabled by `--yes`, and terminal setup
+   still requires the separate raw-capture consent marker. Existing terminal
+   coverage is kept when setup runs again.
 
 `wayexpand ibus status --json` (IBus-route schema 2) separates configuration readiness from
 operational readiness. On GNOME it independently checks the GNOME Wayland
@@ -169,8 +171,17 @@ wayexpand ibus status   # every link of the route, with the fix for each failure
 wayexpand ibus watch    # switch to an app and type: explains each field
 ```
 
-`wayexpand doctor` shows the first broken link, and `wayexpand support-bundle`
-includes check states and per-field verdicts. The engine publishes
+`wayexpand doctor --gnome` presents a GNOME-specific conclusion from the
+session, IBus component, GNOME source, consent, and runtime checks. Use
+`wayexpand debug --gnome --interactive` for a harmless, user-confirmed test
+in a real application; activity counters are explicitly uncorrelated with
+the typed test trigger, and the test does not certify other applications or
+logout persistence. `wayexpand support --gnome` writes the ordinary redacted
+support report plus sanitized GNOME/IBus source, component-location class,
+service, policy, test-state, and stable error-ID fields. It excludes source
+tuples other than WayExpand presence/active state, user paths, keystrokes,
+snippet text, clipboard data, and environment values. The older
+`wayexpand support-bundle` command remains available. The engine publishes
 content-free activity (counts and states only, never text) to
 `$XDG_RUNTIME_DIR/wayexpand-ibus-status.json`; field verdicts distinguish
 `expanded`, `ready`, `sensitive` (password/PIN), `no-surrounding-text`
@@ -180,14 +191,16 @@ content-free activity (counts and states only, never text) to
 ## Terminals
 
 Terminals do not report the text before the cursor, so IBus cannot replace a
-trigger there (the engine refuses rather than deleting blindly). List your
-terminals in `settings.terminal_apps` (setup fills in common terminal app IDs
-when the list is empty) and run setup with `--terminals`: the evdev daemon is
-then started with `WAYEXPAND_TERMINAL_APPS_ONLY=1` and expands only while one
-of those apps is focused (KWin window tracking; fail-closed otherwise). IBus
-keeps handling every other application, so nothing expands twice. evdev reads
-all keyboard input, so this requires the evdev consent marker described in
-[BACKENDS_SENSITIVE_FIELDS.md](BACKENDS_SENSITIVE_FIELDS.md).
+trigger there (the engine refuses rather than deleting blindly). After a
+successful real IBus insertion test, setup can offer optional terminal
+coverage (or use `wayexpand setup --backend ibus --terminals` to request it
+after completing the same insertion test). It uses a separate evdev daemon
+with `WAYEXPAND_TERMINAL_APPS_ONLY=1`
+and expands only while one of the configured `settings.terminal_apps` is
+focused (KWin window tracking; fail-closed otherwise). IBus keeps handling
+other applications, so nothing expands twice. evdev reads raw keyboard input
+including password fields, so this requires the separate consent marker
+described in [BACKENDS_SENSITIVE_FIELDS.md](BACKENDS_SENSITIVE_FIELDS.md).
 
 ## Protocol notes
 

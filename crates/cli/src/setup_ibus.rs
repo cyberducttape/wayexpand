@@ -53,6 +53,9 @@ pub(crate) struct IbusSetupOptions {
     pub(crate) accept_non_atomic_replacement: bool,
     /// Also cover terminals with a terminal-only evdev daemon.
     pub(crate) terminals: bool,
+    /// The core IBus route passed the interactive target-app check in this
+    /// setup invocation; terminal activation is only allowed after this.
+    pub(crate) real_insertion_verified: bool,
     /// Explicit authorization to attempt the one-time privileged component
     /// registration. `--yes` does not imply this authorization.
     pub(crate) install_system_integration: bool,
@@ -101,7 +104,7 @@ pub(crate) fn command_output(program: &str, arguments: &[&str]) -> Option<String
 
 /// Return bounded stdout and the exit status. Some IBus commands print the
 /// active engine successfully but exit nonzero for default-layout engines.
-fn command_output_with_status(
+pub(crate) fn command_output_with_status(
     program: &str,
     arguments: &[&str],
 ) -> Option<(std::process::ExitStatus, String)> {
@@ -2144,10 +2147,17 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
         }
         bail!("WX-POLICY-001: IBus is active, but replacement authorization is required before expansions can work")
     }
-    println!("WayExpand IBus setup is configured; a real target-app insertion has not yet been verified.");
+    println!(
+        "WayExpand IBus setup is configured; real target-app insertion: {}.",
+        if options.real_insertion_verified {
+            "user-confirmed for the tested application"
+        } else {
+            "NOT TESTED"
+        }
+    );
     println!("To complete the first-run check, run `wayexpand ibus watch`, switch to a test application, and type a harmless trigger.");
     if companion != CompanionService::Terminals {
-        println!("Terminals cannot use IBus; add `--terminals` to cover them as well.");
+        println!("Terminal coverage is optional and is offered separately after the real IBus insertion test.");
     }
     Ok(())
 }

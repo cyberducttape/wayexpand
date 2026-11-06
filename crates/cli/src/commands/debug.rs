@@ -15,6 +15,8 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
     let mut seconds = 60_u64;
     let mut trigger: Option<String> = None;
     let mut test_trigger: Option<String> = None;
+    let mut gnome_interactive = false;
+    let mut gnome = false;
     let mut values: Vec<String> = args.collect();
     let mut index = 0;
     while index < values.len() {
@@ -25,6 +27,14 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
             }
             "--json" => {
                 json = true;
+                values.remove(index);
+            }
+            "--gnome" => {
+                gnome = true;
+                values.remove(index);
+            }
+            "--interactive" => {
+                gnome_interactive = true;
                 values.remove(index);
             }
             "--seconds" => {
@@ -60,11 +70,23 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
     if !values.is_empty() {
         bail!("usage: wayexpand debug [--json] [--trigger TEXT] [--live [--seconds 1..300]] | --test TRIGGER");
     }
+    if gnome || gnome_interactive {
+        if !gnome
+            || !gnome_interactive
+            || live
+            || json
+            || trigger.is_some()
+            || test_trigger.is_some()
+        {
+            bail!("usage: wayexpand debug --gnome --interactive");
+        }
+        return gnome_interactive_test();
+    }
     if test_trigger.is_some() && (live || json || trigger.is_some()) {
         bail!("--test cannot be combined with --json, --trigger, or --live");
     }
     if let Some(trigger) = test_trigger {
-        return desktop_test(&trigger);
+        return desktop_test(&trigger).map(|_| ());
     }
     let report = crate::diagnostics::collect(trigger.as_deref());
     if json && live {
@@ -80,7 +102,11 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
 
 /// Interactive, target-application test. It never sends Enter, and only
 /// accepts a static, enabled snippet without command execution or form fields.
-pub(crate) fn desktop_test(trigger: &str) -> Result<()> {
+pub(crate) fn desktop_test(trigger: &str) -> Result<bool> {
+    desktop_test_for(trigger, false)
+}
+
+fn desktop_test_for(trigger: &str, gnome: bool) -> Result<bool> {
     if trigger.is_empty() || trigger.chars().any(char::is_control) {
         bail!("test trigger must be non-empty and contain no control characters");
     }
@@ -119,7 +145,7 @@ pub(crate) fn desktop_test(trigger: &str) -> Result<()> {
     io::stdin().read_line(&mut answer)?;
     if !matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
         println!("Test cancelled; no text was inserted.");
-        return Ok(());
+        return Ok(false);
     }
     let (initial_daemon, _, base_input, base_keys, base_expansions, base_ibus_transaction) =
         snapshot();
@@ -165,7 +191,10 @@ pub(crate) fn desktop_test(trigger: &str) -> Result<()> {
             "Capture [{test_id}]: FAIL — no sanitized input activity reached WayExpand within 30 seconds."
         );
         println!("Next: check the active input method with `wayexpand ibus status` and inspect `wayexpand debug --live`.");
-        return Ok(());
+        if gnome {
+            println!("Problem: WX-GNOME-IM-003 — GNOME/IBus is configured, but no safe-field input activity was observed. Check the selected GNOME source and whether this application uses IBus.");
+        }
+        return Ok(false);
     }
     println!("Capture [{test_id}]: ACTIVITY OBSERVED — test trigger not independently confirmed; aggregate counters do not correlate events to this test ID.");
     if !output_seen {
@@ -207,7 +236,10 @@ pub(crate) fn desktop_test(trigger: &str) -> Result<()> {
     if !output_seen {
         println!("Output [{test_id}]: NO CORRELATED RESULT — no output completion was reported during this test window.");
         println!("No second insertion was attempted. Inspect `wayexpand debug --live` and the target field.");
-        return Ok(());
+        if gnome {
+            println!("Problem: WX-GNOME-IM-004 — activity was observed, but no expansion outcome was correlated with this test window. Check matching, configuration and replacement consent.");
+        }
+        return Ok(false);
     }
     println!(
         "Output activity [{test_id}]: {}",
@@ -225,7 +257,7 @@ pub(crate) fn desktop_test(trigger: &str) -> Result<()> {
             "Test scope: {}; result requires manual review.",
             application_class
         );
-        return Ok(());
+        return Ok(false);
     }
     println!("Check the target application, then return here. Was the expected text inserted exactly once, without loss or interleaving? [y/N] ");
     answer.clear();
@@ -241,6 +273,71 @@ pub(crate) fn desktop_test(trigger: &str) -> Result<()> {
         application_class
     );
     println!("Test scope: user-reported {} only. This does not certify other toolkits, terminals, browsers, remote sessions, or sandboxed apps.", application_class);
+    if gnome && !verified {
+        println!("Problem: WX-GNOME-IM-005 — output activity was reported, but the user did not confirm exact target text. Inspect the field; do not retry automatically.");
+    }
+    Ok(verified)
+}
+
+fn gnome_interactive_test() -> Result<()> {
+    let report = wayexpand_backend_ibus::chain::diagnose();
+    if report.desktop != wayexpand_backend_ibus::chain::IbusDesktop::Gnome {
+        bail!("--gnome --interactive requires a GNOME session; run `wayexpand doctor --gnome` for available diagnostics");
+    }
+    println!("GNOME interactive test — no keystrokes or snippet contents are recorded.");
+    for id in [
+        "gnome-session",
+        "daemon",
+        "component",
+        "registered",
+        "gnome-source-registered",
+        "gnome-source-active",
+        "consent",
+    ] {
+        if let Some(check) = report.check(id) {
+            println!(
+                "{} {}: {}",
+                check.state.symbol(),
+                check.title,
+                check.state.label()
+            );
+            if check.state != wayexpand_backend_ibus::chain::IbusCheckState::Pass {
+                let problem = check.problem_id.unwrap_or(match id {
+                    "gnome-session" => "WX-GNOME-SESSION-001",
+                    "daemon" => "WX-GNOME-IBUS-001",
+                    "component" | "registered" => "WX-IBUS-001",
+                    "gnome-source-active" => "WX-GNOME-IM-002",
+                    "consent" => "WX-POLICY-001",
+                    _ => "WX-GNOME-IM-001",
+                });
+                println!("Problem: {problem}");
+                println!("Next: run `wayexpand doctor --gnome` and follow its fix. The test stopped before inserting anything.");
+                return Ok(());
+            }
+        }
+    }
+    let Some(trigger) = wayexpand_core::Config::load(wayexpand_core::default_config_path())
+        .ok()
+        .and_then(|config| {
+            config
+                .expansion
+                .iter()
+                .find(|item| item.enabled && item.answers_to(";;hello"))
+                .map(|_| ";;hello")
+        })
+    else {
+        println!("No enabled `;;hello` sample is available for the harmless test.");
+        println!("Add or enable the sample expansion, then rerun `wayexpand debug --gnome --interactive`.");
+        return Ok(());
+    };
+    println!("Use a normal GNOME text field. Do not use a password field, terminal command prompt, or production session.");
+    let verified = desktop_test_for(trigger, true)?;
+    if verified {
+        println!("GNOME test: user-confirmed insertion in the reported application only.");
+        println!("Logout persistence and other application/toolkit coverage remain untested.");
+    } else {
+        println!("GNOME test not verified. Run `wayexpand doctor --gnome` for the next likely failing stage.");
+    }
     Ok(())
 }
 

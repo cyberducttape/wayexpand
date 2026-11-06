@@ -180,12 +180,17 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     if install_system_integration && backend != "ibus" {
         usage_bail!("--install-system-integration applies only to the IBus backend");
     }
+    let terminals_requested = terminals;
     configure_setup_backend(
         &backend,
         crate::setup_ibus::IbusSetupOptions {
             assume_yes,
             accept_non_atomic_replacement,
-            terminals,
+            // Terminal capture is a separately authorized compatibility
+            // route. Set it up only after the core IBus path passes a real
+            // insertion check below.
+            terminals: false,
+            real_insertion_verified: false,
             install_system_integration,
         },
     )?;
@@ -195,6 +200,7 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
             .iter()
             .any(|expansion| expansion.enabled && expansion.answers_to(";;hello"))
     });
+    let mut real_insertion_verified = false;
     if hello_available {
         if assume_yes {
             println!("Activation completed. Real application insertion: NOT TESTED.");
@@ -203,13 +209,39 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
             "Activation checks completed; a real application insertion is not yet verified. Run the `;;hello` first-run test now? [Y/n] ",
             true,
         )? {
-            crate::commands::debug::desktop_test(";;hello")?;
+            real_insertion_verified = crate::commands::debug::desktop_test(";;hello")?;
         } else {
             println!("Activation completed. Real application insertion: NOT TESTED.");
             println!("Next: run `wayexpand debug --test ';;hello'` in a disposable text field and confirm the replacement.");
         }
     } else {
         println!("Activation completed. No enabled `;;hello` sample was found; real application insertion remains NOT TESTED.");
+    }
+    if backend == "ibus" {
+        let enable_terminals = if real_insertion_verified && !terminals_requested && !assume_yes {
+            println!("\nOptional terminal coverage uses evdev and can observe raw keyboard input, including password fields. It requires separate permission and compatible output injection.");
+            crate::prompt_yes_no(
+                "Configure terminal coverage as a separate evdev service? [y/N] ",
+                false,
+            )?
+        } else {
+            terminals_requested
+        };
+        if enable_terminals && real_insertion_verified {
+            configure_setup_backend(
+                "ibus",
+                crate::setup_ibus::IbusSetupOptions {
+                    assume_yes,
+                    accept_non_atomic_replacement,
+                    terminals: true,
+                    real_insertion_verified: true,
+                    install_system_integration,
+                },
+            )?;
+        } else if terminals_requested {
+            println!("Optional terminal coverage was not configured because a real IBus insertion was not verified.");
+            println!("After verifying `;;hello` in a disposable text field, rerun `wayexpand setup --backend ibus --terminals`.");
+        }
     }
     Ok(())
 }
@@ -222,6 +254,20 @@ pub(crate) fn doctor_command(args: Args) -> Result<()> {
         .position(|argument| argument == "--security")
         .map(|index| rest.remove(index))
         .is_some();
+    let requested_gnome = rest
+        .iter()
+        .position(|argument| argument == "--gnome")
+        .map(|index| rest.remove(index))
+        .is_some();
+    if requested_gnome {
+        if requested_security
+            || rest.iter().any(|argument| argument == "--certify")
+            || !rest.is_empty()
+        {
+            usage_bail!("usage: wayexpand doctor --gnome [--json]");
+        }
+        return crate::doctor::gnome::run(requested_json);
+    }
     if requested_security {
         let mut profile = crate::doctor::security::ProtectionProfile::Workstation;
         let mut positional = Vec::new();

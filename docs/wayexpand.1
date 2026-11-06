@@ -96,10 +96,20 @@ from the configuration and organization policy. Replacement text is never shown.
 Produce a machine-readable local certification report. Protocol availability
 is not treated as end-to-end certification; untested scenarios remain visible.
 .TP
-.B support-bundle [--output FILE]
-Write a redacted support report. The report excludes config paths, snippet
+.B support [--gnome] [--output FILE]
+Write a redacted support report. With --gnome, include GNOME input-source
+readiness, sanitized component locations, IBus state, policy state and test
+outcomes. The report excludes config paths, snippet
 contents, credentials, and detailed error strings. A file is created with mode
 0600 and is never overwritten; without --output, JSON is written to stdout.
+.TP
+.B doctor --gnome [--json]
+Show a GNOME-specific IBus readiness conclusion. Unknown evidence is not
+treated as success. The command does not claim a real application insertion.
+.TP
+.B debug --gnome --interactive
+Guide a user-confirmed harmless insertion test in a real GNOME application.
+The command does not send Enter or record keystrokes or replacement text.
 .TP
 .B fleet status [--json]
 Show the merged fleet configuration layers and their provenance.
