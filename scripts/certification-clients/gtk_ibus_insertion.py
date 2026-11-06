@@ -23,7 +23,13 @@ KEYS = {
 
 def main():
     application = Gtk.Application(application_id=APP_ID)
-    state = {"window": None, "entry": None, "attempts": 0, "result": 1}
+    state = {
+        "window": None,
+        "entry": None,
+        "focus_attempts": 0,
+        "attempts": 0,
+        "result": 1,
+    }
 
     def finish(result):
         state["result"] = result
@@ -49,11 +55,15 @@ def main():
         window = state["window"]
         entry = state["entry"]
         if not window.is_active() or not entry.is_focus():
-            print(
-                "note gtk-ibus-insertion GTK focus state is not yet confirmed; "
-                "the committed-text assertion remains authoritative",
-                flush=True,
-            )
+            state["focus_attempts"] += 1
+            if state["focus_attempts"] >= TIMEOUT_MS // 50:
+                print(
+                    "fail gtk-ibus-insertion GTK did not confirm window and "
+                    "entry focus before input",
+                    flush=True,
+                )
+                return finish(1)
+            return GLib.SOURCE_CONTINUE
 
         try:
             # GTK cannot synthesize compositor input on Wayland. Use an
