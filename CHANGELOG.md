@@ -10,6 +10,14 @@ All notable changes to WayExpand are documented here.
   completion now distinguishes route configuration from a verified real-app
   insertion, and first-run status shows Installed, Configured, and Verified
   working separately.
+- Avoid restarting an already registered IBus session during setup. When a
+  registry refresh is needed, check the restart command result, use a discovered
+  systemd user unit only when its MainPID owns the IBus daemon, and verify the
+  daemon, GNOME Shell session, and engine registry reconnect before activation.
+  Report `WX-GNOME-IBUS-RESTART` with separate registry/session evidence and
+  preserve or restore GNOME input-source state on failed activation. Recheck
+  GNOME's active source and session state after setup to catch concurrent
+  source changes.
 - Register the WayExpand IBus engine in GNOME's typed input-source list while
   preserving existing keyboard sources and order. Setup selects the GNOME
   source, verifies the saved registration and active source, and restores the

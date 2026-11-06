@@ -585,9 +585,9 @@ impl SessionSnapshot {
                 &["get", "org.freedesktop.ibus.general", "preload-engines"],
             )
             .map(|value| value.trim().to_owned()),
-            gnome_input_sources: (IbusDesktop::detect() == IbusDesktop::Gnome)
-                .then(crate::gnome_input_sources::Snapshot::capture)
-                .and_then(Result::ok),
+            // Captured immediately before GNOME source activation, after any
+            // potentially slow IBus registry refresh.
+            gnome_input_sources: None,
             services: UserService::ALL
                 .into_iter()
                 .map(|service| OriginalServiceState::capture(service, inventory.state(service)))
@@ -598,7 +598,7 @@ impl SessionSnapshot {
 
     /// Undo session changes in reverse order. Prepared, inert changes (the
     /// component file, configuration consent) are kept.
-    fn rollback(&self) {
+    fn rollback(&self) -> Vec<String> {
         let mut failures = self.rollback_with(kwriteconfig(), |program, arguments| {
             run_setup_command(program, arguments).is_ok_and(|status| status.success())
         });
@@ -630,6 +630,7 @@ impl SessionSnapshot {
                 failures.join(", ")
             );
         }
+        failures
     }
 
     fn rollback_with(
@@ -703,6 +704,184 @@ impl SessionSnapshot {
         }
         failures
     }
+}
+
+/// Return a loaded systemd user unit only when it demonstrably owns the
+/// running IBus daemon. IBus unit names differ between distributions, so
+/// discovery is based on the manager's live unit list and MainPID.
+fn systemd_unit_for_ibus(pid: u32) -> Option<String> {
+    let units = command_output(
+        "systemctl",
+        &[
+            "--user",
+            "list-units",
+            "--type=service",
+            "--all",
+            "--no-legend",
+            "--no-pager",
+        ],
+    )?;
+    units.lines().find_map(|line| {
+        let unit = line.split_whitespace().next()?;
+        let lower = unit.to_ascii_lowercase();
+        if !unit.ends_with(".service")
+            || !(lower.starts_with("ibus") || lower.starts_with("org.freedesktop.ibus"))
+        {
+            return None;
+        }
+        let main_pid = command_output(
+            "systemctl",
+            &["--user", "show", unit, "--property=MainPID", "--value"],
+        )?;
+        (main_pid.trim().parse::<u32>().ok() == Some(pid)).then(|| unit.to_owned())
+    })
+}
+
+fn gnome_session_connection_state(report: &chain::IbusChainReport) -> &'static str {
+    let session = report.check("gnome-session").map(|check| check.state);
+    let daemon = report.check("daemon").map(|check| check.state);
+    match (session, daemon) {
+        (Some(IbusCheckState::Pass), Some(IbusCheckState::Pass)) => "PASS",
+        (Some(IbusCheckState::Fail), _) | (_, Some(IbusCheckState::Fail)) => "FAIL",
+        _ => "UNKNOWN",
+    }
+}
+
+fn gnome_activation_failures(report: &chain::IbusChainReport) -> Vec<String> {
+    [
+        "gnome-session",
+        "gnome-source-registered",
+        "gnome-source-active",
+        "daemon",
+        "registered",
+        "selected",
+    ]
+    .iter()
+    .filter_map(|id| report.check(id))
+    .filter(|check| check.state != IbusCheckState::Pass)
+    .map(|check| format!("{}: {}", check.title, check.detail))
+    .collect()
+}
+
+fn restart_failure(desktop: IbusDesktop, reason: &str) -> anyhow::Error {
+    if desktop != IbusDesktop::Gnome {
+        return anyhow::anyhow!("could not refresh the IBus component registry: {reason}");
+    }
+    let report = chain::diagnose();
+    let registration = report
+        .check("gnome-source-registered")
+        .map(|check| check.state)
+        .unwrap_or(IbusCheckState::Unknown);
+    let registry = if wayexpand_backend_ibus::engine_available() {
+        "PASS"
+    } else {
+        "FAIL"
+    };
+    anyhow::anyhow!(
+        "WX-GNOME-IBUS-RESTART: {reason}\nGNOME input-source registration: {}\nIBus registry: {}\nDesktop session connection: {}\nSetup will preserve or restore the previous input source.",
+        registration.label().to_ascii_uppercase(),
+        registry,
+        gnome_session_connection_state(&report),
+    )
+}
+
+/// Refresh the IBus registry only when the installed engine is absent from
+/// the live daemon. Prefer a discovered systemd unit only when it owns that
+/// exact daemon process; otherwise use IBus's own restart command and check
+/// its result. GNOME must reconnect both its Shell and IBus session-bus names.
+fn refresh_ibus_component_registry(desktop: IbusDesktop) -> Result<()> {
+    if wayexpand_backend_ibus::engine_available() {
+        return Ok(());
+    }
+    let daemon = IbusDaemonProcess::find();
+    if desktop == IbusDesktop::Gnome {
+        let report = chain::diagnose();
+        let session_state = report
+            .check("gnome-session")
+            .map(|check| check.state)
+            .unwrap_or(IbusCheckState::Unknown);
+        let daemon_state = report
+            .check("daemon")
+            .map(|check| check.state)
+            .unwrap_or(IbusCheckState::Unknown);
+        if session_state != IbusCheckState::Pass
+            || (daemon.is_some() && daemon_state != IbusCheckState::Pass)
+        {
+            return Err(restart_failure(
+                desktop,
+                "the active GNOME/IBus session could not be confirmed; no restart was attempted",
+            ));
+        }
+    }
+    let restart_result = if let Some(pid) = daemon.as_ref().map(|process| process.pid) {
+        if let Some(unit) = systemd_unit_for_ibus(pid) {
+            step(&format!(
+                "Refreshing IBus component registry through {unit}"
+            ));
+            run_setup_command("systemctl", &["--user", "restart", &unit])
+        } else {
+            step("Refreshing the IBus component registry (the desktop-managed IBus session may pause briefly)");
+            run_setup_command("ibus", &["restart"])
+        }
+    } else {
+        step("Starting the desktop IBus session so it can load the WayExpand component");
+        run_setup_command("ibus", &["start"])
+    };
+    let status = restart_result.map_err(|error| restart_failure(desktop, &error.to_string()))?;
+    if !status.success() {
+        return Err(restart_failure(
+            desktop,
+            &format!("IBus start/restart command exited with {status}"),
+        ));
+    }
+    let connected_and_registered = || {
+        let Some(_daemon) = IbusDaemonProcess::find() else {
+            return false;
+        };
+        let ibus_owner = command_output(
+            "busctl",
+            &[
+                "--user",
+                "--timeout=1s",
+                "call",
+                "org.freedesktop.DBus",
+                "/org/freedesktop/DBus",
+                "org.freedesktop.DBus",
+                "NameHasOwner",
+                "s",
+                "org.freedesktop.IBus",
+            ],
+        )
+        .is_some_and(|value| value.trim() == "b true");
+        let desktop_connected = if desktop == IbusDesktop::Gnome {
+            command_output(
+                "busctl",
+                &[
+                    "--user",
+                    "--timeout=1s",
+                    "call",
+                    "org.freedesktop.DBus",
+                    "/org/freedesktop/DBus",
+                    "org.freedesktop.DBus",
+                    "NameHasOwner",
+                    "s",
+                    "org.gnome.Shell",
+                ],
+            )
+            .is_some_and(|value| value.trim() == "b true")
+        } else {
+            true
+        };
+        ibus_owner && desktop_connected && wayexpand_backend_ibus::engine_available()
+    };
+    if !wait_until(Duration::from_secs(20), connected_and_registered) {
+        return Err(restart_failure(
+            desktop,
+            "IBus restarted, but the WayExpand engine or desktop session did not reconnect",
+        ));
+    }
+    step("IBus reconnected and registered the WayExpand engine");
+    Ok(())
 }
 
 const KWIN_INPUT_METHOD_KEY: [&str; 7] = [
@@ -887,48 +1066,21 @@ fn activate_and_verify(
     companion: CompanionService,
     snapshot: &mut SessionSnapshot,
 ) -> Result<()> {
-    if IbusDesktop::detect() == IbusDesktop::Gnome {
-        // Capture must succeed before mutating the GNOME list; this snapshot
-        // is also used if any later activation step fails.
-        if snapshot.gnome_input_sources.is_none() {
-            snapshot.gnome_input_sources =
-                Some(crate::gnome_input_sources::Snapshot::capture().context(
-                    "GNOME input-source settings are unavailable; refusing partial IBus setup",
-                )?);
-        }
+    let desktop = IbusDesktop::detect();
+    if desktop == IbusDesktop::KdeWayland {
+        route_kde_to_ibus(snapshot)?;
     }
-    match IbusDesktop::detect() {
-        IbusDesktop::KdeWayland => route_kde_to_ibus(snapshot)?,
-        _ => {
-            if IbusDaemonProcess::find().is_none() {
-                step("Starting IBus");
-                let _ = run_setup_command("ibus", &["start"]);
-                wait_until(Duration::from_secs(10), || {
-                    IbusDaemonProcess::find().is_some()
-                });
-            }
-        }
-    }
-    if !wayexpand_backend_ibus::engine_available() {
-        // IBus reads components only at startup; there is no reload call.
-        step("Restarting IBus so it loads the WayExpand component (input methods pause for a moment)");
-        let _ = run_setup_command("ibus", &["restart"]);
-        if !wait_until(
-            Duration::from_secs(15),
-            wayexpand_backend_ibus::engine_available,
-        ) {
-            bail!("IBus did not load the WayExpand engine; run `wayexpand ibus status` to see which link is broken");
-        }
-    }
+    // A healthy registry needs no IBus restart. New component manifests do
+    // require a refresh, which is controlled and verified before selection.
+    refresh_ibus_component_registry(desktop)?;
     add_to_preload_engines();
     restart_stale_engine();
     step("Selecting WayExpand as the active input method");
     if IbusDesktop::detect() == IbusDesktop::Gnome {
-        snapshot
-            .gnome_input_sources
-            .as_ref()
-            .expect("captured above")
-            .register_and_activate()?;
+        crate::gnome_input_sources::Snapshot::register_and_activate(
+            &mut snapshot.gnome_input_sources,
+        )
+        .context("GNOME input-source settings are unavailable; refusing partial IBus setup")?;
         step("Registered and activated WayExpand in GNOME input sources");
     }
     // The exit status is meaningless for `default`-layout engines; read back.
@@ -953,6 +1105,15 @@ fn activate_and_verify(
     }
     // Phase 4: verify with the same checks `wayexpand ibus status` runs.
     let report = chain::diagnose();
+    if desktop == IbusDesktop::Gnome {
+        let failed = gnome_activation_failures(&report);
+        if !failed.is_empty() {
+            bail!(
+                "WX-GNOME-IBUS-ACTIVATION: WayExpand did not remain active in the GNOME session: {}",
+                failed.join("; ")
+            );
+        }
+    }
     if let Some(failure) = report.first_failure() {
         bail!(
             "verification failed at \"{}\": {}{}",
@@ -988,26 +1149,28 @@ pub(crate) fn repair_gnome_input_source() -> Result<()> {
             .filter(|value| !value.is_empty())
             .ok_or_else(|| anyhow::anyhow!("could not read the currently selected IBus engine"))?
     };
-    let snapshot = SessionSnapshot {
+    let mut snapshot = SessionSnapshot {
         global_engine: Some(previous_engine),
-        gnome_input_sources: Some(
-            crate::gnome_input_sources::Snapshot::capture()
-                .context("could not capture GNOME input-source settings; no changes made")?,
-        ),
         ..SessionSnapshot::default()
     };
     let activation = (|| -> Result<()> {
-        snapshot
-            .gnome_input_sources
-            .as_ref()
-            .expect("snapshot captured")
-            .register_and_activate()?;
+        crate::gnome_input_sources::Snapshot::register_and_activate(
+            &mut snapshot.gnome_input_sources,
+        )?;
         let _ = run_setup_command("ibus", &["engine", "wayexpand"]);
         if !wait_until(
             Duration::from_secs(5),
             wayexpand_backend_ibus::global_engine_selected,
         ) {
             bail!("IBus did not report WayExpand as the active engine");
+        }
+        let report = chain::diagnose();
+        let failed = gnome_activation_failures(&report);
+        if !failed.is_empty() {
+            bail!(
+                "WX-GNOME-IBUS-ACTIVATION: WayExpand did not remain active in the GNOME session: {}",
+                failed.join("; ")
+            );
         }
         Ok(())
     })();
@@ -1045,8 +1208,16 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
     let service_snapshot = ServiceInventory::probe();
     let mut snapshot = SessionSnapshot::capture(&service_snapshot);
     if let Err(error) = activate_and_verify(options, companion, &mut snapshot) {
-        snapshot.rollback();
-        return Err(error.context("the previous input-method setup was restored"));
+        let rollback_failures = snapshot.rollback();
+        let restoration = if rollback_failures.is_empty() {
+            "Setup rollback completed; GNOME source settings were restored unless they changed during setup.".to_owned()
+        } else {
+            format!(
+                "Previous input-source restoration needs attention: {}.",
+                rollback_failures.join(", ")
+            )
+        };
+        bail!("{}\n{}", error, restoration);
     }
 
     println!();

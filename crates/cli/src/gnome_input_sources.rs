@@ -26,7 +26,12 @@ impl Snapshot {
         Ok(Self { sources, current })
     }
 
-    pub(crate) fn register_and_activate(&self) -> Result<()> {
+    pub(crate) fn register_and_activate(rollback_snapshot: &mut Option<Snapshot>) -> Result<()> {
+        // Capture immediately before writing. The session may have switched
+        // layouts or input sources while setup was refreshing IBus.
+        *rollback_snapshot = Some(
+            Self::capture().context("could not capture current GNOME source before activation")?,
+        );
         // Re-read before writing so a concurrent user change is retained.
         let raw = get("sources").context("could not reread GNOME input sources")?;
         let mut sources = variant::parse_sources(&raw)
@@ -70,11 +75,41 @@ impl Snapshot {
     }
 
     pub(crate) fn restore_with(&self, mut write: impl FnMut(&str, &str) -> bool) -> Result<()> {
-        let sources = variant::format_sources(&self.sources);
-        if !write("sources", &sources) {
-            bail!("could not restore GNOME input-source list");
+        let current_sources_raw =
+            get("sources").context("could not inspect GNOME sources before rollback")?;
+        let current_sources = variant::parse_sources(&current_sources_raw)
+            .map_err(anyhow::Error::msg)
+            .context("GNOME sources changed to an invalid value before rollback")?;
+        let current_index = variant::parse_current(
+            &get("current").context("could not inspect active GNOME source before rollback")?,
+        )
+        .map_err(anyhow::Error::msg)? as usize;
+
+        // Remove only the source setup may have appended, retaining any
+        // unrelated layout/source changes made concurrently by the user.
+        let mut restored_sources = current_sources.clone();
+        if variant::wayexpand_index(&self.sources).is_none() {
+            if let Some(index) = variant::wayexpand_index(&restored_sources) {
+                restored_sources.remove(index);
+            }
         }
-        if !write("current", &self.current.to_string()) {
+        let active = current_sources.get(current_index).cloned();
+        let target_active = active
+            .filter(|source| source.kind != "ibus" || source.id != "wayexpand")
+            .or_else(|| self.sources.get(self.current as usize).cloned());
+        let restore_current = target_active
+            .as_ref()
+            .and_then(|source| restored_sources.iter().position(|old| old == source))
+            .unwrap_or_else(|| {
+                (self.current as usize).min(restored_sources.len().saturating_sub(1))
+            });
+        if current_sources != restored_sources {
+            let sources = variant::format_sources(&restored_sources);
+            if !write("sources", &sources) {
+                bail!("could not restore GNOME input-source list");
+            }
+        }
+        if !write("current", &restore_current.to_string()) {
             bail!("could not restore GNOME active input-source index");
         }
         let actual_sources = variant::parse_sources(
@@ -85,8 +120,8 @@ impl Snapshot {
             &get("current").context("could not verify restored GNOME current source")?,
         )
         .map_err(anyhow::Error::msg)?;
-        if actual_sources != self.sources || actual_current != self.current {
-            bail!("GNOME input-source settings did not return to their previous values");
+        if actual_sources != restored_sources || actual_current as usize != restore_current {
+            bail!("GNOME input-source settings did not return to the expected safe state");
         }
         Ok(())
     }
