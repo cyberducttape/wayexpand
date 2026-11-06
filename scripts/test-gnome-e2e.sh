@@ -103,6 +103,7 @@ start_sink org.wayexpand.GnomeE2eFirst
 # so the first window closes before the second opens.
 kill "$last_sink" 2>/dev/null || true
 wait "$last_sink" 2>/dev/null || true
+"$E2E_BIN_DIR/wx-e2e-gnome-tracker" --expect-empty || status=1
 start_sink org.wayexpand.GnomeE2eSecond
 "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --expect org.wayexpand.GnomeE2eSecond || status=1
 
@@ -148,7 +149,7 @@ env -i \
 
 cat "$work/results.txt"
 if [ "$status" -ne 0 ] || grep -q '^fail' "$work/results.txt" \
-    || [ "$(grep -c '^pass' "$work/results.txt")" -ne 5 ]; then
+    || [ "$(grep -c '^pass' "$work/results.txt")" -ne 6 ]; then
     printf '%s\n' "GNOME window-tracking end-to-end test FAILED; logs:" >&2
     failure=$(grep '^fail ' "$work/results.txt" | tail -n 1 || true)
     if [ -z "$failure" ]; then

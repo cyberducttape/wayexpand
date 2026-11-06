@@ -1,11 +1,12 @@
-//! `wx-e2e-gnome-tracker --expect APP_ID | --expect-unavailable`
+//! `wx-e2e-gnome-tracker --expect APP_ID | --expect-empty | --expect-unavailable`
 //!
 //! For `scripts/test-gnome-e2e.sh`: connects WayExpand's GNOME window
 //! tracker to a private, headless GNOME Shell running the WayExpand
 //! extension. `--expect` waits until the focused window reports APP_ID (the
 //! initial snapshot from Subscribe counts) and prints its identity;
-//! `--expect-unavailable` checks that the tracker refuses to connect, for
-//! example after the extension was disabled. Prints one
+//! `--expect-empty` waits until GNOME Shell reports that no toplevel is
+//! focused. `--expect-unavailable` checks that the tracker refuses to
+//! connect, for example after the extension was disabled. Prints one
 //! "pass|fail <detail>" line and exits non-zero on failure.
 
 use std::time::{Duration, Instant};
@@ -15,6 +16,7 @@ use wayexpand_core::WindowTracker;
 
 const CONNECT_DEADLINE: Duration = Duration::from_secs(20);
 const FOCUS_DEADLINE: Duration = Duration::from_secs(15);
+const EMPTY_FOCUS_DEADLINE: Duration = Duration::from_secs(5);
 
 fn fail(detail: impl std::fmt::Display) -> ! {
     println!("fail {detail}");
@@ -25,26 +27,33 @@ fn main() {
     let mut arguments = std::env::args().skip(1);
     match (arguments.next().as_deref(), arguments.next()) {
         (Some("--expect"), Some(app_id)) => expect(&app_id),
+        (Some("--expect-empty"), None) => expect_empty(),
         (Some("--expect-unavailable"), None) => match GnomeWindowTracker::probe() {
             Ok(()) => fail("tracker still available"),
             Err(error) => println!("pass tracker unavailable: {error}"),
         },
-        _ => fail("usage: wx-e2e-gnome-tracker --expect APP_ID | --expect-unavailable"),
+        _ => fail(
+            "usage: wx-e2e-gnome-tracker --expect APP_ID | --expect-empty | --expect-unavailable",
+        ),
     }
 }
 
-fn expect(app_id: &str) {
+fn connect_tracker() -> GnomeWindowTracker {
     let connect_deadline = Instant::now() + CONNECT_DEADLINE;
-    let mut tracker = loop {
+    loop {
         match GnomeWindowTracker::probe().and_then(|()| GnomeWindowTracker::new()) {
-            Ok(tracker) => break tracker,
+            Ok(tracker) => return tracker,
             Err(error) if Instant::now() < connect_deadline => {
                 eprintln!("waiting for the GNOME tracker: {error}");
                 std::thread::sleep(Duration::from_millis(500));
             }
             Err(error) => fail(format!("tracker did not connect: {error}")),
         }
-    };
+    }
+}
+
+fn expect(app_id: &str) {
+    let mut tracker = connect_tracker();
     let deadline = Instant::now() + FOCUS_DEADLINE;
     let mut last = None;
     while Instant::now() < deadline {
@@ -68,5 +77,27 @@ fn expect(app_id: &str) {
     }
     fail(format!(
         "focused window never became {app_id}; last report: {last:?}"
+    ));
+}
+
+fn expect_empty() {
+    let mut tracker = connect_tracker();
+    let deadline = Instant::now() + EMPTY_FOCUS_DEADLINE;
+    let mut last = None;
+    while Instant::now() < deadline {
+        match tracker.next_window_timeout(Duration::from_millis(250)) {
+            Ok(Some(None)) => {
+                println!("pass focus cleared");
+                return;
+            }
+            Ok(Some(Some(window))) => last = Some(window),
+            Ok(None) => {}
+            Err(error) => fail(format!(
+                "tracker failed while waiting for focus clear: {error}"
+            )),
+        }
+    }
+    fail(format!(
+        "focus did not clear after closing the test window; last report: {last:?}"
     ));
 }
