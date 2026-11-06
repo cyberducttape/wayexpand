@@ -272,17 +272,23 @@ impl GuiApp {
             .iter()
             .find(|line| line.trim_start().starts_with("DESKTOP TEST RESULT:"))
         {
-            let detail = lines.iter().find(|line| {
-                let line = line.trim_start();
-                line.starts_with("Capture [")
-                    || line.starts_with("Output activity [")
-                    || line.starts_with("Correlation [")
-                    || line.starts_with("Test scope:")
-            });
-            return detail.map_or_else(
-                || result.trim().to_owned(),
-                |detail| format!("{}\n{}", result.trim(), detail.trim()),
-            );
+            let details = lines
+                .iter()
+                .filter(|line| {
+                    let line = line.trim_start();
+                    line.starts_with("Capture [")
+                        || line.starts_with("Output activity [")
+                        || line.starts_with("Correlation [")
+                        || line.starts_with("Test scope:")
+                })
+                .take(4)
+                .map(|line| line.trim())
+                .collect::<Vec<_>>();
+            return if details.is_empty() {
+                result.trim().to_owned()
+            } else {
+                format!("{}\n{}", result.trim(), details.join("\n"))
+            };
         }
         if let Some(result) = lines
             .iter()
@@ -395,6 +401,8 @@ impl GuiApp {
             trigger,
             replacement,
             application_class,
+            capture_activity_observed: false,
+            output_activity_observed: false,
         });
         self.start_cli_task(
             arguments,
@@ -446,6 +454,15 @@ impl GuiApp {
                                     == "DESKTOP TEST RESULT: OUTPUT OBSERVED, AWAITING REVIEW"
                             }) {
                                 self.desktop_test_review = self.pending_desktop_test.take();
+                                if let Some(review) = &mut self.desktop_test_review {
+                                    review.capture_activity_observed = output.lines().any(|line| {
+                                        line.trim_start().starts_with("Capture [")
+                                            && line.contains("ACTIVITY OBSERVED")
+                                    });
+                                    review.output_activity_observed = output.lines().any(|line| {
+                                        line.trim_start().starts_with("Output activity [")
+                                    });
+                                }
                                 self.desktop_test_review_open = self.desktop_test_review.is_some();
                                 Status::info("Activity observed but not correlated to the test trigger. Visually verify the exact target text before confirming.")
                             } else {

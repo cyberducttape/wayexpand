@@ -23,7 +23,9 @@ All notable changes to WayExpand are documented here.
 - Run the Desktop Integration Test from the GUI after a target-field consent
   step. The GUI shows the expected static replacement, asks the user to type
   the trigger once, and requires a separate exact-result confirmation; it never
-  sends Enter or retries an uncertain insertion.
+  sends Enter or retries an uncertain insertion. Its review dialog separates
+  observed capture and output activity, states that trigger correlation is
+  unverified, and keeps long replacements inside a scrollable preview.
 - Add GNOME-specific `wayexpand doctor --gnome` conclusions and a guided
   `wayexpand debug --gnome --interactive` real-app test. The test distinguishes
   configured routing from uncorrelated activity and user-confirmed insertion;

@@ -500,6 +500,8 @@ struct DesktopTestReview {
     trigger: String,
     replacement: String,
     application_class: String,
+    capture_activity_observed: bool,
+    output_activity_observed: bool,
 }
 
 impl Drop for SetupTask {

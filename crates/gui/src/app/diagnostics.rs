@@ -1288,12 +1288,30 @@ impl GuiApp {
                     "WayExpand observed input/output activity during the test window, but could not correlate it to this trigger. No insertion was retried.",
                 );
                 ui.label(desktop_test_review_instruction(review));
+                ui.label(format!(
+                    "Capture: {} · Output: {} · Trigger correlation: not verified",
+                    if review.capture_activity_observed {
+                        "activity observed"
+                    } else {
+                        "not observed"
+                    },
+                    if review.output_activity_observed {
+                        "activity observed"
+                    } else {
+                        "not observed"
+                    }
+                ));
                 ui.label("Expected replacement:");
-                ui.add(
-                    egui::Label::new(RichText::new(&review.replacement).code())
-                        .wrap()
-                        .selectable(true),
-                );
+                egui::ScrollArea::vertical()
+                    .max_height(200.0)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::Label::new(RichText::new(&review.replacement).code())
+                                .wrap()
+                                .selectable(true),
+                        );
+                    });
                 ui.label("Did this exact text appear once, with no lost, duplicated, interleaved, or wrong-field text?");
                 ui.horizontal(|ui| {
                     if ui.button("Yes, exact result").clicked() {
@@ -2178,6 +2196,8 @@ mod desktop_test_review_tests {
             trigger: ";;hello".into(),
             replacement: "Hello from Wayland!".into(),
             application_class: "GTK".into(),
+            capture_activity_observed: true,
+            output_activity_observed: true,
         };
         let instruction = desktop_test_review_instruction(&review);
         assert!(instruction.contains("inspect the field where you attempted to type"));

@@ -1705,6 +1705,8 @@ fn dismissing_desktop_test_review_leaves_result_unverified() {
         trigger: ";;hello".into(),
         replacement: "Hello from Wayland!".into(),
         application_class: "GTK".into(),
+        capture_activity_observed: true,
+        output_activity_observed: true,
     });
     assert!(app.any_dialog_open());
 
@@ -1753,6 +1755,45 @@ fn diagnostics_dialog_stays_inside_a_small_window() {
     assert!(
         screen.expand(1.0).contains_rect(window),
         "diagnostics window {window:?} overflows the {screen:?} viewport"
+    );
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn desktop_test_review_stays_inside_a_small_window_for_long_text() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-desktop-review-fit-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    app.desktop_test_review_open = true;
+    app.desktop_test_review = Some(DesktopTestReview {
+        trigger: ";;long".into(),
+        replacement: "apiVersion: v1\nkind: ConfigMap\n".repeat(2_000),
+        application_class: "GTK".into(),
+        capture_activity_observed: true,
+        output_activity_observed: true,
+    });
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 480.0));
+    let ctx = egui::Context::default();
+    for _ in 0..4 {
+        let input = egui::RawInput {
+            screen_rect: Some(screen),
+            ..Default::default()
+        };
+        let _ = run_gui_test_frame(&ctx, input, |ui| {
+            let frame_ctx = ui.ctx().clone();
+            let palette = Palette::for_pack(app.colorpack, app.dark_mode);
+            app.render_diagnostics(&frame_ctx, &palette);
+        });
+    }
+    let modal = ctx
+        .memory(|memory| memory.area_rect(egui::Id::new("desktop_test_result_review")))
+        .expect("desktop test review modal was laid out");
+    assert!(
+        screen.expand(1.0).contains_rect(modal),
+        "desktop test review modal {modal:?} overflows {screen:?}"
     );
     fs::remove_file(path).unwrap();
 }
