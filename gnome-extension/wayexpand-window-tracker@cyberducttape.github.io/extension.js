@@ -27,6 +27,7 @@ const TRACKER_IFACE = `
       <arg type="s" direction="out" name="instance_id"/>
     </method>
     <method name="Unsubscribe"/>
+    <method name="Ping"/>
     <property name="Version" type="u" access="read"/>
   </interface>
 </node>`;
@@ -34,7 +35,7 @@ const TRACKER_IFACE = `
 // its KWin bridge).
 const CLIENT_PATH = '/WindowTracker';
 const CLIENT_IFACE = 'org.wayexpand.WindowTracker1';
-const PROTOCOL_VERSION = 1;
+const PROTOCOL_VERSION = 2;
 const MAX_SUBSCRIBERS = 8;
 const CALL_TIMEOUT_MS = 2000;
 
@@ -99,6 +100,15 @@ export default class WayExpandWindowTracker extends Extension {
 
     UnsubscribeAsync(_parameters, invocation) {
         this._drop(invocation.get_sender());
+        invocation.return_value(null);
+    }
+
+    PingAsync(_parameters, invocation) {
+        if (!this._subscribers.has(invocation.get_sender())) {
+            invocation.return_error_literal(Gio.DBusError, Gio.DBusError.ACCESS_DENIED,
+                'window tracker subscription is not active');
+            return;
+        }
         invocation.return_value(null);
     }
 

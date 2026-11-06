@@ -32,7 +32,7 @@ const TRACKER_IFACE: &str = "org.wayexpand.ShellWindowTracker1";
 const EXTENSIONS_PATH: &str = "/org/gnome/Shell/Extensions";
 const EXTENSIONS_IFACE: &str = "org.gnome.Shell.Extensions";
 /// The extension protocol this tracker speaks.
-const PROTOCOL_VERSION: u32 = 1;
+const PROTOCOL_VERSION: u32 = 2;
 const DBUS_CONNECTION_TIMEOUT: Duration = Duration::from_secs(3);
 const DBUS_METHOD_TIMEOUT: Duration = Duration::from_secs(1);
 const TRACKER_HEALTH_CHECK_INTERVAL: Duration = Duration::from_secs(1);
@@ -211,6 +211,14 @@ fn is_missing_object(error: &zbus::Error) -> bool {
     }
 }
 
+fn is_not_subscribed(error: &zbus::Error) -> bool {
+    matches!(
+        error,
+        zbus::Error::MethodError(name, _, _)
+            if name.as_str() == "org.freedesktop.DBus.Error.AccessDenied"
+    )
+}
+
 /// A `WindowTracker` backed by the WayExpand GNOME Shell extension.
 pub struct GnomeWindowTracker {
     /// Serves the callback interface the extension calls.
@@ -230,9 +238,8 @@ impl GnomeWindowTracker {
         match read_version(&connection) {
             VersionAnswer::Version(PROTOCOL_VERSION) => Ok(()),
             VersionAnswer::Version(other) => Err(GnomeWindowError::ProtocolMismatch(other)),
-            VersionAnswer::Missing | VersionAnswer::Unanswered(_) => {
-                Err(GnomeWindowError::ExtensionNotActive)
-            }
+            VersionAnswer::Missing => Err(GnomeWindowError::ExtensionNotActive),
+            VersionAnswer::Unanswered(error) => Err(GnomeWindowError::DBus(error)),
         }
     }
 
@@ -272,9 +279,8 @@ impl GnomeWindowTracker {
         match read_version(&connection) {
             VersionAnswer::Version(PROTOCOL_VERSION) => {}
             VersionAnswer::Version(other) => return Err(GnomeWindowError::ProtocolMismatch(other)),
-            VersionAnswer::Missing | VersionAnswer::Unanswered(_) => {
-                return Err(GnomeWindowError::ExtensionNotActive)
-            }
+            VersionAnswer::Missing => return Err(GnomeWindowError::ExtensionNotActive),
+            VersionAnswer::Unanswered(error) => return Err(GnomeWindowError::DBus(error)),
         }
         let reply = connection.call_method(
             Some(SHELL_NAME),
@@ -315,23 +321,29 @@ impl GnomeWindowTracker {
             Ok(_) => return Err(Self::lost(GnomeWindowError::ShellRestarted.to_string())),
             Err(error) => return Err(Self::lost(error.to_string())),
         }
-        match read_version(&self.connection) {
-            VersionAnswer::Version(_) => {
+        match self.connection.call_method(
+            Some(SHELL_NAME),
+            TRACKER_PATH,
+            Some(TRACKER_IFACE),
+            "Ping",
+            &(),
+        ) {
+            Ok(_) => {
                 self.last_healthy = Instant::now();
                 Ok(())
             }
-            VersionAnswer::Missing => {
-                Err(Self::lost(GnomeWindowError::ExtensionNotActive.to_string()))
+            Err(error) if is_missing_object(&error) || is_not_subscribed(&error) => {
+                Err(Self::lost(format!(
+                    "GNOME window-tracker subscription is unavailable: {error}"
+                )))
             }
-            VersionAnswer::Unanswered(error)
-                if self.last_healthy.elapsed() >= TRACKER_HEALTH_GRACE =>
-            {
+            Err(error) if self.last_healthy.elapsed() >= TRACKER_HEALTH_GRACE => {
                 Err(Self::lost(format!(
                     "GNOME Shell did not answer for {} s: {error}",
                     TRACKER_HEALTH_GRACE.as_secs()
                 )))
             }
-            VersionAnswer::Unanswered(_) => Ok(()),
+            Err(_) => Ok(()),
         }
     }
 }
@@ -563,7 +575,20 @@ mod tests {
                 .unwrap(),
         );
         assert!(is_missing_object(&missing));
+        let not_subscribed = zbus::Error::MethodError(
+            zbus::names::OwnedErrorName::try_from("org.freedesktop.DBus.Error.AccessDenied")
+                .unwrap(),
+            None,
+            zbus::message::Message::method_call("/", "Ping")
+                .unwrap()
+                .build(&())
+                .unwrap(),
+        );
+        assert!(is_not_subscribed(&not_subscribed));
         assert!(!is_missing_object(&zbus::Error::InputOutput(
+            std::io::Error::from(std::io::ErrorKind::TimedOut).into()
+        )));
+        assert!(!is_not_subscribed(&zbus::Error::InputOutput(
             std::io::Error::from(std::io::ErrorKind::TimedOut).into()
         )));
     }
@@ -576,5 +601,7 @@ mod tests {
         assert!(script.contains(TRACKER_IFACE));
         assert!(script.contains("org.wayexpand.WindowTracker1"));
         assert!(script.contains(&format!("PROTOCOL_VERSION = {PROTOCOL_VERSION}")));
+        assert!(script.contains("<method name=\"Ping\"/>"));
+        assert!(script.contains("PingAsync"));
     }
 }
