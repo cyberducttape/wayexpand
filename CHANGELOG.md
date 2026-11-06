@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Preserve isolated IBus and GNOME end-to-end logs as short-retention CI
+  artifacts, including on test failure, so input activation and GTK insertion
+  regressions have actionable diagnostics tied to the tested commit.
+- Pin both GDK and GTK to version 3 in the GTK3 IBus acceptance client so
+  newer runner images cannot load GDK4 before the GTK3 insertion test.
 - Extend `wayexpand doctor --gnome` with a running daemon build/schema check and
   actionable per-stage findings: stable error IDs, observed evidence,
   remediation commands, and retest instructions. In GUI Diagnostics, show
