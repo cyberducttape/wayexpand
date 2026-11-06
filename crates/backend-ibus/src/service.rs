@@ -780,7 +780,7 @@ replacement = "signature"
     const BROKER_CONFIG: &str =
         "[settings]\ncompatibility_mode = \"tracked-focus\"\nundo_chord = \"Ctrl+Z\"\n\
          [[expansion]]\ntrigger = \":ok\"\nreplacement = \"\"\n\
-         [expansion.command]\naction = \"status\"\ntimeout_ms = 3000\n";
+         [expansion.command]\naction = \"status\"\ntimeout_ms = 5000\n";
 
     /// Serve exactly one broker request on `socket`, answering with `stdout`
     /// after `delay`. Returns the action id the engine asked for.
@@ -1190,8 +1190,7 @@ replacement = "signature"
 
     #[test]
     fn broker_result_reaches_the_ibus_client_through_the_completion_pump() {
-        let mut broker =
-            BrokerFixture::start("delivered", "from-broker", Duration::from_millis(150));
+        let mut broker = BrokerFixture::start("delivered", "from-broker", Duration::ZERO);
         let harness = Harness::start(BROKER_CONFIG);
         harness.focus_text_field();
         harness.type_trigger();

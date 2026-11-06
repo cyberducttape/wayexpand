@@ -328,6 +328,7 @@ jobs:
       - name: Test with clean CARGO_HOME
         env:
           CARGO_HOME: /tmp/cargo-clean
+          RUST_TEST_THREADS: 4
         run: cd /tmp/clean-build && cargo test --locked --release --workspace
 
   scripts:
