@@ -8,10 +8,11 @@
 use crate::services::{ServiceInventory, UnitState, UserService};
 use crate::setup::{enable_user_service, evdev_consent_marker, run_setup_command};
 use crate::*;
+use sha2::{Digest, Sha256};
 use std::{
     fs,
-    io::Read,
-    os::unix::fs::PermissionsExt,
+    io::{Read, Write},
+    os::unix::fs::{MetadataExt, PermissionsExt},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     thread,
@@ -26,6 +27,7 @@ use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
 const COMPONENT_TEMPLATE: &str = include_str!("../../../desktop/wayexpand-ibus.xml");
 const COMMAND_OUTPUT_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_COMMAND_OUTPUT: u64 = 64 * 1024;
+const MAX_COMPONENT_BYTES: u64 = 64 * 1024;
 const TERMINAL_DROP_IN: &str = "30-terminal-apps-only.conf";
 /// Common terminal app IDs (normalized), used when `terminal_apps` is empty.
 pub(crate) const DEFAULT_TERMINAL_APPS: &[&str] = &[
@@ -55,6 +57,16 @@ pub(crate) struct IbusSetupOptions {
 
 /// Run `program` with a deadline and return its stdout when it succeeds.
 pub(crate) fn command_output(program: &str, arguments: &[&str]) -> Option<String> {
+    let (status, output) = command_output_with_status(program, arguments)?;
+    status.success().then_some(output)
+}
+
+/// Return bounded stdout and the exit status. Some IBus commands print the
+/// active engine successfully but exit nonzero for default-layout engines.
+fn command_output_with_status(
+    program: &str,
+    arguments: &[&str],
+) -> Option<(std::process::ExitStatus, String)> {
     let mut command = Command::new(program);
     command
         .args(arguments)
@@ -87,7 +99,7 @@ pub(crate) fn command_output(program: &str, arguments: &[&str]) -> Option<String
     supervisor.kill_group();
     let status = supervisor.reap().ok()?;
     let output = reader.join().ok()?;
-    status.success().then_some(output)
+    Some((status, output))
 }
 
 fn wait_until(timeout: Duration, mut condition: impl FnMut() -> bool) -> bool {
@@ -120,6 +132,367 @@ pub(crate) fn component_manifest(engine: &Path) -> String {
         "<exec>wayexpand-ibus</exec>",
         &format!("<exec>{}</exec>", xml_escape(&engine.display().to_string())),
     )
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ComponentFileState {
+    bytes: Vec<u8>,
+    mode: u32,
+    uid: u32,
+    gid: u32,
+    sha256: String,
+}
+
+impl ComponentFileState {
+    fn read(path: &Path) -> Result<Option<Self>> {
+        let metadata = match fs::symlink_metadata(path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        if !metadata.file_type().is_file() || metadata.len() > MAX_COMPONENT_BYTES {
+            bail!(
+                "IBus component {} is not a regular file within the {}-byte transaction limit",
+                path.display(),
+                MAX_COMPONENT_BYTES
+            );
+        }
+        let bytes = fs::read(path)?;
+        if bytes.len() as u64 > MAX_COMPONENT_BYTES {
+            bail!(
+                "IBus component {} exceeds the transaction size limit",
+                path.display()
+            );
+        }
+        Ok(Some(Self {
+            sha256: sha256_hex(&bytes),
+            bytes,
+            mode: metadata.permissions().mode() & 0o7777,
+            uid: metadata.uid(),
+            gid: metadata.gid(),
+        }))
+    }
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    Sha256::digest(bytes)
+        .iter()
+        .fold(String::with_capacity(64), |mut output, byte| {
+            let _ = write!(output, "{byte:02x}");
+            output
+        })
+}
+
+/// Journal the system-wide component file separately from the running-session
+/// snapshot so setup can restore a replacement or remove a newly installed
+/// manifest if later activation fails.
+#[derive(Debug)]
+struct ComponentInstallJournal {
+    target: PathBuf,
+    original: Option<ComponentFileState>,
+    installed: Option<ComponentFileState>,
+    install_attempted: bool,
+    installed_state_known: bool,
+    missing_directories: Vec<PathBuf>,
+}
+
+impl ComponentInstallJournal {
+    fn capture() -> Result<Self> {
+        let target = chain::component_install_directory().join("wayexpand.xml");
+        let original = ComponentFileState::read(&target)
+            .with_context(|| format!("could not snapshot IBus component {}", target.display()))?;
+        let mut missing_directories = Vec::new();
+        let mut parent = target.parent();
+        while let Some(directory) = parent {
+            if directory.exists() {
+                break;
+            }
+            missing_directories.push(directory.to_path_buf());
+            parent = directory.parent();
+        }
+        Ok(Self {
+            target,
+            original: original.clone(),
+            installed: original,
+            install_attempted: false,
+            installed_state_known: true,
+            missing_directories,
+        })
+    }
+
+    fn observe_after_install(&mut self) -> Result<()> {
+        self.installed_state_known = false;
+        self.installed = ComponentFileState::read(&self.target)?;
+        self.installed_state_known = true;
+        Ok(())
+    }
+
+    fn restore(&self) -> Result<bool> {
+        if !self.install_attempted {
+            return Ok(false);
+        }
+        let current = ComponentFileState::read(&self.target)?;
+        let file_changed = self.installed != self.original || current != self.original;
+        if file_changed {
+            if !self.installed_state_known || current != self.installed {
+                bail!(
+                    "IBus component {} changed after setup; leaving the newer file untouched",
+                    self.target.display()
+                );
+            }
+            if let Some(original) = &self.original {
+                let staged = write_private_staging_file("ibus-component-restore", &original.bytes)?;
+                let mode = format!("{:o}", original.mode);
+                let uid = original.uid.to_string();
+                let gid = original.gid.to_string();
+                let target = self.target.display().to_string();
+                let staged_arg = staged.display().to_string();
+                let result = run_setup_command(
+                    "pkexec",
+                    &[
+                        "/usr/bin/install",
+                        "-D",
+                        "-o",
+                        &uid,
+                        "-g",
+                        &gid,
+                        "-m",
+                        &mode,
+                        &staged_arg,
+                        &target,
+                    ],
+                );
+                let _ = fs::remove_file(&staged);
+                let status = result.context(
+                    "could not restore the original IBus component through the administrator prompt",
+                )?;
+                if !status.success() {
+                    bail!("administrator command did not restore the original IBus component (exit {status})");
+                }
+                if ComponentFileState::read(&self.target)?.as_ref() != Some(original) {
+                    bail!("restored IBus component did not match its recorded SHA-256 and mode");
+                }
+            } else {
+                let target = self.target.display().to_string();
+                let status = run_setup_command("pkexec", &["/usr/bin/rm", "-f", "--", &target])
+                    .context("could not remove the IBus component installed by this setup")?;
+                if !status.success() {
+                    bail!(
+                        "administrator command did not remove the IBus component (exit {status})"
+                    );
+                }
+                if ComponentFileState::read(&self.target)?.is_some() {
+                    bail!("the IBus component remains after the removal command");
+                }
+            }
+        }
+        let mut directories_removed = false;
+        for directory in &self.missing_directories {
+            if !directory.exists() {
+                continue;
+            }
+            let path = directory.display().to_string();
+            let status = run_setup_command("pkexec", &["/usr/bin/rmdir", "--", &path])
+                .context("could not remove an empty system directory created during setup")?;
+            if !status.success() {
+                bail!("setup-created system directory {} is not empty or could not be removed; leaving it intact", directory.display());
+            }
+            directories_removed = true;
+        }
+        Ok(file_changed || directories_removed)
+    }
+}
+
+#[derive(Debug)]
+struct PreparedFileJournal {
+    target: PathBuf,
+    original: Option<ComponentFileState>,
+    written: Option<ComponentFileState>,
+    attempted: bool,
+    written_state_known: bool,
+    created_directories: Vec<PathBuf>,
+}
+
+impl PreparedFileJournal {
+    fn capture(target: PathBuf) -> Result<Self> {
+        let original = ComponentFileState::read(&target)
+            .with_context(|| format!("could not snapshot prepared file {}", target.display()))?;
+        Ok(Self {
+            target,
+            original: original.clone(),
+            written: original,
+            attempted: false,
+            written_state_known: true,
+            created_directories: Vec::new(),
+        })
+    }
+
+    fn write(&mut self, contents: &[u8]) -> Result<()> {
+        use std::os::unix::fs::OpenOptionsExt;
+        let parent = self
+            .target
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("prepared file has no parent directory"))?;
+        let mut missing = Vec::new();
+        let mut current = parent;
+        while !current.exists() {
+            missing.push(current.to_path_buf());
+            current = current
+                .parent()
+                .ok_or_else(|| anyhow::anyhow!("prepared file has no existing ancestor"))?;
+        }
+        self.attempted = true;
+        for directory in missing.iter().rev() {
+            match fs::create_dir(directory) {
+                Ok(()) => self.created_directories.push(directory.clone()),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    if !fs::symlink_metadata(directory)?.file_type().is_dir() {
+                        bail!(
+                            "prepared path ancestor {} is not a directory",
+                            directory.display()
+                        );
+                    }
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
+        let staged = parent.join(format!(
+            ".wayexpand-setup-{}-{}.tmp",
+            std::process::id(),
+            self.target
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("dropin")
+        ));
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o644)
+            .open(&staged)?;
+        if let Err(error) = file.write_all(contents).and_then(|()| file.sync_all()) {
+            let _ = fs::remove_file(&staged);
+            self.written = ComponentFileState::read(&self.target)?;
+            return Err(error.into());
+        }
+        self.written_state_known = false;
+        if let Err(error) = fs::rename(&staged, &self.target) {
+            let _ = fs::remove_file(&staged);
+            self.written = ComponentFileState::read(&self.target)?;
+            self.written_state_known = true;
+            return Err(error.into());
+        }
+        self.written = ComponentFileState::read(&self.target)?;
+        self.written_state_known = true;
+        Ok(())
+    }
+
+    fn restore(&self) -> Result<bool> {
+        if !self.attempted {
+            return Ok(false);
+        }
+        if !self.written_state_known {
+            bail!(
+                "could not establish the installed state of prepared file {}; leaving it untouched",
+                self.target.display()
+            );
+        }
+        let mut restored = false;
+        if self.written != self.original && ComponentFileState::read(&self.target)? != self.written
+        {
+            bail!(
+                "prepared file {} changed after setup; leaving the newer file untouched",
+                self.target.display()
+            );
+        }
+        if self.written != self.original {
+            if let Some(original) = &self.original {
+                let parent = self.target.parent().expect("captured target has parent");
+                let staged = parent.join(format!(
+                    ".wayexpand-rollback-{}-{}.tmp",
+                    std::process::id(),
+                    self.target
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("dropin")
+                ));
+                use std::os::unix::fs::OpenOptionsExt;
+                let mut file = fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(original.mode)
+                    .open(&staged)?;
+                fs::set_permissions(&staged, fs::Permissions::from_mode(original.mode))?;
+                if let Err(error) = file
+                    .write_all(&original.bytes)
+                    .and_then(|()| file.sync_all())
+                {
+                    let _ = fs::remove_file(&staged);
+                    return Err(error.into());
+                }
+                if let Err(error) = fs::rename(&staged, &self.target) {
+                    let _ = fs::remove_file(&staged);
+                    return Err(error.into());
+                }
+                restore_file_owner(&self.target, original.uid, original.gid)?;
+                if ComponentFileState::read(&self.target)?.as_ref() != Some(original) {
+                    bail!("prepared file restoration did not match its original hash and mode");
+                }
+            } else {
+                fs::remove_file(&self.target)?;
+            }
+            restored = true;
+        }
+        for directory in self.created_directories.iter().rev() {
+            match fs::remove_dir(directory) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) if error.kind() == std::io::ErrorKind::DirectoryNotEmpty => {
+                    bail!(
+                        "setup-created directory {} is no longer empty; leaving it intact",
+                        directory.display()
+                    );
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Ok(restored || !self.created_directories.is_empty())
+    }
+}
+
+fn restore_file_owner(path: &Path, uid: u32, gid: u32) -> Result<()> {
+    use std::{ffi::CString, os::unix::ffi::OsStrExt};
+    let current = fs::symlink_metadata(path)?;
+    if current.uid() == uid && current.gid() == gid {
+        return Ok(());
+    }
+    let path = CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| anyhow::anyhow!("file path contains a NUL byte"))?;
+    // SAFETY: `path` is a valid NUL-terminated path and chown retains no pointers.
+    if unsafe { libc::chown(path.as_ptr(), uid, gid) } != 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    Ok(())
+}
+
+fn write_private_staging_file(prefix: &str, bytes: &[u8]) -> Result<PathBuf> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let runtime = env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .ok_or_else(|| anyhow::anyhow!("XDG_RUNTIME_DIR is not set"))?;
+    let path = runtime.join(format!("wayexpand-{prefix}-{}", std::process::id()));
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&path)
+        .with_context(|| format!("could not create private staging file {}", path.display()))?;
+    if let Err(error) = file.write_all(bytes) {
+        let _ = fs::remove_file(&path);
+        return Err(error.into());
+    }
+    Ok(path)
 }
 
 fn engine_binary() -> Option<PathBuf> {
@@ -204,7 +577,7 @@ fn stale_engine_processes_at(
 
 /// Install the component where the running ibus-daemon reads components.
 /// Writing there needs administrator rights, so this asks through pkexec.
-fn install_component() -> Result<()> {
+fn install_component(journal: &mut ComponentInstallJournal) -> Result<()> {
     let report = chain::diagnose();
     let component_ok = report
         .check("component")
@@ -219,25 +592,16 @@ fn install_component() -> Result<()> {
     let engine = engine_binary().ok_or_else(|| {
         anyhow::anyhow!("`wayexpand-ibus` is not on PATH; reinstall WayExpand (user installs need ~/.local/bin on PATH)")
     })?;
-    let directory = chain::component_install_directory();
-    let target = directory.join("wayexpand.xml");
-    let runtime = env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .filter(|path| path.is_absolute())
-        .ok_or_else(|| anyhow::anyhow!("XDG_RUNTIME_DIR is not set"))?;
-    let staged = runtime.join(format!(
-        "wayexpand-ibus-component-{}.xml",
-        std::process::id()
-    ));
-    fs::write(&staged, component_manifest(&engine))?;
-    fs::set_permissions(&staged, fs::Permissions::from_mode(0o644))?;
+    let manifest = component_manifest(&engine);
+    let staged = write_private_staging_file("ibus-component", manifest.as_bytes())?;
     step(&format!(
         "Installing the IBus component to {} (IBus never reads per-user component folders; you will be asked for an administrator password)",
-        target.display()
+        journal.target.display()
     ));
     let staged_arg = staged.display().to_string();
-    let target_arg = target.display().to_string();
-    let installed = run_setup_command(
+    let target_arg = journal.target.display().to_string();
+    journal.install_attempted = true;
+    let result = run_setup_command(
         "pkexec",
         &[
             "/usr/bin/install",
@@ -247,15 +611,21 @@ fn install_component() -> Result<()> {
             &staged_arg,
             &target_arg,
         ],
-    )
-    .is_ok_and(|status| status.success());
-    if !installed {
-        let manual = format!("sudo install -D -m 0644 {staged_arg} {target_arg}");
-        println!("  Could not install it automatically. Run this, then rerun setup:");
-        println!("    {manual}");
-        bail!("the IBus component is not installed where IBus reads it");
-    }
+    );
+    let observation = journal.observe_after_install();
     let _ = fs::remove_file(&staged);
+    let status =
+        result.context("could not run the administrator prompt to install the IBus component")?;
+    observation.context("could not verify the IBus component after installation")?;
+    if !status.success() {
+        bail!("the administrator command exited with {status}; the component transaction will be rolled back");
+    }
+    let installed = journal.installed.as_ref().ok_or_else(|| {
+        anyhow::anyhow!("the administrator command succeeded but the IBus component is missing")
+    })?;
+    if installed.sha256 != sha256_hex(manifest.as_bytes()) || installed.mode & 0o777 != 0o644 {
+        bail!("the installed IBus component did not match the requested manifest hash and mode");
+    }
     Ok(())
 }
 
@@ -342,21 +712,27 @@ pub(crate) fn format_string_list(items: &[String]) -> String {
     format!("[{}]", quoted.join(", "))
 }
 
-/// Add WayExpand to IBus' input methods so it appears in the IBus menu and
-/// survives restarts.
-fn add_to_preload_engines() {
+/// Add WayExpand to IBus' input methods only when the transaction captured
+/// the original setting; verify the update so rollback has a known baseline.
+fn add_to_preload_engines(
+    original: Option<&str>,
+    changed_value: &mut Option<String>,
+) -> Result<()> {
+    if original.is_none() {
+        step("Leaving the IBus preload list unchanged because its original value could not be captured");
+        return Ok(());
+    }
     let Some(output) = command_output(
         "gsettings",
         &["get", "org.freedesktop.ibus.general", "preload-engines"],
     ) else {
-        println!("  (could not read IBus' input-method list; add WayExpand in the IBus preferences if it is missing)");
-        return;
+        bail!("could not reread IBus' input-method list; refusing an unjournaled change");
     };
     let Some(mut engines) = parse_string_list(&output) else {
-        return;
+        bail!("IBus returned an invalid preload-engine list; refusing to change it");
     };
     if engines.iter().any(|engine| engine == "wayexpand") {
-        return;
+        return Ok(());
     }
     if engines.is_empty() {
         // An empty list means "the default keyboard"; keep one so switching
@@ -364,16 +740,36 @@ fn add_to_preload_engines() {
         engines.push("xkb:us::eng".into());
     }
     engines.push("wayexpand".into());
+    let intended_raw = format_string_list(&engines);
+    // Mark the attempted value before invoking gsettings. A failed process or
+    // lost reply can still have applied the setting, so rollback must know
+    // what value it may safely undo.
+    *changed_value = Some(intended_raw.clone());
     step("Adding WayExpand to IBus' input methods");
-    let _ = run_setup_command(
+    let status = run_setup_command(
         "gsettings",
         &[
             "set",
             "org.freedesktop.ibus.general",
             "preload-engines",
-            &format_string_list(&engines),
+            &intended_raw,
         ],
-    );
+    )?;
+    if !status.success() {
+        bail!("gsettings failed to update IBus' preload-engine list");
+    }
+    let verified_raw = command_output(
+        "gsettings",
+        &["get", "org.freedesktop.ibus.general", "preload-engines"],
+    )
+    .ok_or_else(|| anyhow::anyhow!("could not verify the updated IBus preload-engine list"))?;
+    let verified = parse_string_list(&verified_raw)
+        .ok_or_else(|| anyhow::anyhow!("IBus returned an invalid updated preload-engine list"))?;
+    if verified != engines {
+        bail!("IBus did not retain the updated preload-engine list");
+    }
+    *changed_value = Some(verified_raw.trim().to_owned());
+    Ok(())
 }
 
 fn service_active(service: &str) -> bool {
@@ -457,8 +853,107 @@ fn terminal_drop_in() -> Option<PathBuf> {
     )
 }
 
+#[derive(Debug, Default)]
+struct ConfigMutationJournal {
+    path: PathBuf,
+    original_mode: wayexpand_core::CompatibilityMode,
+    original_terminal_apps: Vec<String>,
+    last_written_revision: Option<wayexpand_core::ConfigRevision>,
+    write_attempted: bool,
+    replacement_authorization_granted: bool,
+}
+
+impl ConfigMutationJournal {
+    fn capture() -> Result<Self> {
+        let path = default_config_path();
+        let loaded =
+            Config::load_versioned(&path).map_err(|error| config_load_error(&path, error))?;
+        Ok(Self {
+            path,
+            original_mode: loaded.config.settings.compatibility_mode,
+            original_terminal_apps: loaded.config.settings.terminal_apps,
+            last_written_revision: None,
+            write_attempted: false,
+            replacement_authorization_granted: false,
+        })
+    }
+
+    fn note_write(&mut self, revision: wayexpand_core::ConfigRevision) {
+        self.last_written_revision = Some(revision);
+    }
+
+    fn rollback(&self) -> Result<Vec<String>> {
+        if !self.write_attempted {
+            return Ok(Vec::new());
+        }
+        let loaded = Config::load_versioned(&self.path)
+            .map_err(|error| config_load_error(&self.path, error))?;
+        let mode_changed = loaded.config.settings.compatibility_mode != self.original_mode;
+        let terminals_changed = loaded.config.settings.terminal_apps != self.original_terminal_apps;
+        if !mode_changed && !terminals_changed {
+            return Ok(Vec::new());
+        }
+        if self
+            .last_written_revision
+            .as_ref()
+            .is_none_or(|expected_revision| loaded.revision != *expected_revision)
+        {
+            let reason = if self.last_written_revision.is_some() {
+                "configuration changed after setup"
+            } else {
+                "the config write outcome could not be bound to a safe revision"
+            };
+            let mut remaining = Vec::new();
+            if mode_changed {
+                remaining.push(format!(
+                    "compatibility_mode remains {} because {reason}",
+                    loaded.config.settings.compatibility_mode.as_str()
+                ));
+            }
+            if terminals_changed {
+                remaining.push(format!(
+                    "settings.terminal_apps remains changed because {reason}"
+                ));
+            }
+            bail!("{}", remaining.join("; "));
+        }
+        let mut config = loaded.config;
+        config.settings.compatibility_mode = self.original_mode;
+        config
+            .settings
+            .terminal_apps
+            .clone_from(&self.original_terminal_apps);
+        config.validate().map_err(|error| {
+            config_error(format!(
+                "configuration invalid during setup rollback: {}",
+                error.safe_summary()
+            ))
+        })?;
+        config
+            .save_atomic_if_revision_matches(&self.path, &loaded.revision)
+            .map_err(|error| {
+                config_error(format!(
+                    "could not restore setup configuration changes: {}",
+                    error.safe_summary()
+                ))
+            })?;
+        let mut restored = Vec::new();
+        if mode_changed {
+            restored.push(if self.replacement_authorization_granted {
+                "explicit replacement authorization was rolled back with the failed setup".into()
+            } else {
+                "compatibility_mode was restored".into()
+            });
+        }
+        if terminals_changed {
+            restored.push("settings.terminal_apps was restored".into());
+        }
+        Ok(restored)
+    }
+}
+
 /// Make sure `settings.terminal_apps` lists terminals; returns the list.
-fn ensure_terminal_apps() -> Result<Vec<String>> {
+fn ensure_terminal_apps(journal: &mut ConfigMutationJournal) -> Result<Vec<String>> {
     let path = default_config_path();
     let loaded = Config::load_versioned(&path).map_err(|error| config_load_error(&path, error))?;
     if !loaded.config.settings.terminal_apps.is_empty() {
@@ -475,7 +970,8 @@ fn ensure_terminal_apps() -> Result<Vec<String>> {
             error.safe_summary()
         ))
     })?;
-    config
+    journal.write_attempted = true;
+    let revision = config
         .save_atomic_if_revision_matches(&path, &loaded.revision)
         .map_err(|error| {
             config_error(format!(
@@ -483,6 +979,7 @@ fn ensure_terminal_apps() -> Result<Vec<String>> {
                 error.safe_summary()
             ))
         })?;
+    journal.note_write(revision);
     step(&format!(
         "Listed common terminals in settings.terminal_apps ({}); edit that list in {} to add yours",
         DEFAULT_TERMINAL_APPS.len(),
@@ -498,7 +995,10 @@ fn replacement_authorization_required(mode: wayexpand_core::CompatibilityMode) -
     mode == wayexpand_core::CompatibilityMode::Off
 }
 
-fn ensure_replacement_consent(options: IbusSetupOptions) -> Result<bool> {
+fn ensure_replacement_consent(
+    options: IbusSetupOptions,
+    journal: &mut ConfigMutationJournal,
+) -> Result<bool> {
     let path = default_config_path();
     let loaded = Config::load_versioned(&path).map_err(|error| config_load_error(&path, error))?;
     if !replacement_authorization_required(loaded.config.settings.compatibility_mode) {
@@ -527,7 +1027,8 @@ fn ensure_replacement_consent(options: IbusSetupOptions) -> Result<bool> {
             error.safe_summary()
         ))
     })?;
-    config
+    journal.write_attempted = true;
+    let revision = config
         .save_atomic_if_revision_matches(&path, &loaded.revision)
         .map_err(|error| {
             config_error(format!(
@@ -535,24 +1036,190 @@ fn ensure_replacement_consent(options: IbusSetupOptions) -> Result<bool> {
                 error.safe_summary()
             ))
         })?;
+    journal.note_write(revision);
+    journal.replacement_authorization_granted = true;
     step("Set compatibility_mode = \"tracked-focus\"");
     Ok(false)
 }
 
-/// What setup may change in the running session, recorded before it changes
-/// it, so a failed activation can put the session back.
+/// Runtime state changed during activation. Persistent files and user config
+/// are tracked separately by `SetupTransaction`.
 #[derive(Debug, Default)]
 struct SessionSnapshot {
+    /// Whether an IBus daemon existed before setup; a newly-started desktop
+    /// daemon may remain after failure and must be reported if not stoppable.
+    ibus_daemon_was_running: bool,
     /// `ibus engine` before setup, if IBus was running.
     global_engine: Option<String>,
     /// Raw `gsettings get` value of IBus' input-method list.
     preload_engines: Option<String>,
+    /// Value installed by this setup, when it changed the list.
+    preload_engines_after: Option<String>,
     /// KWin's previous `[Wayland] InputMethod`, recorded when setup changed it.
     kwin_input_method: Option<Option<String>>,
     /// GNOME's typed input-source list and active source, when applicable.
     gnome_input_sources: Option<crate::gnome_input_sources::Snapshot>,
+    /// State before any component installation/restart, used if failure occurs
+    /// before the later activation-time GNOME snapshot can be captured.
+    gnome_input_sources_original: Option<crate::gnome_input_sources::Snapshot>,
     /// Original service state for every route that setup may affect.
     services: Vec<OriginalServiceState>,
+}
+
+#[derive(Debug, Default)]
+struct TransactionRollback {
+    restored: Vec<String>,
+    remaining: Vec<String>,
+}
+
+#[derive(Debug)]
+struct SetupTransaction {
+    component: ComponentInstallJournal,
+    config: ConfigMutationJournal,
+    prepared_file: Option<PreparedFileJournal>,
+    gnome_input_sources_original: Option<crate::gnome_input_sources::Snapshot>,
+    session: Option<SessionSnapshot>,
+}
+
+impl SetupTransaction {
+    fn capture(terminals: bool) -> Result<Self> {
+        let prepared_file = if terminals {
+            Some(PreparedFileJournal::capture(
+                terminal_drop_in().context("cannot locate the systemd user directory")?,
+            )?)
+        } else {
+            None
+        };
+        let gnome_input_sources_original = if IbusDesktop::detect() == IbusDesktop::Gnome {
+            Some(
+                crate::gnome_input_sources::Snapshot::capture()
+                    .context("could not snapshot original GNOME input sources before setup")?,
+            )
+        } else {
+            None
+        };
+        Ok(Self {
+            // All persistent snapshots are taken before the first mutation.
+            component: ComponentInstallJournal::capture()?,
+            config: ConfigMutationJournal::capture()?,
+            prepared_file,
+            gnome_input_sources_original,
+            session: None,
+        })
+    }
+
+    fn rollback(&self) -> TransactionRollback {
+        let mut report = TransactionRollback::default();
+        if let Some(session) = &self.session {
+            let failures = session.rollback();
+            if failures.is_empty() {
+                report.restored.push(
+                    "active input source, IBus preload list, KWin route, and service states".into(),
+                );
+            } else {
+                report.remaining.extend(failures);
+            }
+        }
+        if let Some(prepared_file) = &self.prepared_file {
+            match prepared_file.restore() {
+                Ok(true) => report.restored.push(format!(
+                    "prepared service drop-in {} restored",
+                    prepared_file.target.display()
+                )),
+                Ok(false) => {}
+                Err(error) => report.remaining.push(format!(
+                    "prepared service drop-in {}: {error}",
+                    prepared_file.target.display()
+                )),
+            }
+        }
+        match self.config.rollback() {
+            Ok(restored) => report.restored.extend(restored),
+            Err(error) => report.remaining.push(error.to_string()),
+        }
+        match self.component.restore() {
+            Ok(true) if self.component.original.is_some() => {
+                report.restored.push(format!(
+                    "original IBus component restored (SHA-256 {})",
+                    self.component
+                        .original
+                        .as_ref()
+                        .map(|state| state.sha256.as_str())
+                        .unwrap_or("unknown")
+                ));
+            }
+            Ok(true) => report.restored.push("new IBus component removed".into()),
+            Ok(false) => {}
+            Err(error) => report.remaining.push(format!(
+                "IBus component {}: {error}",
+                self.component.target.display()
+            )),
+        }
+        report
+    }
+
+    fn retained_prepared_changes(&self) -> Vec<String> {
+        let mut changes = Vec::new();
+        if self.session.as_ref().is_some_and(|session| {
+            !session.ibus_daemon_was_running && IbusDaemonProcess::find().is_some()
+        }) {
+            changes.push(
+                "the desktop IBus daemon is now running and remains under desktop-session control"
+                    .into(),
+            );
+        }
+        if self.component.install_attempted && self.component.installed != self.component.original {
+            let state = self
+                .component
+                .installed
+                .as_ref()
+                .map(|state| format!("SHA-256 {}", state.sha256))
+                .unwrap_or_else(|| "state could not be verified".into());
+            changes.push(format!(
+                "IBus component at {} was {} by setup ({state})",
+                self.component.target.display(),
+                if self.component.original.is_some() {
+                    "replaced"
+                } else {
+                    "installed"
+                },
+            ));
+        }
+        if self.config.last_written_revision.is_some() {
+            changes.push(
+                "WayExpand setup configuration changes are retained (inspect compatibility_mode and settings.terminal_apps)".into(),
+            );
+        }
+        if let Some(file) = &self.prepared_file {
+            if file.attempted && file.written != file.original {
+                changes.push(format!(
+                    "prepared service drop-in at {} is retained",
+                    file.target.display()
+                ));
+            }
+        }
+        changes
+    }
+}
+
+fn transaction_rollback_summary(report: TransactionRollback) -> String {
+    if report.remaining.is_empty() {
+        if report.restored.is_empty() {
+            "No persistent setup changes needed rollback.".into()
+        } else {
+            format!("Setup rollback restored: {}.", report.restored.join("; "))
+        }
+    } else {
+        let restored = if report.restored.is_empty() {
+            "No changes were confirmed restored.".to_owned()
+        } else {
+            format!("Restored: {}.", report.restored.join("; "))
+        };
+        format!(
+            "Setup rollback was incomplete. {restored} Changes remaining or requiring review: {}.",
+            report.remaining.join("; ")
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -575,11 +1242,23 @@ impl OriginalServiceState {
 }
 
 impl SessionSnapshot {
-    fn capture(inventory: &ServiceInventory) -> Self {
-        Self {
-            global_engine: command_output("ibus", &["engine"])
-                .map(|engine| engine.trim().to_owned())
-                .filter(|engine| !engine.is_empty()),
+    fn capture(
+        inventory: &ServiceInventory,
+        original_gnome_input_sources: Option<crate::gnome_input_sources::Snapshot>,
+    ) -> Result<Self> {
+        let ibus_daemon_running = IbusDaemonProcess::find().is_some();
+        let global_engine = ibus_daemon_running
+            .then(|| command_output_with_status("ibus", &["engine"]))
+            .flatten()
+            .map(|(_, engine)| engine)
+            .map(|engine| engine.trim().to_owned())
+            .filter(|engine| !engine.is_empty());
+        if ibus_daemon_running && global_engine.is_none() {
+            bail!("could not capture the active IBus input source; refusing to change the session without a rollback value");
+        }
+        Ok(Self {
+            ibus_daemon_was_running: ibus_daemon_running,
+            global_engine,
             preload_engines: command_output(
                 "gsettings",
                 &["get", "org.freedesktop.ibus.general", "preload-engines"],
@@ -588,12 +1267,13 @@ impl SessionSnapshot {
             // Captured immediately before GNOME source activation, after any
             // potentially slow IBus registry refresh.
             gnome_input_sources: None,
+            gnome_input_sources_original: original_gnome_input_sources,
             services: UserService::ALL
                 .into_iter()
                 .map(|service| OriginalServiceState::capture(service, inventory.state(service)))
                 .collect(),
             ..Self::default()
-        }
+        })
     }
 
     /// Undo session changes in reverse order. Prepared, inert changes (the
@@ -623,6 +1303,12 @@ impl SessionSnapshot {
                     actual.active
                 ));
             }
+        }
+        if !self.ibus_daemon_was_running && IbusDaemonProcess::find().is_some() {
+            failures.push(
+                "IBus daemon was not running before setup and remains running after rollback"
+                    .into(),
+            );
         }
         if !failures.is_empty() {
             eprintln!(
@@ -670,20 +1356,38 @@ impl SessionSnapshot {
                 failures.push("KWin input method".into());
             }
         }
-        if let Some(engines) = &self.preload_engines {
-            if !run(
+        if let (Some(expected), Some(original)) =
+            (&self.preload_engines_after, &self.preload_engines)
+        {
+            let current = command_output(
                 "gsettings",
-                &[
-                    "set",
-                    "org.freedesktop.ibus.general",
-                    "preload-engines",
-                    engines,
-                ],
-            ) {
-                failures.push("IBus preloaded engines".into());
+                &["get", "org.freedesktop.ibus.general", "preload-engines"],
+            )
+            .map(|value| value.trim().to_owned());
+            if current.as_deref() == Some(expected.as_str()) {
+                if !run(
+                    "gsettings",
+                    &[
+                        "set",
+                        "org.freedesktop.ibus.general",
+                        "preload-engines",
+                        original,
+                    ],
+                ) {
+                    failures.push("IBus preloaded engines could not be restored".into());
+                }
+            } else if current.as_deref() != Some(original.as_str()) {
+                failures.push(
+                    "IBus preload list changed after setup; leaving the newer value untouched"
+                        .into(),
+                );
             }
         }
-        if let Some(gnome) = &self.gnome_input_sources {
+        if let Some(gnome) = self
+            .gnome_input_sources
+            .as_ref()
+            .or(self.gnome_input_sources_original.as_ref())
+        {
             if let Err(error) = gnome.restore_with(|key, value| {
                 run(
                     "gsettings",
@@ -698,7 +1402,14 @@ impl SessionSnapshot {
             .as_deref()
             .filter(|engine| *engine != "wayexpand")
         {
-            if !run("ibus", &["engine", engine]) {
+            let requested = run("ibus", &["engine", engine]);
+            let selected = command_output_with_status("ibus", &["engine"])
+                .map(|(_, value)| value.trim().to_owned());
+            if selected
+                .as_deref()
+                .is_some_and(|selected| selected != engine)
+                || (!requested && selected.as_deref() != Some(engine))
+            {
                 failures.push("IBus selected engine".into());
             }
         }
@@ -970,15 +1681,13 @@ fn preflight(options: IbusSetupOptions, inventory: &ServiceInventory) -> Result<
 
 /// Phase 2 (part): the terminal list and the drop-in that limits the evdev
 /// daemon to it. Inert until the unit is started.
-fn prepare_terminals() -> Result<()> {
-    let apps = ensure_terminal_apps()?;
-    let drop_in = terminal_drop_in().context("cannot locate the systemd user directory")?;
-    if let Some(parent) = drop_in.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(
-        &drop_in,
-        "# Written by `wayexpand setup --backend ibus --terminals`.\n\
+fn prepare_terminals(
+    journal: &mut ConfigMutationJournal,
+    file_journal: &mut PreparedFileJournal,
+) -> Result<()> {
+    let apps = ensure_terminal_apps(journal)?;
+    file_journal.write(
+        b"# Written by `wayexpand setup --backend ibus --terminals`.\n\
          # IBus expands in apps; this evdev daemon expands only in settings.terminal_apps.\n\
          [Service]\nEnvironment=WAYEXPAND_TERMINAL_APPS_ONLY=1\n",
     )?;
@@ -1073,7 +1782,10 @@ fn activate_and_verify(
     // A healthy registry needs no IBus restart. New component manifests do
     // require a refresh, which is controlled and verified before selection.
     refresh_ibus_component_registry(desktop)?;
-    add_to_preload_engines();
+    add_to_preload_engines(
+        snapshot.preload_engines.as_deref(),
+        &mut snapshot.preload_engines_after,
+    )?;
     restart_stale_engine();
     step("Selecting WayExpand as the active input method");
     if IbusDesktop::detect() == IbusDesktop::Gnome {
@@ -1144,12 +1856,13 @@ pub(crate) fn repair_gnome_input_source() -> Result<()> {
     let previous_engine = if wayexpand_backend_ibus::global_engine_selected() {
         "wayexpand".to_owned()
     } else {
-        command_output("ibus", &["engine"])
-            .map(|value| value.trim().to_owned())
+        command_output_with_status("ibus", &["engine"])
+            .map(|(_, value)| value.trim().to_owned())
             .filter(|value| !value.is_empty())
             .ok_or_else(|| anyhow::anyhow!("could not read the currently selected IBus engine"))?
     };
     let mut snapshot = SessionSnapshot {
+        ibus_daemon_was_running: true,
         global_engine: Some(previous_engine),
         ..SessionSnapshot::default()
     };
@@ -1196,28 +1909,58 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
     let companion = preflight(options, &inventory)?;
     step("Preflight passed; nothing has been changed yet");
 
-    // Phase 2: inert preparation. None of this changes the active input
-    // method or running services.
-    install_component()?;
-    let replacement_authorization_required = ensure_replacement_consent(options)?;
-    if companion == CompanionService::Terminals && options.terminals {
-        prepare_terminals()?;
-    }
+    // Journal installation and persistent configuration before the first
+    // mutation; activation state is captured immediately before it changes.
+    let mut transaction = SetupTransaction::capture(companion == CompanionService::Terminals)?;
+    let preparation = (|| -> Result<bool> {
+        install_component(&mut transaction.component)?;
+        let authorization_required = ensure_replacement_consent(options, &mut transaction.config)?;
+        if companion == CompanionService::Terminals && options.terminals {
+            prepare_terminals(
+                &mut transaction.config,
+                transaction
+                    .prepared_file
+                    .as_mut()
+                    .expect("terminal drop-in journal captured"),
+            )?;
+        }
+        Ok(authorization_required)
+    })();
+    let replacement_authorization_required = match preparation {
+        Ok(required) => required,
+        Err(error) => {
+            let rollback = transaction.rollback();
+            let summary = transaction_rollback_summary(rollback);
+            bail!("setup preparation failed: {error}\n{summary}");
+        }
+    };
 
-    // Phases 3–5: change the session, verify, or put it back.
+    // Capture live session state after inert preparation, just before it
+    // changes. The transaction still owns the installation/config snapshots.
     let service_snapshot = ServiceInventory::probe();
-    let mut snapshot = SessionSnapshot::capture(&service_snapshot);
-    if let Err(error) = activate_and_verify(options, companion, &mut snapshot) {
-        let rollback_failures = snapshot.rollback();
-        let restoration = if rollback_failures.is_empty() {
-            "Setup rollback completed; GNOME source settings were restored unless they changed during setup.".to_owned()
-        } else {
-            format!(
-                "Previous input-source restoration needs attention: {}.",
-                rollback_failures.join(", ")
-            )
-        };
-        bail!("{}\n{}", error, restoration);
+    let session_snapshot = SessionSnapshot::capture(
+        &service_snapshot,
+        transaction.gnome_input_sources_original.clone(),
+    );
+    transaction.session = match session_snapshot {
+        Ok(snapshot) => Some(snapshot),
+        Err(error) => {
+            let rollback = transaction.rollback();
+            let summary = transaction_rollback_summary(rollback);
+            bail!("could not snapshot session state before activation: {error}\n{summary}");
+        }
+    };
+    if let Err(error) = activate_and_verify(
+        options,
+        companion,
+        transaction
+            .session
+            .as_mut()
+            .expect("session snapshot captured"),
+    ) {
+        let rollback = transaction.rollback();
+        let summary = transaction_rollback_summary(rollback);
+        bail!("IBus activation failed: {error}\n{summary}");
     }
 
     println!();
@@ -1232,6 +1975,13 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
         println!("SETUP INCOMPLETE: WX-POLICY-001");
         println!("IBus was configured and activated, but text replacement is disabled by policy.");
         println!("Required user action: review and authorize compatibility_mode = \"tracked-focus\" under [settings], then rerun `wayexpand setup --backend ibus`.");
+        let retained = transaction.retained_prepared_changes();
+        if !retained.is_empty() {
+            println!("Prepared changes retained by this policy-limited setup:");
+            for change in retained {
+                println!("  - {change}");
+            }
+        }
         bail!("WX-POLICY-001: IBus is active, but replacement authorization is required before expansions can work")
     }
     println!("WayExpand IBus setup is configured; a real target-app insertion has not yet been verified.");
@@ -1428,10 +2178,13 @@ mod tests {
             ),
         ]);
         let snapshot = SessionSnapshot {
+            ibus_daemon_was_running: true,
             global_engine: Some("xkb:us::eng".into()),
             preload_engines: Some("['xkb:us::eng']".into()),
+            preload_engines_after: Some("['xkb:us::eng', 'wayexpand']".into()),
             kwin_input_method: Some(Some("old-input-method.so".into())),
             gnome_input_sources: None,
+            gnome_input_sources_original: None,
             services: UserService::ALL
                 .into_iter()
                 .map(|service| OriginalServiceState::capture(service, inventory.state(service)))

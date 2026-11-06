@@ -4374,6 +4374,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "sha2",
  "toml",
  "unicode-segmentation",
  "wayexpand-backend-evdev",

@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Journal the IBus component's original bytes, SHA-256, mode, and ownership
+  before setup replaces it. On failed activation, restore the prior component
+  or remove a newly installed one, restore setup-written consent and terminal
+  configuration only when the config revision still matches, and restore the
+  terminal service drop-in and any setup-created empty directories. The error
+  now reports restored and remaining changes explicitly; an explicit
+  replacement consent rollback is named instead of being silent.
 - Replace the GUI's IBus setup consent dead end with a pre-setup explanation and
   explicit checkbox. The GUI passes `--accept-non-atomic-replacement` only
   after that choice; `--yes` alone still cannot authorize replacement. Setup
