@@ -12,13 +12,15 @@ configuration management, and configuration validation.
 .SH COMMANDS
 .TP
 .B setup
-Interactively choose a compatibility mode and activate the safest available
-path after displaying session capabilities and safety tradeoffs. Use
---mode recommended|maximum|experimental and --yes for reviewed automation.
-\fB--backend ibus\fR installs the IBus component where IBus reads it (after an
-administrator prompt), routes KDE Plasma's input method to IBus, selects the
-engine, and verifies each step; add \fB--terminals\fR to also cover the apps in
-\fBsettings.terminal_apps\fR with a terminal-only evdev daemon.
+Configure the recommended input route in one interactive run. On GNOME Wayland,
+this registers the IBus component, adds and activates the WayExpand input source,
+requests replacement consent, then offers a real application test. Existing
+keyboard sources and layout are preserved. Setup ends with WORKING only after
+the user confirms an exact insertion in the tested application, CONFIGURED,
+AWAITING TEST when real typing was deferred, or ACTION REQUIRED when a
+prerequisite or attempted test fails. Use --backend ibus to select IBus
+explicitly. Optional terminal evdev coverage is offered only after the core
+application insertion is confirmed and requires separate raw-input consent.
 .TP
 .B edit [CONFIG]
 Open the graphical snippet editor.

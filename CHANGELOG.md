@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Make interactive `wayexpand setup` finish with an explicit `WORKING`,
+  `CONFIGURED, AWAITING TEST`, or `ACTION REQUIRED` result. A failed or
+  unconfirmed real-app test no longer exits as a successful setup, and a
+  verified result names the tested scope while preserving the distinction
+  between that app and broader desktop certification. GNOME Wayland setup
+  explains that existing keyboard sources/layout remain in place.
 - Add GNOME-specific `wayexpand doctor --gnome` conclusions and a guided
   `wayexpand debug --gnome --interactive` real-app test. The test distinguishes
   configured routing from uncorrelated activity and user-confirmed insertion;

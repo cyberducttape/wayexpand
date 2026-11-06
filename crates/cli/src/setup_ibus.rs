@@ -2148,7 +2148,7 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
         bail!("WX-POLICY-001: IBus is active, but replacement authorization is required before expansions can work")
     }
     println!(
-        "WayExpand IBus setup is configured; real target-app insertion: {}.",
+        "IBus configuration and activation checks completed; actual target-app insertion: {}.",
         if options.real_insertion_verified {
             "user-confirmed for the tested application"
         } else {

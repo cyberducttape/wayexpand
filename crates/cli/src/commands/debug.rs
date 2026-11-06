@@ -9,6 +9,13 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DesktopTestResult {
+    Verified,
+    NotTested,
+    Failed,
+}
+
 pub(crate) fn debug_command(args: Args) -> Result<()> {
     let mut live = false;
     let mut json = false;
@@ -102,11 +109,11 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
 
 /// Interactive, target-application test. It never sends Enter, and only
 /// accepts a static, enabled snippet without command execution or form fields.
-pub(crate) fn desktop_test(trigger: &str) -> Result<bool> {
+pub(crate) fn desktop_test(trigger: &str) -> Result<DesktopTestResult> {
     desktop_test_for(trigger, false)
 }
 
-fn desktop_test_for(trigger: &str, gnome: bool) -> Result<bool> {
+fn desktop_test_for(trigger: &str, gnome: bool) -> Result<DesktopTestResult> {
     if trigger.is_empty() || trigger.chars().any(char::is_control) {
         bail!("test trigger must be non-empty and contain no control characters");
     }
@@ -145,7 +152,7 @@ fn desktop_test_for(trigger: &str, gnome: bool) -> Result<bool> {
     io::stdin().read_line(&mut answer)?;
     if !matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
         println!("Test cancelled; no text was inserted.");
-        return Ok(false);
+        return Ok(DesktopTestResult::NotTested);
     }
     let (initial_daemon, _, base_input, base_keys, base_expansions, base_ibus_transaction) =
         snapshot();
@@ -194,7 +201,7 @@ fn desktop_test_for(trigger: &str, gnome: bool) -> Result<bool> {
         if gnome {
             println!("Problem: WX-GNOME-IM-003 — GNOME/IBus is configured, but no safe-field input activity was observed. Check the selected GNOME source and whether this application uses IBus.");
         }
-        return Ok(false);
+        return Ok(DesktopTestResult::Failed);
     }
     println!("Capture [{test_id}]: ACTIVITY OBSERVED — test trigger not independently confirmed; aggregate counters do not correlate events to this test ID.");
     if !output_seen {
@@ -239,7 +246,7 @@ fn desktop_test_for(trigger: &str, gnome: bool) -> Result<bool> {
         if gnome {
             println!("Problem: WX-GNOME-IM-004 — activity was observed, but no expansion outcome was correlated with this test window. Check matching, configuration and replacement consent.");
         }
-        return Ok(false);
+        return Ok(DesktopTestResult::Failed);
     }
     println!(
         "Output activity [{test_id}]: {}",
@@ -257,7 +264,7 @@ fn desktop_test_for(trigger: &str, gnome: bool) -> Result<bool> {
             "Test scope: {}; result requires manual review.",
             application_class
         );
-        return Ok(false);
+        return Ok(DesktopTestResult::Failed);
     }
     println!("Check the target application, then return here. Was the expected text inserted exactly once, without loss or interleaving? [y/N] ");
     answer.clear();
@@ -276,7 +283,11 @@ fn desktop_test_for(trigger: &str, gnome: bool) -> Result<bool> {
     if gnome && !verified {
         println!("Problem: WX-GNOME-IM-005 — output activity was reported, but the user did not confirm exact target text. Inspect the field; do not retry automatically.");
     }
-    Ok(verified)
+    Ok(if verified {
+        DesktopTestResult::Verified
+    } else {
+        DesktopTestResult::Failed
+    })
 }
 
 fn gnome_interactive_test() -> Result<()> {
@@ -331,10 +342,12 @@ fn gnome_interactive_test() -> Result<()> {
         return Ok(());
     };
     println!("Use a normal GNOME text field. Do not use a password field, terminal command prompt, or production session.");
-    let verified = desktop_test_for(trigger, true)?;
-    if verified {
+    let test_result = desktop_test_for(trigger, true)?;
+    if test_result == DesktopTestResult::Verified {
         println!("GNOME test: user-confirmed insertion in the reported application only.");
         println!("Logout persistence and other application/toolkit coverage remain untested.");
+    } else if test_result == DesktopTestResult::NotTested {
+        println!("GNOME test was cancelled; no final insertion result is available.");
     } else {
         println!("GNOME test not verified. Run `wayexpand doctor --gnome` for the next likely failing stage.");
     }

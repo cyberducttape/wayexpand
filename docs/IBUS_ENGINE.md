@@ -98,8 +98,8 @@ with real clients across layouts is not yet certified.
 Run:
 
 ```sh
-wayexpand setup --backend ibus              # IBus for applications
-wayexpand setup --backend ibus               # optional terminal setup follows a verified insertion test
+wayexpand setup                 # recommended route, selected from detected capabilities
+wayexpand setup --backend ibus  # explicitly choose IBus
 ```
 
 Setup works in phases and reads each result back rather than trusting exit
@@ -165,6 +165,17 @@ real field insertion succeeded. The Diagnostics window shows the same
 separate evidence.
 
 ## Diagnostics
+
+On GNOME Wayland, `wayexpand setup` performs component registration,
+replacement-consent handling, GNOME input-source registration and activation,
+then offers the harmless `;;hello` real-application test. Existing GNOME
+keyboard sources are retained and the engine uses the system keyboard layout.
+The command ends with one explicit state: `WORKING` after the user confirms an
+exact insertion in the tested application, `CONFIGURED, AWAITING TEST` when
+the interactive test was deferred, or `ACTION REQUIRED` when a prerequisite
+or attempted test fails. Component registration and engine activation alone
+are never reported as a working text expander. The test does not certify
+other applications or session persistence.
 
 ```sh
 wayexpand ibus status   # every link of the route, with the fix for each failure

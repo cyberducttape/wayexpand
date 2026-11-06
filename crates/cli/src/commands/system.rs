@@ -84,6 +84,14 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
         build_info::COMMIT
     );
     println!("Session: {}", session_description());
+    if wayexpand_backend_selection::Compositor::detect()
+        == wayexpand_backend_selection::Compositor::Gnome
+        && std::env::var("XDG_SESSION_TYPE")
+            .is_ok_and(|session| session.eq_ignore_ascii_case("wayland"))
+    {
+        println!("GNOME Wayland detected. Existing keyboard sources and layout will be preserved.");
+        println!("WayExpand will be added as an IBus source; its engine uses the system keyboard layout.");
+    }
     println!();
     Config::ensure_user_config(default_config_path()).map_err(|error| {
         config_error(format!(
@@ -167,11 +175,13 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
         }
     };
     if backend == "unavailable" {
+        eprintln!("SETUP RESULT: ACTION REQUIRED");
         bail!(
                 "Recommended mode found no safe automatic path; use --mode experimental or configure permissions and rerun setup"
             );
     }
     if !setup_backend_allowed(&policy, &backend) {
+        eprintln!("SETUP RESULT: ACTION REQUIRED");
         bail!("setup backend '{backend}' is disallowed by organization policy")
     }
     if accept_non_atomic_replacement && backend != "ibus" {
@@ -181,7 +191,7 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
         usage_bail!("--install-system-integration applies only to the IBus backend");
     }
     let terminals_requested = terminals;
-    configure_setup_backend(
+    let setup_result = configure_setup_backend(
         &backend,
         crate::setup_ibus::IbusSetupOptions {
             assume_yes,
@@ -193,14 +203,18 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
             real_insertion_verified: false,
             install_system_integration,
         },
-    )?;
+    );
+    if let Err(error) = setup_result {
+        eprintln!("SETUP RESULT: ACTION REQUIRED");
+        return Err(error);
+    }
     let hello_available = Config::load(default_config_path()).is_ok_and(|config| {
         config
             .expansion
             .iter()
             .any(|expansion| expansion.enabled && expansion.answers_to(";;hello"))
     });
-    let mut real_insertion_verified = false;
+    let mut desktop_test_result = crate::commands::debug::DesktopTestResult::NotTested;
     if hello_available {
         if assume_yes {
             println!("Activation completed. Real application insertion: NOT TESTED.");
@@ -209,13 +223,32 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
             "Activation checks completed; a real application insertion is not yet verified. Run the `;;hello` first-run test now? [Y/n] ",
             true,
         )? {
-            real_insertion_verified = crate::commands::debug::desktop_test(";;hello")?;
+            desktop_test_result = crate::commands::debug::desktop_test(";;hello")?;
         } else {
             println!("Activation completed. Real application insertion: NOT TESTED.");
             println!("Next: run `wayexpand debug --test ';;hello'` in a disposable text field and confirm the replacement.");
         }
     } else {
+        println!("SETUP RESULT: ACTION REQUIRED");
         println!("Activation completed. No enabled `;;hello` sample was found; real application insertion remains NOT TESTED.");
+        println!("Enable or add a harmless static test expansion, then run `wayexpand debug --test TRIGGER` in a disposable text field.");
+        bail!(
+            "WX-SETUP-TEST-001: no enabled ;;hello expansion is available for the first-run test"
+        );
+    }
+    if desktop_test_result == crate::commands::debug::DesktopTestResult::Failed {
+        println!("SETUP RESULT: ACTION REQUIRED");
+        println!("The real application test did not verify an exact insertion. Follow the reported stage and do not retry blindly.");
+        bail!("WX-SETUP-TEST-002: the real application insertion test failed or was not confirmed");
+    }
+    let real_insertion_verified =
+        desktop_test_result == crate::commands::debug::DesktopTestResult::Verified;
+    if real_insertion_verified {
+        println!("SETUP RESULT: WORKING");
+        println!("A real expansion was user-confirmed in the tested application. Other applications and persistence across logout remain unverified.");
+    } else {
+        println!("SETUP RESULT: CONFIGURED, AWAITING TEST");
+        println!("Next: run `wayexpand debug --test ';;hello'` in a disposable text field and confirm the replacement.");
     }
     if backend == "ibus" {
         let enable_terminals = if real_insertion_verified && !terminals_requested && !assume_yes {
@@ -228,7 +261,7 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
             terminals_requested
         };
         if enable_terminals && real_insertion_verified {
-            configure_setup_backend(
+            if let Err(error) = configure_setup_backend(
                 "ibus",
                 crate::setup_ibus::IbusSetupOptions {
                     assume_yes,
@@ -237,7 +270,10 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
                     real_insertion_verified: true,
                     install_system_integration,
                 },
-            )?;
+            ) {
+                eprintln!("OPTIONAL TERMINAL COVERAGE: ACTION REQUIRED; core IBus expansion remains working in the tested application.");
+                return Err(error);
+            }
         } else if terminals_requested {
             println!("Optional terminal coverage was not configured because a real IBus insertion was not verified.");
             println!("After verifying `;;hello` in a disposable text field, rerun `wayexpand setup --backend ibus --terminals`.");
