@@ -19,13 +19,15 @@ use std::{
     env,
     ffi::{OsStr, OsString},
     fs,
+    io::Read,
     os::unix::{ffi::OsStrExt, fs::MetadataExt, fs::PermissionsExt},
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
     sync::mpsc,
     thread,
     time::Duration,
 };
+use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
 
 const MAX_MANIFEST_BYTES: u64 = 64 * 1024;
 const MAX_ENVIRON_BYTES: u64 = 256 * 1024;
@@ -34,7 +36,8 @@ pub const KWIN_IBUS_INPUT_METHOD: &str =
     "/usr/share/applications/org.freedesktop.IBus.Panel.Wayland.Gtk3.desktop";
 
 /// Outcome of one check.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum IbusCheckState {
     Pass,
     /// Works, but needs attention (for example not selected yet).
@@ -43,6 +46,9 @@ pub enum IbusCheckState {
     Fail,
     /// Not applicable here, or not checked because an earlier link failed.
     Skip,
+    /// The available evidence cannot establish this condition.
+    #[default]
+    Unknown,
 }
 
 impl IbusCheckState {
@@ -52,6 +58,7 @@ impl IbusCheckState {
             Self::Warn => "warn",
             Self::Fail => "fail",
             Self::Skip => "skip",
+            Self::Unknown => "unknown",
         }
     }
 
@@ -61,6 +68,7 @@ impl IbusCheckState {
             Self::Warn => "!",
             Self::Fail => "✗",
             Self::Skip => "·",
+            Self::Unknown => "?",
         }
     }
 }
@@ -72,6 +80,8 @@ pub struct IbusCheck {
     pub id: &'static str,
     pub title: &'static str,
     pub state: IbusCheckState,
+    /// Stable support identifier for a GNOME input-method failure.
+    pub problem_id: Option<&'static str>,
     pub detail: String,
     /// A command or action that fixes this link, when one is known.
     pub fix: Option<String>,
@@ -131,6 +141,11 @@ pub struct IbusChainReport {
 /// one is evidence for the next, but none implies the ones after it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 pub struct IbusReadiness {
+    /// The configured engine and GNOME source are present and policy allows
+    /// replacement. This does not prove a client has sent input.
+    pub configuration: IbusCheckState,
+    /// Live route and safe-field input evidence. Unknown is never success.
+    pub operational: IbusCheckState,
     /// The component manifest is where the running IBus reads it.
     pub component_installed: bool,
     /// IBus' live registry lists the engine.
@@ -172,27 +187,74 @@ impl IbusChainReport {
         };
         let live = self.activity.as_ref().filter(|reading| reading.live);
         IbusReadiness {
+            configuration: self.configuration_readiness(),
+            operational: self.operational_readiness(),
             component_installed: passed("component") && passed("manifest"),
             registered: passed("registered"),
             ibus_running: passed("daemon"),
             selected: passed("selected"),
             engine_running: live.is_some(),
-            text_received: live.is_some_and(|reading| {
-                reading.status.recent_fields.iter().any(|field| {
-                    field.keys > 0
-                        && field.content_type == crate::telemetry::IbusContentTypeState::Normal
-                        && field.surrounding_nonempty
-                })
-            }),
+            text_received: passed("field-input"),
             expanded: live.is_some_and(|reading| reading.status.totals.expansions > 0),
         }
     }
 
-    /// True when no link is broken.
+    /// True only when operational evidence is complete and successful.
     pub fn ready(&self) -> bool {
-        self.checks
-            .iter()
-            .all(|check| check.state != IbusCheckState::Fail)
+        self.operational_readiness() == IbusCheckState::Pass
+    }
+
+    /// Configuration can be complete while end-to-end operation is still
+    /// unknown until a normal text field has sent input to the engine.
+    pub fn configuration_readiness(&self) -> IbusCheckState {
+        self.aggregate(&[
+            "tools",
+            "component",
+            "manifest",
+            "registered",
+            "consent",
+            "gnome-session",
+            "gnome-source-registered",
+        ])
+    }
+
+    pub fn operational_readiness(&self) -> IbusCheckState {
+        let mut ids = vec![
+            "daemon",
+            "selected",
+            "engine",
+            "gnome-source-active",
+            "field-input",
+            "target-insertion",
+        ];
+        // GNOME is verified by explicit session/source and field-input
+        // evidence. Its desktop name alone is never a routing pass.
+        if self.desktop != IbusDesktop::Gnome {
+            ids.push("desktop");
+        }
+        self.aggregate(&ids)
+    }
+
+    fn aggregate(&self, ids: &[&str]) -> IbusCheckState {
+        let mut state = IbusCheckState::Pass;
+        let mut found = false;
+        for check in self.checks.iter().filter(|check| ids.contains(&check.id)) {
+            found = true;
+            state = match (state, check.state) {
+                (_, IbusCheckState::Fail) | (IbusCheckState::Fail, _) => IbusCheckState::Fail,
+                (_, IbusCheckState::Warn) | (IbusCheckState::Warn, _) => IbusCheckState::Warn,
+                (_, IbusCheckState::Unknown) | (IbusCheckState::Unknown, _) => {
+                    IbusCheckState::Unknown
+                }
+                (_, IbusCheckState::Skip) | (IbusCheckState::Skip, _) => IbusCheckState::Unknown,
+                _ => IbusCheckState::Pass,
+            };
+        }
+        if found {
+            state
+        } else {
+            IbusCheckState::Unknown
+        }
     }
 
     /// The first broken link, which is the one to fix first.
@@ -502,6 +564,12 @@ fn check(
         id,
         title,
         state,
+        problem_id: (state != IbusCheckState::Pass
+            && matches!(
+                id,
+                "gnome-session" | "gnome-source-registered" | "gnome-source-active"
+            ))
+        .then_some("WX-GNOME-IM-001"),
         detail: detail.into(),
         fix,
     }
@@ -565,22 +633,7 @@ pub fn diagnose() -> IbusChainReport {
 
     // 2. The daemon, as started by the desktop.
     let daemon = IbusDaemonProcess::find();
-    checks.push(match &daemon {
-        Some(process) => check(
-            "daemon",
-            "IBus is running",
-            IbusCheckState::Pass,
-            format!("ibus-daemon pid {}", process.pid),
-            None,
-        ),
-        None => check(
-            "daemon",
-            "IBus is running",
-            IbusCheckState::Fail,
-            "no ibus-daemon is running for this user",
-            Some(start_ibus_fix(desktop)),
-        ),
-    });
+    checks.push(ibus_daemon_check(daemon.as_ref(), desktop));
 
     // 3. Desktop routing: who sends keys to IBus.
     checks.push(match desktop {
@@ -608,7 +661,11 @@ pub fn diagnose() -> IbusChainReport {
                 }
             }
         }
-        IbusDesktop::Gnome => check("desktop", "The desktop sends input to IBus", IbusCheckState::Pass, "GNOME Shell routes input methods to IBus", None),
+        IbusDesktop::Gnome => skipped(
+            "desktop",
+            "GNOME input-method routing",
+            "reported by the dedicated GNOME session, source, and field-input checks below",
+        ),
         IbusDesktop::OtherWayland => check("desktop", "The desktop sends input to IBus", IbusCheckState::Warn, "this compositor must route input methods to IBus; WayExpand cannot verify it", Some("use your compositor's input-method support for IBus (for example `ibus-daemon --panel disable` with input-method-v2), then run `wayexpand ibus watch`".into())),
         IbusDesktop::X11 => check("desktop", "Applications use IBus", IbusCheckState::Warn, "X11 applications reach IBus through GTK_IM_MODULE/QT_IM_MODULE/XMODIFIERS", Some("set GTK_IM_MODULE=ibus QT_IM_MODULE=ibus XMODIFIERS=@im=ibus for your session".into())),
         IbusDesktop::Unknown => check("desktop", "The desktop sends input to IBus", IbusCheckState::Skip, "no graphical session detected", None),
@@ -617,7 +674,10 @@ pub fn diagnose() -> IbusChainReport {
     // GNOME keeps a separate typed input-source list; IBus preload/selection
     // alone does not make the engine survive GNOME source switching.
     if desktop == IbusDesktop::Gnome {
-        checks.push(gnome_input_source_check());
+        checks.push(gnome_session_check());
+        let (registered, active) = gnome_input_source_checks();
+        checks.push(registered);
+        checks.push(active);
     }
 
     // 4. The component manifest, where *this daemon* reads components.
@@ -761,6 +821,9 @@ pub fn diagnose() -> IbusChainReport {
         ),
     });
 
+    checks.push(field_input_check(activity.as_ref()));
+    checks.push(target_insertion_check(activity.as_ref()));
+
     IbusChainReport {
         desktop,
         checks,
@@ -768,67 +831,390 @@ pub fn diagnose() -> IbusChainReport {
     }
 }
 
-fn gnome_input_source_check() -> IbusCheck {
-    let read = |key: &str| {
-        Command::new("gsettings")
-            .args(["get", "org.gnome.desktop.input-sources", key])
-            .output()
-            .ok()
-            .filter(|output| output.status.success())
-            .and_then(|output| String::from_utf8(output.stdout).ok())
-            .map(|value| value.trim().to_owned())
-    };
-    let Some(raw_sources) = read("sources") else {
-        return check(
-            "gnome-source",
-            "GNOME input source is registered",
-            IbusCheckState::Fail,
-            "could not read GNOME's input-source list",
-            Some("run `wayexpand setup --backend ibus` in the GNOME session".into()),
-        );
-    };
-    let sources = match crate::gnome_input_sources::parse_sources(&raw_sources) {
-        Ok(sources) => sources,
-        Err(error) => {
-            return check(
-                "gnome-source",
-                "GNOME input source is registered",
-                IbusCheckState::Fail,
-                format!("GNOME returned an invalid input-source tuple array: {error}"),
-                Some("run `wayexpand setup --backend ibus` to repair registration".into()),
-            )
-        }
-    };
-    let Some(index) = crate::gnome_input_sources::wayexpand_index(&sources) else {
-        return check("gnome-source", "GNOME input source is registered", IbusCheckState::Fail,
-            "GNOME's input-source list does not contain ('ibus', 'wayexpand')", Some("run `wayexpand setup --backend ibus` to add WayExpand while preserving existing sources".into()));
-    };
-    let Some(current) =
-        read("current").and_then(|value| crate::gnome_input_sources::parse_current(&value).ok())
-    else {
-        return check(
-            "gnome-source",
-            "GNOME input source is registered",
-            IbusCheckState::Warn,
-            "WayExpand is registered, but GNOME's active source could not be read",
-            None,
-        );
-    };
-    if current as usize == index {
+fn gnome_session_check() -> IbusCheck {
+    let desktop = env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+    let session_type = env::var("XDG_SESSION_TYPE").unwrap_or_default();
+    let wayland_display = env::var_os("WAYLAND_DISPLAY").is_some();
+    gnome_session_check_from(
+        &desktop,
+        &session_type,
+        wayland_display,
+        gnome_shell_name_has_owner(),
+        env::var_os("DISPLAY").is_some(),
+    )
+}
+
+fn gnome_session_check_from(
+    desktop: &str,
+    session_type: &str,
+    wayland_display: bool,
+    shell_owner: Option<bool>,
+    x11_display: bool,
+) -> IbusCheck {
+    let is_gnome = desktop
+        .to_ascii_lowercase()
+        .split(':')
+        .any(|part| part == "gnome");
+    if is_gnome
+        && session_type.eq_ignore_ascii_case("wayland")
+        && wayland_display
+        && shell_owner == Some(true)
+    {
         check(
-            "gnome-source",
-            "GNOME input source is registered and active",
+            "gnome-session",
+            "GNOME Wayland session",
             IbusCheckState::Pass,
-            "GNOME lists WayExpand and currently selects it",
+            "GNOME desktop and Wayland environment are present, and org.gnome.Shell owns its session-bus name",
+            None,
+        )
+    } else if is_gnome
+        && session_type.eq_ignore_ascii_case("wayland")
+        && wayland_display
+        && shell_owner == Some(false)
+    {
+        check(
+            "gnome-session",
+            "GNOME Wayland session",
+            IbusCheckState::Fail,
+            "GNOME Wayland environment is present, but org.gnome.Shell has no session-bus owner",
+            Some("open a GNOME desktop session, then rerun `wayexpand ibus status`".into()),
+        )
+    } else if is_gnome
+        && (session_type.eq_ignore_ascii_case("x11") || (!wayland_display && x11_display))
+    {
+        check(
+            "gnome-session",
+            "GNOME Wayland session",
+            IbusCheckState::Warn,
+            "GNOME is active, but the session is not identified as Wayland",
+            None,
+        )
+    } else if is_gnome && session_type.eq_ignore_ascii_case("wayland") && wayland_display {
+        check(
+            "gnome-session",
+            "GNOME Wayland session",
+            IbusCheckState::Unknown,
+            "the session environment looks like GNOME Wayland, but the GNOME Shell session-bus owner could not be verified",
             None,
         )
     } else {
         check(
-            "gnome-source",
-            "GNOME input source is registered",
+            "gnome-session",
+            "GNOME Wayland session",
+            IbusCheckState::Unknown,
+            "environment evidence is insufficient to confirm a GNOME Wayland session",
+            None,
+        )
+    }
+}
+
+/// Query the live session bus without allowing a stalled bus to block doctor.
+fn gnome_shell_name_has_owner() -> Option<bool> {
+    session_bus_name_has_owner("org.gnome.Shell")
+}
+
+fn session_bus_name_has_owner(name: &str) -> Option<bool> {
+    let response = bounded_command_output(
+        "busctl",
+        &[
+            "--user",
+            "--timeout=1s",
+            "call",
+            "org.freedesktop.DBus",
+            "/org/freedesktop/DBus",
+            "org.freedesktop.DBus",
+            "NameHasOwner",
+            "s",
+            name,
+        ],
+        Duration::from_millis(1500),
+    )?;
+    match response.trim() {
+        "b true" => Some(true),
+        "b false" => Some(false),
+        _ => None,
+    }
+}
+
+fn ibus_daemon_check(daemon: Option<&IbusDaemonProcess>, desktop: IbusDesktop) -> IbusCheck {
+    let owner = daemon.and_then(|_| session_bus_name_has_owner("org.freedesktop.IBus"));
+    ibus_daemon_check_from(daemon, owner, desktop)
+}
+
+fn ibus_daemon_check_from(
+    daemon: Option<&IbusDaemonProcess>,
+    bus_owner: Option<bool>,
+    desktop: IbusDesktop,
+) -> IbusCheck {
+    let Some(process) = daemon else {
+        return check(
+            "daemon",
+            "IBus daemon responds on the session bus",
+            IbusCheckState::Fail,
+            "no ibus-daemon process is running for this user",
+            Some(start_ibus_fix(desktop)),
+        );
+    };
+    match bus_owner {
+        Some(true) => check(
+            "daemon",
+            "IBus daemon responds on the session bus",
+            IbusCheckState::Pass,
+            format!("ibus-daemon pid {} owns org.freedesktop.IBus", process.pid),
+            None,
+        ),
+        Some(false) => check(
+            "daemon",
+            "IBus daemon responds on the session bus",
+            IbusCheckState::Fail,
+            format!(
+                "ibus-daemon pid {} is present, but org.freedesktop.IBus has no session-bus owner",
+                process.pid
+            ),
+            Some(start_ibus_fix(desktop)),
+        ),
+        None => check(
+            "daemon",
+            "IBus daemon responds on the session bus",
+            IbusCheckState::Unknown,
+            "the IBus process is present, but its session-bus name could not be checked",
+            None,
+        ),
+    }
+}
+
+fn gnome_input_source_checks() -> (IbusCheck, IbusCheck) {
+    let sources = gnome_setting("sources");
+    let current = gnome_setting("current");
+    gnome_source_checks(sources.as_deref(), current.as_deref())
+}
+
+fn gnome_source_checks(
+    sources_value: Option<&str>,
+    current_value: Option<&str>,
+) -> (IbusCheck, IbusCheck) {
+    let Some(raw_sources) = sources_value else {
+        return (
+            check(
+                "gnome-source-registered",
+                "WayExpand registered in GNOME",
+                IbusCheckState::Unknown,
+                "GNOME input-source settings could not be read",
+                Some("wayexpand repair --gnome-input-source".into()),
+            ),
+            check(
+                "gnome-source-active",
+                "WayExpand selected in GNOME",
+                IbusCheckState::Unknown,
+                "active GNOME input source could not be verified",
+                None,
+            ),
+        );
+    };
+    let sources = match crate::gnome_input_sources::parse_sources(raw_sources) {
+        Ok(sources) => sources,
+        Err(error) => {
+            return (
+                check(
+                    "gnome-source-registered",
+                    "WayExpand registered in GNOME",
+                    IbusCheckState::Fail,
+                    format!("GNOME returned an invalid input-source tuple array: {error}"),
+                    Some("wayexpand repair --gnome-input-source".into()),
+                ),
+                check(
+                    "gnome-source-active",
+                    "WayExpand selected in GNOME",
+                    IbusCheckState::Unknown,
+                    "registration is invalid, so active selection cannot be verified",
+                    None,
+                ),
+            );
+        }
+    };
+    let Some(index) = crate::gnome_input_sources::wayexpand_index(&sources) else {
+        return (
+            check(
+                "gnome-source-registered",
+                "WayExpand registered in GNOME",
+                IbusCheckState::Fail,
+                "GNOME's source list does not contain ('ibus', 'wayexpand')",
+                Some("wayexpand repair --gnome-input-source".into()),
+            ),
+            check(
+                "gnome-source-active",
+                "WayExpand selected in GNOME",
+                IbusCheckState::Unknown,
+                "WayExpand is not registered, so active selection cannot be verified",
+                None,
+            ),
+        );
+    };
+    let registered = check(
+        "gnome-source-registered",
+        "WayExpand registered in GNOME",
+        IbusCheckState::Pass,
+        "GNOME's typed source list contains ('ibus', 'wayexpand')",
+        None,
+    );
+    let active = match current_value
+        .and_then(|value| crate::gnome_input_sources::parse_current(value).ok())
+    {
+        Some(current) if current as usize == index => check(
+            "gnome-source-active",
+            "WayExpand selected in GNOME",
+            IbusCheckState::Pass,
+            "GNOME's current source index points to WayExpand",
+            None,
+        ),
+        Some(current) if (current as usize) < sources.len() => check(
+            "gnome-source-active",
+            "WayExpand selected in GNOME",
             IbusCheckState::Warn,
-            "WayExpand is registered in GNOME, but a different input source is currently active",
-            Some("select WayExpand from GNOME's input-source menu".into()),
+            "GNOME has another input source selected",
+            Some("select WayExpand from GNOME's input-source menu or run `wayexpand repair --gnome-input-source`".into()),
+        ),
+        Some(_) => check(
+            "gnome-source-active",
+            "WayExpand selected in GNOME",
+            IbusCheckState::Fail,
+            "GNOME's current source index is outside its source list",
+            Some("wayexpand repair --gnome-input-source".into()),
+        ),
+        None => check(
+            "gnome-source-active",
+            "WayExpand selected in GNOME",
+            IbusCheckState::Unknown,
+            "GNOME's current source could not be read",
+            None,
+        ),
+    };
+    (registered, active)
+}
+
+fn gnome_setting(key: &str) -> Option<String> {
+    bounded_command_output(
+        "gsettings",
+        &["get", "org.gnome.desktop.input-sources", key],
+        Duration::from_secs(1),
+    )
+}
+
+fn bounded_command_output(program: &str, arguments: &[&str], timeout: Duration) -> Option<String> {
+    const MAX_OUTPUT: u64 = 64 * 1024;
+    let mut command = Command::new(program);
+    command
+        .args(arguments)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    configure_process_group(&mut command);
+    let child = command.spawn().ok()?;
+    let mut supervisor = ChildSupervisor::new(child);
+    let mut stdout = supervisor.take_stdout()?;
+    let reader = thread::spawn(move || {
+        let mut output = Vec::new();
+        let _ = (&mut stdout).take(MAX_OUTPUT + 1).read_to_end(&mut output);
+        output
+    });
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        match supervisor.has_exited() {
+            Ok(true) => break,
+            Ok(false) if std::time::Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(10))
+            }
+            _ => {
+                supervisor.kill_group();
+                let _ = supervisor.reap();
+                return None;
+            }
+        }
+    }
+    supervisor.kill_group();
+    let status = supervisor.reap().ok()?;
+    let output = reader.join().ok()?;
+    if !status.success() || output.len() as u64 > MAX_OUTPUT {
+        return None;
+    }
+    String::from_utf8(output)
+        .ok()
+        .map(|value| value.trim().to_owned())
+}
+
+fn field_input_check(activity: Option<&IbusStatusReading>) -> IbusCheck {
+    let safe_field_seen = activity
+        .filter(|reading| reading.live)
+        .is_some_and(|reading| {
+            reading.status.recent_fields.iter().any(|field| {
+                field.keys > 0
+                    && field.content_type == crate::telemetry::IbusContentTypeState::Normal
+                    && field.surrounding_capability
+                    && field.surrounding_reports > 0
+            })
+        });
+    if safe_field_seen {
+        check(
+            "field-input",
+            "Normal-field input observed",
+            IbusCheckState::Pass,
+            "the engine received key events and surrounding-text reports from a normal field; contents are not recorded",
+            None,
+        )
+    } else {
+        check(
+            "field-input",
+            "Normal-field input observed",
+            IbusCheckState::Unknown,
+            "no normal text field has yet provided verifiable input telemetry",
+            Some("focus a normal text field, type harmless test text, then run `wayexpand ibus status` again".into()),
+        )
+    }
+}
+
+fn target_insertion_check(activity: Option<&IbusStatusReading>) -> IbusCheck {
+    let Some(reading) = activity.filter(|reading| reading.live) else {
+        return check(
+            "target-insertion",
+            "Target application insertion verified",
+            IbusCheckState::Unknown,
+            "no live IBus engine outcome is available",
+            Some(
+                "use `wayexpand debug --test ';;hello'` in a real application's text field".into(),
+            ),
+        );
+    };
+    if reading
+        .status
+        .recent_fields
+        .iter()
+        .any(|field| field.output_failures > 0)
+    {
+        return check(
+            "target-insertion",
+            "Target application insertion verified",
+            IbusCheckState::Fail,
+            "the IBus engine recorded an output failure; target text may be partial",
+            Some("inspect the target field and do not retry blindly; run `wayexpand debug --test ';;hello'` after recovery".into()),
+        );
+    }
+    if reading.status.totals.expansions > 0 {
+        check(
+            "target-insertion",
+            "Target application insertion verified",
+            IbusCheckState::Warn,
+            "IBus emitted replacement actions, but the client does not acknowledge the resulting target text",
+            Some("visually confirm the text or run `wayexpand debug --test ';;hello'` in this application".into()),
+        )
+    } else {
+        check(
+            "target-insertion",
+            "Target application insertion verified",
+            IbusCheckState::Unknown,
+            "no replacement has been emitted in the current engine session",
+            Some(
+                "use `wayexpand debug --test ';;hello'` in a real application's text field".into(),
+            ),
         )
     }
 }
@@ -907,6 +1293,158 @@ mod tests {
     }
 
     #[test]
+    fn configured_gnome_route_needs_field_input_and_target_confirmation() {
+        let pass = |id| check(id, "", IbusCheckState::Pass, "", None);
+        let report = IbusChainReport {
+            desktop: IbusDesktop::Gnome,
+            checks: vec![
+                pass("component"),
+                pass("manifest"),
+                pass("registered"),
+                pass("consent"),
+                pass("gnome-session"),
+                pass("gnome-source-registered"),
+                pass("daemon"),
+                pass("selected"),
+                pass("engine"),
+                pass("gnome-source-active"),
+                pass("field-input"),
+                check(
+                    "target-insertion",
+                    "",
+                    IbusCheckState::Unknown,
+                    "target effect is not observable",
+                    None,
+                ),
+            ],
+            activity: None,
+        };
+        assert_eq!(report.configuration_readiness(), IbusCheckState::Pass);
+        assert_eq!(report.operational_readiness(), IbusCheckState::Unknown);
+        assert!(!report.ready());
+    }
+
+    #[test]
+    fn unknown_is_not_aggregated_as_pass() {
+        let report = IbusChainReport {
+            desktop: IbusDesktop::KdeWayland,
+            checks: vec![check(
+                "field-input",
+                "",
+                IbusCheckState::Unknown,
+                "not observed",
+                None,
+            )],
+            activity: None,
+        };
+        assert_eq!(report.operational_readiness(), IbusCheckState::Unknown);
+        assert!(!report.ready());
+    }
+
+    #[test]
+    fn gnome_wayland_session_requires_shell_bus_evidence() {
+        let detected = gnome_session_check_from("GNOME", "wayland", true, Some(true), false);
+        assert_eq!(detected.state, IbusCheckState::Pass);
+        let missing_shell = gnome_session_check_from("GNOME", "wayland", true, Some(false), false);
+        assert_eq!(missing_shell.state, IbusCheckState::Fail);
+        let unavailable_shell_probe =
+            gnome_session_check_from("GNOME", "wayland", true, None, false);
+        assert_eq!(unavailable_shell_probe.state, IbusCheckState::Unknown);
+        let x11 = gnome_session_check_from("GNOME", "x11", false, Some(true), true);
+        assert_eq!(x11.state, IbusCheckState::Warn);
+    }
+
+    #[test]
+    fn daemon_process_presence_without_bus_evidence_is_not_a_pass() {
+        let process = IbusDaemonProcess {
+            pid: 123,
+            environment: None,
+        };
+        assert_eq!(
+            ibus_daemon_check_from(Some(&process), None, IbusDesktop::Gnome).state,
+            IbusCheckState::Unknown
+        );
+        assert_eq!(
+            ibus_daemon_check_from(Some(&process), Some(false), IbusDesktop::Gnome).state,
+            IbusCheckState::Fail
+        );
+        assert_eq!(
+            ibus_daemon_check_from(Some(&process), Some(true), IbusDesktop::Gnome).state,
+            IbusCheckState::Pass
+        );
+    }
+
+    #[test]
+    fn gnome_registration_and_activation_are_separate_findings() {
+        let (registered, active) = gnome_source_checks(
+            Some("[('xkb', 'us'), ('ibus', 'wayexpand')]"),
+            Some("uint32 1"),
+        );
+        assert_eq!(registered.state, IbusCheckState::Pass);
+        assert_eq!(active.state, IbusCheckState::Pass);
+
+        let (registered, active) = gnome_source_checks(Some("[('xkb', 'us')]"), Some("0"));
+        assert_eq!(registered.state, IbusCheckState::Fail);
+        assert_eq!(
+            registered.fix.as_deref(),
+            Some("wayexpand repair --gnome-input-source")
+        );
+        assert_eq!(registered.problem_id, Some("WX-GNOME-IM-001"));
+        assert_eq!(active.state, IbusCheckState::Unknown);
+
+        let (registered, active) = gnome_source_checks(
+            Some("[('xkb', 'us'), ('ibus', 'wayexpand')]"),
+            Some("uint32 0"),
+        );
+        assert_eq!(registered.state, IbusCheckState::Pass);
+        assert_eq!(active.state, IbusCheckState::Warn);
+    }
+
+    #[test]
+    fn safe_field_input_is_required_for_input_operational_pass() {
+        let telemetry = crate::telemetry::IbusTelemetry::new();
+        let field = telemetry.focus_in(None);
+        telemetry.capabilities(Some(field), true);
+        telemetry.content_type(Some(field), false);
+        telemetry.surrounding_text(Some(field), true);
+        telemetry.key(Some(field), true);
+        let reading = IbusStatusReading {
+            status: telemetry.snapshot(),
+            live: true,
+        };
+        assert_eq!(
+            field_input_check(Some(&reading)).state,
+            IbusCheckState::Pass
+        );
+        assert_eq!(field_input_check(None).state, IbusCheckState::Unknown);
+    }
+
+    #[test]
+    fn emitted_ibus_action_is_not_mistaken_for_target_insertion_success() {
+        let telemetry = crate::telemetry::IbusTelemetry::new();
+        let field = telemetry.focus_in(None);
+        telemetry.expansion(Some(field));
+        let reading = IbusStatusReading {
+            status: telemetry.snapshot(),
+            live: true,
+        };
+        assert_eq!(
+            target_insertion_check(Some(&reading)).state,
+            IbusCheckState::Warn
+        );
+
+        telemetry.output_failure(Some(field));
+        let failed = IbusStatusReading {
+            status: telemetry.snapshot(),
+            live: true,
+        };
+        assert_eq!(
+            target_insertion_check(Some(&failed)).state,
+            IbusCheckState::Fail
+        );
+    }
+
+    #[test]
     fn report_readiness_follows_failures_only() {
         let report = IbusChainReport {
             desktop: IbusDesktop::Unknown,
@@ -916,7 +1454,8 @@ mod tests {
             ],
             activity: None,
         };
-        assert!(report.ready());
+        assert!(!report.ready());
+        assert_eq!(report.operational_readiness(), IbusCheckState::Unknown);
         let mut broken = report.clone();
         broken.checks.push(check(
             "c",

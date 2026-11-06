@@ -36,6 +36,13 @@ application-filter rules as typed triggers; command snippets are not run.
 .B status [--json]
 Show the active daemon status. The JSON form is stable for automation.
 .TP
+.B repair --check|--apply [--json] | repair --gnome-input-source [--json]
+Inspect or apply safe installation repairs. The GNOME input-source repair
+preserves existing keyboard sources, registers and activates WayExpand, and
+verifies the selected IBus engine. It does not prove that a target application
+accepted an expansion; confirm that separately with the interactive desktop
+test.
+.TP
 .B doctor [--json] [CONFIG] | doctor --certify [--json]
 Report available input and output backends and their compatibility. With
 \fB--certify\fR, run safe insertion and focus checks in a private headless KWin
@@ -269,6 +276,9 @@ Explain the expert backend selection decision and its tradeoffs.
 .TP
 .B ibus status [--json] | ibus watch [--seconds N]
 Check the IBus route link by link and print the fix for the first broken one.
+Configuration readiness and operational readiness are separate. An unknown
+condition is not reported as success; target application text is not
+observable to IBus and needs interactive confirmation.
 \fBwatch\fR explains, per focused field, why triggers do or do not expand (for
 example password fields, or terminals that report no surrounding text). Only
 counts and states are shown; typed text is never recorded.

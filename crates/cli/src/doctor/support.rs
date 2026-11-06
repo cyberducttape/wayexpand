@@ -202,7 +202,13 @@ pub(crate) fn summarize_reports(
         .as_array()
         .into_iter()
         .flatten()
-        .map(|check| serde_json::json!({ "id": safe_token(check.get("id")), "state": safe_token(check.get("state")) }))
+        .map(|check| {
+            serde_json::json!({
+                "id": safe_token(check.get("id")),
+                "problem_id": safe_token(check.get("problem_id")),
+                "state": safe_token(check.get("state")),
+            })
+        })
         .collect::<Vec<_>>();
     let ibus_fields = ibus_route["activity"]["recent_fields"]
         .as_array()
@@ -331,7 +337,10 @@ pub(crate) fn summarize_reports(
         "backends": backends,
         "ibus": {
             "installed": copy(&doctor["ibus"], "installed"),
+            "schema": copy(ibus_route, "schema"),
             "ready": copy(ibus_route, "ready"),
+            "configuration_readiness": safe_token(ibus_route.get("configuration_readiness")),
+            "operational_readiness": safe_token(ibus_route.get("operational_readiness")),
             "desktop": safe_desktop(copy(ibus_route, "desktop")),
             "first_failure": safe_token(ibus_route.get("first_failure")),
             "checks": ibus_checks,
@@ -500,8 +509,20 @@ fn diagnostic_summaries(
     if doctor["daemon"]["available"].as_bool() == Some(false) {
         findings.push(serde_json::json!({"id":"WX-SERVICE-002","severity":"warning","message":"No WayExpand daemon responded"}));
     }
-    if doctor["ibus"]["route"]["ready"].as_bool() == Some(false) {
-        findings.push(serde_json::json!({"id":"WX-IBUS-001","severity":"warning","message":"The IBus route is not ready"}));
+    let ibus_route = &doctor["ibus"]["route"];
+    let gnome_problem = ibus_route["checks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|check| check["problem_id"] == "WX-GNOME-IM-001");
+    if gnome_problem.is_some() {
+        findings.push(serde_json::json!({
+            "id":"WX-GNOME-IM-001",
+            "severity":"warning",
+            "message":"GNOME IBus session, source registration, or activation could not be verified"
+        }));
+    } else if ibus_route["ready"].as_bool() == Some(false) {
+        findings.push(serde_json::json!({"id":"WX-IBUS-001","severity":"warning","message":"The IBus route is configured or observed, but end-to-end insertion is not confirmed"}));
     }
     if let Some(units) = services["units"].as_array() {
         for id in units
@@ -533,6 +554,13 @@ mod tests {
             "config": { "valid": true, "path": "/home/alice/private.toml" },
             "policy": { "policy": { "valid": true, "safe_mode": true, "token": "secret-policy" } },
             "daemon": { "available": false, "error": "private path and credential" },
+            "ibus": { "route": {
+                "ready": false,
+                "schema": 2,
+                "configuration_readiness": "pass",
+                "operational_readiness": "unknown",
+                "checks": [{"id":"gnome-source-registered","state":"fail","problem_id":"WX-GNOME-IM-001","detail":"/home/alice/private setting"}]
+            }},
             "automatic_selection": { "source": "stdin", "backend": "libei", "ready": false },
             "backends": [{
                 "kind": "libei", "state": "Implemented", "availability": "Unknown",
@@ -580,6 +608,15 @@ mod tests {
         ] {
             assert!(!serialized.contains(forbidden), "leaked {forbidden}");
         }
+        assert_eq!(summary["ibus"]["configuration_readiness"], "pass");
+        assert_eq!(summary["ibus"]["schema"], 2);
+        assert_eq!(summary["ibus"]["operational_readiness"], "unknown");
+        assert!(summary["ibus"]["checks"]
+            .to_string()
+            .contains("WX-GNOME-IM-001"));
+        assert!(summary["diagnostics"]
+            .to_string()
+            .contains("WX-GNOME-IM-001"));
         assert_eq!(
             summary["certification"]["check_status_counts"]["not-run"],
             1

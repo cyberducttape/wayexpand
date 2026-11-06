@@ -701,13 +701,40 @@ pub(crate) fn repair(args: Args) -> Result<()> {
     let mut check = false;
     let mut apply = false;
     let mut json = false;
+    let mut gnome_input_source = false;
     for arg in args {
         match arg.as_str() {
             "--check" => check = true,
             "--apply" => apply = true,
             "--json" => json = true,
-            _ => bail!("usage: wayexpand repair --check|--apply [--json]"),
+            "--gnome-input-source" => gnome_input_source = true,
+            _ => bail!(
+                "usage: wayexpand repair --check|--apply [--json] | --gnome-input-source [--json]"
+            ),
         }
+    }
+    if gnome_input_source {
+        if check || apply {
+            bail!("`--gnome-input-source` is a direct repair action; do not combine it with --check or --apply");
+        }
+        crate::setup_ibus::repair_gnome_input_source()?;
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "schema": 1,
+                    "repair": "gnome-input-source",
+                    "state": "pass",
+                    "source_configuration": "pass",
+                    "operational_readiness": "unknown",
+                    "detail": "GNOME source is registered and active; real-field input still requires verification"
+                })
+            );
+        } else {
+            println!("WayExpand is registered and selected as GNOME's current IBus input source.");
+            println!("Input from a normal text field has not been tested by this repair.");
+        }
+        return Ok(());
     }
     if check == apply {
         bail!("choose exactly one of --check or --apply")

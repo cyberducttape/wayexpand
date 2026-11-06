@@ -9,6 +9,12 @@ All notable changes to WayExpand are documented here.
   source, verifies the saved registration and active source, and restores the
   prior GNOME settings if activation later fails. IBus diagnostics now report
   GNOME source registration and selection separately from IBus preload state.
+- Stop treating GNOME desktop detection as evidence that input reaches the
+  engine. Report GNOME Wayland/Shell session, source registration, active
+  source, normal-field input, and target insertion independently. Readiness
+  now distinguishes configuration from operation; schema 2 leaves target
+  insertion unknown until independently confirmed. Add
+  `wayexpand repair --gnome-input-source` with rollback on activation failure.
 - Continue permissive AutoKey imports when an individual nested directory or
   directory entry cannot be read. Preserve accessible phrases and report each
   skipped path with a remediation; strict imports still fail on the same

@@ -965,6 +965,65 @@ fn activate_and_verify(
     Ok(())
 }
 
+/// Repair only GNOME's persistent WayExpand source and activate it. This is
+/// deliberately separate from full IBus setup and records the old values so
+/// selection failure cannot leave a partial GNOME source mutation behind.
+pub(crate) fn repair_gnome_input_source() -> Result<()> {
+    if IbusDesktop::detect() != IbusDesktop::Gnome {
+        bail!("GNOME input-source repair must run inside a GNOME session");
+    }
+    if !wayexpand_backend_ibus::engine_available() {
+        bail!("the WayExpand IBus engine is not registered; run `wayexpand setup --backend ibus` first");
+    }
+    // `ibus engine` can print the active default-layout engine and still exit
+    // nonzero; use the route probe for WayExpand before relying on exit status.
+    let previous_engine = if wayexpand_backend_ibus::global_engine_selected() {
+        "wayexpand".to_owned()
+    } else {
+        command_output("ibus", &["engine"])
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| anyhow::anyhow!("could not read the currently selected IBus engine"))?
+    };
+    let snapshot = SessionSnapshot {
+        global_engine: Some(previous_engine),
+        gnome_input_sources: Some(
+            crate::gnome_input_sources::Snapshot::capture()
+                .context("could not capture GNOME input-source settings; no changes made")?,
+        ),
+        ..SessionSnapshot::default()
+    };
+    let activation = (|| -> Result<()> {
+        snapshot
+            .gnome_input_sources
+            .as_ref()
+            .expect("snapshot captured")
+            .register_and_activate()?;
+        let _ = run_setup_command("ibus", &["engine", "wayexpand"]);
+        if !wait_until(
+            Duration::from_secs(5),
+            wayexpand_backend_ibus::global_engine_selected,
+        ) {
+            bail!("IBus did not report WayExpand as the active engine");
+        }
+        Ok(())
+    })();
+    if let Err(error) = activation {
+        let failures = snapshot.rollback_with(None, |program, arguments| {
+            run_setup_command(program, arguments).is_ok_and(|status| status.success())
+        });
+        bail!(
+            "GNOME source repair failed ({error}); prior settings were restored{}",
+            if failures.is_empty() {
+                String::new()
+            } else {
+                format!(" with rollback issues: {}", failures.join(", "))
+            }
+        );
+    }
+    Ok(())
+}
+
 pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
     let inventory = ServiceInventory::probe();
     println!("Checking what the IBus route needs…");

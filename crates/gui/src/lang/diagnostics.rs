@@ -1055,6 +1055,22 @@ impl Strings {
         }
     }
 
+    pub fn ibus_configuration_readiness(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Configuration readiness",
+            Language::Indonesian => "Kesiapan konfigurasi",
+            Language::German => "Konfigurationsbereitschaft",
+        }
+    }
+
+    pub fn ibus_operational_readiness(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Operational readiness",
+            Language::Indonesian => "Kesiapan operasional",
+            Language::German => "Betriebsbereitschaft",
+        }
+    }
+
     pub fn ibus_watch_hint(&self) -> &'static str {
         match self.lang {
             Language::English => "To check one app, type a trigger in it and refresh this report, or run `wayexpand ibus watch`.",

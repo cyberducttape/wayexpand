@@ -211,7 +211,7 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ("check --all [--json] [config]", "Run static configuration, template, file, policy, and trigger checks without executing commands"),
             ("service status [--json] | restart --yes", "Inspect managed services or restart only the active route"),
             ("config show|validate [--json] [config] | diff [--json] OLD NEW", "Inspect, validate, or compare configuration files"),
-            ("repair --check|--apply [--json]", "Inspect or apply safe installation repairs"),
+            ("repair --check|--apply [--json] | --gnome-input-source [--json]", "Inspect installation repairs or register and activate the GNOME IBus source"),
             ("reset --integration|--services|--preferences [--check|--apply --yes] [--json]", "Preview and apply a scoped recovery reset"),
             ("restore <backup> [--check | --apply --yes --expected-current=HASH --expected-backup=HASH] [--json] [config]", "Review and safely restore a configuration backup"),
             (

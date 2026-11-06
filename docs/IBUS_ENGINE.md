@@ -136,11 +136,19 @@ the recorded session and says so. The steps are:
    `terminal_apps`, which also serves the control socket. Terminal coverage
    set up earlier is kept when setup runs again.
 
-`wayexpand ibus status --json` reports `readiness` as separate conditions —
-component installed, registered with IBus, IBus running, WayExpand selected,
-engine running, text received from a field, and expanded — because each is
-evidence for the next but none implies the ones after it. The Diagnostics
-window shows the same list.
+`wayexpand ibus status --json` (IBus-route schema 2) separates configuration readiness from
+operational readiness. On GNOME it independently checks the GNOME Wayland
+session (including the live Shell bus name), source registration, active GNOME
+source, and content-free input activity from a normal field. Missing evidence
+is `unknown`, never a pass. Seeing key events or emitted replacement actions
+does not prove that the target application applied the edit: IBus does not
+receive an acknowledgement of the resulting document text. `ready` therefore
+remains false until target insertion is independently verified. Use
+`wayexpand debug --test ';;hello'` and confirm the result in the application.
+`wayexpand repair --gnome-input-source` repairs the GNOME source list and
+selection, then verifies the IBus engine selection; it does not claim that a
+real field insertion succeeded. The Diagnostics window shows the same
+separate evidence.
 
 ## Diagnostics
 

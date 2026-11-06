@@ -313,16 +313,25 @@ new fields may be added compatibly.
 
 Checks the IBus route link by link and reports recent engine activity. It
 contains no typed text, triggers, or replacements. Exit code 0 when `ready`
-is true, 1 otherwise.
+is true, 1 otherwise. The IBus-route JSON object has `schema: 2`; this version
+adds separate readiness states and changes `ready` to mean operationally
+verified rather than merely free of hard failures.
 
-- `ready` (bool): no check failed and no second capture route expands in the
-  same apps.
+- `ready` (bool): operational readiness is fully verified and no second
+  capture route expands in the same apps. Configuration alone is not enough.
+- `configuration_readiness` and `operational_readiness` (strings): each is
+  `pass`, `warn`, `fail`, `unknown`, or `skip`. Unknown evidence is never
+  treated as success. `operational_readiness` remains unverified until there
+  is evidence from a normal text field and the target insertion has been
+  independently confirmed.
 - `desktop` (string): `kde-wayland`, `gnome`, `other-wayland`, `x11`, or
   `unknown`.
 - `checks` (array): in order, objects with a stable `id` (`tools`, `daemon`,
   `desktop`, `component`, `manifest`, `registered`, `selected`, `consent`,
-  `engine`), `title`, `state` (`pass`, `warn`, `fail`, or `skip`), `detail`,
-  and `fix` (string or null). The component checks read the running
+  `engine`, GNOME session/source checks, `field-input`, and `target-insertion`),
+  `title`, `state` (`pass`, `warn`, `fail`, `unknown`, or `skip`), `detail`,
+  `problem_id` (stable diagnostic ID or null), and `fix` (string or null).
+  GNOME source-registration failures use `WX-GNOME-IM-001`. The component checks read the running
   ibus-daemon's own `IBUS_COMPONENT_PATH`, not the caller's.
 - `first_failure` (string or null): the `id` of the first failed check.
 - `readiness` (object): booleans for each separate condition —

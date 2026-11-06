@@ -1570,14 +1570,50 @@ impl GuiApp {
         }
         ui.add_space(8.0);
         theme::section_header(ui, "", self.strings.ibus_route_title());
-        let (summary, summary_color) = match report.first_failure() {
-            None => (self.strings.ibus_route_ready().to_owned(), palette.success),
-            Some(check) => (
+        let (summary, summary_color) = if let Some(check) = report.first_failure() {
+            (
                 self.strings.ibus_route_not_ready(check.title),
                 palette.danger,
-            ),
+            )
+        } else {
+            match report.operational_readiness() {
+                IbusCheckState::Pass => {
+                    (self.strings.ibus_route_ready().to_owned(), palette.success)
+                }
+                IbusCheckState::Fail => (
+                    self.strings
+                        .ibus_route_not_ready("operational verification"),
+                    palette.danger,
+                ),
+                IbusCheckState::Warn | IbusCheckState::Unknown | IbusCheckState::Skip => {
+                    let incomplete = report
+                        .checks
+                        .iter()
+                        .find(|check| {
+                            matches!(check.state, IbusCheckState::Warn | IbusCheckState::Unknown)
+                        })
+                        .map_or("operational verification", |check| check.title);
+                    (
+                        self.strings.ibus_route_not_ready(incomplete),
+                        palette.warning,
+                    )
+                }
+            }
         };
         ui.label(RichText::new(summary).color(summary_color).strong());
+        let readiness = report.readiness();
+        ui.horizontal_wrapped(|ui| {
+            ui.label(format!(
+                "{}: {}",
+                self.strings.ibus_configuration_readiness(),
+                readiness.configuration.label()
+            ));
+            ui.label(format!(
+                "{}: {}",
+                self.strings.ibus_operational_readiness(),
+                readiness.operational.label()
+            ));
+        });
         // Installed, registered, running, selected, receiving text and
         // expanding are separate facts; show each instead of one "ready".
         ui.horizontal_wrapped(|ui| {
@@ -1602,6 +1638,7 @@ impl GuiApp {
                     IbusCheckState::Warn => palette.warning,
                     IbusCheckState::Fail => palette.danger,
                     IbusCheckState::Skip => palette.muted,
+                    IbusCheckState::Unknown => palette.muted,
                 };
                 ui.horizontal_wrapped(|ui| {
                     ui.label(RichText::new(check.state.symbol()).color(color).strong());
@@ -1609,6 +1646,13 @@ impl GuiApp {
                 });
                 ui.indent(check.id, |ui| {
                     ui.label(RichText::new(&check.detail).small().color(palette.muted));
+                    if let Some(problem_id) = check.problem_id {
+                        ui.label(
+                            RichText::new(format!("Problem: {problem_id}"))
+                                .small()
+                                .color(color),
+                        );
+                    }
                     if check.state != IbusCheckState::Pass {
                         if let Some(fix) = &check.fix {
                             ui.horizontal_wrapped(|ui| {

@@ -36,9 +36,20 @@ typing the trigger. It waits for sanitized capture/output evidence and then
 asks you to confirm exact visible text. It never presses Enter, never retries
 an uncertain output, and does not claim coverage beyond the one test session.
 
-Finding IDs such as `WX-CONFIG-001`, `WX-IBUS-002`, `WX-INPUT-001`,
+Finding IDs such as `WX-CONFIG-001`, `WX-GNOME-IM-001`, `WX-IBUS-002`, `WX-INPUT-001`,
 `WX-OUTPUT-001`, `WX-SERVICE-002`, and `WX-VERSION-001` are stable references
 for support reports and automation.
+
+### WX-GNOME-IM-001
+
+The GNOME IBus session, source registration, or active source could not be
+verified.
+Inspect the individual GNOME session, source-registration, and active-source
+checks with `wayexpand ibus status --json`. Run
+`wayexpand repair --gnome-input-source` to register and select the source.
+Configuration readiness does not prove that a text field receives input or
+that an application applied a replacement; use `wayexpand debug --test
+';;hello'` and confirm the visible result.
 
 ### WX-PORTAL-001
 
