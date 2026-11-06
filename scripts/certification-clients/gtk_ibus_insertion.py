@@ -8,16 +8,22 @@ and GTK receives the committed replacement.
 """
 
 import sys
+import time
 
 import gi
+from evdev import UInput, ecodes as E
 
-gi.require_version("Gdk", "3.0")
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gdk, GLib, Gtk
+from gi.repository import GLib, Gtk
 
 TRIGGER = ";e2e"
 EXPECTED = "expanded"
 TIMEOUT_MS = 5000
+KEYS = {
+    ";": E.KEY_SEMICOLON,
+    "e": E.KEY_E,
+    "2": E.KEY_2,
+}
 
 
 def main():
@@ -29,17 +35,32 @@ def main():
     entry.grab_focus()
 
     def send_trigger():
-        unhandled = 0
-        for character in TRIGGER:
-            keyval = Gdk.unicode_to_keyval(ord(character))
-            # This reports whether a GTK widget handler claimed the event,
-            # not whether the input-method context delivered it. Send the
-            # whole harmless trigger and use the actual committed entry text
-            # as the acceptance result.
-            if not Gtk.test_widget_send_key(entry, keyval, Gdk.ModifierType(0)):
-                unhandled += 1
-        if unhandled:
-            print(f"note gtk-ibus-insertion {unhandled} GTK key events were not claimed by the widget")
+        if not window.is_active() or not entry.is_focus():
+            print("fail gtk-ibus-insertion GTK test window did not acquire focus")
+            Gtk.main_quit()
+            return GLib.SOURCE_REMOVE
+        try:
+            # GTK cannot synthesize compositor input on Wayland. Use an
+            # isolated CI uinput keyboard instead, so Mutter routes the same
+            # key events through GNOME's active IBus source and GTK's normal
+            # input-method context.
+            with UInput(
+                events={E.EV_KEY: sorted(set(KEYS.values()))},
+                name="WayExpand GNOME acceptance keyboard",
+            ) as keyboard:
+                time.sleep(0.25)  # Let Mutter discover the new virtual device.
+                for character in TRIGGER:
+                    key = KEYS[character]
+                    keyboard.write(E.EV_KEY, key, 1)
+                    keyboard.syn()
+                    time.sleep(0.025)
+                    keyboard.write(E.EV_KEY, key, 0)
+                    keyboard.syn()
+                    time.sleep(0.025)
+        except (OSError, KeyError) as error:
+            print(f"fail gtk-ibus-insertion virtual keyboard unavailable: {error}")
+            Gtk.main_quit()
+            return GLib.SOURCE_REMOVE
         GLib.timeout_add(50, check_result)
         return GLib.SOURCE_REMOVE
 

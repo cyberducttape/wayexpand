@@ -12,6 +12,10 @@ All notable changes to WayExpand are documented here.
   The GNOME lifecycle acceptance test also verifies that the registered IBus
   source remains configured across a Shell restart before reactivating it and
   repeating GTK insertion.
+- Drive the GNOME GTK insertion acceptance test through a CI-only uinput
+  keyboard. Wayland correctly rejects GTK's in-process synthetic key helper;
+  the virtual keyboard now sends the harmless trigger through Mutter, the
+  active IBus source, and the GTK input-method context.
 - Pin both GDK and GTK to version 3 in the GTK3 IBus acceptance client so
   newer runner images cannot load GDK4 before the GTK3 insertion test.
 - Extend `wayexpand doctor --gnome` with a running daemon build/schema check and

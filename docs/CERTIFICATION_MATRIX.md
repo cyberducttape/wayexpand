@@ -71,8 +71,9 @@ and window tracking. It also sends the configured trigger through a GTK 3
 entry's IBus input-method context and verifies the committed replacement, then
 simulates an extension upgrade with an old Shell instance and a Shell restart.
 `test-ibus-e2e.sh` additionally exercises IBus engine focus, content-type and
-telemetry cases. These headless tests use scripted key events; they do not
-prove physical keyboard routing, persistence across an actual user logout, or
+telemetry cases. The GTK test uses a virtual uinput keyboard; these headless
+tests do not prove physical keyboard routing, persistence across an actual
+user logout, or
 replacement in every GTK/Qt/browser/terminal application. They must not be
 counted as passes in the platform matrix below.
 
