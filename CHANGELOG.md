@@ -4,6 +4,14 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Let setup complete when `;;hello` is absent. It now offers a configured,
+  enabled, non-command expansion for the optional real-app test, and reports
+  `CONFIGURED, AWAITING TEST` when no suitable trigger exists instead of
+  treating the missing sample as a backend failure.
+- Bound GNOME Shell focus/title notification work: updates are coalesced, each
+  subscriber has at most one in-flight D-Bus call plus one latest pending
+  snapshot, and subscribers that time out are disconnected. A 100,000-update
+  stress test covers stalled and delayed subscribers.
 - Simplify the GUI's IBus setup into a preflighted, single guided flow. It first
   checks whether the component registration is already valid, only presents
   administrator-registration consent when it is missing or invalid, and keeps

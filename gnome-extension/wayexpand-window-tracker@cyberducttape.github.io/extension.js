@@ -18,6 +18,7 @@ import GLib from 'gi://GLib';
 import Shell from 'gi://Shell';
 import * as Keyboard from 'resource:///org/gnome/shell/ui/status/keyboard.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
+import {LatestOnlyDelivery} from './notification-queue.js';
 
 const TRACKER_PATH = '/org/wayexpand/ShellWindowTracker';
 const TRACKER_IFACE = `
@@ -52,6 +53,7 @@ const CLIENT_IFACE = 'org.wayexpand.WindowTracker1';
 const PROTOCOL_VERSION = 2;
 const MAX_SUBSCRIBERS = 8;
 const CALL_TIMEOUT_MS = 2000;
+const NOTIFY_COALESCE_MS = 30;
 
 /** [app_id, title, instance_id] for `window`, or empty strings for none. */
 function describe(window) {
@@ -74,6 +76,8 @@ export default class WayExpandWindowTracker extends Extension {
         this._subscribers = new Map();
         this._focused = null;
         this._titleChangedId = 0;
+        this._notifySource = 0;
+        this._latestNotification = null;
         this._exported = Gio.DBusExportedObject.wrapJSObject(TRACKER_IFACE, this);
         this._exported.export(Gio.DBus.session, TRACKER_PATH);
         this._focusChangedId = global.display.connect('notify::focus-window',
@@ -85,8 +89,12 @@ export default class WayExpandWindowTracker extends Extension {
         global.display.disconnect(this._focusChangedId);
         this._focusChangedId = 0;
         this._watchTitle(null);
-        for (const watchId of this._subscribers.values())
-            Gio.bus_unwatch_name(watchId);
+        if (this._notifySource) {
+            GLib.source_remove(this._notifySource);
+            this._notifySource = 0;
+        }
+        for (const subscriber of this._subscribers.values())
+            Gio.bus_unwatch_name(subscriber.watchId);
         this._subscribers = null;
         this._exported.unexport();
         this._exported = null;
@@ -167,7 +175,20 @@ export default class WayExpandWindowTracker extends Extension {
             }
             const watchId = Gio.bus_watch_name_on_connection(Gio.DBus.session, subscriber,
                 Gio.BusNameWatcherFlags.NONE, null, () => this._drop(subscriber));
-            this._subscribers.set(subscriber, watchId);
+            const state = {watchId, delivery: null};
+            state.delivery = new LatestOnlyDelivery((parameters, complete) => {
+                Gio.DBus.session.call(subscriber, CLIENT_PATH, CLIENT_IFACE, 'WindowChanged',
+                    parameters, null, Gio.DBusCallFlags.NO_AUTO_START, CALL_TIMEOUT_MS, null,
+                    (connection, result) => {
+                        try {
+                            connection.call_finish(result);
+                            complete(null);
+                        } catch (error) {
+                            complete(error);
+                        }
+                    });
+            }, () => this._drop(subscriber));
+            this._subscribers.set(subscriber, state);
         }
         invocation.return_value(new GLib.Variant('(sss)', describe(this._focused)));
     }
@@ -187,10 +208,11 @@ export default class WayExpandWindowTracker extends Extension {
     }
 
     _drop(subscriber) {
-        const watchId = this._subscribers?.get(subscriber);
-        if (watchId === undefined)
+        const state = this._subscribers?.get(subscriber);
+        if (!state)
             return;
-        Gio.bus_unwatch_name(watchId);
+        state.delivery.close();
+        Gio.bus_unwatch_name(state.watchId);
         this._subscribers.delete(subscriber);
     }
 
@@ -217,19 +239,27 @@ export default class WayExpandWindowTracker extends Extension {
     _notify() {
         if (!this._subscribers || this._subscribers.size === 0)
             return;
-        const parameters = new GLib.Variant('(sss)', describe(this._focused));
-        for (const subscriber of this._subscribers.keys()) {
-            Gio.DBus.session.call(subscriber, CLIENT_PATH, CLIENT_IFACE, 'WindowChanged',
-                parameters, null, Gio.DBusCallFlags.NO_AUTO_START, CALL_TIMEOUT_MS, null,
-                (connection, result) => {
-                    try {
-                        connection.call_finish(result);
-                    } catch {
-                        // A subscriber that cannot take the update is gone
-                        // or broken; it subscribes again when it reconnects.
-                        this._drop(subscriber);
-                    }
-                });
+        this._latestNotification = new GLib.Variant('(sss)', describe(this._focused));
+        if (this._notifySource)
+            return;
+        this._notifySource = GLib.timeout_add(GLib.PRIORITY_DEFAULT,
+            NOTIFY_COALESCE_MS, () => {
+                this._notifySource = 0;
+                this._flushNotifications();
+                return GLib.SOURCE_REMOVE;
+            });
+    }
+
+    _flushNotifications() {
+        if (!this._subscribers || !this._latestNotification)
+            return;
+        const parameters = this._latestNotification;
+        this._latestNotification = null;
+        for (const state of this._subscribers.values()) {
+            // A slow subscriber gets at most one outstanding method call and
+            // one replaceable pending snapshot. Bursts never accumulate a
+            // queue of stale window titles in GNOME Shell.
+            state.delivery.enqueue(parameters);
         }
     }
 }

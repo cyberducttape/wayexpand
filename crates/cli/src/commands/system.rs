@@ -218,22 +218,18 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
         eprintln!("SETUP RESULT: ACTION REQUIRED");
         return Err(error);
     }
-    let hello_available = Config::load(default_config_path()).is_ok_and(|config| {
-        config
-            .expansion
-            .iter()
-            .any(|expansion| expansion.enabled && expansion.answers_to(";;hello"))
-    });
+    let test_config = Config::load(default_config_path())?;
+    let test_trigger = setup_test_trigger(&test_config);
     let mut desktop_test_result = crate::commands::debug::DesktopTestResult::NotTested;
-    if hello_available {
+    if let Some(test_trigger) = test_trigger.as_deref() {
         if assume_yes {
             println!("Activation completed. Real application insertion: NOT TESTED.");
-            println!("Next: run `wayexpand debug --test ';;hello'` in a disposable text field and confirm the replacement.");
+            println!("Next: run `wayexpand debug --test {test_trigger:?}` in a disposable text field and confirm the replacement.");
         } else if crate::prompt_yes_no(
-            "Activation checks completed; a real application insertion is not yet verified. Run the `;;hello` first-run test now? [Y/n] ",
+            &format!("Activation checks completed; real insertion is not yet verified. Run the optional test with {test_trigger:?} now? [Y/n] "),
             true,
         )? {
-            desktop_test_result = match crate::commands::debug::desktop_test(";;hello") {
+            desktop_test_result = match crate::commands::debug::desktop_test(test_trigger) {
                 Ok(result) => result,
                 Err(error) => {
                     eprintln!("SETUP RESULT: ACTION REQUIRED");
@@ -242,15 +238,11 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
             };
         } else {
             println!("Activation completed. Real application insertion: NOT TESTED.");
-            println!("Next: run `wayexpand debug --test ';;hello'` in a disposable text field and confirm the replacement.");
+            println!("Next: run `wayexpand debug --test {test_trigger:?}` in a disposable text field and confirm the replacement.");
         }
     } else {
-        println!("SETUP RESULT: ACTION REQUIRED");
-        println!("Activation completed. No enabled `;;hello` sample was found; real application insertion remains NOT TESTED.");
-        println!("Enable or add a harmless static test expansion, then run `wayexpand debug --test TRIGGER` in a disposable text field.");
-        bail!(
-            "WX-SETUP-TEST-001: no enabled ;;hello expansion is available for the first-run test"
-        );
+        println!("Activation completed. No enabled, safe-to-test expansion is configured; real application insertion remains NOT TESTED.");
+        println!("Setup is configured, but insertion is unverified. Add a harmless static expansion and run `wayexpand debug --test TRIGGER` in a disposable text field when ready.");
     }
     if desktop_test_result == crate::commands::debug::DesktopTestResult::Failed {
         println!("SETUP RESULT: ACTION REQUIRED");
@@ -264,7 +256,9 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
         println!("A real expansion was user-confirmed in the tested application. Other applications and persistence across logout remain unverified.");
     } else {
         println!("SETUP RESULT: CONFIGURED, AWAITING TEST");
-        println!("Next: run `wayexpand debug --test ';;hello'` in a disposable text field and confirm the replacement.");
+        if test_trigger.is_some() {
+            println!("Next: run `wayexpand debug --test {}` in a disposable text field and confirm the replacement.", test_trigger.as_deref().unwrap_or_default());
+        }
     }
     if backend == "ibus" {
         let enable_terminals = if real_insertion_verified && !terminals_requested && !assume_yes {
@@ -292,10 +286,30 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
             }
         } else if terminals_requested {
             println!("Optional terminal coverage was not configured because a real IBus insertion was not verified.");
-            println!("After verifying `;;hello` in a disposable text field, rerun `wayexpand setup --backend ibus --terminals`.");
+            println!("After verifying a harmless expansion in a disposable text field, rerun `wayexpand setup --backend ibus --terminals`.");
         }
     }
     Ok(())
+}
+
+/// Pick a harmless configured expansion for the optional real-client test.
+/// The conventional sample remains preferred, but a custom configuration is
+/// not required to keep that sample. Command-backed entries are excluded so
+/// setup never triggers an operational action as part of a desktop test.
+fn setup_test_trigger(config: &Config) -> Option<String> {
+    config
+        .expansion
+        .iter()
+        .find(|expansion| {
+            expansion.enabled && expansion.command.is_none() && expansion.answers_to(";;hello")
+        })
+        .or_else(|| {
+            config
+                .expansion
+                .iter()
+                .find(|expansion| expansion.enabled && expansion.command.is_none())
+        })
+        .map(|expansion| expansion.trigger.clone())
 }
 
 pub(crate) fn doctor_command(args: Args) -> Result<()> {
@@ -1512,8 +1526,63 @@ pub(crate) fn live_explain_build_gate(
 
 #[cfg(test)]
 mod policy_check_tests {
-    use super::{policy_check_findings, upgrade_health_failure};
-    use wayexpand_core::OrganizationPolicy;
+    use super::{policy_check_findings, setup_test_trigger, upgrade_health_failure};
+    use wayexpand_core::{Config, OrganizationPolicy};
+
+    #[test]
+    fn setup_uses_hello_when_present_but_does_not_require_it() {
+        let config = Config::parse(
+            r#"[[expansion]]
+trigger = ";custom"
+replacement = "custom"
+
+[[expansion]]
+trigger = ";;hello"
+replacement = "hello"
+"#,
+        )
+        .unwrap();
+        assert_eq!(setup_test_trigger(&config).as_deref(), Some(";;hello"));
+    }
+
+    #[test]
+    fn setup_can_offer_an_existing_custom_trigger_without_hello() {
+        let config = Config::parse(
+            r#"[[expansion]]
+trigger = ";custom"
+replacement = "custom"
+"#,
+        )
+        .unwrap();
+        assert_eq!(setup_test_trigger(&config).as_deref(), Some(";custom"));
+    }
+
+    #[test]
+    fn setup_has_no_test_trigger_for_empty_disabled_or_command_only_configs() {
+        let empty = Config::parse("").unwrap();
+        assert_eq!(setup_test_trigger(&empty), None);
+
+        let disabled = Config::parse(
+            r#"[[expansion]]
+trigger = ";disabled"
+replacement = "value"
+enabled = false
+"#,
+        )
+        .unwrap();
+        assert_eq!(setup_test_trigger(&disabled), None);
+
+        let command_only = Config::parse(
+            r#"[[expansion]]
+trigger = ";action"
+replacement = "value"
+[expansion.command]
+program = "/usr/bin/true"
+"#,
+        )
+        .unwrap();
+        assert_eq!(setup_test_trigger(&command_only), None);
+    }
 
     #[test]
     fn policy_check_explains_audit_only_controls_and_can_allow_them_explicitly() {

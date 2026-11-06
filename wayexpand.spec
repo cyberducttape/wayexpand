@@ -49,6 +49,7 @@ install -Dm644 polkit/org.wayexpand.action.policy %{buildroot}%{_datadir}/polkit
 install -Dm644 desktop/wayexpand-ibus.xml %{buildroot}%{_datadir}/ibus/component/wayexpand-ibus.xml
 install -Dm644 gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/metadata.json %{buildroot}%{_datadir}/gnome-shell/extensions/wayexpand-window-tracker@cyberducttape.github.io/metadata.json
 install -Dm644 gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/extension.js %{buildroot}%{_datadir}/gnome-shell/extensions/wayexpand-window-tracker@cyberducttape.github.io/extension.js
+install -Dm644 gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/notification-queue.js %{buildroot}%{_datadir}/gnome-shell/extensions/wayexpand-window-tracker@cyberducttape.github.io/notification-queue.js
 install -Dm644 io.github.cyberducttape.WayExpand.metainfo.xml %{buildroot}%{_datadir}/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml
 install -Dm644 docs/wayexpand.1 %{buildroot}%{_mandir}/man1/wayexpand.1
 for size in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do

@@ -7,6 +7,7 @@ for relative in \
     desktop/wayexpand-ibus.xml \
     gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/metadata.json \
     gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/extension.js \
+    gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/notification-queue.js \
     installer-components.toml \
     systemd/wayexpand-input-method.service \
     systemd/wayexpand-evdev.service \

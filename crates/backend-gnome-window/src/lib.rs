@@ -51,13 +51,17 @@ const EXTENSION_METADATA: &str = include_str!(
 const EXTENSION_SCRIPT: &str = include_str!(
     "../../../gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/extension.js"
 );
+const EXTENSION_NOTIFICATION_QUEUE: &str = include_str!(
+    "../../../gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/notification-queue.js"
+);
 
 /// The extension's files as `(file name, contents)`, so any installation
 /// method can install the exact bundled version.
-pub fn extension_files() -> [(&'static str, &'static str); 2] {
+pub fn extension_files() -> [(&'static str, &'static str); 3] {
     [
         ("metadata.json", EXTENSION_METADATA),
         ("extension.js", EXTENSION_SCRIPT),
+        ("notification-queue.js", EXTENSION_NOTIFICATION_QUEUE),
     ]
 }
 
@@ -270,17 +274,28 @@ fn ensure_current_build_identity(
     }
 }
 
-/// SHA-256 identity of the bundled extension implementation. The metadata
-/// carries the same identity for GNOME Shell to expose from its loaded copy.
+/// SHA-256 identity of the bundled extension implementation modules. The
+/// metadata carries the same identity for GNOME Shell to expose from its
+/// loaded copy, so stale imported modules are covered as well as extension.js.
 pub fn bundled_extension_build_identity() -> String {
     use std::fmt::Write as _;
-    Sha256::digest(EXTENSION_SCRIPT.as_bytes()).iter().fold(
-        String::from("sha256:"),
-        |mut identity, byte| {
+    let mut digest = Sha256::new();
+    for (name, contents) in extension_files()
+        .into_iter()
+        .filter(|(name, _)| *name != "metadata.json")
+    {
+        digest.update(name.as_bytes());
+        digest.update([0]);
+        digest.update(contents.as_bytes());
+        digest.update([0xff]);
+    }
+    digest
+        .finalize()
+        .iter()
+        .fold(String::from("sha256:"), |mut identity, byte| {
             let _ = write!(identity, "{byte:02x}");
             identity
-        },
-    )
+        })
 }
 
 fn read_active_input_source(
@@ -766,7 +781,7 @@ mod tests {
 
     #[test]
     fn bundled_extension_matches_this_tracker() {
-        let [(_, metadata), (_, script)] = extension_files();
+        let [(_, metadata), (_, script), (_, queue)] = extension_files();
         assert!(metadata.contains(EXTENSION_UUID));
         assert!(script.contains(TRACKER_PATH));
         assert!(script.contains(TRACKER_IFACE));
@@ -783,5 +798,7 @@ mod tests {
         assert!(script.contains("InputSourceControlVersion"));
         assert!(script.contains("Keyboard.getInputSourceManager().currentSource"));
         assert!(!script.contains("org.gnome.desktop.input-sources current"));
+        assert!(script.contains("LatestOnlyDelivery"));
+        assert!(queue.contains("class LatestOnlyDelivery"));
     }
 }

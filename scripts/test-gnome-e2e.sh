@@ -51,6 +51,7 @@ mkdir -p "$work/home" "$work/config" "$work/cache" \
     "$work/data/gnome-shell/extensions/$uuid" \
     "$work/data/gnome-shell/extensions/$controller_uuid"
 cp "$project_dir/gnome-extension/$uuid/metadata.json" "$project_dir/gnome-extension/$uuid/extension.js" \
+    "$project_dir/gnome-extension/$uuid/notification-queue.js" \
     "$work/data/gnome-shell/extensions/$uuid/"
 cp "$project_dir/scripts/gnome-e2e-focus-controller/metadata.json" \
     "$project_dir/scripts/gnome-e2e-focus-controller/extension.js" \

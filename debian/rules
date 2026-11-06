@@ -73,7 +73,7 @@ override_dh_install:
 	install -Dm644 scripts/e2e-lib.sh debian/wayexpand/usr/libexec/wayexpand-certification/e2e-lib.sh
 	install -Dm644 scripts/kwin-e2e-report.sh debian/wayexpand/usr/libexec/wayexpand-certification/kwin-e2e-report.sh
 	dh_install --package=wayexpand desktop/wayexpand-ibus.xml usr/share/ibus/component/
-	dh_install --package=wayexpand gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/metadata.json gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/extension.js usr/share/gnome-shell/extensions/wayexpand-window-tracker@cyberducttape.github.io/
+	dh_install --package=wayexpand gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/metadata.json gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/extension.js gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/notification-queue.js usr/share/gnome-shell/extensions/wayexpand-window-tracker@cyberducttape.github.io/
 	dh_install --package=wayexpand desktop/wayexpand.desktop usr/share/applications/
 	dh_install --package=wayexpand installer-components.toml usr/share/wayexpand/
 	install -Dm644 polkit/org.wayexpand.action.policy \

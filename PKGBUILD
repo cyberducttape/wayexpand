@@ -69,6 +69,7 @@ package() {
     install -Dm644 desktop/wayexpand-ibus.xml "${pkgdir}/usr/share/ibus/component/wayexpand-ibus.xml"
     install -Dm644 gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/metadata.json "${pkgdir}/usr/share/gnome-shell/extensions/wayexpand-window-tracker@cyberducttape.github.io/metadata.json"
     install -Dm644 gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/extension.js "${pkgdir}/usr/share/gnome-shell/extensions/wayexpand-window-tracker@cyberducttape.github.io/extension.js"
+    install -Dm644 gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/notification-queue.js "${pkgdir}/usr/share/gnome-shell/extensions/wayexpand-window-tracker@cyberducttape.github.io/notification-queue.js"
     install -Dm644 io.github.cyberducttape.WayExpand.metainfo.xml \
         "${pkgdir}/usr/share/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml"
     install -Dm644 docs/wayexpand.1 "${pkgdir}/usr/share/man/man1/wayexpand.1"
