@@ -69,13 +69,18 @@ trap finish EXIT
 
 extension_state() {
     gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell/Extensions \
-        --method org.gnome.Shell.Extensions.GetExtensionInfo "$E2E_UUID" 2>/dev/null || true
+        --method org.gnome.Shell.Extensions.GetExtensionInfo "$E2E_UUID" 2>&1 || true
 }
 tries=600
 until gnome_extension_state_active "$(extension_state)"; do
     tries=$((tries - 1))
     if [ "$tries" -le 0 ] || ! kill -0 "$shell_pid" 2>/dev/null; then
-        log "fail extension-active GNOME Shell did not activate the extension: $(extension_state)"
+        if kill -0 "$shell_pid" 2>/dev/null; then
+            shell_state=running
+        else
+            shell_state=exited
+        fi
+        log "fail extension-active GNOME Shell did not activate the extension (shell=$shell_state): $(extension_state)"
         exit 1
     fi
     sleep 0.1
@@ -147,6 +152,10 @@ if [ "$status" -ne 0 ] || grep -q '^fail' "$work/results.txt" \
     for log in session.log gnome-shell.log sink.log; do
         printf '%s\n' "--- $log" >&2
         tail -n 60 "$work/$log" >&2 2>/dev/null || true
+        if [ -s "$work/$log" ]; then
+            log_summary=$(tail -n 12 "$work/$log" | tr '\n' ';' | sed 's/%/%25/g; s/\r/%0D/g')
+            printf '::error title=GNOME E2E %s::%s\n' "$log" "$log_summary" >&2
+        fi
     done
     exit 1
 fi
