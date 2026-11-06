@@ -43,10 +43,12 @@ All notable changes to WayExpand are documented here.
   the already active WayExpand engine expands a trigger in a controlled IBus
   input context and a GTK 3 entry. It writes the deprecated `current` index
   and asserts CLI readiness still requires live Shell activation. It also
-  simulates updating extension files while an older build is loaded, checks
-  for `logout-required`, restarts Shell, and verifies the loaded build matches.
-  The test explicitly keeps physical-session certification unverified and
-  checks named lifecycle checkpoints instead of a hard-coded pass count.
+  simulates updating extension files while an older build is loaded and
+  asserts diagnostics do not call that state current. The build-assessment
+  unit test covers `logout-required`; the session test restarts Shell and
+  verifies the newly loaded build matches. Physical-session certification
+  remains explicitly unverified, and the test checks named lifecycle
+  checkpoints instead of a hard-coded pass count.
 - Simplify the GUI's IBus setup into a preflighted, single guided flow. It first
   checks whether the component registration is already valid, only presents
   administrator-registration consent when it is missing or invalid, and keeps
