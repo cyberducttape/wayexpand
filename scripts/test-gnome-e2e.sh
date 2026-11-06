@@ -286,22 +286,10 @@ case "$active_source" in
     *"'ibus', 'wayexpand'"*) log "pass gnome-ibus-source-active $active_source" ;;
     *) log "fail gnome-ibus-source-active GNOME Shell reported $active_source"; exit 1 ;;
 esac
-if ! "$E2E_BIN_DIR/wx-e2e-ibus" "$XDG_RUNTIME_DIR/wayexpand-ibus-status.json" \
-    --expect-active >"$E2E_WORK/ibus-transaction-results.txt" 2>&1; then
-    log "fail ibus-expansion-after-gnome-activation"
-    cat "$E2E_WORK/ibus-transaction-results.txt"
-    exit 1
-fi
-if ! grep -Fx 'pass gnome-selected-engine the engine selected by GNOME was already active in IBus' \
-    "$E2E_WORK/ibus-transaction-results.txt" >/dev/null \
-    || ! grep -F 'pass expands text after typing the trigger: "expanded"' \
-        "$E2E_WORK/ibus-transaction-results.txt" >/dev/null; then
-    log "fail ibus-expansion-after-gnome-activation GNOME-selected engine did not expand the trigger"
-    cat "$E2E_WORK/ibus-transaction-results.txt"
-    exit 1
-fi
-log "pass ibus-expansion-after-gnome-activation IBus input-context transaction passed"
-
+# Let a real GTK input context activate the GNOME-selected engine. The direct
+# IBus protocol transaction is covered by test-ibus-e2e.sh; creating that
+# protocol-only context here before any text client caused a false failure
+# when the engine correctly had no focused field yet.
 if WAYLAND_DISPLAY="$display" /usr/bin/python3 \
     "$E2E_PROJECT_DIR/scripts/certification-clients/gtk_ibus_insertion.py" \
     >"$E2E_WORK/gtk-insertion.log" 2>&1 \
@@ -311,6 +299,30 @@ if WAYLAND_DISPLAY="$display" /usr/bin/python3 \
 else
     log "fail gtk-ibus-insertion GTK did not receive the expected IBus replacement"
     cat "$E2E_WORK/gtk-insertion.log"
+    exit 1
+fi
+"$E2E_BIN_DIR/wayexpand" ibus status --json \
+    >"$E2E_WORK/ibus-after-gtk-insertion.json" \
+    2>"$E2E_WORK/ibus-after-gtk-insertion.err" || true
+if ! python3 - "$E2E_WORK/ibus-after-gtk-insertion.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    report = json.load(source)
+expected = {
+    "registered": True,
+    "selected": True,
+    "engine_running": True,
+    "text_received": True,
+}
+actual = {key: report.get(key) for key in expected}
+assert actual == expected, actual
+print("pass gnome-ibus-operational the GTK input context reached the selected engine")
+PY
+then
+    log "fail gnome-ibus-operational GTK insertion did not produce healthy IBus engine telemetry"
+    cat "$E2E_WORK/ibus-after-gtk-insertion.json"
     exit 1
 fi
 
@@ -494,7 +506,7 @@ env -i \
     dbus-run-session -- "$work/session.sh" >"$work/results.txt" 2>"$work/session.log" || status=$?
 
 cat "$work/results.txt"
-expected_checks='extension-active extension-pre-upgrade-build extension-upgrade-not-current active-input-source deprecated-current-readback ignored-current-setting unavailable-input-source ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active ibus-expansion-after-gnome-activation gtk-ibus-insertion extension-disabled extension-after-login'
+expected_checks='extension-active extension-pre-upgrade-build extension-upgrade-not-current active-input-source deprecated-current-readback ignored-current-setting unavailable-input-source ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gtk-ibus-insertion gnome-ibus-operational extension-disabled extension-after-login'
 missing_check=
 for check in $expected_checks; do
     if ! grep -F "pass $check" "$work/results.txt" >/dev/null; then
@@ -516,7 +528,8 @@ if [ "$status" -ne 0 ] || grep -q '^fail' "$work/results.txt" \
     printf '::error title=GNOME window tracking E2E::%s\n' "$failure" >&2
     for log in session.log gnome-shell.log gnome-shell-after-login.log ibus-daemon.log ibus-engines.txt \
         ibus-before-live-activation.json ibus-before-live-activation.err \
-        ibus-transaction-results.txt doctor-after-extension-upgrade.json \
+        ibus-after-gtk-insertion.json ibus-after-gtk-insertion.err \
+        doctor-after-extension-upgrade.json \
         doctor-after-extension-upgrade.err doctor-after-login.json \
         gtk-insertion.log sink.log; do
         printf '%s\n' "--- $log" >&2
@@ -528,4 +541,4 @@ if [ "$status" -ne 0 ] || grep -q '^fail' "$work/results.txt" \
     done
     exit 1
 fi
-printf '%s\n' "Headless GNOME input activation, GTK3 IBus insertion, and extension upgrade/logout tests passed; physical desktop certification remains unverified"
+printf '%s\n' "Headless GNOME input activation, GTK3 IBus insertion, engine health, and extension upgrade/logout tests passed; physical desktop certification remains unverified"
