@@ -11,6 +11,7 @@
 set -eu
 
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+. "$project_dir/scripts/gnome-extension-state.sh"
 uuid=wayexpand-window-tracker@cyberducttape.github.io
 keep=0
 for argument in "$@"; do
@@ -71,7 +72,7 @@ extension_state() {
         --method org.gnome.Shell.Extensions.GetExtensionInfo "$E2E_UUID" 2>/dev/null || true
 }
 tries=600
-until extension_state | grep -q "'state': <1.0>"; do
+until gnome_extension_state_active "$(extension_state)"; do
     tries=$((tries - 1))
     if [ "$tries" -le 0 ] || ! kill -0 "$shell_pid" 2>/dev/null; then
         log "fail extension-active GNOME Shell did not activate the extension: $(extension_state)"
