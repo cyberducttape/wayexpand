@@ -636,7 +636,9 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
                     "no runtime version mismatch detected"
                 }
             );
-            if source == Some("ibus") || !stale_ibus_processes.is_empty() {
+            if source == Some("ibus") && stale_ibus_processes.is_empty() {
+                println!("IBus: no stale WayExpand engine process was found.");
+            } else if !stale_ibus_processes.is_empty() {
                 print_ibus_engine_restart_guidance(&stale_ibus_processes);
             }
         }
@@ -678,7 +680,9 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
         } else {
             println!("No running daemon version mismatch; nothing to apply.");
         }
-        print_ibus_engine_restart_guidance(&stale_ibus_processes);
+        if !stale_ibus_processes.is_empty() {
+            print_ibus_engine_restart_guidance(&stale_ibus_processes);
+        }
         return Ok(());
     }
     let Some(unit) = service else {
@@ -755,15 +759,14 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
         }
     }
     println!("Restarted {unit}; daemon build {restarted_commit} now matches this CLI.");
-    print_ibus_engine_restart_guidance(&crate::setup_ibus::stale_engine_processes());
+    let stale_ibus_processes = crate::setup_ibus::stale_engine_processes();
+    if !stale_ibus_processes.is_empty() {
+        print_ibus_engine_restart_guidance(&stale_ibus_processes);
+    }
     Ok(())
 }
 
 fn print_ibus_engine_restart_guidance(processes: &[crate::setup_ibus::StaleEngineProcess]) {
-    if processes.is_empty() {
-        println!("IBus: no stale WayExpand engine process was found.");
-        return;
-    }
     println!("IBus still has WayExpand engine process(es) running the previous binary:");
     for process in processes {
         println!(
