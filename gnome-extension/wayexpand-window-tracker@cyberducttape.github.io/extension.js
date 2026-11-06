@@ -83,8 +83,14 @@ function describe(window, includeTitle = false) {
         appId = desktopId.replace(/\.desktop$/, '');
     if (!appId)
         appId = window.get_gtk_application_id() || window.get_wm_class() || '';
-    const title = includeTitle ? (window.get_title() || '') : '';
-    return subscriberSnapshot(appId, title, String(window.get_id()), includeTitle);
+    // Avoid even reading a potentially sensitive document title for the
+    // default app-ID-only subscription.
+    return subscriberSnapshot(
+        appId,
+        () => window.get_title() || '',
+        String(window.get_id()),
+        includeTitle,
+    );
 }
 
 export default class WayExpandWindowTracker extends Extension {

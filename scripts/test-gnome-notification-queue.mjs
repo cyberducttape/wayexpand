@@ -73,14 +73,21 @@ test('revoking title access replaces a queued title-bearing notification', () =>
 });
 
 test('title-free snapshots exclude titles while preserving app and instance identity', () => {
+    let titleReads = 0;
+    const readTitle = () => {
+        titleReads++;
+        return 'secret document title';
+    };
     assert.deepEqual(
-        subscriberSnapshot('org.example.Editor', 'secret document title', 'window-7'),
+        subscriberSnapshot('org.example.Editor', readTitle, 'window-7'),
         ['org.example.Editor', '', 'window-7'],
     );
+    assert.equal(titleReads, 0, 'default subscriptions must not read the window title');
     assert.deepEqual(
-        subscriberSnapshot('org.example.Editor', 'configured title match', 'window-7', true),
-        ['org.example.Editor', 'configured title match', 'window-7'],
+        subscriberSnapshot('org.example.Editor', readTitle, 'window-7', true),
+        ['org.example.Editor', 'secret document title', 'window-7'],
     );
+    assert.equal(titleReads, 1, 'title filters read the title only when explicitly requested');
 });
 
 test('slow subscribers retain only the latest update and one in-flight call', () => {

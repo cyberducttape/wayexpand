@@ -7,6 +7,11 @@ All notable changes to WayExpand are documented here.
 - Preserve isolated IBus and GNOME end-to-end logs as short-retention CI
   artifacts, including on test failure, so input activation and GTK insertion
   regressions have actionable diagnostics tied to the tested commit.
+- Do not read focused-window titles for app-ID-only tracker subscribers; title
+  retrieval now occurs lazily only for an explicit title-filter subscription.
+  The GNOME lifecycle acceptance test also verifies that the registered IBus
+  source remains configured across a Shell restart before reactivating it and
+  repeating GTK insertion.
 - Pin both GDK and GTK to version 3 in the GTK3 IBus acceptance client so
   newer runner images cannot load GDK4 before the GTK3 insertion test.
 - Extend `wayexpand doctor --gnome` with a running daemon build/schema check and

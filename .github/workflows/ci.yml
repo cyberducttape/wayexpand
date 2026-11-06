@@ -606,7 +606,7 @@ jobs:
           retention-days: 14
 
   gnome-e2e:
-    name: Headless GNOME Shell, IBus, and Window Tracking E2E
+    name: GNOME Input Activation, GTK Insertion, and Upgrade Acceptance (Headless)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -622,7 +622,7 @@ jobs:
       - name: Record tested revision
         id: tested_revision
         run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - name: Test GNOME activation, GTK insertion, extension upgrade/logout, and window tracking
+      - name: Accept live GNOME source activation, GTK replacement, and Shell restart lifecycle
         run: bash scripts/test-gnome-e2e.sh --keep
       - name: Upload isolated GNOME diagnostics
         if: always()

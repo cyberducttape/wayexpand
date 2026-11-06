@@ -480,6 +480,17 @@ fi
 # WayExpand through GNOME Shell's live manager, then repeat the real GTK
 # insertion acceptance test against the newly loaded Shell instance.
 if [ "$tries" -gt 0 ]; then
+    persisted_sources=$(gsettings get org.gnome.desktop.input-sources sources)
+    case "$persisted_sources" in
+        *"'ibus', 'wayexpand'"*)
+            log "pass gnome-ibus-source-persisted-after-login $persisted_sources"
+            ;;
+        *)
+            log "fail gnome-ibus-source-persisted-after-login GNOME lost the registered source: $persisted_sources"
+            status=1
+            ;;
+    esac
+
     login_source_ok=0
     if gdbus call --session --dest org.gnome.Shell \
         --object-path /org/wayexpand/ShellWindowTracker \
@@ -560,7 +571,7 @@ env -i \
     dbus-run-session -- "$work/session.sh" >"$work/results.txt" 2>"$work/session.log" || status=$?
 
 cat "$work/results.txt"
-expected_checks='extension-active unauthorized-tracker-subscription extension-pre-upgrade-build extension-upgrade-not-current active-input-source deprecated-current-readback ignored-current-setting unavailable-input-source ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gtk-ibus-insertion gnome-ibus-operational extension-disabled extension-after-login gnome-ibus-source-after-login gtk-ibus-insertion-after-login'
+expected_checks='extension-active unauthorized-tracker-subscription extension-pre-upgrade-build extension-upgrade-not-current active-input-source deprecated-current-readback ignored-current-setting unavailable-input-source ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gtk-ibus-insertion gnome-ibus-operational extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gtk-ibus-insertion-after-login'
 missing_check=
 for check in $expected_checks; do
     if ! grep -F "pass $check" "$work/results.txt" >/dev/null; then

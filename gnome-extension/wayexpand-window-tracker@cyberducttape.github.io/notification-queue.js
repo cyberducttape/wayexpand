@@ -26,9 +26,10 @@ export function setTitleAccess(state, requested, titleFreeSnapshot = null) {
     return state.includeTitles;
 }
 
-/** Shape a per-subscriber snapshot without leaking titles by default. */
-export function subscriberSnapshot(appId, title, instanceId, includeTitles = false) {
-    return [appId, includeTitles ? title : '', instanceId];
+/** Shape a per-subscriber snapshot without reading titles unless requested. */
+export function subscriberSnapshot(appId, readTitle, instanceId, includeTitles = false) {
+    const title = includeTitles && typeof readTitle === 'function' ? readTitle() : '';
+    return [appId, title, instanceId];
 }
 
 /** Bound authorization requests while allowing active subscribers to reconfigure. */
