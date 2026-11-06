@@ -14,6 +14,8 @@ All notable changes to WayExpand are documented here.
   are installed but the running IBus registry has not loaded the component
   yet. Keep route diagnostics grounded in actual installation/registration
   evidence and explain that setup will register the component itself.
+- Preserve GNOME input-source identifiers faithfully when parsing and restoring
+  GVariant escaped, Unicode, and control characters.
 - Add GNOME-specific `wayexpand doctor --gnome` conclusions and a guided
   `wayexpand debug --gnome --interactive` real-app test. The test distinguishes
   configured routing from uncorrelated activity and user-confirmed insertion;

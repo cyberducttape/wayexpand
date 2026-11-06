@@ -83,17 +83,25 @@ pub fn ensure_wayexpand_source(sources: &mut Vec<InputSource>) -> usize {
 }
 
 fn quote(value: &str) -> String {
-    let escaped = value
-        .chars()
-        .flat_map(|c| match c {
-            '\\' => "\\\\".chars().collect::<Vec<_>>(),
-            '\'' => "\\'".chars().collect(),
-            '\n' => "\\n".chars().collect(),
-            '\r' => "\\r".chars().collect(),
-            '\t' => "\\t".chars().collect(),
-            c => vec![c],
-        })
-        .collect::<String>();
+    let mut escaped = String::with_capacity(value.len());
+    for c in value.chars() {
+        match c {
+            '\\' => escaped.push_str("\\\\"),
+            '\'' => escaped.push_str("\\'"),
+            '\u{0007}' => escaped.push_str("\\a"),
+            '\u{0008}' => escaped.push_str("\\b"),
+            '\u{000c}' => escaped.push_str("\\f"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            '\u{000b}' => escaped.push_str("\\v"),
+            c if c.is_control() => {
+                use std::fmt::Write as _;
+                let _ = write!(escaped, "\\U{:08x}", c as u32);
+            }
+            c => escaped.push(c),
+        }
+    }
     format!("'{escaped}'")
 }
 
@@ -152,14 +160,31 @@ impl Parser {
                         .peek()
                         .ok_or("unterminated escape in GNOME input-source tuple")?;
                     self.at += 1;
-                    result.push(match escaped {
-                        'n' => '\n',
-                        'r' => '\r',
-                        't' => '\t',
-                        '\\' => '\\',
-                        '\'' => '\'',
-                        other => other,
-                    });
+                    match escaped {
+                        'a' => result.push('\u{0007}'),
+                        'b' => result.push('\u{0008}'),
+                        'f' => result.push('\u{000c}'),
+                        'n' => result.push('\n'),
+                        'r' => result.push('\r'),
+                        't' => result.push('\t'),
+                        'v' => result.push('\u{000b}'),
+                        '\\' => result.push('\\'),
+                        '\'' => result.push('\''),
+                        '"' => result.push('"'),
+                        '?' => result.push('?'),
+                        'x' => result.push(self.hex_escape(2)?),
+                        'u' => result.push(self.hex_escape(4)?),
+                        'U' => result.push(self.hex_escape(8)?),
+                        '0'..='7' => {
+                            self.at -= 1;
+                            result.push(self.octal_escape()?);
+                        }
+                        other => {
+                            return Err(format!(
+                                "unsupported escape \\{other} in GNOME input-source tuple"
+                            ));
+                        }
+                    }
                 }
                 Some(c) => {
                     self.at += 1;
@@ -167,6 +192,41 @@ impl Parser {
                 }
             }
         }
+    }
+
+    fn hex_escape(&mut self, digits: usize) -> Result<char, String> {
+        let end = self.at + digits;
+        let text = self
+            .chars
+            .get(self.at..end)
+            .ok_or("incomplete hexadecimal escape in GNOME input-source tuple")?
+            .iter()
+            .collect::<String>();
+        let value = u32::from_str_radix(&text, 16)
+            .map_err(|_| "invalid hexadecimal escape in GNOME input-source tuple")?;
+        self.at = end;
+        char::from_u32(value)
+            .ok_or_else(|| "invalid Unicode scalar in GNOME input-source tuple".into())
+    }
+
+    fn octal_escape(&mut self) -> Result<char, String> {
+        let start = self.at;
+        let mut value = 0_u32;
+        let mut digits = 0;
+        while digits < 3 {
+            let Some(c @ '0'..='7') = self.peek() else {
+                break;
+            };
+            value = value * 8 + (c as u32 - '0' as u32);
+            self.at += 1;
+            digits += 1;
+        }
+        if digits == 0 || value > 0xff {
+            self.at = start;
+            return Err("invalid octal escape in GNOME input-source tuple".into());
+        }
+        char::from_u32(value)
+            .ok_or_else(|| "invalid octal escape in GNOME input-source tuple".into())
     }
 }
 
@@ -200,9 +260,24 @@ mod tests {
     fn formatting_roundtrips_escaped_unicode() {
         let input = vec![InputSource {
             kind: "xkb".into(),
-            id: "de'\nü".into(),
+            id: "de'\nü\u{0008}\u{001b}".into(),
         }];
         assert_eq!(parse_sources(&format_sources(&input)).unwrap(), input);
+    }
+
+    #[test]
+    fn parses_gvariant_unicode_hex_and_octal_escapes() {
+        let parsed =
+            parse_sources("[('xkb', 'de\\u00e9'), ('custom', 'line\\n\\x41\\101\\U0001f642')]")
+                .unwrap();
+        assert_eq!(parsed[0].id, "deé");
+        assert_eq!(parsed[1].id, "line\nAA🙂");
+    }
+
+    #[test]
+    fn rejects_invalid_gvariant_escapes() {
+        assert!(parse_sources("[('xkb', 'bad\\q')]").is_err());
+        assert!(parse_sources("[('xkb', 'bad\\uD800')]").is_err());
     }
     #[test]
     fn parses_current_index() {
