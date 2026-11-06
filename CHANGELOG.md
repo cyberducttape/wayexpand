@@ -11,7 +11,9 @@ All notable changes to WayExpand are documented here.
   and entry-focus events before sending input, failing at that stage if focus
   never reaches the test field. The harness stops retrying after the controller's
   bounded focus timeout, preventing a five-second failure from being multiplied
-  into a several-minute loop.
+  into a several-minute loop. The GTK client waits for the toplevel activation
+  event before requesting child-entry focus, since an early Wayland focus request
+  can be ignored before Mutter activates the window.
 - Preserve isolated IBus and GNOME end-to-end logs as short-retention CI
   artifacts, including on test failure, so input activation and GTK insertion
   regressions have actionable diagnostics tied to the tested commit.

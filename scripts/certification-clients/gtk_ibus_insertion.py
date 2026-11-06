@@ -54,12 +54,25 @@ def main():
     def send_trigger():
         window = state["window"]
         entry = state["entry"]
-        if not window.is_active() or not entry.is_focus():
+        if not window.is_active():
             state["focus_attempts"] += 1
             if state["focus_attempts"] >= TIMEOUT_MS // 50:
                 print(
-                    "fail gtk-ibus-insertion GTK did not confirm window and "
-                    "entry focus before input",
+                    "fail gtk-ibus-insertion GTK did not report the test "
+                    "window active before input",
+                    flush=True,
+                )
+                return finish(1)
+            return GLib.SOURCE_CONTINUE
+        if not entry.is_focus():
+            # A focus request made before a Wayland toplevel becomes active
+            # can be ignored. Retry only after GTK has observed activation.
+            entry.grab_focus()
+            state["focus_attempts"] += 1
+            if state["focus_attempts"] >= TIMEOUT_MS // 50:
+                print(
+                    "fail gtk-ibus-insertion GTK did not give the test entry "
+                    "keyboard focus before input",
                     flush=True,
                 )
                 return finish(1)
@@ -100,7 +113,6 @@ def main():
         window.add(entry)
         window.show_all()
         window.present()
-        entry.grab_focus()
         state["window"] = window
         state["entry"] = entry
         print(f"ready gtk-ibus-insertion {APP_ID}", flush=True)
