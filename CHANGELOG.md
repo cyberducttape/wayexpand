@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Make the GNOME GTK insertion acceptance helper acknowledge window activation
+  only after Mutter reports the target window focused, with bounded retries and
+  a specific timeout error. This prevents the test from sending its IBus trigger
+  to an unfocused GTK client.
 - Preserve isolated IBus and GNOME end-to-end logs as short-retention CI
   artifacts, including on test failure, so input activation and GTK insertion
   regressions have actionable diagnostics tied to the tested commit.
