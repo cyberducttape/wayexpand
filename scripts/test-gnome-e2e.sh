@@ -122,8 +122,13 @@ gnome-shell --headless --mode=user --wayland --virtual-monitor 1280x800 --waylan
     >"$E2E_WORK/gnome-shell.log" 2>&1 &
 shell_pid=$!
 sinks=
+gtk_pid=
 finish() {
     for pid in $sinks; do kill "$pid" 2>/dev/null || true; done
+    if [ -n "$gtk_pid" ]; then
+        kill "$gtk_pid" 2>/dev/null || true
+        wait "$gtk_pid" 2>/dev/null || true
+    fi
     kill "$shell_pid" 2>/dev/null || true
     wait "$shell_pid" 2>/dev/null || true
     if [ -f "$XDG_RUNTIME_DIR/wayexpand-ibus-status.json" ]; then
@@ -142,6 +147,64 @@ trap finish EXIT
 extension_state() {
     gnome_shell_extensions_call GetExtensionInfo "$E2E_UUID" || true
 }
+
+activate_window() {
+    tries=100
+    while :; do
+        if gdbus call --session --dest org.gnome.Shell \
+            --object-path /org/wayexpand/GnomeE2eFocusController \
+            --method org.wayexpand.GnomeE2eFocusController.ActivateWindow "$1" \
+            >/dev/null 2>&1; then
+            return 0
+        fi
+        tries=$((tries - 1))
+        [ "$tries" -gt 0 ] || return 1
+        sleep 0.05
+    done
+}
+
+run_gtk_insertion() {
+    label=$1
+    gtk_log="$E2E_WORK/gtk-insertion-$label.log"
+    WAYLAND_DISPLAY="$display" /usr/bin/python3 \
+        "$E2E_PROJECT_DIR/scripts/certification-clients/gtk_ibus_insertion.py" \
+        >"$gtk_log" 2>&1 &
+    gtk_pid=$!
+    tries=200
+    until grep -Fx 'ready gtk-ibus-insertion org.wayexpand.GtkIbusInsertion' "$gtk_log" >/dev/null 2>&1; do
+        tries=$((tries - 1))
+        if [ "$tries" -le 0 ] || ! kill -0 "$gtk_pid" 2>/dev/null; then
+            cat "$gtk_log" 2>/dev/null || true
+            log "fail gtk-ibus-insertion-$label GTK test application did not become ready"
+            kill "$gtk_pid" 2>/dev/null || true
+            wait "$gtk_pid" 2>/dev/null || true
+            gtk_pid=
+            return 1
+        fi
+        sleep 0.05
+    done
+    if ! activate_window org.wayexpand.GtkIbusInsertion; then
+        log "fail gtk-ibus-insertion-$label GNOME Shell could not focus the GTK test window"
+        kill "$gtk_pid" 2>/dev/null || true
+        wait "$gtk_pid" 2>/dev/null || true
+        cat "$gtk_log" 2>/dev/null || true
+        gtk_pid=
+        return 1
+    fi
+    gtk_status=0
+    wait "$gtk_pid" || gtk_status=$?
+    gtk_pid=
+    cat "$gtk_log"
+    if [ "$gtk_status" -eq 0 ] \
+        && grep -Fx 'pass gtk-ibus-insertion GTK entry contains the committed replacement' \
+            "$gtk_log" >/dev/null; then
+        log "pass gtk-ibus-insertion-$label GTK received the active IBus engine replacement"
+        return 0
+    fi
+    log "fail gtk-ibus-insertion-$label GTK did not receive the expected IBus replacement"
+    return 1
+}
+
 tries=600
 until gnome_extension_state_active "$(extension_state)"; do
     tries=$((tries - 1))
@@ -303,18 +366,9 @@ case "$active_source" in
     *"'ibus', 'wayexpand'"*) log "pass gnome-ibus-source-active $active_source" ;;
     *) log "fail gnome-ibus-source-active GNOME Shell reported $active_source"; exit 1 ;;
 esac
-# Let a real GTK input context activate the GNOME-selected engine. The direct
-# IBus protocol transaction is covered by test-ibus-e2e.sh; a protocol-only
-# client did not establish the GNOME toolkit path this acceptance test needs.
-if WAYLAND_DISPLAY="$display" /usr/bin/python3 \
-    "$E2E_PROJECT_DIR/scripts/certification-clients/gtk_ibus_insertion.py" \
-    >"$E2E_WORK/gtk-insertion.log" 2>&1 \
-    && grep -Fx 'pass gtk-ibus-insertion GTK entry contains the committed replacement' \
-        "$E2E_WORK/gtk-insertion.log" >/dev/null; then
-    log "pass gtk-ibus-insertion real GTK3 entry received WayExpand's IBus commit"
-else
-    log "fail gtk-ibus-insertion GTK did not receive the expected IBus replacement"
-    cat "$E2E_WORK/gtk-insertion.log"
+# Let a real GTK input context receive a trigger from the compositor's
+# keyboard path. The direct IBus protocol transaction is covered separately.
+if ! run_gtk_insertion before-shell-restart; then
     exit 1
 fi
 "$E2E_BIN_DIR/wayexpand" ibus status --json \
@@ -369,21 +423,6 @@ start_transition_tracker() {
             log "fail tracker-ready GNOME tracker did not subscribe before the focus action"
             return 1
         fi
-        sleep 0.05
-    done
-}
-
-activate_window() {
-    tries=100
-    while :; do
-        if gdbus call --session --dest org.gnome.Shell \
-            --object-path /org/wayexpand/GnomeE2eFocusController \
-            --method org.wayexpand.GnomeE2eFocusController.ActivateWindow "$1" \
-            >/dev/null 2>&1; then
-            return 0
-        fi
-        tries=$((tries - 1))
-        [ "$tries" -gt 0 ] || return 1
         sleep 0.05
     done
 }
@@ -511,16 +550,7 @@ if [ "$tries" -gt 0 ]; then
         status=1
     fi
 
-    if [ "$login_source_ok" -eq 1 ] \
-        && WAYLAND_DISPLAY="$display" /usr/bin/python3 \
-            "$E2E_PROJECT_DIR/scripts/certification-clients/gtk_ibus_insertion.py" \
-            >"$E2E_WORK/gtk-insertion-after-login.log" 2>&1 \
-        && grep -Fx 'pass gtk-ibus-insertion GTK entry contains the committed replacement' \
-            "$E2E_WORK/gtk-insertion-after-login.log" >/dev/null; then
-        log "pass gtk-ibus-insertion-after-login a GTK entry received the replacement after Shell restart"
-    else
-        log "fail gtk-ibus-insertion-after-login WayExpand did not replace the trigger after Shell restart"
-        cat "$E2E_WORK/gtk-insertion-after-login.log" 2>/dev/null || true
+    if [ "$login_source_ok" -eq 1 ] && ! run_gtk_insertion after-shell-restart; then
         status=1
     fi
 fi
@@ -571,7 +601,7 @@ env -i \
     dbus-run-session -- "$work/session.sh" >"$work/results.txt" 2>"$work/session.log" || status=$?
 
 cat "$work/results.txt"
-expected_checks='extension-active unauthorized-tracker-subscription extension-pre-upgrade-build extension-upgrade-not-current active-input-source deprecated-current-readback ignored-current-setting unavailable-input-source ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gtk-ibus-insertion gnome-ibus-operational extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gtk-ibus-insertion-after-login'
+expected_checks='extension-active unauthorized-tracker-subscription extension-pre-upgrade-build extension-upgrade-not-current active-input-source deprecated-current-readback ignored-current-setting unavailable-input-source ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gtk-ibus-insertion-before-shell-restart gnome-ibus-operational extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gtk-ibus-insertion-after-shell-restart'
 missing_check=
 for check in $expected_checks; do
     if ! grep -F "pass $check" "$work/results.txt" >/dev/null; then
@@ -594,11 +624,11 @@ if [ "$status" -ne 0 ] || grep -q '^fail' "$work/results.txt" \
     for log in session.log gnome-shell.log gnome-shell-after-login.log ibus-daemon.log ibus-engines.txt \
         ibus-before-live-activation.json ibus-before-live-activation.err \
         ibus-after-gtk-insertion.json ibus-after-gtk-insertion.err \
-        ibus-source-activation-after-login.log gtk-insertion-after-login.log \
+        ibus-source-activation-after-login.log \
         unauthorized-tracker-subscription.log \
         doctor-after-extension-upgrade.json \
         doctor-after-extension-upgrade.err doctor-after-login.json \
-        gtk-insertion.log sink.log; do
+        gtk-insertion-before-shell-restart.log gtk-insertion-after-shell-restart.log sink.log; do
         printf '%s\n' "--- $log" >&2
         tail -n 60 "$work/$log" >&2 2>/dev/null || true
         if [ -s "$work/$log" ]; then

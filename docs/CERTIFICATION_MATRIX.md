@@ -73,9 +73,8 @@ simulates an extension upgrade with an old Shell instance and a Shell restart.
 `test-ibus-e2e.sh` additionally exercises IBus engine focus, content-type and
 telemetry cases. The GTK test uses a virtual uinput keyboard; these headless
 tests do not prove physical keyboard routing, persistence across an actual
-user logout, or
-replacement in every GTK/Qt/browser/terminal application. They must not be
-counted as passes in the platform matrix below.
+user logout, or replacement in every GTK/Qt/browser/terminal application.
+They must not be counted as passes in the platform matrix below.
 
 | Platform/session | GTK 3 | GTK 4 | Qt | Browser | Terminal | Install/activation lifecycle | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
