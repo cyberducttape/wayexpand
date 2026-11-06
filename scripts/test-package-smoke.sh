@@ -91,7 +91,11 @@ check_installed() {
     grep -Fx '<exec>wayexpand-ibus</exec>' "$package_manifest" >/dev/null
     install -D -o wxsmoke -m 0600 /etc/wayexpand/expansions.toml.example \
         /home/wxsmoke/.config/wayexpand/expansions.toml
-    su wxsmoke -s /bin/sh -c 'wayexpand validate "$HOME/.config/wayexpand/expansions.toml"'
+    wxsmoke_home=$(getent passwd wxsmoke | cut -d: -f6)
+    # $1 must expand in the target user's `su` shell, not in this installer.
+    # shellcheck disable=SC2016
+    su wxsmoke -s /bin/sh -c 'wayexpand validate "$1"' wayexpand \
+        "$wxsmoke_home/.config/wayexpand/expansions.toml"
     install_report=$(su wxsmoke -s /bin/sh -c 'wayexpand install-check --json' 2>/dev/null || true)
     printf '%s\n' "$install_report" | python3 -c '
 import json, sys

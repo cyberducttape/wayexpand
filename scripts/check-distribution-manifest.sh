@@ -87,7 +87,7 @@ grep -q '^package_path = "/etc/wayexpand/expansions.toml.example"$' \
     exit 1
 }
 for installer in "$project_dir/scripts/install-user.sh" "$project_dir/scripts/install-release.sh"; do
-    grep -q -F '"$stage_dir/expansions.toml"' "$installer" || {
+    grep -q -F "\"\$stage_dir/expansions.toml\"" "$installer" || {
         printf '%s\n' "user installer does not stage the default configuration template: $installer" >&2
         exit 1
     }

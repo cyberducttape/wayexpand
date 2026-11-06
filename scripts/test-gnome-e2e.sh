@@ -1,9 +1,9 @@
 #!/bin/sh
 # End-to-end test of GNOME source activation, the IBus engine, and window
 # tracking in a private headless GNOME Shell session. It verifies GNOME source
-# registration/activation followed by an IBus replacement transaction and
-# focus tracking. The replacement uses a controlled IBus protocol client,
-# not a GTK application, so this is not desktop certification.
+# registration/activation, an IBus protocol transaction, insertion into a GTK
+# 3 entry, focus tracking, and extension upgrade/reload behavior. The GTK
+# test uses scripted key events; it is not physical-keyboard certification.
 #
 # Usage: scripts/test-gnome-e2e.sh [--keep]
 #   E2E_BIN=DIR        use prebuilt wayexpand, wayexpand-ibus, and wx-e2e-* binaries

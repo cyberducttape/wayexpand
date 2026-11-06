@@ -341,8 +341,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.checkout_ref || github.ref }}
-      - name: Install supported shell interpreters
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fish zsh
+      - name: Install ShellCheck and supported shell interpreters
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fish zsh shellcheck && shellcheck --version
       - name: ShellCheck scripts
         run: shellcheck scripts/*.sh crates/cli/integrations/wayexpand.bash
       - name: Verify daemon soak environment isolation
