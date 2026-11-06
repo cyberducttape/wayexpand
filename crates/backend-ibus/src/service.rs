@@ -1197,7 +1197,10 @@ replacement = "signature"
         harness.type_trigger();
         assert_eq!(broker.answered(), "status");
         assert_eq!(
-            harness.commits_through("from-broker", Duration::from_secs(8)),
+            // Workspace tests start many subprocess-backed cases in parallel;
+            // retain a finite bound without treating runner contention as a
+            // lost completion-pump wakeup.
+            harness.commits_through("from-broker", Duration::from_secs(30)),
             ["o", "k", "from-broker"]
         );
     }
