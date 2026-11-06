@@ -27,6 +27,9 @@ struct DoctorCheck {
     detail: String,
     problem_id: Option<&'static str>,
     remedy: Option<String>,
+    remediation_command: Option<String>,
+    retest_instructions: Option<String>,
+    evidence: Option<Value>,
 }
 
 impl DoctorCheck {
@@ -38,6 +41,15 @@ impl DoctorCheck {
             detail: check.detail.clone(),
             problem_id: problem_for(check),
             remedy: check.fix.clone(),
+            remediation_command: check
+                .fix
+                .as_deref()
+                .and_then(first_command)
+                .filter(|command| is_action_command(command))
+                .or_else(|| default_remediation_command(check.id)),
+            retest_instructions: (check.state != IbusCheckState::Pass)
+                .then(|| retest_instructions(check.id).to_owned()),
+            evidence: Some(json!({"observation": check.detail})),
         }
     }
 
@@ -55,7 +67,14 @@ impl DoctorCheck {
             state,
             detail: detail.into(),
             problem_id,
+            remediation_command: remedy
+                .as_deref()
+                .and_then(first_command)
+                .filter(|command| is_action_command(command))
+                .or_else(|| default_remediation_command(id)),
+            retest_instructions: (state != "pass").then(|| retest_instructions(id).to_owned()),
             remedy,
+            evidence: None,
         }
     }
 
@@ -65,8 +84,12 @@ impl DoctorCheck {
             "title": self.title,
             "state": self.state,
             "detail": self.detail,
+            "evidence": self.evidence.clone().unwrap_or_else(|| json!({"observation": self.detail})),
+            "error_id": self.problem_id,
             "problem_id": self.problem_id,
             "remedy": self.remedy,
+            "remediation_command": self.remediation_command,
+            "retest_instructions": self.retest_instructions,
         })
     }
 }
@@ -90,6 +113,9 @@ pub(crate) fn run(json_output: bool) -> Result<()> {
             check
         })
         .chain(std::iter::once(output_backend_check(
+            window_status.as_deref(),
+        )))
+        .chain(std::iter::once(daemon_version_check(
             window_status.as_deref(),
         )))
         .collect::<Vec<_>>();
@@ -130,7 +156,7 @@ pub(crate) fn run(json_output: bool) -> Result<()> {
             .map(DoctorCheck::json)
             .collect::<Vec<_>>();
         let value = json!({
-            "schema": 2,
+        "schema": 3,
             "command": "doctor --gnome",
             "desktop": if is_gnome { "gnome" } else { "other_or_unknown" },
             "conclusion": conclusion,
@@ -185,9 +211,108 @@ fn print_section(title: &str, checks: &[DoctorCheck]) {
             check.state
         );
         println!("      {}", check.detail);
-        if let Some(remedy) = &check.remedy {
-            println!("      Fix: {remedy}");
+        if check.state != "pass" {
+            if let Some(problem_id) = check.problem_id {
+                println!("      Error ID: {problem_id}");
+            }
+            println!("      Evidence: {}", check.detail);
+            if let Some(command) = &check.remediation_command {
+                println!("      Remediation command: {command}");
+            }
+            if let Some(remedy) = &check.remedy {
+                println!("      Remediation: {remedy}");
+            }
+            if let Some(retest) = &check.retest_instructions {
+                println!("      Retest: {retest}");
+            }
         }
+    }
+}
+
+fn first_command(text: &str) -> Option<String> {
+    let (_, remaining) = text.split_once('`')?;
+    let (command, _) = remaining.split_once('`')?;
+    let command = command.trim();
+    (!command.is_empty()).then(|| command.to_owned())
+}
+
+fn is_action_command(command: &str) -> bool {
+    let mut words = command.split_whitespace();
+    let Some(program) = words.next() else {
+        return false;
+    };
+    let has_action = words.next().is_some();
+    let diagnostic_only = [
+        "wayexpand doctor",
+        "wayexpand status",
+        "wayexpand health",
+        "wayexpand support",
+        "wayexpand ibus status",
+        "wayexpand backend list",
+        "ibus list-engine",
+        "gnome-extensions info",
+        "loginctl session-status",
+    ]
+    .iter()
+    .any(|prefix| command == *prefix || command.starts_with(&format!("{prefix} ")))
+        || command == "ibus engine";
+    has_action
+        && !diagnostic_only
+        && matches!(
+            program,
+            "wayexpand"
+                | "ibus"
+                | "gsettings"
+                | "gnome-extensions"
+                | "systemctl"
+                | "loginctl"
+                | "apt"
+                | "apt-get"
+                | "dnf"
+                | "pacman"
+                | "pkexec"
+                | "sudo"
+        )
+}
+
+fn default_remediation_command(id: &str) -> Option<String> {
+    Some(
+        match id {
+            "gnome-session" => "wayexpand setup --check",
+            "tools"
+            | "component"
+            | "manifest"
+            | "registered"
+            | "engine"
+            | "selected"
+            | "consent" => "wayexpand setup --backend ibus",
+            "daemon" => "ibus start",
+            "gnome-source-registered" | "gnome-source-active" => {
+                "wayexpand repair --gnome-input-source"
+            }
+            "field-input" | "target-insertion" => "wayexpand debug --gnome --interactive",
+            "output-backend" => "wayexpand backend list",
+            "daemon-version" => "wayexpand upgrade --apply",
+            "window-extension-installed" | "window-extension-loaded" => "wayexpand setup",
+            "window-extension-build" => {
+                "gnome-extensions disable wayexpand-window-tracker@cyberducttape.github.io && gnome-extensions enable wayexpand-window-tracker@cyberducttape.github.io"
+            }
+            "window-extension-handshake" | "window-focus-events" => "wayexpand setup",
+            _ => return None,
+        }
+        .to_owned(),
+    )
+}
+
+fn retest_instructions(id: &str) -> &'static str {
+    match id {
+        "field-input" | "engine" | "target-insertion" => {
+            "Run `wayexpand debug --gnome --interactive` in a normal, disposable text field and confirm the exact result."
+        }
+        "window-focus-events" | "window-extension-handshake" | "window-extension-build" => {
+            "Focus a normal application window, then run `wayexpand doctor --gnome`; confirm the live tracker identity and build."
+        }
+        _ => "Run `wayexpand doctor --gnome` again and confirm this check reports pass.",
     }
 }
 
@@ -228,6 +353,61 @@ fn output_backend_check(status: Option<&str>) -> DoctorCheck {
             Some("WX-OUTPUT-001"),
             Some("start the user service, then run `wayexpand status` and `wayexpand doctor --gnome` again".into()),
         ),
+    }
+}
+
+fn daemon_version_check(status: Option<&str>) -> DoctorCheck {
+    let daemon_commit = status.and_then(|status| status_field(status, "daemon_commit"));
+    let schema = status.and_then(|status| status_field(status, "status_schema"));
+    let schema_compatible = schema
+        .and_then(|schema| schema.parse::<u64>().ok())
+        .is_some_and(|schema| schema == u64::from(wayexpand_core::CONTROL_STATUS_SCHEMA));
+    if schema_compatible
+        && daemon_commit
+            .is_some_and(|commit| crate::doctor::status::daemon_commit_matches(Some(commit)))
+    {
+        DoctorCheck::new(
+            "daemon-version",
+            "Running daemon build matches this CLI",
+            "pass",
+            format!(
+                "daemon build {} matches CLI build {}",
+                daemon_commit.unwrap_or("unknown"),
+                crate::build_info::COMMIT
+            ),
+            None,
+            None,
+        )
+    } else {
+        let unknown = daemon_commit
+            .is_none_or(|commit| crate::doctor::status::daemon_commit_unknown(Some(commit)))
+            || schema.is_none();
+        let state = if unknown { "unknown" } else { "fail" };
+        let detail = if status.is_none() {
+            "live daemon status is unavailable; the running build cannot be compared".to_owned()
+        } else if !schema_compatible {
+            format!("daemon status schema {} is not compatible with required schema {}; running commit {}", schema.unwrap_or("unknown"), wayexpand_core::CONTROL_STATUS_SCHEMA, daemon_commit.unwrap_or("unknown"))
+        } else if unknown {
+            format!(
+                "daemon commit identity is unavailable (status schema {}, CLI build {})",
+                schema.unwrap_or("unknown"),
+                crate::build_info::COMMIT
+            )
+        } else {
+            format!(
+                "running daemon build {} differs from CLI build {}",
+                daemon_commit.unwrap_or("unknown"),
+                crate::build_info::COMMIT
+            )
+        };
+        DoctorCheck::new(
+            "daemon-version",
+            "Running daemon build matches this CLI",
+            state,
+            detail,
+            Some("WX-VERSION-001"),
+            Some("run `wayexpand upgrade --apply`, then rerun `wayexpand doctor --gnome`".into()),
+        )
     }
 }
 
@@ -578,5 +758,82 @@ mod tests {
             .map(DoctorCheck::from_ibus)
             .collect::<Vec<_>>();
         assert_eq!(section_state(&checks), ("unknown", Some("WX-GNOME-IM-001")));
+    }
+
+    #[test]
+    fn actionable_nonpassing_stages_have_stable_id_evidence_command_and_retest() {
+        for id in INPUT_CAPTURE_CHECKS {
+            let check = DoctorCheck::from_ibus(&IbusCheck {
+                id,
+                title: "GNOME integration stage",
+                state: IbusCheckState::Unknown,
+                problem_id: None,
+                detail: format!("evidence for {id}"),
+                fix: None,
+            });
+            let json = check.json();
+            assert!(json["error_id"].as_str().is_some(), "{id}");
+            assert_eq!(
+                json["evidence"]["observation"],
+                format!("evidence for {id}")
+            );
+            assert!(json["remediation_command"].as_str().is_some(), "{id}");
+            assert!(json["retest_instructions"].as_str().is_some(), "{id}");
+        }
+
+        let check = DoctorCheck::from_ibus(&IbusCheck {
+            id: "field-input",
+            title: "Normal-field input observed",
+            state: IbusCheckState::Unknown,
+            problem_id: None,
+            detail: "no safe-field input telemetry was observed".into(),
+            fix: Some("focus a normal text field and type harmless text".into()),
+        });
+        let json = check.json();
+        assert_eq!(json["error_id"], "WX-GNOME-IM-003");
+        assert_eq!(
+            json["remediation_command"],
+            "wayexpand debug --gnome --interactive"
+        );
+        assert!(json["retest_instructions"]
+            .as_str()
+            .unwrap()
+            .contains("disposable text field"));
+
+        let extension = window_tracking_checks(None, None);
+        for check in extension.iter().filter(|check| check.state != "pass") {
+            let json = check.json();
+            assert!(json["error_id"].as_str().is_some(), "{}", check.id);
+            assert!(json["evidence"].is_object(), "{}", check.id);
+            assert!(
+                json["remediation_command"].as_str().is_some(),
+                "{}",
+                check.id
+            );
+            assert!(
+                json["retest_instructions"].as_str().is_some(),
+                "{}",
+                check.id
+            );
+        }
+    }
+
+    #[test]
+    fn running_daemon_build_is_reported_separately_from_route_health() {
+        let status = format!(
+            "daemon_commit=old-build\nstatus_schema={}\n",
+            wayexpand_core::CONTROL_STATUS_SCHEMA
+        );
+        let check = daemon_version_check(Some(&status));
+        assert_eq!(check.state, "fail");
+        assert_eq!(check.problem_id, Some("WX-VERSION-001"));
+        assert!(check.detail.contains("old-build"));
+        assert_eq!(
+            check.remediation_command.as_deref(),
+            Some("wayexpand upgrade --apply")
+        );
+        let unknown = daemon_version_check(None);
+        assert_eq!(unknown.state, "unknown");
+        assert_eq!(unknown.problem_id, Some("WX-VERSION-001"));
     }
 }

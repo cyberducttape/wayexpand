@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Extend `wayexpand doctor --gnome` with a running daemon build/schema check and
+  actionable per-stage findings: stable error IDs, observed evidence,
+  remediation commands, and retest instructions. In GUI Diagnostics, show
+  IBus configured, running, and user-verified-in-an-application as separate
+  states; setup completion without a confirmed desktop insertion remains
+  unverified.
 - Keep distro-owned IBus component registrations intact when a per-user source
   install runs; distinguish the package engine path from the root-owned shared
   source-install engine path in the installation contract. Make `install-check`

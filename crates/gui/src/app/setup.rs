@@ -544,7 +544,12 @@ impl GuiApp {
                 true,
             )
         } else {
-            (Status::success(fallback), false)
+            (
+                Status::info(format!(
+                    "{fallback} Configuration and service state were not enough to verify a real application insertion; check Diagnostics."
+                )),
+                true,
+            )
         }
     }
 
@@ -578,6 +583,8 @@ impl GuiApp {
         if self.setup_task.is_some() {
             return;
         }
+        self.desktop_test_verified = false;
+        self.desktop_test_verified_application = None;
         let arguments = vec![
             "debug".into(),
             "--test".into(),
@@ -1146,6 +1153,17 @@ mod tests {
             "Working: a real insertion was confirmed in the tested application."
         );
         assert!(!open_diagnostics);
+    }
+
+    #[test]
+    fn generic_setup_completion_is_never_presented_as_verified_success() {
+        let (status, open_diagnostics) =
+            GuiApp::setup_completion_status("IBus component installed", "Setup finished.".into());
+        assert!(!status.is_error());
+        assert!(status
+            .text()
+            .contains("not enough to verify a real application insertion"));
+        assert!(open_diagnostics);
     }
 
     #[test]

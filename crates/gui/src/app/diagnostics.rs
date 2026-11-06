@@ -1342,18 +1342,24 @@ impl GuiApp {
                 });
             });
         if confirmed {
+            self.desktop_test_verified = true;
+            self.desktop_test_verified_application = Some(application_class.clone());
             self.status = Status::success(format!(
                 "User-confirmed exact insertion in {}. This does not certify other applications or sessions.",
                 application_class
             ));
             self.desktop_test_review = None;
         } else if rejected {
+            self.desktop_test_verified = false;
+            self.desktop_test_verified_application = None;
             self.status = Status::error(
                 "Desktop insertion was not confirmed. Inspect the target field and Diagnostics; do not retry automatically.",
             );
             self.desktop_test_review = None;
             self.diagnostics_open = true;
         } else if dismissed {
+            self.desktop_test_verified = false;
+            self.desktop_test_verified_application = None;
             self.status = Status::warning("Desktop test result remains unverified.");
             self.desktop_test_review = None;
         }
@@ -1744,7 +1750,7 @@ impl GuiApp {
     /// The IBus route, link by link, with the fix for each failure and what
     /// the engine saw in recently focused fields. Hidden when IBus is not
     /// installed at all.
-    fn render_ibus_route(&self, ui: &mut egui::Ui, palette: &Palette) {
+    fn render_ibus_route(&mut self, ui: &mut egui::Ui, palette: &Palette) {
         use wayexpand_backend_ibus::chain::IbusCheckState;
         let Some(report) = self.ibus_route.as_ref() else {
             return;
@@ -1786,6 +1792,54 @@ impl GuiApp {
         };
         ui.label(RichText::new(summary).color(summary_color).strong());
         let readiness = report.readiness();
+        let running = readiness.ibus_running && readiness.selected && readiness.engine_running;
+        let running_text = if running {
+            "running"
+        } else if readiness.ibus_running && readiness.engine_running {
+            "engine running; WayExpand is not the active source"
+        } else if report
+            .check("daemon")
+            .is_some_and(|check| check.state == wayexpand_backend_ibus::chain::IbusCheckState::Fail)
+        {
+            "not running"
+        } else {
+            "unknown or partially running"
+        };
+        let verified_text = if self.desktop_test_verified {
+            self.desktop_test_verified_application
+                .as_deref()
+                .map_or_else(
+                    || "user-confirmed in an application this session".to_owned(),
+                    |app| format!("user-confirmed in {app} this session"),
+                )
+        } else if readiness.expanded {
+            "Output observed; application result unverified".to_owned()
+        } else {
+            "Not verified in an application".to_owned()
+        };
+        ui.group(|ui| {
+            ui.label(RichText::new("GNOME input method: configured, running, verified").strong());
+            ui.horizontal_wrapped(|ui| {
+                ui.colored_label(
+                    if readiness.configuration == wayexpand_backend_ibus::chain::IbusCheckState::Pass { palette.success } else { palette.warning },
+                    format!("Configured: {}", readiness.configuration.label()),
+                );
+                ui.colored_label(
+                    if running { palette.success } else if readiness.ibus_running && readiness.engine_running { palette.warning } else { palette.muted },
+                    format!("Running: {running_text}"),
+                );
+                ui.colored_label(
+                    if self.desktop_test_verified { palette.success } else { palette.muted },
+                    format!("Verified: {verified_text}"),
+                );
+            });
+            if !self.desktop_test_verified {
+                ui.label(RichText::new("Only a user-confirmed exact result in a real application is marked verified.").small().color(palette.muted));
+                if ui.small_button("Run Desktop Integration Test…").clicked() {
+                    self.test_expansion_dialog_open = true;
+                }
+            }
+        });
         ui.horizontal_wrapped(|ui| {
             ui.label(format!(
                 "{}: {}",
