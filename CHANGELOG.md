@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Expand `wayexpand doctor --gnome` into input-capture, snippet-insertion,
+  and GNOME Shell window-tracking sections. Report extension installation,
+  loaded state, live build identity, D-Bus handshake, and sanitized focus-event
+  evidence; version the detailed JSON report as schema 2.
 - Preserve both stdout and stderr from failed GUI setup tasks in a bounded,
   sanitized diagnostic report. The report identifies the last setup stage, a
   stable problem ID, a suggested remedy, and rollback status; Diagnostics now

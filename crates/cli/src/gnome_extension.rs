@@ -364,10 +364,34 @@ pub(crate) fn doctor_report() -> Option<serde_json::Value> {
         Ok(status) => (Some(status.state), status.user_extensions_enabled),
         Err(_) => (None, true),
     };
+    let (protocol_state, protocol_detail) = match &state {
+        Some(ExtensionState::Active) => match probe_if_active(&ExtensionState::Active) {
+            Ok(()) => (
+                "pass",
+                "the tracker D-Bus protocol and live build identity responded".to_owned(),
+            ),
+            Err(error) => (
+                "fail",
+                format!("the tracker D-Bus handshake failed: {error}"),
+            ),
+        },
+        Some(_) => (
+            "unknown",
+            "the extension is not loaded, so its D-Bus handshake cannot be tested".to_owned(),
+        ),
+        None => (
+            "unknown",
+            "GNOME Shell did not answer on the session bus".to_owned(),
+        ),
+    };
     let (mut ok, mut message, mut fix) = match &state {
         Some(state) => {
             let readiness = describe_state(state, user_extensions_enabled);
-            let protocol = probe_if_active(state);
+            let protocol = if protocol_state == "pass" {
+                Ok(())
+            } else {
+                Err(protocol_detail.clone())
+            };
             verify_tracker_protocol(state, readiness, protocol)
         }
         None => (
@@ -461,6 +485,10 @@ pub(crate) fn doctor_report() -> Option<serde_json::Value> {
             "fix": build.fix,
         },
         "state": state_label,
+        "protocol_handshake": {
+            "state": protocol_state,
+            "detail": protocol_detail,
+        },
         "user_extensions_enabled": user_extensions_enabled,
         "ready": ok,
         "detail": message,

@@ -206,8 +206,14 @@ wayexpand ibus status   # every link of the route, with the fix for each failure
 wayexpand ibus watch    # switch to an app and type: explains each field
 ```
 
-`wayexpand doctor --gnome` presents a GNOME-specific conclusion from the
-session, IBus component, GNOME source, consent, and runtime checks. Use
+`wayexpand doctor --gnome` presents three diagnostic sections: IBus input
+capture, snippet insertion (including replacement consent, output route, and
+the distinction between emitted actions and a verified target result), and
+GNOME Shell window tracking. The window section separately checks extension
+installation, Shell load state, live build identity, the tracker D-Bus
+handshake, and the daemon's current focus identity. Focus identifiers and
+titles are not included in the report. Its versioned JSON schema is 2 and
+includes detail and remediation for each check. Use
 `wayexpand debug --gnome --interactive` for a harmless, user-confirmed test
 in a real application; activity counters are explicitly uncorrelated with
 the typed test trigger, and the test does not certify other applications or

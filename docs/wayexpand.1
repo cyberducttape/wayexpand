@@ -106,8 +106,10 @@ contents, credentials, and detailed error strings. A file is created with mode
 0600 and is never overwritten; without --output, JSON is written to stdout.
 .TP
 .B doctor --gnome [--json]
-Show a GNOME-specific IBus readiness conclusion. Unknown evidence is not
-treated as success. The command does not claim a real application insertion.
+Show separate GNOME checks for IBus input capture, snippet insertion, and the
+GNOME Shell window-tracking extension. Unknown evidence is not treated as
+success; the report distinguishes an output route from a verified application
+insertion.
 .TP
 .B debug --gnome --interactive
 Guide a user-confirmed harmless insertion test in a real GNOME application.
