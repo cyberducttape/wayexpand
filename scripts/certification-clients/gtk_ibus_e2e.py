@@ -18,7 +18,8 @@ from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
 TRIGGER = ";e2e"
 EXPECTED = "expanded"
-TIMEOUT_MS = 5000
+APP_ID = "org.wayexpand.GnomeGtkIbus"
+TIMEOUT_MS = 10000
 
 
 def main():
@@ -28,7 +29,7 @@ def main():
         raise SystemExit("IBUS_ADDRESS must identify the private IBus daemon")
 
     Gtk.init(sys.argv)
-    window = Gtk.Window(title="WayExpand GTK IBus acceptance")
+    window = Gtk.Window(title=f"WayExpand GTK IBus acceptance {APP_ID}")
     window.set_default_size(500, 80)
     entry = Gtk.Entry()
     window.add(entry)

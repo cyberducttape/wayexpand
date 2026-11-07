@@ -354,13 +354,26 @@ done
 IBUS_ADDRESS=$(ibus address) "$E2E_BIN_DIR/wx-e2e-ibus" \
     "$XDG_RUNTIME_DIR/wayexpand-ibus-status.json" --expect-active --single-expansion
 log "pass gnome-ibus-input-context the active GNOME-selected engine replaced a verified trigger"
-if ! timeout 10s env \
+timeout 15s env \
     GTK_IM_MODULE=ibus \
     GDK_BACKEND=wayland \
     WAYLAND_DISPLAY="$display" \
     IBUS_ADDRESS="$(ibus address)" \
     python3 "$E2E_PROJECT_DIR/scripts/certification-clients/gtk_ibus_e2e.py" \
-    >"$E2E_WORK/gtk-ibus-e2e.log" 2>&1; then
+    >"$E2E_WORK/gtk-ibus-e2e.log" 2>&1 &
+gtk_pid=$!
+if ! activate_window org.wayexpand.GnomeGtkIbus; then
+    kill "$gtk_pid" 2>/dev/null || true
+    wait "$gtk_pid" 2>/dev/null || true
+    gtk_pid=
+    log "fail gnome-gtk-insertion Mutter could not focus the GTK IBus acceptance window"
+    cat "$E2E_WORK/gtk-ibus-e2e.log"
+    exit 1
+fi
+gtk_status=0
+wait "$gtk_pid" || gtk_status=$?
+gtk_pid=
+if [ "$gtk_status" -ne 0 ]; then
     log "fail gnome-gtk-insertion GTK's focused Entry did not receive the WayExpand replacement"
     cat "$E2E_WORK/gtk-ibus-e2e.log"
     exit 1
