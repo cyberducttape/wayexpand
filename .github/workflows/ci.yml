@@ -645,7 +645,7 @@ jobs:
       - name: Install GNOME Shell 51 and isolated-session requirements
         run: |
           dnf install -y curl dbus-daemon dconf glib2 gnome-shell gsettings-desktop-schemas \
-            libxkbcommon-devel mesa-dri-drivers pkgconf-pkg-config python3 \
+            libxkbcommon-devel mesa-dri-drivers pkgconf-pkg-config python3 systemd \
             shadow-utils git gcc tar gzip wayland-devel
           useradd --create-home wayexpand-test
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -661,6 +661,16 @@ jobs:
         run: |
           mkdir -p /run/dbus
           dbus-daemon --system --fork --nopidfile
+          mkdir -p /run/systemd/seats /run/systemd/sessions /run/systemd/users
+          /usr/lib/systemd/systemd-logind &
+          for attempt in $(seq 1 50); do
+            if busctl --system status org.freedesktop.login1 >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 0.1
+          done
+          echo 'systemd-logind did not acquire org.freedesktop.login1' >&2
+          exit 1
       - name: Load the extension and verify live input-source and layout APIs
         run: >-
           runuser -u wayexpand-test -- env
