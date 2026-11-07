@@ -5,7 +5,7 @@ use anyhow::Result;
 use serde_json::{json, Value};
 use wayexpand_backend_ibus::chain::{self, IbusCheck, IbusCheckState, IbusDesktop};
 
-const INPUT_CAPTURE_CHECKS: [&str; 12] = [
+const INPUT_CAPTURE_CHECKS: [&str; 13] = [
     "gnome-session",
     "tools",
     "daemon",
@@ -17,6 +17,7 @@ const INPUT_CAPTURE_CHECKS: [&str; 12] = [
     "gnome-source-active",
     "selected",
     "engine",
+    "config-generation",
     "field-input",
 ];
 

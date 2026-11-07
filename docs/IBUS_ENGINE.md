@@ -232,6 +232,13 @@ observed in the current engine session. These distinguish capture activity
 from target-side success; never automatically replay an uncertain insertion.
 Use `wayexpand help finding <WX-ID>` for a next step.
 
+`WX-IBUS-RELOAD-001` means the service could not publish a validated
+configuration generation to the factory and all existing input contexts as
+one handoff. The status JSON reports the last published and requested
+generations, the count of contexts still on an older generation, and the
+cumulative handoff-failure count. Restart the WayExpand IBus engine through
+the desktop input-source controls, then rerun `wayexpand ibus status`.
+
 `wayexpand doctor --gnome` presents three diagnostic sections: IBus input
 capture, snippet insertion (including replacement consent, output route, and
 the distinction between emitted actions and a verified target result), and

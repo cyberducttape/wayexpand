@@ -580,6 +580,12 @@ pub(crate) fn summarize_reports(
                 "state": safe_token(ibus_route["other_route"].get("state")),
             },
             "engine_live": copy(&ibus_route["activity"], "live"),
+            "config_generation_diagnostics_available": copy(&ibus_route["activity"], "config_generation_diagnostics_available"),
+            "config_generation": number(&ibus_route["activity"], "config_generation"),
+            "config_generation_requested": number(&ibus_route["activity"], "config_generation_requested"),
+            "config_generation_mismatches": number(&ibus_route["activity"], "config_generation_mismatches"),
+            "config_reload_failures": number(&ibus_route["activity"], "config_reload_failures"),
+            "config_reload_error": safe_token(ibus_route["activity"].get("config_reload_error")),
             "totals": {
                 "focus_ins": number(&ibus_route["activity"]["totals"], "focus_ins"),
                 "keys": number(&ibus_route["activity"]["totals"], "keys"),

@@ -225,6 +225,7 @@ impl IbusChainReport {
             "daemon",
             "selected",
             "engine",
+            "config-generation",
             "gnome-source-active",
             "field-input",
             "target-insertion",
@@ -967,6 +968,7 @@ pub fn diagnose() -> IbusChainReport {
     });
 
     checks.push(field_input_check(activity.as_ref()));
+    checks.push(config_generation_check(activity.as_ref()));
     checks.push(target_insertion_check(activity.as_ref()));
 
     IbusChainReport {
@@ -974,6 +976,60 @@ pub fn diagnose() -> IbusChainReport {
         checks,
         activity,
     }
+}
+
+fn config_generation_check(activity: Option<&IbusStatusReading>) -> IbusCheck {
+    let Some(reading) = activity.filter(|reading| reading.live) else {
+        return check(
+            "config-generation",
+            "IBus contexts use one configuration generation",
+            IbusCheckState::Skip,
+            "the live IBus engine has not published configuration-generation diagnostics",
+            None,
+        );
+    };
+    let status = &reading.status;
+    if !status.config_generation_diagnostics_available {
+        return check(
+            "config-generation",
+            "IBus contexts use one configuration generation",
+            IbusCheckState::Unknown,
+            "the running IBus engine predates configuration-generation diagnostics",
+            Some("restart the WayExpand IBus engine from the desktop input-source controls, then rerun `wayexpand ibus status`".into()),
+        );
+    }
+    let detail = format!(
+        "published generation {}, requested generation {}, {} context(s) out of date, {} failed handoff(s){}",
+        status.config_generation,
+        status.config_generation_requested,
+        status.config_generation_mismatches,
+        status.config_reload_failures,
+        status
+            .config_reload_error
+            .as_deref()
+            .map(|error| format!(", last error {error}"))
+            .unwrap_or_default(),
+    );
+    let healthy = status.config_generation == status.config_generation_requested
+        && status.config_generation_mismatches == 0
+        && status.config_reload_error.is_none();
+    let mut result = check(
+        "config-generation",
+        "IBus contexts use one configuration generation",
+        if healthy {
+            IbusCheckState::Pass
+        } else {
+            IbusCheckState::Fail
+        },
+        detail,
+        (!healthy).then(|| {
+            "restart the WayExpand IBus engine from the desktop input-source controls, then rerun `wayexpand doctor --gnome` or `wayexpand ibus status`".into()
+        }),
+    );
+    if !healthy {
+        result.problem_id = Some("WX-IBUS-RELOAD-001");
+    }
+    result
 }
 
 fn kwin_input_method_check(

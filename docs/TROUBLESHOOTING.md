@@ -42,8 +42,8 @@ trigger, so the GUI labels them as observed activity and never treats them as
 proof of insertion by themselves.
 
 Finding IDs such as `WX-CONFIG-001`, `WX-GNOME-IM-001`, `WX-IBUS-002`,
-`WX-INPUT-001`, `WX-OUTPUT-001`, `WX-POLICY-001`, `WX-SERVICE-002`, and
-`WX-VERSION-001` are stable references
+`WX-IBUS-RELOAD-001`, `WX-INPUT-001`, `WX-OUTPUT-001`, `WX-POLICY-001`,
+`WX-SERVICE-002`, and `WX-VERSION-001` are stable references
 for support reports and automation.
 
 ### Browser text fields do not expand

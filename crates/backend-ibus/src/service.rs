@@ -90,6 +90,7 @@ fn spawn_gnome_focus_tracker(
 struct Factory {
     connection: Arc<Mutex<Option<Connection>>>,
     validated_config: Arc<Mutex<Arc<ValidatedConfig>>>,
+    config_generation: Arc<AtomicU64>,
     policy: Arc<OrganizationPolicy>,
     instances: Arc<Mutex<HashMap<OwnedObjectPath, EngineInstance>>>,
     next_id: AtomicU64,
@@ -105,6 +106,7 @@ type Instances = Arc<Mutex<HashMap<OwnedObjectPath, EngineInstance>>>;
 
 struct EngineInstance {
     adapter: Arc<Mutex<IbusEngineAdapter>>,
+    config_generation: AtomicU64,
 }
 
 #[interface(name = "org.freedesktop.IBus.Factory")]
@@ -122,11 +124,16 @@ impl Factory {
 
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let path = engine_path(id);
-        let validated = self
-            .validated_config
-            .lock()
-            .map_err(|_| zbus::fdo::Error::Failed("IBus config lock poisoned".into()))?
-            .clone();
+        let (validated, generation) = {
+            let current = self
+                .validated_config
+                .lock()
+                .map_err(|_| zbus::fdo::Error::Failed("IBus config lock poisoned".into()))?;
+            (
+                Arc::clone(&current),
+                self.config_generation.load(Ordering::Acquire),
+            )
+        };
         let mut adapter =
             IbusEngineAdapter::with_validated_config(validated, (*self.policy).clone());
         let completions = self.completions.clone();
@@ -152,25 +159,131 @@ impl Factory {
             .map_err(|_| zbus::fdo::Error::Failed("IBus connection lock poisoned".into()))?
             .clone()
             .ok_or_else(|| zbus::fdo::Error::Failed("IBus connection unavailable".into()))?;
-        connection
-            .inner()
-            .object_server()
-            .at(path.as_str(), engine)
-            .await
-            .map_err(zbus::fdo::Error::ZBus)?;
-        let engines = {
+        {
+            // Lock order is config snapshot, then instances, then adapter.
+            // Reload uses the same order. Re-read after adapter construction
+            // so a context racing a reload is brought to the current
+            // generation before it becomes visible to IBus.
+            let current = self
+                .validated_config
+                .lock()
+                .map_err(|_| zbus::fdo::Error::Failed("IBus config lock poisoned".into()))?;
             let mut instances = self
                 .instances
                 .lock()
                 .map_err(|_| zbus::fdo::Error::Failed("IBus instance lock poisoned".into()))?;
-            instances.insert(path.clone(), EngineInstance { adapter });
-            instances.len()
-        };
+            let current_generation = self.config_generation.load(Ordering::Acquire);
+            if current_generation != generation {
+                let mut adapter = adapter
+                    .lock()
+                    .map_err(|_| zbus::fdo::Error::Failed("IBus engine lock poisoned".into()))?;
+                adapter.replace_validated_config(Arc::clone(&current));
+            }
+            instances.insert(
+                path.clone(),
+                EngineInstance {
+                    adapter: Arc::clone(&adapter),
+                    config_generation: AtomicU64::new(current_generation),
+                },
+            );
+        }
+        if let Err(error) = connection
+            .inner()
+            .object_server()
+            .at(path.as_str(), engine)
+            .await
+        {
+            let removed = self
+                .instances
+                .lock()
+                .map_err(|_| zbus::fdo::Error::Failed("IBus instance lock poisoned".into()))?
+                .remove(&path)
+                .is_some();
+            if removed {
+                if let Some(telemetry) = &self.telemetry {
+                    refresh_context_diagnostics(self.instances.as_ref(), telemetry);
+                }
+            }
+            return Err(zbus::fdo::Error::ZBus(error));
+        }
         if let Some(telemetry) = &self.telemetry {
-            telemetry.set_engines(engines);
+            refresh_context_diagnostics(self.instances.as_ref(), telemetry);
         }
         Ok(path)
     }
+}
+
+fn config_generation_mismatch_count(
+    instances: &HashMap<OwnedObjectPath, EngineInstance>,
+    generation: u64,
+) -> usize {
+    instances
+        .values()
+        .filter(|instance| instance.config_generation.load(Ordering::Acquire) != generation)
+        .count()
+}
+
+fn refresh_context_diagnostics(
+    instances: &Mutex<HashMap<OwnedObjectPath, EngineInstance>>,
+    telemetry: &IbusTelemetry,
+) {
+    let generation = telemetry.snapshot().config_generation_requested;
+    if let Ok(instances) = instances.lock() {
+        telemetry.set_context_diagnostics(
+            generation,
+            instances.len(),
+            config_generation_mismatch_count(&instances, generation),
+        );
+    }
+}
+
+/// Install a validated generation as one handoff. The caller already holds
+/// the factory snapshot mutex. The instance map blocks context creation and
+/// destruction while all adapter locks are first acquired. If any lock is
+/// poisoned, no adapter or factory snapshot is changed.
+fn publish_config_generation(
+    current: &mut Arc<ValidatedConfig>,
+    current_generation: &AtomicU64,
+    instances: &Instances,
+    validated: Arc<ValidatedConfig>,
+    generation: u64,
+) -> Result<(), (&'static str, usize, String)> {
+    let instances = instances.lock().map_err(|_| {
+        (
+            "WX-IBUS-RELOAD-001",
+            0,
+            "IBus engine-instance registry lock is poisoned".to_owned(),
+        )
+    })?;
+    let mut adapters = Vec::with_capacity(instances.len());
+    for instance in instances.values() {
+        match instance.adapter.lock() {
+            Ok(adapter) => adapters.push(adapter),
+            Err(_) => {
+                let mismatches = instances
+                    .values()
+                    .filter(|instance| {
+                        instance.config_generation.load(Ordering::Acquire) != generation
+                    })
+                    .count();
+                return Err((
+                    "WX-IBUS-RELOAD-001",
+                    mismatches,
+                    "an IBus engine-context lock is poisoned".to_owned(),
+                ));
+            }
+        }
+    }
+
+    for (instance, adapter) in instances.values().zip(adapters.iter_mut()) {
+        adapter.replace_validated_config(Arc::clone(&validated));
+        instance
+            .config_generation
+            .store(generation, Ordering::Release);
+    }
+    *current = validated;
+    current_generation.store(generation, Ordering::Release);
+    Ok(())
 }
 
 fn validate_config_for_policy(
@@ -411,18 +524,18 @@ impl EngineObject {
     /// rather than blocking it: removal takes the object tree's write lock,
     /// which a blocking call from inside a handler could wait on forever.
     async fn destroy(&self) -> zbus::fdo::Result<()> {
-        let (removed, engines) = {
+        let removed = {
             let mut instances = self
                 .instances
                 .lock()
                 .map_err(|_| zbus::fdo::Error::Failed("IBus instance lock poisoned".into()))?;
-            (instances.remove(&self.path).is_some(), instances.len())
+            instances.remove(&self.path).is_some()
         };
         if !removed {
             return Ok(());
         }
         if let Some(telemetry) = &self.telemetry {
-            telemetry.set_engines(engines);
+            refresh_context_diagnostics(self.instances.as_ref(), telemetry);
         }
         let connection = self
             .connection
@@ -490,9 +603,11 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
     );
     let connection_slot = Arc::new(Mutex::new(None));
     let telemetry = Arc::new(IbusTelemetry::new());
-    start_status_writer(Arc::clone(&telemetry))?;
     let initial_validated = validate_config_for_policy(&initial_snapshot.config, &policy)?;
+    telemetry.config_generation_published(initial_snapshot.generation, 0);
+    start_status_writer(Arc::clone(&telemetry))?;
     let factory_config = Arc::new(Mutex::new(initial_validated));
+    let config_generation = Arc::new(AtomicU64::new(initial_snapshot.generation));
     let instances: Instances = Arc::new(Mutex::new(HashMap::new()));
     let gnome_focus = Arc::new(Mutex::new(None));
     if env::var("XDG_CURRENT_DESKTOP")
@@ -506,6 +621,7 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
     let factory = Factory {
         connection: Arc::clone(&connection_slot),
         validated_config: Arc::clone(&factory_config),
+        config_generation: Arc::clone(&config_generation),
         policy: Arc::clone(&policy),
         instances: Arc::clone(&instances),
         next_id: AtomicU64::new(1),
@@ -524,6 +640,8 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
     let reload_instances = Arc::clone(&instances);
     let reload_policy = Arc::clone(&policy);
     let reload_validated_config = Arc::clone(&factory_config);
+    let reload_config_generation = Arc::clone(&config_generation);
+    let reload_telemetry = Arc::clone(&telemetry);
     let config_watch_path = path;
     std::thread::Builder::new()
         .name("wayexpand-ibus-config".into())
@@ -598,14 +716,57 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
                         }
                     };
                     if let Ok(mut current) = reload_validated_config.lock() {
-                        *current = Arc::clone(&validated);
-                    }
-                    if let Ok(instances) = reload_instances.lock() {
-                        for instance in instances.values() {
-                            if let Ok(mut adapter) = instance.adapter.lock() {
-                                adapter.replace_validated_config(Arc::clone(&validated));
+                        let publish = publish_config_generation(
+                            &mut current,
+                            &reload_config_generation,
+                            &reload_instances,
+                            Arc::clone(&validated),
+                            snapshot.generation,
+                        );
+                        match publish {
+                            Ok(()) => {
+                                reload_telemetry
+                                    .config_generation_published(snapshot.generation, 0);
+                                reload_error = None;
+                            }
+                            Err((error_id, mismatches, detail)) => {
+                                let mismatches = if mismatches == 0 {
+                                    reload_telemetry.snapshot().engines as usize
+                                } else {
+                                    mismatches
+                                };
+                                reload_telemetry.config_generation_failed(
+                                    snapshot.generation,
+                                    error_id,
+                                    mismatches,
+                                );
+                                if reload_error.as_deref() != Some(error_id) {
+                                    warn!(
+                                        problem_id = error_id,
+                                        config_generation = snapshot.generation,
+                                        context_mismatches = mismatches,
+                                        error = detail,
+                                        "IBus configuration generation handoff failed; retaining previous published generation"
+                                    );
+                                }
+                                reload_error = Some(error_id.to_owned());
                             }
                         }
+                    } else {
+                        let error_id = "WX-IBUS-RELOAD-001";
+                        let mismatches = reload_telemetry.snapshot().engines as usize;
+                        reload_telemetry.config_generation_failed(
+                            snapshot.generation,
+                            error_id,
+                            mismatches,
+                        );
+                        warn!(
+                            problem_id = error_id,
+                            config_generation = snapshot.generation,
+                            context_mismatches = mismatches,
+                            "IBus factory config lock poisoned; retaining previous generation"
+                        );
+                        reload_error = Some(error_id.to_owned());
                     }
                 }
             }
@@ -733,6 +894,7 @@ mod tests {
             validated_config: Arc::new(Mutex::new(
                 validate_config_for_policy(&config, &policy).unwrap(),
             )),
+            config_generation: Arc::new(AtomicU64::new(1)),
             policy,
             instances: Arc::new(Mutex::new(HashMap::new())),
             next_id: AtomicU64::new(1),
@@ -758,6 +920,7 @@ mod tests {
                 adapter: Arc::new(Mutex::new(IbusEngineAdapter::new(
                     ExpansionEngine::new(config).unwrap(),
                 ))),
+                config_generation: AtomicU64::new(1),
             },
         );
         let engine = EngineObject {
@@ -997,6 +1160,7 @@ replacement = "signature"
                 validated_config: Arc::new(Mutex::new(
                     validate_config_for_policy(&config, &policy).unwrap(),
                 )),
+                config_generation: Arc::new(AtomicU64::new(1)),
                 policy,
                 instances: Arc::clone(&instances),
                 next_id: AtomicU64::new(1),

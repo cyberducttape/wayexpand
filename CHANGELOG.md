@@ -39,6 +39,11 @@ All notable changes to WayExpand are documented here.
   validated snapshot and immutable matcher across engine contexts. Each IBus
   context retains its own mutable typing state. Add a Criterion benchmark for
   10,000-entry libraries with 1, 4, and 16 contexts.
+- Publish IBus configuration reloads as one generation handoff: acquire the
+  factory, instance registry, and every context lock before updating any
+  engine. Poisoned locks retain the previous generation and surface
+  `WX-IBUS-RELOAD-001`, published/requested generations, and stale-context
+  counts through IBus, GNOME, and sanitized support diagnostics.
 - Keep the per-user source installer focused on runtime binaries instead of
   building certification-only executables, and direct ordinary desktop users
   without Cargo to the package and release installation paths. Debian and RPM

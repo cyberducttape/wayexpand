@@ -346,7 +346,10 @@ verified rather than merely free of hard failures.
   `WX-IBUS-006` for replacement actions whose target effect is unverified,
   and `WX-IBUS-007` when no insertion was observed in the current engine
   session. These distinctions are evidence states, not claims that a specific
-  application received or displayed the text.
+  application received or displayed the text. `WX-IBUS-RELOAD-001` indicates
+  that a configuration generation could not be handed off to the factory and
+  every live context atomically; diagnostics include published/requested
+  generations and stale-context counts.
 - `first_failure` (string or null): the `id` of the first failed check.
 - `readiness` (object): booleans for each separate condition —
   `component_installed`, `registered`, `ibus_running`, `selected`,
