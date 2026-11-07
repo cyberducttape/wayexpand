@@ -874,7 +874,7 @@ for check in $expected_checks; do
         break
     fi
 done
-if ! grep -Eq '^pass gnome-browser-(insertion|safe-refusal)' "$work/results.txt"; then
+if ! grep -Eq '^pass gnome-browser-(insertion|safe-passthrough)' "$work/results.txt"; then
     missing_check=${missing_check:-gnome-browser-result}
 fi
 if [ "$status" -ne 0 ] || grep -q '^fail' "$work/results.txt" \
@@ -907,4 +907,4 @@ if [ "$status" -ne 0 ] || grep -q '^fail' "$work/results.txt" \
     done
     exit 1
 fi
-printf '%s\n' "Headless GNOME input activation, GTK3 IBus insertion, Chromium IBus refusal safety, engine health, and extension upgrade/logout tests passed; physical desktop certification remains unverified"
+printf '%s\n' "Headless GNOME input activation, GTK3 IBus insertion, Chromium IBus pass-through safety, engine health, and extension upgrade/logout tests passed; physical desktop certification remains unverified"

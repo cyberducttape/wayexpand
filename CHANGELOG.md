@@ -11,6 +11,8 @@ All notable changes to WayExpand are documented here.
 - Synchronize the GNOME browser acceptance test with an armed marker after its
   focus and telemetry baselines are recorded, so the shell sends the test trigger
   only after the correlated browser measurement is ready.
+- Update the GNOME acceptance summary to require and describe browser pass-through
+  safety when Chromium does not support IBus surrounding text.
 - Correlate the Chromium IBus acceptance trigger with its new focused IBus
   context, and include content-free focus, key, and refusal counters when the
   acceptance run cannot verify insertion or safe pass-through. Failure
