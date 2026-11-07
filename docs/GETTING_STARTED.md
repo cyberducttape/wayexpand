@@ -125,6 +125,10 @@ For the desktop check, focus a disposable, non-sensitive text field and run:
 wayexpand debug --test ';;hello'
 ```
 
+If `;;hello` is not in your library, substitute any enabled static trigger
+listed by `wayexpand list`; command-backed and form-driven snippets are not
+used for this harmless insertion check.
+
 Follow its prompt, type the trigger once, inspect the resulting text, and
 confirm only if it exactly matches the expected replacement. WayExpand never
 presses Enter or retries uncertain output. The GUI offers this as **Desktop
@@ -134,6 +138,10 @@ the tested application**. That result applies only to the tested app and
 session. It does not certify other applications or the compositor. If the
 matcher check instead prints `no expansion matched`, inspect the trigger with
 `wayexpand list` and `wayexpand validate` before debugging the backend.
+
+If no automatic route is available, the first-run guide offers Quick Picker in
+copy-only mode. It does not enable raw keyboard capture or attempt insertion;
+choose a snippet, switch back to the target application, and paste it yourself.
 
 ### 5. Add an app-filtered snippet (optional)
 
@@ -158,10 +166,10 @@ For the output-driven recovery flow, go directly to the
 
 ### Architecture note: aarch64
 
-The release workflow supports native `x86_64` and `aarch64` builds, but the
-current v1.3.3 release has no downloadable assets. Check the [packaging
-guide](PACKAGING.md) for actual publication status before choosing an install
-path.
+The release workflow supports native `x86_64` and `aarch64` builds. Published
+package and archive availability varies by version and architecture, and
+current builds remain experimental until real-desktop certification. Check
+the [packaging guide](PACKAGING.md) for the current installation matrix.
 
 ## Which Desktop Are You Using?
 

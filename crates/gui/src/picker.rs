@@ -603,16 +603,20 @@ fn focus_returned_to_target(target: &FocusTarget, current: &FocusTarget) -> bool
 
 /// Run the picker. Insertion remains inside the picker until the guarded
 /// focus handoff succeeds, so a safe failure remains visible to the user.
-pub(crate) fn run(path: PathBuf) -> anyhow::Result<()> {
+pub(crate) fn run(path: PathBuf, copy_only: bool) -> anyhow::Result<()> {
     let loaded = Config::load_versioned(&path)
         .map_err(|error| anyhow::anyhow!("configuration invalid: {}", error.safe_summary()))?;
     let config = loaded.config;
     let config_revision = loaded.revision;
     let prefs = crate::settings::load_gui_prefs();
-    let focus_info = crate::runtime::control_command(wayexpand_core::DaemonOperation::Focus)
-        .ok()
-        .and_then(|response| focus_target_from_response(&response));
-    let (target_focus, safe_direct_insert) = picker_focus_state(focus_info);
+    let focus_info = if copy_only {
+        None
+    } else {
+        crate::runtime::control_command(wayexpand_core::DaemonOperation::Focus)
+            .ok()
+            .and_then(|response| focus_target_from_response(&response))
+    };
+    let (target_focus, safe_direct_insert) = picker_focus_state(focus_info, copy_only);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("WayExpand — Insert snippet")
@@ -657,7 +661,13 @@ pub(crate) fn run(path: PathBuf) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn picker_focus_state(focus_info: Option<FocusInfo>) -> (Option<FocusTarget>, bool) {
+fn picker_focus_state(
+    focus_info: Option<FocusInfo>,
+    copy_only: bool,
+) -> (Option<FocusTarget>, bool) {
+    if copy_only {
+        return (None, false);
+    }
     focus_info
         .map(|info| {
             // A target-verification signal alone does not prevent concurrent
@@ -778,7 +788,7 @@ mod tests {
 
     #[test]
     fn missing_focus_response_does_not_claim_exact_identity() {
-        assert_eq!(picker_focus_state(None), (None, false));
+        assert_eq!(picker_focus_state(None, false), (None, false));
     }
 
     #[test]
@@ -787,14 +797,14 @@ mod tests {
             "focus_generation=4\nfocus_token=abcd\nfocus_identity=exact\natomic_replace=true\nverified_replace=true\n",
         )
         .unwrap();
-        assert!(picker_focus_state(Some(atomic)).1);
+        assert!(picker_focus_state(Some(atomic), false).1);
 
         let focus = focus_target_from_response(
             "focus_generation=4\nfocus_token=abcd\nfocus_identity=exact\natomic_replace=false\nverified_replace=true\n",
         )
         .unwrap();
         assert_eq!(
-            picker_focus_state(Some(focus)),
+            picker_focus_state(Some(focus), false),
             (
                 Some(FocusTarget {
                     generation: 4,
@@ -808,7 +818,7 @@ mod tests {
             "focus_generation=4\nfocus_token=abcd\nfocus_identity=exact\natomic_replace=false\nverified_replace=false\n",
         )
         .unwrap();
-        assert!(!picker_focus_state(Some(unverified)).1);
+        assert!(!picker_focus_state(Some(unverified), false).1);
     }
 
     #[test]
@@ -854,6 +864,22 @@ mod tests {
         };
         assert!(!picker_expansion_is_eligible(&expansion, false));
         assert!(picker_expansion_is_eligible(&expansion, true));
+    }
+
+    #[test]
+    fn copy_only_picker_never_requests_direct_insertion() {
+        let (target, direct_insert) = picker_focus_state(
+            Some(FocusInfo {
+                target: Some(FocusTarget {
+                    generation: 7,
+                    token: "opaque-test-token".into(),
+                }),
+                atomic_replace_available: true,
+            }),
+            true,
+        );
+        assert!(target.is_none());
+        assert!(!direct_insert);
     }
 
     #[test]

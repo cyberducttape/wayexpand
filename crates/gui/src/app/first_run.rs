@@ -6,23 +6,95 @@ const ONBOARDING_REPLACEMENT: &str = "WayExpand is working!";
 
 fn onboarding_snippet(config: &Config) -> Option<&ExpansionConfig> {
     config.expansion.iter().find(|expansion| {
-        expansion.replacement == ONBOARDING_REPLACEMENT
+        expansion.enabled
+            && expansion.replacement == ONBOARDING_REPLACEMENT
             && expansion.tags.iter().any(|tag| tag == "tutorial")
     })
 }
 
+fn onboarding_test_snippet(config: &Config) -> Option<&ExpansionConfig> {
+    onboarding_snippet(config).or_else(|| {
+        config.expansion.iter().find(|expansion| {
+            expansion.enabled
+                && expansion.command.is_none()
+                && !expansion.replacement.contains("{{")
+        })
+    })
+}
+
 impl GuiApp {
+    /// Persist the pending-test state so a previously completed guide reopens
+    /// if setup was changed and the user postpones verification.
+    pub(crate) fn require_desktop_test(&mut self) -> Option<String> {
+        self.onboarding_completed = false;
+        self.onboarding_visible = true;
+        self.desktop_test_dialog_required = true;
+        save_gui_prefs(
+            self.language,
+            self.colorpack,
+            self.settings_font_scale,
+            self.dark_mode,
+            false,
+        )
+        .err()
+        .map(|error| error.to_string())
+    }
+
     pub(crate) fn finish_onboarding(&mut self) {
+        if !self.desktop_test_verified {
+            self.onboarding_visible = true;
+            self.status = Status::warning(
+                "First run is not complete: verify an exact insertion in a real application first.",
+            );
+            return;
+        }
         self.persist_onboarding(self.strings.onboarding_complete_note());
     }
 
-    pub(crate) fn skip_onboarding(&mut self) {
-        self.persist_onboarding(self.strings.onboarding_skipped_note());
+    pub(crate) fn defer_onboarding(&mut self) {
+        // Let users continue working while preserving the incomplete state.
+        // The guide returns on the next launch and cannot be recorded as
+        // completed without a real-application verification.
+        self.onboarding_visible = false;
+        self.status = Status::warning(
+            "Setup is not verified yet. The first-run guide will return until a real application test succeeds.",
+        );
+    }
+
+    fn open_copy_only_picker(&mut self) {
+        let executable = match env::current_exe() {
+            Ok(executable) => executable,
+            Err(error) => {
+                self.status = Status::error(format!(
+                    "Could not locate the Quick Picker executable: {error}"
+                ));
+                return;
+            }
+        };
+        match std::process::Command::new(executable)
+            .arg("--picker")
+            .arg("--copy-only")
+            .arg(&self.path)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+        {
+            Ok(_) => {
+                self.status = Status::info(
+                    "Quick Picker opened in copy-only mode. Choose a snippet, then paste it yourself; the picker does not request automatic insertion.",
+                );
+            }
+            Err(error) => {
+                self.status = Status::error(format!("Could not open Quick Picker: {error}"));
+            }
+        }
     }
 
     fn persist_onboarding(&mut self, message: &str) {
         self.onboarding_completed = true;
         self.onboarding_visible = false;
+        self.desktop_test_dialog_required = false;
         self.onboarding_show_troubleshooting = false;
         match save_gui_prefs(
             self.language,
@@ -71,13 +143,18 @@ impl GuiApp {
         let daemon_build = daemon_running.then(|| runtime::daemon_build_state(&self.daemon_status));
         let route_ready = ibus_only
             || route_connected && daemon_build == Some(runtime::DaemonBuildState::Current);
-        let sample_trigger = onboarding_snippet(&self.config)
-            .map(|expansion| expansion.trigger.clone())
+        let test_snippet = onboarding_test_snippet(&self.config)
+            .map(|expansion| (expansion.trigger.clone(), expansion.replacement.clone()));
+        let sample_trigger = test_snippet
+            .as_ref()
+            .map(|(trigger, _)| trigger.clone())
             .unwrap_or_else(|| ONBOARDING_TRIGGER.to_owned());
         let sample_exists = onboarding_snippet(&self.config).is_some();
-        let matcher_passed = sample_exists
+        let matcher_passed = test_snippet.is_some()
             && self.playground.last_trigger.as_deref() == Some(sample_trigger.as_str())
-            && self.playground.text.contains(ONBOARDING_REPLACEMENT);
+            && test_snippet
+                .as_ref()
+                .is_some_and(|(_, replacement)| self.playground.text.contains(replacement));
         let status_value = |key: &str| {
             self.daemon_status
                 .split(" · ")
@@ -198,8 +275,8 @@ impl GuiApp {
                                 .strong(),
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.small_button(self.strings.onboarding_skip()).clicked() {
-                                self.skip_onboarding();
+                            if ui.small_button(self.strings.onboarding_defer()).clicked() {
+                                self.defer_onboarding();
                             }
                         });
                     });
@@ -303,13 +380,18 @@ impl GuiApp {
                         palette,
                         3,
                         self.strings.onboarding_snippet_title(),
-                        sample_exists,
+                        sample_exists || test_snippet.is_some(),
                     );
                     ui.indent("first_run_snippet", |ui| {
                         if sample_exists {
                             ui.colored_label(
                                 palette.success,
                                 self.strings.onboarding_sample_saved(),
+                            );
+                        } else if test_snippet.is_some() {
+                            ui.colored_label(
+                                palette.success,
+                                "An enabled static expansion is available for the real-app test.",
                             );
                         } else {
                             ui.label(
@@ -365,8 +447,14 @@ impl GuiApp {
                                 .monospace()
                                 .strong(),
                         );
-                        ui.colored_label(palette.accent, self.strings.onboarding_expected_result());
-                        if !sample_exists {
+                        ui.colored_label(
+                            palette.accent,
+                            test_snippet.as_ref().map_or_else(
+                                || self.strings.onboarding_expected_result().to_owned(),
+                                |(_, replacement)| format!("Expected result: {replacement}"),
+                            ),
+                        );
+                        if test_snippet.is_none() {
                             ui.label(
                                 RichText::new(self.strings.onboarding_create_sample_first())
                                     .small()
@@ -381,61 +469,33 @@ impl GuiApp {
                         palette,
                         5,
                         self.strings.onboarding_real_app_title(),
-                        false,
+                        self.desktop_test_verified,
                     );
                     ui.indent("first_run_real_app", |ui| {
                         ui.label(
                             RichText::new(self.strings.onboarding_real_app_help())
                                 .color(palette.muted),
                         );
-                        if sample_exists && route_ready {
-                            ui.horizontal_wrapped(|ui| {
-                                ui.label(
-                                    RichText::new(self.strings.onboarding_trigger(&sample_trigger))
-                                        .monospace()
-                                        .strong(),
-                                );
-                                if ui
-                                    .small_button(self.strings.onboarding_copy_trigger())
-                                    .clicked()
-                                {
-                                    ui.ctx().copy_text(sample_trigger.to_owned());
-                                    self.status =
-                                        Status::info(self.strings.status_preview_copied());
-                                }
-                            });
-                            ui.colored_label(
-                                palette.accent,
-                                self.strings.onboarding_expected_result(),
-                            );
-                            ui.label(
-                                RichText::new(self.strings.onboarding_manual_check_note())
-                                    .small()
-                                    .color(palette.warning),
-                            );
+                        let has_static_test = test_snippet.is_some();
+                        if has_static_test && route_ready {
                             ui.horizontal_wrapped(|ui| {
                                 if theme::primary_button(
                                     ui,
                                     palette,
-                                    self.strings.onboarding_test_succeeded(),
+                                    "Start Desktop Integration Test",
                                 )
                                 .clicked()
                                 {
-                                    self.desktop_test_verified = true;
-                                    self.finish_onboarding();
-                                }
-                                if theme::secondary_button(
-                                    ui,
-                                    palette,
-                                    self.strings.onboarding_test_failed(),
-                                )
-                                .clicked()
-                                {
-                                    self.onboarding_show_troubleshooting = true;
-                                    self.refresh_diagnostics(false);
+                                    self.select_default_desktop_test();
+                                    if let Some(error) = self.require_desktop_test() {
+                                        self.status = Status::warning(format!(
+                                            "Desktop testing is still required, but the pending first-run state could not be saved: {error}"
+                                        ));
+                                    }
+                                    self.test_expansion_dialog_open = true;
                                 }
                             });
-                        } else if !sample_exists {
+                        } else if test_snippet.is_none() {
                             ui.label(
                                 RichText::new(self.strings.onboarding_create_sample_first())
                                     .color(palette.warning),
@@ -457,6 +517,21 @@ impl GuiApp {
                                 RichText::new(self.strings.onboarding_backend_first())
                                     .color(palette.warning),
                             );
+                        }
+                        ui.add_space(8.0);
+                        ui.label(
+                            RichText::new("Lower-privilege fallback: copy a snippet and paste it yourself. This does not enable raw keyboard capture or verify automatic expansion.")
+                                .small()
+                                .color(palette.muted),
+                        );
+                        if theme::secondary_button(
+                            ui,
+                            palette,
+                            "Open Quick Picker (copy and paste)",
+                        )
+                        .clicked()
+                        {
+                            self.open_copy_only_picker();
                         }
                         if self.onboarding_show_troubleshooting {
                             ui.add_space(8.0);
@@ -532,5 +607,22 @@ impl GuiApp {
                 });
                 ui.add_space(16.0);
             });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::onboarding_test_snippet;
+    use wayexpand_core::Config;
+
+    #[test]
+    fn custom_static_snippet_can_be_used_for_first_run_verification() {
+        let config = Config::parse(
+            "[[expansion]]\ntrigger = ';custom-check'\nreplacement = 'Custom check passed'\n",
+        )
+        .unwrap();
+        let snippet = onboarding_test_snippet(&config).expect("static snippet is testable");
+        assert_eq!(snippet.trigger, ";custom-check");
+        assert_eq!(snippet.replacement, "Custom check passed");
     }
 }

@@ -638,7 +638,7 @@ impl GuiApp {
         Status::info("Review the setup stages and any required consent to continue.")
     }
 
-    fn select_default_desktop_test(&mut self) -> bool {
+    pub(crate) fn select_default_desktop_test(&mut self) -> bool {
         let selected_is_testable = self
             .selected_index()
             .and_then(|index| self.config.expansion.get(index))
@@ -728,12 +728,17 @@ impl GuiApp {
                 self.setup_task = None;
                 self.status = match result {
                     Ok(output) => {
+                        let onboarding_state_error = if is_setup
+                            && output.lines().any(|line| {
+                                line.trim() == "SETUP RESULT: CONFIGURED, AWAITING TEST"
+                            }) {
+                            self.require_desktop_test()
+                        } else {
+                            None
+                        };
                         if is_setup {
                             self.gnome_setup_resume_pending =
                                 wayexpand_core::gnome_ibus_setup_resume_pending(&self.path);
-                            if !self.gnome_setup_resume_pending {
-                                self.onboarding_visible = false;
-                            }
                         }
                         let task_kind = self.cli_task_kind.take();
                         if task_kind.as_deref() != Some("setup-preflight") {
@@ -744,7 +749,11 @@ impl GuiApp {
                         } else if task_kind.as_deref() == Some("gnome-source-repair") {
                             self.desktop_test_verified = false;
                             self.desktop_test_verified_application = None;
-                            Status::info("WayExpand was selected in GNOME. Input-source configuration is updated; complete the Desktop Integration Test to verify a real insertion.")
+                            if self.desktop_test_dialog_required {
+                                Status::info("WayExpand was selected in GNOME. Input-source configuration is updated; first-run setup still requires a real-app test.")
+                            } else {
+                                Status::info("WayExpand was selected in GNOME. Input-source configuration is updated; real insertion remains unverified.")
+                            }
                         } else {
                             match task_kind.as_deref() {
                                 Some("restore-check") => {
@@ -793,7 +802,11 @@ impl GuiApp {
                                     self.select_default_desktop_test();
                                     self.test_expansion_dialog_open = true;
                                     self.diagnostics_open = false;
-                                    Status::info("Configured, untested: complete the Desktop Integration Test to confirm insertion in a real application. You can defer it, but WayExpand will not mark the route Working until you confirm the exact result.")
+                                    if let Some(error) = onboarding_state_error {
+                                        Status::warning(format!("WayExpand is configured but unverified. The incomplete first-run state could not be saved, so the guide may not reopen automatically: {error}"))
+                                    } else {
+                                        Status::info("Configured, unverified: complete the Desktop Integration Test and confirm the exact result in a real application. You can defer it, but WayExpand will not mark the route Working until confirmation.")
+                                    }
                                 } else {
                                     self.diagnostics_open |= open_diagnostics;
                                     status

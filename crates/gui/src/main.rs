@@ -318,6 +318,9 @@ struct GuiApp {
     dark_mode: bool,
     onboarding_visible: bool,
     onboarding_completed: bool,
+    /// The post-setup desktop test must be completed before onboarding can
+    /// persist a successful first-run state.
+    desktop_test_dialog_required: bool,
     gnome_setup_resume_pending: bool,
     onboarding_show_troubleshooting: bool,
     language: Language,
@@ -722,6 +725,7 @@ impl GuiApp {
             dark_mode: prefs.dark_mode.unwrap_or(true),
             onboarding_visible,
             onboarding_completed,
+            desktop_test_dialog_required: false,
             gnome_setup_resume_pending,
             onboarding_show_troubleshooting: false,
             language: prefs.language,
@@ -948,7 +952,7 @@ fn config_path_argument(argument: Option<String>) -> Result<PathBuf> {
 fn main() -> Result<()> {
     if matches!(env::args().nth(1).as_deref(), Some("--help" | "-h")) {
         println!(
-            "Usage: wayexpand-gui [CONFIG]\n       wayexpand-gui --picker [CONFIG]\n       wayexpand-gui --form SPEC\n\nNative Wayland settings editor for WayExpand.\n\n--picker  Quick-insert window: search your snippets and press Enter to type\n          one into the app you were using. Bind it to a desktop shortcut.\n--form    Snippet form window; started by the daemon for snippets with fields."
+            "Usage: wayexpand-gui [CONFIG]\n       wayexpand-gui --picker [--copy-only] [CONFIG]\n       wayexpand-gui --form SPEC\n\nNative Wayland settings editor for WayExpand.\n\n--picker     Quick-insert window for searching saved snippets.\n--copy-only  Copy the selected snippet for manual paste; do not request insertion.\n--form       Snippet form window; started by the daemon for snippets with fields."
         );
         return Ok(());
     }
@@ -963,8 +967,17 @@ fn main() -> Result<()> {
         return form::run(&spec);
     }
     if env::args().nth(1).as_deref() == Some("--picker") {
-        let path = config_path_argument(env::args().nth(2))?;
-        return picker::run(path);
+        let mut copy_only = false;
+        let mut config = None;
+        for argument in env::args().skip(2) {
+            if argument == "--copy-only" {
+                copy_only = true;
+            } else if config.replace(argument).is_some() {
+                anyhow::bail!("--picker accepts at most one CONFIG path");
+            }
+        }
+        let path = config_path_argument(config)?;
+        return picker::run(path, copy_only);
     }
     let path = config_path_argument(env::args().nth(1))?;
     let mut app = GuiApp::load(path)?;

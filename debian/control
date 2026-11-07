@@ -21,6 +21,9 @@ Depends:
     ${misc:Depends},
     libwayland-client0,
     libxkbcommon0
+Recommends:
+    ibus,
+    pkexec
 Description: Wayland-native text expander for Linux
  WayExpand is a privacy-first text expander designed for Wayland desktop
  environments. Type a short trigger like ;;hello and it automatically

@@ -13,7 +13,9 @@ use std::{
     time::Duration,
 };
 use tracing::{info, warn};
-use wayexpand_core::{default_config_path, ConfigStore, ExpansionEngine, OrganizationPolicy};
+use wayexpand_core::{
+    default_config_path, Config, ConfigStore, OrganizationPolicy, ValidatedConfig,
+};
 use zbus::{
     blocking::{connection::Builder, Connection},
     interface,
@@ -45,7 +47,7 @@ pub enum IbusServiceError {
 /// objects are removed from this map by their Destroy method.
 struct Factory {
     connection: Arc<Mutex<Option<Connection>>>,
-    config: Arc<Mutex<wayexpand_core::Config>>,
+    validated_config: Arc<Mutex<Arc<ValidatedConfig>>>,
     policy: Arc<OrganizationPolicy>,
     instances: Arc<Mutex<HashMap<OwnedObjectPath, EngineInstance>>>,
     next_id: AtomicU64,
@@ -77,20 +79,13 @@ impl Factory {
 
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let path = engine_path(id);
-        let config = self
-            .config
+        let validated = self
+            .validated_config
             .lock()
             .map_err(|_| zbus::fdo::Error::Failed("IBus config lock poisoned".into()))?
             .clone();
-        let engine = ExpansionEngine::new(config).map_err(|error| {
-            zbus::fdo::Error::Failed(format!("could not create IBus engine: {error}"))
-        })?;
         let mut adapter =
-            IbusEngineAdapter::with_policy(engine, (*self.policy).clone()).map_err(|error| {
-                zbus::fdo::Error::Failed(format!(
-                    "administrator policy rejects IBus config: {error}"
-                ))
-            })?;
+            IbusEngineAdapter::with_validated_config(validated, (*self.policy).clone());
         let completions = self.completions.clone();
         let completed_path = path.clone();
         adapter.set_completion_notifier(Some(Arc::new(move || {
@@ -132,6 +127,15 @@ impl Factory {
         }
         Ok(path)
     }
+}
+
+fn validate_config_for_policy(
+    config: &Config,
+    policy: &OrganizationPolicy,
+) -> Result<Arc<ValidatedConfig>, wayexpand_core::ConfigError> {
+    let mut effective = config.clone();
+    effective.apply_administrator_policy(policy)?;
+    Ok(Arc::new(effective.validate_snapshot()?))
 }
 
 fn engine_path(id: u64) -> OwnedObjectPath {
@@ -436,13 +440,14 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
     let connection_slot = Arc::new(Mutex::new(None));
     let telemetry = Arc::new(IbusTelemetry::new());
     start_status_writer(Arc::clone(&telemetry))?;
-    let factory_config = Arc::new(Mutex::new((*initial_snapshot.config).clone()));
+    let initial_validated = validate_config_for_policy(&initial_snapshot.config, &policy)?;
+    let factory_config = Arc::new(Mutex::new(initial_validated));
     let instances: Instances = Arc::new(Mutex::new(HashMap::new()));
     let (completion_sender, completion_receiver) = mpsc::channel();
     let factory = Factory {
         connection: Arc::clone(&connection_slot),
-        config: Arc::clone(&factory_config),
-        policy,
+        validated_config: Arc::clone(&factory_config),
+        policy: Arc::clone(&policy),
         instances: Arc::clone(&instances),
         next_id: AtomicU64::new(1),
         completions: completion_sender,
@@ -456,8 +461,9 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
         .map_err(|error| IbusServiceError::Thread(error.to_string()))?;
     let reload_receiver = store.subscribe();
     let reload_store = Arc::clone(&store);
-    let reload_config = Arc::clone(&factory_config);
     let reload_instances = Arc::clone(&instances);
+    let reload_policy = Arc::clone(&policy);
+    let reload_validated_config = Arc::clone(&factory_config);
     let config_watch_path = path;
     std::thread::Builder::new()
         .name("wayexpand-ibus-config".into())
@@ -483,7 +489,6 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
                 warn!("IBus configuration watch unavailable; using fallback polling");
             }
             let mut reload_error = None;
-            let mut adapter_error = None;
             loop {
                 if watcher.is_some() {
                     let _ = watch_receiver.recv_timeout(Duration::from_secs(30));
@@ -518,28 +523,27 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
                 }
                 while reload_receiver.try_recv().is_ok() {
                     let snapshot = reload_store.snapshot();
-                    let config = (*snapshot.config).clone();
-                    if let Ok(mut current) = reload_config.lock() {
-                        *current = config.clone();
+                    let validated = match validate_config_for_policy(
+                        &snapshot.config,
+                        &reload_policy,
+                    ) {
+                        Ok(validated) => validated,
+                        Err(error) => {
+                            warn!(
+                                config_generation = snapshot.generation,
+                                config_error = %error.safe_summary(),
+                                "IBus configuration generation rejected after administrator policy"
+                            );
+                            continue;
+                        }
+                    };
+                    if let Ok(mut current) = reload_validated_config.lock() {
+                        *current = Arc::clone(&validated);
                     }
                     if let Ok(instances) = reload_instances.lock() {
                         for instance in instances.values() {
                             if let Ok(mut adapter) = instance.adapter.lock() {
-                                if let Err(error) = adapter.replace_config(config.clone()) {
-                                    let summary = error.safe_summary();
-                                    if adapter_error.as_deref() != Some(summary.as_str()) {
-                                        let status = reload_store.status();
-                                        warn!(
-                                            config_state = status.state,
-                                            adapter_error = %summary,
-                                            config_generation = snapshot.generation,
-                                            "IBus configuration could not be applied to an engine"
-                                        );
-                                        adapter_error = Some(summary);
-                                    }
-                                } else {
-                                    adapter_error = None;
-                                }
+                                adapter.replace_validated_config(Arc::clone(&validated));
                             }
                         }
                     }
@@ -621,6 +625,7 @@ fn ibus_text_value(text: &str) -> zbus::zvariant::Structure<'static> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wayexpand_core::ExpansionEngine;
 
     #[test]
     fn bus_name_matches_the_ibus_component_name() {
@@ -662,10 +667,13 @@ mod tests {
     fn factory_rejects_unknown_engine_names() {
         let config: Config =
             toml::from_str("[[expansion]]\ntrigger = \":x\"\nreplacement = \"x\"\n").unwrap();
+        let policy = Arc::new(OrganizationPolicy::default());
         let factory = Factory {
             connection: Arc::new(Mutex::new(None)),
-            config: Arc::new(Mutex::new(config)),
-            policy: Arc::new(OrganizationPolicy::default()),
+            validated_config: Arc::new(Mutex::new(
+                validate_config_for_policy(&config, &policy).unwrap(),
+            )),
+            policy,
             instances: Arc::new(Mutex::new(HashMap::new())),
             next_id: AtomicU64::new(1),
             completions: mpsc::channel().0,
@@ -915,14 +923,17 @@ replacement = "signature"
     impl Harness {
         fn start(config: &str) -> Self {
             let config: Config = toml::from_str(config).unwrap();
+            let policy = Arc::new(OrganizationPolicy::default());
             let connection_slot = Arc::new(Mutex::new(None));
             let instances: Instances = Arc::new(Mutex::new(HashMap::new()));
             let telemetry = Arc::new(IbusTelemetry::new());
             let (completion_sender, completion_receiver) = mpsc::channel();
             let factory = Factory {
                 connection: Arc::clone(&connection_slot),
-                config: Arc::new(Mutex::new(config)),
-                policy: Arc::new(OrganizationPolicy::default()),
+                validated_config: Arc::new(Mutex::new(
+                    validate_config_for_policy(&config, &policy).unwrap(),
+                )),
+                policy,
                 instances: Arc::clone(&instances),
                 next_id: AtomicU64::new(1),
                 completions: completion_sender,
