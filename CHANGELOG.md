@@ -4,6 +4,15 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Make GNOME's first IBus setup resumable across the logout required to load a
+  newly installed Shell extension. Setup saves only a fixed, private resume
+  marker, stops before IBus mutation with `WX-GNOME-SESSION-RESTART-001`, and
+  the GUI offers to resume after login. Consent and administrator authorization
+  are requested again through their normal explicit flows. Recommend distro
+  packages for ordinary installs because they ship the shared IBus manifest
+  and system-owned engine executable together; retain source/archive installs
+  as developer paths.
+
 - Declare the GNOME Shell tracker compatible with GNOME 51 and run an isolated
   test against Fedora 45's GNOME Shell 51 package. The test verifies extension
   loading, its live build identity, the exported tracker protocol, active

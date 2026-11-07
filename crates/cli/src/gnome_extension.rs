@@ -257,28 +257,40 @@ fn probe_if_active(state: &ExtensionState) -> Result<(), String> {
 }
 
 /// Setup step on GNOME: install the extension if needed and enable it.
-/// It never fails setup: app filters are optional, and every outcome is
-/// explained with its fix.
-pub(crate) fn setup_gnome_window_tracker() {
+/// App filters are optional, but IBus setup consumes this readiness result
+/// because its session snapshot depends on the live Shell bridge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SetupReadiness {
+    Ready,
+    SessionRestartRequired,
+    Unavailable,
+}
+
+pub(crate) fn setup_gnome_window_tracker() -> SetupReadiness {
     println!("GNOME window tracking (for snippets limited to certain apps):");
     let directory = match install_user_copy() {
         Ok(directory) => directory,
         Err(error) => {
             println!("  could not install the WayExpand GNOME Shell extension: {error}");
-            return;
+            return SetupReadiness::Unavailable;
         }
     };
     println!("  extension: {}", directory.display());
-    if !persist_enabled() {
+    let enabled_persisted = persist_enabled();
+    if !enabled_persisted {
         println!("  could not add it to GNOME's enabled extensions (gsettings); run `gnome-extensions enable {EXTENSION_UUID}` after your next login");
     }
     let status = match extension_status() {
         Ok(status) => status,
         Err(error) => {
-            println!(
-                "  GNOME Shell did not answer ({error}); it loads the extension at your next login"
-            );
-            return;
+            println!("  GNOME Shell readiness could not be queried ({error})");
+            return if enabled_persisted && matches_bundled(&directory) {
+                println!("  prepared extension is not loaded in this session; a logout/login is required before IBus setup can continue");
+                SetupReadiness::SessionRestartRequired
+            } else {
+                println!("  the extension enablement or installed build could not be verified; run `wayexpand doctor --gnome`");
+                SetupReadiness::Unavailable
+            };
         }
     };
     let status = if status.user_extensions_enabled && status.state != ExtensionState::Active {
@@ -353,6 +365,18 @@ pub(crate) fn setup_gnome_window_tracker() {
     } else if let Some(fix) = fix {
         println!("  Fix: {fix}");
     }
+    if status.state == ExtensionState::Unknown
+        && status.user_extensions_enabled
+        && enabled_persisted
+        && metadata_matches
+        && disk_identity.as_deref() == Some(bundled_identity.as_str())
+    {
+        return SetupReadiness::SessionRestartRequired;
+    }
+    if !ok {
+        return SetupReadiness::Unavailable;
+    }
+    SetupReadiness::Ready
 }
 
 /// Doctor's view of the extension, for human and JSON output. `None` outside

@@ -281,9 +281,10 @@ impl GuiApp {
     }
 
     pub(crate) fn start_guided_setup(&mut self) {
-        let ibus_route = self
-            .recommended_route
-            .is_some_and(|route| route.setup_backend() == "ibus");
+        let ibus_route = self.gnome_setup_resume_pending
+            || self
+                .recommended_route
+                .is_some_and(|route| route.setup_backend() == "ibus");
         if ibus_route {
             self.start_cli_task(
                 vec!["ibus".into(), "status".into(), "--json".into()],
@@ -706,6 +707,13 @@ impl GuiApp {
                 self.setup_task = None;
                 self.status = match result {
                     Ok(output) => {
+                        if is_setup {
+                            self.gnome_setup_resume_pending =
+                                wayexpand_core::gnome_ibus_setup_resume_pending(&self.path);
+                            if !self.gnome_setup_resume_pending {
+                                self.onboarding_visible = false;
+                            }
+                        }
                         let task_kind = self.cli_task_kind.take();
                         if task_kind.as_deref() != Some("setup-preflight") {
                             self.last_cli_task_output = Some(output.clone());
@@ -776,6 +784,11 @@ impl GuiApp {
                         let task_kind = self.cli_task_kind.take();
                         self.pending_desktop_test = None;
                         if is_setup {
+                            self.gnome_setup_resume_pending =
+                                wayexpand_core::gnome_ibus_setup_resume_pending(&self.path);
+                            if self.gnome_setup_resume_pending {
+                                self.onboarding_visible = true;
+                            }
                             let report = if detail.starts_with("Setup diagnostic report\n") {
                                 detail
                             } else {

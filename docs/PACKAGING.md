@@ -23,6 +23,16 @@ reported build `1.3.3-0~202610270213~ubuntu26.04.1` as successfully built on
 This daily package is not compositor-certified; certified releases remain
 gated on compositor certification.
 
+For ordinary desktop installations, prefer the distribution package whenever
+one is available. Debian, RPM, and Arch package recipes install the shared
+IBus component and its package-owned executable together. This avoids the
+source-install flow's administrator-authorized system registration step.
+Release archives and `scripts/install-user.sh` remain useful for development
+and per-user CLI/GUI installs, but their staged IBus component may still need
+system integration before the GNOME IBus route can run. Package availability
+and desktop certification are separate: the currently published packages are
+experimental and have not passed the physical-desktop certification gate.
+
 The next recorded attempt, build
 [`33891053`](https://launchpad.net/~cyberducttape/+archive/ubuntu/ppa/+build/33891053),
 failed because its source snapshot selected egui/eframe 0.37, which requires
