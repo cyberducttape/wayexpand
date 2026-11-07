@@ -7,19 +7,16 @@ const ONBOARDING_REPLACEMENT: &str = "WayExpand is working!";
 fn onboarding_snippet(config: &Config) -> Option<&ExpansionConfig> {
     config.expansion.iter().find(|expansion| {
         expansion.enabled
+            && expansion.app_filter.is_empty()
+            && expansion.command.is_none()
+            && !expansion.replacement.contains("{{")
             && expansion.replacement == ONBOARDING_REPLACEMENT
             && expansion.tags.iter().any(|tag| tag == "tutorial")
     })
 }
 
-fn onboarding_test_snippet(config: &Config) -> Option<&ExpansionConfig> {
-    onboarding_snippet(config).or_else(|| {
-        config.expansion.iter().find(|expansion| {
-            expansion.enabled
-                && expansion.command.is_none()
-                && !expansion.replacement.contains("{{")
-        })
-    })
+pub(super) fn onboarding_test_snippet(config: &Config) -> Option<&ExpansionConfig> {
+    onboarding_snippet(config)
 }
 
 impl GuiApp {
@@ -613,16 +610,48 @@ impl GuiApp {
 #[cfg(test)]
 mod tests {
     use super::onboarding_test_snippet;
-    use wayexpand_core::Config;
+    use wayexpand_core::{Config, ExpansionConfig};
 
     #[test]
-    fn custom_static_snippet_can_be_used_for_first_run_verification() {
+    fn first_run_uses_only_the_dedicated_global_tutorial_snippet() {
         let config = Config::parse(
             "[[expansion]]\ntrigger = ';custom-check'\nreplacement = 'Custom check passed'\n",
         )
         .unwrap();
-        let snippet = onboarding_test_snippet(&config).expect("static snippet is testable");
-        assert_eq!(snippet.trigger, ";custom-check");
-        assert_eq!(snippet.replacement, "Custom check passed");
+        assert!(onboarding_test_snippet(&config).is_none());
+
+        let mut config = Config::parse("").unwrap();
+        let mut tutorial = ExpansionConfig {
+            id: ExpansionConfig::new_id(),
+            trigger: ":wayexpand-test".into(),
+            aliases: Vec::new(),
+            replacement: "WayExpand is working!".into(),
+            description: String::new(),
+            tags: vec!["tutorial".into()],
+            category: String::new(),
+            app_filter: vec!["app_id_exact:org.example.Editor".into()],
+            match_mode: Default::default(),
+            command: None,
+            enabled: true,
+            propagate_case: false,
+            output_file: None,
+        };
+        config.expansion.push(tutorial.clone());
+        assert!(onboarding_test_snippet(&config).is_none());
+
+        tutorial.app_filter.clear();
+        config.expansion[0] = tutorial;
+        let snippet = onboarding_test_snippet(&config).expect("global tutorial is testable");
+        assert_eq!(snippet.trigger, ":wayexpand-test");
+        assert_eq!(snippet.replacement, "WayExpand is working!");
+    }
+
+    #[test]
+    fn invalid_tutorial_variants_are_not_selected_for_first_run() {
+        let config = Config::parse(
+            "[[expansion]]\ntrigger = ':wayexpand-test'\nreplacement = 'WayExpand is working! {{field:review}}'\ntags = ['tutorial']\n",
+        )
+        .unwrap();
+        assert!(onboarding_test_snippet(&config).is_none());
     }
 }

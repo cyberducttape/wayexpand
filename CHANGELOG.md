@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Limit first-run desktop verification to the dedicated harmless, global
+  `:wayexpand-test` tutorial expansion. App-filtered snippets are excluded from
+  desktop-test choices, and the dialog presents the exact trigger and expected
+  text before asking the user to type; application type is a simple report
+  choice rather than a technical class string.
 - Treat IBus configuration-generation handoff failures as unhealthy and
   expose the requested/published generation mismatch in stable GNOME/IBus
   diagnostics. Keep async workers enabled for form-only libraries so field

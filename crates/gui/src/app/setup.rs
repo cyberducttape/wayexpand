@@ -639,28 +639,7 @@ impl GuiApp {
     }
 
     pub(crate) fn select_default_desktop_test(&mut self) -> bool {
-        let selected_is_testable = self
-            .selected_index()
-            .and_then(|index| self.config.expansion.get(index))
-            .is_some_and(|expansion| {
-                expansion.enabled
-                    && expansion.command.is_none()
-                    && !expansion.replacement.contains("{{")
-            });
-        if selected_is_testable {
-            if let Some(expansion) = self
-                .selected_index()
-                .and_then(|index| self.config.expansion.get(index))
-            {
-                self.desktop_test_trigger = expansion.trigger.clone();
-                return true;
-            }
-        }
-        if let Some(expansion) = self.config.expansion.iter().find(|expansion| {
-            expansion.enabled
-                && expansion.command.is_none()
-                && !expansion.replacement.contains("{{")
-        }) {
+        if let Some(expansion) = super::first_run::onboarding_test_snippet(&self.config) {
             self.desktop_test_trigger = expansion.trigger.clone();
             true
         } else {

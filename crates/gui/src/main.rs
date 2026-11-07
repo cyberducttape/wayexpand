@@ -630,7 +630,7 @@ impl GuiApp {
             diagnostics_close_requested: false,
             test_expansion_dialog_open: false,
             desktop_test_trigger: String::new(),
-            desktop_test_application_class: "GTK".into(),
+            desktop_test_application_class: "Text editor".into(),
             desktop_test_target_acknowledged: false,
             pending_desktop_test: None,
             desktop_test_review: None,
