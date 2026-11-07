@@ -7,6 +7,10 @@ All notable changes to WayExpand are documented here.
 - Detect a stale or unverifiable daemon before requesting the terminal-only
   matcher self-test. Report `WX-VERSION-001` with the upgrade command instead
   of mislabeling an old daemon's unsupported response as invalid test data.
+- Include compositor input-method routing, normal-field input, and observed
+  expansion stages in setup readiness. A registered and running IBus engine
+  no longer obscures the case where KWin is not routing application input to
+  IBus.
 - Add a machine-readable `route_safety` section to `wayexpand health --json`
   so an operationally connected route also reports missing sensitive-field
   detection, target-identity evidence, non-atomic compatibility overrides,

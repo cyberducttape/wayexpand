@@ -341,6 +341,7 @@ fn integrated_checks(ibus: &wayexpand_backend_ibus::chain::IbusChainReport) -> V
             "manifest":ibus.check("manifest").map(|check| serde_json::json!({"state":format!("{:?}",check.state).to_lowercase(),"detail":check.detail})),
         }),
     ));
+    checks.extend(ibus_routing_checks(ibus));
     let identity = installation_identity();
     let mismatch = identity["path_shadow_detected"] == true
         || identity["mixed_cli_daemon_installation"] == true;
@@ -351,6 +352,43 @@ fn integrated_checks(ibus: &wayexpand_backend_ibus::chain::IbusChainReport) -> V
         identity,
     ));
     checks
+}
+
+/// Copy the bounded, content-free desktop routing evidence into setup
+/// readiness. A registered and running IBus engine does not imply that the
+/// compositor routes application input to it.
+fn ibus_routing_checks(
+    ibus: &wayexpand_backend_ibus::chain::IbusChainReport,
+) -> Vec<ReadinessCheck> {
+    [
+        "desktop",
+        "gnome-session",
+        "gnome-source-registered",
+        "gnome-source-active",
+        "toolkit-environment",
+        "desktop-shell-environment",
+    ]
+    .into_iter()
+    .filter_map(|id| {
+        let check = ibus.check(id)?;
+        let status = match check.state {
+            wayexpand_backend_ibus::chain::IbusCheckState::Pass => "pass",
+            wayexpand_backend_ibus::chain::IbusCheckState::Warn => "warning",
+            wayexpand_backend_ibus::chain::IbusCheckState::Fail => "fail",
+            wayexpand_backend_ibus::chain::IbusCheckState::Skip => "not_applicable",
+            wayexpand_backend_ibus::chain::IbusCheckState::Unknown => "unknown",
+        };
+        Some(readiness_check(
+            format!("ibus_route:{id}"),
+            status,
+            check.detail.clone(),
+            serde_json::json!({
+                "problem_id":check.problem_id,
+                "remediation":check.fix,
+            }),
+        ))
+    })
+    .collect()
 }
 
 fn operational_checks(
@@ -364,6 +402,30 @@ fn operational_checks(
         if ibus_active { "pass" } else { "not_tested" },
         if ibus_active { "selected engine process is running; target text receipt/insertion remains a separate test" } else { "IBus engine activation has not been verified" },
         serde_json::json!({"selected":ibus.selected,"engine_running":ibus.engine_running,"text_received":ibus.text_received,"expanded":ibus.expanded}),
+    ));
+    checks.push(readiness_check(
+        "ibus_field_input",
+        if ibus.text_received {
+            "pass"
+        } else {
+            "not_tested"
+        },
+        if ibus.text_received {
+            "a normal IBus text field has supplied input telemetry"
+        } else {
+            "no normal text-field input has been verified by the IBus engine"
+        },
+        serde_json::json!({"text_received":ibus.text_received}),
+    ));
+    checks.push(readiness_check(
+        "ibus_expansion",
+        if ibus.expanded { "pass" } else { "not_tested" },
+        if ibus.expanded {
+            "the IBus engine reports a committed expansion"
+        } else {
+            "no IBus expansion has been observed; actual target insertion remains unverified"
+        },
+        serde_json::json!({"expanded":ibus.expanded}),
     ));
     let daemon_ready = daemon.is_some_and(|status| {
         crate::doctor::status::status_schema_compatible(status)
@@ -1055,6 +1117,70 @@ pub(crate) fn repair(args: Args) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn setup_readiness_exposes_compositor_routing_failure_and_repair() {
+        let report = wayexpand_backend_ibus::chain::IbusChainReport {
+            desktop: wayexpand_backend_ibus::chain::IbusDesktop::KdeWayland,
+            checks: vec![wayexpand_backend_ibus::chain::IbusCheck {
+                id: "desktop",
+                title: "KWin sends input to IBus",
+                state: wayexpand_backend_ibus::chain::IbusCheckState::Fail,
+                problem_id: Some("WX-KWIN-IBUS-001"),
+                detail: "KWin has no Virtual Keyboard configured".into(),
+                fix: Some("Select IBus Wayland in KWin settings".into()),
+            }],
+            activity: None,
+        };
+
+        let checks = ibus_routing_checks(&report);
+        let routing = checks
+            .iter()
+            .find(|check| check.component == "ibus_route:desktop")
+            .expect("desktop routing evidence should be included");
+        assert_eq!(routing.status, "fail");
+        assert_eq!(routing.evidence["problem_id"], "WX-KWIN-IBUS-001");
+        assert_eq!(
+            routing.evidence["remediation"],
+            "Select IBus Wayland in KWin settings"
+        );
+        assert!(routing.detail.contains("no Virtual Keyboard"));
+    }
+
+    #[test]
+    fn setup_readiness_separates_a_running_engine_from_received_input() {
+        let readiness = wayexpand_backend_ibus::chain::IbusReadiness {
+            selected: true,
+            engine_running: true,
+            text_received: false,
+            expanded: false,
+            ..Default::default()
+        };
+
+        let checks = operational_checks(&readiness, None);
+        assert_eq!(
+            checks
+                .iter()
+                .find(|check| check.component == "ibus_engine")
+                .unwrap()
+                .status,
+            "pass"
+        );
+        let field = checks
+            .iter()
+            .find(|check| check.component == "ibus_field_input")
+            .unwrap();
+        assert_eq!(field.status, "not_tested");
+        assert!(field.detail.contains("no normal text-field input"));
+        assert_eq!(
+            checks
+                .iter()
+                .find(|check| check.component == "ibus_expansion")
+                .unwrap()
+                .status,
+            "not_tested"
+        );
+    }
 
     #[test]
     fn terminal_matching_self_test_exercises_the_terminal_only_engine_gate() {
