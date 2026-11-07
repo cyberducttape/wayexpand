@@ -359,6 +359,7 @@ timeout 15s env \
     GDK_BACKEND=wayland \
     WAYLAND_DISPLAY="$display" \
     IBUS_ADDRESS="$(ibus address)" \
+    GTK_E2E_FOCUS_MARKER="$E2E_WORK/gtk-window-focused" \
     python3 "$E2E_PROJECT_DIR/scripts/certification-clients/gtk_ibus_e2e.py" \
     >"$E2E_WORK/gtk-ibus-e2e.log" 2>&1 &
 gtk_pid=$!
@@ -370,6 +371,7 @@ if ! activate_window org.wayexpand.GnomeGtkIbus; then
     cat "$E2E_WORK/gtk-ibus-e2e.log"
     exit 1
 fi
+: >"$E2E_WORK/gtk-window-focused"
 gtk_status=0
 wait "$gtk_pid" || gtk_status=$?
 gtk_pid=

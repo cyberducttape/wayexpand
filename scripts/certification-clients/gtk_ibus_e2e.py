@@ -27,6 +27,9 @@ def main():
         raise SystemExit("GTK_IM_MODULE must be set to ibus")
     if not os.environ.get("IBUS_ADDRESS"):
         raise SystemExit("IBUS_ADDRESS must identify the private IBus daemon")
+    focus_marker = os.environ.get("GTK_E2E_FOCUS_MARKER")
+    if not focus_marker:
+        raise SystemExit("GTK_E2E_FOCUS_MARKER must be set by the Mutter focus test")
 
     Gtk.init(sys.argv)
     window = Gtk.Window(title=f"WayExpand GTK IBus acceptance {APP_ID}")
@@ -44,14 +47,16 @@ def main():
 
     def send_next():
         nonlocal sent, failed
-        if not entry.has_focus():
-            entry.grab_focus()
+        if not os.path.exists(focus_marker):
             if GLib.get_monotonic_time() - started_at >= TIMEOUT_MS * 1000:
-                print("GTK Entry did not receive focus", file=sys.stderr)
+                print("Mutter did not activate the GTK acceptance window", file=sys.stderr)
                 failed = True
                 Gtk.main_quit()
                 return False
             return True
+        if sent == 0:
+            window.set_focus(entry)
+            entry.grab_focus()
         if sent >= len(TRIGGER):
             return False
         character = TRIGGER[sent]
