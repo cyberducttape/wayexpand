@@ -294,7 +294,7 @@ What could be added:
 require_absolute_paths = true
 strict_env = true
 
-# Action: Local report (no network)
+# Action: Local report (direct IP sockets are restricted by the service)
 [actions."local-report"]
 program = "/usr/local/bin/report"
 args = []
