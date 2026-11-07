@@ -625,7 +625,7 @@ jobs:
           toolchain: 1.96.0
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Install GNOME Shell, GTK, IBus, browser protocol, and D-Bus dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gnome-shell xwayland xdotool ibus ibus-gtk3 ibus-gtk4 dconf-service dbus-daemon libglib2.0-bin libgl1-mesa-dri libwayland-dev libxkbcommon-dev pkg-config python3-gi python3-websocket gir1.2-gtk-3.0 gir1.2-gtk-4.0
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gnome-shell xwayland xdotool ibus ibus-gtk3 ibus-gtk4 dconf-service dbus-daemon libglib2.0-bin libgl1-mesa-dri libwayland-dev libxkbcommon-dev pkg-config python3-gi python3-pyqt6 python3-websocket gir1.2-gtk-3.0 gir1.2-gtk-4.0
       - name: Verify the hosted browser test runtime
         run: google-chrome --version
       - name: Record tested revision

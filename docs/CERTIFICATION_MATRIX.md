@@ -103,6 +103,9 @@ French keyboard sources and checks expansion after returning to WayExpand. It al
 the field with `GTK_IM_MODULE=ibus`
 on GNOME's private XWayland server, activates the window through Mutter, types
 a fixed test trigger through XTEST, and verifies the resulting widget text.
+The Qt 6 `QLineEdit` fixture uses the IBus XIM bridge and verifies exact
+trigger/Unicode pass-through plus password-field preservation; it does not
+claim Qt replacement support without a verified surrounding-text contract.
 The same test opens an isolated Google Chrome profile on a local page, focuses
 its textarea through Mutter, types the same harmless trigger through XTEST, and
 checks the textarea value using Chrome DevTools. The tested Chrome XWayland/IBus

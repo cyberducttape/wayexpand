@@ -149,6 +149,7 @@ done
 sinks=
 gtk_pid=
 browser_pid=
+qt_pid=
 finish() {
     for pid in $sinks; do kill "$pid" 2>/dev/null || true; done
     if [ -n "$gtk_pid" ]; then
@@ -158,6 +159,10 @@ finish() {
     if [ -n "$browser_pid" ]; then
         kill "$browser_pid" 2>/dev/null || true
         wait "$browser_pid" 2>/dev/null || true
+    fi
+    if [ -n "$qt_pid" ]; then
+        kill "$qt_pid" 2>/dev/null || true
+        wait "$qt_pid" 2>/dev/null || true
     fi
     kill "$shell_pid" 2>/dev/null || true
     wait "$shell_pid" 2>/dev/null || true
@@ -476,6 +481,56 @@ run_gtk_ibus_case password ';e2e' ';e2e' true
 run_gtk_ibus_case gtk4-insertion ';e2e' expanded false 4
 run_gtk_ibus_case gtk4-unicode ';unicode' 'Grüße 世界 🖥️' false 4
 run_gtk_ibus_case gtk4-password ';e2e' ';e2e' true 4
+run_qt_xim_case() {
+    case_name=$1
+    input=$2
+    expected=$3
+    password=$4
+    marker="$E2E_WORK/qt-window-focused-$case_name"
+    test_log="$E2E_WORK/qt-ibus-e2e-$case_name.log"
+    set --
+    if [ "$password" = true ]; then
+        set -- --password
+    fi
+    timeout 20s env \
+        QT_IM_MODULE=xim \
+        XMODIFIERS='@im=ibus' \
+        DISPLAY="$x11_display" \
+        XAUTHORITY="$xwayland_auth" \
+        IBUS_ADDRESS="$(ibus address)" \
+        QT_E2E_FOCUS_MARKER="$marker" \
+        python3 "$E2E_PROJECT_DIR/scripts/certification-clients/qt_ibus_e2e.py" \
+        --expected "$expected" "$@" >"$test_log" 2>&1 &
+    qt_pid=$!
+    if ! activate_window org.wayexpand.GnomeQtIbus; then
+        kill "$qt_pid" 2>/dev/null || true
+        wait "$qt_pid" 2>/dev/null || true
+        log "fail gnome-qt-$case_name Mutter could not focus the Qt XIM acceptance window"
+        cat "$test_log"
+        exit 1
+    fi
+    : >"$marker"
+    if ! DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+        xdotool type --clearmodifiers --delay 40 -- "$input"; then
+        kill "$qt_pid" 2>/dev/null || true
+        wait "$qt_pid" 2>/dev/null || true
+        log "fail gnome-qt-$case_name XTEST could not type into the Qt field"
+        cat "$test_log"
+        exit 1
+    fi
+    qt_status=0
+    wait "$qt_pid" || qt_status=$?
+    qt_pid=
+    if [ "$qt_status" -ne 0 ]; then
+        log "fail gnome-qt-$case_name Qt XIM changed or lost input"
+        cat "$test_log"
+        exit 1
+    fi
+    log "pass gnome-qt-$case_name $(cat "$test_log")"
+}
+run_qt_xim_case safe-passthrough ';e2e' ';e2e' false
+run_qt_xim_case unicode-passthrough 'Grüße 世界 🖥️' 'Grüße 世界 🖥️' false
+run_qt_xim_case password ';e2e' ';e2e' true
 for layout in de fr; do
     "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --activate-source xkb "$layout" \
         >"$E2E_WORK/layout-$layout-activation.log"
@@ -931,7 +986,7 @@ env -i \
     dbus-run-session -- "$work/session.sh" >"$work/results.txt" 2>"$work/session.log" || status=$?
 
 cat "$work/results.txt"
-expected_checks='extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-ibus-input-context gnome-gtk-insertion gnome-gtk-unicode gnome-gtk-password gnome-gtk-gtk4-insertion gnome-gtk-gtk4-unicode gnome-gtk-gtk4-password gnome-layout-de gnome-layout-fr extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-ibus-input-context-after-login'
+expected_checks='extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-ibus-input-context gnome-gtk-insertion gnome-gtk-unicode gnome-gtk-password gnome-gtk-gtk4-insertion gnome-gtk-gtk4-unicode gnome-gtk-gtk4-password gnome-qt-safe-passthrough gnome-qt-unicode-passthrough gnome-qt-password gnome-layout-de gnome-layout-fr extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-ibus-input-context-after-login'
 missing_check=
 for check in $expected_checks; do
     if ! grep -F "pass $check" "$work/results.txt" >/dev/null; then
