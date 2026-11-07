@@ -635,6 +635,34 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  gnome51-extension-runtime:
+    name: GNOME Shell 51 Extension Runtime Compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container:
+      image: fedora:45
+    steps:
+      - name: Install GNOME Shell 51 and isolated-session requirements
+        run: |
+          dnf install -y curl dbus-daemon dconf glib2 gnome-shell gsettings-desktop-schemas \
+            libxkbcommon-devel mesa-dri-drivers pkgconf-pkg-config python3 \
+            shadow-utils git gcc tar gzip wayland-devel
+          useradd --create-home wayexpand-test
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: 1.96.0
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Build the authenticated GNOME tracker test client
+        run: cargo build --locked -p wayexpand-e2e --bin wx-e2e-gnome-tracker
+      - name: Load the extension and verify live input-source and layout APIs
+        run: >-
+          runuser -u wayexpand-test -- env
+          WX_GNOME_TRACKER_BIN="$GITHUB_WORKSPACE/target/debug/wx-e2e-gnome-tracker"
+          bash scripts/test-gnome51-extension-runtime.sh
+
   packaging:
     name: Debian and RPM Package Artifacts
     runs-on: ubuntu-latest

@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Declare the GNOME Shell tracker compatible with GNOME 51 and run an isolated
+  test against Fedora 45's GNOME Shell 51 package. The test verifies extension
+  loading, its live build identity, the exported tracker protocol, active
+  input-source queries, and live US/German layout switching; this is runtime
+  compatibility evidence, not desktop route certification.
+
 - Give IBus normal-field input and target-insertion checks stable, distinct
   problem IDs in `wayexpand ibus status --json`. Output failures, emitted but
   unverified replacement actions, and no observed insertion now have separate
