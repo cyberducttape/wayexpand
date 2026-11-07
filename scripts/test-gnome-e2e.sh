@@ -1,11 +1,10 @@
 #!/bin/sh
 # End-to-end test of GNOME source activation, the IBus engine, and window
 # tracking in a private headless GNOME Shell session. It verifies GNOME source
-# registration/activation, an IBus protocol transaction, insertion into a GTK
-# GNOME source activation, a live IBus input-context transaction, focus
-# tracking, and extension upgrade/reload behavior. The IBus client verifies
-# the toolkit protocol contract, but does not certify GTK application
-# insertion, compositor keyboard delivery, or physical-keyboard behavior.
+# registration/activation, an IBus protocol transaction, a live GTK 3 IBus
+# input context, focus tracking, and extension upgrade/reload behavior. GTK's
+# test event is sent to a focused Entry through GTK's actual IBus module; it
+# does not certify compositor keyboard delivery or physical-keyboard behavior.
 #
 # Usage: scripts/test-gnome-e2e.sh [--keep]
 #   E2E_BIN=DIR        use prebuilt wayexpand, wayexpand-ibus, and wx-e2e-* binaries
@@ -24,9 +23,9 @@ for argument in "$@"; do
         *) printf '%s\n' "usage: $0 [--keep]" >&2; exit 2 ;;
     esac
 done
-for tool in gnome-shell dbus-run-session gsettings gdbus; do
+for tool in gnome-shell dbus-run-session gsettings gdbus xdotool timeout; do
     if ! command -v "$tool" >/dev/null 2>&1; then
-        printf '%s\n' "error: $tool is required (install gnome-shell, dbus-daemon and libglib2.0-bin)" >&2
+        printf '%s\n' "error: $tool is required (install GNOME Shell, XWayland, xdotool and the GTK/IBus test dependencies)" >&2
         exit 2
     fi
 done
@@ -349,11 +348,73 @@ while :; do
     sleep 0.1
 done
 # Exercise the active GNOME-selected engine through the IBus input-context
-# protocol. The toolkit client verifies deletion and commit behavior, though
-# headless GNOME cannot deliver a trusted synthetic physical key to GTK.
+# protocol, then through GTK's own IBus module and Gtk.Entry widget hosted on
+# GNOME's private XWayland server. xdotool sends the harmless test trigger
+# through XTEST after Mutter confirms the target window is focused. This does
+# not certify native Wayland compositor or physical-keyboard event delivery.
 IBUS_ADDRESS=$(ibus address) "$E2E_BIN_DIR/wx-e2e-ibus" \
     "$XDG_RUNTIME_DIR/wayexpand-ibus-status.json" --expect-active --single-expansion
 log "pass gnome-ibus-input-context the active GNOME-selected engine replaced a verified trigger"
+x11_display=$(sed -n 's/.*Using public X11 display \([^,]*\),.*/\1/p' \
+    "$E2E_WORK/gnome-shell.log" | head -n 1)
+if [ -z "$x11_display" ]; then
+    log "fail gnome-gtk-insertion GNOME did not start its private XWayland server"
+    exit 1
+fi
+xwayland_auth=
+for process_cmdline in /proc/[0-9]*/cmdline; do
+    [ -r "$process_cmdline" ] || continue
+    process_args=$(tr '\000' '\n' <"$process_cmdline" 2>/dev/null || true)
+    process_display=$(printf '%s\n' "$process_args" | awk '/^:[0-9]+$/ { print; exit }')
+    if [ "$process_display" = "$x11_display" ]; then
+        candidate_auth=$(printf '%s\n' "$process_args" | awk 'previous == "-auth" { print; exit } { previous = $0 }')
+        if [ -n "$candidate_auth" ] && [ -r "$candidate_auth" ]; then
+            xwayland_auth=$candidate_auth
+            break
+        fi
+    fi
+done
+if [ -z "$xwayland_auth" ]; then
+    log "fail gnome-gtk-insertion GNOME's private XWayland authorization file could not be resolved"
+    exit 1
+fi
+timeout 20s env \
+    GTK_IM_MODULE=ibus \
+    GDK_BACKEND=x11 \
+    DISPLAY="$x11_display" \
+    XAUTHORITY="$xwayland_auth" \
+    IBUS_ADDRESS="$(ibus address)" \
+    GTK_E2E_FOCUS_MARKER="$E2E_WORK/gtk-window-focused" \
+    python3 "$E2E_PROJECT_DIR/scripts/certification-clients/gtk_ibus_e2e.py" \
+    >"$E2E_WORK/gtk-ibus-e2e.log" 2>&1 &
+gtk_pid=$!
+if ! activate_window org.wayexpand.GnomeGtkIbus; then
+    kill "$gtk_pid" 2>/dev/null || true
+    wait "$gtk_pid" 2>/dev/null || true
+    gtk_pid=
+    log "fail gnome-gtk-insertion Mutter could not focus the GTK IBus acceptance window"
+    cat "$E2E_WORK/gtk-ibus-e2e.log"
+    exit 1
+fi
+: >"$E2E_WORK/gtk-window-focused"
+if ! DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+    xdotool type --clearmodifiers --delay 40 -- ';e2e'; then
+    kill "$gtk_pid" 2>/dev/null || true
+    wait "$gtk_pid" 2>/dev/null || true
+    gtk_pid=
+    log "fail gnome-gtk-insertion XTEST could not type into the focused GTK window"
+    cat "$E2E_WORK/gtk-ibus-e2e.log"
+    exit 1
+fi
+gtk_status=0
+wait "$gtk_pid" || gtk_status=$?
+gtk_pid=
+if [ "$gtk_status" -ne 0 ]; then
+    log "fail gnome-gtk-insertion GTK's focused Entry did not receive the WayExpand replacement"
+    cat "$E2E_WORK/gtk-ibus-e2e.log"
+    exit 1
+fi
+log "pass gnome-gtk-insertion GTK's IBus input context replaced the trigger in Gtk.Entry"
 "$E2E_BIN_DIR/wayexpand" ibus status --json \
     >"$E2E_WORK/ibus-after-input-context.json" \
     2>"$E2E_WORK/ibus-after-input-context.err" || true
@@ -685,7 +746,7 @@ env -i \
     dbus-run-session -- "$work/session.sh" >"$work/results.txt" 2>"$work/session.log" || status=$?
 
 cat "$work/results.txt"
-expected_checks='extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-ibus-input-context extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-ibus-input-context-after-login'
+expected_checks='extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-ibus-input-context gnome-gtk-insertion extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-ibus-input-context-after-login'
 missing_check=
 for check in $expected_checks; do
     if ! grep -F "pass $check" "$work/results.txt" >/dev/null; then
