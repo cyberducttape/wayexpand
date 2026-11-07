@@ -821,6 +821,7 @@ env -i \
     WAYEXPAND_GNOME_AUTH_DIAGNOSTICS=1 \
     E2E_WORK="$work" \
     E2E_BIN_DIR="$bin_dir" \
+    E2E_BROWSER_BIN="$browser_bin" \
     E2E_PROJECT_DIR="$project_dir" \
     E2E_UUID="$uuid" \
     E2E_CONTROLLER_UUID="$controller_uuid" \
