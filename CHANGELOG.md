@@ -6,13 +6,12 @@ All notable changes to WayExpand are documented here.
 
 - Pass IBus key events through untouched when the client lacks advertised
   surrounding-text support. This prevents matching from consuming trigger
-  characters that cannot be safely replaced; the browser acceptance test verifies
-  exact
-  trigger preservation in this case.
+  characters that cannot be safely replaced; browser and real-daemon acceptance
+  tests verify exact trigger preservation and content-free pass-through telemetry.
 - Correlate the Chromium IBus acceptance trigger with its new focused IBus
   context, and include content-free focus, key, and refusal counters when the
-  acceptance run cannot verify insertion or safe refusal. Failure diagnostics
-  encode only the fixed test-field value as Unicode code points.
+  acceptance run cannot verify insertion or safe pass-through. Failure
+  diagnostics encode only the fixed test-field value as Unicode code points.
 - Clarify that systemd AF_UNIX-only restrictions block direct IP sockets but
   do not prevent network access relayed through an authorized local Unix-socket
   service.

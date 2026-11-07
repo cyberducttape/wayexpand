@@ -521,8 +521,8 @@ fn main() -> Result<()> {
     );
     terminal.call("FocusOut", &())?;
 
-    // Telemetry: the engine published its activity, explains the terminal
-    // refusal, and never recorded typed text.
+    // Telemetry: the engine published its activity, passed terminal
+    // input through without capturing it, and never recorded typed text.
     thread::sleep(Duration::from_millis(800));
     match wayexpand_backend_ibus::telemetry::read_status_at(&status_file) {
         Some(reading) => {
@@ -533,11 +533,12 @@ fn main() -> Result<()> {
                 .iter()
                 .map(|field| {
                     format!(
-                        "focused={} type={:?} surrounding={} keys={} expansions={} refusals={:?}",
+                        "focused={} type={:?} surrounding={} keys={} uncaptured={} expansions={} refusals={:?}",
                         field.focused,
                         field.content_type,
                         field.surrounding_capability,
                         field.keys,
+                        field.keys_without_capture,
                         field.expansions,
                         field.refusals
                     )
@@ -552,14 +553,15 @@ fn main() -> Result<()> {
                 ),
             );
             let explained = status.recent_fields.iter().any(|field| {
-                field.refusals.no_surrounding_capability > 0
+                !field.surrounding_capability
+                    && field.keys_without_capture >= TRIGGER.chars().count() as u64
                     && wayexpand_backend_ibus::IbusFieldVerdict::of(field)
                         == wayexpand_backend_ibus::IbusFieldVerdict::NoSurroundingText
             });
             results.check(
                 "telemetry-explains-terminal",
                 explained,
-                "terminal-like field reported as no-surrounding-text",
+                "unsupported terminal-like field passed through without capture and reported as no-surrounding-text",
             );
             results.check(
                 "telemetry-content-free",
