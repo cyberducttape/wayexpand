@@ -650,7 +650,7 @@ fn check(
             .or_else(|| {
                 (state != IbusCheckState::Pass && id == "field-input").then_some("WX-IBUS-003")
             })
-            .or_else(|| match (id, state) {
+            .or(match (id, state) {
                 ("target-insertion", IbusCheckState::Fail) => Some("WX-IBUS-005"),
                 ("target-insertion", IbusCheckState::Warn) => Some("WX-IBUS-006"),
                 ("target-insertion", IbusCheckState::Unknown) => Some("WX-IBUS-007"),
