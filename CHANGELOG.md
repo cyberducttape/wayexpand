@@ -11,7 +11,8 @@ All notable changes to WayExpand are documented here.
   expansion stages in setup readiness, including warnings for shared IBus
   manifests that point into one user's home. A registered and running IBus
   engine no longer obscures the case where KWin is not routing application
-  input to IBus.
+  input to IBus. Summarize integrated checks as degraded when warnings exist
+  and incomplete when a prerequisite is failed or unknown.
 - Add a machine-readable `route_safety` section to `wayexpand health --json`
   so an operationally connected route also reports missing sensitive-field
   detection, target-identity evidence, non-atomic compatibility overrides,

@@ -156,6 +156,24 @@ fn readiness_check(
     }
 }
 
+fn integrated_readiness_status(checks: &[ReadinessCheck]) -> &'static str {
+    if checks.iter().any(|check| {
+        matches!(
+            check.status.as_str(),
+            "fail" | "unavailable" | "unknown" | "not_tested"
+        )
+    }) {
+        "incomplete"
+    } else if checks
+        .iter()
+        .any(|check| check.status.as_str() == "warning")
+    {
+        "degraded"
+    } else {
+        "pass"
+    }
+}
+
 fn systemd_property(unit: &str, property: &str) -> Option<String> {
     crate::setup_ibus::command_output(
         "systemctl",
@@ -768,7 +786,7 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
             "schema":2, "title":"WayExpand setup readiness", "ready":ready,
                 "readiness_levels":{
                     "installed":{"status":if installed {"pass"} else {"fail"},"checks":rows.iter().map(|row| serde_json::json!({"component":row.component,"status":row.status,"path":row.path,"detail":row.detail})).collect::<Vec<_>>()},
-                    "integrated":{"status":if integration.iter().all(|check| check.status == "pass" || check.status == "warning") {"pass"} else {"incomplete"},"checks":integration},
+                    "integrated":{"status":integrated_readiness_status(&integration),"checks":integration},
                     "operational":{"status":if operational.iter().any(|check| check.component == "daemon_runtime" && check.status == "pass") || operational.iter().any(|check| check.component == "ibus_engine" && check.status == "pass") {"partial"} else {"not_ready"},"checks":operational},
                     "target_insertion":{"status":"not_tested","verified":false},
                     "terminal_matching_self_test":&terminal_match,
@@ -1118,6 +1136,35 @@ pub(crate) fn repair(args: Args) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn integrated_readiness_does_not_promote_warnings_or_unknowns_to_pass() {
+        let pass = || readiness_check("unit", "pass", "loaded", serde_json::Value::Null);
+        let not_applicable = readiness_check(
+            "optional",
+            "not_applicable",
+            "not used on this desktop",
+            serde_json::Value::Null,
+        );
+        assert_eq!(
+            integrated_readiness_status(&[pass(), not_applicable]),
+            "pass"
+        );
+
+        let warning = readiness_check(
+            "ibus_route",
+            "warning",
+            "recent helper crash",
+            serde_json::Value::Null,
+        );
+        assert_eq!(integrated_readiness_status(&[pass(), warning]), "degraded");
+
+        let unknown = readiness_check("input", "unknown", "not observed", serde_json::Value::Null);
+        assert_eq!(
+            integrated_readiness_status(&[pass(), unknown]),
+            "incomplete"
+        );
+    }
 
     #[test]
     fn setup_readiness_exposes_compositor_routing_failure_and_repair() {
