@@ -62,6 +62,14 @@ passes by a green CI run.
 
 ### GNOME IBus install and application coverage
 
+GNOME Shell extension compatibility is also checked separately from desktop
+route certification. CI runs the shipped window-tracker extension inside the
+GNOME Shell 51 runtime from Fedora 45, verifies that Shell loads it, and checks
+its live build identity, D-Bus protocol, active input-source query, and US to
+German to US layout switching through GNOME's input-source manager. This does
+not certify physical keyboard delivery, text replacement, or a production
+GNOME route.
+
 `tests/certification/gnome-ibus-matrix.json` defines the platform and client
 coverage required before making GNOME IBus support claims. The existing
 `test-gnome-e2e.sh` now runs GNOME Shell with its session-managed IBus daemon. It
