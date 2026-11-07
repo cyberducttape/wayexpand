@@ -1106,10 +1106,11 @@ All notable changes to WayExpand are documented here.
 
 - Exit with code 1 instead of panicking (exit 101) when the reader closes the
   CLI's standard output, as in `wayexpand doctor | head`.
-- Port the GUI to egui/eframe 0.37. Enable egui's `monochrome_emoji_fonts`,
-  which eframe does not forward, so interface arrows and symbols keep
-  rendering; a test now requires the bundled fonts to cover every symbol the
-  GUI uses, apart from those deliberately drawn from system symbol fonts.
+- Extend the headless GNOME acceptance run to verify real GTK insertion and
+  Chromium input handling over XWayland. The tested Chromium IBus field did not
+  provide surrounding-text support, so the test verifies that WayExpand refuses
+  replacement and preserves the trigger; this is not browser replacement
+  certification.
 - Accept Dependabot commits and GitHub web-UI merge commits on `main` only
   when they carry GitHub's pinned web-flow signature; the key is committed
   under `.github/keys/`. Dependabot commits on pull requests now need the same
