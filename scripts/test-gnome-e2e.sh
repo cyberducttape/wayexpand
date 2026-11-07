@@ -392,13 +392,14 @@ import sys
 
 with open(sys.argv[1], encoding="utf-8") as source:
     report = json.load(source)
+readiness = report.get("readiness", {})
 expected = {
     "registered": True,
     "selected": True,
     "engine_running": True,
     "text_received": True,
 }
-actual = {key: report.get(key) for key in expected}
+actual = {key: readiness.get(key) for key in expected}
 assert actual == expected, actual
 print("pass gnome-ibus-input-context the live GNOME engine replaced a verified trigger")
 PY
