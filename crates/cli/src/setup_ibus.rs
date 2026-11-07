@@ -2322,16 +2322,15 @@ pub(crate) fn repair_gnome_input_source() -> Result<()> {
     // `ibus engine` can print the active default-layout engine and still exit
     // nonzero; use the route probe for WayExpand before relying on exit status.
     let previous_engine = if wayexpand_backend_ibus::global_engine_selected() {
-        "wayexpand".to_owned()
+        Some("wayexpand".to_owned())
     } else {
         command_output_with_status("ibus", &["engine"])
             .map(|(_, value)| value.trim().to_owned())
             .filter(|value| !value.is_empty())
-            .ok_or_else(|| anyhow::anyhow!("could not read the currently selected IBus engine"))?
     };
     let mut snapshot = SessionSnapshot {
         ibus_daemon_was_running: true,
-        global_engine: Some(previous_engine),
+        global_engine: previous_engine,
         ..SessionSnapshot::default()
     };
     let activation = (|| -> Result<()> {
