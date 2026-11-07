@@ -815,7 +815,7 @@ mod tests {
             super::daemon_build_state(&format!(
                 "daemon_commit={commit}\ndaemon_version={version}\n"
             )),
-            if commit == "unknown" || version == "unknown" {
+            if commit == "unknown" || version == "unknown" || version.contains(".dirty-unknown") {
                 super::DaemonBuildState::Unverified
             } else {
                 super::DaemonBuildState::Current
@@ -825,7 +825,7 @@ mod tests {
             super::daemon_build_state(&format!(
                 "daemon_commit={commit}\ndaemon_version={version}-other-tree\n"
             )),
-            if commit == "unknown" {
+            if commit == "unknown" || version.contains(".dirty-unknown") {
                 super::DaemonBuildState::Unverified
             } else {
                 super::DaemonBuildState::RestartRequired
@@ -841,7 +841,7 @@ mod tests {
         );
         assert_eq!(
             super::daemon_build_state("daemon_commit=older-build\n"),
-            if commit == "unknown" {
+            if commit == "unknown" || version.contains(".dirty-unknown") {
                 super::DaemonBuildState::Unverified
             } else {
                 super::DaemonBuildState::RestartRequired

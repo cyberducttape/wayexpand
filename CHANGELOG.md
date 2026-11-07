@@ -11,6 +11,8 @@ All notable changes to WayExpand are documented here.
   selected descriptor could pass while the test context remained unattached.
 - Report `commit_matches` as false when a source-archive build identity is
   unverified, even if its placeholder commit string happens to match.
+- Treat the GUI's `dirty-unknown` source-archive build identity as unverified
+  in first-run guidance and build-state regression tests.
 - Keep GNOME extension diagnostics useful across a Shell restart by verifying
   the live tracker identity when the Extensions manager query is temporarily
   unavailable. Treat matching `dirty-unknown` build labels as unverified in

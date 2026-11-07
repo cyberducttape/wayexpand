@@ -16,6 +16,12 @@ fn run_gui_test_frame(
     output
 }
 
+fn build_identity_unverified() -> bool {
+    env!("WAYEXPAND_COMMIT") == "unknown"
+        || env!("WAYEXPAND_BUILD_VERSION") == "unknown"
+        || env!("WAYEXPAND_BUILD_VERSION").contains(".dirty-unknown")
+}
+
 fn import_expansion(trigger: &str, replacement: &str) -> wayexpand_core::ExpansionConfig {
     wayexpand_core::ExpansionConfig {
         id: wayexpand_core::ExpansionConfig::new_id(),
@@ -2278,7 +2284,7 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
         guide_semantics.contains("Try it in a real app"),
         "{guide_semantics}"
     );
-    if env!("WAYEXPAND_COMMIT") == "unknown" {
+    if build_identity_unverified() {
         assert!(
             guide_semantics.contains("daemon's build identity is unknown"),
             "{guide_semantics}"
@@ -2290,7 +2296,7 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
             "{guide_semantics}"
         );
     }
-    if env!("WAYEXPAND_COMMIT") == "unknown" {
+    if build_identity_unverified() {
         assert!(!guide_semantics.contains("Copy trigger"));
     } else {
         assert!(
@@ -2361,13 +2367,13 @@ fn first_run_requires_a_verified_build_before_offering_live_test() {
                 .expect("first-run guide should expose accessible controls")
                 .nodes
         );
-        let expected_warning = if env!("WAYEXPAND_COMMIT") == "unknown" {
+        let expected_warning = if build_identity_unverified() {
             "daemon's build identity is unknown"
         } else {
             expected_warning
         };
         assert!(semantics.contains(expected_warning), "{semantics}");
-        if case == "stale" && env!("WAYEXPAND_COMMIT") != "unknown" {
+        if case == "stale" && !build_identity_unverified() {
             assert!(
                 semantics.contains("systemctl --user restart wayexpand-evdev.service"),
                 "{semantics}"
