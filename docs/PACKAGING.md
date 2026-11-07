@@ -13,15 +13,25 @@ packagers and source-build users need a compatible toolchain.
 
 ## Quick Reference
 
-**Current publication status:** experimental (uncertified) builds with
-x86_64 and aarch64 archives, a `.deb`, and an `.rpm` are published as GitHub
-prereleases (see [Experimental builds](#experimental-builds)). The v1.3.3
-GitHub release itself has no downloadable assets. The Launchpad PPA publishes
-an experimental daily package for Ubuntu 26.04 (Resolute), amd64. Launchpad
-reported build `1.3.3-0~202610270213~ubuntu26.04.1` as successfully built on
-2026-10-27 ([build result](https://launchpad.net/~cyberducttape/+archive/ubuntu/ppa/+build/33875568)).
-This daily package is not compositor-certified; certified releases remain
-gated on compositor certification.
+**Publication status audited 2026-11-07:** the latest GitHub release (`1.3.4`)
+has no downloadable assets. The Launchpad PPA has an experimental daily
+`1.3.3` package for Ubuntu 26.04 (Resolute) and Ubuntu 26.10 (Stonking), amd64.
+Its Ubuntu 24.04 (Noble) and 22.04 (Jammy) publications are stale at `0.2.0`;
+do not treat them as current installation channels. No WayExpand Copr project
+is currently published, and the PKGBUILD has not been submitted to AUR. The
+PPA packages are not compositor-certified; certified releases remain gated on
+compositor certification.
+
+The release payload is built on Ubuntu 24.04 and package-install CI covers
+Debian packages on Ubuntu 24.04 and 26.04 plus RPM packages on Fedora 45. These
+checks establish package installation compatibility only. The current
+package smoke test covers install, reinstall, and removal, but not an upgrade
+from a previous package version. These checks do not establish desktop input
+certification or a stable distro repository. GitHub release artifacts receive
+build-provenance attestations and checksums; repositories must use their
+distribution signing infrastructure before they are advertised as official
+channels. CI does not yet compare independently rebuilt `.deb`/`.rpm` files,
+so package reproducibility is also unverified.
 
 For ordinary desktop installations, prefer the distribution package whenever
 one is available. Debian, RPM, and Arch package recipes install the shared
@@ -30,24 +40,32 @@ source-install flow's administrator-authorized system registration step.
 Release archives and `scripts/install-user.sh` remain useful for development
 and per-user CLI/GUI installs, but their staged IBus component may still need
 system integration before the GNOME IBus route can run. Package availability
-and desktop certification are separate: the currently published packages are
-experimental and have not passed the physical-desktop certification gate.
+and desktop certification are separate: no currently published package has
+passed the physical-desktop certification gate.
 
-The next recorded attempt, build
-[`33891053`](https://launchpad.net/~cyberducttape/+archive/ubuntu/ppa/+build/33891053),
-failed because its source snapshot selected egui/eframe 0.37, which requires
-Rust 1.95, while the builder had Rust 1.93.1. The current vendored branch has
-since been synchronized to source revision `3de0954a` with egui/eframe 0.35;
-the workspace check and Debian release build pass under Rust 1.92 locally.
-A new Launchpad build has not yet confirmed the repaired source remotely.
+The earlier Rust 1.93 build failure was resolved by synchronizing the
+vendored source branch. The current `1.3.3` daily package built successfully
+for amd64 on Resolute and Stonking on 2026-11-07 ([Resolute build
+33926583](https://launchpad.net/~cyberducttape/+archive/ubuntu/ppa/+build/33926583),
+[Stonking build
+33926582](https://launchpad.net/~cyberducttape/+archive/ubuntu/ppa/+build/33926582)).
 
 | Distro | Package | Status | Maintainer |
 |--------|---------|--------|------------|
 | Arch Linux | `wayexpand` | Build locally | Packaging preview; not submitted to AUR |
-| Ubuntu | `wayexpand` | Experimental daily PPA package published for Ubuntu 26.04 (Resolute), amd64 | Successful Launchpad build; not compositor-certified; other series and architectures are not implied |
+| Ubuntu 24.04 LTS | `.deb` | Release build baseline and package-install CI target | Current PPA publication is stale (`0.2.0`); no certified release asset |
+| Ubuntu 26.04 LTS | `wayexpand` | Experimental daily PPA package; `.deb` package-install CI target | Current daily package published for amd64; not compositor-certified |
 | Debian | `.deb` | Build locally from source | No release asset or APT repository currently published |
-| Fedora/RHEL | `.rpm` | Build locally from source/spec | No release asset or Copr repository currently published |
+| Fedora 45 | `.rpm` | RPM package-install CI target | No certified release asset or Copr repository currently published |
 | aarch64 | `wayexpand` | Build locally from source | No release archive currently published |
+
+The Ubuntu 24.04 and Fedora 45 entries describe package build/install coverage,
+not a claim that a stable distribution channel or compositor-certified route
+is available. Release publication remains blocked until the production
+certification gate passes. GitHub release artifacts carry build-provenance
+attestations and checksums; a future APT/Copr repository must use the
+repository's signing infrastructure before it is described as an official
+package channel.
 
 ### Experimental builds
 
@@ -112,7 +130,8 @@ This documents a local packaging path. An experimental daily package is
 currently published for Ubuntu 26.04 (Resolute), amd64; check the PPA for the
 latest package and build state before installing. The daily package is not a
 certified release. The GitHub release workflow only publishes release
-artifacts after its certification gates pass.
+artifacts after its certification gates pass. CI also verifies package
+installation on Ubuntu 24.04 LTS and 26.04 LTS.
 
 **To maintain:**
 1. Update version in `debian/changelog`
@@ -124,8 +143,9 @@ artifacts after its certification gates pass.
 
 **Status:** The release workflow is configured to attach a local-install RPM
 for x86_64 after certification gates pass; no RPM is currently published. The
-RPM spec is maintained and built in CI, but no official Copr repository is
-published, so DNF repository-based updates are not available.
+RPM spec is maintained and built in CI, with package installation checked on
+Fedora 45. No official Copr repository is published, so DNF repository-based
+updates are not available.
 
 For the release RPM, install the downloaded local package with:
 
@@ -238,11 +258,10 @@ dput ppa:cyberducttape/ppa "wayexpand_${source_version}_source.changes"
 
 Launchpad builds from source, so only submit to Ubuntu series whose build
 archive provides both `rustc` and `cargo` at or above the project MSRV (1.92).
-Ubuntu 26.04 Resolute provides Rust 1.93 and satisfies this package's build
-dependencies. The current daily amd64 build succeeded on 2026-10-27; see the
-[Launchpad build record](https://launchpad.net/~cyberducttape/+archive/ubuntu/ppa/+build/33875568).
-Check each series and architecture's current Launchpad build and publication
-state before advertising it as installable.
+Ubuntu 26.04 Resolute currently satisfies this package's build dependencies.
+The latest amd64 builds and published series are listed in the publication
+status above. Check Launchpad before advertising any additional series or
+architecture as installable.
 
 **Daily builds:** the `main-daily` recipe builds the `launchpad-vendored`
 branch once a day when it has changed. Its text is

@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Build release payloads against Ubuntu 24.04 LTS and pin distro package
+  install smoke checks to Ubuntu 24.04/26.04 and Fedora 45. Clarify in
+  packaging docs that CI coverage is not the same as published package
+  channels; refresh publication status from current GitHub and Launchpad
+  inventories.
 - Keep GNOME extension readiness distinct when Shell status queries fail:
   session-bus failures and unknown state now produce targeted diagnostics,
   and logout/login is recommended only when the live Shell reports that the

@@ -114,7 +114,10 @@ jobs:
   linux-x86_64:
     name: Linux x86_64 release
     needs: [ci, certification, linux-aarch64]
-    runs-on: ubuntu-latest
+    # Build the release binaries and .deb against Ubuntu 24.04 LTS, the oldest
+    # supported Ubuntu package target. Fedora package installation is covered
+    # by the pinned Fedora 45 smoke lane in ci.yml.
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
       contents: write
