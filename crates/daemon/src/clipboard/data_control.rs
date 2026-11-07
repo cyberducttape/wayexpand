@@ -235,9 +235,18 @@ pub(super) fn read(deadline: Instant, max_bytes: usize) -> NativeRead {
     let manager: ExtDataControlManagerV1 = registry.bind(manager_name, 1, &handle, ());
     let device = manager.get_data_device(&seat, &handle, ());
     // The compositor announces the current selection right after the device
-    // is created.
+    // is created. The selection event may be queued before the selected offer's
+    // MIME-type events, so don't treat the selection alone as a complete offer.
     let announced = dispatch_until(&connection, &mut queue, &mut state, deadline, |state| {
-        state.selection.is_some() || state.finished
+        state.finished
+            || match state.selection.as_ref() {
+                Some(None) => true,
+                Some(Some(selected)) => state
+                    .offers
+                    .iter()
+                    .any(|(offer, mime_types)| offer == selected && !mime_types.is_empty()),
+                None => false,
+            }
     });
     let text = if announced {
         receive_text(&connection, &state, deadline, max_bytes)
