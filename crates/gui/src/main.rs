@@ -318,6 +318,7 @@ struct GuiApp {
     dark_mode: bool,
     onboarding_visible: bool,
     onboarding_completed: bool,
+    gnome_setup_resume_pending: bool,
     onboarding_show_troubleshooting: bool,
     language: Language,
     strings: Strings,
@@ -568,6 +569,7 @@ impl GuiApp {
         let config_document = persistence::read_config_document(loaded.source())?;
         let config_revision = loaded.revision.clone();
         let config = loaded.config;
+        let gnome_setup_resume_pending = wayexpand_core::gnome_ibus_setup_resume_pending(&path);
         let preview_library_snippets = config.includable_snippets();
         let preview_library_revision = config_revision.clone();
         let search_index = library::SearchIndex::new(&config);
@@ -583,12 +585,13 @@ impl GuiApp {
         let settings_keystroke_limit = config.settings.keystroke_max_chars.to_string();
         let prefs = load_gui_prefs();
         let onboarding_completed = prefs.onboarding_completed;
-        let onboarding_visible = !onboarding_completed
-            && (config.expansion.is_empty()
-                || config.expansion.iter().any(|expansion| {
-                    expansion.replacement == "WayExpand is working!"
-                        && expansion.tags.iter().any(|tag| tag == "tutorial")
-                }));
+        let onboarding_visible = gnome_setup_resume_pending
+            || !onboarding_completed
+                && (config.expansion.is_empty()
+                    || config.expansion.iter().any(|expansion| {
+                        expansion.replacement == "WayExpand is working!"
+                            && expansion.tags.iter().any(|tag| tag == "tutorial")
+                    }));
         let settings_font_scale = prefs.font_scale;
         let strings = Strings::new(prefs.language);
         Ok(Self {
@@ -719,6 +722,7 @@ impl GuiApp {
             dark_mode: prefs.dark_mode.unwrap_or(true),
             onboarding_visible,
             onboarding_completed,
+            gnome_setup_resume_pending,
             onboarding_show_troubleshooting: false,
             language: prefs.language,
             strings,

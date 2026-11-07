@@ -84,15 +84,21 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
         build_info::COMMIT
     );
     println!("Session: {}", session_description());
-    if wayexpand_backend_selection::Compositor::detect()
-        == wayexpand_backend_selection::Compositor::Gnome
+    let is_gnome = wayexpand_backend_selection::Compositor::detect()
+        == wayexpand_backend_selection::Compositor::Gnome;
+    let is_gnome_wayland = is_gnome
         && std::env::var("XDG_SESSION_TYPE")
-            .is_ok_and(|session| session.eq_ignore_ascii_case("wayland"))
-    {
+            .is_ok_and(|session| session.eq_ignore_ascii_case("wayland"));
+    if is_gnome_wayland {
         println!("GNOME Wayland detected. Existing keyboard sources and layout will be preserved.");
         println!("WayExpand will be added as an IBus source; its engine uses the system keyboard layout.");
     }
     println!();
+    let config_path = default_config_path();
+    let resume_pending = wayexpand_core::gnome_ibus_setup_resume_pending(&config_path);
+    if resume_pending {
+        println!("Resuming the GNOME IBus setup prepared before the previous logout.");
+    }
     let capabilities = probe_capabilities();
     let policy = load_policy()?;
     // A packaged IBus component can be installed but absent from the running
@@ -160,6 +166,8 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
         backend
     } else if let Some(mode) = requested_mode {
         setup_backend_for_mode(&mode, &capabilities, &policy)?
+    } else if resume_pending {
+        "ibus".to_owned()
     } else if assume_yes {
         automatic.backend
     } else {
@@ -209,6 +217,13 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     if let Err(error) = setup_result {
         eprintln!("SETUP RESULT: ACTION REQUIRED");
         return Err(error);
+    }
+    if backend == "ibus" && resume_pending {
+        wayexpand_core::clear_gnome_ibus_setup_resume(&config_path).map_err(|error| {
+            anyhow::anyhow!(
+                "IBus setup completed, but its continuation marker could not be cleared: {error}"
+            )
+        })?;
     }
     let test_config = Config::load(default_config_path())?;
     let test_trigger = setup_test_trigger(&test_config);

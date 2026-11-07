@@ -1478,6 +1478,18 @@ fn ensure_replacement_consent(
     Ok(false)
 }
 
+fn persist_gnome_setup_resume(
+    readiness: crate::gnome_extension::SetupReadiness,
+    config_path: &Path,
+) -> Result<()> {
+    if readiness != crate::gnome_extension::SetupReadiness::SessionRestartRequired {
+        return Ok(());
+    }
+    wayexpand_core::mark_gnome_ibus_setup_resume(config_path)
+        .context("could not save the GNOME setup continuation")?;
+    Ok(())
+}
+
 /// Runtime state changed during activation. Persistent files and user config
 /// are tracked separately by `SetupTransaction`.
 #[derive(Debug, Default)]
@@ -1527,16 +1539,10 @@ impl SetupTransaction {
         } else {
             None
         };
-        let gnome_input_sources_original = if IbusDesktop::detect() == IbusDesktop::Gnome {
-            Some(
-                crate::gnome_input_sources::Snapshot::capture()
-                    .context("could not snapshot original GNOME input sources before setup")?,
-            )
-        } else {
-            None
-        };
         Ok(Self {
-            // All persistent snapshots are taken before the first mutation.
+            // Persistent file snapshots are taken before file changes. The
+            // live GNOME source is captured later, once the Shell bridge is
+            // verified and immediately before input-source activation.
             component: ComponentInstallJournal::capture()?,
             shared_engine: ComponentInstallJournal::capture_limited(
                 shared_engine_path(),
@@ -1544,7 +1550,10 @@ impl SetupTransaction {
             )?,
             config: ConfigMutationJournal::capture()?,
             prepared_file,
-            gnome_input_sources_original,
+            // GNOME's live source snapshot requires the Shell bridge. Capture
+            // it later, after extension preflight has proved that bridge is
+            // loaded, but before setup activates or changes the source.
+            gnome_input_sources_original: None,
             session: None,
         })
     }
@@ -2425,12 +2434,15 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
     // mutation; activation state is captured immediately before it changes.
     let mut transaction = SetupTransaction::capture(companion == CompanionService::Terminals)?;
     let preparation = (|| -> Result<bool> {
+        let authorization_required = ensure_replacement_consent(options, &mut transaction.config)?;
+        if authorization_required {
+            return Ok(true);
+        }
         install_component(
             &mut transaction.component,
             &mut transaction.shared_engine,
             options,
         )?;
-        let authorization_required = ensure_replacement_consent(options, &mut transaction.config)?;
         if companion == CompanionService::Terminals && options.terminals {
             prepare_terminals(
                 &mut transaction.config,
@@ -2450,12 +2462,52 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
             bail!("setup preparation failed: {error}\n{summary}");
         }
     };
+    if replacement_authorization_required {
+        println!("SETUP INCOMPLETE: WX-POLICY-001");
+        println!("Text replacement remains disabled by policy. IBus registration, input-source activation, and service changes were not performed.");
+        println!("Required user action: review and authorize compatibility_mode = \"tracked-focus\" under [settings], then rerun `wayexpand setup --backend ibus`.");
+        bail!("WX-POLICY-001: explicit replacement authorization is required before IBus setup can continue");
+    }
 
     // The Shell extension is needed for GNOME's live source and layout
     // integration. Install/enable it only after the IBus route passed
     // preflight and the user has authorized replacement when required.
     if !replacement_authorization_required && IbusDesktop::detect() == IbusDesktop::Gnome {
-        crate::gnome_extension::setup_gnome_window_tracker();
+        match crate::gnome_extension::setup_gnome_window_tracker() {
+            crate::gnome_extension::SetupReadiness::Ready => {}
+            crate::gnome_extension::SetupReadiness::SessionRestartRequired => {
+                let config_path = default_config_path();
+                if let Err(error) = persist_gnome_setup_resume(
+                    crate::gnome_extension::SetupReadiness::SessionRestartRequired,
+                    &config_path,
+                ) {
+                    let rollback = transaction.rollback();
+                    let summary = transaction_rollback_summary(rollback);
+                    bail!("WX-GNOME-SESSION-RESTART-001: GNOME requires a logout/login, but WayExpand could not save the resume marker: {error}. The extension may remain installed or enabled; run `wayexpand doctor --gnome` and retry setup manually.\n{summary}");
+                }
+                println!("SETUP RESULT: ACTION REQUIRED");
+                println!("WX-GNOME-SESSION-RESTART-001: GNOME must load the WayExpand Shell extension before IBus setup can continue.");
+                println!("The verified extension build is installed and enabled. IBus activation has not started.");
+                println!("Next: log out of GNOME and log back in, then reopen WayExpand or run `wayexpand setup` to resume. Any required replacement consent and administrator authorization remain separate.");
+                for change in transaction.retained_prepared_changes() {
+                    println!("  Prepared change: {change}");
+                }
+                bail!("WX-GNOME-SESSION-RESTART-001: restart the GNOME session to continue setup");
+            }
+            crate::gnome_extension::SetupReadiness::Unavailable => {
+                let rollback = transaction.rollback();
+                let summary = transaction_rollback_summary(rollback);
+                bail!("WX-GNOME-EXTENSION-001: GNOME extension readiness could not be verified; IBus preparation was rolled back where possible. The extension may remain installed or enabled; run `wayexpand doctor --gnome` for its exact state.\n{summary}");
+            }
+        }
+        match crate::gnome_input_sources::Snapshot::capture() {
+            Ok(snapshot) => transaction.gnome_input_sources_original = Some(snapshot),
+            Err(error) => {
+                let rollback = transaction.rollback();
+                let summary = transaction_rollback_summary(rollback);
+                bail!("WX-GNOME-INPUT-SOURCE-001: could not capture GNOME's active input source before setup: {error}. IBus preparation was rolled back where possible.\n{summary}");
+            }
+        }
     }
 
     // Capture live session state after inert preparation, just before it
@@ -2572,6 +2624,29 @@ mod tests {
         fs::write(&path, b"<component />").unwrap();
         drop(PrivateStagingFile(Some(path.clone())));
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn gnome_setup_resume_is_persisted_only_when_a_new_login_is_required() {
+        let directory = env::temp_dir().join(format!(
+            "wayexpand-gnome-resume-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&directory).unwrap();
+        let config = directory.join("expansions.toml");
+        persist_gnome_setup_resume(crate::gnome_extension::SetupReadiness::Ready, &config).unwrap();
+        assert!(!wayexpand_core::gnome_ibus_setup_resume_pending(&config));
+        persist_gnome_setup_resume(
+            crate::gnome_extension::SetupReadiness::SessionRestartRequired,
+            &config,
+        )
+        .unwrap();
+        assert!(wayexpand_core::gnome_ibus_setup_resume_pending(&config));
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
