@@ -739,6 +739,12 @@ scenario_clipboard_variable() {
     expand_in e2e-a "" ";quote" || return 2
     wait_until 50 sink_text_is e2e-a "> copied text"
     result=$?
+    if [ "$result" -ne 0 ]; then
+        # Capture counters and outcome categories without collecting clipboard
+        # or snippet contents. This distinguishes a clipboard read failure
+        # from a trigger that never reached the matcher.
+        daemon_status >"$case_dir/daemon-status-after.txt" 2>&1 || true
+    fi
     describe e2e-a
     return "$result"
 }
