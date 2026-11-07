@@ -1490,6 +1490,14 @@ fn persist_gnome_setup_resume(
     Ok(())
 }
 
+fn gnome_extension_retention_note() -> &'static str {
+    if IbusDesktop::detect() == IbusDesktop::Gnome {
+        " The GNOME extension may remain installed or enabled; run `wayexpand doctor --gnome` to inspect it."
+    } else {
+        ""
+    }
+}
+
 /// Runtime state changed during activation. Persistent files and user config
 /// are tracked separately by `SetupTransaction`.
 #[derive(Debug, Default)]
@@ -2505,7 +2513,7 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
             Err(error) => {
                 let rollback = transaction.rollback();
                 let summary = transaction_rollback_summary(rollback);
-                bail!("WX-GNOME-INPUT-SOURCE-001: could not capture GNOME's active input source before setup: {error}. IBus preparation was rolled back where possible.\n{summary}");
+                bail!("WX-GNOME-INPUT-SOURCE-001: could not capture GNOME's active input source before setup: {error}. IBus preparation was rolled back where possible.{}\n{summary}", gnome_extension_retention_note());
             }
         }
     }
@@ -2522,7 +2530,10 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
         Err(error) => {
             let rollback = transaction.rollback();
             let summary = transaction_rollback_summary(rollback);
-            bail!("could not snapshot session state before activation: {error}\n{summary}");
+            bail!(
+                "could not snapshot session state before activation: {error}.{}\n{summary}",
+                gnome_extension_retention_note()
+            );
         }
     };
     if let Err(error) = activate_and_verify(
@@ -2535,7 +2546,10 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
     ) {
         let rollback = transaction.rollback();
         let summary = transaction_rollback_summary(rollback);
-        bail!("IBus activation failed: {error}\n{summary}");
+        bail!(
+            "IBus activation failed: {error}.{}\n{summary}",
+            gnome_extension_retention_note()
+        );
     }
     println!();
     let report = chain::diagnose();
