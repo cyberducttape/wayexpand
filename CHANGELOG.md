@@ -38,6 +38,10 @@ All notable changes to WayExpand are documented here.
   at IBus focus-in. Revalidate that window on key processing and clear
   application identity after focus changes or tracker loss, keeping
   app-filtered snippets fail-closed when the association is uncertain.
+- Exercise the IBus service path with two independent input contexts across
+  GNOME editor/terminal focus changes. Verify that app-filtered replacements
+  are suppressed in the terminal and become available only after the context
+  refocuses the authorized editor.
 - Make the real-application insertion test an explicit onboarding stage and
   update Getting Started so matcher success is never described as desktop
   verification. The GUI now labels configured-but-untested routes and maps
