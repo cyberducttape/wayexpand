@@ -1549,10 +1549,13 @@ pub(crate) fn live_explain_build_gate(
     let daemon_version = status.field("daemon_version");
     let commit_matches = cli_commit != "unknown"
         && daemon_commit.is_some_and(|commit| commit != "unknown" && commit == cli_commit);
-    let build_matches = daemon_version.map_or_else(
-        || !cli_version.contains(".dirty.") && commit_matches,
-        |version| commit_matches && version == cli_version,
-    );
+    let build_identity_unverified = cli_version.contains(".dirty-unknown")
+        || daemon_version.is_some_and(|version| version.contains(".dirty-unknown"));
+    let build_matches = !build_identity_unverified
+        && daemon_version.map_or_else(
+            || !cli_version.contains(".dirty.") && commit_matches,
+            |version| commit_matches && version == cli_version,
+        );
     if build_matches {
         None
     } else if cli_commit == "unknown"

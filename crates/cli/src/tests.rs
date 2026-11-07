@@ -22,20 +22,25 @@ fn live_explain_requires_matching_daemon_build_and_status_schema() {
         "running\nstatus_schema={}\ndaemon_commit={}\ndaemon_version={}\n",
         CONTROL_STATUS_SCHEMA, cli_commit, cli_version
     );
-    assert_eq!(
-        crate::commands::system::live_explain_build_gate(&current, cli_commit, cli_version),
-        None
-    );
+    let current_result =
+        crate::commands::system::live_explain_build_gate(&current, cli_commit, cli_version);
+    if cli_version.contains(".dirty-unknown") {
+        assert!(current_result.unwrap().contains("cannot be verified"));
+    } else {
+        assert_eq!(current_result, None);
+    }
 
     let stale = format!(
         "running\nstatus_schema={}\ndaemon_commit=older-build\ndaemon_version=old-version\n",
         CONTROL_STATUS_SCHEMA
     );
-    assert!(
-        crate::commands::system::live_explain_build_gate(&stale, cli_commit, cli_version)
-            .unwrap()
-            .contains("different build")
-    );
+    let stale_result =
+        crate::commands::system::live_explain_build_gate(&stale, cli_commit, cli_version).unwrap();
+    if cli_version.contains(".dirty-unknown") {
+        assert!(stale_result.contains("cannot be verified"));
+    } else {
+        assert!(stale_result.contains("different build"));
+    }
 
     let unknown = format!("running\nstatus_schema={}\n", CONTROL_STATUS_SCHEMA);
     assert!(
@@ -598,7 +603,11 @@ fn upgrade_status_distinguishes_current_stale_and_incompatible_daemons() {
         "source": "input-method",
         "backend": "input-method-v2",
     }));
-    if crate::build_info::COMMIT == "unknown" {
+    let identity_unverified = crate::doctor::status::daemon_build_unknown(
+        Some(crate::build_info::COMMIT),
+        Some(crate::build_info::VERSION),
+    );
+    if identity_unverified {
         assert_eq!(current["status"], "unverified");
         assert_eq!(current["commit_matches"], false);
     } else {
@@ -612,14 +621,14 @@ fn upgrade_status_distinguishes_current_stale_and_incompatible_daemons() {
         "daemon_version": "1.3.2-dev+older-build",
         "status_schema": CONTROL_STATUS_SCHEMA,
     }));
-    let stale_status = if crate::build_info::COMMIT == "unknown" {
+    let stale_status = if identity_unverified {
         "unverified"
     } else {
         "restart-required"
     };
     assert_eq!(stale["status"], stale_status);
     assert_eq!(stale["commit_matches"], false);
-    if crate::build_info::COMMIT == "unknown" {
+    if identity_unverified {
         assert!(stale["action"]
             .as_str()
             .unwrap()

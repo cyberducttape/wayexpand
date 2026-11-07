@@ -941,7 +941,10 @@ mod runtime_route_tests {
         );
         assert_eq!(summary["matcher_latency"]["p95_us"], 12);
         assert_eq!(summary["matcher_latency"]["sample_count"], 500);
-        let expected_status = if crate::build_info::COMMIT == "unknown" {
+        let expected_status = if daemon_build_unknown(
+            Some(crate::build_info::COMMIT),
+            Some(crate::build_info::VERSION),
+        ) {
             "unverified"
         } else {
             "current"
@@ -959,11 +962,12 @@ mod runtime_route_tests {
 
         let summary = runtime_route_summary(&snapshot);
 
-        let expected_status = if crate::build_info::COMMIT == "unknown" {
-            "unverified"
-        } else {
-            "restart-required"
-        };
+        let expected_status =
+            if daemon_build_unknown(Some("old-build"), Some("1.3.2-dev+old-build")) {
+                "unverified"
+            } else {
+                "restart-required"
+            };
         assert_eq!(summary["daemon_compatibility"]["status"], expected_status);
     }
 }
@@ -990,7 +994,10 @@ mod commit_tests {
 
     #[test]
     fn same_commit_with_a_different_dirty_build_version_requires_restart() {
-        if crate::build_info::COMMIT == "unknown" {
+        if daemon_build_unknown(
+            Some(crate::build_info::COMMIT),
+            Some(crate::build_info::VERSION),
+        ) {
             return;
         }
         let snapshot = serde_json::json!({
@@ -1006,7 +1013,7 @@ mod commit_tests {
 
     #[test]
     fn dirty_cli_does_not_assume_a_legacy_same_commit_daemon_matches() {
-        if crate::build_info::VERSION.contains(".dirty.") {
+        if daemon_build_unknown(Some(crate::build_info::COMMIT), None) {
             assert!(!daemon_build_matches(Some(crate::build_info::COMMIT), None));
             assert!(daemon_build_unknown(Some(crate::build_info::COMMIT), None));
         } else if crate::build_info::COMMIT != "unknown" {

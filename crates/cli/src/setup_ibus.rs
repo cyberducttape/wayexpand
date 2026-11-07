@@ -2683,6 +2683,15 @@ mod tests {
     #[test]
     fn companion_readiness_checks_build_schema_config_backend_and_runtime() {
         let mut status = healthy_companion_status("evdev");
+        if crate::doctor::status::daemon_build_unknown(
+            Some(crate::build_info::COMMIT),
+            Some(crate::build_info::VERSION),
+        ) {
+            assert!(companion_readiness_error(UserService::Evdev, &status)
+                .unwrap()
+                .contains("build identity"));
+            return;
+        }
         assert_eq!(companion_readiness_error(UserService::Evdev, &status), None);
 
         status["daemon_commit"] = "older-build".into();
@@ -2714,10 +2723,15 @@ mod tests {
     #[test]
     fn control_companion_requires_healthy_output_but_not_text_capture() {
         let status = healthy_companion_status("stdin");
-        assert_eq!(
-            companion_readiness_error(UserService::Control, &status),
-            None
-        );
+        let error = companion_readiness_error(UserService::Control, &status);
+        if crate::doctor::status::daemon_build_unknown(
+            Some(crate::build_info::COMMIT),
+            Some(crate::build_info::VERSION),
+        ) {
+            assert!(error.unwrap().contains("build identity"));
+        } else {
+            assert_eq!(error, None);
+        }
     }
 
     #[test]

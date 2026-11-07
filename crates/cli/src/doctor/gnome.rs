@@ -972,9 +972,20 @@ mod tests {
             wayexpand_core::CONTROL_STATUS_SCHEMA
         );
         let check = daemon_version_check(Some(&status));
-        assert_eq!(check.state, "fail");
+        let identity_unverified =
+            crate::doctor::status::daemon_build_unknown(Some("old-build"), Some("old-version"));
+        assert_eq!(
+            check.state,
+            if identity_unverified {
+                "unknown"
+            } else {
+                "fail"
+            }
+        );
         assert_eq!(check.problem_id, Some("WX-VERSION-001"));
-        assert!(check.detail.contains("old-build"));
+        if !identity_unverified {
+            assert!(check.detail.contains("old-build"));
+        }
         assert_eq!(
             check.remediation_command.as_deref(),
             Some("wayexpand upgrade --apply")
