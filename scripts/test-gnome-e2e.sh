@@ -1,7 +1,7 @@
 #!/bin/sh
 # End-to-end test of GNOME source activation, the IBus engine, and window
 # tracking in a private headless GNOME Shell session. It verifies GNOME source
-# registration/activation, an IBus protocol transaction, a live GTK 3 IBus
+# registration/activation, an IBus protocol transaction, live GTK 3/4 IBus
 # input context, focus tracking, and extension upgrade/reload behavior. GTK's
 # test event is sent to a focused Entry through GTK's actual IBus module; it
 # does not certify compositor keyboard delivery or physical-keyboard behavior.
@@ -409,6 +409,7 @@ run_gtk_ibus_case() {
     trigger=$2
     expected=$3
     password=$4
+    gtk_version=${5:-3}
     marker="$E2E_WORK/gtk-window-focused-$case_name"
     test_log="$E2E_WORK/gtk-ibus-e2e-$case_name.log"
     set --
@@ -423,7 +424,7 @@ run_gtk_ibus_case() {
         IBUS_ADDRESS="$(ibus address)" \
         GTK_E2E_FOCUS_MARKER="$marker" \
         python3 "$E2E_PROJECT_DIR/scripts/certification-clients/gtk_ibus_e2e.py" \
-        --expected "$expected" "$@" >"$test_log" 2>&1 &
+        --gtk-version "$gtk_version" --expected "$expected" "$@" >"$test_log" 2>&1 &
     gtk_pid=$!
     if ! activate_window org.wayexpand.GnomeGtkIbus; then
         kill "$gtk_pid" 2>/dev/null || true
@@ -457,6 +458,9 @@ run_gtk_ibus_case() {
 run_gtk_ibus_case insertion ';e2e' expanded false
 run_gtk_ibus_case unicode ';unicode' 'Grüße 世界 🖥️' false
 run_gtk_ibus_case password ';e2e' ';e2e' true
+run_gtk_ibus_case gtk4-insertion ';e2e' expanded false 4
+run_gtk_ibus_case gtk4-unicode ';unicode' 'Grüße 世界 🖥️' false 4
+run_gtk_ibus_case gtk4-password ';e2e' ';e2e' true 4
 # Exercise the same active engine in a real browser renderer. The isolated
 # Chromium profile uses a local page, XTEST sends only the harmless `;e2e`
 # trigger, and DevTools reads only that test textarea's final value.
@@ -888,7 +892,7 @@ env -i \
     dbus-run-session -- "$work/session.sh" >"$work/results.txt" 2>"$work/session.log" || status=$?
 
 cat "$work/results.txt"
-expected_checks='extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-ibus-input-context gnome-gtk-insertion gnome-gtk-unicode gnome-gtk-password extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-ibus-input-context-after-login'
+expected_checks='extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-ibus-input-context gnome-gtk-insertion gnome-gtk-unicode gnome-gtk-password gnome-gtk-gtk4-insertion gnome-gtk-gtk4-unicode gnome-gtk-gtk4-password extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-ibus-input-context-after-login'
 missing_check=
 for check in $expected_checks; do
     if ! grep -F "pass $check" "$work/results.txt" >/dev/null; then
@@ -929,4 +933,4 @@ if [ "$status" -ne 0 ] || grep -q '^fail' "$work/results.txt" \
     done
     exit 1
 fi
-printf '%s\n' "Headless GNOME input activation, GTK3 replacement/Unicode/password-field behavior, Chromium IBus pass-through safety, engine health, and extension upgrade/logout tests passed; GTK4, Qt, Firefox, Electron, terminal, and physical desktop certification remain unverified"
+printf '%s\n' "Headless GNOME input activation, GTK3/GTK4 replacement/Unicode/password-field behavior, Chromium IBus pass-through safety, engine health, and extension upgrade/logout tests passed; Qt, Firefox, Electron, terminal, and physical desktop certification remain unverified"
