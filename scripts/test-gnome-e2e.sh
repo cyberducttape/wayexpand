@@ -635,7 +635,7 @@ status=0
 # engines GNOME needs for the configured xkb sources.
 env -i \
     HOME="$work/home" \
-    PATH="$PATH" \
+    PATH="$bin_dir:$PATH" \
     XDG_CONFIG_HOME="$work/config" \
     XDG_CACHE_HOME="$work/cache" \
     XDG_DATA_HOME="$work/home/.local/share" \
