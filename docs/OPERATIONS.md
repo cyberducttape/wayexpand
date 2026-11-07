@@ -12,6 +12,13 @@ degraded, 2 daemon unavailable, 3 invalid configuration, 4 authorization
 required, and 5 internal error. “Ready” reports negotiated runtime operation
 only; it does not mean that a compositor/client combination has passed
 production certification.
+The JSON report also includes `route_safety`, a concise summary of the active
+route's sensitive-field signal, target-identity evidence, atomic-replacement
+capability, compatibility override, and certification status. Atomicity alone
+does not establish target identity. These limitations do not change the
+operational health exit code; automation that requires the independent
+execution-sandbox, input-privacy, configuration-integrity, or broker gates
+must inspect `wayexpand doctor --security --json` as well.
 
 The GUI Diagnostics window provides quick actions for opening setup, editing
 configuration, running the local matcher preview, reviewing desktop-test

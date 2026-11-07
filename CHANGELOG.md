@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add a machine-readable `route_safety` section to `wayexpand health --json`
+  so an operationally connected route also reports missing sensitive-field
+  detection, target-identity evidence, non-atomic compatibility overrides,
+  and the lack of production certification. Operational health and security
+  readiness remain separate.
 - Pass IBus key events through untouched when the client lacks advertised
   surrounding-text support. This prevents matching from consuming trigger
   characters that cannot be safely replaced; browser and real-daemon acceptance
