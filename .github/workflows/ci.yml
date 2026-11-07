@@ -624,6 +624,9 @@ jobs:
           sudo modprobe uinput
           sudo usermod -aG input "$USER"
           sudo chown "$(id -u):$(id -g)" /dev/uinput
+          printf '%s\n' 'SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="WayExpand GNOME acceptance keyboard", GROUP="input", MODE="0660"' \
+            | sudo tee /etc/udev/rules.d/99-wayexpand-gnome-e2e.rules >/dev/null
+          sudo udevadm control --reload-rules
           test -c /dev/uinput
       - name: Record tested revision
         id: tested_revision
