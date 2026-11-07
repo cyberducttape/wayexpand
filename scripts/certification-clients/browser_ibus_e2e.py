@@ -69,6 +69,19 @@ def main():
     )
     profile = Path(args.profile)
     profile.mkdir(mode=0o700, parents=True, exist_ok=True)
+    status_file = Path(args.status_file)
+
+    def status_snapshot():
+        try:
+            return json.loads(status_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return {}
+
+    # Take this before Chromium creates its input context. A snapshot taken
+    # after window activation can miss the FocusIn transition if the browser
+    # already reported focus while Mutter was mapping its XWayland window.
+    initial_status = status_snapshot()
+    initial_focus_ins = int(initial_status.get("totals", {}).get("focus_ins", 0))
     log_file = open(args.log, "wb")
     process = subprocess.Popen(
         [
@@ -153,14 +166,33 @@ def main():
         if evaluate("document.title") != TITLE:
             fail("unexpected browser title; refusing to activate an unrelated window")
         evaluate("document.querySelector('#target').focus()")
-        status_file = Path(args.status_file)
+        Path(args.ready_marker).touch(mode=0o600)
+        wait_for(lambda: Path(args.focus_marker).exists(), "Mutter-confirmed browser focus")
 
-        def status_snapshot():
-            try:
-                return json.loads(status_file.read_text(encoding="utf-8"))
-            except (OSError, ValueError, TypeError):
-                return {}
+        def browser_context_focused():
+            status = status_snapshot()
+            fields = status.get("recent_fields", [])
+            latest_field = fields[-1] if fields else {}
+            focus_ins = int(status.get("totals", {}).get("focus_ins", 0))
+            return focus_ins > initial_focus_ins and latest_field.get("focused") is True
 
+        try:
+            wait_for(
+                browser_context_focused,
+                "a new focused Chromium IBus context",
+            )
+        except SystemExit as error:
+            status = status_snapshot()
+            totals = status.get("totals", {})
+            fields = status.get("recent_fields", [])
+            latest_field = fields[-1] if fields else {}
+            fail(
+                f"{error}; "
+                f"focus_ins_delta={int(totals.get('focus_ins', 0)) - initial_focus_ins}, "
+                f"keys={totals.get('keys', 0)}, "
+                f"latest_field_focused={latest_field.get('focused')}, "
+                f"latest_field_surrounding={latest_field.get('surrounding_capability')}"
+            )
         baseline = status_snapshot()
         baseline_refusals = int(
             baseline.get("totals", {}).get("refusals", {}).get(
@@ -168,8 +200,6 @@ def main():
             )
         )
         baseline_keys = int(baseline.get("totals", {}).get("keys", 0))
-        Path(args.ready_marker).touch(mode=0o600)
-        wait_for(lambda: Path(args.focus_marker).exists(), "Mutter-confirmed browser focus")
 
         deadline = time.monotonic() + TIMEOUT_SECONDS
         actual = ""
@@ -196,9 +226,31 @@ def main():
                     )
                     return
             time.sleep(0.05)
+        final_status = status_snapshot()
+        final_totals = final_status.get("totals", {})
+        final_fields = final_status.get("recent_fields", [])
+        latest_field = final_fields[-1] if final_fields else {}
+        final_refusals = final_totals.get("refusals", {})
+        value_state = (
+            "replacement"
+            if actual == EXPECTED
+            else "trigger"
+            if actual == TRIGGER
+            else "empty"
+            if not actual
+            else "other"
+        )
         fail(
             "Chromium did not insert the expected text or record a safe refusal "
-            "for missing IBus surrounding-text support"
+            "for missing IBus surrounding-text support; "
+            f"value_state={value_state}, "
+            f"focus_ins_delta={int(final_totals.get('focus_ins', 0)) - initial_focus_ins}, "
+            f"keys_delta={int(final_totals.get('keys', 0)) - baseline_keys}, "
+            f"latest_field_focused={latest_field.get('focused')}, "
+            f"latest_field_keys={latest_field.get('keys', 0)}, "
+            f"latest_field_surrounding={latest_field.get('surrounding_capability')}, "
+            "no_surrounding_refusals_delta="
+            f"{int(final_refusals.get('no_surrounding_capability', 0)) - baseline_refusals}"
         )
     finally:
         if connection is not None:

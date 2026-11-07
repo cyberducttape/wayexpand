@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Correlate the Chromium IBus acceptance trigger with its new focused IBus
+  context, and include content-free focus, key, and refusal counters when the
+  acceptance run cannot verify insertion or safe refusal.
 - Clarify that systemd AF_UNIX-only restrictions block direct IP sockets but
   do not prevent network access relayed through an authorized local Unix-socket
   service.
