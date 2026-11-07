@@ -421,8 +421,12 @@ export default class WayExpandWindowTracker extends Extension {
                                         `peer uid=${uid} executable=${executable.split('/').pop()} authorized=${authorized}`,
                                     );
                                     finish(authorized);
-                                } catch {
-                                    this._logAuthorizationDiagnostic('could not resolve peer executable');
+                                } catch (error) {
+                                    const detail = String(error?.message || error)
+                                        .replace(/\/proc\/[0-9]+\/exe/g, '/proc/<pid>/exe');
+                                    this._logAuthorizationDiagnostic(
+                                        `could not resolve peer executable (${detail})`,
+                                    );
                                     finish(false);
                                 }
                             });
