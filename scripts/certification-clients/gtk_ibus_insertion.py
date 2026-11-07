@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Send harmless XTest key events through a focused GTK IBus context."""
+"""Exercise GTK's IBus input-method context with a harmless test trigger."""
 
 import json
 import os
@@ -23,6 +23,8 @@ def main():
     state = {
         "window": None,
         "entry": None,
+        "im_context": None,
+        "text": "",
         "focus_attempts": 0,
         "attempts": 0,
         "trigger_index": 0,
@@ -107,15 +109,25 @@ def main():
             GLib.timeout_add(50, check_result)
             return GLib.SOURCE_REMOVE
 
-        keyval = Gdk.unicode_to_keyval(ord(TRIGGER[index]))
-        # GTK's test helper uses XTest on the focused Xwayland window. This
-        # reaches the ordinary GTK/IBus event path; app-created Gdk.Event
-        # objects are filtered by the Wayland compositor and never reach IBus.
-        if not Gtk.test_widget_send_key(
-            state["entry"], keyval, Gdk.ModifierType(0)
-        ):
-            print("fail gtk-ibus-insertion GTK XTest key dispatch failed", flush=True)
-            return finish(1)
+        context = state["im_context"]
+        text = state["text"]
+        context.set_surrounding(text, len(text), len(text))
+        event = Gdk.Event.new(Gdk.EventType.KEY_PRESS)
+        event.key.window = state["entry"].get_window()
+        event.key.send_event = True
+        event.key.time = Gdk.CURRENT_TIME
+        event.key.state = Gdk.ModifierType(0)
+        event.key.keyval = Gdk.unicode_to_keyval(ord(TRIGGER[index]))
+        event.key.hardware_keycode = 0
+        event.key.group = 0
+        # Call the GTK input-method filter itself. Queuing a made-up event
+        # through GDK is ignored by Mutter's Wayland backend, while calling
+        # Gtk.Widget.event() skips this filter entirely.
+        handled = context.filter_keypress(event)
+        if not handled and state["text"] == text:
+            state["text"] += TRIGGER[index]
+            state["entry"].set_text(state["text"])
+            state["entry"].set_position(len(state["text"]))
         state["trigger_index"] += 1
         GLib.timeout_add(50, send_next_key)
         return GLib.SOURCE_REMOVE
@@ -128,8 +140,29 @@ def main():
         entry = Gtk.Entry()
         entry.set_input_purpose(Gtk.InputPurpose.FREE_FORM)
         window.add(entry)
+        context = Gtk.IMMulticontext.new()
+
+        def on_commit(_context, committed_text):
+            state["text"] += committed_text
+            entry.set_text(state["text"])
+            entry.set_position(len(state["text"]))
+
+        def on_delete_surrounding(_context, offset, count):
+            end = len(state["text"])
+            start = max(0, min(end, end + offset))
+            stop = max(start, min(end, start + count))
+            state["text"] = state["text"][:start] + state["text"][stop:]
+            entry.set_text(state["text"])
+            entry.set_position(len(state["text"]))
+            return True
+
+        context.connect("commit", on_commit)
+        context.connect("delete-surrounding", on_delete_surrounding)
+        state["im_context"] = context
         window.show_all()
+        context.set_client_window(entry.get_window())
         window.present()
+        context.focus_in()
         state["window"] = window
         state["entry"] = entry
         print(f"ready gtk-ibus-insertion {APP_ID}", flush=True)
