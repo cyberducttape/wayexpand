@@ -372,6 +372,25 @@ fn main() -> Result<()> {
             std::process::exit(1);
         }
     }
+    if single_expansion {
+        // After a GNOME Shell restart, the global source can be selected before
+        // IBus has attached a fresh engine instance to a focused text context.
+        // Real toolkits discover that state while processing input, so send a
+        // harmless non-trigger character before requiring engine telemetry.
+        editor.type_text("x")?;
+        results.check(
+            "engine-start-probe",
+            editor.contents() == "x",
+            format!(
+                "harmless probe text remained intact: {:?}",
+                editor.contents()
+            ),
+        );
+        if results.failed {
+            std::process::exit(1);
+        }
+        editor.clear()?;
+    }
     match wait_for_focused_engine(&status_file) {
         Ok(()) => results.check(
             "engine-context-ready",
