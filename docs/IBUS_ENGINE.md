@@ -217,6 +217,15 @@ wayexpand ibus status   # every link of the route, with the fix for each failure
 wayexpand ibus watch    # switch to an app and type: explains each field
 ```
 
+The JSON checks expose stable problem IDs for runtime evidence too:
+`WX-IBUS-003` means no normal-field input was observed, `WX-IBUS-005` means
+the engine recorded an output failure (the target may contain partial text),
+`WX-IBUS-006` means replacement actions were emitted but the resulting text
+cannot be verified by IBus, and `WX-IBUS-007` means no replacement was
+observed in the current engine session. These distinguish capture activity
+from target-side success; never automatically replay an uncertain insertion.
+Use `wayexpand help finding <WX-ID>` for a next step.
+
 `wayexpand doctor --gnome` presents three diagnostic sections: IBus input
 capture, snippet insertion (including replacement consent, output route, and
 the distinction between emitted actions and a verified target result), and
