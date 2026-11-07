@@ -4,6 +4,21 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Compile the effective IBus configuration once per generation and share its
+  validated snapshot and immutable matcher across engine contexts. Each IBus
+  context retains its own mutable typing state. Add a Criterion benchmark for
+  10,000-entry libraries with 1, 4, and 16 contexts.
+- Keep the per-user source installer focused on runtime binaries instead of
+  building certification-only executables, and direct ordinary desktop users
+  without Cargo to the package and release installation paths. Debian and RPM
+  packages now recommend IBus and PolicyKit for the optional GNOME setup flow;
+  release archive smoke tests also verify the desktop launcher is present.
+- Make first-run GUI completion depend on confirming an exact desktop-test
+  result in the selected application. Deferring the test keeps onboarding
+  incomplete; any enabled static snippet can be selected, so `;;hello` is not
+  required. Offer an explicit copy-only Quick Picker for manual paste without
+  querying focus or enabling raw keyboard capture. Clarify that local matcher
+  checks do not verify insertion in a desktop application.
 - Make GNOME's first IBus setup resumable across the logout required to load a
   newly installed Shell extension. Setup saves only a fixed, private resume
   marker, stops before IBus mutation with `WX-GNOME-SESSION-RESTART-001`, and

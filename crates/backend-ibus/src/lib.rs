@@ -17,7 +17,7 @@ use tracing::warn;
 use wayexpand_core::{
     CompletionNotifier, Config, ExpansionEngine, ExpansionResult, InjectorCapabilities, InputEvent,
     InputSourceCapabilities, OrganizationPolicy, PendingExpansionDispatch, ReplacementAdmission,
-    ReplacementGuarantee, WindowContext, MAX_WINDOW_INSTANCE_ID_BYTES,
+    ReplacementGuarantee, ValidatedConfig, WindowContext, MAX_WINDOW_INSTANCE_ID_BYTES,
 };
 
 // IBus' public C API defines IBUS_RELEASE_MASK as (1 << 30). The ibus-rs
@@ -168,6 +168,16 @@ impl IbusEngineAdapter {
     ) -> Result<Self, wayexpand_core::ConfigError> {
         engine.apply_administrator_policy(&policy)?;
         Ok(Self::build(engine, policy))
+    }
+
+    /// Build an independent input-context adapter over the same immutable
+    /// validated generation. The matcher's trie and compiled configuration
+    /// metadata are shared; only the engine's mutable typing state is new.
+    pub fn with_validated_config(
+        validated: Arc<ValidatedConfig>,
+        policy: OrganizationPolicy,
+    ) -> Self {
+        Self::build(ExpansionEngine::from_validated(validated), policy)
     }
 
     fn build(mut engine: ExpansionEngine, policy: OrganizationPolicy) -> Self {
@@ -396,6 +406,22 @@ impl IbusEngineAdapter {
         policy::apply_to_engine(&mut engine, &self.policy);
         self.engine = engine;
         Ok(())
+    }
+
+    /// Apply a generation already validated and compiled by the IBus service.
+    /// This avoids revalidating policy and rebuilding the trigger trie once
+    /// for every input context during a reload.
+    pub fn replace_validated_config(&mut self, validated: Arc<ValidatedConfig>) {
+        let mut engine = ExpansionEngine::from_validated(validated);
+        policy::apply_to_engine(&mut engine, &self.policy);
+        engine.set_form_replacement_guarantee(ReplacementGuarantee::VerifiedSurroundingText);
+        if self.engine.async_commands_enabled() && !engine.enable_async_commands() {
+            warn!(
+                "IBus asynchronous workers could not restart after configuration reload; command-backed actions are unavailable"
+            );
+        }
+        engine.inherit_runtime_state(&self.engine);
+        self.engine = engine;
     }
 
     /// A context gained focus. This is the only lifecycle event that clears
@@ -1829,5 +1855,23 @@ timeout_ms = 1000
             action,
             IbusAction::CommitText(text) if text == "signature"
         )));
+    }
+
+    #[test]
+    fn adapters_share_validated_generation_and_matcher_but_isolate_input_state() {
+        let config =
+            Config::parse("[[expansion]]\ntrigger = ':hello'\nreplacement = 'hello'\n").unwrap();
+        let validated = Arc::new(config.validate_snapshot().unwrap());
+        let first = IbusEngineAdapter::with_validated_config(
+            Arc::clone(&validated),
+            OrganizationPolicy::default(),
+        );
+        let second = IbusEngineAdapter::with_validated_config(
+            Arc::clone(&validated),
+            OrganizationPolicy::default(),
+        );
+
+        assert!(Arc::ptr_eq(first.engine.validated_config(), &validated));
+        assert!(Arc::ptr_eq(second.engine.validated_config(), &validated));
     }
 }

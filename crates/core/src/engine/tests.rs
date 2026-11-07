@@ -2,7 +2,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc,
+        mpsc, Arc,
     },
     thread,
 };
@@ -7156,4 +7156,22 @@ fn terminal_apps_must_be_app_ids() {
         ConfigError::InvalidTerminalApp { .. }
     ));
     assert!(Config::parse("[settings]\nterminal_apps = [\"org.kde.konsole\"]\n").is_ok());
+}
+
+#[test]
+fn engines_from_one_validated_generation_share_matcher_but_not_input_state() {
+    let config =
+        Config::parse("[[expansion]]\ntrigger = ':hello'\nreplacement = 'hello'\n").unwrap();
+    let validated = Arc::new(config.validate_snapshot().unwrap());
+    let mut first = ExpansionEngine::from_validated(Arc::clone(&validated));
+    let second = ExpansionEngine::from_validated(Arc::clone(&validated));
+
+    assert!(Arc::ptr_eq(&first.matcher, &second.matcher));
+    assert!(Arc::ptr_eq(
+        first.validated_config(),
+        second.validated_config()
+    ));
+    first.process(InputEvent::TextChar('x'));
+    assert!(first.buffer.iter().copied().eq(['x']));
+    assert!(second.buffer.is_empty());
 }

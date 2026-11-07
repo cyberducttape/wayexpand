@@ -1,4 +1,4 @@
-use crate::{ClipboardReader, KeyChord, TemplateContext, TemplateError};
+use crate::{ClipboardReader, KeyChord, Matcher, TemplateContext, TemplateError};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -640,6 +640,9 @@ pub struct ValidatedConfig {
     pub(crate) resolved_policy: OrganizationPolicy,
     pub(crate) normalized_ids: Vec<String>,
     pub(crate) effective_triggers: EffectiveTriggers,
+    /// Immutable compiled trie shared by all engine instances using this
+    /// validated generation. Per-engine typing buffers remain independent.
+    pub(crate) matcher: Arc<Matcher>,
     pub(crate) app_filters: Vec<Vec<AppFilter>>,
     /// Parsed once during validation and reused by matching and diagnostics.
     pub(crate) form_fields: Vec<Option<Arc<Vec<crate::FormField>>>>,

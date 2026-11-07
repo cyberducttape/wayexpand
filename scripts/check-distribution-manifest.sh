@@ -100,17 +100,20 @@ for contract_field in current_link config user_units binary_links uninstall upgr
 done
 
 for manifest in "$project_dir/debian/rules" "$project_dir/PKGBUILD" \
-    "$project_dir/wayexpand.spec" "$project_dir/.github/workflows/release.yml" \
-    "$project_dir/scripts/install-user.sh"; do
+    "$project_dir/wayexpand.spec" "$project_dir/.github/workflows/release.yml"; do
     grep -q -F 'wayexpand-e2e' "$manifest" || {
         printf '%s\n' "manifest omits the isolated certification helper build: $manifest" >&2
         exit 1
     }
 done
+if grep -q -F 'wayexpand-e2e' "$project_dir/scripts/install-user.sh"; then
+    printf '%s\n' 'developer source installer should not build certification-only helpers' >&2
+    exit 1
+fi
 
 for helper in wx-e2e-sink wx-e2e-type wx-e2e-eis-relay e2e-lib.sh kwin-e2e-report.sh; do
     for manifest in "$project_dir/PKGBUILD" "$project_dir/wayexpand.spec" \
-        "$project_dir/debian/rules" "$project_dir/scripts/install-user.sh" \
+        "$project_dir/debian/rules" \
         "$project_dir/scripts/install-release.sh" "$project_dir/scripts/package-release-binaries.sh"; do
         grep -q -F "$helper" "$manifest" || {
             printf '%s\n' "manifest omits certification helper $helper: $manifest" >&2
@@ -118,6 +121,35 @@ for helper in wx-e2e-sink wx-e2e-type wx-e2e-eis-relay e2e-lib.sh kwin-e2e-repor
         }
     done
 done
+
+# The developer-only source installer deliberately builds runtime components
+# only. Certification helpers remain available in distribution/release
+# packages, but should not add toolchain work to a per-user source install.
+for helper in wx-e2e-sink wx-e2e-type wx-e2e-eis-relay e2e-lib.sh kwin-e2e-report.sh; do
+    if grep -q -F "$helper" "$project_dir/scripts/install-user.sh"; then
+        printf '%s\n' "developer source installer must not stage certification helper $helper" >&2
+        exit 1
+    fi
+done
+
+# Package managers should surface the normal GNOME integration dependencies,
+# while retaining them as recommendations so non-IBus routes remain usable.
+grep -q -E '^Recommends:.*ibus|^    ibus,$' "$project_dir/debian/control" || {
+    printf '%s\n' 'Debian package should recommend IBus for GNOME integration' >&2
+    exit 1
+}
+grep -q -E '^Recommends:.*pkexec|^    pkexec$' "$project_dir/debian/control" || {
+    printf '%s\n' 'Debian package should recommend PolicyKit authorization support' >&2
+    exit 1
+}
+grep -q '^Recommends:[[:space:]]*ibus$' "$project_dir/wayexpand.spec" || {
+    printf '%s\n' 'RPM package should recommend IBus for GNOME integration' >&2
+    exit 1
+}
+grep -q '^Recommends:[[:space:]]*polkit$' "$project_dir/wayexpand.spec" || {
+    printf '%s\n' 'RPM package should recommend PolicyKit authorization support' >&2
+    exit 1
+}
 
 # Debian/Launchpad builds are network-isolated and must consume the vendored
 # source archive rather than trying to regenerate dependencies in the chroot.

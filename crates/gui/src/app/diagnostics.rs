@@ -1228,6 +1228,7 @@ impl GuiApp {
                 .desktop_test_application_class
                 .chars()
                 .any(char::is_control);
+        let first_run_verification = self.desktop_test_dialog_required;
         egui::Window::new("Test Expansion")
             .id(egui::Id::new("test_expansion_mode_picker"))
             .order(egui::Order::Foreground)
@@ -1236,7 +1237,11 @@ impl GuiApp {
             .resizable(false)
             .default_width(520.0)
             .show(ctx, |ui| {
-                ui.label(RichText::new("A real insertion test is optional. It is the only stage that verifies text in a target application.").color(palette.muted));
+                ui.label(RichText::new(if first_run_verification {
+                    "Complete this real-app test to finish first-run setup. Until you confirm the exact result, WayExpand remains configured but unverified."
+                } else {
+                    "A real insertion test verifies text in a target application. It never presses Enter or retries an uncertain insertion."
+                }).color(palette.muted));
                 ui.label(RichText::new("Matcher Test").strong());
                 ui.label("Checks the loaded snippets and template rendering locally. It does not read keyboard input or modify another application.");
                 if ui.button("Open Matcher Test").clicked() {
@@ -1313,11 +1318,20 @@ impl GuiApp {
                     if ui.button("Copy desktop test command").clicked() {
                         ui.ctx().copy_text(command.clone());
                     }
+                } else if first_run_verification {
+                    ui.label("A real-app test needs a saved, enabled static snippet. Add the harmless WayExpand test snippet or enable a suitable static snippet; command-backed and templated snippets are excluded.");
+                    if ui.button("Add harmless test snippet").clicked() {
+                        self.create_test_snippet();
+                    }
                 } else {
-                    ui.label("No enabled static snippet is available for the optional desktop test. Setup is complete; save or enable a harmless static snippet, then open Test Expansion again. Templated and command-backed snippets are excluded.");
+                    ui.label("No enabled static snippet is available for a desktop test. Save or enable a harmless static snippet, then try again. Templated and command-backed snippets are excluded.");
                 }
                 ui.colored_label(palette.warning, "If the matcher succeeds but desktop insertion fails, inspect the Input and Output route assessment and run the guided backend checks.");
-                if ui.button("Close").clicked() {
+                if ui.button(if first_run_verification {
+                    "Continue later — setup stays unverified"
+                } else {
+                    "Close"
+                }).clicked() {
                     close = true;
                 }
             });
@@ -1386,11 +1400,16 @@ impl GuiApp {
         if confirmed {
             self.desktop_test_verified = true;
             self.desktop_test_verified_application = Some(application_class.clone());
-            self.status = Status::success(format!(
-                "User-confirmed exact insertion in {}. This does not certify other applications or sessions.",
-                application_class
-            ));
             self.desktop_test_review = None;
+            if self.desktop_test_dialog_required || self.onboarding_visible {
+                self.onboarding_visible = true;
+                self.finish_onboarding();
+            } else {
+                self.status = Status::success(format!(
+                    "User-confirmed exact insertion in {}. This does not certify other applications or sessions.",
+                    application_class
+                ));
+            }
         } else if rejected {
             self.desktop_test_verified = false;
             self.desktop_test_verified_application = None;

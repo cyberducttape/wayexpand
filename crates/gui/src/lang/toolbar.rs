@@ -633,14 +633,6 @@ impl Strings {
         }
     }
 
-    pub fn onboarding_manual_check_note(&self) -> &'static str {
-        match self.lang {
-            Language::English => "WayExpand cannot inspect another app’s text field. Your confirmation is a manual result, not an automatic safety or compatibility certification.",
-            Language::Indonesian => "WayExpand tidak dapat memeriksa kolom teks aplikasi lain. Konfirmasi Anda adalah hasil manual, bukan sertifikasi keamanan atau kompatibilitas otomatis.",
-            Language::German => "WayExpand kann das Textfeld einer anderen App nicht prüfen. Ihre Bestätigung ist ein manuelles Ergebnis, keine automatische Sicherheits- oder Kompatibilitätszertifizierung.",
-        }
-    }
-
     pub fn onboarding_open_diagnostics(&self) -> &'static str {
         match self.lang {
             Language::English => "Open diagnostics",
@@ -697,35 +689,11 @@ impl Strings {
         }
     }
 
-    pub fn onboarding_copy_trigger(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Copy trigger",
-            Language::Indonesian => "Salin pemicu",
-            Language::German => "Auslöser kopieren",
-        }
-    }
-
-    pub fn onboarding_test_succeeded(&self) -> &'static str {
-        match self.lang {
-            Language::English => "It expanded correctly",
-            Language::Indonesian => "Ekspansi berhasil",
-            Language::German => "Ersetzung hat funktioniert",
-        }
-    }
-
     pub fn onboarding_backend_first(&self) -> &'static str {
         match self.lang {
             Language::English => "Finish the session check before testing input in another app.",
             Language::Indonesian => "Selesaikan pemeriksaan sesi sebelum menguji masukan di aplikasi lain.",
             Language::German => "Schließen Sie die Sitzungsprüfung ab, bevor Sie die Eingabe in einer anderen App testen.",
-        }
-    }
-
-    pub fn onboarding_test_failed(&self) -> &'static str {
-        match self.lang {
-            Language::English => "It did not expand correctly",
-            Language::Indonesian => "Ekspansi tidak berhasil",
-            Language::German => "Ersetzung hat nicht funktioniert",
         }
     }
 
@@ -745,11 +713,11 @@ impl Strings {
         }
     }
 
-    pub fn onboarding_skip(&self) -> &'static str {
+    pub fn onboarding_defer(&self) -> &'static str {
         match self.lang {
-            Language::English => "Skip guide",
-            Language::Indonesian => "Lewati panduan",
-            Language::German => "Anleitung überspringen",
+            Language::English => "Continue later",
+            Language::Indonesian => "Lanjutkan nanti",
+            Language::German => "Später fortsetzen",
         }
     }
 
@@ -766,14 +734,6 @@ impl Strings {
             Language::English => "Thanks for confirming. This records your manual test; WayExpand does not observe or certify insertion in another application.",
             Language::Indonesian => "Terima kasih atas konfirmasinya. Ini mencatat tes manual Anda; WayExpand tidak mengamati atau mensertifikasi penyisipan di aplikasi lain.",
             Language::German => "Danke für die Bestätigung. Damit wird Ihr manueller Test gespeichert; WayExpand beobachtet oder zertifiziert das Einfügen in anderen Apps nicht.",
-        }
-    }
-
-    pub fn onboarding_skipped_note(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Setup guide skipped. Reopen it from More actions → Getting started.",
-            Language::Indonesian => "Panduan penyiapan dilewati. Buka kembali dari Tindakan lainnya → Memulai.",
-            Language::German => "Einrichtungsanleitung übersprungen. Über Weitere Aktionen → Erste Schritte erneut öffnen.",
         }
     }
 

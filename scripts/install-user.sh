@@ -52,12 +52,14 @@ if [ -z "$cargo_bin" ] && [ -x "$HOME/.cargo/bin/cargo" ]; then
     cargo_bin="$HOME/.cargo/bin/cargo"
 fi
 if [ -z "$cargo_bin" ]; then
-    printf '%s\n' "error: Cargo was not found" >&2
-    printf '%s\n' "install Rust with rustup, restart your shell, and rerun this script:" >&2
-    printf '%s\n' "  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh" >&2
-    printf '%s\n' "  . \"\$HOME/.cargo/env\"" >&2
+    printf '%s\n' "error: Cargo was not found; this source installer is intended for developers" >&2
+    printf '%s\n' "install a published package or release archive instead; those do not need a Rust toolchain:" >&2
+    printf '%s\n' "  https://github.com/cyberducttape/wayexpand/releases" >&2
+    printf '%s\n' "See README.md for current package availability and certification status." >&2
     exit 127
 fi
+printf '%s\n' "Developer source install: compiling the application from this checkout."
+printf '%s\n' "For ordinary desktop installation, use a published .deb/.rpm or release archive; no local Rust toolchain is needed."
 bin_dir="$HOME/.local/bin"
 library_dir="$HOME/.local/lib/wayexpand"
 config_home=${XDG_CONFIG_HOME:-"$HOME/.config"}
@@ -128,8 +130,7 @@ CARGO_TARGET_DIR="$target_dir" "$cargo_bin" build --locked --release \
     -p wayexpand \
     -p wayexpand-ui \
     -p wayexpand-gui \
-    -p wayexpand-backend-ibus \
-    -p wayexpand-e2e
+    -p wayexpand-backend-ibus
 
 # Development builds intentionally retain the package version and encode the
 # source commit in the binary version. Use that complete build identity for
@@ -174,21 +175,10 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 install -d -m 0755 "$stage_dir/bin" "$stage_dir/systemd" "$stage_dir/desktop" "$stage_dir/ibus" \
-    "$stage_dir/share/wayexpand" \
-    "$stage_dir/libexec/wayexpand-certification/bin"
+    "$stage_dir/share/wayexpand"
 for binary in wayexpand-daemon wayexpand-action-broker wayexpand wayexpand-ui wayexpand-gui wayexpand-ibus; do
     install -m 0755 "$target_dir/release/$binary" "$stage_dir/bin/$binary"
 done
-for helper in wx-e2e-sink wx-e2e-type wx-e2e-eis-relay; do
-    install -m 0755 "$target_dir/release/$helper" \
-        "$stage_dir/libexec/wayexpand-certification/bin/$helper"
-done
-install -m 0755 "$project_dir/scripts/test-kwin-e2e.sh" \
-    "$project_dir/scripts/kwin-e2e-session.sh" \
-    "$stage_dir/libexec/wayexpand-certification/"
-install -m 0644 "$project_dir/scripts/e2e-lib.sh" \
-    "$project_dir/scripts/kwin-e2e-report.sh" \
-    "$stage_dir/libexec/wayexpand-certification/"
 install -m 0644 "$project_dir"/systemd/*.service "$stage_dir/systemd/"
 install -m 0644 "$project_dir/desktop/wayexpand.desktop" "$stage_dir/desktop/wayexpand.desktop"
 install -m 0644 "$project_dir/desktop/wayexpand-ibus.xml" "$stage_dir/ibus/wayexpand.xml"

@@ -2284,23 +2284,17 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
         guide_semantics.contains("Try it in a real app"),
         "{guide_semantics}"
     );
+    assert!(guide_semantics.contains("Open Quick Picker (copy and paste)"));
+    assert!(!guide_semantics.contains("It expanded correctly"));
+    assert!(!guide_semantics.contains("Copy trigger"));
     if build_identity_unverified() {
         assert!(
             guide_semantics.contains("daemon's build identity is unknown"),
             "{guide_semantics}"
         );
-        assert!(!guide_semantics.contains("It expanded correctly"));
     } else {
         assert!(
-            guide_semantics.contains("It expanded correctly"),
-            "{guide_semantics}"
-        );
-    }
-    if build_identity_unverified() {
-        assert!(!guide_semantics.contains("Copy trigger"));
-    } else {
-        assert!(
-            guide_semantics.contains("Copy trigger"),
+            guide_semantics.contains("Start Desktop Integration Test"),
             "{guide_semantics}"
         );
     }
@@ -2311,6 +2305,33 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
     app.refresh_visible_indices_cache();
     assert_eq!(app.visible_indices(), vec![0]);
     assert_eq!(Config::load(&path).unwrap().expansion.len(), 1);
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn first_run_cannot_be_recorded_complete_without_desktop_verification() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-first-run-gate-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    app.onboarding_completed = false;
+    app.onboarding_visible = true;
+    app.desktop_test_verified = false;
+
+    app.finish_onboarding();
+
+    assert!(!app.onboarding_completed);
+    assert!(app.onboarding_visible);
+    assert!(app.status.text().contains("verify an exact insertion"));
+
+    app.defer_onboarding();
+    assert!(
+        !app.onboarding_completed,
+        "deferring is not completing onboarding"
+    );
+    assert!(!app.onboarding_visible);
     fs::remove_file(path).unwrap();
 }
 

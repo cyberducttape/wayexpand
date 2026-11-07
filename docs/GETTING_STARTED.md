@@ -8,7 +8,9 @@ Welcome! This guide will help you get up and running based on your desktop envir
 
 ## Five-Minute Quickstart
 
-This is the shortest path from an installed binary to a working snippet.
+This guide separates snippet matching from a real desktop insertion. A
+connected service or successful matcher check does not prove that a target
+application replaced text correctly.
 
 ### 1. Check the session
 
@@ -111,9 +113,18 @@ service. For any route, read the security tradeoffs in
 wayexpand test ';;hello'
 ```
 
-If this prints `Hello, world!`, type `;;hello` into a plain text field. If it
-prints `no expansion matched`, inspect the trigger with `wayexpand list` and
-`wayexpand validate` before debugging the backend.
+This checks matching and rendering only; it does not read keyboard input or
+insert into another application. The GUI's first-run guide follows setup with
+a Desktop Integration Test. Use a disposable plain-text field, type the
+selected harmless trigger once, and confirm the exact result in the test
+review. Only that confirmation marks the GUI setup as working in the tested
+application. Closing or deferring the test leaves onboarding incomplete and
+the result unverified. Other applications and future sessions remain
+untested.
+
+If no automatic route is available, the first-run guide offers Quick Picker in
+copy-only mode. It does not enable raw keyboard capture or attempt insertion;
+choose a snippet, switch back to the target application, and paste it yourself.
 
 ### 5. Add an app-filtered snippet (optional)
 
@@ -138,10 +149,10 @@ For the output-driven recovery flow, go directly to the
 
 ### Architecture note: aarch64
 
-The release workflow supports native `x86_64` and `aarch64` builds, but the
-current v1.3.3 release has no downloadable assets. Check the [packaging
-guide](PACKAGING.md) for actual publication status before choosing an install
-path.
+The release workflow supports native `x86_64` and `aarch64` builds. Published
+package and archive availability varies by version and architecture, and
+current builds remain experimental until real-desktop certification. Check
+the [packaging guide](PACKAGING.md) for the current installation matrix.
 
 ## Which Desktop Are You Using?
 

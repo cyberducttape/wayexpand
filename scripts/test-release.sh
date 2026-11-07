@@ -102,6 +102,19 @@ for path in \
         exit 1
     }
 done
+desktop_entry="wayexpand-test-linux-$release_arch/desktop/wayexpand.desktop"
+grep -Fxq "$desktop_entry" "$archive_listing" || {
+    printf '%s\n' "release archive is missing $desktop_entry" >&2
+    exit 1
+}
+test -f "$extracted_archive/$desktop_entry" || {
+    printf '%s\n' "release archive desktop entry is not a regular file: $desktop_entry" >&2
+    exit 1
+}
+test "$(stat -c '%a' "$extracted_archive/$desktop_entry")" = 644 || {
+    printf '%s\n' "release archive desktop entry has unexpected permissions: $desktop_entry" >&2
+    exit 1
+}
 report_helper="wayexpand-test-linux-$release_arch/libexec/wayexpand-certification/kwin-e2e-report.sh"
 grep -Fxq "$report_helper" "$archive_listing" || {
     printf '%s\n' "release archive is missing $report_helper" >&2
