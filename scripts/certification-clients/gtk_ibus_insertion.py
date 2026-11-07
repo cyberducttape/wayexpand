@@ -107,18 +107,23 @@ def main():
             GLib.timeout_add(50, check_result)
             return GLib.SOURCE_REMOVE
 
-        event = Gdk.Event.new(Gdk.EventType.KEY_PRESS)
-        event.key.window = state["entry"].get_window()
-        event.key.send_event = True
-        event.key.time = Gdk.CURRENT_TIME
-        event.key.state = Gdk.ModifierType(0)
-        event.key.keyval = Gdk.unicode_to_keyval(ord(TRIGGER[index]))
-        event.key.hardware_keycode = 0
-        event.key.group = 0
         keyboard = Gdk.Display.get_default().get_default_seat().get_keyboard()
-        if keyboard is not None:
-            event.set_device(keyboard)
-        state["entry"].event(event)
+        keyval = Gdk.unicode_to_keyval(ord(TRIGGER[index]))
+        for event_type in (Gdk.EventType.KEY_PRESS, Gdk.EventType.KEY_RELEASE):
+            event = Gdk.Event.new(event_type)
+            event.key.window = state["entry"].get_window()
+            event.key.send_event = True
+            event.key.time = Gdk.CURRENT_TIME
+            event.key.state = Gdk.ModifierType(0)
+            event.key.keyval = keyval
+            event.key.hardware_keycode = 0
+            event.key.group = 0
+            if keyboard is not None:
+                event.set_device(keyboard)
+            # Queue through GDK's normal event dispatcher. Calling
+            # Gtk.Widget.event() directly bypasses the toplevel's IM-context
+            # filter, so WayExpand's IBus engine never sees those key events.
+            event.put()
         state["trigger_index"] += 1
         GLib.timeout_add(50, send_next_key)
         return GLib.SOURCE_REMOVE
