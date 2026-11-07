@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Version GNOME setup continuations with their originating GNOME Wayland
+  session and creation time. Resume only in a matching session, ignore expired
+  or unsupported markers for route selection, and provide
+  `wayexpand setup --cancel-resume` to discard abandoned setup state.
 - Bind GNOME IBus engine contexts to the authenticated Shell window observed
   at IBus focus-in. Revalidate that window on key processing and clear
   application identity after focus changes or tracker loss, keeping

@@ -2653,13 +2653,15 @@ mod tests {
         fs::create_dir(&directory).unwrap();
         let config = directory.join("expansions.toml");
         persist_gnome_setup_resume(crate::gnome_extension::SetupReadiness::Ready, &config).unwrap();
-        assert!(!wayexpand_core::gnome_ibus_setup_resume_pending(&config));
+        assert!(!wayexpand_core::gnome_ibus_setup_resume_pending_for_session(&config, true, true));
         persist_gnome_setup_resume(
             crate::gnome_extension::SetupReadiness::SessionRestartRequired,
             &config,
         )
         .unwrap();
-        assert!(wayexpand_core::gnome_ibus_setup_resume_pending(&config));
+        assert!(wayexpand_core::gnome_ibus_setup_resume_pending_for_session(
+            &config, true, true
+        ));
         fs::remove_dir_all(directory).unwrap();
     }
 

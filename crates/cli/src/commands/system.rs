@@ -14,11 +14,13 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     let mut check_only = false;
     let mut apply_requested = false;
     let mut json = false;
+    let mut cancel_resume = false;
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--check" => check_only = true,
             "--apply" => apply_requested = true,
             "--json" => json = true,
+            "--cancel-resume" => cancel_resume = true,
             "--terminals" => terminals = true,
             "--experimental-input-method-v2" => {
                 requested_backend = Some("input-method".into());
@@ -48,6 +50,24 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
                 )
             }
         }
+    }
+    if cancel_resume {
+        if check_only
+            || apply_requested
+            || requested_backend.is_some()
+            || requested_mode.is_some()
+            || assume_yes
+            || json
+            || terminals
+            || accept_non_atomic_replacement
+            || install_system_integration
+        {
+            usage_bail!("`wayexpand setup --cancel-resume` cannot be combined with other options");
+        }
+        wayexpand_core::clear_gnome_ibus_setup_resume(&default_config_path())
+            .map_err(|error| anyhow::anyhow!("could not cancel setup continuation: {error}"))?;
+        println!("GNOME setup continuation cancelled. No backend or configuration was changed.");
+        return Ok(());
     }
     if check_only && apply_requested {
         usage_bail!("choose either `wayexpand setup --check` or `wayexpand setup --apply`");
@@ -95,9 +115,16 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     }
     println!();
     let config_path = default_config_path();
-    let resume_pending = wayexpand_core::gnome_ibus_setup_resume_pending(&config_path);
+    let resume_pending = wayexpand_core::gnome_ibus_setup_resume_pending_for_session(
+        &config_path,
+        is_gnome,
+        is_gnome_wayland,
+    );
+    let resume_marker_exists = wayexpand_core::gnome_ibus_setup_resume_marker_present(&config_path);
     if resume_pending {
         println!("Resuming the GNOME IBus setup prepared before the previous logout.");
+    } else if resume_marker_exists {
+        println!("A GNOME IBus setup continuation is stale, unsupported, or belongs to another session; it will not affect backend selection. Use `wayexpand setup --cancel-resume` to discard it.");
     }
     let capabilities = probe_capabilities();
     let policy = load_policy()?;

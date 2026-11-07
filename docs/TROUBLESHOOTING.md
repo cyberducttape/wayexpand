@@ -134,6 +134,15 @@ Configuration readiness does not prove that a text field receives input or
 that an application applied a replacement; use `wayexpand debug --test
 ';;hello'` and confirm the visible result.
 
+### GNOME setup continuation
+
+If setup installed the Shell extension and asked for a logout/login, its
+continuation is valid only in a GNOME Wayland session and expires after 14
+days. On another desktop, ordinary `wayexpand setup` uses that desktop's
+normal backend recommendation and leaves the continuation untouched. To
+discard an abandoned or unsupported continuation, run
+`wayexpand setup --cancel-resume`.
+
 ### WX-PORTAL-001
 
 **Portal authorization required.**
