@@ -1,11 +1,10 @@
 #!/bin/sh
 # End-to-end test of GNOME source activation, the IBus engine, and window
 # tracking in a private headless GNOME Shell session. It verifies GNOME source
-# registration/activation, an IBus protocol transaction, insertion into a GTK
-# GNOME source activation, a live IBus input-context transaction, focus
-# tracking, and extension upgrade/reload behavior. The IBus client verifies
-# the toolkit protocol contract, but does not certify GTK application
-# insertion, compositor keyboard delivery, or physical-keyboard behavior.
+# registration/activation, an IBus protocol transaction, a live GTK 3 IBus
+# input context, focus tracking, and extension upgrade/reload behavior. GTK's
+# test event is sent to a focused Entry through GTK's actual IBus module; it
+# does not certify compositor keyboard delivery or physical-keyboard behavior.
 #
 # Usage: scripts/test-gnome-e2e.sh [--keep]
 #   E2E_BIN=DIR        use prebuilt wayexpand, wayexpand-ibus, and wx-e2e-* binaries
@@ -349,11 +348,24 @@ while :; do
     sleep 0.1
 done
 # Exercise the active GNOME-selected engine through the IBus input-context
-# protocol. The toolkit client verifies deletion and commit behavior, though
-# headless GNOME cannot deliver a trusted synthetic physical key to GTK.
+# protocol, then through GTK's own IBus module and Gtk.Entry widget. The GTK
+# test uses a toolkit test event; headless GNOME cannot certify compositor or
+# physical-keyboard event delivery.
 IBUS_ADDRESS=$(ibus address) "$E2E_BIN_DIR/wx-e2e-ibus" \
     "$XDG_RUNTIME_DIR/wayexpand-ibus-status.json" --expect-active --single-expansion
 log "pass gnome-ibus-input-context the active GNOME-selected engine replaced a verified trigger"
+if ! timeout 10s env \
+    GTK_IM_MODULE=ibus \
+    GDK_BACKEND=wayland \
+    WAYLAND_DISPLAY="$display" \
+    IBUS_ADDRESS="$(ibus address)" \
+    python3 "$E2E_PROJECT_DIR/scripts/certification-clients/gtk_ibus_e2e.py" \
+    >"$E2E_WORK/gtk-ibus-e2e.log" 2>&1; then
+    log "fail gnome-gtk-insertion GTK's focused Entry did not receive the WayExpand replacement"
+    cat "$E2E_WORK/gtk-ibus-e2e.log"
+    exit 1
+fi
+log "pass gnome-gtk-insertion GTK's IBus input context replaced the trigger in Gtk.Entry"
 "$E2E_BIN_DIR/wayexpand" ibus status --json \
     >"$E2E_WORK/ibus-after-input-context.json" \
     2>"$E2E_WORK/ibus-after-input-context.err" || true
@@ -685,7 +697,7 @@ env -i \
     dbus-run-session -- "$work/session.sh" >"$work/results.txt" 2>"$work/session.log" || status=$?
 
 cat "$work/results.txt"
-expected_checks='extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-ibus-input-context extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-ibus-input-context-after-login'
+expected_checks='extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-ibus-input-context gnome-gtk-insertion extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-ibus-input-context-after-login'
 missing_check=
 for check in $expected_checks; do
     if ! grep -F "pass $check" "$work/results.txt" >/dev/null; then
