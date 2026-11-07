@@ -341,7 +341,7 @@ fn integrated_checks(ibus: &wayexpand_backend_ibus::chain::IbusChainReport) -> V
             "manifest":ibus.check("manifest").map(|check| serde_json::json!({"state":format!("{:?}",check.state).to_lowercase(),"detail":check.detail})),
         }),
     ));
-    checks.extend(ibus_routing_checks(ibus));
+    checks.extend(ibus_integration_checks(ibus));
     let identity = installation_identity();
     let mismatch = identity["path_shadow_detected"] == true
         || identity["mixed_cli_daemon_installation"] == true;
@@ -357,11 +357,12 @@ fn integrated_checks(ibus: &wayexpand_backend_ibus::chain::IbusChainReport) -> V
 /// Copy the bounded, content-free desktop routing evidence into setup
 /// readiness. A registered and running IBus engine does not imply that the
 /// compositor routes application input to it.
-fn ibus_routing_checks(
+fn ibus_integration_checks(
     ibus: &wayexpand_backend_ibus::chain::IbusChainReport,
 ) -> Vec<ReadinessCheck> {
     [
         "desktop",
+        "manifest-scope",
         "gnome-session",
         "gnome-source-registered",
         "gnome-source-active",
@@ -1122,18 +1123,28 @@ mod tests {
     fn setup_readiness_exposes_compositor_routing_failure_and_repair() {
         let report = wayexpand_backend_ibus::chain::IbusChainReport {
             desktop: wayexpand_backend_ibus::chain::IbusDesktop::KdeWayland,
-            checks: vec![wayexpand_backend_ibus::chain::IbusCheck {
-                id: "desktop",
-                title: "KWin sends input to IBus",
-                state: wayexpand_backend_ibus::chain::IbusCheckState::Fail,
-                problem_id: Some("WX-KWIN-IBUS-001"),
-                detail: "KWin has no Virtual Keyboard configured".into(),
-                fix: Some("Select IBus Wayland in KWin settings".into()),
-            }],
+            checks: vec![
+                wayexpand_backend_ibus::chain::IbusCheck {
+                    id: "desktop",
+                    title: "KWin sends input to IBus",
+                    state: wayexpand_backend_ibus::chain::IbusCheckState::Fail,
+                    problem_id: Some("WX-KWIN-IBUS-001"),
+                    detail: "KWin has no Virtual Keyboard configured".into(),
+                    fix: Some("Select IBus Wayland in KWin settings".into()),
+                },
+                wayexpand_backend_ibus::chain::IbusCheck {
+                    id: "manifest-scope",
+                    title: "Shared IBus registration is multi-user safe",
+                    state: wayexpand_backend_ibus::chain::IbusCheckState::Warn,
+                    problem_id: Some("WX-IBUS-MULTIUSER-001"),
+                    detail: "shared manifest points into a user home".into(),
+                    fix: Some("install the shared engine".into()),
+                },
+            ],
             activity: None,
         };
 
-        let checks = ibus_routing_checks(&report);
+        let checks = ibus_integration_checks(&report);
         let routing = checks
             .iter()
             .find(|check| check.component == "ibus_route:desktop")
@@ -1145,6 +1156,12 @@ mod tests {
             "Select IBus Wayland in KWin settings"
         );
         assert!(routing.detail.contains("no Virtual Keyboard"));
+        let manifest = checks
+            .iter()
+            .find(|check| check.component == "ibus_route:manifest-scope")
+            .expect("shared IBus scope evidence should be included");
+        assert_eq!(manifest.status, "warning");
+        assert_eq!(manifest.evidence["problem_id"], "WX-IBUS-MULTIUSER-001");
     }
 
     #[test]
