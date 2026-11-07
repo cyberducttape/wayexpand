@@ -2,25 +2,60 @@
   "schema": 1,
   "purpose": "Coverage plan for GNOME IBus setup and real-client integration; entries are not certification evidence.",
   "status_vocabulary": ["not-tested", "pass", "fail", "unsupported"],
-  "application_classes": ["gtk3", "gtk4", "qt", "browser", "terminal"],
+  "application_classes": [
+    "gtk3",
+    "gtk4",
+    "qt",
+    "browser-firefox",
+    "browser-chromium",
+    "electron",
+    "terminal"
+  ],
   "required_lifecycle_scenarios": [
     "clean-user-install",
     "component-registration",
     "gnome-source-registration-and-activation",
     "real-trigger-replacement",
+    "unicode-replacement",
+    "multiple-layout-switching",
+    "password-field-refusal",
     "switch-away-and-back",
     "logout-login-persistence",
-    "upgrade-preserves-input-sources",
-    "uninstall-preserves-original-desktop-settings"
+    "shell-restart-and-extension-reload",
+    "package-upgrade-preserves-input-sources",
+    "uninstall-preserves-original-desktop-settings",
+    "uninstall-removes-wayexpand-components"
   ],
   "platforms": [
-    {"id": "fedora-45-gnome51-runtime", "distribution": "Fedora", "release": "45", "gnome_shell": "51.x", "automated_extension_runtime_compatibility": "scripts/test-gnome51-extension-runtime.sh; not desktop route certification"},
-    {"id": "fedora-gnome", "distribution": "Fedora", "release": "record-exact-supported-release", "gnome_shell": "record-exact-version"},
-    {"id": "ubuntu-24.04-gnome", "distribution": "Ubuntu", "release": "24.04 LTS", "gnome_shell": "record-exact-version"},
-    {"id": "ubuntu-26.04-gnome", "distribution": "Ubuntu", "release": "26.04 LTS", "gnome_shell": "record-exact-version"},
-    {"id": "gnome-oldest-supported-shell", "distribution": "record-distribution", "release": "record-exact-release", "gnome_shell": "oldest-supported-by-extension"},
-    {"id": "gnome-newest-supported-shell", "distribution": "record-distribution", "release": "record-exact-release", "gnome_shell": "newest-supported-by-extension"}
+    {
+      "id": "fedora-45-gnome51",
+      "distribution": "Fedora",
+      "release": "45",
+      "gnome_shell": "51.x",
+      "automated_extension_runtime_compatibility": "scripts/test-gnome51-extension-runtime.sh; extension API and layout only, not desktop route certification"
+    },
+    {"id": "ubuntu-24.04-gnome", "distribution": "Ubuntu", "release": "24.04 LTS", "gnome_shell": "record exact installed version"},
+    {"id": "ubuntu-26.04-gnome", "distribution": "Ubuntu", "release": "26.04 LTS", "gnome_shell": "record exact installed version"}
   ],
   "initial_status": "not-tested",
-  "evidence_requirement": "Every tested platform and application class requires an independently reviewed report bound to exact package, WayExpand commit, distribution release, GNOME Shell version, application/version, and date. Headless IBus protocol tests do not satisfy real-client or physical-session evidence."
+  "required_application_scenarios": [
+    "real-trigger-replacement",
+    "unicode-replacement",
+    "password-field-refusal",
+    "focus-change-during-replacement"
+  ],
+  "required_evidence_fields": [
+    "wayexpand_commit",
+    "package_identity",
+    "distribution_release",
+    "gnome_shell_version",
+    "application_id",
+    "application_version",
+    "input_route",
+    "keyboard_profiles",
+    "test_date",
+    "result",
+    "reviewed_by"
+  ],
+  "evidence_requirement": "Every platform × application × required application scenario and every platform × lifecycle scenario requires an independently reviewed result bound to exact package, WayExpand commit, distribution release, GNOME Shell version, application/version where applicable, route, keyboard profiles, and date. Headless IBus protocol tests do not satisfy physical-session evidence. A platform remains not-tested until all required cells have evidence; no result is inferred from another toolkit, browser, package, or distro."
 }

@@ -71,7 +71,20 @@ not certify physical keyboard delivery, text replacement, or a production
 GNOME route.
 
 `tests/certification/gnome-ibus-matrix.json` defines the platform and client
-coverage required before making GNOME IBus support claims. The existing
+coverage required before making GNOME IBus support claims. It explicitly
+requires Fedora 45/GNOME 51 and Ubuntu 24.04/26.04, with separate GTK 3, GTK 4,
+Qt, Firefox, Chromium, Electron, and terminal results. Each application needs
+real replacement, Unicode, password-field refusal, and focus-change results;
+each platform also needs source activation, multiple-layout switching,
+logout/login persistence, Shell/extension restart, package upgrade, and
+uninstall results. `scripts/check-gnome-acceptance-matrix.py` checks that the
+plan retains every required cell and validates reviewed per-platform JSON
+reports without accepting missing or unsupported cells as passes. CI runs the
+headless GNOME IBus acceptance test on Ubuntu 24.04 and 26.04 and the extension
+runtime test on Fedora 45/GNOME 51. These hosted jobs validate their stated
+headless scope only; they do not fill the real-session matrix.
+
+The existing
 `test-gnome-e2e.sh` now runs GNOME Shell with its session-managed IBus daemon. It
 checks component discovery, GNOME source registration, Shell activation, an
 already-active WayExpand engine, a controlled IBus input-context replacement,
@@ -100,13 +113,11 @@ replacement in every GTK/Qt/browser/terminal application.
 They must not be counted as physical-session passes in the platform matrix
 below.
 
-| Platform/session | GTK 3 | GTK 4 | Qt | Browser | Terminal | Install/activation lifecycle | Status |
+| Platform/session | GTK 3 | GTK 4 | Qt | Firefox / Chromium | Electron | Terminal | Unicode / layouts / password | Restart / upgrade / uninstall | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Fedora GNOME (exact supported release required) | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
-| Ubuntu 24.04 LTS GNOME | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
-| Ubuntu 26.04 LTS GNOME | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
-| Oldest GNOME Shell supported by the extension | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
-| Newest GNOME Shell supported by the extension | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
+| Fedora 45 / GNOME 51 | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
+| Ubuntu 24.04 LTS GNOME | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
+| Ubuntu 26.04 LTS GNOME | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
 
 Each cell requires a separate result. Lifecycle coverage includes clean-user
 installation, component registration, GNOME source activation, a real trigger
