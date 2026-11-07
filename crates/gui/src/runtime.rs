@@ -833,7 +833,10 @@ mod tests {
         );
         assert_eq!(
             super::daemon_build_state(&format!("daemon_commit={commit}\n")),
-            if commit == "unknown" || version.contains(".dirty.") {
+            if commit == "unknown"
+                || version.contains(".dirty.")
+                || version.contains(".dirty-unknown")
+            {
                 super::DaemonBuildState::Unverified
             } else {
                 super::DaemonBuildState::Current
