@@ -364,6 +364,8 @@ jobs:
         run: bash scripts/test-gnome-extension-state.sh
       - name: Stress-test bounded GNOME notification delivery
         run: node --test scripts/test-gnome-notification-queue.mjs
+      - name: Verify GNOME keyboard API compatibility boundary
+        run: node scripts/test-gnome-keyboard-compat.mjs
       - name: Verify GNOME extension D-Bus path compatibility
         run: sh scripts/test-gnome-extension-dbus.sh
       - name: Check Rust dependency hygiene

@@ -8,6 +8,7 @@ for relative in \
     gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/metadata.json \
     gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/extension.js \
     gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/notification-queue.js \
+    gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/keyboard-compat.js \
     installer-components.toml \
     systemd/wayexpand-input-method.service \
     systemd/wayexpand-evdev.service \

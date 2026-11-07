@@ -7,7 +7,9 @@ use crate::*;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Write;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
+use std::path::PathBuf;
 use wayexpand_backend_gnome_window::{
     enable_extension, extension_files, extension_status, ExtensionState, GnomeWindowTracker,
     EXTENSION_UUID,
@@ -156,21 +158,90 @@ fn install_user_copy() -> Result<PathBuf> {
     }
     let directory = user_extension_dir()
         .context("cannot locate the GNOME Shell extension directory: HOME is not set")?;
-    fs::create_dir_all(&directory)?;
-    fs::set_permissions(&directory, fs::Permissions::from_mode(0o755))?;
-    for (name, contents) in extension_files() {
-        let target = directory.join(name);
-        let temporary = directory.join(format!(".{name}.{}.tmp", std::process::id()));
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary)?;
-        file.write_all(contents.as_bytes())?;
-        file.set_permissions(fs::Permissions::from_mode(0o644))?;
-        drop(file);
-        fs::rename(&temporary, &target)?;
-    }
+    install_extension_directory(&directory, &extension_files())?;
     Ok(directory)
+}
+
+/// Stage and verify a complete extension before switching GNOME's directory.
+/// The old complete directory is retained until the new one is in place; if
+/// the final rename fails it is restored before returning the error.
+fn install_extension_directory(directory: &Path, files: &[(&str, &str)]) -> Result<()> {
+    let parent = directory
+        .parent()
+        .context("GNOME extension directory has no parent")?;
+    fs::create_dir_all(parent)?;
+    let stem = directory
+        .file_name()
+        .context("GNOME extension directory has no name")?
+        .to_string_lossy();
+    let nonce = format!(
+        "{}.{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
+    let staged = parent.join(format!(".{stem}.{nonce}.staged"));
+    fs::create_dir(&staged)?;
+    let stage_result = (|| -> Result<()> {
+        fs::set_permissions(&staged, fs::Permissions::from_mode(0o755))?;
+        for (name, contents) in files {
+            let target = staged.join(name);
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&target)?;
+            file.write_all(contents.as_bytes())?;
+            file.sync_all()?;
+            file.set_permissions(fs::Permissions::from_mode(0o644))?;
+        }
+        if !matches_bundled(&staged) {
+            bail!("staged GNOME extension does not match the bundled files");
+        }
+        Ok(())
+    })();
+    if let Err(error) = stage_result {
+        let _ = fs::remove_dir_all(&staged);
+        return Err(error);
+    }
+
+    let had_previous = directory.exists();
+    if had_previous {
+        // Linux rename exchange atomically swaps the complete loaded path.
+        // If the kernel/filesystem cannot provide it, fail without touching
+        // the installed version rather than falling back to a visible gap.
+        let staged_c = std::ffi::CString::new(staged.as_os_str().as_bytes())?;
+        let directory_c = std::ffi::CString::new(directory.as_os_str().as_bytes())?;
+        // SAFETY: both C strings are NUL-terminated, point to sibling paths
+        // under the same user-owned directory, and remain alive for the call.
+        let exchanged = unsafe {
+            libc::renameat2(
+                libc::AT_FDCWD,
+                staged_c.as_ptr(),
+                libc::AT_FDCWD,
+                directory_c.as_ptr(),
+                libc::RENAME_EXCHANGE,
+            )
+        };
+        if exchanged != 0 {
+            let error = std::io::Error::last_os_error();
+            let _ = fs::remove_dir_all(&staged);
+            return Err(error).context("filesystem cannot atomically switch the GNOME extension");
+        }
+    } else if let Err(error) = fs::rename(&staged, directory) {
+        let _ = fs::remove_dir_all(&staged);
+        return Err(error).context("could not activate staged GNOME extension");
+    }
+    if let Ok(parent_file) = fs::File::open(parent) {
+        let _ = parent_file.sync_all();
+    }
+    if had_previous {
+        // The exchange left the old complete version at the staging name.
+        // Cleanup failure does not invalidate the active new version.
+        let _ = fs::remove_dir_all(&staged);
+    }
+    Ok(())
 }
 
 /// Add the extension to GNOME's enabled list (it persists across logins)
@@ -637,6 +708,24 @@ mod tests {
         assert!(matches_bundled(&directory));
         fs::write(directory.join("extension.js"), "// stale").unwrap();
         assert!(!matches_bundled(&directory));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn extension_update_stages_a_complete_directory_before_switching() {
+        let root =
+            std::env::temp_dir().join(format!("wayexpand-gnome-ext-atomic-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let directory = root.join(EXTENSION_UUID);
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("old-file"), "old version").unwrap();
+
+        install_extension_directory(&directory, &extension_files()).unwrap();
+
+        assert!(matches_bundled(&directory));
+        assert!(!directory.join("old-file").exists());
+        let entries = fs::read_dir(&root).unwrap().count();
+        assert_eq!(entries, 1, "staging/backup directory leaked after switch");
         fs::remove_dir_all(&root).unwrap();
     }
 }

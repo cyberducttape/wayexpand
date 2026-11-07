@@ -102,6 +102,15 @@ for path in \
         exit 1
     }
 done
+policy_path="wayexpand-test-linux-$release_arch/polkit/org.wayexpand.action.policy"
+grep -Fxq "$policy_path" "$archive_listing" || {
+    printf '%s\n' "release archive is missing $policy_path" >&2
+    exit 1
+}
+grep -F 'id="org.wayexpand.execute-action"' "$extracted_archive/$policy_path" >/dev/null || {
+    printf '%s\n' 'release archive PolicyKit policy is invalid' >&2
+    exit 1
+}
 report_helper="wayexpand-test-linux-$release_arch/libexec/wayexpand-certification/kwin-e2e-report.sh"
 grep -Fxq "$report_helper" "$archive_listing" || {
     printf '%s\n' "release archive is missing $report_helper" >&2

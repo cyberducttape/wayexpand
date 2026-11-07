@@ -55,14 +55,18 @@ const EXTENSION_SCRIPT: &str = include_str!(
 const EXTENSION_NOTIFICATION_QUEUE: &str = include_str!(
     "../../../gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/notification-queue.js"
 );
+const EXTENSION_KEYBOARD_COMPAT: &str = include_str!(
+    "../../../gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/keyboard-compat.js"
+);
 
 /// The extension's files as `(file name, contents)`, so any installation
 /// method can install the exact bundled version.
-pub fn extension_files() -> [(&'static str, &'static str); 3] {
+pub fn extension_files() -> [(&'static str, &'static str); 4] {
     [
         ("metadata.json", EXTENSION_METADATA),
         ("extension.js", EXTENSION_SCRIPT),
         ("notification-queue.js", EXTENSION_NOTIFICATION_QUEUE),
+        ("keyboard-compat.js", EXTENSION_KEYBOARD_COMPAT),
     ]
 }
 
@@ -862,7 +866,7 @@ mod tests {
 
     #[test]
     fn bundled_extension_matches_this_tracker() {
-        let [(_, metadata), (_, script), (_, queue)] = extension_files();
+        let [(_, metadata), (_, script), (_, queue), (_, keyboard)] = extension_files();
         assert!(metadata.contains(EXTENSION_UUID));
         assert!(script.contains(TRACKER_PATH));
         assert!(script.contains(TRACKER_IFACE));
@@ -890,12 +894,15 @@ mod tests {
         assert!(script.contains("GetActiveKeyboardLayout"));
         assert!(script.contains("new GLib.Variant('(ssssas)'"));
         assert!(script.contains("source.xkbId"));
-        assert!(script.contains("activeXkbSettings(manager._settings)"));
+        assert!(script.contains("keyboardLayoutSettings(manager)"));
+        assert!(keyboard.contains("manager?._settings"));
+        assert!(keyboard.contains("typeof manager.reload !== 'function'"));
+        assert!(keyboard.contains("typeof source.activate !== 'function'"));
         assert!(queue.contains("settings.keyboardModel"));
         assert!(queue.contains("settings.keyboardOptions"));
         assert!(queue.contains("model = 'pc105'"));
         assert!(script.contains("KeyboardLayoutVersion"));
-        assert!(script.contains("Keyboard.getInputSourceManager().currentSource"));
+        assert!(script.contains("activeSource(Keyboard)"));
         assert!(!script.contains("org.gnome.desktop.input-sources current"));
         assert!(script.contains("LatestOnlyDelivery"));
         assert!(queue.contains("class LatestOnlyDelivery"));

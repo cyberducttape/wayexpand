@@ -21,9 +21,14 @@ import Shell from 'gi://Shell';
 import * as Keyboard from 'resource:///org/gnome/shell/ui/status/keyboard.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import {
+    activeSource,
+    activateSource,
+    inputSourceManager,
+    keyboardLayoutSettings,
+} from './keyboard-compat.js';
+import {
     isAuthorizedTrackerClient,
     LatestOnlyDelivery,
-    activeXkbSettings,
     setTitleAccess,
     SubscriptionReservations,
     subscriberSnapshot,
@@ -175,7 +180,7 @@ export default class WayExpandWindowTracker extends Extension {
     }
 
     _getActiveInputSource(invocation) {
-        const source = Keyboard.getInputSourceManager().currentSource;
+        const source = activeSource(Keyboard);
         if (!source) {
             invocation.return_dbus_error(
                 'org.wayexpand.ShellWindowTracker1.Error.NoActiveInputSource',
@@ -191,8 +196,8 @@ export default class WayExpandWindowTracker extends Extension {
     }
 
     _getActiveKeyboardLayout(invocation) {
-        const manager = Keyboard.getInputSourceManager();
-        const source = manager.currentSource;
+        const manager = inputSourceManager(Keyboard);
+        const source = manager?.currentSource;
         if (!source) {
             invocation.return_dbus_error(
                 'org.wayexpand.ShellWindowTracker1.Error.NoActiveInputSource',
@@ -207,7 +212,7 @@ export default class WayExpandWindowTracker extends Extension {
         // It may be the per-user GSettings source or systemd-localed, depending
         // on the desktop configuration. Reading gsettings directly here would
         // pair the live source with options/model that Mutter may not apply.
-        const xkbSettings = activeXkbSettings(manager._settings);
+        const xkbSettings = keyboardLayoutSettings(manager);
         if (typeof source.xkbId !== 'string' || source.xkbId.length === 0) {
             invocation.return_dbus_error(
                 'org.wayexpand.ShellWindowTracker1.Error.InputSourceUnavailable',
@@ -238,34 +243,20 @@ export default class WayExpandWindowTracker extends Extension {
             return;
         }
 
-        const manager = Keyboard.getInputSourceManager();
-        // GNOME Shell may have loaded the source list before a newly
-        // registered IBus engine appeared. Reload the configured list before
-        // looking up the source so activation uses Shell's live objects.
-        manager.reload();
-        const source = Object.values(manager.inputSources).find(candidate =>
-            candidate.type === kind && candidate.id === id);
-        if (!source) {
+        // Use Shell's live source manager, never the deprecated gsettings
+        // `current` value. The compatibility helper verifies the active
+        // source after activation and reports unsupported runtime shapes.
+        const result = activateSource(Keyboard, kind, id);
+        if (result.error) {
             invocation.return_dbus_error(
-                'org.wayexpand.ShellWindowTracker1.Error.InputSourceUnavailable',
-                `GNOME input source ${kind}:${id} is unavailable`,
+                result.error === 'source-unavailable'
+                    ? 'org.wayexpand.ShellWindowTracker1.Error.InputSourceUnavailable'
+                    : 'org.wayexpand.ShellWindowTracker1.Error.ActivationFailed',
+                `GNOME Shell input-source activation failed (${result.error})`,
             );
             return;
         }
-
-        // Use GNOME Shell's own source activation path. In particular this
-        // updates the live InputSourceManager and its MRU persistence; writing
-        // the deprecated gsettings "current" key does neither reliably.
-        source.activate(true);
-
-        const active = manager.currentSource;
-        if (!active || active.type !== kind || active.id !== id) {
-            invocation.return_dbus_error(
-                'org.wayexpand.ShellWindowTracker1.Error.ActivationFailed',
-                'GNOME Shell did not activate the requested input source',
-            );
-            return;
-        }
+        const active = result.source;
         invocation.return_value(new GLib.Variant('(ss)', [active.type, active.id]));
     }
 

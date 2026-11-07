@@ -120,7 +120,7 @@ gnome_extension_dir="${XDG_DATA_HOME:-$HOME/.local/share}/gnome-shell/extensions
 if [ -f "$gnome_extension_dir/metadata.json" ] \
     && grep -F '"uuid": "wayexpand-window-tracker@cyberducttape.github.io"' "$gnome_extension_dir/metadata.json" >/dev/null 2>&1; then
     rm -f -- "$gnome_extension_dir/metadata.json" "$gnome_extension_dir/extension.js" \
-        "$gnome_extension_dir/notification-queue.js"
+        "$gnome_extension_dir/notification-queue.js" "$gnome_extension_dir/keyboard-compat.js"
     rmdir -- "$gnome_extension_dir" 2>/dev/null || true
     printf '%s\n' "Removed $gnome_extension_dir"
 fi

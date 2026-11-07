@@ -93,20 +93,6 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
         println!("WayExpand will be added as an IBus source; its engine uses the system keyboard layout.");
     }
     println!();
-    Config::ensure_user_config(default_config_path()).map_err(|error| {
-        config_error(format!(
-            "could not initialize configuration: {}",
-            error.safe_summary()
-        ))
-    })?;
-    // Window tracking is independent of the input route, so set it up even
-    // when no capture route turns out to be available.
-    if wayexpand_backend_selection::Compositor::detect()
-        == wayexpand_backend_selection::Compositor::Gnome
-    {
-        crate::gnome_extension::setup_gnome_window_tracker();
-        println!();
-    }
     let capabilities = probe_capabilities();
     let policy = load_policy()?;
     // A packaged IBus component can be installed but absent from the running
@@ -200,6 +186,12 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     if install_system_integration && backend != "ibus" {
         usage_bail!("--install-system-integration applies only to the IBus backend");
     }
+    Config::ensure_user_config(default_config_path()).map_err(|error| {
+        config_error(format!(
+            "could not initialize configuration: {}",
+            error.safe_summary()
+        ))
+    })?;
     let terminals_requested = terminals;
     let setup_result = configure_setup_backend(
         &backend,

@@ -2451,6 +2451,13 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
         }
     };
 
+    // The Shell extension is needed for GNOME's live source and layout
+    // integration. Install/enable it only after the IBus route passed
+    // preflight and the user has authorized replacement when required.
+    if !replacement_authorization_required && IbusDesktop::detect() == IbusDesktop::Gnome {
+        crate::gnome_extension::setup_gnome_window_tracker();
+    }
+
     // Capture live session state after inert preparation, just before it
     // changes. The transaction still owns the installation/config snapshots.
     let service_snapshot = ServiceInventory::probe();

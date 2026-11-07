@@ -68,6 +68,7 @@ mkdir -p "$work/home" "$work/config/wayexpand" "$work/cache" "$work/component" \
     "$work/home/.local/share/gnome-shell/extensions/$controller_uuid"
 cp "$project_dir/gnome-extension/$uuid/metadata.json" "$project_dir/gnome-extension/$uuid/extension.js" \
     "$project_dir/gnome-extension/$uuid/notification-queue.js" \
+    "$project_dir/gnome-extension/$uuid/keyboard-compat.js" \
     "$work/home/.local/share/gnome-shell/extensions/$uuid/"
 cp "$project_dir/scripts/gnome-e2e-focus-controller/metadata.json" \
     "$project_dir/scripts/gnome-e2e-focus-controller/extension.js" \
@@ -674,6 +675,7 @@ fi
 cp "$E2E_PROJECT_DIR/gnome-extension/$E2E_UUID/metadata.json" \
     "$E2E_PROJECT_DIR/gnome-extension/$E2E_UUID/extension.js" \
     "$E2E_PROJECT_DIR/gnome-extension/$E2E_UUID/notification-queue.js" \
+    "$E2E_PROJECT_DIR/gnome-extension/$E2E_UUID/keyboard-compat.js" \
     "$E2E_WORK/home/.local/share/gnome-shell/extensions/$E2E_UUID/"
 
 # Restarting Shell in this isolated session models the logout/login needed

@@ -4,6 +4,18 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Defer GNOME extension setup until after backend selection, policy checks,
+  IBus preflight, and replacement authorization. A rejected route no longer
+  installs or enables the extension, and backend selection failures no longer
+  initialize a configuration file.
+- Install GNOME Shell extension updates from a staged, fully verified directory
+  and switch the complete payload together, retaining the prior directory if
+  the activation rename fails. Isolate GNOME's internal keyboard-manager calls
+  behind a feature-detecting compatibility boundary with fail-closed tests.
+- Include the optional Action Broker PolicyKit policy in binary release
+  archives and assert its presence and action identity in release packaging
+  tests.
+
 - Declare the GNOME Shell tracker compatible with GNOME 51 and run an isolated
   test against Fedora 45's GNOME Shell 51 package. The test verifies extension
   loading, its live build identity, the exported tracker protocol, active
