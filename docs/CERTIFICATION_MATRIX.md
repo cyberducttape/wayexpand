@@ -86,15 +86,20 @@ application result is a separate scenario × keyboard-profile cell and links to
 reviewable evidence. Report validation rejects headless sessions and requires
 a physical keyboard and reviewer identity. CI runs the headless GNOME IBus
 acceptance test on Ubuntu 24.04 and 26.04 and the extension runtime test on
-Fedora 45/GNOME 51. These hosted jobs validate their stated headless scope
-only; they do not fill the real-session matrix.
+Fedora 45/GNOME 51. The Ubuntu headless test covers GTK 3 and GTK 4 text
+replacement, Unicode, password-purpose pass-through, source switching between
+US, German, and French layouts, and Shell restart/extension upgrade behavior.
+It exercises Chromium's safe pass-through behavior. These hosted jobs validate
+their stated headless scope only; they do not fill the real-session matrix.
 
 The existing
 `test-gnome-e2e.sh` now runs GNOME Shell with its session-managed IBus daemon. It
 checks component discovery, GNOME source registration, Shell activation, an
 already-active WayExpand engine, a controlled IBus input-context replacement,
-and window tracking. Its GTK 3 `Gtk.Entry` checks exact trigger replacement,
-Unicode output, and refusal to expand a password-purpose field. It also opens
+and window tracking. Its GTK 3 and GTK 4 `Gtk.Entry` checks exact trigger
+replacement, Unicode output, and refusal to expand a password-purpose field.
+The test verifies a live switch to German and French keyboard sources and
+checks expansion after returning to the WayExpand source. It also opens
 the field with `GTK_IM_MODULE=ibus`
 on GNOME's private XWayland server, activates the window through Mutter, types
 a fixed test trigger through XTEST, and verifies the resulting widget text.

@@ -8,8 +8,11 @@ All notable changes to WayExpand are documented here.
   sending its harmless key probe, correlated to a new IBus focus sequence so a
   stale pre-restart context cannot satisfy readiness. Ubuntu 24.04 CI had shown
   the first key could be consumed during post-Shell-restart engine attachment.
-  Extend the GTK 3 headless acceptance client to verify Unicode output and
-  password-purpose field refusal alongside ordinary replacement.
+  Filter the e2e client to D-Bus signals and correlate input to the focused
+  field. Extend headless Ubuntu coverage to GTK 3/4 replacement, Unicode,
+  password-purpose pass-through, and US/German/French layout switches. Keep
+  Qt, Firefox, Electron, terminal, and physical-session results uncertified
+  until independently tested.
 - Expand the GNOME IBus acceptance plan to Fedora 45/GNOME 51 and supported
   Ubuntu 24.04/26.04 releases, with independent GTK 3/4, Qt, Firefox,
   Chromium, Electron, and terminal cells for US, German, French, AltGr, and
