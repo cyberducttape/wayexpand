@@ -146,6 +146,11 @@ pub struct IbusEngineAdapter {
     capability_block: Option<String>,
     pending_output: Option<ExpansionResult>,
     last_expansion_outcome: Option<IbusExpansionOutcome>,
+    /// GNOME window identity observed when this IBus input context received
+    /// focus. App filters are enabled only while the authenticated Shell
+    /// tracker continues to report that same focused window.
+    gnome_focus_binding: Option<String>,
+    ibus_context_identity: Option<String>,
 }
 
 /// An emitted IBus signal sequence is not confirmation that the target
@@ -208,6 +213,8 @@ impl IbusEngineAdapter {
             capability_block,
             pending_output: None,
             last_expansion_outcome: None,
+            gnome_focus_binding: None,
+            ibus_context_identity: None,
         }
     }
 
@@ -457,6 +464,10 @@ impl IbusEngineAdapter {
                 title: None,
                 instance_id: Some(format!("{IBUS_CONTEXT_ID_PREFIX}{identity}")),
             });
+        self.ibus_context_identity = identity
+            .as_ref()
+            .and_then(|window| window.instance_id.clone());
+        self.gnome_focus_binding = None;
         self.engine.process(InputEvent::WindowChanged(identity));
         self.engine
             .process(InputEvent::FocusChanged { sensitive: true });
@@ -467,9 +478,48 @@ impl IbusEngineAdapter {
         self.note(|telemetry, field| telemetry.focus_out(field));
         self.enabled = false;
         self.surrounding = None;
+        self.gnome_focus_binding = None;
+        self.ibus_context_identity = None;
         self.engine.process(InputEvent::WindowChanged(None));
         self.engine
             .process(InputEvent::FocusChanged { sensitive: true });
+    }
+
+    /// Bind this active IBus context to the authenticated GNOME window that
+    /// was focused at FocusIn. `None` deliberately leaves app filtering
+    /// unavailable. The Shell identity is revalidated before each key event.
+    pub(crate) fn bind_gnome_focus(&mut self, window: Option<&WindowContext>) {
+        self.gnome_focus_binding = window
+            .and_then(|window| window.instance_id.clone())
+            .filter(|identity| !identity.is_empty());
+        self.update_gnome_focus(window);
+    }
+
+    /// Refresh GNOME app identity against the window bound at FocusIn. A
+    /// changed window, missing snapshot, or disconnected tracker clears the
+    /// app ID so app-filtered snippets fail closed.
+    pub(crate) fn update_gnome_focus(&mut self, window: Option<&WindowContext>) {
+        let app_id = match (self.gnome_focus_binding.as_deref(), window) {
+            (Some(bound), Some(current)) if current.instance_id.as_deref() == Some(bound) => {
+                current.app_id.clone()
+            }
+            _ => {
+                // Once focus diverges or becomes unobservable, this input
+                // context must receive a new FocusIn before identity can be
+                // trusted again, even if the previous window later returns.
+                self.gnome_focus_binding = None;
+                None
+            }
+        };
+        let context = self
+            .ibus_context_identity
+            .as_ref()
+            .map(|identity| WindowContext {
+                app_id,
+                title: None,
+                instance_id: Some(identity.clone()),
+            });
+        self.engine.process(InputEvent::WindowChanged(context));
     }
 
     /// Apply IBus `Enable` without treating it as proof that focus changed.
@@ -797,6 +847,54 @@ replacement = "Incident {{field:hostname}}"
         assert!(blurred.checks.iter().any(|check| {
             check.name == "target identity" && check.status == wayexpand_core::CheckStatus::Fail
         }));
+    }
+
+    #[test]
+    fn app_filter_requires_focus_bound_to_the_same_authenticated_gnome_window() {
+        let config = Config::parse(
+            r#"[[expansion]]
+trigger = ";;ticket"
+replacement = "Investigating this now."
+app_filter = ["app_id_exact:org.gnome.TextEditor"]
+"#,
+        )
+        .unwrap();
+        let mut adapter = focused(IbusEngineAdapter::new(
+            ExpansionEngine::new(config).unwrap(),
+        ));
+        adapter.focus_in_for_context(Some("/org/freedesktop/IBus/Engine/WayExpand/7"));
+
+        let editor = WindowContext {
+            app_id: Some("org.gnome.TextEditor".into()),
+            title: None,
+            instance_id: Some("mutter:42".into()),
+        };
+        adapter.bind_gnome_focus(Some(&editor));
+        let allowed = adapter.engine().explain(";;ticket", IBUS_BACKEND_NAME);
+        assert!(allowed.would_expand(), "{}", allowed.render_text());
+
+        let elsewhere = WindowContext {
+            app_id: Some("org.gnome.Terminal".into()),
+            title: None,
+            instance_id: Some("mutter:43".into()),
+        };
+        adapter.update_gnome_focus(Some(&elsewhere));
+        let denied = adapter.engine().explain(";;ticket", IBUS_BACKEND_NAME);
+        assert!(!denied.would_expand(), "{}", denied.render_text());
+
+        adapter.update_gnome_focus(None);
+        let unavailable = adapter.engine().explain(";;ticket", IBUS_BACKEND_NAME);
+        assert!(!unavailable.would_expand(), "{}", unavailable.render_text());
+
+        // Even the right app ID is insufficient if the Shell window identity
+        // changed after IBus FocusIn; a fresh focus lifecycle is required.
+        adapter.update_gnome_focus(Some(&editor));
+        let stale_binding = adapter.engine().explain(";;ticket", IBUS_BACKEND_NAME);
+        assert!(
+            !stale_binding.would_expand(),
+            "{}",
+            stale_binding.render_text()
+        );
     }
 
     #[cfg(unix)]

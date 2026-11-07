@@ -24,8 +24,14 @@ translates actions into `CommitText`/`DeleteSurroundingText` signals. The
 adapter remains separate so matching and deletion semantics stay testable
 without an IBus session.
 
-`app_filter` entries fail closed in this mode because IBus does not provide a
-portable focused-window identity.
+On GNOME, the IBus service can use the authenticated WayExpand Shell tracker
+to bind an active IBus context to the focused window observed at `FocusIn`.
+The app ID is used only while the tracker continues to report that same window;
+focus changes and tracker loss clear the identity and require a fresh IBus
+focus event before app-filtered matching resumes. If the Shell tracker is
+unavailable, `app_filter` entries fail closed. IBus context identity remains
+separate from the GNOME window identity and is retained for target-scoped
+operations.
 
 ## Sensitive fields
 

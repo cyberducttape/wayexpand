@@ -13,8 +13,10 @@ use std::{
     time::Duration,
 };
 use tracing::{info, warn};
+use wayexpand_backend_gnome_window::GnomeWindowTracker;
 use wayexpand_core::{
-    default_config_path, Config, ConfigStore, OrganizationPolicy, ValidatedConfig,
+    default_config_path, Config, ConfigStore, OrganizationPolicy, ValidatedConfig, WindowContext,
+    WindowTracker,
 };
 use zbus::{
     blocking::{connection::Builder, Connection},
@@ -42,6 +44,46 @@ pub enum IbusServiceError {
     Policy(String),
 }
 
+/// Feed only authenticated GNOME Shell focus updates to IBus engines. A
+/// tracker error clears the snapshot before reconnecting, so consumers
+/// immediately lose app identity instead of retaining stale focus metadata.
+fn spawn_gnome_focus_tracker(
+    focus: Arc<Mutex<Option<WindowContext>>>,
+) -> Result<(), IbusServiceError> {
+    std::thread::Builder::new()
+        .name("wayexpand-ibus-gnome-focus".into())
+        .spawn(move || loop {
+            match GnomeWindowTracker::new() {
+                Ok(mut tracker) => loop {
+                    match tracker.next_window_timeout(Duration::from_millis(250)) {
+                        Ok(Some(window)) => {
+                            if let Ok(mut current) = focus.lock() {
+                                *current = window;
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(error) => {
+                            warn!(%error, "GNOME focus tracking unavailable to IBus; app-filtered expansions fail closed");
+                            if let Ok(mut current) = focus.lock() {
+                                *current = None;
+                            }
+                            break;
+                        }
+                    }
+                },
+                Err(error) => {
+                    warn!(%error, "GNOME focus tracking unavailable to IBus; app-filtered expansions fail closed");
+                    if let Ok(mut current) = focus.lock() {
+                        *current = None;
+                    }
+                }
+            }
+            std::thread::sleep(Duration::from_secs(1));
+        })
+        .map_err(|error| IbusServiceError::Thread(error.to_string()))?;
+    Ok(())
+}
+
 /// IBus factory state. Each CreateEngine call gets its own adapter and object
 /// path; IBus may create multiple engines for separate input contexts. Engine
 /// objects are removed from this map by their Destroy method.
@@ -56,6 +98,7 @@ struct Factory {
     completions: mpsc::Sender<OwnedObjectPath>,
     /// Content-free activity shared by every engine of this process.
     telemetry: Option<Arc<IbusTelemetry>>,
+    gnome_focus: Arc<Mutex<Option<WindowContext>>>,
 }
 
 type Instances = Arc<Mutex<HashMap<OwnedObjectPath, EngineInstance>>>;
@@ -101,6 +144,7 @@ impl Factory {
             path: path.clone(),
             instances: Arc::clone(&self.instances),
             telemetry: self.telemetry.clone(),
+            gnome_focus: Arc::clone(&self.gnome_focus),
         };
         let connection = self
             .connection
@@ -149,6 +193,7 @@ struct EngineObject {
     path: OwnedObjectPath,
     instances: Arc<Mutex<HashMap<OwnedObjectPath, EngineInstance>>>,
     telemetry: Option<Arc<IbusTelemetry>>,
+    gnome_focus: Arc<Mutex<Option<WindowContext>>>,
 }
 
 impl EngineObject {
@@ -306,7 +351,11 @@ fn ibus_text_string(value: &Value<'_>) -> Option<String> {
 impl EngineObject {
     async fn process_key_event(&self, keyval: u32, keycode: u32, state: u32) -> bool {
         let result = match self.adapter.lock() {
-            Ok(mut adapter) => adapter.process_key_event(keyval, keycode, state),
+            Ok(mut adapter) => {
+                let focus = self.gnome_focus.lock().ok().and_then(|focus| focus.clone());
+                adapter.update_gnome_focus(focus.as_ref());
+                adapter.process_key_event(keyval, keycode, state)
+            }
             Err(_) => return false,
         };
         if self.emit_actions(&result.actions).await.is_err() {
@@ -328,6 +377,8 @@ impl EngineObject {
     async fn focus_in(&self) {
         if let Ok(mut adapter) = self.adapter.lock() {
             adapter.focus_in_for_context(Some(self.path.as_str()));
+            let focus = self.gnome_focus.lock().ok().and_then(|focus| focus.clone());
+            adapter.bind_gnome_focus(focus.as_ref());
         }
         self.require_surrounding_text().await;
     }
@@ -443,6 +494,14 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
     let initial_validated = validate_config_for_policy(&initial_snapshot.config, &policy)?;
     let factory_config = Arc::new(Mutex::new(initial_validated));
     let instances: Instances = Arc::new(Mutex::new(HashMap::new()));
+    let gnome_focus = Arc::new(Mutex::new(None));
+    if env::var("XDG_CURRENT_DESKTOP")
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .contains("gnome")
+    {
+        spawn_gnome_focus_tracker(Arc::clone(&gnome_focus))?;
+    }
     let (completion_sender, completion_receiver) = mpsc::channel();
     let factory = Factory {
         connection: Arc::clone(&connection_slot),
@@ -452,6 +511,7 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
         next_id: AtomicU64::new(1),
         completions: completion_sender,
         telemetry: Some(Arc::clone(&telemetry)),
+        gnome_focus,
     };
     let pump_instances = Arc::clone(&instances);
     let pump_connection = Arc::clone(&connection_slot);
@@ -678,6 +738,7 @@ mod tests {
             next_id: AtomicU64::new(1),
             completions: mpsc::channel().0,
             telemetry: None,
+            gnome_focus: Arc::new(Mutex::new(None)),
         };
         assert!(matches!(
             zbus::block_on(factory.create_engine("not-wayexpand")),
@@ -711,6 +772,7 @@ mod tests {
             path,
             instances: Arc::clone(&instances),
             telemetry: None,
+            gnome_focus: Arc::new(Mutex::new(None)),
         };
 
         assert!(zbus::block_on(engine.destroy()).is_err());
@@ -730,6 +792,7 @@ mod tests {
             path: engine_path(1),
             instances: Arc::new(Mutex::new(HashMap::new())),
             telemetry: None,
+            gnome_focus: Arc::new(Mutex::new(None)),
         };
         engine.set_content_type((8, 0));
         assert!(!zbus::block_on(engine.process_key_event('a' as u32, 0, 0)));
@@ -765,6 +828,7 @@ replacement = "signature"
             path: engine_path(2),
             instances: Arc::new(Mutex::new(HashMap::new())),
             telemetry: None,
+            gnome_focus: Arc::new(Mutex::new(None)),
         };
 
         // Ordinary key output fails because there is no live D-Bus transport.
@@ -938,6 +1002,7 @@ replacement = "signature"
                 next_id: AtomicU64::new(1),
                 completions: completion_sender,
                 telemetry: Some(Arc::clone(&telemetry)),
+                gnome_focus: Arc::new(Mutex::new(None)),
             };
             let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair().unwrap();
             let server = std::thread::spawn(move || {
