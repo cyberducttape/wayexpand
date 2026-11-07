@@ -926,13 +926,15 @@ fn terminal_match_self_test(
 }
 
 fn daemon_build_matches_cli(status: &serde_json::Value) -> bool {
-    crate::doctor::status::daemon_build_matches(
+    crate::doctor::status::build_identities_match(
         status
             .get("daemon_commit")
             .and_then(serde_json::Value::as_str),
         status
             .get("daemon_version")
             .and_then(serde_json::Value::as_str),
+        crate::build_info::COMMIT,
+        crate::build_info::VERSION,
     )
 }
 
@@ -1318,11 +1320,18 @@ mod tests {
 
     #[test]
     fn terminal_matching_self_test_accepts_a_matching_daemon_build() {
-        let status = serde_json::json!({
-            "daemon_commit": crate::build_info::COMMIT,
-            "daemon_version": crate::build_info::VERSION,
-        });
-        assert!(daemon_build_matches_cli(&status));
+        assert!(crate::doctor::status::build_identities_match(
+            Some("known-build"),
+            Some("1.3.3-dev+known-build"),
+            "known-build",
+            "1.3.3-dev+known-build",
+        ));
+        assert!(!crate::doctor::status::build_identities_match(
+            Some("known-build"),
+            Some("1.3.3-dev+known-build.dirty-unknown"),
+            "known-build",
+            "1.3.3-dev+known-build.dirty-unknown",
+        ));
     }
 
     #[test]

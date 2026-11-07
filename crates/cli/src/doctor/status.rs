@@ -764,15 +764,29 @@ pub(crate) fn daemon_build_matches(
     daemon_commit: Option<&str>,
     daemon_version: Option<&str>,
 ) -> bool {
-    if crate::build_info::VERSION.contains(".dirty-unknown") {
+    build_identities_match(
+        daemon_commit,
+        daemon_version,
+        crate::build_info::COMMIT,
+        crate::build_info::VERSION,
+    )
+}
+
+pub(crate) fn build_identities_match(
+    daemon_commit: Option<&str>,
+    daemon_version: Option<&str>,
+    cli_commit: &str,
+    cli_version: &str,
+) -> bool {
+    if cli_version.contains(".dirty-unknown") {
         return false;
     }
     if let Some(version) = daemon_version {
-        return daemon_commit_matches(daemon_commit)
-            && version == crate::build_info::VERSION
+        return commits_match(daemon_commit, cli_commit)
+            && version == cli_version
             && !version.contains(".dirty-unknown");
     }
-    !crate::build_info::VERSION.contains(".dirty.") && daemon_commit_matches(daemon_commit)
+    !cli_version.contains(".dirty.") && commits_match(daemon_commit, cli_commit)
 }
 
 pub(crate) fn daemon_build_unknown(

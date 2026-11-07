@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Require the GUI's IBus setup preflight to verify that a shared component is
+  multi-user safe before skipping administrator integration consent. A legacy
+  system manifest that points into one user's home now offers the repair path.
 - Detect a stale or unverifiable daemon before requesting the terminal-only
   matcher self-test. Report `WX-VERSION-001` with the upgrade command instead
   of mislabeling an old daemon's unsupported response as invalid test data.

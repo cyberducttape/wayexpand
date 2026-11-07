@@ -22,7 +22,11 @@ fn ibus_registration_needed(report: &serde_json::Value) -> Option<bool> {
     };
     let component_valid = state("component") == Some("pass");
     let manifest_valid = state("manifest") == Some("pass");
-    Some(!(component_valid && manifest_valid))
+    // A system component that invokes one user's home-directory binary is
+    // registered, but is not a valid shared installation. Keep the explicit
+    // administrator-integration step available for this unsafe legacy state.
+    let manifest_scope_valid = state("manifest-scope") == Some("pass");
+    Some(!(component_valid && manifest_valid && manifest_scope_valid))
 }
 
 fn set_nonblocking<R: AsRawFd>(stream: &R) -> Result<(), String> {
@@ -1107,11 +1111,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn system_registration_consent_is_needed_only_when_component_checks_fail() {
+    fn system_registration_consent_requires_a_multiuser_safe_component() {
         let registered = serde_json::json!({
             "checks": [
                 {"id": "component", "state": "pass"},
-                {"id": "manifest", "state": "pass"}
+                {"id": "manifest", "state": "pass"},
+                {"id": "manifest-scope", "state": "pass"}
             ]
         });
         assert_eq!(ibus_registration_needed(&registered), Some(false));
@@ -1123,6 +1128,29 @@ mod tests {
             ]
         });
         assert_eq!(ibus_registration_needed(&missing), Some(true));
+
+        let legacy_shared_manifest = serde_json::json!({
+            "checks": [
+                {"id": "component", "state": "pass"},
+                {"id": "manifest", "state": "pass"},
+                {"id": "manifest-scope", "state": "warn"}
+            ]
+        });
+        assert_eq!(
+            ibus_registration_needed(&legacy_shared_manifest),
+            Some(true)
+        );
+
+        let older_report_without_scope_evidence = serde_json::json!({
+            "checks": [
+                {"id": "component", "state": "pass"},
+                {"id": "manifest", "state": "pass"}
+            ]
+        });
+        assert_eq!(
+            ibus_registration_needed(&older_report_without_scope_evidence),
+            Some(true)
+        );
 
         assert_eq!(
             ibus_registration_needed(&serde_json::json!({"schema": 2})),
