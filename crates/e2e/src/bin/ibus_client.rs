@@ -283,6 +283,29 @@ fn wait_for_focused_engine(status_file: &Path) -> Result<()> {
     }
 }
 
+/// Wait until the live engine has observed a content-type transition before
+/// sending more keys. The property write is synchronous to ibus-daemon, but
+/// forwarding it to an engine instance may complete asynchronously.
+fn wait_for_content_type(
+    status_file: &Path,
+    expected: wayexpand_backend_ibus::telemetry::IbusContentTypeState,
+) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        if let Some(reading) = wayexpand_backend_ibus::telemetry::read_status_at(status_file) {
+            if reading.status.recent_fields.iter().any(|field| {
+                field.focused && field.content_type == expected
+            }) {
+                return Ok(());
+            }
+        }
+        if Instant::now() >= deadline {
+            bail!("IBus engine did not observe the requested input-field content type");
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
 fn main() -> Result<()> {
     let mut arguments = env::args_os().skip(1);
     let status_file: PathBuf = arguments
@@ -376,6 +399,10 @@ fn main() -> Result<()> {
     );
 
     editor.set_content_type(PURPOSE_PASSWORD)?;
+    wait_for_content_type(
+        &status_file,
+        wayexpand_backend_ibus::telemetry::IbusContentTypeState::Sensitive,
+    )?;
     editor.clear()?;
     editor.type_text(TRIGGER)?;
     results.check(
@@ -388,6 +415,10 @@ fn main() -> Result<()> {
     );
 
     editor.set_content_type(PURPOSE_FREE_FORM)?;
+    wait_for_content_type(
+        &status_file,
+        wayexpand_backend_ibus::telemetry::IbusContentTypeState::Normal,
+    )?;
     editor.clear()?;
     editor.type_text(TRIGGER)?;
     results.check(
@@ -428,10 +459,28 @@ fn main() -> Result<()> {
         Some(reading) => {
             let status = reading.status;
             let raw = std::fs::read_to_string(&status_file).unwrap_or_default();
+            let field_summary = status
+                .recent_fields
+                .iter()
+                .map(|field| {
+                    format!(
+                        "focused={} type={:?} surrounding={} keys={} expansions={} refusals={:?}",
+                        field.focused,
+                        field.content_type,
+                        field.surrounding_capability,
+                        field.keys,
+                        field.expansions,
+                        field.refusals
+                    )
+                })
+                .collect::<Vec<_>>();
             results.check(
                 "telemetry-counts",
                 status.totals.expansions >= 3,
-                format!("{} expansion(s) recorded", status.totals.expansions),
+                format!(
+                    "{} expansion(s) recorded; fields={field_summary:?}",
+                    status.totals.expansions
+                ),
             );
             let explained = status.recent_fields.iter().any(|field| {
                 field.refusals.no_surrounding_capability > 0
