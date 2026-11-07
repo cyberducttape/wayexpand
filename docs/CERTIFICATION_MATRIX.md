@@ -106,6 +106,10 @@ a fixed test trigger through XTEST, and verifies the resulting widget text.
 The Qt 6 `QLineEdit` fixture uses the IBus XIM bridge and verifies exact
 trigger/Unicode pass-through plus password-field preservation; it does not
 claim Qt replacement support without a verified surrounding-text contract.
+An xterm fixture reads test bytes in raw mode, verifies trigger and Unicode
+pass-through, and exits without submitting a command. These XIM checks are
+limited to the hosted XWayland session and do not certify native Wayland
+terminal clients or physical keyboards.
 The same test opens an isolated Google Chrome profile on a local page, focuses
 its textarea through Mutter, types the same harmless trigger through XTEST, and
 checks the textarea value using Chrome DevTools. The tested Chrome XWayland/IBus

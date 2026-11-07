@@ -23,7 +23,7 @@ for argument in "$@"; do
         *) printf '%s\n' "usage: $0 [--keep]" >&2; exit 2 ;;
     esac
 done
-for tool in gnome-shell dbus-run-session gsettings gdbus xdotool timeout python3; do
+for tool in gnome-shell dbus-run-session gsettings gdbus xdotool xterm timeout python3; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         printf '%s\n' "error: $tool is required (install GNOME Shell, XWayland, xdotool and the GTK/IBus test dependencies)" >&2
         exit 2
@@ -150,6 +150,7 @@ sinks=
 gtk_pid=
 browser_pid=
 qt_pid=
+terminal_pid=
 finish() {
     for pid in $sinks; do kill "$pid" 2>/dev/null || true; done
     if [ -n "$gtk_pid" ]; then
@@ -163,6 +164,10 @@ finish() {
     if [ -n "$qt_pid" ]; then
         kill "$qt_pid" 2>/dev/null || true
         wait "$qt_pid" 2>/dev/null || true
+    fi
+    if [ -n "$terminal_pid" ]; then
+        kill "$terminal_pid" 2>/dev/null || true
+        wait "$terminal_pid" 2>/dev/null || true
     fi
     kill "$shell_pid" 2>/dev/null || true
     wait "$shell_pid" 2>/dev/null || true
@@ -531,6 +536,67 @@ run_qt_xim_case() {
 run_qt_xim_case safe-passthrough ';e2e' ';e2e' false
 run_qt_xim_case unicode-passthrough 'Grüße 世界 🖥️' 'Grüße 世界 🖥️' false
 run_qt_xim_case password ';e2e' ';e2e' true
+run_terminal_xim_case() {
+    case_name=$1
+    input=$2
+    ready_marker="$E2E_WORK/terminal-ready-$case_name"
+    test_log="$E2E_WORK/terminal-ibus-e2e-$case_name.log"
+    XMODIFIERS='@im=ibus' \
+        xterm -title "WayExpand terminal acceptance org.wayexpand.GnomeTerminalIbus" \
+        -geometry 80x3+0+0 -e python3 \
+        "$E2E_PROJECT_DIR/scripts/certification-clients/terminal_ibus_e2e.py" \
+        --expected "$input" --ready-marker "$ready_marker" \
+        >"$test_log" 2>&1 &
+    terminal_pid=$!
+    ready_tries=100
+    while [ ! -s "$ready_marker" ]; do
+        if ! kill -0 "$terminal_pid" 2>/dev/null; then
+            wait "$terminal_pid" || true
+            terminal_pid=
+            log "fail gnome-terminal-$case_name terminal input reader exited before readiness"
+            cat "$test_log"
+            exit 1
+        fi
+        ready_tries=$((ready_tries - 1))
+        if [ "$ready_tries" -le 0 ]; then
+            kill "$terminal_pid" 2>/dev/null || true
+            wait "$terminal_pid" 2>/dev/null || true
+            terminal_pid=
+            log "fail gnome-terminal-$case_name terminal input reader did not become ready"
+            cat "$test_log"
+            exit 1
+        fi
+        sleep 0.05
+    done
+    if ! activate_window org.wayexpand.GnomeTerminalIbus; then
+        kill "$terminal_pid" 2>/dev/null || true
+        wait "$terminal_pid" 2>/dev/null || true
+        terminal_pid=
+        log "fail gnome-terminal-$case_name Mutter could not focus the terminal acceptance window"
+        cat "$test_log"
+        exit 1
+    fi
+    if ! DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+        xdotool type --clearmodifiers --delay 40 -- "$input"; then
+        kill "$terminal_pid" 2>/dev/null || true
+        wait "$terminal_pid" 2>/dev/null || true
+        terminal_pid=
+        log "fail gnome-terminal-$case_name XTEST could not type into the terminal"
+        cat "$test_log"
+        exit 1
+    fi
+    terminal_status=0
+    wait "$terminal_pid" || terminal_status=$?
+    terminal_pid=
+    if [ "$terminal_status" -ne 0 ]; then
+        log "fail gnome-terminal-$case_name terminal XIM changed or lost input"
+        cat "$test_log"
+        exit 1
+    fi
+    log "pass gnome-terminal-$case_name $(cat "$test_log")"
+}
+run_terminal_xim_case safe-passthrough ';e2e'
+run_terminal_xim_case unicode-passthrough 'Grüße 世界 🖥️'
 for layout in de fr; do
     "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --activate-source xkb "$layout" \
         >"$E2E_WORK/layout-$layout-activation.log"
@@ -986,7 +1052,7 @@ env -i \
     dbus-run-session -- "$work/session.sh" >"$work/results.txt" 2>"$work/session.log" || status=$?
 
 cat "$work/results.txt"
-expected_checks='extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-ibus-input-context gnome-gtk-insertion gnome-gtk-unicode gnome-gtk-password gnome-gtk-gtk4-insertion gnome-gtk-gtk4-unicode gnome-gtk-gtk4-password gnome-qt-safe-passthrough gnome-qt-unicode-passthrough gnome-qt-password gnome-layout-de gnome-layout-fr extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-ibus-input-context-after-login'
+expected_checks='extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-ibus-input-context gnome-gtk-insertion gnome-gtk-unicode gnome-gtk-password gnome-gtk-gtk4-insertion gnome-gtk-gtk4-unicode gnome-gtk-gtk4-password gnome-qt-safe-passthrough gnome-qt-unicode-passthrough gnome-qt-password gnome-terminal-safe-passthrough gnome-terminal-unicode-passthrough gnome-layout-de gnome-layout-fr extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-ibus-input-context-after-login'
 missing_check=
 for check in $expected_checks; do
     if ! grep -F "pass $check" "$work/results.txt" >/dev/null; then
