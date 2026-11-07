@@ -22,6 +22,18 @@ impl Config {
     ) -> Result<crate::ValidatedConfig, ConfigError> {
         let metadata = self.validate_metadata_with_snippets(snippets)?;
         let config = Arc::new(self.clone());
+        // Matcher structure is immutable. Compile it into this generation so
+        // separate input contexts can share the trie while retaining private
+        // mutable input, composition, and pending-output state.
+        let matcher = Arc::new(
+            crate::Matcher::try_new(
+                metadata
+                    .effective_triggers
+                    .iter()
+                    .map(|(_, trigger)| trigger.as_str()),
+            )
+            .expect("validated effective-trigger limit fits matcher indices"),
+        );
         let compiled_expansions = config
             .expansion
             .iter()
@@ -42,6 +54,7 @@ impl Config {
                 .map(|expansion| expansion.id.to_ascii_lowercase())
                 .collect(),
             effective_triggers: metadata.effective_triggers,
+            matcher,
             app_filters: metadata.app_filters,
             form_fields: metadata.form_fields,
             template_variables: metadata.template_variables,

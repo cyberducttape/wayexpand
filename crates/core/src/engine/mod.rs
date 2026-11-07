@@ -87,7 +87,7 @@ pub struct ExpansionEngine {
     terminal_app_scope: Vec<(AppFilter, Option<GlobPattern>)>,
     /// Host restriction: expand automatically only in `terminal_apps`.
     terminal_apps_only: bool,
-    matcher: Matcher,
+    matcher: Arc<Matcher>,
     /// Reused temporary storage for NFC normalization and raw-offset mapping
     /// of decomposed input suffixes.
     match_scratch: MatchScratch,
@@ -256,13 +256,7 @@ impl ExpansionEngine {
         // Snapshot validation caps effective triggers far below the matcher's
         // representable index count. Keep the public constructor fallible for
         // arbitrary callers; this internal boundary consumes validated data.
-        let matcher = Matcher::try_new(
-            validated
-                .effective_triggers
-                .iter()
-                .map(|(_, trigger)| trigger.as_str()),
-        )
-        .expect("validated effective-trigger limit fits matcher indices");
+        let matcher = Arc::clone(&validated.matcher);
         let app_filter_globs = validated
             .app_filters
             .iter()

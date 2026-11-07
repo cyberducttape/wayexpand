@@ -88,10 +88,7 @@ XDG_CONFIG_HOME="$test_root/config" \
 [ -x "$test_root/home/.local/bin/wayexpand-ibus" ]
 [ -L "$test_root/home/.local/lib/wayexpand/current" ]
 [ -x "$test_root/home/.local/lib/wayexpand/current/bin/wayexpand-daemon" ]
-[ -x "$test_root/home/.local/lib/wayexpand/current/libexec/wayexpand-certification/bin/wx-e2e-sink" ]
-[ -x "$test_root/home/.local/lib/wayexpand/current/libexec/wayexpand-certification/bin/wx-e2e-type" ]
-[ -x "$test_root/home/.local/lib/wayexpand/current/libexec/wayexpand-certification/bin/wx-e2e-eis-relay" ]
-[ -f "$test_root/home/.local/lib/wayexpand/current/libexec/wayexpand-certification/kwin-e2e-report.sh" ]
+[ ! -e "$test_root/home/.local/lib/wayexpand/current/libexec/wayexpand-certification" ]
 first_build=$(readlink "$test_root/home/.local/lib/wayexpand/current")
 
 # Fail immediately after the version pointer is switched. The installer must

@@ -89,6 +89,7 @@ for path in \
     "wayexpand-test-linux-$release_arch/bin/wayexpand-ui" \
     "wayexpand-test-linux-$release_arch/bin/wayexpand-gui" \
     "wayexpand-test-linux-$release_arch/bin/wayexpand-ibus" \
+    "wayexpand-test-linux-$release_arch/desktop/wayexpand.desktop" \
     "wayexpand-test-linux-$release_arch/libexec/wayexpand-certification/bin/wx-e2e-sink" \
     "wayexpand-test-linux-$release_arch/libexec/wayexpand-certification/bin/wx-e2e-type" \
     "wayexpand-test-linux-$release_arch/libexec/wayexpand-certification/bin/wx-e2e-eis-relay" \
