@@ -105,32 +105,28 @@ fi
 gsettings set org.gnome.shell disable-user-extensions false
 gsettings set org.gnome.shell enabled-extensions "['$E2E_UUID', '$E2E_CONTROLLER_UUID']"
 gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us'), ('xkb', 'de')]"
-socket="$XDG_RUNTIME_DIR/ibus.sock"
-ibus-daemon --single --panel=disable --emoji-extension=disable \
-    --cache=none --address="unix:path=$socket" >"$E2E_WORK/ibus-daemon.log" 2>&1 &
-ibus_pid=$!
-tries=100
-while [ ! -S "$socket" ] && [ "$tries" -gt 0 ]; do
-    sleep 0.1
-    tries=$((tries - 1))
-done
-if [ ! -S "$socket" ]; then
-    log "fail ibus-started private ibus-daemon did not create its socket"
-    kill "$ibus_pid" 2>/dev/null || true
-    exit 1
-fi
-export IBUS_ADDRESS="unix:path=$socket"
-if ! ibus list-engine --name-only >"$E2E_WORK/ibus-engines.txt" 2>&1 \
-    || ! grep -Fx wayexpand "$E2E_WORK/ibus-engines.txt" >/dev/null; then
-    log "fail ibus-engine-registered WayExpand engine is missing from the private IBus registry"
-    cat "$E2E_WORK/ibus-engines.txt"
-    kill "$ibus_pid" 2>/dev/null || true
-    exit 1
-fi
-log "pass ibus-engine-registered"
 gnome-shell --headless --mode=user --wayland --virtual-monitor 1280x800 --wayland-display "$display" \
     >"$E2E_WORK/gnome-shell.log" 2>&1 &
 shell_pid=$!
+# GNOME Shell owns the session IBus lifecycle. Starting a second private
+# daemon before Shell causes Shell to replace it, leaving later CLI probes
+# pointed at a stale IBUS_ADDRESS. Let Shell start its daemon, then verify the
+# component registered in that live session.
+tries=100
+while :; do
+    if ibus list-engine --name-only >"$E2E_WORK/ibus-engines.txt" 2>&1 \
+        && grep -Fx wayexpand "$E2E_WORK/ibus-engines.txt" >/dev/null; then
+        log "pass ibus-engine-registered"
+        break
+    fi
+    tries=$((tries - 1))
+    if [ "$tries" -le 0 ] || ! kill -0 "$shell_pid" 2>/dev/null; then
+        log "fail ibus-engine-registered GNOME's session IBus registry did not load WayExpand"
+        cat "$E2E_WORK/ibus-engines.txt"
+        exit 1
+    fi
+    sleep 0.1
+done
 # Preserve safe activation diagnostics: configuration values, extension IDs,
 # and paths only. This helps distinguish an undiscovered extension from one
 # that GNOME refused to enable; no snippet or keyboard data is collected.
@@ -172,8 +168,6 @@ finish() {
             kill "$engine_pid" 2>/dev/null || true
         fi
     fi
-    kill "$ibus_pid" 2>/dev/null || true
-    wait "$ibus_pid" 2>/dev/null || true
 }
 trap finish EXIT
 
