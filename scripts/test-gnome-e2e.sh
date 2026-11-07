@@ -91,6 +91,7 @@ cat >"$work/session.sh" <<'EOF'
 set -eu
 . "$E2E_STATE_HELPER"
 . "$E2E_DBUS_HELPER"
+browser_bin=${E2E_BROWSER_BIN:?E2E_BROWSER_BIN must identify the browser executable}
 display=wayexpand-gnome-e2e
 log() { printf '%s\n' "$*"; }
 if [ "$HOME" != "$E2E_WORK/home" ] \
