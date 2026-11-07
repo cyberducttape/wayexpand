@@ -105,13 +105,12 @@ fi
 gsettings set org.gnome.shell disable-user-extensions false
 gsettings set org.gnome.shell enabled-extensions "['$E2E_UUID', '$E2E_CONTROLLER_UUID']"
 gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us'), ('xkb', 'de')]"
-gnome-shell --headless --mode=user --wayland --virtual-monitor 1280x800 --wayland-display "$display" \
-    >"$E2E_WORK/gnome-shell.log" 2>&1 &
-shell_pid=$!
-# GNOME Shell owns the session IBus lifecycle. Starting a second private
-# daemon before Shell causes Shell to replace it, leaving later CLI probes
-# pointed at a stale IBUS_ADDRESS. Let Shell start its daemon, then verify the
-# component registered in that live session.
+ibus-daemon --single --panel=disable --emoji-extension=disable --cache=none \
+    >"$E2E_WORK/ibus-daemon.log" 2>&1 &
+ibus_pid=$!
+# Run the private fixture on the session bus, so GNOME Shell discovers and
+# reuses it instead of starting a second daemon. The daemon inherits the
+# isolated component path from the test session.
 tries=100
 while :; do
     if ibus list-engine --name-only >"$E2E_WORK/ibus-engines.txt" 2>&1 \
@@ -120,13 +119,16 @@ while :; do
         break
     fi
     tries=$((tries - 1))
-    if [ "$tries" -le 0 ] || ! kill -0 "$shell_pid" 2>/dev/null; then
-        log "fail ibus-engine-registered GNOME's session IBus registry did not load WayExpand"
+    if [ "$tries" -le 0 ] || ! kill -0 "$ibus_pid" 2>/dev/null; then
+        log "fail ibus-engine-registered the session IBus registry did not load WayExpand"
         cat "$E2E_WORK/ibus-engines.txt"
         exit 1
     fi
     sleep 0.1
 done
+gnome-shell --headless --mode=user --wayland --virtual-monitor 1280x800 --wayland-display "$display" \
+    >"$E2E_WORK/gnome-shell.log" 2>&1 &
+shell_pid=$!
 # Preserve safe activation diagnostics: configuration values, extension IDs,
 # and paths only. This helps distinguish an undiscovered extension from one
 # that GNOME refused to enable; no snippet or keyboard data is collected.
@@ -168,6 +170,8 @@ finish() {
             kill "$engine_pid" 2>/dev/null || true
         fi
     fi
+    kill "$ibus_pid" 2>/dev/null || true
+    wait "$ibus_pid" 2>/dev/null || true
 }
 trap finish EXIT
 
