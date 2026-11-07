@@ -1565,10 +1565,15 @@ impl SetupTransaction {
         })
     }
 
-    fn commit(&mut self) {
+    fn commit(&mut self) -> Result<()> {
         if let Some(extension) = self.gnome_extension.as_mut() {
-            extension.commit();
+            if let Err(error) = extension.commit() {
+                let rollback = self.rollback();
+                let summary = transaction_rollback_summary(rollback);
+                bail!("could not commit the GNOME extension install journal: {error}. Setup changes were rolled back where possible.\n{summary}");
+            }
         }
+        Ok(())
     }
 
     fn rollback(&mut self) -> TransactionRollback {
@@ -2518,7 +2523,7 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
                 // This is an intentional prepared state: GNOME must load the
                 // complete, verified extension at the next login before the
                 // remaining IBus activation can proceed.
-                transaction.commit();
+                transaction.commit()?;
                 bail!("WX-GNOME-SESSION-RESTART-001: restart the GNOME session to continue setup");
             }
             crate::gnome_extension::SetupOutcome::Unavailable => {
@@ -2589,7 +2594,7 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
                 println!("  - {change}");
             }
         }
-        transaction.commit();
+        transaction.commit()?;
         bail!("WX-POLICY-001: IBus is active, but replacement authorization is required before expansions can work")
     }
     if let Some(problem_id) = setup_route_failure_problem_id(&report, &overlap) {
@@ -2623,7 +2628,7 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
     if companion != CompanionService::Terminals {
         println!("Terminal coverage is optional and is offered separately after the real IBus insertion test.");
     }
-    transaction.commit();
+    transaction.commit()?;
     Ok(())
 }
 

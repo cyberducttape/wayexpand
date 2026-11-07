@@ -209,4 +209,39 @@ mod tests {
         assert!(!gnome_ibus_setup_resume_marker_present(&config));
         fs::remove_dir_all(dir).unwrap();
     }
+
+    #[test]
+    fn stale_markers_remain_visible_for_diagnostics_but_never_resume() {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let dir = std::env::temp_dir().join(format!(
+            "wayexpand-setup-resume-stale-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        fs::create_dir(&dir).unwrap();
+        let config = dir.join("expansions.toml");
+        let expired_at = unix_now().saturating_sub(MAX_RESUME_AGE_SECS + 1);
+        let path = marker_path(&config);
+        let mut marker = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+            .unwrap();
+        marker
+            .write_all(transaction(expired_at).as_bytes())
+            .unwrap();
+        marker.sync_all().unwrap();
+
+        assert!(gnome_ibus_setup_resume_marker_present(&config));
+        assert!(!gnome_ibus_setup_resume_pending_for_session(
+            &config, true, true
+        ));
+        assert!(!gnome_ibus_setup_resume_pending_for_session(
+            &config, true, false
+        ));
+        clear_gnome_ibus_setup_resume(&config).unwrap();
+        assert!(!gnome_ibus_setup_resume_marker_present(&config));
+        fs::remove_dir_all(dir).unwrap();
+    }
 }

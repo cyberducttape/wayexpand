@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Recover interrupted GNOME Shell extension installs from a private, fsynced
+  transaction journal. The installer holds a per-extension flock, rolls back
+  an uncommitted directory exchange on the next setup run, retains a committed
+  build while cleaning its backup, and removes partial journal writes. Add
+  regressions for interruption before/after the switch and after commit, plus
+  explicit stale GNOME setup-marker coverage; stale markers remain visible for
+  diagnostics but cannot resume and can be cancelled.
 - Keep IBus async workers absent for text-only configurations and add a
   regression that verifies worker startup/removal follows configuration reloads.
   Replace the hotkey worker's timed channel wait with a wakeable bounded queue,
