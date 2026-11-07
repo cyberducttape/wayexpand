@@ -706,7 +706,7 @@ fn rejected_command_job_does_not_consume_the_trigger() {
     // A zero-capacity queue with its receiver held makes try_send return
     // Full deterministically, without starting a child process.
     let sender = Arc::new(super::async_runtime::CommandQueue::new(0));
-    let (hotkey_sender, _hotkey_receiver) = mpsc::sync_channel(0);
+    let hotkey_sender = Arc::new(super::async_runtime::CommandQueue::new(0));
     let (_, completion_receiver) = mpsc::sync_channel(1);
     let (_, hotkey_completion_receiver) = mpsc::sync_channel(1);
     engine.async_commands = Some(AsyncCommandRuntime {
@@ -756,7 +756,7 @@ fn deferred_dispatch_rejects_a_saturated_queue_without_running_command() {
     let mut engine = ExpansionEngine::new(config).unwrap();
 
     let sender = Arc::new(super::async_runtime::CommandQueue::new(0));
-    let (hotkey_sender, _hotkey_receiver) = mpsc::sync_channel(0);
+    let hotkey_sender = Arc::new(super::async_runtime::CommandQueue::new(0));
     let (_, completion_receiver) = mpsc::sync_channel(1);
     let (_, hotkey_completion_receiver) = mpsc::sync_channel(1);
     engine.async_commands = Some(AsyncCommandRuntime {

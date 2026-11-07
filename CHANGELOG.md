@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Keep IBus async workers absent for text-only configurations and add a
+  regression that verifies worker startup/removal follows configuration reloads.
+  Replace the hotkey worker's timed channel wait with a wakeable bounded queue,
+  avoiding an idle 50 ms shutdown wait during worker teardown. Add an IBus
+  context benchmark for construction, reload, process thread count, RSS/PSS,
+  and p50/p95/p99 key processing; the 16-context baseline shows 80 workers,
+  establishing the need for a shared bounded pool.
 - Rework Getting Started around the GUI-first onboarding flow, and document
   app-filter availability by route. GNOME focus updates are supplied by the
   Shell extension and bound to IBus contexts, but remain uncertified in

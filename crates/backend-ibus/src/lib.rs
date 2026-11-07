@@ -1332,6 +1332,38 @@ replacement = "signature"
         let _ = std::fs::remove_file(marker);
     }
 
+    #[test]
+    fn async_workers_are_lazy_and_follow_the_active_config_generation() {
+        let text_config =
+            Config::parse("[[expansion]]\ntrigger = ':hello'\nreplacement = 'hello'\n").unwrap();
+        let mut adapter = IbusEngineAdapter::new(ExpansionEngine::new(text_config).unwrap());
+        assert!(!adapter.engine().async_commands_enabled());
+        assert_eq!(adapter.engine().command_metrics().command_worker_threads, 0);
+        assert_eq!(adapter.engine().command_metrics().hotkey_worker_threads, 0);
+
+        let command_config = Config::parse(
+            "[[expansion]]\ntrigger = ':cmd'\nreplacement = ''\n\
+             [expansion.command]\nprogram = '/usr/bin/true'\nargs = []\n",
+        )
+        .unwrap();
+        adapter.replace_config(command_config).unwrap();
+        assert!(adapter.engine().async_commands_enabled());
+        let metrics = adapter.engine().command_metrics();
+        assert_eq!(metrics.command_worker_threads, 4);
+        assert_eq!(metrics.hotkey_worker_threads, 1);
+
+        adapter
+            .replace_config(
+                Config::parse("[[expansion]]\ntrigger = ':hello'\nreplacement = 'hello'\n")
+                    .unwrap(),
+            )
+            .unwrap();
+        assert!(!adapter.engine().async_commands_enabled());
+        let metrics = adapter.engine().command_metrics();
+        assert_eq!(metrics.command_worker_threads, 0);
+        assert_eq!(metrics.hotkey_worker_threads, 0);
+    }
+
     #[cfg(unix)]
     #[test]
     fn audit_mode_logs_but_commits_async_output_over_organization_limit() {

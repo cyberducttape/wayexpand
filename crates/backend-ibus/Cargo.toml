@@ -34,3 +34,7 @@ zbus = { version = "5", default-features = false, features = ["async-io", "block
 [[bench]]
 name = "engine-generation"
 harness = false
+
+[[bench]]
+name = "runtime-profile"
+harness = false
