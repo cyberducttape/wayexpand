@@ -714,7 +714,7 @@ EOF
 }
 
 session_clipboard_is() {
-    [ "$(wl-paste --no-newline 2>/dev/null)" = "$1" ]
+    [ "$(wl-paste --type='text/plain;charset=utf-8' --no-newline 2>/dev/null)" = "$1" ]
 }
 
 scenario_clipboard_variable() {
@@ -727,7 +727,8 @@ scenario_clipboard_variable() {
     clipboard_config
     start_sink e2e-a && start_daemon || return 2
     activate e2e-a || return 2
-    printf 'copied text' | wl-copy 2>>"$case_dir/clipboard.log" || {
+    printf 'copied text' | wl-copy --type='text/plain;charset=utf-8' \
+        2>>"$case_dir/clipboard.log" || {
         printf 'wl-copy could not set the session clipboard'
         return 2
     }
@@ -735,9 +736,6 @@ scenario_clipboard_variable() {
         printf 'the session clipboard did not report the copied text'
         return 2
     }
-    # Record only advertised MIME types (never clipboard contents) to make
-    # protocol capability failures diagnosable from CI artifacts.
-    wl-paste --list-types >"$case_dir/clipboard-types.txt" 2>&1 || true
     activate e2e-a || return 2
     expand_in e2e-a "" ";quote" || return 2
     wait_until 50 sink_text_is e2e-a "> copied text"

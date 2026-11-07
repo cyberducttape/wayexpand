@@ -18,8 +18,9 @@ All notable changes to WayExpand are documented here.
   acceptance tests run; install Xwayland for GNOME Shell's headless session and
   omit recommended packages from KWin's install.
 - Wait until the Wayland clipboard selection's MIME types arrive before
-  reading its data-control offer. Preserve content-free daemon counters when
-  the clipboard insertion E2E case fails.
+  reading its data-control offer. Make the KWin clipboard acceptance fixture
+  advertise UTF-8 plain text explicitly and preserve content-free daemon
+  counters when the clipboard insertion case fails.
 - Activate GNOME E2E extensions through GNOME Shell's extension manager after
   writing the enabled-extension setting, avoiding a startup race with dconf.
 - Correct the KWin/IBus crash guidance: a recent helper coredump is evidence
