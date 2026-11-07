@@ -586,7 +586,8 @@ fn main() -> Result<()> {
         None
     };
 
-    let window_tracker = backend_lifecycle::spawn_window_tracker();
+    let window_tracker =
+        backend_lifecycle::spawn_window_tracker(config.engine.requires_window_titles());
     let output_guard = assurance::GuardState::global();
     output_guard.set_mode(config.engine.compatibility_mode());
     output_guard.set_witness(

@@ -757,6 +757,40 @@ pub(crate) fn daemon_commit_unknown(daemon_commit: Option<&str>) -> bool {
     commit_unknown(daemon_commit, crate::build_info::COMMIT)
 }
 
+/// Compare exact build versions when the daemon publishes them. The commit
+/// fallback keeps compatibility with older daemons for clean builds; a dirty
+/// CLI cannot claim an exact match from a shared Git commit alone.
+pub(crate) fn daemon_build_matches(
+    daemon_commit: Option<&str>,
+    daemon_version: Option<&str>,
+) -> bool {
+    if crate::build_info::VERSION.contains(".dirty-unknown") {
+        return false;
+    }
+    if let Some(version) = daemon_version {
+        return daemon_commit_matches(daemon_commit)
+            && version == crate::build_info::VERSION
+            && !version.contains(".dirty-unknown");
+    }
+    !crate::build_info::VERSION.contains(".dirty.") && daemon_commit_matches(daemon_commit)
+}
+
+pub(crate) fn daemon_build_unknown(
+    daemon_commit: Option<&str>,
+    daemon_version: Option<&str>,
+) -> bool {
+    if crate::build_info::VERSION.contains(".dirty-unknown") {
+        return true;
+    }
+    if daemon_commit_unknown(daemon_commit) {
+        return true;
+    }
+    daemon_version.is_some_and(|version| version == "unknown" || version.contains(".dirty-unknown"))
+        || (daemon_version.is_none()
+            && crate::build_info::VERSION.contains(".dirty.")
+            && daemon_commit == Some(crate::build_info::COMMIT))
+}
+
 fn commit_unknown(daemon: Option<&str>, cli: &str) -> bool {
     cli == "unknown" || daemon.is_none_or(|commit| commit == "unknown")
 }
@@ -772,13 +806,17 @@ pub(crate) fn upgrade_status_from_snapshot(snapshot: &serde_json::Value) -> serd
     let daemon_commit = snapshot
         .get("daemon_commit")
         .and_then(serde_json::Value::as_str);
+    let daemon_version = snapshot
+        .get("daemon_version")
+        .and_then(serde_json::Value::as_str);
     let compatible = status_schema_compatible(snapshot);
-    let commit_matches = daemon_commit_matches(daemon_commit);
+    let build_matches = daemon_build_matches(daemon_commit, daemon_version);
+    let build_unknown = daemon_build_unknown(daemon_commit, daemon_version);
     let status = if !compatible {
         "incompatible"
-    } else if daemon_commit_unknown(daemon_commit) {
+    } else if build_unknown {
         "unverified"
-    } else if !commit_matches {
+    } else if !build_matches {
         "restart-required"
     } else {
         "current"
@@ -790,9 +828,7 @@ pub(crate) fn upgrade_status_from_snapshot(snapshot: &serde_json::Value) -> serd
         "restart-required" => {
             "The running daemon is from a different build; stop and restart it using the same launch method, and ensure the updated binary is used. If systemd manages it, restart the corresponding user service before relying on this CLI."
         }
-        "unverified" => {
-            "This CLI or the daemon was built without a commit ID (for example from a source archive), so it cannot tell whether the daemon is current; stop and restart it using the same launch method after every upgrade, and ensure the updated binary is used. If systemd manages it, restart the corresponding user service."
-        }
+        "unverified" => "This build identity cannot be verified against the running daemon; restart it using the same launch method with the matching installation payload, then rerun this check.",
         _ => "The running daemon matches this CLI build.",
     };
     serde_json::json!({
@@ -801,17 +837,24 @@ pub(crate) fn upgrade_status_from_snapshot(snapshot: &serde_json::Value) -> serd
         "cli": {
             "version": crate::build_info::VERSION,
             "commit": crate::build_info::COMMIT,
+            "build_matches": build_matches,
         },
         "daemon": {
             "available": true,
             "commit": daemon_commit,
+            "version": daemon_version,
             "status_schema": snapshot.get("status_schema"),
             "state": snapshot.get("state"),
             "source": snapshot.get("source"),
             "backend": snapshot.get("backend"),
         },
         "compatible": compatible,
-        "commit_matches": commit_matches,
+        // A matching commit string is not verification when either side has
+        // an explicitly unknown build identity (for example a source archive
+        // without Git metadata). Keep the public result consistent with the
+        // `unverified` status and `build_matches` field.
+        "commit_matches": !build_unknown && daemon_commit_matches(daemon_commit),
+        "build_matches": build_matches,
     })
 }
 
@@ -877,6 +920,7 @@ mod runtime_route_tests {
             "evdev_quarantined_events_total": 7,
             "status_schema": CONTROL_STATUS_SCHEMA,
             "daemon_commit": crate::build_info::COMMIT,
+            "daemon_version": crate::build_info::VERSION,
         });
 
         let summary = runtime_route_summary(&snapshot);
@@ -901,7 +945,10 @@ mod runtime_route_tests {
         );
         assert_eq!(summary["matcher_latency"]["p95_us"], 12);
         assert_eq!(summary["matcher_latency"]["sample_count"], 500);
-        let expected_status = if crate::build_info::COMMIT == "unknown" {
+        let expected_status = if daemon_build_unknown(
+            Some(crate::build_info::COMMIT),
+            Some(crate::build_info::VERSION),
+        ) {
             "unverified"
         } else {
             "current"
@@ -914,22 +961,27 @@ mod runtime_route_tests {
         let snapshot = serde_json::json!({
             "status_schema": CONTROL_STATUS_SCHEMA,
             "daemon_commit": "old-build",
+            "daemon_version": "1.3.2-dev+old-build",
         });
 
         let summary = runtime_route_summary(&snapshot);
 
-        let expected_status = if crate::build_info::COMMIT == "unknown" {
-            "unverified"
-        } else {
-            "restart-required"
-        };
+        let expected_status =
+            if daemon_build_unknown(Some("old-build"), Some("1.3.2-dev+old-build")) {
+                "unverified"
+            } else {
+                "restart-required"
+            };
         assert_eq!(summary["daemon_compatibility"]["status"], expected_status);
     }
 }
 
 #[cfg(test)]
 mod commit_tests {
-    use super::{commit_unknown, commits_match};
+    use super::{
+        commit_unknown, commits_match, daemon_build_matches, daemon_build_unknown,
+        upgrade_status_from_snapshot,
+    };
 
     #[test]
     fn unknown_commits_never_match() {
@@ -942,5 +994,35 @@ mod commit_tests {
         assert!(commit_unknown(Some("unknown"), "abc123"));
         assert!(commit_unknown(None, "abc123"));
         assert!(!commit_unknown(Some("def456"), "abc123"));
+    }
+
+    #[test]
+    fn same_commit_with_a_different_dirty_build_version_requires_restart() {
+        if daemon_build_unknown(
+            Some(crate::build_info::COMMIT),
+            Some(crate::build_info::VERSION),
+        ) {
+            return;
+        }
+        let snapshot = serde_json::json!({
+            "status_schema": wayexpand_core::CONTROL_STATUS_SCHEMA,
+            "daemon_commit": crate::build_info::COMMIT,
+            "daemon_version": format!("{}-other-tree", crate::build_info::VERSION),
+        });
+        let report = upgrade_status_from_snapshot(&snapshot);
+        assert_eq!(report["status"], "restart-required");
+        assert_eq!(report["commit_matches"], true);
+        assert_eq!(report["build_matches"], false);
+    }
+
+    #[test]
+    fn dirty_cli_does_not_assume_a_legacy_same_commit_daemon_matches() {
+        if daemon_build_unknown(Some(crate::build_info::COMMIT), None) {
+            assert!(!daemon_build_matches(Some(crate::build_info::COMMIT), None));
+            assert!(daemon_build_unknown(Some(crate::build_info::COMMIT), None));
+        } else if crate::build_info::COMMIT != "unknown" {
+            assert!(daemon_build_matches(Some(crate::build_info::COMMIT), None));
+            assert!(!daemon_build_unknown(Some(crate::build_info::COMMIT), None));
+        }
     }
 }

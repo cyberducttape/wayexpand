@@ -140,6 +140,10 @@ pub enum DaemonOperation {
         text: String,
         json: bool,
     },
+    /// Verify that the daemon's currently loaded configuration can match at
+    /// least one enabled static expansion through terminal-only admission.
+    /// This performs no insertion and never returns snippet contents.
+    TerminalMatchSelfTest,
     ContextSet {
         ttl_seconds: u32,
         report: crate::SessionContextReport,
@@ -272,6 +276,7 @@ fn encode_operation(operation: &DaemonOperation) -> Result<String, DaemonClientE
                 if *json { "-json" } else { "" }
             ))
         }
+        DaemonOperation::TerminalMatchSelfTest => Ok("terminal-match-self-test".into()),
         DaemonOperation::ContextSet {
             ttl_seconds,
             report,
@@ -465,6 +470,10 @@ mod tests {
 
     #[test]
     fn encodes_typed_operations_with_validation() {
+        assert_eq!(
+            encode_operation(&DaemonOperation::TerminalMatchSelfTest).unwrap(),
+            "terminal-match-self-test"
+        );
         assert_eq!(
             encode_operation(&DaemonOperation::Explain {
                 text: "hello world".into(),

@@ -1,5 +1,5 @@
 {
-  "schema_version": 14,
+  "schema_version": 15,
   "daemon_control_schema": 29,
   "fields": {
     "response": "string",
@@ -14,6 +14,7 @@
     "backend_shutdown_workers_failed_total": "integer",
     "status_schema": "integer",
     "daemon_commit": "string",
+    "daemon_version": "string",
     "capture_sensitive_focus": "boolean",
     "capture_exclusive": "boolean",
     "capture_reliable_key_state": "boolean",

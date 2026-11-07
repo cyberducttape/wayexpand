@@ -148,6 +148,7 @@ pub(crate) fn report_json(report: &IbusChainReport, overlap: &RouteOverlap) -> s
                 "id": check.id,
                 "title": check.title,
                 "state": check.state.label(),
+                "problem_id": check.problem_id,
                 "detail": check.detail,
                 "fix": check.fix,
             })
@@ -166,7 +167,10 @@ pub(crate) fn report_json(report: &IbusChainReport, overlap: &RouteOverlap) -> s
     });
     let finding = overlap.finding(ibus_active(report), control_installed());
     serde_json::json!({
+        "schema": 2,
         "ready": report.ready() && !matches!(finding, Some((IbusCheckState::Fail, _, _))),
+        "configuration_readiness": report.configuration_readiness().label(),
+        "operational_readiness": report.operational_readiness().label(),
         "desktop": report.desktop.label(),
         "checks": checks,
         "first_failure": report.first_failure().map(|check| check.id),
@@ -236,7 +240,12 @@ pub(crate) fn print_report(report: &IbusChainReport, overlap: &RouteOverlap) -> 
             )
         })
         .collect();
-    println!("Readiness: {}", stages.join(" · "));
+    println!(
+        "Readiness: configuration={} · operational={} · {}",
+        report.configuration_readiness().label(),
+        report.operational_readiness().label(),
+        stages.join(" · ")
+    );
     match &report.activity {
         Some(reading) if !reading.status.recent_fields.is_empty() => {
             println!("Recent fields (newest last; no text is recorded):");
@@ -265,10 +274,24 @@ fn status_command(mut args: Args) -> Result<()> {
         let ready = print_report(&report, &overlap);
         println!();
         if ready {
-            println!("Result: READY. Check a specific app with `wayexpand ibus watch`.");
+            println!("Result: OPERATIONALLY VERIFIED. The IBus engine has received input from a normal field.");
+        } else if report.configuration_readiness() == IbusCheckState::Pass
+            && report.operational_readiness() == IbusCheckState::Fail
+        {
+            println!("Result: CONFIGURED, OPERATIONAL FAILURE. Resolve the failed check above and rerun `wayexpand ibus status`.");
+        } else if report.configuration_readiness() == IbusCheckState::Pass {
+            println!(
+                "Result: CONFIGURED, OPERATIONAL STATUS {}. Target-app insertion has not been independently confirmed.",
+                report.operational_readiness().label().to_ascii_uppercase()
+            );
         } else {
             println!(
-                "Result: NOT READY. Fix the first ✗ above, then run `wayexpand ibus status` again."
+                "Result: CONFIGURATION {} · OPERATIONAL STATUS {}. Review the checks above.",
+                report
+                    .configuration_readiness()
+                    .label()
+                    .to_ascii_uppercase(),
+                report.operational_readiness().label().to_ascii_uppercase()
             );
         }
         ready
@@ -404,19 +427,33 @@ mod tests {
     fn report_json_is_content_free_and_flags_the_first_failure() {
         let report = IbusChainReport {
             desktop: chain::IbusDesktop::KdeWayland,
-            checks: vec![chain::IbusCheck {
-                id: "component",
-                title: "IBus can find the WayExpand component",
-                state: IbusCheckState::Fail,
-                detail: "missing".into(),
-                fix: Some("run setup".into()),
-            }],
+            checks: vec![
+                chain::IbusCheck {
+                    id: "component",
+                    title: "IBus can find the WayExpand component",
+                    state: IbusCheckState::Fail,
+                    problem_id: None,
+                    detail: "missing".into(),
+                    fix: Some("run setup".into()),
+                },
+                chain::IbusCheck {
+                    id: "gnome-source-registered",
+                    title: "WayExpand registered in GNOME",
+                    state: IbusCheckState::Fail,
+                    problem_id: Some("WX-GNOME-IM-001"),
+                    detail: "missing".into(),
+                    fix: Some("wayexpand repair --gnome-input-source".into()),
+                },
+            ],
             activity: None,
         };
         let value = report_json(&report, &RouteOverlap::None);
         assert_eq!(value["ready"], false);
+        assert_eq!(value["schema"], 2);
         assert_eq!(value["first_failure"], "component");
         assert_eq!(value["checks"][0]["fix"], "run setup");
+        assert_eq!(value["checks"][1]["problem_id"], "WX-GNOME-IM-001");
         assert_eq!(value["other_route"]["scope"], "none");
+        assert_eq!(value["operational_readiness"], "unknown");
     }
 }

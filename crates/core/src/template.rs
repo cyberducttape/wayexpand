@@ -881,7 +881,7 @@ pub fn form_fields(template: &str) -> Result<Vec<FormField>, TemplateError> {
     for name in template_variables(template) {
         if name
             .strip_prefix("shellq:")
-            .is_some_and(|spec| spec.starts_with("context:"))
+            .is_some_and(|spec| spec.starts_with("context:") || spec.starts_with("env:"))
         {
             continue;
         }
@@ -1284,6 +1284,7 @@ enum Variable {
     SessionContext(SessionContextField),
     ShellQuotedSessionContext(SessionContextField),
     Env(String),
+    ShellQuotedEnv(String),
     Snippet(String),
     Uuid,
     NamedUuid(String),
@@ -1363,7 +1364,9 @@ fn parse_variable(name: &str) -> Result<Variable, TemplateError> {
         }
         other if other.starts_with("shellq:") => {
             let specification = &other["shellq:".len()..];
-            if let Some(name) = specification.strip_prefix("context:") {
+            if let Some(name) = specification.strip_prefix("env:") {
+                Variable::ShellQuotedEnv(name.trim().to_owned())
+            } else if let Some(name) = specification.strip_prefix("context:") {
                 Variable::ShellQuotedSessionContext(SessionContextField::parse(name).ok_or_else(
                     || TemplateError::UnknownVariable {
                         name: other.to_owned(),
@@ -1572,6 +1575,23 @@ fn evaluate<'a>(
                     name: variable.clone(),
                 },
             )?)
+        }
+        Variable::ShellQuotedEnv(variable) => {
+            let value = context
+                .env
+                .get(variable)
+                .ok_or_else(|| TemplateError::EnvNotAllowed {
+                    name: variable.clone(),
+                })?;
+            let shell = context
+                .session_context
+                .as_ref()
+                .and_then(|report| report.shell.as_deref())
+                .ok_or(TemplateError::SessionContextUnavailable { field: "shell" })?;
+            RenderValue::owned(
+                shell_quote_for_context(value, shell)
+                    .ok_or(TemplateError::SessionContextUnavailable { field: "shell" })?,
+            )
         }
         Variable::Uuid => RenderValue::owned(crate::template_dynamic::uuid_v4()?),
         Variable::NamedUuid(label) => match named.get(label) {
@@ -2603,6 +2623,26 @@ mod tests {
             render_template("ssh {{shellq:context:remote_host}}", &fish).unwrap(),
             "ssh 'prod\\'; touch /tmp/owned; #'"
         );
+        let env: BTreeMap<String, String> =
+            [("TARGET".into(), "prod'; touch /tmp/owned; #".into())]
+                .into_iter()
+                .collect();
+        let env_context = TemplateContext {
+            env: Arc::new(env),
+            session_context: Some(crate::SessionContextReport {
+                shell: Some("bash".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            render_template("ssh {{shellq:env:TARGET}}", &env_context).unwrap(),
+            "ssh 'prod'\\''; touch /tmp/owned; #'"
+        );
+        assert!(matches!(
+            render_template("ssh {{shellq:env:TARGET}}", &TemplateContext::default()),
+            Err(TemplateError::EnvNotAllowed { .. })
+        ));
         assert!(form_fields("{{shellq:context:remote_host}}")
             .unwrap()
             .is_empty());

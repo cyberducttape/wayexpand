@@ -42,7 +42,32 @@ export default class GnomeE2eFocusController extends Extension {
             );
             return;
         }
+        // Mutter may accept activate() before the focus transition has
+        // completed. Do not acknowledge the request until the compositor's
+        // focused-window state confirms that the test target owns focus.
+        const startedAt = GLib.get_monotonic_time();
+        let attempts = 0;
+        const confirmFocus = () => {
+            if (global.display.get_focus_window() === window) {
+                invocation.return_value(new GLib.Variant('()', []));
+                return GLib.SOURCE_REMOVE;
+            }
+
+            attempts += 1;
+            if (attempts >= 100 ||
+                GLib.get_monotonic_time() - startedAt >= 5_000_000) {
+                invocation.return_dbus_error(
+                    'org.wayexpand.GnomeE2eFocusController.Error.FocusTimeout',
+                    `Mutter did not focus ${appId} within five seconds`,
+                );
+                return GLib.SOURCE_REMOVE;
+            }
+
+            window.activate(global.get_current_time());
+            return GLib.SOURCE_CONTINUE;
+        };
+
         window.activate(global.get_current_time());
-        invocation.return_value(new GLib.Variant('()', []));
+        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, confirmFocus);
     }
 }

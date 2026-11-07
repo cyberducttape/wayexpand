@@ -61,12 +61,28 @@ impl GuiApp {
                     self.ibus_active = runtime::ibus_engine_active();
                     self.ibus_route = Some(snapshot.ibus_route);
                     self.diagnostics_checked_at = Some(Instant::now());
+                    let continuing_guided_setup = self.guided_setup_waiting_for_route;
                     if let Some(paused) = snapshot.paused {
                         self.paused = paused;
                     }
                     self.diagnostics_running = false;
                     self.next_status_poll = Instant::now() + Duration::from_secs(2);
-                    if snapshot.announce {
+                    if self.guided_setup_waiting_for_route {
+                        self.guided_setup_waiting_for_route = false;
+                        if let Some(route) = self.recommended_route {
+                            if route.setup_backend() == "ibus" {
+                                self.start_guided_setup();
+                            } else {
+                                self.start_setup();
+                            }
+                        } else {
+                            self.status = Status::warning(
+                                "No compatible input route is available yet. Review Diagnostics for the missing prerequisite, then try guided setup again.",
+                            );
+                            self.diagnostics_open = true;
+                        }
+                    }
+                    if snapshot.announce && !continuing_guided_setup {
                         self.status = Status::success(self.strings.status_diagnostics_refreshed());
                     }
                 }

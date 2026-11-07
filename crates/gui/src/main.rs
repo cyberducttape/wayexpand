@@ -226,6 +226,12 @@ struct GuiApp {
     diagnostics_open: bool,
     diagnostics_close_requested: bool,
     test_expansion_dialog_open: bool,
+    desktop_test_trigger: String,
+    desktop_test_application_class: String,
+    desktop_test_target_acknowledged: bool,
+    pending_desktop_test: Option<DesktopTestReview>,
+    desktop_test_review: Option<DesktopTestReview>,
+    desktop_test_review_open: bool,
     backend_test_help_open: bool,
     service_restart_confirm_open: bool,
     service_restart_unit: Option<String>,
@@ -238,6 +244,8 @@ struct GuiApp {
     restore_confirmed: bool,
     cli_task_kind: Option<String>,
     last_cli_task_output: Option<String>,
+    setup_failure_report: Option<String>,
+    setup_failure_report_open: bool,
     support_export_open: bool,
     support_preview_loading: bool,
     support_preview: Option<String>,
@@ -245,6 +253,13 @@ struct GuiApp {
     support_output_path: String,
     evdev_setup_open: bool,
     evdev_setup_acknowledged: bool,
+    setup_consent_open: bool,
+    setup_consent_acknowledged: bool,
+    setup_system_integration_required: bool,
+    setup_system_integration_acknowledged: bool,
+    guided_setup_waiting_for_route: bool,
+    desktop_test_verified: bool,
+    desktop_test_verified_application: Option<String>,
     daemon_status: String,
     daemon_capabilities: Option<runtime::DaemonCapabilities>,
     fleet_status: String,
@@ -484,6 +499,16 @@ struct SetupTask {
     receiver: mpsc::Receiver<Result<String, String>>,
     cancel: Arc<AtomicBool>,
     success_message: String,
+    is_setup: bool,
+}
+
+#[derive(Clone, Debug)]
+struct DesktopTestReview {
+    trigger: String,
+    replacement: String,
+    application_class: String,
+    capture_activity_observed: bool,
+    output_activity_observed: bool,
 }
 
 impl Drop for SetupTask {
@@ -598,6 +623,12 @@ impl GuiApp {
             diagnostics_open: false,
             diagnostics_close_requested: false,
             test_expansion_dialog_open: false,
+            desktop_test_trigger: String::new(),
+            desktop_test_application_class: "GTK".into(),
+            desktop_test_target_acknowledged: false,
+            pending_desktop_test: None,
+            desktop_test_review: None,
+            desktop_test_review_open: false,
             backend_test_help_open: false,
             service_restart_confirm_open: false,
             service_restart_unit: None,
@@ -610,6 +641,8 @@ impl GuiApp {
             restore_confirmed: false,
             cli_task_kind: None,
             last_cli_task_output: None,
+            setup_failure_report: None,
+            setup_failure_report_open: false,
             support_export_open: false,
             support_preview_loading: false,
             support_preview: None,
@@ -624,6 +657,13 @@ impl GuiApp {
                 .unwrap_or_else(|| "wayexpand-support.json".into()),
             evdev_setup_open: false,
             evdev_setup_acknowledged: false,
+            setup_consent_open: false,
+            setup_consent_acknowledged: false,
+            setup_system_integration_required: false,
+            setup_system_integration_acknowledged: false,
+            guided_setup_waiting_for_route: false,
+            desktop_test_verified: false,
+            desktop_test_verified_application: None,
             daemon_status: strings.not_checked().into(),
             daemon_capabilities: None,
             fleet_status: strings.not_checked().into(),
@@ -834,6 +874,7 @@ impl eframe::App for GuiApp {
         self.render_editor(root, &palette);
         self.render_pending_action(ctx, &palette);
         self.render_evdev_setup(ctx, &palette);
+        self.render_setup_consent(ctx);
         if self.any_dialog_open() {
             // Dim the window behind an open dialog so it reads as one.
             // Dialog windows are in the Foreground order, so a Middle layer

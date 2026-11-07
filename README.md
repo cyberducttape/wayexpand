@@ -103,10 +103,12 @@ packages and the Ubuntu PPA's status.
 ![WayExpand's first-run screen in the Terminal Blue color pack with four steps: Turn on WayExpand, Verify this desktop session, Add your first snippet, Check the Matcher preview](docs/images/wayexpand-first-run.png)
 
 1. **Turn on WayExpand** — one click in the GUI, or `wayexpand setup` in a
-   terminal.
-2. **Verify this desktop session** — the GUI checks that the user service is
-   reachable; *Open diagnostics* shows the capabilities and certification
-   status of the active integration.
+   terminal. Setup configures the supported input route without requiring
+   manual IBus commands.
+2. **Verify this desktop session** — setup guides you through a harmless real
+   application insertion and ends as Working, Configured awaiting test, or
+   Action required. The GUI's *Open diagnostics* shows route capabilities and
+   certification separately.
 3. **Add a snippet** — *Create test snippet*, write your own, or import Espanso.
 4. **Try it** — type the trigger in *Matcher preview*, then in a normal text
    field in an app you use.

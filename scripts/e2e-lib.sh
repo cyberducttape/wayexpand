@@ -714,7 +714,7 @@ EOF
 }
 
 session_clipboard_is() {
-    [ "$(wl-paste --no-newline 2>/dev/null)" = "$1" ]
+    [ "$(wl-paste --type='text/plain;charset=utf-8' --no-newline 2>/dev/null)" = "$1" ]
 }
 
 scenario_clipboard_variable() {
@@ -727,7 +727,8 @@ scenario_clipboard_variable() {
     clipboard_config
     start_sink e2e-a && start_daemon || return 2
     activate e2e-a || return 2
-    printf 'copied text' | wl-copy 2>>"$case_dir/clipboard.log" || {
+    printf 'copied text' | wl-copy --type='text/plain;charset=utf-8' \
+        2>>"$case_dir/clipboard.log" || {
         printf 'wl-copy could not set the session clipboard'
         return 2
     }
@@ -739,6 +740,12 @@ scenario_clipboard_variable() {
     expand_in e2e-a "" ";quote" || return 2
     wait_until 50 sink_text_is e2e-a "> copied text"
     result=$?
+    if [ "$result" -ne 0 ]; then
+        # Capture counters and outcome categories without collecting clipboard
+        # or snippet contents. This distinguishes a clipboard read failure
+        # from a trigger that never reached the matcher.
+        daemon_status >"$case_dir/daemon-status-after.txt" 2>&1 || true
+    fi
     describe e2e-a
     return "$result"
 }

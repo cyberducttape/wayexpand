@@ -16,6 +16,12 @@ fn run_gui_test_frame(
     output
 }
 
+fn build_identity_unverified() -> bool {
+    env!("WAYEXPAND_COMMIT") == "unknown"
+        || env!("WAYEXPAND_BUILD_VERSION") == "unknown"
+        || env!("WAYEXPAND_BUILD_VERSION").contains(".dirty-unknown")
+}
+
 fn import_expansion(trigger: &str, replacement: &str) -> wayexpand_core::ExpansionConfig {
     wayexpand_core::ExpansionConfig {
         id: wayexpand_core::ExpansionConfig::new_id(),
@@ -1692,6 +1698,34 @@ fn escape_closes_one_dialog_at_a_time_and_keeps_a_loaded_import() {
 }
 
 #[test]
+fn dismissing_desktop_test_review_leaves_result_unverified() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-desktop-review-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    app.diagnostics_open = true;
+    app.desktop_test_review_open = true;
+    app.desktop_test_review = Some(DesktopTestReview {
+        trigger: ";;hello".into(),
+        replacement: "Hello from Wayland!".into(),
+        application_class: "GTK".into(),
+        capture_activity_observed: true,
+        output_activity_observed: true,
+    });
+    assert!(app.any_dialog_open());
+
+    app.close_topmost_dialog();
+
+    assert!(!app.desktop_test_review_open);
+    assert!(app.desktop_test_review.is_none());
+    assert!(app.status.text().contains("remains unverified"));
+    assert!(app.diagnostics_open);
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn diagnostics_dialog_stays_inside_a_small_window() {
     let path = std::env::temp_dir().join(format!(
         "wayexpand-gui-diagnostics-fit-{}.toml",
@@ -1727,6 +1761,45 @@ fn diagnostics_dialog_stays_inside_a_small_window() {
     assert!(
         screen.expand(1.0).contains_rect(window),
         "diagnostics window {window:?} overflows the {screen:?} viewport"
+    );
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn desktop_test_review_stays_inside_a_small_window_for_long_text() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-desktop-review-fit-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    app.desktop_test_review_open = true;
+    app.desktop_test_review = Some(DesktopTestReview {
+        trigger: ";;long".into(),
+        replacement: "apiVersion: v1\nkind: ConfigMap\n".repeat(2_000),
+        application_class: "GTK".into(),
+        capture_activity_observed: true,
+        output_activity_observed: true,
+    });
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 480.0));
+    let ctx = egui::Context::default();
+    for _ in 0..4 {
+        let input = egui::RawInput {
+            screen_rect: Some(screen),
+            ..Default::default()
+        };
+        let _ = run_gui_test_frame(&ctx, input, |ui| {
+            let frame_ctx = ui.ctx().clone();
+            let palette = Palette::for_pack(app.colorpack, app.dark_mode);
+            app.render_diagnostics(&frame_ctx, &palette);
+        });
+    }
+    let modal = ctx
+        .memory(|memory| memory.area_rect(egui::Id::new("desktop_test_result_review")))
+        .expect("desktop test review modal was laid out");
+    assert!(
+        screen.expand(1.0).contains_rect(modal),
+        "desktop test review modal {modal:?} overflows {screen:?}"
     );
     fs::remove_file(path).unwrap();
 }
@@ -2168,8 +2241,9 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
     app.daemon_reachable = Some(true);
     app.route_state = Some(runtime::RouteState::Connected);
     app.daemon_status = format!(
-        "source=input-method · backend=input-method-v2 · daemon_commit={}",
-        env!("WAYEXPAND_COMMIT")
+        "source=input-method · backend=input-method-v2 · daemon_commit={} · daemon_version={}",
+        env!("WAYEXPAND_COMMIT"),
+        env!("WAYEXPAND_BUILD_VERSION")
     );
     app.language = Language::English;
     app.strings.set_language(Language::English);
@@ -2210,7 +2284,7 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
         guide_semantics.contains("Try it in a real app"),
         "{guide_semantics}"
     );
-    if env!("WAYEXPAND_COMMIT") == "unknown" {
+    if build_identity_unverified() {
         assert!(
             guide_semantics.contains("daemon's build identity is unknown"),
             "{guide_semantics}"
@@ -2222,7 +2296,7 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
             "{guide_semantics}"
         );
     }
-    if env!("WAYEXPAND_COMMIT") == "unknown" {
+    if build_identity_unverified() {
         assert!(!guide_semantics.contains("Copy trigger"));
     } else {
         assert!(
@@ -2293,13 +2367,13 @@ fn first_run_requires_a_verified_build_before_offering_live_test() {
                 .expect("first-run guide should expose accessible controls")
                 .nodes
         );
-        let expected_warning = if env!("WAYEXPAND_COMMIT") == "unknown" {
+        let expected_warning = if build_identity_unverified() {
             "daemon's build identity is unknown"
         } else {
             expected_warning
         };
         assert!(semantics.contains(expected_warning), "{semantics}");
-        if case == "stale" && env!("WAYEXPAND_COMMIT") != "unknown" {
+        if case == "stale" && !build_identity_unverified() {
             assert!(
                 semantics.contains("systemctl --user restart wayexpand-evdev.service"),
                 "{semantics}"

@@ -4,6 +4,7 @@
 use crate::setup::run_setup_command;
 use crate::setup_ibus::{command_output, format_string_list, parse_string_list};
 use crate::*;
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
@@ -35,6 +36,103 @@ fn matches_bundled(directory: &Path) -> bool {
     extension_files().iter().all(|(name, contents)| {
         fs::read_to_string(directory.join(name)).is_ok_and(|on_disk| on_disk == *contents)
     })
+}
+
+fn disk_build_identity(directory: &Path) -> Option<String> {
+    let mut digest = Sha256::new();
+    for (name, _) in extension_files()
+        .into_iter()
+        .filter(|(name, _)| *name != "metadata.json")
+    {
+        let contents = fs::read(directory.join(name)).ok()?;
+        digest.update(name.as_bytes());
+        digest.update([0]);
+        digest.update(contents);
+        digest.update([0xff]);
+    }
+    use std::fmt::Write as _;
+    Some(
+        digest
+            .finalize()
+            .iter()
+            .fold(String::from("sha256:"), |mut identity, byte| {
+                let _ = write!(identity, "{byte:02x}");
+                identity
+            }),
+    )
+}
+
+fn disk_metadata_matches_build(directory: &Path, identity: &str) -> bool {
+    let Ok(metadata) = fs::read_to_string(directory.join("metadata.json")) else {
+        return false;
+    };
+    serde_json::from_str::<serde_json::Value>(&metadata)
+        .ok()
+        .and_then(|metadata| metadata["x-wayexpand-build-id"].as_str().map(str::to_owned))
+        .is_some_and(|metadata_identity| metadata_identity == identity)
+}
+
+#[derive(Debug)]
+struct BuildAssessment {
+    state: &'static str,
+    ready: bool,
+    detail: String,
+    fix: Option<String>,
+}
+
+fn assess_build_identity(
+    on_disk: Option<&str>,
+    metadata_matches: bool,
+    bundled: &str,
+    live: Option<&str>,
+    live_error: Option<&str>,
+) -> BuildAssessment {
+    let Some(on_disk) = on_disk else {
+        return BuildAssessment {
+            state: "unavailable",
+            ready: false,
+            detail: "the installed GNOME extension build identity could not be read".into(),
+            fix: Some("run `wayexpand setup` to install the bundled GNOME extension".into()),
+        };
+    };
+    if !metadata_matches {
+        return BuildAssessment {
+            state: "invalid-on-disk",
+            ready: false,
+            detail:
+                "the extension metadata build identity does not match its on-disk implementation"
+                    .into(),
+            fix: Some("run `wayexpand setup` to reinstall the GNOME extension".into()),
+        };
+    }
+    if on_disk != bundled {
+        return BuildAssessment {
+            state: "update-required",
+            ready: false,
+            detail: format!("the installed GNOME extension is build {on_disk}, while this WayExpand installation bundles {bundled}"),
+            fix: Some("run `wayexpand setup` to update the installed GNOME extension".into()),
+        };
+    }
+    match live {
+        Some(identity) if identity == bundled => BuildAssessment {
+            state: "current",
+            ready: true,
+            detail: format!("GNOME Shell is running the current extension build {identity}"),
+            fix: None,
+        },
+        Some(identity) => BuildAssessment {
+            state: "logout-required",
+            ready: false,
+            detail: format!("the installed extension is build {bundled}, but GNOME Shell still has build {identity} loaded"),
+            fix: Some("log out of GNOME and log back in to load the installed extension build".into()),
+        },
+        None => BuildAssessment {
+            state: "logout-required",
+            ready: false,
+            detail: format!("the installed extension is build {bundled}, but its live build identity could not be verified{}", live_error.map(|error| format!(": {error}")).unwrap_or_default()),
+            fix: Some("log out of GNOME and log back in to load and verify the installed extension build".into()),
+        },
+    }
 }
 
 /// Where GNOME Shell will load the extension from: a user copy wins over a
@@ -193,8 +291,63 @@ pub(crate) fn setup_gnome_window_tracker() {
     };
     let readiness = describe_state(&status.state, status.user_extensions_enabled);
     let protocol = probe_if_active(&status.state);
-    let (ok, message, fix) = verify_tracker_protocol(&status.state, readiness, protocol);
+    let (mut ok, mut message, mut fix) =
+        verify_tracker_protocol(&status.state, readiness, protocol);
+    let bundled_identity = wayexpand_backend_gnome_window::bundled_extension_build_identity();
+    let disk_identity = disk_build_identity(&directory);
+    let metadata_matches = disk_identity
+        .as_deref()
+        .is_some_and(|identity| disk_metadata_matches_build(&directory, identity));
+    if status.state == ExtensionState::Active {
+        let live_result = wayexpand_backend_gnome_window::extension_build_identity();
+        let live_identity = live_result.as_ref().ok().map(String::as_str);
+        let assessment = assess_build_identity(
+            disk_identity.as_deref(),
+            metadata_matches,
+            &bundled_identity,
+            live_identity,
+            live_result
+                .as_ref()
+                .err()
+                .map(ToString::to_string)
+                .as_deref(),
+        );
+        if !assessment.ready {
+            ok = false;
+            message = assessment.detail.clone();
+            fix = assessment.fix.clone();
+        }
+        println!(
+            "  extension build: {} (disk {}, live {})",
+            assessment.state,
+            disk_identity.as_deref().unwrap_or("unknown"),
+            live_identity.unwrap_or("unverified")
+        );
+    } else if status.state == ExtensionState::Unknown
+        && metadata_matches
+        && disk_identity.as_deref() == Some(bundled_identity.as_str())
+    {
+        println!(
+            "  extension build: installed {}, awaiting GNOME login to load it",
+            disk_identity.as_deref().unwrap_or("unknown")
+        );
+    }
     println!("  {} {message}", if ok { "✓" } else { "!" });
+    if status.state == ExtensionState::Active {
+        match wayexpand_backend_gnome_window::active_input_source() {
+            Ok((kind, id)) => {
+                let source = if kind == "ibus" && id == "wayexpand" {
+                    "WayExpand".to_owned()
+                } else {
+                    "another configured source".to_owned()
+                };
+                println!("  ✓ GNOME live input-source control: Shell reports {source}");
+            }
+            Err(error) => println!(
+                "  ! GNOME live input-source control is unavailable ({error}); a newly updated extension may require logging out and back in"
+            ),
+        }
+    }
     if status.state == ExtensionState::Unknown && status.user_extensions_enabled {
         println!("  GNOME Shell on Wayland loads newly installed extensions at login: log out and back in once, and app filters start working (it stays enabled after that).");
     } else if let Some(fix) = fix {
@@ -212,14 +365,56 @@ pub(crate) fn doctor_report() -> Option<serde_json::Value> {
     }
     let installed = installed_copy();
     let current = installed.as_deref().is_some_and(matches_bundled);
+    let bundled_identity = wayexpand_backend_gnome_window::bundled_extension_build_identity();
+    let disk_identity = installed.as_deref().and_then(disk_build_identity);
+    let metadata_matches = installed
+        .as_deref()
+        .zip(disk_identity.as_deref())
+        .is_some_and(|(directory, identity)| disk_metadata_matches_build(directory, identity));
     let (state, user_extensions_enabled) = match extension_status() {
         Ok(status) => (Some(status.state), status.user_extensions_enabled),
-        Err(_) => (None, true),
+        Err(_) => {
+            // Some headless and restarted GNOME sessions temporarily fail
+            // the Extensions manager query while the extension's own tracker
+            // object is already live. Its exported identity exists only
+            // between enable() and disable(), so a response is direct evidence
+            // that the extension instance is running. The later Ping and
+            // build-identity checks still verify its protocol and version.
+            if wayexpand_backend_gnome_window::extension_build_identity().is_ok() {
+                (Some(ExtensionState::Active), true)
+            } else {
+                (None, true)
+            }
+        }
     };
-    let (ok, message, fix) = match &state {
+    let (protocol_state, protocol_detail) = match &state {
+        Some(ExtensionState::Active) => match probe_if_active(&ExtensionState::Active) {
+            Ok(()) => (
+                "pass",
+                "the tracker D-Bus protocol and live build identity responded".to_owned(),
+            ),
+            Err(error) => (
+                "fail",
+                format!("the tracker D-Bus handshake failed: {error}"),
+            ),
+        },
+        Some(_) => (
+            "unknown",
+            "the extension is not loaded, so its D-Bus handshake cannot be tested".to_owned(),
+        ),
+        None => (
+            "unknown",
+            "GNOME Shell did not answer on the session bus".to_owned(),
+        ),
+    };
+    let (mut ok, mut message, mut fix) = match &state {
         Some(state) => {
             let readiness = describe_state(state, user_extensions_enabled);
-            let protocol = probe_if_active(state);
+            let protocol = if protocol_state == "pass" {
+                Ok(())
+            } else {
+                Err(protocol_detail.clone())
+            };
             verify_tracker_protocol(state, readiness, protocol)
         }
         None => (
@@ -228,6 +423,51 @@ pub(crate) fn doctor_report() -> Option<serde_json::Value> {
             None,
         ),
     };
+    let live_identity_result = if state == Some(ExtensionState::Active) {
+        Some(wayexpand_backend_gnome_window::extension_build_identity())
+    } else {
+        None
+    };
+    let live_identity = live_identity_result
+        .as_ref()
+        .and_then(|result| result.as_ref().ok())
+        .map(String::as_str);
+    let live_error = live_identity_result
+        .as_ref()
+        .and_then(|result| result.as_ref().err())
+        .map(ToString::to_string);
+    let build = if state == Some(ExtensionState::Active) {
+        assess_build_identity(
+            disk_identity.as_deref(),
+            metadata_matches,
+            &bundled_identity,
+            live_identity,
+            live_error.as_deref(),
+        )
+    } else if state == Some(ExtensionState::Unknown)
+        && metadata_matches
+        && disk_identity.as_deref() == Some(bundled_identity.as_str())
+    {
+        assess_build_identity(
+            disk_identity.as_deref(),
+            metadata_matches,
+            &bundled_identity,
+            None,
+            Some("GNOME Shell has not loaded the installed extension"),
+        )
+    } else {
+        BuildAssessment {
+            state: "not-running",
+            ready: true,
+            detail: "GNOME Shell has not confirmed a running extension instance".into(),
+            fix: None,
+        }
+    };
+    if state == Some(ExtensionState::Active) && !build.ready {
+        ok = false;
+        message = build.detail.clone();
+        fix = build.fix.clone();
+    }
     let fix = fix.or_else(|| {
         (!current && installed.is_some())
             .then(|| "run `wayexpand setup` to update the installed extension".into())
@@ -241,15 +481,42 @@ pub(crate) fn doctor_report() -> Option<serde_json::Value> {
         Some(ExtensionState::Other(_)) => "other",
         None => "shell-unavailable",
     };
+    let input_source_control = if state == Some(ExtensionState::Active) {
+        wayexpand_backend_gnome_window::active_input_source()
+            .ok()
+            .map(|(kind, id)| {
+                serde_json::json!({
+                    "available": true,
+                    "wayexpand_active": kind == "ibus" && id == "wayexpand",
+                })
+            })
+            .unwrap_or_else(|| serde_json::json!({"available": false, "wayexpand_active": null}))
+    } else {
+        serde_json::json!({"available": false, "wayexpand_active": null})
+    };
     Some(serde_json::json!({
         "uuid": EXTENSION_UUID,
         "installed_path": installed.map(|path| path.display().to_string()),
         "installed_matches_bundled": current,
+        "build_identity": {
+            "bundled": bundled_identity,
+            "on_disk": disk_identity,
+            "on_disk_metadata_matches": metadata_matches,
+            "live": live_identity,
+            "runtime_state": build.state,
+            "detail": build.detail,
+            "fix": build.fix,
+        },
         "state": state_label,
+        "protocol_handshake": {
+            "state": protocol_state,
+            "detail": protocol_detail,
+        },
         "user_extensions_enabled": user_extensions_enabled,
         "ready": ok,
         "detail": message,
         "fix": fix,
+        "input_source_control": input_source_control,
     }))
 }
 
@@ -295,6 +562,66 @@ mod tests {
             Ok(()),
         );
         assert!(ready.0);
+    }
+
+    #[test]
+    fn live_extension_build_must_match_installed_build() {
+        let expected = "sha256:current";
+        let current = assess_build_identity(Some(expected), true, expected, Some(expected), None);
+        assert!(current.ready);
+        assert_eq!(current.state, "current");
+
+        let stale = assess_build_identity(
+            Some(expected),
+            true,
+            expected,
+            Some("sha256:previous"),
+            None,
+        );
+        assert!(!stale.ready);
+        assert_eq!(stale.state, "logout-required");
+        assert!(stale
+            .detail
+            .contains("still has build sha256:previous loaded"));
+        assert!(stale.fix.unwrap().contains("log out"));
+
+        let unverified =
+            assess_build_identity(Some(expected), true, expected, None, Some("no property"));
+        assert!(!unverified.ready);
+        assert_eq!(unverified.state, "logout-required");
+
+        let outdated = assess_build_identity(
+            Some("sha256:old-disk"),
+            true,
+            expected,
+            Some(expected),
+            None,
+        );
+        assert_eq!(outdated.state, "update-required");
+        assert!(outdated.fix.unwrap().contains("wayexpand setup"));
+    }
+
+    #[test]
+    fn disk_build_identity_and_metadata_are_content_bound() {
+        let root =
+            std::env::temp_dir().join(format!("wayexpand-gnome-build-id-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        for (name, contents) in extension_files() {
+            fs::write(root.join(name), contents).unwrap();
+        }
+        let identity = disk_build_identity(&root).unwrap();
+        assert_eq!(
+            identity,
+            wayexpand_backend_gnome_window::bundled_extension_build_identity()
+        );
+        assert!(disk_metadata_matches_build(&root, &identity));
+        fs::write(root.join("extension.js"), "// newer code").unwrap();
+        assert!(!disk_metadata_matches_build(
+            &root,
+            &disk_build_identity(&root).unwrap()
+        ));
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

@@ -27,27 +27,31 @@ WayExpand must choose between two fundamentally different capture methods:
 
 | Aspect | Input-Method-V2 | Evdev |
 |--------|-----------------|-------|
-| **Committed Unicode** | ✅ Supported | ⚠️ Layout-dependent |
+| **Committed Unicode** | Supported by the backend; target insertion must be tested | Layout-dependent; target insertion must be tested |
 | **Active CJK/IME preedit** | ❌ Not supported | ❌ Not supported |
 | **Passwords** | ⚠️ Protected when reliably reported; not universally certified | ⚠️ Visible if input group granted |
 | **Arrow Keys** | ❌ Not captured | ✅ Full capture |
 | **Function Keys** | ❌ Not captured | ✅ Full capture |
 | **Escape/Ctrl+C** | ❌ Not captured | ✅ Full capture |
-| **Browser URLs** | Committed-text path; certify target client | ✅ Works |
-| **IDE Code** | Committed-text path; certify target client | ✅ Works |
-| **Office Docs** | Committed-text path; certify target client | ✅ Works |
+| **Browser URLs** | Unverified per browser/compositor; requires IBus/input-method routing and usable surrounding text | Not certified; terminal-only evdev profiles do not cover browsers |
+| **IDE Code** | Unverified per IDE/compositor | Not certified; raw capture also sees sensitive fields |
+| **Office Docs** | Unverified per application/compositor | Not certified; raw capture also sees sensitive fields |
 | **Setup difficulty** | ⭐ Simple (no permissions needed) | ⭐⭐⭐⭐ Complex (requires permissions) |
 | **Daemon permissions** | Minimal | Requires input group |
 | **Latency** | ~5-10ms (IPC + composition) | ~1-2ms (direct kernel) |
 
 ## Decision Tree
 
-### Use Input-Method-V2 if:
+### Try Input-Method-V2 if:
 - ✅ You type committed text, including Unicode after composition completes
-- ✅ You use text editors, terminals, browsers
+- ✅ Your target application and compositor have a tested input-method route
 - ✅ Security/password protection matters
 - ✅ You want zero-configuration setup
 - ✅ You want minimal daemon permissions
+
+Do not infer browser, editor, or terminal support from the protocol being
+available. Verify each application class separately; WayExpand's published
+certification matrix currently leaves browser clients untested.
 
 This is the preferred security model, but desktop and client compatibility
 remain uncertified until the required real-session scenarios pass.

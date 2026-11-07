@@ -4,6 +4,365 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Require a live WayExpand engine process before reporting GNOME IBus selection
+  ready, so stale global-engine state cannot mask a stopped engine. Update the
+  IBus acceptance client to bind an already-selected global engine to its
+  focused diagnostic context, matching the toolkit focus path; otherwise the
+  selected descriptor could pass while the test context remained unattached.
+- Report `commit_matches` as false when a source-archive build identity is
+  unverified, even if its placeholder commit string happens to match.
+- Treat the GUI's `dirty-unknown` source-archive build identity as unverified
+  in first-run guidance and build-state regression tests.
+- Keep GNOME extension diagnostics useful across a Shell restart by verifying
+  the live tracker identity when the Extensions manager query is temporarily
+  unavailable. Treat matching `dirty-unknown` build labels as unverified in
+  live daemon explanations.
+- Let GNOME Shell's input-source manager select the IBus engine without a
+  competing `ibus engine` request, which could cancel activation and leave the
+  source selected without a live engine after a Shell restart.
+- Report terminal-only coverage as a limit of the daemon route, not proof that
+  browser fields are unsupported globally. Other input routes such as IBus may
+  cover browsers; `wayexpand health` now leaves that combined coverage unknown
+  unless it has been verified.
+- Detect a shared IBus component that resolves its engine executable inside
+  one user's home directory. Report `WX-IBUS-MULTIUSER-001` with the explicit
+  system-integration repair path instead of treating the registration as
+  fully healthy on multi-user workstations.
+- Prevent package smoke CI from depending on uninstalled Python/account tools,
+  and print the failing package-test stage on errors. Give the headless GNOME
+  and KWin jobs enough time to install desktop dependencies before their
+  acceptance tests run; install Xwayland for GNOME Shell's headless session and
+  omit recommended packages from KWin's install.
+- Wait until the Wayland clipboard selection's MIME types arrive before
+  reading its data-control offer. Make the KWin clipboard acceptance fixture
+  advertise UTF-8 plain text explicitly and preserve content-free daemon
+  counters when the clipboard insertion case fails.
+- Activate GNOME E2E extensions through GNOME Shell's extension manager after
+  writing the enabled-extension setting, and stage them under GNOME's
+  documented per-user extension directory before checking activation. Fail
+  before changing dconf if the test escapes its private HOME/XDG directories.
+- Correct the KWin/IBus crash guidance: a recent helper coredump is evidence
+  of a crash, not proof that the current helper is still down or that a
+  specific upstream patch fixes it. Direct users to the exact backtrace,
+  current distribution package, and a real application retest.
+- Require shell snippets in reviewed packs to quote untrusted environment,
+  clipboard, and session-context values. Add `{{shellq:env:NAME}}` for
+  allowlisted environment variables, using the explicitly reported shell.
+- Count an IBus field as having delivered input when the engine observed keys
+  and surrounding-text reports from a normal field, even if a later capability
+  update says the client does not advertise surrounding text. Keep target
+  insertion verification as a separate check.
+- Require the GNOME Shell tracker to authenticate callers before returning
+  active keyboard-source/layout data or switching the input source, using the
+  same UID and executable checks as window subscriptions. Bound outstanding
+  authorization calls and return pending calls when the extension is disabled.
+- Normalize GNOME Shell's string user ID and D-Bus's numeric peer UID before
+  comparing them. The tracker still requires the same UID and an approved
+  WayExpand executable; diagnostics now distinguish a rejected daemon client
+  from an unavailable extension.
+- Read GNOME's live active input-source XKB map, model, and options from the
+  exact Shell InputSourceManager settings source, then track changes for evdev
+  matching. GNOME 45, whose session settings lack a model field, uses
+  Mutter's `pc105` default. Unknown or unsupported sources continue to fail closed.
+  `wayexpand doctor --gnome` reports the layout-provider state with a repair
+  path.
+- Reuse the GNOME layout snapshot between unchanged polls so the daemon only
+  recompiles XKB state when the active source, map, model, or options change.
+- Exercise the matcher's live validated snapshot under terminal-only admission
+  during setup checks. The bounded self-test returns only status and detail,
+  never trigger or replacement text, so a stale file on disk cannot mask a
+  terminal app-scope or matching failure.
+- Remove the legacy Plasma GTK/Qt IBus overrides previously written by setup.
+  KWin's native IBus Wayland route is compositor-managed; setup and diagnostics
+  now catch conflicting toolkit overrides instead of encouraging them.
+- Make both human and JSON `doctor` health reflect stable blockers on the
+  currently selected IBus route. An unselected optional IBus route and
+  unknown per-field activity remain informational.
+- Give IBus replacement refusal under `compatibility_mode = "off"` the stable
+  `WX-POLICY-001` finding so setup, diagnostics, and support reports identify
+  missing replacement authorization consistently.
+- Attach the documented `WX-IBUS-001` and `WX-IBUS-002` IDs to generic engine
+  registration and selection failures, and include available IDs in the human
+  `doctor` route summary.
+- Keep recent KWin/IBus Wayland helper crashes visible after the helper has
+  restarted. Diagnostics now report a recovered bridge as unstable instead
+  of treating its current process presence as a clean pass.
+- Parse KWin's persisted `InputMethod[$e]` KConfig key as well as the plain
+  key, so KDE IBus routing is not falsely reported as missing. Include an
+  explicit terminal-only application scope in health output so `ready` does
+  not imply browser coverage when evdev matching is restricted to terminals.
+- Filter IBus Wayland crash history by the current user before applying the
+  diagnostic result limit, so another account's crash volume cannot hide it.
+- Require shell command pack fields to use shell quoting or a validator whose
+  allowed characters are safe as an unquoted shell token. A semantic
+  validator or `free_text=true` alone no longer clears shell-injection review.
+- Resolve IBus and GNOME input-readiness finding IDs through
+  `wayexpand help finding`, with the specific repair and retest steps for each.
+- Report an unreachable IBus daemon as `WX-IBUS-004` in `wayexpand debug`,
+  instead of treating a live engine process or remembered selection as enough
+  to diagnose browser input readiness.
+- Suppress the downstream “no field input” warning when a failed IBus daemon
+  or KWin bridge already explains why client text cannot reach the engine.
+- Inspect the running Plasma shell environment as well as the systemd manager
+  for legacy GTK/Qt overrides that can conflict with native Wayland IBus.
+  Setup removes its own recognized legacy override script and clears matching
+  values from the user service manager.
+- Make IBus's no-surrounding-text guidance app-agnostic. It no longer treats
+  every unsupported field as a terminal or suggests terminal-only evdev for a
+  browser; the status explicitly says that telemetry does not identify the app.
+- Clarify that IBus `field-input` readiness is aggregate across recent fields
+  and cannot verify input from a particular browser. Its recovery guidance now
+  describes the safe counter-only watch as activity evidence, not replacement
+  proof.
+- Stamp dirty development builds with a deterministic digest of tracked and
+  untracked Rust, extension, asset, systemd, and embedded manifest inputs;
+  publish the exact daemon version in runtime status; and use it to detect
+  same-commit CLI/daemon skew during upgrade and health checks. A dirty client
+  no longer treats a legacy same-commit daemon as verified. If a dirty-tree
+  digest cannot be computed, report the identity as unverifiable instead of
+  reusing the bare commit identity; daemon status also reports unknown build
+  metadata as unverifiable instead of mislabeling it as a build mismatch.
+- Correct backend tradeoff documentation that implied browser insertion was
+  supported, and add browser troubleshooting steps that distinguish missing
+  IBus input from unavailable surrounding text without recommending evdev.
+- Probe IBus liveness on the private bus address returned by `ibus`, avoiding
+  a false daemon-down report when the engine is responsive but does not own
+  `org.freedesktop.IBus` on the desktop's general session bus.
+- Diagnose an unavailable KWin IBus Wayland bridge separately from toolkit
+  environment settings. Native Wayland browser input depends on the compositor
+  bridge, and the doctor now reports `WX-KWIN-IBUS-001` with a repair and
+  retest path when that bridge is stopped or unavailable.
+- Detect recent per-user `ibus-ui-gtk3` segmentation faults through bounded,
+  sanitized `coredumpctl` metadata and report `WX-KWIN-IBUS-002` with the crash
+  PID and a package-update/retest path. Preserve the same stable finding in
+  `wayexpand debug --json` instead of dropping crash-specific IDs.
+- Bound the IBus fake-broker test listener, preserve the caller's broker-socket
+  environment across tests, and verify the request is received before checking
+  asynchronous insertion delivery.
+- Clean partial Git library checkouts explicitly and surface staging cleanup
+  failures instead of silently ignoring failed removal.
+- Parse the packaged IBus component XML in package smoke tests instead of
+  matching an indentation-sensitive line, so valid Debian and RPM manifests
+  pass the installation gate. Install Python and account-management tools
+  explicitly in both distro containers, and report smoke-test stages in CI.
+- Restrict the IBus action-collection helper that assumes emission succeeded
+  to unit tests. Production hosts must use the acknowledged emission callback
+  before expansion accounting or undo state is committed.
+- Publish validated Git libraries with Linux `RENAME_NOREPLACE`, so concurrent
+  add operations cannot replace a directory created after the initial check;
+  report directory-sync failures as activated-but-durability-uncertain.
+- Apply the aggregate Git library network budget across the initial clone and
+  approved-revision fetch, so each transfer is limited to the remaining
+  allowance instead of receiving a fresh full budget.
+- Make IBus setup stop with a stable `ACTION REQUIRED` result when route
+  diagnostics find a hard failure or a duplicate global capture route; a
+  configured-but-unavailable route is no longer reported as setup success.
+- Make the GNOME GTK insertion acceptance helper acknowledge window activation
+  only after Mutter reports the target window focused, with bounded retries and
+  a specific timeout error. This prevents the test from sending its IBus trigger
+  to an unfocused GTK client. The GTK client waits for entry focus before sending
+  input; it no longer blocks on GTK's top-level active flag, which remains false
+  in the headless GNOME session even after Mutter confirms focus. The harness
+  stops retrying after the controller's
+  bounded focus timeout, preventing a five-second failure from being multiplied
+  into a several-minute loop. The GTK client retries child-entry focus requests
+  while waiting for Mutter's confirmed toplevel activation, since an early
+  Wayland focus request can be ignored before Mutter activates the window.
+- Use the current `wayexpand config validate` command in the package install
+  smoke test so Debian and Fedora package checks reach the installation audit.
+- Keep IBus's normal configuration engine enabled in the GNOME acceptance
+  session, and wait for IBus itself to confirm WayExpand activation before the
+  GTK insertion check. Preserve the system IBus component directory alongside
+  the private test component so GNOME can resolve its configured keyboard
+  layout engines.
+- Preserve isolated IBus and GNOME end-to-end logs as short-retention CI
+  artifacts, including on test failure, so input activation and GTK insertion
+  regressions have actionable diagnostics tied to the tested commit.
+- Do not read focused-window titles for app-ID-only tracker subscribers; title
+  retrieval now occurs lazily only for an explicit title-filter subscription.
+  The GNOME lifecycle acceptance test also verifies that the registered IBus
+  source remains configured across a Shell restart before reactivating it and
+  repeating GTK insertion.
+- Drive the GNOME GTK insertion acceptance test through a CI-only uinput
+  keyboard. Wayland correctly rejects GTK's in-process synthetic key helper;
+  the virtual keyboard now sends the harmless trigger through Mutter, the
+  active IBus source, and the GTK input-method context. Give the GTK test app
+  a stable ID, present it, and activate it through the test Shell controller
+  before input.
+- Pin both GDK and GTK to version 3 in the GTK3 IBus acceptance client so
+  newer runner images cannot load GDK4 before the GTK3 insertion test.
+- Extend `wayexpand doctor --gnome` with a running daemon build/schema check and
+  actionable per-stage findings: stable error IDs, observed evidence,
+  remediation commands, and retest instructions. In GUI Diagnostics, show
+  IBus configured, running, and user-verified-in-an-application as separate
+  states; setup completion without a confirmed desktop insertion remains
+  unverified.
+- Keep distro-owned IBus component registrations intact when a per-user source
+  install runs; distinguish the package engine path from the root-owned shared
+  source-install engine path in the installation contract. Make `install-check`
+  validate the staged engine independently from live IBus registration, use
+  contract-declared package paths for the default config and IBus manifest, and
+  resolve empty/invalid XDG roots consistently with the installers.
+- Keep GNOME activation checks tied to the registered source and the live
+  Shell `InputSourceManager` bridge. The deprecated `current` setting and
+  `mru-sources` history cannot establish activation; support reports now use
+  the same live evidence contract and tests cover legacy-setting readback.
+- Let setup complete when `;;hello` is absent. It now offers a configured,
+  enabled, non-command expansion for the optional real-app test, and reports
+  `CONFIGURED, AWAITING TEST` when no suitable trigger exists instead of
+  treating the missing sample as a backend failure.
+- Bound GNOME Shell focus/title notification work: updates are coalesced, each
+  subscriber has at most one in-flight D-Bus call plus one latest pending
+  snapshot, and subscribers that time out are disconnected. A 100,000-update
+  stress test covers stalled and delayed subscribers.
+- Treat GNOME window-title access as a per-request opt-in: switching an active
+  tracker connection back to the title-free subscription clears queued title
+  snapshots, and test that title-free D-Bus snapshots contain no window title.
+  Extend the isolated GNOME upgrade/logout test to re-activate the IBus source
+  through GNOME Shell and verify GTK insertion after Shell reload.
+- Perform GNOME tracker subscriber credential checks asynchronously so the
+  Shell main loop does not block on session-bus replies. Bound and deduplicate
+  pending authorization requests, and cancel pending subscriptions on client
+  unsubscribe or extension shutdown. The headless GNOME session test verifies
+  that a generic session-bus peer receives an explicit access-denied response.
+- Reduce GNOME focus-data exposure: default tracker subscriptions return app
+  and opaque instance IDs without window titles. Only verified WayExpand
+  executables can subscribe. The daemon now requests titles only while an
+  enabled `title_contains` snippet filter needs them, and reconnects the GNOME
+  tracker when a config reload changes that requirement. The extension build
+  identity covers every imported implementation module.
+- Honor `XDG_DATA_HOME` consistently in source and release-archive installs,
+  uninstall, and `install-check` for desktop entries, icons, metainfo, manuals,
+  and GNOME integration. Reject relative data roots and test installations
+  with a custom data directory.
+- Extend the headless GNOME session test to register the IBus component,
+  register and activate the GNOME IBus source through Shell, then verify that
+  the already active WayExpand engine expands a trigger in a controlled IBus
+  input context and a GTK 3 entry. It writes the deprecated `current` index
+  and asserts CLI readiness still requires live Shell activation. It also
+  simulates updating extension files while an older build is loaded and
+  asserts diagnostics do not call that state current. The build-assessment
+  unit test covers `logout-required`; the session test restarts Shell and
+  verifies the newly loaded build matches. Physical-session certification
+  remains explicitly unverified, and the test checks named lifecycle
+  checkpoints instead of a hard-coded pass count.
+- Simplify the GUI's IBus setup into a preflighted, single guided flow. It first
+  checks whether the component registration is already valid, only presents
+  administrator-registration consent when it is missing or invalid, and keeps
+  non-atomic replacement consent as a separate explicit choice.
+- Continue the GUI setup automatically after route preflight, explain the
+  administrator registration step before consent, guide users to GNOME's
+  input-source selector when WayExpand is registered but inactive, and offer
+  an optional real-app expansion test using any eligible saved static snippet;
+  setup does not depend on the `;;hello` sample.
+- Expand `wayexpand doctor --gnome` into input-capture, snippet-insertion,
+  and GNOME Shell window-tracking sections. Report extension installation,
+  loaded state, live build identity, D-Bus handshake, and sanitized focus-event
+  evidence; version the detailed JSON report as schema 2.
+- Preserve both stdout and stderr from failed GUI setup tasks in a bounded,
+  sanitized diagnostic report. The report identifies the last setup stage, a
+  stable problem ID, a suggested remedy, and rollback status; Diagnostics now
+  offers a “View diagnostic report” action and copyable full output.
+- Give the GNOME Shell window tracker a content-bound build identity. The
+  running Shell extension reports the build identity from its loaded metadata;
+  `doctor` and setup compare it with the installed extension and distinguish
+  `current`, `update-required`, and `logout-required`. The daemon refuses to
+  use a tracker whose loaded build identity is missing or stale.
+- Separate the bundled default-configuration template check from validation of
+  the active user configuration in `wayexpand install-check`. Source and
+  release-archive installers now include the template in each immutable
+  payload, and installer tests verify both template and active-config files.
+- Correct the shared installer contract to describe system-wide IBus
+  registration and its system-owned executable paths. `install-check` no
+  longer treats an ordinary per-user IBus component directory as registration
+  evidence; contract tests guard this boundary.
+- Register user-installed IBus engines through one root-owned executable at
+  `/usr/local/libexec/wayexpand/wayexpand-ibus`; shared component XML no longer
+  points into the installing user's home directory. Setup journals the shared
+  executable and component together for rollback, verifies trusted ownership
+  and permissions, and reuses the same registration for later users.
+- Replace GNOME's deprecated, ignored `input-sources current` setting with a
+  GNOME Shell `InputSourceManager` bridge. Setup activates through Shell and
+  independently reads back the live source; diagnostics no longer infer
+  activation from a gsettings write. Rollback restores the Shell-reported
+  source while retaining unrelated user changes, and the headless GNOME E2E
+  now exercises Shell activation and readback.
+- Make interactive `wayexpand setup` finish with an explicit `WORKING`,
+  `CONFIGURED, AWAITING TEST`, or `ACTION REQUIRED` result. A failed or
+  unconfirmed real-app test no longer exits as a successful setup, and a
+  verified result names the tested scope while preserving the distinction
+  between that app and broader desktop certification. GNOME Wayland setup
+  explains that existing keyboard sources/layout remain in place.
+- Let bare `wayexpand setup` recommend IBus when its client and WayExpand engine
+  are installed but the running IBus registry has not loaded the component
+  yet. Keep route diagnostics grounded in actual installation/registration
+  evidence and explain that setup will register the component itself.
+- Preserve GNOME input-source identifiers faithfully when parsing and restoring
+  GVariant escaped, Unicode, and control characters.
+- Keep the GUI's first-run status aligned with the CLI's explicit setup result;
+  activating an input route without a real insertion test now opens Diagnostics
+  and reports “Configured, awaiting test” instead of generic success. A
+  “Working” status is reserved for a user-confirmed real insertion.
+- Run the Desktop Integration Test from the GUI after a target-field consent
+  step. The GUI shows the expected static replacement, asks the user to type
+  the trigger once, and requires a separate exact-result confirmation; it never
+  sends Enter or retries an uncertain insertion. Its review dialog separates
+  observed capture and output activity, states that trigger correlation is
+  unverified, and keeps long replacements inside a scrollable preview.
+- Add GNOME-specific `wayexpand doctor --gnome` conclusions and a guided
+  `wayexpand debug --gnome --interactive` real-app test. The test distinguishes
+  configured routing from uncorrelated activity and user-confirmed insertion;
+  it never logs entered or replacement text. Add `wayexpand support --gnome`
+  with GNOME/IBus source, sanitized component-location, service, policy, test,
+  and stable error-ID data (support schema 3). Make terminal evdev coverage an
+  optional follow-up offered only after the core IBus insertion is confirmed;
+  `--yes` cannot implicitly enable raw keyboard capture.
+- Make missing system IBus registration an explicit setup choice. User installs
+  show the registration plan and ask separately before a one-time administrator
+  authorization; `--yes` alone cannot invoke it, while
+  `--install-system-integration` is the explicit scripted retry. The GUI also
+  asks separately from non-atomic replacement consent. Explain alternatives
+  when `pkexec` is unavailable and remove private staged manifests with an
+  automatic cleanup guard on every exit path. Document GNOME IBus certification
+  coverage by Fedora, Ubuntu LTS, GNOME Shell range, and GTK 3/GTK 4/Qt/browser/
+  terminal clients; all remain untested pending real-session evidence.
+- Journal the IBus component's original bytes, SHA-256, mode, and ownership
+  before setup replaces it. On failed activation, restore the prior component
+  or remove a newly installed one, restore setup-written consent and terminal
+  configuration only when the config revision still matches, and restore the
+  terminal service drop-in and any setup-created empty directories. The error
+  now reports restored and remaining changes explicitly; an explicit
+  replacement consent rollback is named instead of being silent.
+- Replace the GUI's IBus setup consent dead end with a pre-setup explanation and
+  explicit checkbox. The GUI passes `--accept-non-atomic-replacement` only
+  after that choice; `--yes` alone still cannot authorize replacement. Setup
+  completion now distinguishes route configuration from a verified real-app
+  insertion, and first-run status shows Installed, Configured, and Verified
+  working separately.
+- Avoid restarting an already registered IBus session during setup. When a
+  registry refresh is needed, check the restart command result, use a discovered
+  systemd user unit only when its MainPID owns the IBus daemon, and verify the
+  daemon, GNOME Shell session, and engine registry reconnect before activation.
+  Report `WX-GNOME-IBUS-RESTART` with separate registry/session evidence and
+  preserve or restore GNOME input-source state on failed activation. Recheck
+  GNOME's active source and session state after setup to catch concurrent
+  source changes.
+- Register the WayExpand IBus engine in GNOME's typed input-source list while
+  preserving existing keyboard sources and order. Setup selects the GNOME
+  source, verifies the saved registration and active source, and restores the
+  prior GNOME settings if activation later fails. IBus diagnostics now report
+  GNOME source registration and selection separately from IBus preload state.
+- Stop treating GNOME desktop detection as evidence that input reaches the
+  engine. Report GNOME Wayland/Shell session, source registration, active
+  source, normal-field input, and target insertion independently. Readiness
+  now distinguishes configuration from operation; schema 2 leaves target
+  insertion unknown until independently confirmed. Add
+  `wayexpand repair --gnome-input-source` with rollback on activation failure.
+- Continue permissive AutoKey imports when an individual nested directory or
+  directory entry cannot be read. Preserve accessible phrases and report each
+  skipped path with a remediation; strict imports still fail on the same
+  errors. An import with only inaccessible entries now returns its skipped
+  report instead of a generic no-phrases error.
 - Add GNOME window tracking: a bundled GNOME Shell extension (GNOME 45+,
   `wayexpand-window-tracker@cyberducttape.github.io`) reports the focused
   window's app ID, title and Mutter window ID to subscribers only, and the new

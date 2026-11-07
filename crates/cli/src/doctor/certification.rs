@@ -217,8 +217,13 @@ pub(crate) fn print_certification(json: bool) -> Result<bool> {
             let daemon_commit = snapshot
                 .get("daemon_commit")
                 .and_then(serde_json::Value::as_str);
-            let commit_matches = crate::doctor::status::daemon_commit_matches(daemon_commit);
-            let commit_unknown = crate::doctor::status::daemon_commit_unknown(daemon_commit);
+            let daemon_version = snapshot
+                .get("daemon_version")
+                .and_then(serde_json::Value::as_str);
+            let commit_matches =
+                crate::doctor::status::daemon_build_matches(daemon_commit, daemon_version);
+            let commit_unknown =
+                crate::doctor::status::daemon_build_unknown(daemon_commit, daemon_version);
             let compatible = status_schema_compatible(&snapshot);
             let runtime_capabilities = runtime_capabilities_from_status(&snapshot);
             let detail = match (source, backend, compatible, commit_matches) {
@@ -257,6 +262,8 @@ pub(crate) fn print_certification(json: bool) -> Result<bool> {
                 "compatible": compatible,
                 "commit_matches": commit_matches,
                 "daemon_commit": daemon_commit,
+                "build_matches": commit_matches,
+                "daemon_version": daemon_version,
                 "status_schema": status_schema,
                 "state": state,
                 "source": source,

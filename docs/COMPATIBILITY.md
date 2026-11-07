@@ -19,7 +19,10 @@ wayexpand 1.3.3-dev+<short-sha> (commit <short-sha>)
 
 An exact clean release tag reports the release version (`1.3.3`). A build from
 an unreleased Git revision reports `-dev+<commit>` so bug reports can be tied to
-the exact source tree. `wayexpand doctor --json` exposes the same values as
+the source revision; dirty development builds append a deterministic digest
+of build inputs. If Git marks the worktree dirty but that digest cannot be
+computed, the version ends in `.dirty-unknown` and runtime matching remains
+unverified. `wayexpand doctor --json` exposes the same values as
 `wayexpand_version` and `wayexpand_commit`; certification evidence records them
 as well. Builds made from source archives without Git metadata use the package
 version and report the commit as `unknown`, unless the packaging source carries
@@ -313,22 +316,41 @@ new fields may be added compatibly.
 
 Checks the IBus route link by link and reports recent engine activity. It
 contains no typed text, triggers, or replacements. Exit code 0 when `ready`
-is true, 1 otherwise.
+is true, 1 otherwise. The IBus-route JSON object has `schema: 2`; this version
+adds separate readiness states and changes `ready` to mean operationally
+verified rather than merely free of hard failures.
 
-- `ready` (bool): no check failed and no second capture route expands in the
-  same apps.
+- `ready` (bool): operational readiness is fully verified and no second
+  capture route expands in the same apps. Configuration alone is not enough.
+- `configuration_readiness` and `operational_readiness` (strings): each is
+  `pass`, `warn`, `fail`, `unknown`, or `skip`. Unknown evidence is never
+  treated as success. `operational_readiness` remains unverified until there
+  is evidence from a normal text field and the target insertion has been
+  independently confirmed.
 - `desktop` (string): `kde-wayland`, `gnome`, `other-wayland`, `x11`, or
   `unknown`.
 - `checks` (array): in order, objects with a stable `id` (`tools`, `daemon`,
   `desktop`, `component`, `manifest`, `registered`, `selected`, `consent`,
-  `engine`), `title`, `state` (`pass`, `warn`, `fail`, or `skip`), `detail`,
-  and `fix` (string or null). The component checks read the running
+  `engine`, GNOME session/source checks, `field-input`, and `target-insertion`),
+  `title`, `state` (`pass`, `warn`, `fail`, `unknown`, or `skip`), `detail`,
+  `problem_id` (stable diagnostic ID or null), and `fix` (string or null).
+  Component registration failures use `WX-IBUS-001`, an unselected engine
+  uses `WX-IBUS-002`, replacement refusal uses `WX-POLICY-001`, conflicting
+  Plasma Wayland toolkit overrides use `WX-IBUS-TOOLKIT-001`, an unavailable KWin IBus
+  Wayland bridge uses `WX-KWIN-IBUS-001`, and GNOME session/source
+  failures use `WX-GNOME-SESSION-001`, `WX-GNOME-IM-001`, or
+  `WX-GNOME-IM-002`. The component checks read the running
   ibus-daemon's own `IBUS_COMPONENT_PATH`, not the caller's.
 - `first_failure` (string or null): the `id` of the first failed check.
 - `readiness` (object): booleans for each separate condition —
   `component_installed`, `registered`, `ibus_running`, `selected`,
-  `engine_running`, `text_received` (a field sent keys and reported its
-  text), and `expanded` (at least one expansion since the engine started).
+  `engine_running`, `text_received` (a normal field sent keys and at least one
+  surrounding-text report), and `expanded` (at least one expansion since the
+  engine started). This input evidence is independent of the client's
+  advertised surrounding-text capability and does not imply that replacement
+  succeeded. It is aggregate across recent fields: IBus telemetry does not
+  record application identity, so `text_received` cannot certify a browser or
+  any other particular client.
 - `activity` (object or null): the engine's published status: `live`, `pid`,
   `version`, `engines`, `totals` (`focus_ins`, `keys`, `expansions`,
   `refusals`, `output_failures`), and `recent_fields` (up to 8, newest last)
@@ -477,7 +499,7 @@ Diagnostic output suitable for health checks and monitoring systems.
 ```
 
 **Field stability:**
-- `healthy` (bool): Overall health (an active display session, config and organization policy valid, a usable automatic input path or installed IBus path, and socket operational if configured)
+- `healthy` (bool): Host readiness: valid config and policy, active display session, an available automatic or recommended setup route, valid control-socket path when configured, required broker healthy, daemon output not stalled, insertion not blocked, and cleanup queue not degraded. If IBus is selected, an actionable stable IBus route problem also makes this false. An unselected optional IBus route and unverified per-field activity do not fail host health; this flag does not certify real-app insertion.
 - `wayland` (bool): Wayland session detected
 - `desktop` (string): Detected desktop/compositor identity used to bind certification evidence to the session actually probed (for example, `KDE Plasma`, `GNOME`, `Sway/wlroots`, or `Hyprland/wlroots`). `unknown` is not certifiable.
 - `config.path` (string): Configuration file path
@@ -523,7 +545,7 @@ Diagnostic output suitable for health checks and monitoring systems.
 - `automatic_selection` (object): The daemon's shared source/backend resolver result; `ready` is false for the conservative stdin-only fallback.
 - `setup_recommendation` (object): The route Recommended mode would configure, chosen by the shared route planner from current capabilities, organization policy, and certification status (certified routes first, then input-method-v2 with libei key pass-through, then IBus). It may be an experimental route; it is never a raw-input (evdev) route.
 - `route_plan` (object): The full route order from the same planner, including each route's stable `id`, `standing` (`recommended`, `available`, `requires-consent`, `blocked-by-policy`, or `unavailable`), explanation `reason`, capture and injection methods, catalog `certification` status, replacement assurance, and whether sensitive-field protection is certified. Each route also contains a normalized `assessment` with independent `installed`, `supported`, `authorized`, and `connected` evidence (`yes`, `no`, `unknown`, or `requires_action`), `policy_allowed`, `certified`, `requires_user_action`, and explicit limitations. The optional `portal` assessment separates provider-candidate discovery from implementation/interface availability, authorization, direct socket configuration, EIS connection, negotiated injection, and verified injection. Desktop-name discovery is only a candidate hint. This is an additive field; availability and catalog certification are distinct claims.
-- `gnome_window_tracker` (object or null): `null` outside GNOME. On GNOME: `uuid`, `installed_path` (the copy GNOME Shell loads, user copy first), `installed_matches_bundled`, `state` (`active`, `inactive`, `error`, `out-of-date`, `not-loaded`, `other`, or `shell-unavailable`), `user_extensions_enabled`, `ready`, `detail`, and `fix`. Additive.
+- `gnome_window_tracker` (object or null): `null` outside GNOME. On GNOME: `uuid`, `installed_path` (the copy GNOME Shell loads, user copy first), `installed_matches_bundled`, `state` (`active`, `inactive`, `error`, `out-of-date`, `not-loaded`, `other`, or `shell-unavailable`), `user_extensions_enabled`, `ready`, `detail`, and `fix`. `build_identity` reports the bundled, on-disk, and live extension identities, whether on-disk metadata matches the extension JavaScript, and `runtime_state` (`current`, `logout-required`, `update-required`, `invalid-on-disk`, `unavailable`, or `not-running`). The live identity comes from the currently loaded Shell extension metadata, so replacing files cannot make an older loaded instance appear current. Additive.
 - `ibus` (object): `installed` (bool, IBus' live registry lists the engine), `status`, and `route`, which has the same shape as `wayexpand ibus status --json` (below). Additive.
 - `capture_readiness` (object): Non-invasive source/output readiness after organization-policy filtering across IBus, libei, wlroots, and input-method-v2. `state` is one of `available-to-try`, `authorization-required`, `not-probed`, or `unavailable`; `end_to_end_verified` remains false until a compositor/client certification harness supplies evidence.
 - `feature_support` (object): Product-wide integration limits, separate from backend probes. `ime_preedit.status` is `unsupported`; `app_filter.status` is `kwin_or_gnome_extension` (KWin on KDE Plasma, the WayExpand GNOME Shell extension on GNOME 45+; it was `kwin_only` before GNOME support). These are implementation-scope statements, not compositor certification.
@@ -553,18 +575,22 @@ plain-text control-socket status response (`response` is its first line;
 every subsequent `key=value` line becomes a field, with `true`/`false`
 parsed as JSON booleans and nonnegative integer values parsed as JSON numbers)
 rather than a purpose-built schema. The CLI adds `client_commit`,
-`daemon_build_matches_client`, and `daemon_build_warning` to make build skew
-visible; text output prints the same warning to stderr. A matching commit has
-no warning, while unknown build identity or a status protocol mismatch is
-reported as unverifiable.
+`client_version`, `daemon_build_matches_client`, and `daemon_build_warning`
+to make build skew visible; text output prints the same warning to stderr.
+Exact source-tree identity is preferred over a commit-only comparison; unknown
+build identity or a status protocol mismatch is reported as unverifiable.
 The optional `sandbox_security` object contains direct `/proc` and syscall
 probes from the daemon process for `wayexpand doctor --security`; older daemons
 omit it, and this optional additive field does not change the status schema.
 
-`daemon_commit` identifies the daemon binary that produced the response, so
-operators can distinguish a running process from newly installed binaries.
-Builds without Git metadata report `unknown`; an `unknown` commit on either
-side never counts as a match (`commit_matches` is then `false`).
+`daemon_commit` identifies the source revision, and `daemon_version` identifies
+the exact source-tree build. Dirty development builds include a short digest of
+tracked and untracked build inputs in the version, so two binaries from the
+same commit but different working-tree edits do not appear identical. New
+clients prefer exact version matching; they use commit matching for older clean
+daemons that do not report `daemon_version`. A dirty client cannot treat a
+legacy same-commit daemon as verified. Builds without Git metadata report
+`unknown`; an unknown commit never counts as a commit match.
 
 **Output shape:**
 ```json
@@ -576,7 +602,9 @@ side never counts as a match (`commit_matches` is then `false`).
   "backend_mode": "unknown",
   "status_schema": 26,
   "daemon_commit": "example-commit",
+  "daemon_version": "1.3.3-dev+example-commit",
   "client_commit": "example-commit",
+  "client_version": "1.3.3-dev+example-commit",
   "daemon_build_matches_client": true,
   "daemon_build_warning": null,
   "state": "connected",

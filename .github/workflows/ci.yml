@@ -341,8 +341,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.checkout_ref || github.ref }}
-      - name: Install supported shell interpreters
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fish zsh
+      - name: Install ShellCheck and supported shell interpreters
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fish zsh shellcheck && shellcheck --version
       - name: ShellCheck scripts
         run: shellcheck scripts/*.sh crates/cli/integrations/wayexpand.bash
       - name: Verify daemon soak environment isolation
@@ -361,6 +361,8 @@ jobs:
         run: bash scripts/test-package-smoke-guard.sh
       - name: Verify GNOME extension state parsing
         run: bash scripts/test-gnome-extension-state.sh
+      - name: Stress-test bounded GNOME notification delivery
+        run: node --test scripts/test-gnome-notification-queue.mjs
       - name: Verify GNOME extension D-Bus path compatibility
         run: sh scripts/test-gnome-extension-dbus.sh
       - name: Check Rust dependency hygiene
@@ -520,7 +522,7 @@ jobs:
   kwin-e2e:
     name: Headless KWin Output and Focus E2E
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -533,7 +535,7 @@ jobs:
           toolchain: 1.96.0
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Install headless compositor dependencies
-        run: sudo apt-get update && sudo apt-get install -y dbus-daemon jq kwin-common kwin-wayland libglib2.0-bin libwayland-dev libxkbcommon-dev pkg-config wl-clipboard
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends dbus-daemon jq kwin-common kwin-wayland libglib2.0-bin libwayland-dev libxkbcommon-dev pkg-config wl-clipboard
       - name: Test production output and KWin focus tracking
         run: bash scripts/test-kwin-e2e.sh --keep
       - name: Test isolated doctor certification report
@@ -589,13 +591,24 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Install IBus and D-Bus
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ibus dbus-daemon libwayland-dev libxkbcommon-dev pkg-config
+      - name: Record tested revision
+        id: tested_revision
+        run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Test the IBus engine against a private ibus-daemon
-        run: bash scripts/test-ibus-e2e.sh
+        run: bash scripts/test-ibus-e2e.sh --keep
+      - name: Upload private IBus diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ibus-e2e-diagnostics-${{ steps.tested_revision.outputs.commit }}
+          path: /tmp/wayexpand-ibus-e2e.*/**
+          if-no-files-found: ignore
+          retention-days: 14
 
   gnome-e2e:
-    name: Headless GNOME Shell Window Tracking E2E
+    name: GNOME Input Activation, IBus Context, and Upgrade Acceptance (Headless)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -604,10 +617,21 @@ jobs:
         with:
           toolchain: 1.96.0
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - name: Install GNOME Shell and D-Bus
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gnome-shell dconf-service dbus-daemon libglib2.0-bin libgl1-mesa-dri libwayland-dev libxkbcommon-dev pkg-config
-      - name: Test the GNOME Shell extension and tracker in a headless GNOME Shell
-        run: bash scripts/test-gnome-e2e.sh
+      - name: Install GNOME Shell, GTK, IBus, and D-Bus
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gnome-shell xwayland ibus ibus-gtk3 dconf-service dbus-daemon libglib2.0-bin libgl1-mesa-dri libwayland-dev libxkbcommon-dev pkg-config python3-gi gir1.2-gtk-3.0
+      - name: Record tested revision
+        id: tested_revision
+        run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Accept live GNOME source activation, IBus replacement, and Shell restart lifecycle
+        run: bash scripts/test-gnome-e2e.sh --keep
+      - name: Upload isolated GNOME diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gnome-e2e-diagnostics-${{ steps.tested_revision.outputs.commit }}
+          path: /tmp/wayexpand-gnome-e2e.*/**
+          if-no-files-found: ignore
+          retention-days: 14
 
   packaging:
     name: Debian and RPM Package Artifacts
@@ -750,7 +774,10 @@ jobs:
       - name: Install smoke-test tools
         run: |
           if command -v dnf >/dev/null; then
-            dnf install -y -q glibc-common shadow-utils util-linux
+            dnf install -y -q glibc-common shadow-utils util-linux python3
+          else
+            apt-get update -qq
+            apt-get install -y -qq passwd util-linux python3
           fi
       - name: Install, reinstall, and remove the package
         env:

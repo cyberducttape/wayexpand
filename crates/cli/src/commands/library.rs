@@ -211,178 +211,254 @@ fn add_repository_at(
             "could not create private library staging directory: {error}"
         ))
     })?;
-    fs::set_permissions(&stage, fs::Permissions::from_mode(0o700)).map_err(|error| {
-        config_error(format!(
-            "could not secure library staging directory: {error}"
-        ))
-    })?;
     let cleanup = StagedRepository(stage.clone());
-    let budgets = LibraryBudgets::from_environment()?;
-    let git_limits = |max_file_size| sync::GitResourceLimits {
-        timeout: std::time::Duration::from_secs(MAX_INTAKE_SECONDS),
-        max_file_size,
-        cpu_seconds: budgets.cpu_seconds,
-    };
+    let result = (|| -> Result<(PathBuf, String, String, usize)> {
+        fs::set_permissions(&stage, fs::Permissions::from_mode(0o700)).map_err(|error| {
+            config_error(format!(
+                "could not secure library staging directory: {error}"
+            ))
+        })?;
+        let budgets = LibraryBudgets::from_environment()?;
+        let git_limits = |max_file_size| sync::GitResourceLimits {
+            timeout: std::time::Duration::from_secs(MAX_INTAKE_SECONDS),
+            max_file_size,
+            cpu_seconds: budgets.cpu_seconds,
+        };
 
-    let mut clone = vec![
-        "-c",
-        "core.hooksPath=/dev/null",
-        "-c",
-        "init.templateDir=/dev/null",
-        "-c",
-        "core.attributesFile=/dev/null",
-        "clone",
-        "--quiet",
-        "--depth=1",
-        "--single-branch",
-        "--no-tags",
-        "--no-recurse-submodules",
-        "--no-checkout",
-        "--filter=blob:none",
-    ];
-    if let Some(branch) = branch {
-        clone.push("--branch");
-        clone.push(branch);
-    }
-    clone.push("--");
-    clone.push(remote);
-    let stage_text = stage
-        .to_str()
-        .ok_or_else(|| config_error("library path is not UTF-8"))?;
-    clone.push(stage_text);
-    let output =
-        sync::git_library_output_bounded(root, &clone, None, git_limits(budgets.network_bytes))?;
-    if !output.status.success() {
-        bail!(
-            "could not clone library source: {}",
-            sync::redact_library_diagnostic(String::from_utf8_lossy(&output.stderr).trim())
-        );
-    }
-    if String::from_utf8_lossy(&output.stderr).contains("filtering not recognized") {
-        bail!("library server did not honor the filtered clone request");
-    }
-
-    if let Some(revision) = revision {
-        let revision = revision.to_ascii_lowercase();
-        let fetch = [
-            "fetch",
+        let mut clone = vec![
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "init.templateDir=/dev/null",
+            "-c",
+            "core.attributesFile=/dev/null",
+            "clone",
             "--quiet",
             "--depth=1",
+            "--single-branch",
             "--no-tags",
             "--no-recurse-submodules",
+            "--no-checkout",
             "--filter=blob:none",
-            "origin",
-            revision.as_str(),
         ];
+        if let Some(branch) = branch {
+            clone.push("--branch");
+            clone.push(branch);
+        }
+        clone.push("--");
+        clone.push(remote);
+        let stage_text = stage
+            .to_str()
+            .ok_or_else(|| config_error("library path is not UTF-8"))?;
+        clone.push(stage_text);
         let output = sync::git_library_output_bounded(
-            &stage,
-            &fetch,
+            root,
+            &clone,
             None,
             git_limits(budgets.network_bytes),
         )?;
+        if !output.status.success() {
+            bail!(
+                "could not clone library source: {}",
+                sync::redact_library_diagnostic(String::from_utf8_lossy(&output.stderr).trim())
+            );
+        }
+        if String::from_utf8_lossy(&output.stderr).contains("filtering not recognized") {
+            bail!("library server did not honor the filtered clone request");
+        }
+
+        if let Some(revision) = revision {
+            let revision = revision.to_ascii_lowercase();
+            // The initial clone already consumed part of the aggregate
+            // download allowance. Bound this fetch by what remains instead of
+            // granting each Git subprocess the entire per-library budget.
+            let already_downloaded = repository_pack_bytes(&stage)?;
+            let remaining_network =
+                remaining_network_budget(budgets.network_bytes, already_downloaded)?;
+            let fetch = [
+                "fetch",
+                "--quiet",
+                "--depth=1",
+                "--no-tags",
+                "--no-recurse-submodules",
+                "--filter=blob:none",
+                "origin",
+                revision.as_str(),
+            ];
+            let output = sync::git_library_output_bounded(
+                &stage,
+                &fetch,
+                None,
+                git_limits(remaining_network),
+            )?;
+            if !output.status.success()
+                || String::from_utf8_lossy(&output.stderr).contains("filtering not recognized")
+            {
+                bail!(
+                    "could not fetch approved catalog revision: {}",
+                    sync::redact_library_diagnostic(String::from_utf8_lossy(&output.stderr).trim())
+                );
+            }
+            let fetched = sync::git_library_ok(&stage, &["rev-parse", "FETCH_HEAD"])?;
+            if !fetched.eq_ignore_ascii_case(&revision) {
+                bail!("Git server returned a different commit than the approved revision");
+            }
+            if sync::git_library_ok(&stage, &["cat-file", "-t", "FETCH_HEAD"])? != "commit" {
+                bail!("--approved-revision must identify a Git commit");
+            }
+            let branch = sync::git_library_ok(&stage, &["branch", "--show-current"])?;
+            if branch.is_empty() || branch == "HEAD" {
+                bail!("pinned catalog clone did not select a local branch");
+            }
+            sync::git_library_ok(
+                &stage,
+                &["update-ref", &format!("refs/heads/{branch}"), &revision],
+            )?;
+            if repository_pack_bytes(&stage)? > budgets.network_bytes {
+                bail!("library download exceeds the network budget");
+            }
+        }
+
+        let entries = validate_repository_tree(&stage, git_limits(budgets.network_bytes))?;
+        let revision = sync::git_library_ok(&stage, &["rev-parse", "HEAD"])?;
+        validate_object_id(&revision)?;
+        let selected_branch = sync::git_library_ok(&stage, &["branch", "--show-current"])?;
+        if selected_branch.is_empty() || selected_branch == "HEAD" {
+            bail!("library clone did not select a branch; use --branch to pin one");
+        }
+        // Fetch only blobs below the individual limit. A server that ignores the
+        // filter is rejected, and RLIMIT_FSIZE bounds any pack it writes.
+        let already_downloaded = repository_pack_bytes(&stage)?;
+        if already_downloaded >= budgets.network_bytes {
+            bail!("library download exhausts the network budget before blob inspection");
+        }
+        let remaining_network =
+            remaining_network_budget(budgets.network_bytes, already_downloaded)?;
+        let filter = format!("--filter=blob:limit={}", budgets.blob_bytes);
+        let fetch = [
+            "-c",
+            "protocol.version=2",
+            "fetch",
+            "--quiet",
+            "--no-tags",
+            "--no-recurse-submodules",
+            "--refetch",
+            filter.as_str(),
+            "origin",
+            revision.as_str(),
+        ];
+        let output =
+            sync::git_library_output_bounded(&stage, &fetch, None, git_limits(remaining_network))?;
         if !output.status.success()
             || String::from_utf8_lossy(&output.stderr).contains("filtering not recognized")
         {
             bail!(
-                "could not fetch approved catalog revision: {}",
+                "library bounded blob fetch failed: {}",
                 sync::redact_library_diagnostic(String::from_utf8_lossy(&output.stderr).trim())
             );
         }
-        let fetched = sync::git_library_ok(&stage, &["rev-parse", "FETCH_HEAD"])?;
-        if !fetched.eq_ignore_ascii_case(&revision) {
-            bail!("Git server returned a different commit than the approved revision");
-        }
-        if sync::git_library_ok(&stage, &["cat-file", "-t", "FETCH_HEAD"])? != "commit" {
-            bail!("--approved-revision must identify a Git commit");
-        }
-        let branch = sync::git_library_ok(&stage, &["branch", "--show-current"])?;
-        if branch.is_empty() || branch == "HEAD" {
-            bail!("pinned catalog clone did not select a local branch");
-        }
-        sync::git_library_ok(
-            &stage,
-            &["update-ref", &format!("refs/heads/{branch}"), &revision],
-        )?;
         if repository_pack_bytes(&stage)? > budgets.network_bytes {
             bail!("library download exceeds the network budget");
         }
+        validate_fetched_blob_sizes(
+            &stage,
+            &entries,
+            &budgets,
+            git_limits(budgets.network_bytes),
+        )?;
+        let catalog_paths = permitted_catalog_paths(&entries)?;
+        if catalog_paths.is_empty() {
+            bail!("repository contains no catalog files");
+        }
+        let mut checkout = vec!["checkout", "--quiet", "--force", &revision, "--"];
+        let pathspecs: Vec<String> = catalog_paths
+            .iter()
+            .map(|path| format!(":(literal){path}"))
+            .collect();
+        checkout.extend(pathspecs.iter().map(String::as_str));
+        let output = sync::git_library_output_bounded_no_lazy_fetch(
+            &stage,
+            &checkout,
+            None,
+            git_limits(budgets.blob_bytes),
+        )?;
+        if !output.status.success() {
+            bail!("could not check out the permitted WayExpand catalog paths");
+        }
+        let catalog = config::scan_pack_catalog(&stage)?;
+        if catalog.packs.is_empty() {
+            bail!("repository contains no valid WayExpand packs");
+        }
+        let pack_count = catalog.packs.len();
+        rename_directory_without_replacement(&stage, &target).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::AlreadyExists {
+                config_error(format!(
+                    "library {name} was created concurrently; refusing to replace it"
+                ))
+            } else {
+                config_error(format!("could not activate library source: {error}"))
+            }
+        })?;
+        if let Err(error) = sync_directory(root) {
+            bail!(
+                "library {name} was activated at {}, but its directory durability could not be confirmed: {error:#}",
+                target.display()
+            );
+        }
+        Ok((target, revision, selected_branch, pack_count))
+    })();
+    if let Err(error) = &result {
+        if let Err(cleanup_error) = cleanup.remove_now() {
+            return Err(config_error(format!(
+                "{error:#}; staging directory {} could not be removed: {cleanup_error}",
+                stage.display()
+            )));
+        }
     }
+    result
+}
 
-    let entries = validate_repository_tree(&stage, git_limits(budgets.network_bytes))?;
-    let revision = sync::git_library_ok(&stage, &["rev-parse", "HEAD"])?;
-    validate_object_id(&revision)?;
-    let selected_branch = sync::git_library_ok(&stage, &["branch", "--show-current"])?;
-    if selected_branch.is_empty() || selected_branch == "HEAD" {
-        bail!("library clone did not select a branch; use --branch to pin one");
+/// Atomically publish a validated staging directory without replacing any
+/// path created by a concurrent library operation. Failure to get the kernel
+/// primitive is fail-closed; a check-then-rename fallback can clobber a peer.
+fn rename_directory_without_replacement(from: &Path, to: &Path) -> std::io::Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+
+    let from = std::ffi::CString::new(from.as_os_str().as_bytes()).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "staging path contains NUL",
+        )
+    })?;
+    let to = std::ffi::CString::new(to.as_os_str().as_bytes()).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "library path contains NUL",
+        )
+    })?;
+    let result = unsafe {
+        libc::renameat2(
+            libc::AT_FDCWD,
+            from.as_ptr(),
+            libc::AT_FDCWD,
+            to.as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
     }
-    // Fetch only blobs below the individual limit. A server that ignores the
-    // filter is rejected, and RLIMIT_FSIZE bounds any pack it writes.
-    let already_downloaded = repository_pack_bytes(&stage)?;
-    if already_downloaded >= budgets.network_bytes {
-        bail!("library download exhausts the network budget before blob inspection");
-    }
-    let remaining_network = budgets.network_bytes - already_downloaded;
-    let filter = format!("--filter=blob:limit={}", budgets.blob_bytes);
-    let fetch = [
-        "-c",
-        "protocol.version=2",
-        "fetch",
-        "--quiet",
-        "--no-tags",
-        "--no-recurse-submodules",
-        "--refetch",
-        filter.as_str(),
-        "origin",
-        revision.as_str(),
-    ];
-    let output =
-        sync::git_library_output_bounded(&stage, &fetch, None, git_limits(remaining_network))?;
-    if !output.status.success()
-        || String::from_utf8_lossy(&output.stderr).contains("filtering not recognized")
-    {
-        bail!(
-            "library bounded blob fetch failed: {}",
-            sync::redact_library_diagnostic(String::from_utf8_lossy(&output.stderr).trim())
-        );
-    }
-    if repository_pack_bytes(&stage)? > budgets.network_bytes {
-        bail!("library download exceeds the network budget");
-    }
-    validate_fetched_blob_sizes(
-        &stage,
-        &entries,
-        &budgets,
-        git_limits(budgets.network_bytes),
-    )?;
-    let catalog_paths = permitted_catalog_paths(&entries)?;
-    if catalog_paths.is_empty() {
-        bail!("repository contains no catalog files");
-    }
-    let mut checkout = vec!["checkout", "--quiet", "--force", &revision, "--"];
-    let pathspecs: Vec<String> = catalog_paths
-        .iter()
-        .map(|path| format!(":(literal){path}"))
-        .collect();
-    checkout.extend(pathspecs.iter().map(String::as_str));
-    let output = sync::git_library_output_bounded_no_lazy_fetch(
-        &stage,
-        &checkout,
-        None,
-        git_limits(budgets.blob_bytes),
-    )?;
-    if !output.status.success() {
-        bail!("could not check out the permitted WayExpand catalog paths");
-    }
-    let catalog = config::scan_pack_catalog(&stage)?;
-    if catalog.packs.is_empty() {
-        bail!("repository contains no valid WayExpand packs");
-    }
-    let pack_count = catalog.packs.len();
-    fs::rename(&stage, &target)
-        .map_err(|error| config_error(format!("could not activate library source: {error}")))?;
-    drop(cleanup);
-    sync_directory(root)?;
-    Ok((target, revision, selected_branch, pack_count))
+}
+
+fn remaining_network_budget(total: u64, used: u64) -> Result<u64> {
+    total
+        .checked_sub(used)
+        .filter(|remaining| *remaining > 0)
+        .ok_or_else(|| {
+            config_error("library download exhausts the network budget before the next fetch")
+        })
 }
 
 #[derive(Clone)]
@@ -740,9 +816,19 @@ fn sync_directory(path: &Path) -> Result<()> {
 
 struct StagedRepository(PathBuf);
 
+impl StagedRepository {
+    fn remove_now(&self) -> std::io::Result<()> {
+        match fs::remove_dir_all(&self.0) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+        }
+    }
+}
+
 impl Drop for StagedRepository {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
+        let _ = self.remove_now();
     }
 }
 
@@ -909,6 +995,31 @@ mod tests {
             .expect_err("symlink tree entries must be rejected");
         assert!(error.to_string().contains("symlink"));
         assert!(fs::read_dir(&root).unwrap().next().is_none());
+    }
+
+    #[test]
+    fn publication_never_replaces_a_concurrent_library_directory() {
+        let tree = TestTree::new("no-replace");
+        let stage = tree.0.join("stage");
+        let target = tree.0.join("library");
+        fs::create_dir(&stage).unwrap();
+        fs::write(stage.join("staged"), b"validated").unwrap();
+        fs::create_dir(&target).unwrap();
+        fs::write(target.join("existing"), b"keep").unwrap();
+
+        let error = rename_directory_without_replacement(&stage, &target)
+            .expect_err("publication must not replace a concurrently-created target");
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+        assert!(stage.join("staged").is_file());
+        assert_eq!(fs::read(target.join("existing")).unwrap(), b"keep");
+    }
+
+    #[test]
+    fn each_library_fetch_receives_only_the_remaining_network_budget() {
+        assert_eq!(remaining_network_budget(128, 0).unwrap(), 128);
+        assert_eq!(remaining_network_budget(128, 31).unwrap(), 97);
+        assert!(remaining_network_budget(128, 128).is_err());
+        assert!(remaining_network_budget(128, 129).is_err());
     }
 
     #[test]

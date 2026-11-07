@@ -183,6 +183,21 @@ pub struct ExpansionEngine {
 }
 
 impl ExpansionEngine {
+    /// Whether the active snippet snapshot needs focused-window titles for
+    /// an explicitly configured `title_contains` filter. Window trackers
+    /// should request title metadata only while this is true.
+    pub fn requires_window_titles(&self) -> bool {
+        !self.runtime_policy.disable_title_matching
+            && self
+                .config
+                .expansion
+                .iter()
+                .zip(self.validated.app_filters.iter())
+                .filter(|(expansion, _)| expansion.enabled)
+                .flat_map(|(_, filters)| filters.iter())
+                .any(|filter| matches!(filter, AppFilter::TitleContains(_)))
+    }
+
     /// The immutable validated source and derived metadata used by this
     /// engine. Runtime-only host restrictions are exposed separately through
     /// policy diagnostics and do not mutate the snapshot.

@@ -89,7 +89,7 @@ pub fn engine_installed() -> bool {
 /// reliable check.
 pub fn global_engine_selected() -> bool {
     executable_in_path("ibus")
-        && registry_command_contains_engine("ibus", &["engine"], Duration::from_millis(500))
+        && registry_command_contains_engine("ibus", &["engine"], Duration::from_secs(5))
 }
 
 fn runtime_executables_present() -> bool {
@@ -100,7 +100,7 @@ pub(crate) fn ibus_registry_contains_engine() -> bool {
     registry_command_contains_engine(
         "ibus",
         &["list-engine", "--name-only"],
-        Duration::from_millis(500),
+        Duration::from_secs(5),
     )
 }
 

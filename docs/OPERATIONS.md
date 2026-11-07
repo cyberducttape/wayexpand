@@ -394,9 +394,15 @@ status, validates the control-socket parent and existing path permissions, and
 performs non-invasive availability checks where possible, including a
 writable-open check for `/dev/uinput`. A backend marked `RequiresPermission`
 needs permissions, while `NotImplemented` means that environment access alone
-does not make the backend selectable or usable. `doctor` exits nonzero when the
-configuration is missing, unreadable, or invalid; lack of an active Wayland
-session remains informational.
+does not make the backend selectable or usable. `doctor` exits nonzero when
+configuration, policy, output health, or required capture readiness fails. It
+also fails when the currently selected IBus route has an actionable, stable
+blocker such as KWin's IBus Wayland bridge being unavailable or legacy
+`GTK_IM_MODULE`/`QT_IM_MODULE` overrides conflicting with the native route.
+An installed but unselected IBus route remains informational.
+Per-field activity that has not yet been observed is not treated as a host
+failure; test the target application with `wayexpand ibus watch` or
+`wayexpand debug --test`.
 
 The stdin harness bounds each input line at 1 MiB. Oversized or invalid UTF-8
 lines are discarded and logged without including their contents or stopping the
@@ -475,7 +481,12 @@ wayexpand ibus status
 separates installed files, live integration (including loaded systemd units,
 IBus registry/engine resolution, and PATH/CLI/daemon installation identity),
 and operational runtime evidence (daemon protocol/build/config/output health
-and IBus engine state). A mixed user-local and distribution installation is
+and IBus engine state). Its `default_config_template` check means a starter
+template shipped with the installation is present; `active_configuration`
+separately means the user's selected config exists and parses. Source and
+release-archive installs include the template in the versioned payload, while
+the active config remains under the user's XDG configuration directory. A
+mixed user-local and distribution installation is
 reported as a path-identity warning, including the resolved CLI, PATH, and
 daemon executable paths. Setup preflight still does not prove insertion:
 target insertion remains `not_tested` until a harmless trigger is checked in a

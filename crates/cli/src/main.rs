@@ -6,6 +6,7 @@ mod diagnostics;
 mod doctor;
 mod errors;
 mod gnome_extension;
+mod gnome_input_sources;
 mod services;
 mod setup;
 mod setup_ibus;
@@ -150,6 +151,7 @@ fn run() -> Result<()> {
         Some("sync") => sync_command(args)?,
         Some("certify") => certify_command(args)?,
         Some("support-bundle") => support_bundle(args)?,
+        Some("support") => support_bundle(args)?,
         Some("backend") => backend_command(args)?,
         Some("explain-backend") => explain_backend_command(args)?,
         Some("fleet") => fleet_command(args)?,
@@ -181,6 +183,19 @@ fn help_command(mut args: Args) -> Result<()> {
                 "WX-PORTAL-001" => ("Desktop input-emulation permission is required.", "Run `wayexpand backend test --injection` in a terminal and approve the portal prompt only if expected.", "docs/BACKENDS.md#libei-and-the-remotedesktop-portal"),
                 "WX-IBUS-001" => ("The WayExpand IBus component is not registered.", "Run `wayexpand install-check` then `wayexpand setup --backend ibus`.", "docs/IBUS_ENGINE.md"),
                 "WX-IBUS-002" => ("The IBus engine is registered but not selected.", "Select WayExpand in the desktop input-method menu, then run `wayexpand ibus status`.", "docs/IBUS_ENGINE.md#diagnostics"),
+                "WX-IBUS-003" => ("The selected IBus engine has not observed text from a normal field.", "Run `wayexpand ibus watch --seconds 30`, focus a plain text field, and type harmless text; this reports counters only.", "docs/IBUS_ENGINE.md#diagnostics"),
+                "WX-IBUS-004" => ("The IBus daemon is not responding, so browser and other IBus clients cannot reach WayExpand.", "Restore the desktop-managed IBus session, then run `wayexpand ibus status --json` and confirm the daemon check passes.", "docs/TROUBLESHOOTING.md#browser-text-fields-do-not-expand"),
+                "WX-IBUS-SETUP-001" => ("IBus setup changed configuration, but a required desktop-route check failed.", "Run `wayexpand ibus status --json`, repair the first failed check, and rerun the status command before testing a real field.", "docs/IBUS_ENGINE.md#diagnostics"),
+                "WX-IBUS-SETUP-002" => ("IBus is selected while a global WayExpand capture route also expands the same applications.", "Limit the evdev route to configured terminals with `wayexpand setup --backend ibus --terminals`, or stop the overlapping capture service, then rerun `wayexpand ibus status`.", "docs/IBUS_ENGINE.md#diagnostics"),
+                "WX-IBUS-TOOLKIT-001" => ("Legacy GTK/Qt environment overrides conflict with Plasma's native IBus Wayland route.", "Remove GTK_IM_MODULE and QT_IM_MODULE from Plasma login files, run `systemctl --user unset-environment GTK_IM_MODULE QT_IM_MODULE`, log out of Plasma and back in, then run `wayexpand ibus status --json`.", "docs/TROUBLESHOOTING.md#browser-text-fields-do-not-expand"),
+                "WX-KWIN-IBUS-001" => ("KWin's IBus Wayland bridge is not running, so native Wayland applications cannot send text to WayExpand.", "Select IBus Wayland in System Settings → Keyboard → Virtual Keyboard, log out of Plasma and back in, then run `wayexpand ibus status --json`. If the helper keeps crashing, update or repair the system IBus package and inspect `coredumpctl info ibus-ui-gtk3`.", "docs/TROUBLESHOOTING.md#browser-text-fields-do-not-expand"),
+                "WX-KWIN-IBUS-002" => ("The IBus Wayland helper crashed recently. It may have restarted, so check the live route and retest a real application.", "Inspect `coredumpctl info <PID>`, install the latest IBus package supported by your distribution, then log out of Plasma and back in. Run `wayexpand ibus status --json` and verify a harmless expansion in the affected application. If the crash recurs, report the backtrace and exact IBus package version to your distribution or IBus maintainers.", "docs/TROUBLESHOOTING.md#browser-text-fields-do-not-expand"),
+                "WX-POLICY-001" => ("Replacement is refused by local compatibility settings or organization policy.", "Run `wayexpand ibus status`; only if you accept the non-atomic IBus replacement behavior, authorize it through interactive `wayexpand setup --backend ibus`. Run `wayexpand policy check --json` to inspect organization restrictions.", "docs/TROUBLESHOOTING.md#wx-policy-001"),
+                "WX-GNOME-IM-001" => ("WayExpand is missing from GNOME's configured input sources.", "Run `wayexpand repair --gnome-input-source`, then `wayexpand doctor --gnome` to verify registration and activation.", "docs/TROUBLESHOOTING.md#wx-gnome-im-001"),
+                "WX-GNOME-IM-002" => ("GNOME's live input-source manager has not confirmed WayExpand as active.", "Run `wayexpand repair --gnome-input-source`, then `wayexpand doctor --gnome` to independently verify the active source and IBus engine.", "docs/TROUBLESHOOTING.md#wx-gnome-im-001"),
+                "WX-GNOME-IM-003" => ("No safe-field input activity was observed from the GNOME IBus engine.", "Run `wayexpand ibus watch --seconds 30`, select WayExpand in GNOME, and type harmless text in a normal text field.", "docs/IBUS_ENGINE.md#diagnostics"),
+                "WX-GNOME-IM-004" => ("The GNOME test did not establish a successful expansion in the target application.", "Run `wayexpand debug --test 'YOUR_TRIGGER'` with a harmless enabled trigger, then confirm the exact visible result; do not retry uncertain output.", "docs/TROUBLESHOOTING.md#wx-gnome-im-001"),
+                "WX-GNOME-IM-005" => ("The test could not verify the final text in the target application.", "Inspect the target field manually and do not automatically replay the insertion.", "docs/TROUBLESHOOTING.md#wx-gnome-im-001"),
                 "WX-CONFIG-001" => ("The active configuration could not be loaded.", "Run `wayexpand validate` and correct the reported issue; back up before manual edits.", "docs/TROUBLESHOOTING.md#configuration-invalid"),
                 "WX-INPUT-001" => ("The active capture route cannot currently match text.", "Run `wayexpand debug` and inspect layout, capture, policy, and service findings.", "docs/TROUBLESHOOTING.md#wx-input-001"),
                 "WX-OUTPUT-001" => ("The output route is unavailable or stalled.", "Inspect `wayexpand status`; do not retry an insertion with an uncertain result.", "docs/TROUBLESHOOTING.md#wx-output-001"),
@@ -201,7 +216,7 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
         "Getting started",
         &[
             (
-                "setup --check [--json] | --apply [--mode recommended|maximum|experimental] [--terminals] [--yes]",
+                "setup --check [--json] | --apply [--mode recommended|maximum|experimental] [--terminals] [--yes] [--accept-non-atomic-replacement] [--install-system-integration]",
                 "Check setup readiness or configure a reviewed input route",
             ),
             ("install-check [--json]", "Audit installed WayExpand components"),
@@ -210,14 +225,14 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ("check --all [--json] [config]", "Run static configuration, template, file, policy, and trigger checks without executing commands"),
             ("service status [--json] | restart --yes", "Inspect managed services or restart only the active route"),
             ("config show|validate [--json] [config] | diff [--json] OLD NEW", "Inspect, validate, or compare configuration files"),
-            ("repair --check|--apply [--json]", "Inspect or apply safe installation repairs"),
+            ("repair --check|--apply [--json] | --gnome-input-source [--json]", "Inspect installation repairs or register and activate the GNOME IBus source"),
             ("reset --integration|--services|--preferences [--check|--apply --yes] [--json]", "Preview and apply a scoped recovery reset"),
             ("restore <backup> [--check | --apply --yes --expected-current=HASH --expected-backup=HASH] [--json] [config]", "Review and safely restore a configuration backup"),
             (
-                "doctor [--json] [config]",
+                "doctor [--json] [config] | --gnome [--json]",
                 "Diagnose configuration, backends and the running daemon",
             ),
-            ("debug [--json] [--trigger TEXT] [--live [--seconds 1..300]]", "Explain runtime readiness and a specific trigger with sanitized live diagnostics"),
+            ("debug [--json] [--trigger TEXT] [--live [--seconds 1..300]] | --test TRIGGER [--application-class CLASS --focus-confirmed [--observe-only]] | --gnome --interactive", "Explain runtime readiness or guide a harmless insertion test"),
             (
                 "policy inspect|check [--file PATH] [--allow-audit-only] [--json]",
                 "Inspect policy provenance or fail CI when restrictions are not enforced",
@@ -353,6 +368,10 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ("backend list [--json] | profile [ID|--current] [--json] | test --capture|--injection", "Inspect live route assessments, desktop guidance, or run an explicit one-shot route test"),
             ("explain-backend", "Explain automatic backend selection"),
             ("certify [--json]", "Run local compatibility certification"),
+            (
+                "support [--gnome] [--output FILE]",
+                "Write a sanitized GNOME-focused support report",
+            ),
             (
                 "support-bundle [--output FILE]",
                 "Write redacted diagnostic JSON for support",

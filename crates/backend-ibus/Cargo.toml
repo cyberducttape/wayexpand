@@ -23,6 +23,7 @@ libc.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 wayexpand-process-supervisor = { path = "../process-supervisor" }
+wayexpand-backend-gnome-window = { path = "../backend-gnome-window" }
 
 [dev-dependencies]
 toml.workspace = true

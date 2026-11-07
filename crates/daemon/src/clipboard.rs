@@ -30,10 +30,10 @@ mod data_control;
 /// Typing the rest of a trigger takes well under this.
 const PREFETCH_MAX_AGE: Duration = Duration::from_secs(2);
 
-/// Upper bound on one `{{clipboard}}` read. A healthy `wl-paste` returns in a
-/// few milliseconds; this only limits how long a stuck clipboard owner can
-/// delay an expansion. Reading on demand (never caching) is deliberate, see
-/// the module docs.
+/// Upper bound on one `{{clipboard}}` read. A healthy clipboard owner returns
+/// in a few milliseconds; this only limits how long a stuck owner can delay an
+/// expansion. Reading on demand (never caching) is deliberate, see the module
+/// docs.
 const CLIPBOARD_TIMEOUT_MS: u64 = 150;
 
 static WORKER_THREADS: AtomicUsize = AtomicUsize::new(0);
@@ -463,7 +463,7 @@ mod tests {
         wayexpand_core::validate_command_config(&command).unwrap();
         assert_eq!(command.environment, CommandEnvironment::Minimal);
         assert_eq!(command.pass_env, ["WAYLAND_DISPLAY", "XDG_RUNTIME_DIR"]);
-        assert!(command.timeout_ms <= 150);
+        assert!(command.timeout_ms <= CLIPBOARD_TIMEOUT_MS);
         assert_eq!(command.cache_ms, 0);
     }
 

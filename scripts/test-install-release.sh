@@ -2,6 +2,14 @@
 set -eu
 
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+if [ -x "${WAYEXPAND_CLI:-$project_dir/target/debug/wayexpand}" ]; then
+    install_check_cli=${WAYEXPAND_CLI:-$project_dir/target/debug/wayexpand}
+elif [ -x "$project_dir/target/release/wayexpand" ]; then
+    install_check_cli="$project_dir/target/release/wayexpand"
+else
+    printf '%s\n' 'error: build wayexpand before running the release installer check' >&2
+    exit 1
+fi
 test_root=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-release-test.XXXXXX")
 trap 'rm -rf "$test_root"' EXIT INT TERM
 # Never reach the invoking user's real systemd manager or session bus, even
@@ -13,7 +21,7 @@ export XDG_RUNTIME_DIR="$isolated_runtime"
 export DBUS_SESSION_BUS_ADDRESS="unix:path=$isolated_runtime/bus"
 
 release_dir="$test_root/wayexpand-0.0.0-linux-x86_64"
-mkdir -p "$release_dir/bin" "$release_dir/systemd" "$release_dir/desktop" "$release_dir/docs" "$release_dir/scripts" "$release_dir/udev" "$release_dir/ibus/component" "$release_dir/libexec/wayexpand-certification/bin"
+mkdir -p "$release_dir/bin" "$release_dir/systemd" "$release_dir/desktop" "$release_dir/docs" "$release_dir/scripts" "$release_dir/udev" "$release_dir/ibus/component" "$release_dir/icons" "$release_dir/libexec/wayexpand-certification/bin"
 for binary in wayexpand-daemon wayexpand wayexpand-action-broker wayexpand-ui wayexpand-gui wayexpand-ibus; do
     printf '#!/bin/sh\nexit 0\n' >"$release_dir/bin/$binary"
     chmod 0755 "$release_dir/bin/$binary"
@@ -33,6 +41,7 @@ install -m 0644 "$project_dir/systemd/wayexpand-evdev.service" "$release_dir/sys
 install -m 0644 "$project_dir/systemd/wayexpand-control.service" "$release_dir/systemd/"
 install -m 0644 "$project_dir/systemd/wayexpand-action-broker.service" "$release_dir/systemd/"
 install -m 0644 "$project_dir/desktop/wayexpand.desktop" "$release_dir/desktop/"
+cp -a "$project_dir/assets/icon/hicolor" "$release_dir/icons/"
 install -m 0644 "$project_dir/installer-components.toml" "$release_dir/installer-components.toml"
 install -m 0644 "$project_dir/desktop/wayexpand-ibus.xml" "$release_dir/ibus/component/"
 install -m 0644 "$project_dir/expansions.toml" "$release_dir/expansions.toml"
@@ -50,6 +59,8 @@ install -m 0644 "$project_dir/udev/69-wayexpand-evdev-uaccess.rules" "$release_d
 "$release_dir/scripts/install-evdev-permissions.sh" --dry-run >/dev/null
 
 mkdir -p "$test_root/home" "$test_root/config"
+chmod 0700 "$test_root/config"
+export XDG_DATA_HOME="$test_root/custom-data"
 install -m 0644 "$project_dir/io.github.cyberducttape.WayExpand.metainfo.xml" \
     "$release_dir/io.github.cyberducttape.WayExpand.metainfo.xml"
 install -m 0644 "$project_dir/docs/wayexpand.1" "$release_dir/docs/wayexpand.1"
@@ -114,12 +125,14 @@ case "$first_version" in
     *) printf '%s\n' "unexpected install directory: $first_version" >&2; exit 1 ;;
 esac
 # IBus never reads per-user component directories; setup installs it.
-[ ! -e "$test_root/home/.local/share/ibus/component/wayexpand.xml" ]
+[ ! -e "$test_root/custom-data/ibus/component/wayexpand.xml" ]
 [ -f "$test_root/home/.local/lib/wayexpand/current/ibus/wayexpand.xml" ]
 [ -f "$test_root/home/.local/lib/wayexpand/current/share/wayexpand/installer-components.toml" ]
-[ -f "$test_root/home/.local/share/applications/wayexpand.desktop" ]
-[ -f "$test_root/home/.local/share/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml" ]
-[ -f "$test_root/home/.local/share/man/man1/wayexpand.1" ]
+[ -f "$test_root/home/.local/lib/wayexpand/current/expansions.toml" ]
+[ -f "$test_root/config/wayexpand/expansions.toml" ]
+[ -L "$test_root/custom-data/applications/wayexpand.desktop" ]
+[ -f "$test_root/custom-data/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml" ]
+[ -f "$test_root/custom-data/man/man1/wayexpand.1" ]
 [ -f "$test_root/config/systemd/user/wayexpand-input-method.service" ]
 [ -f "$test_root/config/systemd/user/wayexpand-evdev.service" ]
 # IBus setup enables the control-only unit, so every install ships it.
@@ -135,6 +148,19 @@ grep -Fx 'ExecStart=%h/.local/lib/wayexpand/current/bin/wayexpand-daemon --sourc
 [ ! -e "$test_root/config/systemd/user/wayexpand.service" ]
 [ -f "$test_root/config/wayexpand/expansions.toml" ]
 [ -f "$test_root/config/wayexpand/broker.toml" ]
+release_install_report=$(HOME="$test_root/home" XDG_CONFIG_HOME="$test_root/config" \
+    XDG_DATA_HOME="$test_root/custom-data" PATH="$test_root/home/.local/bin:$PATH" \
+    "$install_check_cli" install-check --json 2>/dev/null || true)
+printf '%s\n' "$release_install_report" | python3 -c '
+import json, sys
+report = json.load(sys.stdin)
+checks = {check["component"]: check for check in report["checks"]}
+assert report["ready"] is True, checks
+for component in ("ibus", "ibus_engine_executable", "installer_contract",
+                  "default_config_template", "active_configuration", "xdg_config_home",
+                  "xdg_data_home"):
+    assert checks[component]["status"] == "pass", (component, checks.get(component))
+'
 
 # Enabling evdev without its consent marker would leave an inert unit that
 # systemd reports as started.
@@ -248,11 +274,12 @@ EOF
 chmod 0755 "$stub_bin/systemctl"
 
 touch "$test_root/71-wayexpand-evdev.rules" "$test_root/69-wayexpand-evdev-uaccess.rules"
-gnome_extension_dir="$test_root/home/.local/share/gnome-shell/extensions/wayexpand-window-tracker@cyberducttape.github.io"
+gnome_extension_dir="$test_root/custom-data/gnome-shell/extensions/wayexpand-window-tracker@cyberducttape.github.io"
 mkdir -p "$gnome_extension_dir"
 printf '%s\n' '{"uuid": "wayexpand-window-tracker@cyberducttape.github.io"}' \
     >"$gnome_extension_dir/metadata.json"
 printf '%s\n' '// WayExpand GNOME tracker' >"$gnome_extension_dir/extension.js"
+printf '%s\n' '// WayExpand notification queue' >"$gnome_extension_dir/notification-queue.js"
 PATH="$stub_bin:$PATH" \
 HOME="$test_root/home" \
 XDG_CONFIG_HOME="$test_root/config" \
@@ -273,12 +300,13 @@ grep -F "sudo $release_dir/scripts/install-evdev-permissions.sh --uninstall" "$t
 [ ! -e "$test_root/home/.local/bin/wayexpand-ui" ]
 [ ! -e "$test_root/home/.local/bin/wayexpand-gui" ]
 [ ! -e "$test_root/home/.local/bin/wayexpand-ibus" ]
-[ ! -e "$test_root/home/.local/share/ibus/component/wayexpand.xml" ]
+[ ! -e "$test_root/custom-data/ibus/component/wayexpand.xml" ]
 [ ! -e "$gnome_extension_dir/metadata.json" ]
 [ ! -e "$gnome_extension_dir/extension.js" ]
-[ ! -e "$test_root/home/.local/share/applications/wayexpand.desktop" ]
-[ ! -e "$test_root/home/.local/share/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml" ]
-[ ! -e "$test_root/home/.local/share/man/man1/wayexpand.1" ]
+[ ! -e "$gnome_extension_dir/notification-queue.js" ]
+[ ! -e "$test_root/custom-data/applications/wayexpand.desktop" ]
+[ ! -e "$test_root/custom-data/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml" ]
+[ ! -e "$test_root/custom-data/man/man1/wayexpand.1" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand-input-method.service" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand-evdev.service" ]
 [ ! -e "$test_root/config/systemd/user/wayexpand-control.service" ]

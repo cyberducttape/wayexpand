@@ -62,12 +62,13 @@ bin_dir="$HOME/.local/bin"
 library_dir="$HOME/.local/lib/wayexpand"
 config_home=${XDG_CONFIG_HOME:-"$HOME/.config"}
 config_dir="$config_home/wayexpand"
+data_home=${XDG_DATA_HOME:-"$HOME/.local/share"}
 state_home=${XDG_STATE_HOME:-"$HOME/.local/state"}
 state_dir="$state_home/wayexpand"
 unit_dir="$config_home/systemd/user"
-application_dir="$HOME/.local/share/applications"
-metainfo_dir="$HOME/.local/share/metainfo"
-man_dir="$HOME/.local/share/man/man1"
+application_dir="$data_home/applications"
+metainfo_dir="$data_home/metainfo"
+man_dir="$data_home/man/man1"
 # One consent-marker location for the CLI, installers, doctor, GUI and the
 # unit: systemd evaluates ConditionPathExists before any XDG environment
 # applies, so the marker never follows XDG_CONFIG_HOME. The evdev unit is
@@ -94,6 +95,13 @@ case "$config_home" in
     /*) ;;
     *)
         printf '%s\n' "error: XDG_CONFIG_HOME must be an absolute path" >&2
+        exit 1
+        ;;
+esac
+case "$data_home" in
+    /*) ;;
+    *)
+        printf '%s\n' "error: XDG_DATA_HOME must be an absolute path" >&2
         exit 1
         ;;
 esac
@@ -185,6 +193,7 @@ install -m 0644 "$project_dir"/systemd/*.service "$stage_dir/systemd/"
 install -m 0644 "$project_dir/desktop/wayexpand.desktop" "$stage_dir/desktop/wayexpand.desktop"
 install -m 0644 "$project_dir/desktop/wayexpand-ibus.xml" "$stage_dir/ibus/wayexpand.xml"
 install -m 0644 "$project_dir/installer-components.toml" "$stage_dir/share/wayexpand/installer-components.toml"
+install -m 0644 "$project_dir/expansions.toml" "$stage_dir/expansions.toml"
 printf '%s\n' 'source-installation' >"$stage_dir/share/wayexpand/install-origin"
 payload_hash=$("$project_dir/scripts/hash-install-payload.sh" "$stage_dir")
 if [ "${#payload_hash}" -ne 64 ]; then
@@ -275,7 +284,7 @@ done
 # ibus-daemon never reads per-user component directories, so a manifest
 # there cannot register the engine. Remove the link older installers made;
 # `wayexpand setup --backend ibus` installs the component where IBus reads it.
-stale_ibus_component="$HOME/.local/share/ibus/component/wayexpand.xml"
+stale_ibus_component="$data_home/ibus/component/wayexpand.xml"
 if [ -L "$stale_ibus_component" ]; then
     case $(readlink "$stale_ibus_component") in
         "$library_dir"/*) rm -f -- "$stale_ibus_component" ;;
@@ -288,7 +297,7 @@ install -Dm644 "$project_dir/io.github.cyberducttape.WayExpand.metainfo.xml" \
     "$metainfo_dir/io.github.cyberducttape.WayExpand.metainfo.xml"
 install -Dm644 "$project_dir/docs/wayexpand.1" "$man_dir/wayexpand.1"
 
-icon_base="$HOME/.local/share/icons/hicolor"
+icon_base="$data_home/icons/hicolor"
 for size in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
     install -Dm644 "$project_dir/assets/icon/hicolor/$size/apps/wayexpand.png" \
         "$icon_base/$size/apps/wayexpand.png"
@@ -311,7 +320,7 @@ fi
 printf '%s\n' "Installed binaries in $bin_dir"
 printf '%s\n' "Installed user units in $unit_dir"
 printf '%s\n' "Installed desktop entry in $application_dir"
-printf '%s\n' "Staged IBus component in $library_dir/current/ibus (register it with \`wayexpand setup --backend ibus\`)"
+printf '%s\n' "Staged IBus component in $library_dir/current/ibus (not registered with the system IBus daemon)"
 printf '%s\n' "Installed application icon in $icon_base"
 printf '%s\n' ""
 printf '%s\n' "=== NEXT STEPS ==="
@@ -338,6 +347,8 @@ printf '%s\n' "   wayexpand doctor"
 printf '%s\n' ""
 printf '%s\n' "4. Run guided setup (it selects a safe detected compatibility mode):"
 printf '%s\n' "   wayexpand setup"
+printf '%s\n' "   If you choose IBus and its manifest is missing, setup explains the one-time administrator authorization before installing it."
+printf '%s\n' "   For scripted IBus setup, explicitly authorize that step with: wayexpand setup --backend ibus --yes --install-system-integration"
 printf '%s\n' "   wayexpand status"
 printf '%s\n' "   wayexpand doctor"
 printf '%s\n' "   (setup never grants raw-input permissions or portal consent)"

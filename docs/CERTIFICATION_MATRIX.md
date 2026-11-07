@@ -60,6 +60,41 @@ route, physical keyboard, focused client, and test date. Failures, unavailable
 capabilities, and untested cases remain visible; they are not converted into
 passes by a green CI run.
 
+### GNOME IBus install and application coverage
+
+`tests/certification/gnome-ibus-matrix.json` defines the platform and client
+coverage required before making GNOME IBus support claims. The existing
+`test-gnome-e2e.sh` now runs GNOME Shell with its session-managed IBus daemon. It
+checks component discovery, GNOME source registration, Shell activation, an
+already-active WayExpand engine, a controlled IBus input-context replacement,
+and window tracking. It also drives a toolkit-style IBus input context against
+the active GNOME-selected engine, verifies trigger deletion and replacement
+commit, checks password-field refusal and content-free telemetry, then
+simulates an extension upgrade with an old Shell instance and a Shell restart.
+This validates the IBus protocol path in a headless GNOME session; it does not
+certify GTK application insertion, compositor keyboard routing, or physical
+keyboard delivery.
+`test-ibus-e2e.sh` additionally exercises IBus engine focus, content-type and
+telemetry cases. These headless tests do not prove physical keyboard routing,
+compositor-delivered key events, persistence across an actual user logout, or
+replacement in every GTK/Qt/browser/terminal application.
+They must not be counted as passes in the platform matrix below.
+
+| Platform/session | GTK 3 | GTK 4 | Qt | Browser | Terminal | Install/activation lifecycle | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Fedora GNOME (exact supported release required) | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
+| Ubuntu 24.04 LTS GNOME | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
+| Ubuntu 26.04 LTS GNOME | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
+| Oldest GNOME Shell supported by the extension | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
+| Newest GNOME Shell supported by the extension | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
+
+Each cell requires a separate result. Lifecycle coverage includes clean-user
+installation, component registration, GNOME source activation, a real trigger
+replacement, switching away and back, logout/login persistence, upgrade, and
+uninstall while preserving the user's original desktop settings. Reports must
+identify exact OS, package, GNOME Shell and application versions. Physical
+desktop evidence remains required for production certification.
+
 Automatic replacement must remain unavailable on a route until its reviewed
 production report demonstrates the required target-integrity and sensitive-
 field contracts. A route without those guarantees stays experimental or

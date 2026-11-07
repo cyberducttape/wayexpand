@@ -46,7 +46,7 @@ description = "Review the active Kubernetes or cloud CLI identity before an oper
 category = "Operations triage"
 tags = ["cloud", "kubernetes", "target-review", "read-only"]
 replacement = """Operator-selected environment: {{choice:environment=development|staging|production;default=staging;required}}
-Expected account, project, or cluster: {{field:expected target|required|max=256|free_text=true}}
+Expected account, project, or cluster: {{shellq:expected target|required|max=256|free_text=true}}
 
 This does not infer or select your shell, SSH, container, Kubernetes, or cloud context. Review the expected target, then choose and run the matching read-only identity command in the intended session:
 {{choice:identity command=kubectl config current-context|aws sts get-caller-identity|gcloud config get-value project|az account show --output table;required}}
@@ -87,7 +87,7 @@ trigger = ";;ssh-health"
 description = "Generate shell-aware, read-only host diagnostics from an explicitly reported SSH session"
 category = "Operations triage"
 tags = ["ssh", "incident", "systemd", "read-only", "multiline"]
-replacement = """# Review-only {{context:shell}} commands; environment={{context:environment}}; SSH target={{context:remote_host}}
+replacement = """# Review-only {{shellq:context:shell}} commands; environment={{shellq:context:environment}}; SSH target={{shellq:context:remote_host}}
 # Expected host: {{field:expected host|required|max=253|validate=hostname}}
 # Compare `hostname -f` with the expected host before running any line.
 hostname -f

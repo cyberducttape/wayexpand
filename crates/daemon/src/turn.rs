@@ -96,6 +96,9 @@ impl Daemon {
             return Ok(ControlFlow::Break(()));
         }
         self.config.reload_if_changed();
+        if let Some(tracker) = &self.window_tracker {
+            tracker.set_title_matching_required(self.config.engine.requires_window_titles());
+        }
         self.update_profile_for_focus()?;
         // After any reload this turn: outputs use the consent now in effect.
         crate::assurance::GuardState::global().set_mode(self.config.engine.compatibility_mode());

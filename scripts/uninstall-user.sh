@@ -29,13 +29,14 @@ bin_dir="$HOME/.local/bin"
 library_dir="$HOME/.local/lib/wayexpand"
 config_home=${XDG_CONFIG_HOME:-"$HOME/.config"}
 config_dir="$config_home/wayexpand"
+data_home=${XDG_DATA_HOME:-"$HOME/.local/share"}
 state_home=${XDG_STATE_HOME:-"$HOME/.local/state"}
 state_dir="$state_home/wayexpand"
 unit_dir="$config_home/systemd/user"
-application_dir="$HOME/.local/share/applications"
-metainfo_dir="$HOME/.local/share/metainfo"
-man_dir="$HOME/.local/share/man/man1"
-ibus_component_dir="$HOME/.local/share/ibus/component"
+application_dir="$data_home/applications"
+metainfo_dir="$data_home/metainfo"
+man_dir="$data_home/man/man1"
+ibus_component_dir="$data_home/ibus/component"
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 evdev_rule_dest=${WAYEXPAND_EVDEV_RULE_DEST:-/etc/udev/rules.d/71-wayexpand-evdev.rules}
 evdev_uaccess_rule_dest=${WAYEXPAND_EVDEV_UACCESS_RULE_DEST:-/etc/udev/rules.d/69-wayexpand-evdev-uaccess.rules}
@@ -44,6 +45,13 @@ case "$config_home" in
     /*) ;;
     *)
         printf '%s\n' "error: XDG_CONFIG_HOME must be an absolute path" >&2
+        exit 1
+        ;;
+esac
+case "$data_home" in
+    /*) ;;
+    *)
+        printf '%s\n' "error: XDG_DATA_HOME must be an absolute path" >&2
         exit 1
         ;;
 esac
@@ -111,7 +119,8 @@ done
 gnome_extension_dir="${XDG_DATA_HOME:-$HOME/.local/share}/gnome-shell/extensions/wayexpand-window-tracker@cyberducttape.github.io"
 if [ -f "$gnome_extension_dir/metadata.json" ] \
     && grep -F '"uuid": "wayexpand-window-tracker@cyberducttape.github.io"' "$gnome_extension_dir/metadata.json" >/dev/null 2>&1; then
-    rm -f -- "$gnome_extension_dir/metadata.json" "$gnome_extension_dir/extension.js"
+    rm -f -- "$gnome_extension_dir/metadata.json" "$gnome_extension_dir/extension.js" \
+        "$gnome_extension_dir/notification-queue.js"
     rmdir -- "$gnome_extension_dir" 2>/dev/null || true
     printf '%s\n' "Removed $gnome_extension_dir"
 fi
@@ -164,7 +173,7 @@ for installed_file in \
     fi
 done
 
-icon_base="$HOME/.local/share/icons/hicolor"
+icon_base="$data_home/icons/hicolor"
 for size in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
     icon_path="$icon_base/$size/apps/wayexpand.png"
     if [ -e "$icon_path" ]; then

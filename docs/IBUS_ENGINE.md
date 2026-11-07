@@ -98,8 +98,8 @@ with real clients across layouts is not yet certified.
 Run:
 
 ```sh
-wayexpand setup --backend ibus              # IBus for applications
-wayexpand setup --backend ibus --terminals  # also cover terminals (see below)
+wayexpand setup                 # recommended route, selected from detected capabilities
+wayexpand setup --backend ibus  # explicitly choose IBus
 ```
 
 Setup works in phases and reads each result back rather than trusting exit
@@ -113,12 +113,33 @@ services ran), then changes it. **Verify** runs the same checks as
 `wayexpand ibus status`; if activation or verification fails, setup restores
 the recorded session and says so. The steps are:
 
-1. Installs the component manifest where the **running** ibus-daemon reads
-   components (its `IBUS_COMPONENT_PATH`, otherwise `/usr/share/ibus/component`),
-   with an absolute engine path, after an administrator prompt (pkexec).
-   ibus-daemon never reads per-user directories such as
-   `~/.local/share/ibus/component`, so user installs only stage the manifest.
-   Distribution packages install it themselves.
+1. Checks whether the **running** ibus-daemon already reads the component
+   manifest (its `IBUS_COMPONENT_PATH`, otherwise the distribution directory).
+   Distribution packages own and install this file themselves. A user/tarball
+   install displays a plan before requesting one-time desktop authorization to
+   register the manifest when the running daemon's component directory is not
+   writable by the user. An explicitly configured writable
+   `IBUS_COMPONENT_PATH` can be used without elevation; WayExpand does not
+   assume the ordinary XDG data directory is read by IBus. This does not
+   install application files system-wide or grant keyboard-device access. The
+   shared manifest points to the root-owned
+   `/usr/local/libexec/wayexpand/wayexpand-ibus` executable, never to the
+   installing user's home directory. Setup stages the current engine there,
+   verifies ownership and permissions, and journals it with the manifest so
+   failed activation can restore both. Later users reuse the same system
+   registration rather than replacing it with a home-specific path. The
+   IBus diagnostic reports `WX-IBUS-MULTIUSER-001` if an older shared
+   manifest still resolves its executable into one user's home; repair that
+   registration with `wayexpand setup --backend ibus --install-system-integration`.
+   The GUI has a separate checkbox for that
+   authorization. In scripts, `--yes` alone deliberately skips the privileged
+   step; pass `--install-system-integration` only when that change is intended.
+   If authorization is unavailable, install the distribution package, restore
+   the desktop `pkexec` authorization path, or select another supported input
+   route. No ordinary per-user IBus component directory is assumed to work.
+   Setup removes its private staged XML on success and failure. After resolving
+   the authorization problem, the supported retry is
+   `wayexpand setup --backend ibus --install-system-integration`.
 2. On KDE Plasma Wayland, sets KWin's Virtual Keyboard to IBus Wayland (the
    same as System Settings → Keyboard → Virtual Keyboard). Without it,
    Wayland applications never reach IBus. A hand-started ibus-daemon is
@@ -130,27 +151,92 @@ the recorded session and says so. The steps are:
    verified but not atomic, and `off` refuses every replacement. `--yes`
    never grants this consent.
 5. Stops WayExpand daemons that capture keys in every application, since they
-   would expand snippets a second time, and starts a companion service:
+   would expand snippets a second time, and starts the core companion service:
    `wayexpand-control.service` (control socket, quick insert and hotkeys; it
-   captures no keys), or with `--terminals` the evdev daemon limited to
-   `terminal_apps`, which also serves the control socket. Terminal coverage
-   set up earlier is kept when setup runs again.
+   captures no keys). Optional terminal coverage uses a separate evdev daemon
+   restricted to `terminal_apps`; setup offers it only after the user confirms
+   a real IBus insertion. It is never enabled by `--yes`, and terminal setup
+   still requires the separate raw-capture consent marker. Existing terminal
+   coverage is kept when setup runs again.
 
-`wayexpand ibus status --json` reports `readiness` as separate conditions —
-component installed, registered with IBus, IBus running, WayExpand selected,
-engine running, text received from a field, and expanded — because each is
-evidence for the next but none implies the ones after it. The Diagnostics
-window shows the same list.
+`wayexpand ibus status --json` (IBus-route schema 2) separates configuration readiness from
+operational readiness. On GNOME it independently checks the GNOME Wayland
+session (including the live Shell bus name), source registration, the active
+source reported by GNOME Shell's `InputSourceManager`, and content-free input
+activity from a normal field. GNOME ignores the deprecated
+`org.gnome.desktop.input-sources current` setting; it is never used as
+activation or readiness evidence. The WayExpand GNOME Shell extension uses Shell's own source
+activation API and verifies the resulting live source; the IBus engine is
+checked independently. Missing extension/API evidence is `unknown`, never a
+pass. `mru-sources` is persistence context only and is not used to infer or
+trigger activation. Seeing key events or emitted replacement actions
+does not prove that the target application applied the edit: IBus does not
+receive an acknowledgement of the resulting document text. `ready` therefore
+remains false until target insertion is independently verified. Use
+`wayexpand debug --test ';;hello'` and confirm the result in the application.
+`wayexpand repair --gnome-input-source` repairs the GNOME source list, asks
+GNOME Shell's live input-source manager to select WayExpand, reads that
+manager's selection back, then verifies the IBus engine independently; it
+does not claim that a real field insertion succeeded. If the Shell bridge is
+not active or current, setup stops and explains that the extension must be
+enabled or the session restarted. The Diagnostics window shows the same
+separate evidence.
+
+The GNOME extension also exposes a build identity from the metadata loaded by
+the running Shell process. `wayexpand doctor --json` reports the bundled,
+on-disk, and live identities. If the installed files are current but Shell is
+still running an older identity (or cannot report one), diagnostics say
+`logout-required`; logging out and back in loads the installed extension. The
+`x-wayexpand-build-id` metadata value is the SHA-256 of `extension.js`; the
+backend test verifies the pair, so extension code changes must refresh that
+metadata identity before packaging.
 
 ## Diagnostics
+
+On GNOME Wayland, `wayexpand setup` performs component registration,
+replacement-consent handling, GNOME input-source registration and activation,
+then offers the harmless `;;hello` real-application test. Existing GNOME
+keyboard sources are retained and the engine uses the system keyboard layout.
+The command ends with one explicit state: `WORKING` after the user confirms an
+exact insertion in the tested application, `CONFIGURED, AWAITING TEST` when
+the interactive test was deferred, or `ACTION REQUIRED` when a prerequisite
+or attempted test fails. Component registration and engine activation alone
+are never reported as a working text expander. The test does not certify
+other applications or session persistence.
+
+If IBus is configured but a required route check fails, setup returns a
+nonzero result with `SETUP RESULT: ACTION REQUIRED` and a stable finding ID;
+the valid configuration is retained for diagnosis. A second unrestricted
+capture route beside IBus is also an action-required condition because it can
+expand the same trigger twice. Run `wayexpand help finding <WX-ID>` for the
+repair and retest steps. A route with no hard failure but no user-confirmed
+application insertion is reported as configured and awaiting test.
 
 ```sh
 wayexpand ibus status   # every link of the route, with the fix for each failure
 wayexpand ibus watch    # switch to an app and type: explains each field
 ```
 
-`wayexpand doctor` shows the first broken link, and `wayexpand support-bundle`
-includes check states and per-field verdicts. The engine publishes
+`wayexpand doctor --gnome` presents three diagnostic sections: IBus input
+capture, snippet insertion (including replacement consent, output route, and
+the distinction between emitted actions and a verified target result), and
+GNOME Shell window tracking. The window section separately checks extension
+installation, Shell load state, live build identity, the tracker D-Bus
+handshake, and the daemon's current focus identity. Focus identifiers and
+titles are not included in the report. Its versioned JSON schema is 3 and
+includes a stable `error_id`, sanitized `evidence`, `remediation_command`,
+remediation detail, and `retest_instructions` for every non-passing stage. It
+also compares the running daemon's build identity and control-status schema
+with the CLI. Use
+`wayexpand debug --gnome --interactive` for a harmless, user-confirmed test
+in a real application; activity counters are explicitly uncorrelated with
+the typed test trigger, and the test does not certify other applications or
+logout persistence. `wayexpand support --gnome` writes the ordinary redacted
+support report plus sanitized GNOME/IBus source, component-location class,
+service, policy, test-state, and stable error-ID fields. It excludes source
+tuples other than WayExpand presence/active state, user paths, keystrokes,
+snippet text, clipboard data, and environment values. The older
+`wayexpand support-bundle` command remains available. The engine publishes
 content-free activity (counts and states only, never text) to
 `$XDG_RUNTIME_DIR/wayexpand-ibus-status.json`; field verdicts distinguish
 `expanded`, `ready`, `sensitive` (password/PIN), `no-surrounding-text`
@@ -160,14 +246,16 @@ content-free activity (counts and states only, never text) to
 ## Terminals
 
 Terminals do not report the text before the cursor, so IBus cannot replace a
-trigger there (the engine refuses rather than deleting blindly). List your
-terminals in `settings.terminal_apps` (setup fills in common terminal app IDs
-when the list is empty) and run setup with `--terminals`: the evdev daemon is
-then started with `WAYEXPAND_TERMINAL_APPS_ONLY=1` and expands only while one
-of those apps is focused (KWin window tracking; fail-closed otherwise). IBus
-keeps handling every other application, so nothing expands twice. evdev reads
-all keyboard input, so this requires the evdev consent marker described in
-[BACKENDS_SENSITIVE_FIELDS.md](BACKENDS_SENSITIVE_FIELDS.md).
+trigger there (the engine refuses rather than deleting blindly). After a
+successful real IBus insertion test, setup can offer optional terminal
+coverage (or use `wayexpand setup --backend ibus --terminals` to request it
+after completing the same insertion test). It uses a separate evdev daemon
+with `WAYEXPAND_TERMINAL_APPS_ONLY=1`
+and expands only while one of the configured `settings.terminal_apps` is
+focused (KWin window tracking; fail-closed otherwise). IBus keeps handling
+other applications, so nothing expands twice. evdev reads raw keyboard input
+including password fields, so this requires the separate consent marker
+described in [BACKENDS_SENSITIVE_FIELDS.md](BACKENDS_SENSITIVE_FIELDS.md).
 
 ## Protocol notes
 

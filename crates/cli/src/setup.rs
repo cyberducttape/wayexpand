@@ -30,11 +30,19 @@ fn setup_command_timeout(program: &str, arguments: &[&str]) -> Duration {
 }
 
 pub(crate) fn run_setup_command(program: &str, arguments: &[&str]) -> Result<ExitStatus> {
+    run_setup_command_with_env(program, arguments, &[])
+}
+
+pub(crate) fn run_setup_command_with_env(
+    program: &str,
+    arguments: &[&str],
+    environment: &[(&str, &str)],
+) -> Result<ExitStatus> {
     let timeout = setup_command_timeout(program, arguments);
     let mut command = Command::new(program);
+    command.args(arguments).envs(environment.iter().copied());
     configure_process_group(&mut command);
     let child = command
-        .args(arguments)
         .spawn()
         .map_err(|error| anyhow::anyhow!("could not start {program}: {error}"))?;
     let mut supervisor = ChildSupervisor::new(child);
@@ -91,9 +99,12 @@ pub(crate) fn recommended_setup_backend(
     capabilities: &wayexpand_backend_selection::Capabilities,
     policy: &OrganizationPolicy,
 ) -> SetupRecommendation {
-    // Setup restarts IBus before selecting the engine, so a component that
-    // ibus-daemon will load on restart is enough to recommend this route.
-    let ibus_ready = ibus_engine_available() || ibus_engine_installed();
+    // Setup can install the component and refresh IBus, so the executable
+    // client/engine pair is enough to offer IBus as the setup route. Live
+    // registration remains a separate readiness check.
+    let ibus_ready = crate::setup_ibus::setup_route_available()
+        || ibus_engine_available()
+        || ibus_engine_installed();
     recommended_setup_backend_with_ibus(capabilities, ibus_ready, policy)
 }
 

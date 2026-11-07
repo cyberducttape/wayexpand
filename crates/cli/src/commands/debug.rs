@@ -9,12 +9,32 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DesktopTestResult {
+    Verified,
+    NotTested,
+    Failed,
+    AwaitingReview,
+}
+
+#[derive(Default)]
+struct DesktopTestOptions {
+    application_class: Option<String>,
+    focus_confirmed: bool,
+    observe_only: bool,
+}
+
 pub(crate) fn debug_command(args: Args) -> Result<()> {
     let mut live = false;
     let mut json = false;
     let mut seconds = 60_u64;
     let mut trigger: Option<String> = None;
     let mut test_trigger: Option<String> = None;
+    let mut test_application_class: Option<String> = None;
+    let mut test_focus_confirmed = false;
+    let mut test_observe_only = false;
+    let mut gnome_interactive = false;
+    let mut gnome = false;
     let mut values: Vec<String> = args.collect();
     let mut index = 0;
     while index < values.len() {
@@ -25,6 +45,14 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
             }
             "--json" => {
                 json = true;
+                values.remove(index);
+            }
+            "--gnome" => {
+                gnome = true;
+                values.remove(index);
+            }
+            "--interactive" => {
+                gnome_interactive = true;
                 values.remove(index);
             }
             "--seconds" => {
@@ -52,19 +80,64 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
                 test_trigger = Some(values.remove(index + 1));
                 values.remove(index);
             }
+            "--application-class" => {
+                if index + 1 >= values.len() {
+                    bail!("--application-class requires a non-empty application class");
+                }
+                test_application_class = Some(values.remove(index + 1));
+                values.remove(index);
+            }
+            "--focus-confirmed" => {
+                test_focus_confirmed = true;
+                values.remove(index);
+            }
+            "--observe-only" => {
+                test_observe_only = true;
+                values.remove(index);
+            }
             _ => {
                 index += 1;
             }
         }
     }
     if !values.is_empty() {
-        bail!("usage: wayexpand debug [--json] [--trigger TEXT] [--live [--seconds 1..300]] | --test TRIGGER");
+        bail!("usage: wayexpand debug [--json] [--trigger TEXT] [--live [--seconds 1..300]] | --test TRIGGER [--application-class CLASS --focus-confirmed [--observe-only]]");
+    }
+    if gnome || gnome_interactive {
+        if !gnome
+            || !gnome_interactive
+            || live
+            || json
+            || trigger.is_some()
+            || test_trigger.is_some()
+            || test_application_class.is_some()
+            || test_focus_confirmed
+            || test_observe_only
+        {
+            bail!("usage: wayexpand debug --gnome --interactive");
+        }
+        return gnome_interactive_test();
     }
     if test_trigger.is_some() && (live || json || trigger.is_some()) {
         bail!("--test cannot be combined with --json, --trigger, or --live");
     }
+    validate_desktop_test_options(
+        test_trigger.is_some(),
+        test_application_class.as_deref(),
+        test_focus_confirmed,
+        test_observe_only,
+    )?;
     if let Some(trigger) = test_trigger {
-        return desktop_test(&trigger);
+        return desktop_test_for(
+            &trigger,
+            false,
+            DesktopTestOptions {
+                application_class: test_application_class,
+                focus_confirmed: test_focus_confirmed,
+                observe_only: test_observe_only,
+            },
+        )
+        .map(|_| ());
     }
     let report = crate::diagnostics::collect(trigger.as_deref());
     if json && live {
@@ -78,9 +151,43 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
     Ok(())
 }
 
+fn validate_desktop_test_options(
+    has_test_trigger: bool,
+    application_class: Option<&str>,
+    focus_confirmed: bool,
+    observe_only: bool,
+) -> Result<()> {
+    if !has_test_trigger && (application_class.is_some() || focus_confirmed || observe_only) {
+        bail!("--application-class, --focus-confirmed, and --observe-only apply only to --test");
+    }
+    if focus_confirmed != application_class.is_some() {
+        bail!("--focus-confirmed and --application-class must be provided together");
+    }
+    if observe_only && !focus_confirmed {
+        bail!("--observe-only requires an explicit --application-class and --focus-confirmed");
+    }
+    if let Some(application_class) = application_class {
+        if application_class.trim().is_empty()
+            || application_class.chars().count() > 64
+            || application_class.chars().any(char::is_control)
+        {
+            bail!("--application-class must be 1 to 64 characters without controls");
+        }
+    }
+    Ok(())
+}
+
 /// Interactive, target-application test. It never sends Enter, and only
 /// accepts a static, enabled snippet without command execution or form fields.
-pub(crate) fn desktop_test(trigger: &str) -> Result<()> {
+pub(crate) fn desktop_test(trigger: &str) -> Result<DesktopTestResult> {
+    desktop_test_for(trigger, false, DesktopTestOptions::default())
+}
+
+fn desktop_test_for(
+    trigger: &str,
+    gnome: bool,
+    options: DesktopTestOptions,
+) -> Result<DesktopTestResult> {
     if trigger.is_empty() || trigger.chars().any(char::is_control) {
         bail!("test trigger must be non-empty and contain no control characters");
     }
@@ -105,21 +212,30 @@ pub(crate) fn desktop_test(trigger: &str) -> Result<()> {
     println!("Replacement [{test_id}]: pending — you will verify the final text in the target app");
     println!("\nReview the expected text with `wayexpand preview {trigger:?}` first.");
     println!("This test types the configured replacement into the focused application when you type {trigger:?}.");
-    print!("Target application class (GTK/Qt/Electron/terminal/browser/remote/sandboxed/other): ");
-    io::stdout().flush()?;
-    let mut application_class = String::new();
-    io::stdin().read_line(&mut application_class)?;
-    let application_class = application_class.trim();
+    let application_class = if let Some(application_class) = options.application_class.as_deref() {
+        application_class.trim().to_owned()
+    } else {
+        print!(
+            "Target application class (GTK/Qt/Electron/terminal/browser/remote/sandboxed/other): "
+        );
+        io::stdout().flush()?;
+        let mut application_class = String::new();
+        io::stdin().read_line(&mut application_class)?;
+        application_class.trim().to_owned()
+    };
     if application_class.is_empty() || application_class.chars().any(char::is_control) {
         bail!("enter a non-empty application class without control characters");
     }
-    print!("Focus a disposable text field, then continue? [y/N] ");
-    io::stdout().flush()?;
-    let mut answer = String::new();
-    io::stdin().read_line(&mut answer)?;
-    if !matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
-        println!("Test cancelled; no text was inserted.");
-        return Ok(());
+    if !options.focus_confirmed {
+        print!("Focus a disposable text field, then continue? [y/N] ");
+        io::stdout().flush()?;
+        let mut answer = String::new();
+        io::stdin().read_line(&mut answer)?;
+        if !matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+            println!("Test cancelled; no text was inserted.");
+            println!("DESKTOP TEST RESULT: CANCELLED");
+            return Ok(DesktopTestResult::NotTested);
+        }
     }
     let (initial_daemon, _, base_input, base_keys, base_expansions, base_ibus_transaction) =
         snapshot();
@@ -165,7 +281,11 @@ pub(crate) fn desktop_test(trigger: &str) -> Result<()> {
             "Capture [{test_id}]: FAIL — no sanitized input activity reached WayExpand within 30 seconds."
         );
         println!("Next: check the active input method with `wayexpand ibus status` and inspect `wayexpand debug --live`.");
-        return Ok(());
+        println!("DESKTOP TEST RESULT: INPUT NOT OBSERVED");
+        if gnome {
+            println!("Problem: WX-GNOME-IM-003 — GNOME/IBus is configured, but no safe-field input activity was observed. Check the selected GNOME source and whether this application uses IBus.");
+        }
+        return Ok(DesktopTestResult::Failed);
     }
     println!("Capture [{test_id}]: ACTIVITY OBSERVED — test trigger not independently confirmed; aggregate counters do not correlate events to this test ID.");
     if !output_seen {
@@ -207,7 +327,11 @@ pub(crate) fn desktop_test(trigger: &str) -> Result<()> {
     if !output_seen {
         println!("Output [{test_id}]: NO CORRELATED RESULT — no output completion was reported during this test window.");
         println!("No second insertion was attempted. Inspect `wayexpand debug --live` and the target field.");
-        return Ok(());
+        println!("DESKTOP TEST RESULT: NO OUTPUT OUTCOME");
+        if gnome {
+            println!("Problem: WX-GNOME-IM-004 — activity was observed, but no expansion outcome was correlated with this test window. Check matching, configuration and replacement consent.");
+        }
+        return Ok(DesktopTestResult::Failed);
     }
     println!(
         "Output activity [{test_id}]: {}",
@@ -221,14 +345,22 @@ pub(crate) fn desktop_test(trigger: &str) -> Result<()> {
         value == "partial_write" || value.contains("unknown") || value.contains("not applied")
     }) {
         println!("Output outcome is uncertain or failed. Do not retry automatically; inspect the target field manually.");
+        println!("DESKTOP TEST RESULT: UNCERTAIN OUTPUT");
         println!(
             "Test scope: {}; result requires manual review.",
             application_class
         );
-        return Ok(());
+        return Ok(DesktopTestResult::Failed);
+    }
+    if options.observe_only {
+        println!("DESKTOP TEST RESULT: OUTPUT OBSERVED, AWAITING REVIEW");
+        println!("Correlation: backend activity was not bound to this diagnostic test ID.");
+        println!("Confirm the exact target text visually in the GUI before recording a pass.");
+        return Ok(DesktopTestResult::AwaitingReview);
     }
     println!("Check the target application, then return here. Was the expected text inserted exactly once, without loss or interleaving? [y/N] ");
-    answer.clear();
+    io::stdout().flush()?;
+    let mut answer = String::new();
     io::stdin().read_line(&mut answer)?;
     let verified = matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes");
     println!(
@@ -241,6 +373,85 @@ pub(crate) fn desktop_test(trigger: &str) -> Result<()> {
         application_class
     );
     println!("Test scope: user-reported {} only. This does not certify other toolkits, terminals, browsers, remote sessions, or sandboxed apps.", application_class);
+    println!(
+        "DESKTOP TEST RESULT: {}",
+        if verified {
+            "USER CONFIRMED"
+        } else {
+            "NOT CONFIRMED"
+        }
+    );
+    if gnome && !verified {
+        println!("Problem: WX-GNOME-IM-005 — output activity was reported, but the user did not confirm exact target text. Inspect the field; do not retry automatically.");
+    }
+    Ok(if verified {
+        DesktopTestResult::Verified
+    } else {
+        DesktopTestResult::Failed
+    })
+}
+
+fn gnome_interactive_test() -> Result<()> {
+    let report = wayexpand_backend_ibus::chain::diagnose();
+    if report.desktop != wayexpand_backend_ibus::chain::IbusDesktop::Gnome {
+        bail!("--gnome --interactive requires a GNOME session; run `wayexpand doctor --gnome` for available diagnostics");
+    }
+    println!("GNOME interactive test — no keystrokes or snippet contents are recorded.");
+    for id in [
+        "gnome-session",
+        "daemon",
+        "component",
+        "registered",
+        "gnome-source-registered",
+        "gnome-source-active",
+        "consent",
+    ] {
+        if let Some(check) = report.check(id) {
+            println!(
+                "{} {}: {}",
+                check.state.symbol(),
+                check.title,
+                check.state.label()
+            );
+            if check.state != wayexpand_backend_ibus::chain::IbusCheckState::Pass {
+                let problem = check.problem_id.unwrap_or(match id {
+                    "gnome-session" => "WX-GNOME-SESSION-001",
+                    "daemon" => "WX-GNOME-IBUS-001",
+                    "component" | "registered" => "WX-IBUS-001",
+                    "gnome-source-active" => "WX-GNOME-IM-002",
+                    "consent" => "WX-POLICY-001",
+                    _ => "WX-GNOME-IM-001",
+                });
+                println!("Problem: {problem}");
+                println!("Next: run `wayexpand doctor --gnome` and follow its fix. The test stopped before inserting anything.");
+                return Ok(());
+            }
+        }
+    }
+    let Some(trigger) = wayexpand_core::Config::load(wayexpand_core::default_config_path())
+        .ok()
+        .and_then(|config| {
+            config
+                .expansion
+                .iter()
+                .find(|item| item.enabled && item.answers_to(";;hello"))
+                .map(|_| ";;hello")
+        })
+    else {
+        println!("No enabled `;;hello` sample is available for the harmless test.");
+        println!("Add or enable the sample expansion, then rerun `wayexpand debug --gnome --interactive`.");
+        return Ok(());
+    };
+    println!("Use a normal GNOME text field. Do not use a password field, terminal command prompt, or production session.");
+    let test_result = desktop_test_for(trigger, true, DesktopTestOptions::default())?;
+    if test_result == DesktopTestResult::Verified {
+        println!("GNOME test: user-confirmed insertion in the reported application only.");
+        println!("Logout persistence and other application/toolkit coverage remain untested.");
+    } else if test_result == DesktopTestResult::NotTested {
+        println!("GNOME test was cancelled; no final insertion result is available.");
+    } else {
+        println!("GNOME test not verified. Run `wayexpand doctor --gnome` for the next likely failing stage.");
+    }
     Ok(())
 }
 
@@ -256,6 +467,27 @@ fn diagnostic_test_id() -> String {
         timestamp,
         sequence
     )
+}
+
+#[cfg(test)]
+mod desktop_test_option_tests {
+    use super::validate_desktop_test_options;
+
+    #[test]
+    fn observe_only_requires_a_test_class_and_explicit_focus_acknowledgment() {
+        assert!(validate_desktop_test_options(true, Some("GTK"), true, true).is_ok());
+        assert!(validate_desktop_test_options(true, None, true, true).is_err());
+        assert!(validate_desktop_test_options(true, Some("GTK"), false, true).is_err());
+        assert!(validate_desktop_test_options(false, Some("GTK"), true, true).is_err());
+    }
+
+    #[test]
+    fn application_class_is_bounded_and_control_free() {
+        assert!(validate_desktop_test_options(true, Some("GTK"), true, true).is_ok());
+        assert!(validate_desktop_test_options(true, Some(""), true, true).is_err());
+        assert!(validate_desktop_test_options(true, Some("gtk\nterminal"), true, true).is_err());
+        assert!(validate_desktop_test_options(true, Some(&"a".repeat(65)), true, true).is_err());
+    }
 }
 
 fn now_seconds() -> u64 {

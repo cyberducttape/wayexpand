@@ -146,15 +146,16 @@ pub fn import_autokey(
         return Err(AutoKeyImportError::UnsafePath(path.display().to_string()));
     }
     let mut phrases = Vec::new();
+    let mut report = AutoKeyImportReport::default();
     if metadata.is_dir() {
-        collect_phrase_files(path, 0, &mut phrases)?;
+        collect_phrase_files(path, path, 0, &mut phrases, mode, &mut report)?;
     } else if metadata.is_file() && path.extension().is_some_and(|extension| extension == "txt") {
         phrases.push(path.to_path_buf());
     } else {
         return Err(AutoKeyImportError::UnsafePath(path.display().to_string()));
     }
     phrases.sort();
-    if phrases.is_empty() {
+    if phrases.is_empty() && report.skipped == 0 {
         return Err(AutoKeyImportError::Io {
             path: path.display().to_string(),
             source: std::io::Error::new(
@@ -171,7 +172,6 @@ pub fn import_autokey(
         settings: Settings::default(),
         organization: OrganizationPolicy::default(),
     };
-    let mut report = AutoKeyImportReport::default();
     let mut triggers = HashSet::new();
     let mut trigger_chars = 0usize;
     let mut effective_trigger_chars = 0usize;
@@ -517,15 +517,46 @@ fn unsupported(
 }
 
 fn collect_phrase_files(
+    root: &Path,
     directory: &Path,
     depth: usize,
     phrases: &mut Vec<PathBuf>,
+    mode: AutoKeyImportMode,
+    report: &mut AutoKeyImportReport,
 ) -> Result<(), AutoKeyImportError> {
     if depth > MAX_DIRECTORY_DEPTH {
         return Err(AutoKeyImportError::TooManyPhrases);
     }
-    for entry in fs::read_dir(directory).map_err(|source| io_error(directory, source))? {
-        let entry = entry.map_err(|source| io_error(directory, source))?;
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(source) if depth == 0 => return Err(io_error(directory, source)),
+        Err(source) => {
+            record_traversal_error(
+                root,
+                directory,
+                source,
+                mode,
+                report,
+                "Restore read access to this folder, then retry the import. Accessible sibling entries were retained.",
+            )?;
+            return Ok(());
+        }
+    };
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(source) => {
+                record_traversal_error(
+                    root,
+                    directory,
+                    source,
+                    mode,
+                    report,
+                    "Restore directory access and retry the import. Entries already read were retained.",
+                )?;
+                continue;
+            }
+        };
         let path = entry.path();
         // macOS may add AppleDouble resource-fork files when a folder is
         // copied to a filesystem that cannot store those forks. They are
@@ -538,12 +569,25 @@ fn collect_phrase_files(
         {
             continue;
         }
-        let metadata = fs::symlink_metadata(&path).map_err(|source| io_error(&path, source))?;
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(source) => {
+                record_traversal_error(
+                    root,
+                    &path,
+                    source,
+                    mode,
+                    report,
+                    "Restore or repair this entry, then retry the import.",
+                )?;
+                continue;
+            }
+        };
         if metadata.file_type().is_symlink() {
             continue;
         }
         if metadata.is_dir() {
-            collect_phrase_files(&path, depth + 1, phrases)?;
+            collect_phrase_files(root, &path, depth + 1, phrases, mode, report)?;
         } else if metadata.is_file() && path.extension().is_some_and(|extension| extension == "txt")
         {
             phrases.push(path);
@@ -552,6 +596,39 @@ fn collect_phrase_files(
             }
         }
     }
+    Ok(())
+}
+
+fn record_traversal_error(
+    root: &Path,
+    path: &Path,
+    source: std::io::Error,
+    mode: AutoKeyImportMode,
+    report: &mut AutoKeyImportReport,
+    remediation: &str,
+) -> Result<(), AutoKeyImportError> {
+    if mode == AutoKeyImportMode::Strict {
+        return Err(io_error(path, source));
+    }
+    let entry = path
+        .strip_prefix(root)
+        .map(|relative| {
+            if relative.as_os_str().is_empty() {
+                Path::new(".")
+            } else {
+                relative
+            }
+        })
+        .unwrap_or(path)
+        .to_string_lossy()
+        .into_owned();
+    report.skipped += 1;
+    report.needs_review += 1;
+    report.warnings.push(AutoKeyImportWarning {
+        entry,
+        reason: io_error(path, source).to_string(),
+        remediation: remediation.into(),
+    });
     Ok(())
 }
 
@@ -608,6 +685,7 @@ fn io_error(path: &Path, source: std::io::Error) -> AutoKeyImportError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -686,6 +764,50 @@ mod tests {
         assert_eq!(expansion.category, "Support");
         assert_eq!(expansion.match_mode, MatchMode::WordBoundary);
         assert!(expansion.propagate_case);
+    }
+
+    #[test]
+    fn permissive_import_skips_unreadable_nested_directory_and_continues() {
+        let directory = TestDirectory::new();
+        directory.phrase("available.txt", "Kept", &metadata(&[";available"]));
+        let restricted = directory.0.join("000-private");
+        fs::create_dir(&restricted).unwrap();
+        fs::write(restricted.join("hidden.txt"), "not readable").unwrap();
+        fs::write(restricted.join(".hidden.json"), metadata(&[";hidden"])).unwrap();
+        fs::set_permissions(&restricted, fs::Permissions::from_mode(0o0)).unwrap();
+
+        // Root-run test environments bypass Unix directory read permissions;
+        // hosted CI and ordinary desktop users exercise the denied traversal.
+        let permissions_are_enforced = fs::read_dir(&restricted).is_err();
+        if !permissions_are_enforced {
+            fs::set_permissions(&restricted, fs::Permissions::from_mode(0o700)).unwrap();
+            return;
+        }
+
+        let strict = import_autokey(&directory.0, AutoKeyImportMode::Strict);
+        let permissive = import_autokey(&directory.0, AutoKeyImportMode::Permissive);
+        fs::set_permissions(&restricted, fs::Permissions::from_mode(0o700)).unwrap();
+
+        assert!(matches!(strict, Err(AutoKeyImportError::Io { .. })));
+        let imported = permissive.unwrap();
+        assert_eq!(imported.report.imported, 1);
+        assert_eq!(imported.report.skipped, 1);
+        assert_eq!(imported.report.needs_review, 1);
+        assert_eq!(imported.report.warnings[0].entry, "000-private");
+        assert!(imported.report.warnings[0]
+            .reason
+            .contains("Permission denied"));
+        assert!(imported.config.expansion[0].replacement.contains("Kept"));
+
+        fs::remove_file(directory.0.join("available.txt")).unwrap();
+        fs::remove_file(directory.0.join(".available.json")).unwrap();
+        fs::set_permissions(&restricted, fs::Permissions::from_mode(0o0)).unwrap();
+        let only_unreadable = import_autokey(&directory.0, AutoKeyImportMode::Permissive);
+        fs::set_permissions(&restricted, fs::Permissions::from_mode(0o700)).unwrap();
+        let only_unreadable = only_unreadable.unwrap();
+        assert_eq!(only_unreadable.report.imported, 0);
+        assert_eq!(only_unreadable.report.skipped, 1);
+        assert!(only_unreadable.config.expansion.is_empty());
     }
 
     #[test]

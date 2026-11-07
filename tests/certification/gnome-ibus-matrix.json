@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "purpose": "Coverage plan for GNOME IBus setup and real-client integration; entries are not certification evidence.",
+  "status_vocabulary": ["not-tested", "pass", "fail", "unsupported"],
+  "application_classes": ["gtk3", "gtk4", "qt", "browser", "terminal"],
+  "required_lifecycle_scenarios": [
+    "clean-user-install",
+    "component-registration",
+    "gnome-source-registration-and-activation",
+    "real-trigger-replacement",
+    "switch-away-and-back",
+    "logout-login-persistence",
+    "upgrade-preserves-input-sources",
+    "uninstall-preserves-original-desktop-settings"
+  ],
+  "platforms": [
+    {"id": "fedora-gnome", "distribution": "Fedora", "release": "record-exact-supported-release", "gnome_shell": "record-exact-version"},
+    {"id": "ubuntu-24.04-gnome", "distribution": "Ubuntu", "release": "24.04 LTS", "gnome_shell": "record-exact-version"},
+    {"id": "ubuntu-26.04-gnome", "distribution": "Ubuntu", "release": "26.04 LTS", "gnome_shell": "record-exact-version"},
+    {"id": "gnome-oldest-supported-shell", "distribution": "record-distribution", "release": "record-exact-release", "gnome_shell": "oldest-supported-by-extension"},
+    {"id": "gnome-newest-supported-shell", "distribution": "record-distribution", "release": "record-exact-release", "gnome_shell": "newest-supported-by-extension"}
+  ],
+  "initial_status": "not-tested",
+  "evidence_requirement": "Every tested platform and application class requires an independently reviewed report bound to exact package, WayExpand commit, distribution release, GNOME Shell version, application/version, and date. Headless IBus protocol tests do not satisfy real-client or physical-session evidence."
+}

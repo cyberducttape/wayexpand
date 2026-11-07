@@ -8,6 +8,8 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     let mut requested_backend: Option<String> = None;
     let mut requested_mode: Option<String> = None;
     let mut assume_yes = false;
+    let mut accept_non_atomic_replacement = false;
+    let mut install_system_integration = false;
     let mut terminals = false;
     let mut check_only = false;
     let mut apply_requested = false;
@@ -22,6 +24,8 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
                 requested_backend = Some("input-method".into());
             }
             "--yes" | "-y" => assume_yes = true,
+            "--accept-non-atomic-replacement" => accept_non_atomic_replacement = true,
+            "--install-system-integration" => install_system_integration = true,
             "--backend" => {
                 requested_backend = Some(args.next().ok_or_else(|| {
                     usage_error("--backend requires ibus, input-method, or evdev")
@@ -40,7 +44,7 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
             }
             _ => {
                 usage_bail!(
-                    "usage: wayexpand setup [--mode recommended|maximum|experimental | --backend ibus|input-method|evdev] [--terminals] [--yes]"
+                    "usage: wayexpand setup [--mode recommended|maximum|experimental | --backend ibus|input-method|evdev] [--terminals] [--yes] [--accept-non-atomic-replacement] [--install-system-integration]"
                 )
             }
         }
@@ -49,7 +53,13 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
         usage_bail!("choose either `wayexpand setup --check` or `wayexpand setup --apply`");
     }
     if check_only {
-        if requested_backend.is_some() || requested_mode.is_some() || terminals || assume_yes {
+        if requested_backend.is_some()
+            || requested_mode.is_some()
+            || terminals
+            || assume_yes
+            || accept_non_atomic_replacement
+            || install_system_integration
+        {
             usage_bail!("usage: wayexpand setup --check [--json]");
         }
         return crate::commands::install::setup_check(json);
@@ -74,6 +84,14 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
         build_info::COMMIT
     );
     println!("Session: {}", session_description());
+    if wayexpand_backend_selection::Compositor::detect()
+        == wayexpand_backend_selection::Compositor::Gnome
+        && std::env::var("XDG_SESSION_TYPE")
+            .is_ok_and(|session| session.eq_ignore_ascii_case("wayland"))
+    {
+        println!("GNOME Wayland detected. Existing keyboard sources and layout will be preserved.");
+        println!("WayExpand will be added as an IBus source; its engine uses the system keyboard layout.");
+    }
     println!();
     Config::ensure_user_config(default_config_path()).map_err(|error| {
         config_error(format!(
@@ -91,12 +109,22 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     }
     let capabilities = probe_capabilities();
     let policy = load_policy()?;
-    let ibus_available = ibus_engine_available();
-    let automatic = recommended_setup_backend_with_ibus(&capabilities, ibus_available, &policy);
+    // A packaged IBus component can be installed but absent from the running
+    // registry until setup refreshes IBus. Treat that as an available setup
+    // route so the one-command first-run flow can register/activate it.
+    let ibus_setup_available = crate::setup_ibus::setup_route_available()
+        || ibus_engine_available()
+        || ibus_engine_installed();
+    let ibus_route_ready = ibus_engine_available() || ibus_engine_installed();
+    let automatic =
+        recommended_setup_backend_with_ibus(&capabilities, ibus_setup_available, &policy);
     let route_plan =
-        wayexpand_backend_selection::plan_routes(&capabilities, ibus_available, |route| {
+        wayexpand_backend_selection::plan_routes(&capabilities, ibus_route_ready, |route| {
             route_allowed_by_policy(&policy, route)
         });
+    if automatic.backend == "ibus" && !ibus_route_ready && ibus_setup_available {
+        println!("IBus is ready to configure, but its component is not registered in the running session yet. Setup will register it and refresh IBus; no IBus shell commands are needed.");
+    }
     println!();
     println!("Compatibility modes");
     println!("  Recommended         safest detected path; run doctor/certify for verification");
@@ -157,43 +185,131 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
         }
     };
     if backend == "unavailable" {
+        eprintln!("SETUP RESULT: ACTION REQUIRED");
         bail!(
                 "Recommended mode found no safe automatic path; use --mode experimental or configure permissions and rerun setup"
             );
     }
     if !setup_backend_allowed(&policy, &backend) {
+        eprintln!("SETUP RESULT: ACTION REQUIRED");
         bail!("setup backend '{backend}' is disallowed by organization policy")
     }
-    configure_setup_backend(
+    if accept_non_atomic_replacement && backend != "ibus" {
+        usage_bail!("--accept-non-atomic-replacement applies only to the IBus backend");
+    }
+    if install_system_integration && backend != "ibus" {
+        usage_bail!("--install-system-integration applies only to the IBus backend");
+    }
+    let terminals_requested = terminals;
+    let setup_result = configure_setup_backend(
         &backend,
         crate::setup_ibus::IbusSetupOptions {
             assume_yes,
-            terminals,
+            accept_non_atomic_replacement,
+            // Terminal capture is a separately authorized compatibility
+            // route. Set it up only after the core IBus path passes a real
+            // insertion check below.
+            terminals: false,
+            real_insertion_verified: false,
+            install_system_integration,
         },
-    )?;
-    let hello_available = Config::load(default_config_path()).is_ok_and(|config| {
-        config
-            .expansion
-            .iter()
-            .any(|expansion| expansion.enabled && expansion.answers_to(";;hello"))
-    });
-    if hello_available {
+    );
+    if let Err(error) = setup_result {
+        eprintln!("SETUP RESULT: ACTION REQUIRED");
+        return Err(error);
+    }
+    let test_config = Config::load(default_config_path())?;
+    let test_trigger = setup_test_trigger(&test_config);
+    let mut desktop_test_result = crate::commands::debug::DesktopTestResult::NotTested;
+    if let Some(test_trigger) = test_trigger.as_deref() {
         if assume_yes {
             println!("Activation completed. Real application insertion: NOT TESTED.");
-            println!("Next: run `wayexpand debug --test ';;hello'` in a disposable text field and confirm the replacement.");
+            println!("Next: run `wayexpand debug --test {test_trigger:?}` in a disposable text field and confirm the replacement.");
         } else if crate::prompt_yes_no(
-            "Activation checks completed; a real application insertion is not yet verified. Run the `;;hello` first-run test now? [Y/n] ",
+            &format!("Activation checks completed; real insertion is not yet verified. Run the optional test with {test_trigger:?} now? [Y/n] "),
             true,
         )? {
-            crate::commands::debug::desktop_test(";;hello")?;
+            desktop_test_result = match crate::commands::debug::desktop_test(test_trigger) {
+                Ok(result) => result,
+                Err(error) => {
+                    eprintln!("SETUP RESULT: ACTION REQUIRED");
+                    return Err(error);
+                }
+            };
         } else {
             println!("Activation completed. Real application insertion: NOT TESTED.");
-            println!("Next: run `wayexpand debug --test ';;hello'` in a disposable text field and confirm the replacement.");
+            println!("Next: run `wayexpand debug --test {test_trigger:?}` in a disposable text field and confirm the replacement.");
         }
     } else {
-        println!("Activation completed. No enabled `;;hello` sample was found; real application insertion remains NOT TESTED.");
+        println!("Activation completed. No enabled, safe-to-test expansion is configured; real application insertion remains NOT TESTED.");
+        println!("Setup is configured, but insertion is unverified. Add a harmless static expansion and run `wayexpand debug --test TRIGGER` in a disposable text field when ready.");
+    }
+    if desktop_test_result == crate::commands::debug::DesktopTestResult::Failed {
+        println!("SETUP RESULT: ACTION REQUIRED");
+        println!("The real application test did not verify an exact insertion. Follow the reported stage and do not retry blindly.");
+        bail!("WX-SETUP-TEST-002: the real application insertion test failed or was not confirmed");
+    }
+    let real_insertion_verified =
+        desktop_test_result == crate::commands::debug::DesktopTestResult::Verified;
+    if real_insertion_verified {
+        println!("SETUP RESULT: WORKING");
+        println!("A real expansion was user-confirmed in the tested application. Other applications and persistence across logout remain unverified.");
+    } else {
+        println!("SETUP RESULT: CONFIGURED, AWAITING TEST");
+        if test_trigger.is_some() {
+            println!("Next: run `wayexpand debug --test {}` in a disposable text field and confirm the replacement.", test_trigger.as_deref().unwrap_or_default());
+        }
+    }
+    if backend == "ibus" {
+        let enable_terminals = if real_insertion_verified && !terminals_requested && !assume_yes {
+            println!("\nOptional terminal coverage uses evdev and can observe raw keyboard input, including password fields. It requires separate permission and compatible output injection.");
+            crate::prompt_yes_no(
+                "Configure terminal coverage as a separate evdev service? [y/N] ",
+                false,
+            )?
+        } else {
+            terminals_requested
+        };
+        if enable_terminals && real_insertion_verified {
+            if let Err(error) = configure_setup_backend(
+                "ibus",
+                crate::setup_ibus::IbusSetupOptions {
+                    assume_yes,
+                    accept_non_atomic_replacement,
+                    terminals: true,
+                    real_insertion_verified: true,
+                    install_system_integration,
+                },
+            ) {
+                eprintln!("SETUP RESULT: WORKING (core IBus); optional terminal coverage: ACTION REQUIRED.");
+                return Err(error);
+            }
+        } else if terminals_requested {
+            println!("Optional terminal coverage was not configured because a real IBus insertion was not verified.");
+            println!("After verifying a harmless expansion in a disposable text field, rerun `wayexpand setup --backend ibus --terminals`.");
+        }
     }
     Ok(())
+}
+
+/// Pick a harmless configured expansion for the optional real-client test.
+/// The conventional sample remains preferred, but a custom configuration is
+/// not required to keep that sample. Command-backed entries are excluded so
+/// setup never triggers an operational action as part of a desktop test.
+fn setup_test_trigger(config: &Config) -> Option<String> {
+    config
+        .expansion
+        .iter()
+        .find(|expansion| {
+            expansion.enabled && expansion.command.is_none() && expansion.answers_to(";;hello")
+        })
+        .or_else(|| {
+            config
+                .expansion
+                .iter()
+                .find(|expansion| expansion.enabled && expansion.command.is_none())
+        })
+        .map(|expansion| expansion.trigger.clone())
 }
 
 pub(crate) fn doctor_command(args: Args) -> Result<()> {
@@ -204,6 +320,20 @@ pub(crate) fn doctor_command(args: Args) -> Result<()> {
         .position(|argument| argument == "--security")
         .map(|index| rest.remove(index))
         .is_some();
+    let requested_gnome = rest
+        .iter()
+        .position(|argument| argument == "--gnome")
+        .map(|index| rest.remove(index))
+        .is_some();
+    if requested_gnome {
+        if requested_security
+            || rest.iter().any(|argument| argument == "--certify")
+            || !rest.is_empty()
+        {
+            usage_bail!("usage: wayexpand doctor --gnome [--json]");
+        }
+        return crate::doctor::gnome::run(requested_json);
+    }
     if requested_security {
         let mut profile = crate::doctor::security::ProtectionProfile::Workstation;
         let mut positional = Vec::new();
@@ -560,13 +690,19 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
         .and_then(|response| crate::doctor::status::status_as_json(&response))
         .ok();
     let cli_commit = build_info::COMMIT;
+    let cli_version = build_info::VERSION;
     let daemon_commit = status_snapshot
         .as_ref()
         .and_then(|s| s.get("daemon_commit"))
         .and_then(serde_json::Value::as_str);
-    let mismatch = status_snapshot
+    let daemon_version = status_snapshot
         .as_ref()
-        .is_some_and(|_| daemon_commit != Some(cli_commit));
+        .and_then(|s| s.get("daemon_version"))
+        .and_then(serde_json::Value::as_str);
+    let mismatch = status_snapshot.as_ref().is_some_and(|snapshot| {
+        !crate::doctor::status::daemon_build_matches(daemon_commit, daemon_version)
+            || !crate::doctor::status::status_schema_compatible(snapshot)
+    });
     let source = status_snapshot
         .as_ref()
         .and_then(|s| s.get("source"))
@@ -601,9 +737,9 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
         })
         .collect();
     let report = serde_json::json!({
-        "schema":1, "action":action, "cli_commit":cli_commit,
+        "schema":1, "action":action, "cli_commit":cli_commit, "cli_version":cli_version,
         "current_install":current_target.as_ref().map(|v|v.to_string_lossy().into_owned()).or_else(|| installed_cli.as_ref().map(|p|p.display().to_string())),
-        "daemon_commit":daemon_commit, "daemon_running":status_snapshot.is_some(),
+        "daemon_commit":daemon_commit, "daemon_version":daemon_version, "daemon_running":status_snapshot.is_some(),
         "config_valid":config_valid, "version_mismatch":mismatch,
         "restart_service":service, "rollback_available":rollback_file.is_file(),
         "ibus_stale_engine_processes":stale_ibus_processes_json,
@@ -625,7 +761,10 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
                     "invalid or missing"
                 }
             );
-            println!("Daemon: {}", daemon_commit.unwrap_or("not responding"));
+            println!(
+                "Daemon: {}",
+                daemon_version.or(daemon_commit).unwrap_or("not responding")
+            );
             println!(
                 "Action: {}",
                 if status_snapshot.is_none() {
@@ -707,24 +846,34 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
     // daemon may still be initializing its control socket/status publisher, so
     // give it a short bounded window before treating an unavailable snapshot
     // as a failed upgrade.
-    let (health, restarted_commit) = wait_for_daemon_build(cli_commit);
-    let restarted_commit = restarted_commit.as_deref().unwrap_or("unknown");
+    let (health, restarted_build) = wait_for_daemon_build();
+    let restarted_build = restarted_build.as_deref().unwrap_or("unknown");
     let compatible = health.as_ref().is_ok_and(|verified| {
         crate::doctor::status::upgrade_status_from_snapshot(verified)["compatible"] == true
     });
-    if restarted_commit != cli_commit || !compatible {
+    let build_matches = health.as_ref().is_ok_and(|verified| {
+        crate::doctor::status::daemon_build_matches(
+            verified
+                .get("daemon_commit")
+                .and_then(serde_json::Value::as_str),
+            verified
+                .get("daemon_version")
+                .and_then(serde_json::Value::as_str),
+        )
+    });
+    if !build_matches || !compatible {
         if rollback_file.is_file() {
             let restored = restore_previous_install(&library, &current, &rollback_file, Some(unit));
             bail!(upgrade_health_failure(
-                cli_commit,
-                restarted_commit,
+                cli_version,
+                restarted_build,
                 health.is_ok(),
                 restored.is_ok()
             ))
         }
         bail!(upgrade_health_failure(
-            cli_commit,
-            restarted_commit,
+            cli_version,
+            restarted_build,
             health.is_ok(),
             false
         ))
@@ -758,7 +907,7 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
             bail!("action broker health check failed; no saved payload is available for automatic rollback")
         }
     }
-    println!("Restarted {unit}; daemon build {restarted_commit} now matches this CLI.");
+    println!("Restarted {unit}; daemon build {restarted_build} now matches this CLI.");
     let stale_ibus_processes = crate::setup_ibus::stale_engine_processes();
     if !stale_ibus_processes.is_empty() {
         print_ibus_engine_restart_guidance(&stale_ibus_processes);
@@ -778,29 +927,42 @@ fn print_ibus_engine_restart_guidance(processes: &[crate::setup_ibus::StaleEngin
     println!("Restart IBus to load the updated engine: `ibus restart` (input pauses briefly).");
 }
 
-fn wait_for_daemon_build(expected_commit: &str) -> (Result<serde_json::Value>, Option<String>) {
+fn wait_for_daemon_build() -> (Result<serde_json::Value>, Option<String>) {
     const ATTEMPTS: usize = 20;
     const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
 
     let mut last_health = Err(anyhow::anyhow!("daemon has not published status yet"));
-    let mut last_commit = None;
+    let mut last_build = None;
     for attempt in 0..ATTEMPTS {
         last_health = crate::doctor::status::read_daemon_status()
             .and_then(|response| crate::doctor::status::status_as_json(&response));
-        last_commit = last_health
-            .as_ref()
-            .ok()
-            .and_then(|snapshot| snapshot.get("daemon_commit"))
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_owned);
-        if last_commit.as_deref() == Some(expected_commit) {
+        last_build = last_health.as_ref().ok().and_then(|snapshot| {
+            let commit = snapshot
+                .get("daemon_commit")
+                .and_then(serde_json::Value::as_str);
+            let version = snapshot
+                .get("daemon_version")
+                .and_then(serde_json::Value::as_str);
+            crate::doctor::status::daemon_build_matches(commit, version)
+                .then(|| version.or(commit).unwrap_or("unknown").to_owned())
+        });
+        if last_build.is_some() {
             break;
         }
         if attempt + 1 < ATTEMPTS {
             std::thread::sleep(RETRY_DELAY);
         }
     }
-    (last_health, last_commit)
+    let reported_build = last_build.or_else(|| {
+        last_health.as_ref().ok().and_then(|snapshot| {
+            snapshot
+                .get("daemon_version")
+                .or_else(|| snapshot.get("daemon_commit"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        })
+    });
+    (last_health, reported_build)
 }
 
 fn upgrade_health_failure(
@@ -1283,7 +1445,11 @@ pub(crate) fn explain_command(mut args: Args) -> Result<()> {
     let mut daemon_unreachable = None;
     if !offline && app.is_none() && config_path.is_none() {
         match control_operation(wayexpand_core::DaemonOperation::Status) {
-            Ok(status) => match live_explain_build_gate(&status, crate::build_info::COMMIT) {
+            Ok(status) => match live_explain_build_gate(
+                &status,
+                crate::build_info::COMMIT,
+                crate::build_info::VERSION,
+            ) {
                 None => match control_operation(wayexpand_core::DaemonOperation::Explain {
                     text: text.clone(),
                     json: requested_json,
@@ -1371,6 +1537,7 @@ pub(crate) fn explain_command(mut args: Args) -> Result<()> {
 pub(crate) fn live_explain_build_gate(
     status_response: &str,
     cli_commit: &str,
+    cli_version: &str,
 ) -> Option<&'static str> {
     let status = wayexpand_core::DaemonStatus::parse(status_response);
     if status.status_schema() != Some(CONTROL_STATUS_SCHEMA) {
@@ -1379,11 +1546,33 @@ pub(crate) fn live_explain_build_gate(
         );
     }
     let daemon_commit = status.field("daemon_commit");
-    if cli_commit != "unknown"
-        && daemon_commit.is_some_and(|commit| commit != "unknown" && commit == cli_commit)
-    {
+    let daemon_version = status.field("daemon_version");
+    let commit_matches = cli_commit != "unknown"
+        && daemon_commit.is_some_and(|commit| commit != "unknown" && commit == cli_commit);
+    let build_identity_unverified = cli_version.contains(".dirty-unknown")
+        || daemon_version.is_some_and(|version| version.contains(".dirty-unknown"));
+    let build_matches = !build_identity_unverified
+        && daemon_version.map_or_else(
+            || !cli_version.contains(".dirty.") && commit_matches,
+            |version| commit_matches && version == cli_version,
+        );
+    if build_matches {
         None
-    } else if cli_commit == "unknown" || daemon_commit.is_none_or(|commit| commit == "unknown") {
+    } else if cli_commit == "unknown"
+        || cli_version.contains(".dirty-unknown")
+        || daemon_version.map_or_else(
+            || {
+                cli_commit == "unknown"
+                    || daemon_commit.is_none_or(|commit| commit == "unknown")
+                    || (cli_version.contains(".dirty.") && daemon_commit == Some(cli_commit))
+            },
+            |version| {
+                version == "unknown"
+                    || version.contains(".dirty-unknown")
+                    || daemon_commit.is_none_or(|c| c == "unknown")
+            },
+        )
+    {
         Some(
             "the running daemon build cannot be verified; restart it before relying on live explanations",
         )
@@ -1396,8 +1585,63 @@ pub(crate) fn live_explain_build_gate(
 
 #[cfg(test)]
 mod policy_check_tests {
-    use super::{policy_check_findings, upgrade_health_failure};
-    use wayexpand_core::OrganizationPolicy;
+    use super::{policy_check_findings, setup_test_trigger, upgrade_health_failure};
+    use wayexpand_core::{Config, OrganizationPolicy};
+
+    #[test]
+    fn setup_uses_hello_when_present_but_does_not_require_it() {
+        let config = Config::parse(
+            r#"[[expansion]]
+trigger = ";custom"
+replacement = "custom"
+
+[[expansion]]
+trigger = ";;hello"
+replacement = "hello"
+"#,
+        )
+        .unwrap();
+        assert_eq!(setup_test_trigger(&config).as_deref(), Some(";;hello"));
+    }
+
+    #[test]
+    fn setup_can_offer_an_existing_custom_trigger_without_hello() {
+        let config = Config::parse(
+            r#"[[expansion]]
+trigger = ";custom"
+replacement = "custom"
+"#,
+        )
+        .unwrap();
+        assert_eq!(setup_test_trigger(&config).as_deref(), Some(";custom"));
+    }
+
+    #[test]
+    fn setup_has_no_test_trigger_for_empty_disabled_or_command_only_configs() {
+        let empty = Config::parse("").unwrap();
+        assert_eq!(setup_test_trigger(&empty), None);
+
+        let disabled = Config::parse(
+            r#"[[expansion]]
+trigger = ";disabled"
+replacement = "value"
+enabled = false
+"#,
+        )
+        .unwrap();
+        assert_eq!(setup_test_trigger(&disabled), None);
+
+        let command_only = Config::parse(
+            r#"[[expansion]]
+trigger = ";action"
+replacement = "value"
+[expansion.command]
+program = "/usr/bin/true"
+"#,
+        )
+        .unwrap();
+        assert_eq!(setup_test_trigger(&command_only), None);
+    }
 
     #[test]
     fn policy_check_explains_audit_only_controls_and_can_allow_them_explicitly() {

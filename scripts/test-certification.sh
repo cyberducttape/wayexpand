@@ -23,7 +23,14 @@ client_versions=$(jq -cn --arg apps "$target_apps" '
         toolkit_version: "test-toolkit-1.0"
     }}) | from_entries
 ')
-
+gnome_target_apps="gtk3-demo,$target_apps"
+gnome_client_versions=$(jq -cn --arg apps "$gnome_target_apps" '
+    ($apps | split(",")) | map({key: ., value: {
+        application_version: "test-app-1.0",
+        toolkit_name: "test-toolkit",
+        toolkit_version: "test-toolkit-1.0"
+    }}) | from_entries
+')
 results="$test_root/results.txt"
 output="$test_root/certification.md"
 for scenario in $scenarios; do
@@ -41,6 +48,17 @@ for scenario in $scenarios; do
         done
     done
 done >"$results"
+gnome_results="${test_root}/gnome-results.txt"
+cp "$results" "$gnome_results"
+old_ifs=$IFS
+IFS=,
+set -- $layout_profiles
+IFS=$old_ifs
+for layout_profile do
+    for scenario in $scenarios; do
+        printf '%s|%s|gtk3-demo=pass\n' "$scenario" "$layout_profile" >>"$gnome_results"
+    done
+done
 expected_scenarios=$(jq '.required_scenarios | length' "$matrix")
 expected_layouts=$(jq '.required_layout_profiles | length' "$matrix")
 expected_apps=$(jq -nr --arg apps "$target_apps" '$apps | split(",") | length')
@@ -428,8 +446,8 @@ missing_versions_json="$test_root/missing-client-versions.json"
 if XDG_CURRENT_DESKTOP=GNOME PATH="$project_dir/target/debug:$PATH" \
     "$project_dir/scripts/certify-compositor.sh" \
     --compositor gnome --version 49.0 --backend ibus --layout "$layout_profiles" \
-    --target-apps "$target_apps" --cli "$gnome_cli" --format json \
-    --results "$results" --output "$missing_versions_json" >/dev/null; then
+    --target-apps "$gnome_target_apps" --cli "$gnome_cli" --format json \
+    --results "$gnome_results" --output "$missing_versions_json" >/dev/null; then
     printf '%s\n' 'certification accepted missing client and toolkit versions' >&2
     exit 1
 fi
@@ -439,8 +457,8 @@ malformed_versions_json="$test_root/malformed-client-versions.json"
 if XDG_CURRENT_DESKTOP=GNOME PATH="$project_dir/target/debug:$PATH" \
     "$project_dir/scripts/certify-compositor.sh" \
     --compositor gnome --version 49.0 --backend ibus --layout "$layout_profiles" \
-    --target-apps "$target_apps" --client-versions '{}' --cli "$gnome_cli" --format json \
-    --results "$results" --output "$malformed_versions_json" >/dev/null; then
+    --target-apps "$gnome_target_apps" --client-versions '{}' --cli "$gnome_cli" --format json \
+    --results "$gnome_results" --output "$malformed_versions_json" >/dev/null; then
     printf '%s\n' 'certification accepted an incomplete client version map' >&2
     exit 1
 fi
@@ -450,9 +468,9 @@ gnome_json="$test_root/gnome-certification.json"
 XDG_CURRENT_DESKTOP=GNOME PATH="$project_dir/target/debug:$PATH" \
     "$project_dir/scripts/certify-compositor.sh" \
     --compositor gnome --version 49.0 --backend ibus --layout "$layout_profiles" \
-    --target-apps "$target_apps" --client-versions "$client_versions" \
+    --target-apps "$gnome_target_apps" --client-versions "$gnome_client_versions" \
     --cli "$gnome_cli" --format json \
-    --results "$results" --output "$gnome_json"
+    --results "$gnome_results" --output "$gnome_json"
 jq -e '
     .schema == 4 and .certified == true and .status == "certified" and
     .certification_scope == "compatibility" and

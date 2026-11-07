@@ -62,6 +62,34 @@ fn classify_health(
     }
 }
 
+fn application_coverage(snapshot: Option<&serde_json::Value>) -> serde_json::Value {
+    let terminal_only = snapshot
+        .and_then(|status| status.get("terminal_apps_only"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    if terminal_only {
+        serde_json::json!({
+            "scope":"daemon_route_configured_terminals_only",
+            "terminal_only":true,
+            "desktop_wide":null,
+            "browser_fields_covered":null,
+            "daemon_route": {
+                "desktop_wide":false,
+                "browser_fields_covered":false
+            },
+            "detail":"the daemon route matches only configured terminal applications; another route such as IBus may cover browser fields, but this command does not verify it"
+        })
+    } else {
+        serde_json::json!({
+            "scope":"active_route",
+            "terminal_only":false,
+            "desktop_wide":null,
+            "browser_fields_covered":null,
+            "detail":"health describes the active daemon route; it does not certify input delivery in every application"
+        })
+    }
+}
+
 pub(crate) fn health_command(args: Args) -> Result<()> {
     let mut json = false;
     for arg in args {
@@ -106,6 +134,7 @@ pub(crate) fn health_command(args: Args) -> Result<()> {
         "exit_code": code,
         "reason": reason,
         "errors": errors,
+        "application_coverage": application_coverage(daemon.as_ref()),
         "configuration": {
             "path": config_path,
             "valid": config_valid,
@@ -117,6 +146,7 @@ pub(crate) fn health_command(args: Args) -> Result<()> {
             "commit": snapshot.get("daemon_commit"),
             "source": snapshot.get("source"),
             "backend": snapshot.get("backend"),
+            "terminal_apps_only": snapshot.get("terminal_apps_only"),
             "state": snapshot.get("state"),
             "output_health": snapshot.get("output_health"),
             "matching_available": matching_available,
@@ -147,6 +177,14 @@ pub(crate) fn health_command(args: Args) -> Result<()> {
                     .unwrap_or("unknown"),
                 matching_available,
             );
+            let coverage = application_coverage(Some(daemon));
+            println!(
+                "Application scope: {} — {}",
+                coverage["scope"].as_str().unwrap_or("unknown"),
+                coverage["detail"]
+                    .as_str()
+                    .unwrap_or("coverage unavailable"),
+            );
         } else {
             println!("Daemon: unavailable");
         }
@@ -164,7 +202,33 @@ pub(crate) fn health_command(args: Args) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::classify_health;
+    use super::{application_coverage, classify_health};
+
+    #[test]
+    fn terminal_only_daemon_route_does_not_claim_global_browser_coverage() {
+        let snapshot = serde_json::json!({
+            "source":"evdev",
+            "terminal_apps_only":true
+        });
+        let coverage = application_coverage(Some(&snapshot));
+        assert_eq!(coverage["scope"], "daemon_route_configured_terminals_only");
+        assert!(coverage["desktop_wide"].is_null());
+        assert!(coverage["browser_fields_covered"].is_null());
+        assert_eq!(coverage["daemon_route"]["desktop_wide"], false);
+        assert_eq!(coverage["daemon_route"]["browser_fields_covered"], false);
+        assert!(coverage["detail"]
+            .as_str()
+            .unwrap()
+            .contains("does not verify it"));
+    }
+
+    #[test]
+    fn older_or_missing_status_does_not_invent_application_coverage() {
+        let coverage = application_coverage(None);
+        assert_eq!(coverage["scope"], "active_route");
+        assert!(coverage["desktop_wide"].is_null());
+        assert!(coverage["browser_fields_covered"].is_null());
+    }
 
     #[test]
     fn health_codes_distinguish_readiness_and_configuration() {

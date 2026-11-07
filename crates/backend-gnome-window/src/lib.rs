@@ -11,6 +11,7 @@
 //! or title change. Calls are accepted only from the process that owns
 //! `org.gnome.Shell`, so another local client cannot forge window identity.
 
+use sha2::{Digest, Sha256};
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -33,6 +34,8 @@ const EXTENSIONS_PATH: &str = "/org/gnome/Shell/Extensions";
 const EXTENSIONS_IFACE: &str = "org.gnome.Shell.Extensions";
 /// The extension protocol this tracker speaks.
 const PROTOCOL_VERSION: u32 = 2;
+const INPUT_SOURCE_CONTROL_VERSION: u32 = 1;
+const KEYBOARD_LAYOUT_VERSION: u32 = 2;
 const DBUS_CONNECTION_TIMEOUT: Duration = Duration::from_secs(3);
 const DBUS_METHOD_TIMEOUT: Duration = Duration::from_secs(1);
 const TRACKER_HEALTH_CHECK_INTERVAL: Duration = Duration::from_secs(1);
@@ -49,13 +52,17 @@ const EXTENSION_METADATA: &str = include_str!(
 const EXTENSION_SCRIPT: &str = include_str!(
     "../../../gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/extension.js"
 );
+const EXTENSION_NOTIFICATION_QUEUE: &str = include_str!(
+    "../../../gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/notification-queue.js"
+);
 
 /// The extension's files as `(file name, contents)`, so any installation
 /// method can install the exact bundled version.
-pub fn extension_files() -> [(&'static str, &'static str); 2] {
+pub fn extension_files() -> [(&'static str, &'static str); 3] {
     [
         ("metadata.json", EXTENSION_METADATA),
         ("extension.js", EXTENSION_SCRIPT),
+        ("notification-queue.js", EXTENSION_NOTIFICATION_QUEUE),
     ]
 }
 
@@ -71,6 +78,20 @@ pub enum GnomeWindowError {
     ExtensionNotActive,
     #[error("the WayExpand GNOME Shell extension speaks protocol {0}; this WayExpand needs {PROTOCOL_VERSION}")]
     ProtocolMismatch(u32),
+    #[error("the loaded WayExpand GNOME Shell extension does not expose a build identity; log out and back in to load the installed version")]
+    BuildIdentityUnavailable,
+    #[error("the loaded WayExpand GNOME Shell extension build does not match this WayExpand installation (loaded {0}); log out and back in")]
+    BuildIdentityMismatch(String),
+    #[error("GNOME Shell input-source control is unavailable; update or enable the WayExpand GNOME Shell extension")]
+    InputSourceControlUnavailable,
+    #[error("GNOME Shell did not provide the active XKB keyboard model and options")]
+    KeyboardLayoutUnavailable,
+    #[error("the WayExpand GNOME Shell extension speaks keyboard-layout protocol {0}; this WayExpand needs {KEYBOARD_LAYOUT_VERSION}")]
+    KeyboardLayoutProtocolMismatch(u32),
+    #[error("the WayExpand GNOME Shell extension speaks input-source protocol {0}; this WayExpand needs {INPUT_SOURCE_CONTROL_VERSION}")]
+    InputSourceControlProtocolMismatch(u32),
+    #[error("GNOME Shell did not activate the requested input source")]
+    InputSourceActivationFailed,
     #[error("GNOME Shell restarted; the window tracker reconnects")]
     ShellRestarted,
     #[error("window tracking setup was cancelled")]
@@ -164,6 +185,214 @@ fn shell_owner(connection: &Connection) -> Result<String, GnomeWindowError> {
         .map_err(|_| GnomeWindowError::ShellNotRunning)
 }
 
+fn input_source_control_version(
+    connection: &Connection,
+    owner: &str,
+) -> Result<u32, GnomeWindowError> {
+    let reply = connection.call_method(
+        Some(SHELL_NAME),
+        TRACKER_PATH,
+        Some("org.freedesktop.DBus.Properties"),
+        "Get",
+        &(TRACKER_IFACE, "InputSourceControlVersion"),
+    );
+    let version = match reply {
+        Ok(reply) => {
+            if reply.header().sender().map(|name| name.as_str()) != Some(owner) {
+                return Err(GnomeWindowError::ShellRestarted);
+            }
+            reply
+                .body()
+                .deserialize::<OwnedValue>()
+                .ok()
+                .and_then(|value| u32::try_from(value).ok())
+        }
+        Err(error) if is_missing_object(&error) => {
+            return Err(GnomeWindowError::InputSourceControlUnavailable)
+        }
+        Err(error) => return Err(GnomeWindowError::DBus(error)),
+    };
+    match version {
+        Some(INPUT_SOURCE_CONTROL_VERSION) => Ok(INPUT_SOURCE_CONTROL_VERSION),
+        Some(other) => Err(GnomeWindowError::InputSourceControlProtocolMismatch(other)),
+        None => Err(GnomeWindowError::InputSourceControlUnavailable),
+    }
+}
+
+/// Read the active source from GNOME Shell's live InputSourceManager. The
+/// deprecated gsettings `current` key is deliberately not consulted.
+pub fn active_input_source() -> Result<(String, String), GnomeWindowError> {
+    let connection = plain_connection()?;
+    let owner = shell_owner(&connection)?;
+    input_source_control_version(&connection, &owner)?;
+    read_active_input_source(&connection, &owner)
+}
+
+/// Read GNOME Shell's live keyboard source and the model/options its active
+/// InputSourceManager settings object applies. An IBus source is returned as
+/// such so callers fail closed rather than substituting stale settings.
+pub fn active_keyboard_layout(
+) -> Result<(String, String, String, String, Vec<String>), GnomeWindowError> {
+    let connection = plain_connection()?;
+    let owner = shell_owner(&connection)?;
+    let reply = connection.call_method(
+        Some(SHELL_NAME),
+        TRACKER_PATH,
+        Some("org.freedesktop.DBus.Properties"),
+        "Get",
+        &(TRACKER_IFACE, "KeyboardLayoutVersion"),
+    )?;
+    if reply.header().sender().map(|name| name.as_str()) != Some(owner.as_str()) {
+        return Err(GnomeWindowError::ShellRestarted);
+    }
+    let version = reply
+        .body()
+        .deserialize::<OwnedValue>()
+        .ok()
+        .and_then(|value| u32::try_from(value).ok());
+    match version {
+        Some(KEYBOARD_LAYOUT_VERSION) => {}
+        Some(other) => return Err(GnomeWindowError::KeyboardLayoutProtocolMismatch(other)),
+        None => return Err(GnomeWindowError::KeyboardLayoutUnavailable),
+    }
+    let reply = connection.call_method(
+        Some(SHELL_NAME),
+        TRACKER_PATH,
+        Some(TRACKER_IFACE),
+        "GetActiveKeyboardLayout",
+        &(),
+    )?;
+    if reply.header().sender().map(|name| name.as_str()) != Some(owner.as_str()) {
+        return Err(GnomeWindowError::ShellRestarted);
+    }
+    Ok(reply
+        .body()
+        .deserialize::<(String, String, String, String, Vec<String>)>()?)
+}
+
+/// Build identity reported by the currently loaded extension instance. GNOME
+/// retains the extension metadata in memory across on-disk updates, so this
+/// distinguishes the loaded code from newly installed files.
+pub fn extension_build_identity() -> Result<String, GnomeWindowError> {
+    let connection = plain_connection()?;
+    let owner = shell_owner(&connection)?;
+    read_build_identity(&connection, &owner)
+}
+
+fn read_build_identity(connection: &Connection, owner: &str) -> Result<String, GnomeWindowError> {
+    let reply = connection.call_method(
+        Some(SHELL_NAME),
+        TRACKER_PATH,
+        Some("org.freedesktop.DBus.Properties"),
+        "Get",
+        &(TRACKER_IFACE, "BuildIdentity"),
+    );
+    let identity = match reply {
+        Ok(reply) => {
+            if reply.header().sender().map(|name| name.as_str()) != Some(owner) {
+                return Err(GnomeWindowError::ShellRestarted);
+            }
+            reply
+                .body()
+                .deserialize::<OwnedValue>()
+                .ok()
+                .and_then(|value| String::try_from(value).ok())
+        }
+        Err(error) if is_missing_object(&error) => {
+            return Err(GnomeWindowError::BuildIdentityUnavailable)
+        }
+        Err(error) => return Err(GnomeWindowError::DBus(error)),
+    };
+    identity
+        .filter(|identity| !identity.is_empty())
+        .ok_or(GnomeWindowError::BuildIdentityUnavailable)
+}
+
+fn ensure_current_build_identity(
+    connection: &Connection,
+    owner: &str,
+) -> Result<(), GnomeWindowError> {
+    let identity = read_build_identity(connection, owner)?;
+    let expected = bundled_extension_build_identity();
+    if identity == expected {
+        Ok(())
+    } else {
+        Err(GnomeWindowError::BuildIdentityMismatch(identity))
+    }
+}
+
+/// SHA-256 identity of the bundled extension implementation modules. The
+/// metadata carries the same identity for GNOME Shell to expose from its
+/// loaded copy, so stale imported modules are covered as well as extension.js.
+pub fn bundled_extension_build_identity() -> String {
+    use std::fmt::Write as _;
+    let mut digest = Sha256::new();
+    for (name, contents) in extension_files()
+        .into_iter()
+        .filter(|(name, _)| *name != "metadata.json")
+    {
+        digest.update(name.as_bytes());
+        digest.update([0]);
+        digest.update(contents.as_bytes());
+        digest.update([0xff]);
+    }
+    digest
+        .finalize()
+        .iter()
+        .fold(String::from("sha256:"), |mut identity, byte| {
+            let _ = write!(identity, "{byte:02x}");
+            identity
+        })
+}
+
+fn read_active_input_source(
+    connection: &Connection,
+    owner: &str,
+) -> Result<(String, String), GnomeWindowError> {
+    let reply = connection.call_method(
+        Some(SHELL_NAME),
+        TRACKER_PATH,
+        Some(TRACKER_IFACE),
+        "GetActiveInputSource",
+        &(),
+    )?;
+    if reply.header().sender().map(|name| name.as_str()) != Some(owner) {
+        return Err(GnomeWindowError::ShellRestarted);
+    }
+    reply
+        .body()
+        .deserialize::<(String, String)>()
+        .map_err(GnomeWindowError::DBus)
+}
+
+/// Activate an input source through GNOME Shell's own InputSourceManager,
+/// then independently read its active-source state back from that manager.
+pub fn activate_input_source(kind: &str, id: &str) -> Result<(String, String), GnomeWindowError> {
+    if !matches!(kind, "ibus" | "xkb") || id.is_empty() || id.len() > 256 {
+        return Err(GnomeWindowError::InputSourceActivationFailed);
+    }
+    let connection = plain_connection()?;
+    let owner = shell_owner(&connection)?;
+    input_source_control_version(&connection, &owner)?;
+    let reply = connection.call_method(
+        Some(SHELL_NAME),
+        TRACKER_PATH,
+        Some(TRACKER_IFACE),
+        "ActivateInputSource",
+        &(kind, id),
+    )?;
+    if reply.header().sender().map(|name| name.as_str()) != Some(owner.as_str()) {
+        return Err(GnomeWindowError::ShellRestarted);
+    }
+    let requested = (kind.to_owned(), id.to_owned());
+    let acknowledged: (String, String) = reply.body().deserialize()?;
+    let observed = read_active_input_source(&connection, &owner)?;
+    if acknowledged != requested || observed != requested {
+        return Err(GnomeWindowError::InputSourceActivationFailed);
+    }
+    Ok(observed)
+}
+
 /// What a `Version` property read says about the extension.
 #[derive(Debug)]
 enum VersionAnswer {
@@ -234,9 +463,11 @@ impl GnomeWindowTracker {
     /// extension answers with a compatible protocol version.
     pub fn probe() -> Result<(), GnomeWindowError> {
         let connection = plain_connection()?;
-        shell_owner(&connection)?;
+        let owner = shell_owner(&connection)?;
         match read_version(&connection) {
-            VersionAnswer::Version(PROTOCOL_VERSION) => Ok(()),
+            VersionAnswer::Version(PROTOCOL_VERSION) => {
+                ensure_current_build_identity(&connection, &owner)
+            }
             VersionAnswer::Version(other) => Err(GnomeWindowError::ProtocolMismatch(other)),
             VersionAnswer::Missing => Err(GnomeWindowError::ExtensionNotActive),
             VersionAnswer::Unanswered(error) => Err(GnomeWindowError::DBus(error)),
@@ -250,6 +481,20 @@ impl GnomeWindowTracker {
     /// Subscribe to the extension. `cancelled` lets a UI give up between the
     /// bounded setup steps.
     pub fn new_cancellable(cancelled: Option<&AtomicBool>) -> Result<Self, GnomeWindowError> {
+        Self::new_cancellable_with_titles(cancelled, false)
+    }
+
+    /// Subscribe without window titles by default. `include_titles` is used
+    /// only when the active snippet configuration has a `title_contains`
+    /// filter; ordinary app-ID filtering needs no title metadata.
+    pub fn new_with_titles(include_titles: bool) -> Result<Self, GnomeWindowError> {
+        Self::new_cancellable_with_titles(None, include_titles)
+    }
+
+    pub fn new_cancellable_with_titles(
+        cancelled: Option<&AtomicBool>,
+        include_titles: bool,
+    ) -> Result<Self, GnomeWindowError> {
         let check_cancelled = || {
             if cancelled.is_some_and(|flag| flag.load(Ordering::Acquire)) {
                 Err(GnomeWindowError::Cancelled)
@@ -277,18 +522,30 @@ impl GnomeWindowTracker {
         )?;
         check_cancelled()?;
         match read_version(&connection) {
-            VersionAnswer::Version(PROTOCOL_VERSION) => {}
+            VersionAnswer::Version(PROTOCOL_VERSION) => {
+                ensure_current_build_identity(&connection, &shell_owner)?;
+            }
             VersionAnswer::Version(other) => return Err(GnomeWindowError::ProtocolMismatch(other)),
             VersionAnswer::Missing => return Err(GnomeWindowError::ExtensionNotActive),
             VersionAnswer::Unanswered(error) => return Err(GnomeWindowError::DBus(error)),
         }
-        let reply = connection.call_method(
-            Some(SHELL_NAME),
-            TRACKER_PATH,
-            Some(TRACKER_IFACE),
-            "Subscribe",
-            &(),
-        )?;
+        let reply = if include_titles {
+            connection.call_method(
+                Some(SHELL_NAME),
+                TRACKER_PATH,
+                Some(TRACKER_IFACE),
+                "SubscribeWithTitles",
+                &(true,),
+            )?
+        } else {
+            connection.call_method(
+                Some(SHELL_NAME),
+                TRACKER_PATH,
+                Some(TRACKER_IFACE),
+                "Subscribe",
+                &(),
+            )?
+        };
         // The reply comes from whoever owns org.gnome.Shell now; if that
         // changed since setup began, start over rather than trust it.
         if reply.header().sender().map(|name| name.as_str()) != Some(shell_owner.as_str()) {
@@ -427,6 +684,7 @@ fn extension_state_from_info(
         info.get(key).and_then(|value| {
             f64::try_from(value.clone())
                 .ok()
+                .or_else(|| i32::try_from(value.clone()).ok().map(f64::from))
                 .or_else(|| u32::try_from(value.clone()).ok().map(f64::from))
         })
     };
@@ -561,6 +819,15 @@ mod tests {
             extension_state_from_info(&info(3.0)),
             ExtensionState::Error(_)
         ));
+
+        let signed_state = HashMap::from([(
+            "state".to_owned(),
+            OwnedValue::try_from(zbus::zvariant::Value::from(1_i32)).unwrap(),
+        )]);
+        assert_eq!(
+            extension_state_from_info(&signed_state),
+            ExtensionState::Active
+        );
     }
 
     #[test]
@@ -595,13 +862,42 @@ mod tests {
 
     #[test]
     fn bundled_extension_matches_this_tracker() {
-        let [(_, metadata), (_, script)] = extension_files();
+        let [(_, metadata), (_, script), (_, queue)] = extension_files();
         assert!(metadata.contains(EXTENSION_UUID));
         assert!(script.contains(TRACKER_PATH));
         assert!(script.contains(TRACKER_IFACE));
         assert!(script.contains("org.wayexpand.WindowTracker1"));
         assert!(script.contains(&format!("PROTOCOL_VERSION = {PROTOCOL_VERSION}")));
+        let build_id = bundled_extension_build_identity();
+        assert!(metadata.contains(&format!("\"x-wayexpand-build-id\": \"{build_id}\"")));
+        assert!(script.contains("get BuildIdentity()"));
+        assert!(script.contains("this.metadata['x-wayexpand-build-id']"));
         assert!(script.contains("<method name=\"Ping\"/>"));
         assert!(script.contains("PingAsync"));
+        assert!(script.contains("<method name=\"GetActiveInputSource\">"));
+        assert!(script.contains("<method name=\"ActivateInputSource\">"));
+        assert!(script.contains("<method name=\"SubscribeWithTitles\">"));
+        assert!(script.contains("this._subscribe(invocation, false)"));
+        assert!(script.contains("isAuthorizedTrackerClient(uid, ownUid, executable)"));
+        assert!(script.contains("GetConnectionUnixUser",));
+        assert!(script.contains("GetActiveInputSourceAsync(_parameters, invocation) {\n        this._withAuthorizedClient(invocation"));
+        assert!(script.contains("GetActiveKeyboardLayoutAsync(_parameters, invocation) {\n        this._withAuthorizedClient(invocation"));
+        assert!(script.contains("ActivateInputSourceAsync([kind, id], invocation) {\n        this._withAuthorizedClient(invocation"));
+        assert!(script.contains(
+            "invocation.return_error_literal(Gio.DBusError, Gio.DBusError.ACCESS_DENIED"
+        ));
+        assert!(script.contains("InputSourceControlVersion"));
+        assert!(script.contains("GetActiveKeyboardLayout"));
+        assert!(script.contains("new GLib.Variant('(ssssas)'"));
+        assert!(script.contains("source.xkbId"));
+        assert!(script.contains("activeXkbSettings(manager._settings)"));
+        assert!(queue.contains("settings.keyboardModel"));
+        assert!(queue.contains("settings.keyboardOptions"));
+        assert!(queue.contains("model = 'pc105'"));
+        assert!(script.contains("KeyboardLayoutVersion"));
+        assert!(script.contains("Keyboard.getInputSourceManager().currentSource"));
+        assert!(!script.contains("org.gnome.desktop.input-sources current"));
+        assert!(script.contains("LatestOnlyDelivery"));
+        assert!(queue.contains("class LatestOnlyDelivery"));
     }
 }

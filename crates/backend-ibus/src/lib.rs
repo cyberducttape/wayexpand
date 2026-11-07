@@ -50,6 +50,7 @@ mod availability;
 use availability::component_file_present_in;
 pub use availability::{engine_available, engine_installed, global_engine_selected};
 pub mod chain;
+pub mod gnome_input_sources;
 pub mod telemetry;
 pub use telemetry::{IbusFieldVerdict, IbusRefusal, IbusTelemetry};
 mod text;
@@ -315,10 +316,11 @@ impl IbusEngineAdapter {
         &mut self.engine
     }
 
-    /// Drain completed asynchronous commands and return their actions. Each
-    /// result is recorded as applied as soon as its actions are produced;
-    /// hosts that emit actions should use [`Self::drain_completed_commands_with`].
-    pub fn drain_completed_commands(&mut self) -> Vec<IbusAction> {
+    /// Test-only sink that treats collecting actions as successful emission.
+    /// Production hosts must use [`Self::drain_completed_commands_with`] so
+    /// accounting is committed only after the output layer acknowledges them.
+    #[cfg(test)]
+    fn drain_completed_commands_for_test(&mut self) -> Vec<IbusAction> {
         let mut actions = Vec::new();
         let _ = self.drain_completed_commands_with(|batch| {
             actions.extend_from_slice(batch);
@@ -830,7 +832,7 @@ replacement = "Incident {{field:hostname}}"
                 client.cursor as u32,
                 client.cursor as u32,
             );
-            replacement = adapter.drain_completed_commands();
+            replacement = adapter.drain_completed_commands_for_test();
             if !replacement.is_empty() {
                 break;
             }
@@ -1080,7 +1082,7 @@ replacement = "signature"
             action,
             IbusAction::CommitText(text) if text.chars().count() == 1
         )));
-        assert!(adapter.drain_completed_commands().is_empty());
+        assert!(adapter.drain_completed_commands_for_test().is_empty());
     }
 
     #[test]
@@ -1130,7 +1132,7 @@ replacement = "signature"
         );
         assert!(key_actions.contains(&IbusAction::CommitText("w".into())));
 
-        assert!(adapter.drain_completed_commands().is_empty());
+        assert!(adapter.drain_completed_commands_for_test().is_empty());
     }
 
     #[cfg(unix)]
@@ -1171,7 +1173,7 @@ replacement = "signature"
             actions.extend(adapter.process_key_event(character as u32, 0, 0).actions);
         }
 
-        actions.extend(adapter.drain_completed_commands());
+        actions.extend(adapter.drain_completed_commands_for_test());
         thread::sleep(Duration::from_millis(20));
         assert!(
             !actions
@@ -1218,7 +1220,7 @@ replacement = "signature"
             action,
             IbusAction::CommitText(text) if text.len() > 1
         )));
-        assert!(adapter.drain_completed_commands().is_empty());
+        assert!(adapter.drain_completed_commands_for_test().is_empty());
     }
 
     #[test]
@@ -1372,7 +1374,7 @@ timeout_ms = 1000
             action,
             IbusAction::CommitText(text) if text.contains("signature")
         )));
-        assert!(adapter.drain_completed_commands().is_empty());
+        assert!(adapter.drain_completed_commands_for_test().is_empty());
     }
 
     #[test]

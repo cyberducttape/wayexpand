@@ -348,6 +348,7 @@ mod tests {
             "backend_mode",
             "status_schema",
             "daemon_commit",
+            "daemon_version",
             "state",
             "paused",
             "config",

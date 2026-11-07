@@ -88,6 +88,7 @@ pub struct InsertRequest {
 pub struct ExplainRequest {
     pub text: String,
     pub json: bool,
+    pub terminal_match_self_test: bool,
     pub reply: std::sync::mpsc::SyncSender<String>,
 }
 
@@ -755,20 +756,25 @@ fn explain_request(
 ) -> Result<Option<String>> {
     let line = line.strip_suffix('\n').unwrap_or(line);
     let line = line.strip_suffix('\r').unwrap_or(line);
-    let (text, json) = if let Some(text) = line.strip_prefix("explain-json ") {
-        (text, true)
+    let (text, json, terminal_match_self_test) = if line == "terminal-match-self-test" {
+        (String::new(), true, true)
+    } else if let Some(text) = line.strip_prefix("explain-json ") {
+        (text.to_owned(), true, false)
     } else if let Some(text) = line.strip_prefix("explain ") {
-        (text, false)
+        (text.to_owned(), false, false)
     } else {
         return Ok(None);
     };
-    if !(1..=256).contains(&text.chars().count()) || text.chars().any(char::is_control) {
+    if !terminal_match_self_test
+        && (!(1..=256).contains(&text.chars().count()) || text.chars().any(char::is_control))
+    {
         return Ok(Some("invalid text\n".into()));
     }
     let (reply, answer) = std::sync::mpsc::sync_channel(1);
     let request = ExplainRequest {
-        text: text.to_owned(),
+        text,
         json,
+        terminal_match_self_test,
         reply,
     };
     if queue.try_send(request).is_err() {
@@ -799,6 +805,9 @@ fn explain_worker(
         let answer = current.map_or_else(
             || "explain unavailable: diagnostics are starting; retry\n".to_owned(),
             |state| {
+                if request.terminal_match_self_test {
+                    return terminal_match_self_test(&state.validated);
+                }
                 if validated
                     .as_ref()
                     .is_none_or(|previous| !Arc::ptr_eq(previous, &state.validated))
@@ -887,6 +896,65 @@ fn explain_worker(
         );
         let _ = request.reply.try_send(answer);
     }
+}
+
+fn terminal_match_self_test(validated: &wayexpand_core::ValidatedConfig) -> String {
+    const SELF_TEST_BUDGET: Duration = Duration::from_millis(500);
+    let deadline = Instant::now() + SELF_TEST_BUDGET;
+    let config = validated.config();
+    if config.settings.terminal_apps.is_empty() {
+        return r#"{"status":"fail","detail":"no terminal application identifiers are configured"}"#.to_owned();
+    }
+    let mut engine = wayexpand_core::ExpansionEngine::from_validated(Arc::new(validated.clone()));
+    engine.set_terminal_apps_only(true);
+    for terminal_filter in &config.settings.terminal_apps {
+        if Instant::now() >= deadline {
+            return r#"{"status":"fail","detail":"terminal matching self-test exceeded its time budget"}"#.to_owned();
+        }
+        let app_id = terminal_filter
+            .strip_prefix("app_id_exact:")
+            .or_else(|| terminal_filter.strip_prefix("app_id_glob:"))
+            .unwrap_or(terminal_filter);
+        let app_id = if terminal_filter.starts_with("app_id_glob:") {
+            app_id.replace('*', "terminal").replace('?', "x")
+        } else {
+            app_id.to_owned()
+        };
+        for expansion in config
+            .expansion
+            .iter()
+            .filter(|item| item.enabled && item.command.is_none())
+        {
+            if Instant::now() >= deadline {
+                return r#"{"status":"fail","detail":"terminal matching self-test exceeded its time budget"}"#.to_owned();
+            }
+            engine.process(wayexpand_core::InputEvent::Reset);
+            engine.process(wayexpand_core::InputEvent::WindowChanged(Some(
+                wayexpand_core::WindowContext {
+                    app_id: Some(app_id.clone()),
+                    ..Default::default()
+                },
+            )));
+            let mut matched = false;
+            for character in expansion.trigger.chars() {
+                if Instant::now() >= deadline {
+                    return r#"{"status":"fail","detail":"terminal matching self-test exceeded its time budget"}"#.to_owned();
+                }
+                matched |= engine
+                    .process(wayexpand_core::InputEvent::Text(character.to_string()))
+                    .iter()
+                    .any(|result| result.trigger.as_ref() == expansion.trigger);
+            }
+            matched |= engine
+                .process(wayexpand_core::InputEvent::Delimiter(' '))
+                .iter()
+                .any(|result| result.trigger.as_ref() == expansion.trigger);
+            if matched {
+                return r#"{"status":"pass","detail":"the live daemon configuration matched an enabled static expansion through terminal-only admission"}"#.to_owned();
+            }
+        }
+    }
+    r#"{"status":"fail","detail":"no enabled static expansion matched through terminal-only admission in the live daemon configuration"}"#.to_owned()
 }
 
 /// Summary fields shared by the detailed and restricted responses.
@@ -1254,6 +1322,53 @@ mod tests {
     }
 
     #[test]
+    fn terminal_match_self_test_request_uses_the_live_diagnostics_worker() {
+        let (queue, requests) = std::sync::mpsc::sync_channel(EXPLAIN_QUEUE_CAPACITY);
+        let client = thread::spawn(move || {
+            explain_request("terminal-match-self-test", &queue)
+                .unwrap()
+                .unwrap()
+        });
+        let request = requests.recv_timeout(Duration::from_millis(500)).unwrap();
+        assert!(request.terminal_match_self_test);
+        assert!(request.json);
+        assert!(request.text.is_empty());
+        request
+            .reply
+            .try_send(r#"{"status":"pass"}"#.to_owned())
+            .unwrap();
+        assert_eq!(client.join().unwrap(), "{\"status\":\"pass\"}");
+    }
+
+    #[test]
+    fn live_terminal_match_self_test_returns_only_status_and_detail() {
+        let config = wayexpand_core::Config::parse(
+            "[settings]\nterminal_apps = [\"org.example.Terminal\"]\n\
+             [[expansion]]\ntrigger = \";;private-trigger\"\nreplacement = \"private replacement\"\n",
+        )
+        .unwrap();
+        let validated = config.validate_snapshot().unwrap();
+        let report = terminal_match_self_test(&validated);
+        let json: serde_json::Value = serde_json::from_str(&report).unwrap();
+        assert_eq!(json["status"], "pass");
+        assert!(!report.contains("private-trigger"));
+        assert!(!report.contains("private replacement"));
+
+        let disabled = wayexpand_core::Config::parse(
+            "[settings]\nterminal_apps = [\"org.example.Terminal\"]\n\
+             [[expansion]]\nenabled = false\ntrigger = \";;private-trigger\"\nreplacement = \"private replacement\"\n",
+        )
+        .unwrap()
+        .validate_snapshot()
+        .unwrap();
+        let report = terminal_match_self_test(&disabled);
+        let json: serde_json::Value = serde_json::from_str(&report).unwrap();
+        assert_eq!(json["status"], "fail");
+        assert!(!report.contains("private-trigger"));
+        assert!(!report.contains("private replacement"));
+    }
+
+    #[test]
     fn saturated_explanation_queue_returns_retryable_response_without_overwriting() {
         let (queue, _requests) = std::sync::mpsc::sync_channel(EXPLAIN_QUEUE_CAPACITY);
         let mut held_replies = Vec::new();
@@ -1264,6 +1379,7 @@ mod tests {
                 .try_send(ExplainRequest {
                     text: format!(".pending{index}"),
                     json: true,
+                    terminal_match_self_test: false,
                     reply,
                 })
                 .unwrap();

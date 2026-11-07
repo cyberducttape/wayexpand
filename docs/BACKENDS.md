@@ -88,8 +88,14 @@ The EIS keymap remains authoritative for actual key synthesis; requiring all
 non-text keysyms to match would reject otherwise compatible maps (for example,
 when media-key definitions differ). Missing, reordered, or ambiguous layout
 state is refused rather than guessed. KWin's provider reads its
-keyboard-layout service; Hyprland uses compositor-owned keyboard data. These
-paths still require live certification. A
+keyboard-layout service; Hyprland uses compositor-owned keyboard data; GNOME
+uses the Shell extension's live `currentSource.xkbId` plus the model and
+options from the exact settings source GNOME's InputSourceManager applies
+(session GSettings or systemd-localed); GNOME 45's session settings lack a
+model field, so the provider uses Mutter's `pc105` default for that case.
+GNOME evdev matching remains disabled if the Shell extension cannot provide
+that active state or XKB cannot compile the reported map. These paths still
+require live certification. A
 replacement
 containing an unreachable character is rejected with an error before
 anything is typed, rather than partially or incorrectly inserted. Portal use
@@ -273,6 +279,14 @@ run without that session configuration is not a universal KWin capability
 result. Use `wayexpand doctor` (or `wayland-info`) after configuring the
 intended input method before choosing a route. See
 [KDE's Virtual Keyboard settings](https://docs.kde.org/stable_kf6/en/kwin/kcontrol/kwinvirtualkeyboard/).
+
+On GNOME, the WayExpand Shell extension authorizes tracker subscriptions by
+session UID and executable identity. The default D-Bus `Subscribe()` reply
+contains the app ID and opaque window instance ID, but no title. WayExpand
+explicitly requests titles only to support configured `title_contains` filters.
+This is a privacy reduction for unrelated session-bus clients, not isolation
+from malicious software running as the same user: same-UID processes remain
+within the desktop session's trust boundary.
 
 `wayexpand-backend-kwin-window` bridges this gap for KDE Plasma the only
 way currently available: KWin's scripting engine, reached over the session

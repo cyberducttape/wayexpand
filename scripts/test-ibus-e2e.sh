@@ -93,6 +93,14 @@ fi
 export IBUS_ADDRESS="unix:path=$socket"
 status=0
 "$E2E_BIN_DIR/wx-e2e-ibus" "$XDG_RUNTIME_DIR/wayexpand-ibus-status.json" || status=$?
+if [ "$status" -eq 0 ]; then
+    # Exercise a toolkit joining an already-selected global engine, as GNOME
+    # does after changing its input source. This catches tests that only pass
+    # because their helper itself first changes IBus's global selection.
+    "$E2E_BIN_DIR/wx-e2e-ibus" \
+        "$XDG_RUNTIME_DIR/wayexpand-ibus-status.json" \
+        --expect-active --single-expansion || status=$?
+fi
 kill "$daemon_pid" 2>/dev/null || true
 wait "$daemon_pid" 2>/dev/null || true
 exit "$status"
