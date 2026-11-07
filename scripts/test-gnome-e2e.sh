@@ -505,8 +505,22 @@ sleep 0.2
 gnome-shell --headless --mode=user --wayland --virtual-monitor 1280x800 --wayland-display "$display" \
     >"$E2E_WORK/gnome-shell-after-login.log" 2>&1 &
 shell_pid=$!
+# GNOME Shell may retain the enabled-extensions preference across restart
+# without instantiating an extension in this headless session. Ask the live
+# extension manager to load the installed extension before checking its
+# runtime identity.
+enable_tries=100
+until gnome_shell_extensions_call EnableExtension "$E2E_UUID" \
+    >"$E2E_WORK/enable-after-login.log" 2>&1; do
+    enable_tries=$((enable_tries - 1))
+    if [ "$enable_tries" -le 0 ] || ! kill -0 "$shell_pid" 2>/dev/null; then
+        log "fail extension-after-login GNOME Shell could not enable the installed extension: $(cat "$E2E_WORK/enable-after-login.log")"
+        exit 1
+    fi
+    sleep 0.1
+done
 tries=600
-until gnome_extension_state_active "$(extension_state)"; do
+until [ "$enable_tries" -le 0 ] || gnome_extension_state_active "$(extension_state)"; do
     tries=$((tries - 1))
     if [ "$tries" -le 0 ] || ! kill -0 "$shell_pid" 2>/dev/null; then
         log "fail extension-after-login GNOME Shell did not reload the installed extension"
