@@ -239,6 +239,10 @@ impl IbusEngineAdapter {
         self.note(|telemetry, field| telemetry.refusal(field, refusal));
     }
 
+    fn advertises_surrounding_text(&self) -> bool {
+        self.client_capabilities & IBUS_CAP_SURROUNDING_TEXT != 0
+    }
+
     /// Apply the IBus `ContentType` property. A content type IBus set is the
     /// only way capture is enabled for a field.
     pub fn set_content_type(&mut self, purpose: u32, hints: u32) {
@@ -494,6 +498,7 @@ impl IbusEngineAdapter {
         if state & IBUS_RELEASE_MASK == 0 {
             let captured = self.enabled
                 && self.capability_block.is_none()
+                && self.advertises_surrounding_text()
                 && !self.engine.is_sensitive_focus()
                 && !self.engine.is_user_paused();
             self.note(|telemetry, field| telemetry.key(field, captured));
@@ -520,6 +525,15 @@ impl IbusEngineAdapter {
         }
 
         if !self.enabled || self.capability_block.is_some() {
+            return IbusKeyResult::default();
+        }
+
+        // Without the advertised surrounding-text capability, this engine
+        // cannot safely replace a trigger in the target. Pass every event
+        // through untouched instead of consuming characters and only
+        // discovering the missing contract when a trigger matches.
+        if !self.advertises_surrounding_text() {
+            self.engine.process(InputEvent::Reset);
             return IbusKeyResult::default();
         }
 
@@ -1736,10 +1750,19 @@ timeout_ms = 1000
         adapter.set_capabilities(0);
         let mut client = Client::default();
         let actions = client.type_text(&mut adapter, ":sig");
-        assert!(!actions
-            .iter()
-            .any(|action| matches!(action, IbusAction::DeleteSurroundingText { .. })));
+        assert!(actions.is_empty(), "unverified input should pass through");
         assert_eq!(client.text(), ":sig");
+    }
+
+    #[test]
+    fn ordinary_text_is_committed_when_surrounding_text_is_supported() {
+        let mut adapter = adapter();
+        adapter.set_capabilities(IBUS_CAP_SURROUNDING_TEXT);
+
+        let result = adapter.process_key_event('x' as u32, 0, 0);
+
+        assert!(result.handled);
+        assert_eq!(result.actions, vec![IbusAction::CommitText("x".into())]);
     }
 
     #[test]

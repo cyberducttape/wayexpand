@@ -194,12 +194,11 @@ def main():
                 f"latest_field_surrounding={latest_field.get('surrounding_capability')}"
             )
         baseline = status_snapshot()
-        baseline_refusals = int(
-            baseline.get("totals", {}).get("refusals", {}).get(
-                "no_surrounding_capability", 0
-            )
-        )
         baseline_keys = int(baseline.get("totals", {}).get("keys", 0))
+        baseline_uncaptured = int(
+            (baseline.get("recent_fields", [])[-1] if baseline.get("recent_fields") else {})
+            .get("keys_without_capture", 0)
+        )
 
         deadline = time.monotonic() + TIMEOUT_SECONDS
         actual = ""
@@ -211,18 +210,17 @@ def main():
             if actual == TRIGGER:
                 status = status_snapshot()
                 totals = status.get("totals", {})
-                refusals = totals.get("refusals", {})
                 fields = status.get("recent_fields", [])
                 latest_field = fields[-1] if fields else {}
+                uncaptured = int(latest_field.get("keys_without_capture", 0))
                 if (
                     int(totals.get("keys", 0)) > baseline_keys
                     and latest_field.get("surrounding_capability") is False
-                    and int(refusals.get("no_surrounding_capability", 0))
-                    > baseline_refusals
+                    and uncaptured - baseline_uncaptured >= len(TRIGGER)
                 ):
                     print(
-                        "pass Chromium input reached WayExpand; IBus did not advertise "
-                        "surrounding-text support, the replacement was refused, and the trigger remained intact"
+                        "pass Chromium input reached WayExpand; without IBus "
+                        "surrounding-text support, all trigger keys passed through unchanged"
                     )
                     return
             time.sleep(0.05)
@@ -230,7 +228,7 @@ def main():
         final_totals = final_status.get("totals", {})
         final_fields = final_status.get("recent_fields", [])
         latest_field = final_fields[-1] if final_fields else {}
-        final_refusals = final_totals.get("refusals", {})
+        final_uncaptured = int(latest_field.get("keys_without_capture", 0))
         value_state = (
             "replacement"
             if actual == EXPECTED
@@ -241,8 +239,8 @@ def main():
             else "other"
         )
         fail(
-            "Chromium did not insert the expected text or record a safe refusal "
-            "for missing IBus surrounding-text support; "
+            "Chromium did not insert the expected text or pass the trigger "
+            "through unchanged without surrounding-text support; "
             f"value_state={value_state}, "
             "test_value_codepoints="
             f"{','.join(f'U+{ord(character):04X}' for character in actual) or 'empty'}, "
@@ -251,8 +249,8 @@ def main():
             f"latest_field_focused={latest_field.get('focused')}, "
             f"latest_field_keys={latest_field.get('keys', 0)}, "
             f"latest_field_surrounding={latest_field.get('surrounding_capability')}, "
-            "no_surrounding_refusals_delta="
-            f"{int(final_refusals.get('no_surrounding_capability', 0)) - baseline_refusals}"
+            "uncaptured_keys_delta="
+            f"{final_uncaptured - baseline_uncaptured}"
         )
     finally:
         if connection is not None:
