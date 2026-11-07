@@ -58,18 +58,6 @@ mkdir -p "$work/home" "$work/config/wayexpand" "$work/cache" "$work/component" \
 cp "$project_dir/gnome-extension/$uuid/metadata.json" "$project_dir/gnome-extension/$uuid/extension.js" \
     "$project_dir/gnome-extension/$uuid/notification-queue.js" \
     "$work/home/.local/share/gnome-shell/extensions/$uuid/"
-python3 - "$work/home/.local/share/gnome-shell/extensions/$uuid/metadata.json" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-with open(path, encoding="utf-8") as source:
-    metadata = json.load(source)
-metadata["x-wayexpand-build-id"] = "sha256:pre-upgrade-e2e-fixture"
-with open(path, "w", encoding="utf-8") as destination:
-    json.dump(metadata, destination)
-    destination.write("\n")
-PY
 cp "$project_dir/scripts/gnome-e2e-focus-controller/metadata.json" \
     "$project_dir/scripts/gnome-e2e-focus-controller/extension.js" \
     "$work/home/.local/share/gnome-shell/extensions/$controller_uuid/"
@@ -251,14 +239,22 @@ assert_tracker_method_denied unauthorized-input-source-query GetActiveInputSourc
 assert_tracker_method_denied unauthorized-keyboard-layout-query GetActiveKeyboardLayout
 assert_tracker_method_denied unauthorized-input-source-activation ActivateInputSource xkb de
 
-# Confirm Shell loaded the old fixture before the simulated on-disk upgrade.
+# Confirm Shell loaded the bundled build before simulating an on-disk update.
 live_build=$(gdbus call --session --dest org.gnome.Shell \
     --object-path /org/wayexpand/ShellWindowTracker \
     --method org.freedesktop.DBus.Properties.Get \
     org.wayexpand.ShellWindowTracker1 BuildIdentity)
+expected_build=$(python3 - "$E2E_PROJECT_DIR/gnome-extension/$E2E_UUID/metadata.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    print(json.load(source)["x-wayexpand-build-id"])
+PY
+)
 case "$live_build" in
-    *sha256:pre-upgrade-e2e-fixture*) log "pass extension-pre-upgrade-build $live_build" ;;
-    *) log "fail extension-pre-upgrade-build unexpected live identity: $live_build"; exit 1 ;;
+    *"$expected_build"*) log "pass extension-initial-build live build matches the installed files" ;;
+    *) log "fail extension-initial-build unexpected live identity: $live_build"; exit 1 ;;
 esac
 
 # Register in GNOME's typed source list without disturbing the keyboard
@@ -457,13 +453,20 @@ else
     status=1
 fi
 
-# Install the updated extension on disk while the current Shell still has the
-# older build loaded. The tracker intentionally refuses calls during this
-# mismatch, so run the focus-transition checks above before updating files.
-cp "$E2E_PROJECT_DIR/gnome-extension/$E2E_UUID/metadata.json" \
-    "$E2E_PROJECT_DIR/gnome-extension/$E2E_UUID/extension.js" \
-    "$E2E_PROJECT_DIR/gnome-extension/$E2E_UUID/notification-queue.js" \
-    "$E2E_WORK/home/.local/share/gnome-shell/extensions/$E2E_UUID/"
+# Simulate an extension upgrade on disk while Shell still has the previous
+# build loaded. Diagnostics must report the mismatch until Shell restarts.
+python3 - "$E2E_WORK/home/.local/share/gnome-shell/extensions/$E2E_UUID/metadata.json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as source:
+    metadata = json.load(source)
+metadata["x-wayexpand-build-id"] = "sha256:post-upgrade-e2e-fixture"
+with open(path, "w", encoding="utf-8") as destination:
+    json.dump(metadata, destination)
+    destination.write("\n")
+PY
 "$E2E_BIN_DIR/wayexpand" doctor --gnome --json \
     >"$E2E_WORK/doctor-after-extension-upgrade.json" \
     2>"$E2E_WORK/doctor-after-extension-upgrade.err" || true
@@ -485,6 +488,13 @@ then
     cat "$E2E_WORK/doctor-after-extension-upgrade.json"
     exit 1
 fi
+
+# The updated payload is the currently bundled build in this test checkout.
+# Restore it before restarting Shell so the new process loads that build.
+cp "$E2E_PROJECT_DIR/gnome-extension/$E2E_UUID/metadata.json" \
+    "$E2E_PROJECT_DIR/gnome-extension/$E2E_UUID/extension.js" \
+    "$E2E_PROJECT_DIR/gnome-extension/$E2E_UUID/notification-queue.js" \
+    "$E2E_WORK/home/.local/share/gnome-shell/extensions/$E2E_UUID/"
 
 # Restarting Shell in this isolated session models the logout/login needed
 # after a GNOME extension update. The newly loaded runtime identity must now
@@ -633,7 +643,7 @@ env -i \
     dbus-run-session -- "$work/session.sh" >"$work/results.txt" 2>"$work/session.log" || status=$?
 
 cat "$work/results.txt"
-expected_checks='extension-active unauthorized-tracker-subscription extension-pre-upgrade-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-ibus-input-context extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-ibus-input-context-after-login'
+expected_checks='extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-ibus-input-context extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-ibus-input-context-after-login'
 missing_check=
 for check in $expected_checks; do
     if ! grep -F "pass $check" "$work/results.txt" >/dev/null; then
