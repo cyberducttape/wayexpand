@@ -251,9 +251,7 @@ assert_tracker_method_denied unauthorized-input-source-query GetActiveInputSourc
 assert_tracker_method_denied unauthorized-keyboard-layout-query GetActiveKeyboardLayout
 assert_tracker_method_denied unauthorized-input-source-activation ActivateInputSource xkb de
 
-# Start Shell with an older on-disk identity, then install the current
-# metadata while that extension remains loaded. Diagnostics must identify
-# the stale in-memory instance as logout-required, not trust the new files.
+# Confirm Shell loaded the old fixture before the simulated on-disk upgrade.
 live_build=$(gdbus call --session --dest org.gnome.Shell \
     --object-path /org/wayexpand/ShellWindowTracker \
     --method org.freedesktop.DBus.Properties.Get \
@@ -262,29 +260,6 @@ case "$live_build" in
     *sha256:pre-upgrade-e2e-fixture*) log "pass extension-pre-upgrade-build $live_build" ;;
     *) log "fail extension-pre-upgrade-build unexpected live identity: $live_build"; exit 1 ;;
 esac
-cp "$E2E_PROJECT_DIR/gnome-extension/$E2E_UUID/metadata.json" \
-    "$E2E_WORK/home/.local/share/gnome-shell/extensions/$E2E_UUID/metadata.json"
-"$E2E_BIN_DIR/wayexpand" doctor --gnome --json \
-    >"$E2E_WORK/doctor-after-extension-upgrade.json" \
-    2>"$E2E_WORK/doctor-after-extension-upgrade.err" || true
-if ! python3 - "$E2E_WORK/doctor-after-extension-upgrade.json" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as source:
-    report = json.load(source)
-check = next(
-    item for item in report["sections"]["window_tracking"]["checks"]
-    if item["id"] == "window-extension-build"
-)
-assert check["state"] in {"warn", "unknown"}, check
-print("pass extension-upgrade-not-current updated files are not reported as a verified loaded build")
-PY
-then
-    log "fail extension-upgrade-not-current diagnostics incorrectly reported the updated extension as current"
-    cat "$E2E_WORK/doctor-after-extension-upgrade.json"
-    exit 1
-fi
 
 # Register in GNOME's typed source list without disturbing the keyboard
 # layouts. Ask the real CLI to activate WayExpand so the session-bus caller
@@ -480,6 +455,35 @@ if start_transition_tracker --expect-transition-empty "" empty; then
     [ "$tracker_status" -eq 0 ] || status=1
 else
     status=1
+fi
+
+# Install the updated extension on disk while the current Shell still has the
+# older build loaded. The tracker intentionally refuses calls during this
+# mismatch, so run the focus-transition checks above before updating files.
+cp "$E2E_PROJECT_DIR/gnome-extension/$E2E_UUID/metadata.json" \
+    "$E2E_PROJECT_DIR/gnome-extension/$E2E_UUID/extension.js" \
+    "$E2E_PROJECT_DIR/gnome-extension/$E2E_UUID/notification-queue.js" \
+    "$E2E_WORK/home/.local/share/gnome-shell/extensions/$E2E_UUID/"
+"$E2E_BIN_DIR/wayexpand" doctor --gnome --json \
+    >"$E2E_WORK/doctor-after-extension-upgrade.json" \
+    2>"$E2E_WORK/doctor-after-extension-upgrade.err" || true
+if ! python3 - "$E2E_WORK/doctor-after-extension-upgrade.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    report = json.load(source)
+check = next(
+    item for item in report["sections"]["window_tracking"]["checks"]
+    if item["id"] == "window-extension-build"
+)
+assert check["state"] in {"warn", "unknown"}, check
+print("pass extension-upgrade-not-current updated files are not reported as a verified loaded build")
+PY
+then
+    log "fail extension-upgrade-not-current diagnostics incorrectly reported the updated extension as current"
+    cat "$E2E_WORK/doctor-after-extension-upgrade.json"
+    exit 1
 fi
 
 # Restarting Shell in this isolated session models the logout/login needed
