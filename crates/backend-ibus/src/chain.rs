@@ -728,16 +728,7 @@ pub fn diagnose() -> IbusChainReport {
                 .as_deref()
                 .is_some_and(|value| value.to_ascii_lowercase().contains("ibus"));
             if !ibus_configured {
-                check(
-                    "desktop",
-                    "KWin sends input to IBus",
-                    IbusCheckState::Fail,
-                    match configured.as_deref() {
-                        Some("") | None => "KWin has no Virtual Keyboard (input method) configured, so Wayland apps never reach IBus".to_owned(),
-                        Some(other) => format!("KWin's Virtual Keyboard is {other}, not IBus"),
-                    },
-                    Some(start_ibus_fix(desktop)),
-                )
+                kwin_unconfigured_input_method(configured.as_deref())
             } else {
                 kwin_input_method_check(
                     kwin_input_method_available(),
@@ -1019,6 +1010,18 @@ fn kwin_input_method_check(
             result
         }
     }
+}
+
+fn kwin_unconfigured_input_method(configured: Option<&str>) -> IbusCheck {
+    let detail = match configured {
+        Some("") | None => {
+            "KWin has no Virtual Keyboard (input method) configured, so Wayland apps never reach IBus"
+        }
+        Some(other) => return kwin_input_method_failure(format!(
+            "KWin's Virtual Keyboard is {other}, not IBus"
+        )),
+    };
+    kwin_input_method_failure(detail)
 }
 
 fn kwin_input_method_crash(pid: u32, helper_running: bool) -> IbusCheck {
@@ -2096,6 +2099,28 @@ mod tests {
         assert_eq!(check.problem_id, Some("WX-KWIN-IBUS-001"));
         assert!(check.detail.contains("helper is not running"));
         assert!(check.fix.as_deref().unwrap().contains("log out of Plasma"));
+    }
+
+    #[test]
+    fn missing_kwin_virtual_keyboard_has_a_stable_repair_finding() {
+        for configured in [None, Some("")] {
+            let check = kwin_unconfigured_input_method(configured);
+            assert_eq!(check.state, IbusCheckState::Fail);
+            assert_eq!(check.problem_id, Some("WX-KWIN-IBUS-001"));
+            assert!(check.detail.contains("no Virtual Keyboard"));
+            assert!(check.detail.contains("Wayland apps never reach IBus"));
+            assert!(check
+                .fix
+                .as_deref()
+                .unwrap()
+                .contains("select IBus Wayland"));
+            assert!(check.fix.as_deref().unwrap().contains("log out of Plasma"));
+        }
+
+        let other = kwin_unconfigured_input_method(Some("Fcitx 5"));
+        assert_eq!(other.state, IbusCheckState::Fail);
+        assert_eq!(other.problem_id, Some("WX-KWIN-IBUS-001"));
+        assert!(other.detail.contains("Fcitx 5, not IBus"));
     }
 
     #[test]

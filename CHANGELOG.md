@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Give missing or non-IBus KWin Virtual Keyboard configuration a stable
+  `WX-KWIN-IBUS-001` finding and the same explicit selection, logout, and retest
+  instructions used by other KWin input-routing failures.
 - Require the GUI's IBus setup preflight to verify that a shared component is
   multi-user safe before skipping administrator integration consent. A legacy
   system manifest that points into one user's home now offers the repair path.
