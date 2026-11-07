@@ -121,6 +121,22 @@ log "pass ibus-engine-registered"
 gnome-shell --headless --mode=user --wayland --virtual-monitor 1280x800 --wayland-display "$display" \
     >"$E2E_WORK/gnome-shell.log" 2>&1 &
 shell_pid=$!
+# Ask GNOME's extension manager to activate both installed test extensions.
+# This is the same supported activation API the user can reach with
+# `gnome-extensions enable`; it also avoids racing the asynchronous dconf
+# writer immediately after setting enabled-extensions above.
+for extension_uuid in "$uuid" "$controller_uuid"; do
+    tries=100
+    while ! gnome_shell_extensions_call EnableExtension "$extension_uuid" \
+        >"$work/enable-$extension_uuid.log" 2>&1; do
+        tries=$((tries - 1))
+        if [ "$tries" -le 0 ] || ! kill -0 "$shell_pid" 2>/dev/null; then
+            log "fail extension-enable GNOME Shell could not enable $extension_uuid: $(cat "$work/enable-$extension_uuid.log")"
+            exit 1
+        fi
+        sleep 0.1
+    done
+done
 sinks=
 gtk_pid=
 finish() {
