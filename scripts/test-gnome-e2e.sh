@@ -488,8 +488,22 @@ PY
     wait "$gtk_pid" || gtk_status=$?
     gtk_pid=
     if [ "$gtk_status" -ne 0 ]; then
+        cp "$status_file" "$E2E_WORK/ibus-status-$case_name.json" 2>/dev/null || true
         log "fail gnome-gtk-$case_name GTK's IBus input context produced an incorrect result"
         cat "$test_log"
+        if [ -s "$E2E_WORK/ibus-status-$case_name.json" ]; then
+            python3 - "$E2E_WORK/ibus-status-$case_name.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as status_file:
+    status = json.load(status_file)
+print("content-free IBus counters:", json.dumps({
+    "totals": status.get("totals"),
+    "recent_fields": status.get("recent_fields"),
+}, sort_keys=True))
+PY
+        fi
         exit 1
     fi
     log "pass gnome-gtk-$case_name $(cat "$test_log")"
