@@ -381,7 +381,7 @@ done
 # protocol. The toolkit client verifies deletion and commit behavior, though
 # headless GNOME cannot deliver a trusted synthetic physical key to GTK.
 IBUS_ADDRESS=$(ibus address) "$E2E_BIN_DIR/wx-e2e-ibus" \
-    "$XDG_RUNTIME_DIR/wayexpand-ibus-status.json" --expect-active
+    "$XDG_RUNTIME_DIR/wayexpand-ibus-status.json" --expect-active --single-expansion
 log "pass gnome-ibus-input-context the active GNOME-selected engine replaced a verified trigger"
 "$E2E_BIN_DIR/wayexpand" ibus status --json \
     >"$E2E_WORK/ibus-after-input-context.json" \
@@ -570,7 +570,7 @@ PY
 
     if [ "$login_source_ok" -eq 1 ]; then
         IBUS_ADDRESS=$(ibus address) "$E2E_BIN_DIR/wx-e2e-ibus" \
-            "$XDG_RUNTIME_DIR/wayexpand-ibus-status.json" --expect-active \
+            "$XDG_RUNTIME_DIR/wayexpand-ibus-status.json" --expect-active --single-expansion \
             || status=1
         if [ "$status" -eq 0 ]; then
             log "pass gnome-ibus-input-context-after-login the reloaded session replaced a verified trigger"

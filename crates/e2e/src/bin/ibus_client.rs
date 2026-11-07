@@ -7,7 +7,8 @@
 //! scenario checks the resulting text, so protocol mismatches between the
 //! WayExpand engine and the real daemon fail here instead of on a desktop.
 //!
-//! Usage: wx-e2e-ibus <status-file> [--expect-active]   (IBUS_ADDRESS must be set)
+//! Usage: wx-e2e-ibus <status-file> [--expect-active] [--single-expansion]
+//!        (IBUS_ADDRESS must be set)
 //! Prints one "pass|fail <scenario> <detail>" line per scenario and exits
 //! non-zero if any scenario failed.
 
@@ -293,9 +294,12 @@ fn wait_for_content_type(
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
         if let Some(reading) = wayexpand_backend_ibus::telemetry::read_status_at(status_file) {
-            if reading.status.recent_fields.iter().any(|field| {
-                field.focused && field.content_type == expected
-            }) {
+            if reading
+                .status
+                .recent_fields
+                .iter()
+                .any(|field| field.focused && field.content_type == expected)
+            {
                 return Ok(());
             }
         }
@@ -312,13 +316,14 @@ fn main() -> Result<()> {
         .next()
         .map(PathBuf::from)
         .context("usage: wx-e2e-ibus <status-file> [--expect-active]")?;
-    let expect_active = match arguments.next().as_deref().and_then(|arg| arg.to_str()) {
-        None => false,
-        Some("--expect-active") => true,
-        Some(_) => bail!("usage: wx-e2e-ibus <status-file> [--expect-active]"),
-    };
-    if arguments.next().is_some() {
-        bail!("usage: wx-e2e-ibus <status-file> [--expect-active]");
+    let mut expect_active = false;
+    let mut single_expansion = false;
+    for argument in arguments {
+        match argument.to_str() {
+            Some("--expect-active") if !expect_active => expect_active = true,
+            Some("--single-expansion") if !single_expansion => single_expansion = true,
+            _ => bail!("usage: wx-e2e-ibus <status-file> [--expect-active] [--single-expansion]"),
+        }
     }
     let address = env::var("IBUS_ADDRESS").context("IBUS_ADDRESS is not set")?;
     let connection = zbus::blocking::connection::Builder::address(address.as_str())?.build()?;
@@ -386,6 +391,35 @@ fn main() -> Result<()> {
         editor.contents() == REPLACEMENT,
         format!("text after typing the trigger: {:?}", editor.contents()),
     );
+
+    if single_expansion {
+        thread::sleep(Duration::from_millis(200));
+        match wayexpand_backend_ibus::telemetry::read_status_at(&status_file) {
+            Some(reading) => {
+                let status = reading.status;
+                let raw = std::fs::read_to_string(&status_file).unwrap_or_default();
+                results.check(
+                    "telemetry-counts",
+                    status.totals.expansions >= 1,
+                    format!("{} expansion(s) recorded", status.totals.expansions),
+                );
+                results.check(
+                    "telemetry-content-free",
+                    !raw.contains(TRIGGER) && !raw.contains(REPLACEMENT) && !raw.contains("e2e"),
+                    "status file contains no typed text, trigger, or replacement",
+                );
+            }
+            None => results.check(
+                "telemetry-counts",
+                false,
+                format!("no status at {}", status_file.display()),
+            ),
+        }
+        if results.failed {
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
 
     // Same field type again: ibus-daemon does not set ContentType again.
     editor.call("FocusOut", &())?;
