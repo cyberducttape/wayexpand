@@ -37,7 +37,18 @@ cleanup() {
         kill "$shell_pid" 2>/dev/null || true
         wait "$shell_pid" 2>/dev/null || true
     fi
-    rm -rf -- "$work" "$runtime"
+    attempt=0
+    while [ "$attempt" -lt 10 ]; do
+        if rm -rf -- "$work" "$runtime" 2>/dev/null; then
+            return 0
+        fi
+        attempt=$((attempt + 1))
+        sleep 0.1
+    done
+    # D-Bus-activated desktop helpers can finish writing metadata just after
+    # their session bus exits. Cleanup is best-effort after the bounded retry;
+    # it must not turn a successful compatibility assertion into a failure.
+    rm -rf -- "$work" "$runtime" 2>/dev/null || true
 }
 trap cleanup EXIT HUP INT TERM
 
