@@ -461,6 +461,21 @@ run_gtk_ibus_case password ';e2e' ';e2e' true
 run_gtk_ibus_case gtk4-insertion ';e2e' expanded false 4
 run_gtk_ibus_case gtk4-unicode ';unicode' 'Grüße 世界 🖥️' false 4
 run_gtk_ibus_case gtk4-password ';e2e' ';e2e' true 4
+for layout in de fr; do
+    "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --activate-source xkb "$layout" \
+        >"$E2E_WORK/layout-$layout-activation.log"
+    if ! "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --active-layout \
+        >"$E2E_WORK/layout-$layout-active.log" \
+        || ! grep -F "active-layout xkb $layout " "$E2E_WORK/layout-$layout-active.log" >/dev/null; then
+        log "fail gnome-layout-$layout GNOME did not report the selected keyboard layout"
+        cat "$E2E_WORK/layout-$layout-activation.log" "$E2E_WORK/layout-$layout-active.log"
+        exit 1
+    fi
+    "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --activate-source ibus wayexpand \
+        >"$E2E_WORK/layout-$layout-ibus-activation.log"
+    run_gtk_ibus_case "layout-$layout" ';e2e' expanded false
+    log "pass gnome-layout-$layout expansion remained correct after switching layouts"
+done
 # Exercise the same active engine in a real browser renderer. The isolated
 # Chromium profile uses a local page, XTEST sends only the harmless `;e2e`
 # trigger, and DevTools reads only that test textarea's final value.
@@ -892,7 +907,7 @@ env -i \
     dbus-run-session -- "$work/session.sh" >"$work/results.txt" 2>"$work/session.log" || status=$?
 
 cat "$work/results.txt"
-expected_checks='extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-ibus-input-context gnome-gtk-insertion gnome-gtk-unicode gnome-gtk-password gnome-gtk-gtk4-insertion gnome-gtk-gtk4-unicode gnome-gtk-gtk4-password extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-ibus-input-context-after-login'
+expected_checks='extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-ibus-input-context gnome-gtk-insertion gnome-gtk-unicode gnome-gtk-password gnome-gtk-gtk4-insertion gnome-gtk-gtk4-unicode gnome-gtk-gtk4-password gnome-layout-de gnome-layout-fr extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-ibus-input-context-after-login'
 missing_check=
 for check in $expected_checks; do
     if ! grep -F "pass $check" "$work/results.txt" >/dev/null; then
