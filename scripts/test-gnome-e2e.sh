@@ -450,12 +450,15 @@ while :; do
 done
 # Let a real GTK input context receive a trigger from the compositor's
 # keyboard path. The direct IBus protocol transaction is covered separately.
-if ! run_gtk_insertion before-shell-restart; then
-    exit 1
-fi
+gtk_insertion_status=0
+run_gtk_insertion before-shell-restart || gtk_insertion_status=$?
 "$E2E_BIN_DIR/wayexpand" ibus status --json \
     >"$E2E_WORK/ibus-after-gtk-insertion.json" \
     2>"$E2E_WORK/ibus-after-gtk-insertion.err" || true
+if [ "$gtk_insertion_status" -ne 0 ]; then
+    cat "$E2E_WORK/ibus-after-gtk-insertion.json"
+    exit 1
+fi
 if ! python3 - "$E2E_WORK/ibus-after-gtk-insertion.json" <<'PY'
 import json
 import sys
