@@ -657,6 +657,10 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Build the authenticated GNOME tracker test client
         run: cargo build --locked -p wayexpand-e2e --bin wx-e2e-gnome-tracker
+      - name: Start the isolated system bus required by GNOME Shell
+        run: |
+          mkdir -p /run/dbus
+          dbus-daemon --system --fork --nopidfile
       - name: Load the extension and verify live input-source and layout APIs
         run: >-
           runuser -u wayexpand-test -- env
