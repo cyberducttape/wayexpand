@@ -127,7 +127,12 @@ def main():
         window.destroy()
     if failed:
         raise SystemExit(1)
-    result = "preserved the trigger in a password-purpose field" if args.password else "replaced the trigger"
+    if args.password:
+        result = "preserved the trigger in a password-purpose field"
+    elif args.expected.startswith(";"):
+        result = "passed the trigger through unchanged"
+    else:
+        result = "replaced the trigger"
     print(f"pass GTK {args.gtk_version} IBus input context {result} in Gtk.Entry")
 
 
