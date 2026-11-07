@@ -414,13 +414,23 @@ export default class WayExpandWindowTracker extends Extension {
                                 try {
                                     const [pid] = pidConnection.call_finish(pidResult).deep_unpack();
                                     const executable = GLib.file_read_link(`/proc/${pid}/exe`);
-                                    const authorized = isAuthorizedTrackerClient(
-                                        uid, GLib.get_user_id(), executable,
-                                    );
-                                    this._logAuthorizationDiagnostic(
-                                        `peer uid=${uid} executable=${executable.split('/').pop()} authorized=${authorized}`,
-                                    );
-                                    finish(authorized);
+                                    const ownName = Gio.DBus.session.get_unique_name();
+                                    Gio.DBus.session.call(DBUS_NAME, DBUS_PATH, DBUS_NAME,
+                                        'GetConnectionUnixUser', new GLib.Variant('(s)', [ownName]),
+                                        new GLib.VariantType('(u)'), Gio.DBusCallFlags.NONE, 500, null,
+                                        (ownConnection, ownResult) => {
+                                            try {
+                                                const [ownUid] = ownConnection.call_finish(ownResult).deep_unpack();
+                                                const authorized = isAuthorizedTrackerClient(uid, ownUid, executable);
+                                                this._logAuthorizationDiagnostic(
+                                                    `peer uid=${uid} shell uid=${ownUid} executable=${executable.split('/').pop()} authorized=${authorized}`,
+                                                );
+                                                finish(authorized);
+                                            } catch {
+                                                this._logAuthorizationDiagnostic('could not resolve Shell UID');
+                                                finish(false);
+                                            }
+                                        });
                                 } catch (error) {
                                     const detail = String(error?.message || error)
                                         .replace(/\/proc\/[0-9]+\/exe/g, '/proc/<pid>/exe');

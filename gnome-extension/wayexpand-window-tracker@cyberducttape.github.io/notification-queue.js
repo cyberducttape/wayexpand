@@ -9,10 +9,9 @@ const WAYEXPAND_CLIENTS = new Set([
 
 /** Session-bus peer check; same-UID processes are still one trust domain. */
 export function isAuthorizedTrackerClient(peerUid, currentUid, executablePath) {
-    // GetConnectionUnixUser() unpacks a D-Bus uint32 as a JS number, while
-    // GLib.get_user_id() returns the UID as a string on supported GJS builds.
-    // Compare canonical numeric identities; never fall back to username,
-    // process arguments, or executable basename without the UID check.
+    // GetConnectionUnixUser() supplies both peer and Shell UIDs. Compare
+    // canonical numeric identities; never fall back to username, process
+    // arguments, or executable basename without the UID check.
     const normalizeUid = uid => {
         if (typeof uid === 'number' && Number.isSafeInteger(uid) && uid >= 0)
             return String(uid);
