@@ -451,6 +451,7 @@ env \
     --page "$E2E_WORK/browser-ibus-e2e.html" \
     --ready-marker "$E2E_WORK/browser-window-ready" \
     --focus-marker "$E2E_WORK/browser-window-focused" \
+    --armed-marker "$E2E_WORK/browser-window-armed" \
     --status-file "$XDG_RUNTIME_DIR/wayexpand-ibus-status.json" \
     --log "$E2E_WORK/browser-ibus-e2e-chrome.log" \
     >"$E2E_WORK/browser-ibus-e2e.log" 2>&1 &
@@ -484,6 +485,26 @@ if ! activate_window org.wayexpand.GnomeBrowserIbus; then
     exit 1
 fi
 : >"$E2E_WORK/browser-window-focused"
+tries=200
+while [ ! -e "$E2E_WORK/browser-window-armed" ]; do
+    if ! kill -0 "$browser_pid" 2>/dev/null; then
+        wait "$browser_pid" || true
+        browser_pid=
+        log "fail gnome-browser-insertion Chromium did not arm its correlated input check"
+        cat "$E2E_WORK/browser-ibus-e2e.log" "$E2E_WORK/browser-ibus-e2e-chrome.log"
+        exit 1
+    fi
+    tries=$((tries - 1))
+    if [ "$tries" -le 0 ]; then
+        kill "$browser_pid" 2>/dev/null || true
+        wait "$browser_pid" 2>/dev/null || true
+        browser_pid=
+        log "fail gnome-browser-insertion Chromium did not arm its correlated input check"
+        cat "$E2E_WORK/browser-ibus-e2e.log" "$E2E_WORK/browser-ibus-e2e-chrome.log"
+        exit 1
+    fi
+    sleep 0.1
+done
 if ! DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
     xdotool type --clearmodifiers --delay 40 -- ';e2e'; then
     kill "$browser_pid" 2>/dev/null || true

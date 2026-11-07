@@ -49,6 +49,7 @@ def main():
     parser.add_argument("--page", required=True)
     parser.add_argument("--ready-marker", required=True)
     parser.add_argument("--focus-marker", required=True)
+    parser.add_argument("--armed-marker", required=True)
     parser.add_argument("--status-file", required=True)
     parser.add_argument("--log", required=True)
     args = parser.parse_args()
@@ -199,6 +200,7 @@ def main():
             (baseline.get("recent_fields", [])[-1] if baseline.get("recent_fields") else {})
             .get("keys_without_capture", 0)
         )
+        Path(args.armed_marker).touch(mode=0o600)
 
         deadline = time.monotonic() + TIMEOUT_SECONDS
         actual = ""
