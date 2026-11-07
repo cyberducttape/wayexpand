@@ -174,6 +174,22 @@ impl GuiApp {
                     ui.label(RichText::new(self.strings.welcome_intro()).color(palette.muted));
                 });
                 ui.add_space(14.0);
+                if self.gnome_setup_resume_pending {
+                    theme::card(ui, palette, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.colored_label(
+                            palette.warning,
+                            "GNOME setup is ready to resume",
+                        );
+                        ui.label(
+                            "WayExpand's GNOME extension is prepared. If you have not logged out and back in since setup paused, do that first so GNOME can load it. Then continue IBus setup here; replacement consent and any administrator authorization are still reviewed separately.",
+                        );
+                        if theme::primary_button(ui, palette, "Resume GNOME setup").clicked() {
+                            self.start_guided_setup();
+                        }
+                    });
+                    ui.add_space(10.0);
+                }
                 theme::card(ui, palette, |ui| {
                     ui.set_width(ui.available_width());
                     ui.horizontal_wrapped(|ui| {

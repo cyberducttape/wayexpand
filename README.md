@@ -55,20 +55,23 @@ local, offline, no account, no telemetry.
 
 ## Install
 
-### Prebuilt packages (experimental)
+### Distribution packages (recommended when available; currently experimental)
 
 Uncertified builds are published as GitHub prereleases named
 *Experimental build …* on the [releases page](https://github.com/cyberducttape/wayexpand/releases).
 They pass the full CI suite but not real-desktop certification, and need no
 Rust toolchain. Each includes x86_64 and aarch64 archives, a `.deb`, and an
-`.rpm`, with `.sha256` files and build provenance:
+`.rpm`, with `.sha256` files and build provenance. Prefer the `.deb`, `.rpm`,
+or Arch package over the per-user archive installer: distribution packages
+install the shared IBus component manifest and its system-owned
+`wayexpand-ibus` executable together, avoiding setup-time `pkexec` registration
+for those files. The package builds remain experimental and are not desktop
+certification.
 
 ```sh
-sha256sum --check wayexpand-*-linux-x86_64.tar.gz.sha256
-tar -xzf wayexpand-*-linux-x86_64.tar.gz
-./wayexpand-*-linux-x86_64/scripts/install-release.sh
-# or: sudo apt install ./wayexpand_*_amd64.deb
+sudo apt install ./wayexpand_*_amd64.deb
 # or: sudo dnf install ./wayexpand-*.x86_64.rpm
+# Arch packaging preview: see docs/PACKAGING.md#arch-linux-packaging-preview
 ```
 
 Ubuntu 26.04 (Resolute) users can also install the experimental daily package
@@ -80,10 +83,27 @@ sudo apt update
 sudo apt install wayexpand
 ```
 
-The PPA's latest Resolute amd64 package built successfully on 2026-10-27, but
-it is not compositor-certified. Check the PPA page for current package status.
+The PPA is currently limited to Ubuntu 26.04 amd64 and is not
+compositor-certified. Check the PPA page and [packaging status](docs/PACKAGING.md)
+before installing.
 
-### From source
+### Developer installs
+
+The release archive and source installer are per-user developer paths. They
+stage the IBus component but may require administrator authorization to
+register the system-wide IBus component. On GNOME, setup can also ask you to log
+out and back in before resuming. Prefer a distribution package for an ordinary
+desktop installation when one is available.
+
+To install a release archive without building from source:
+
+```sh
+sha256sum --check wayexpand-*-linux-x86_64.tar.gz.sha256
+tar -xzf wayexpand-*-linux-x86_64.tar.gz
+./wayexpand-*-linux-x86_64/scripts/install-release.sh
+```
+
+To build and install from source:
 
 Rust 1.92 or newer:
 
