@@ -192,9 +192,15 @@ impl IbusEngineAdapter {
         // for opening a form only when the IBus input-context identity is
         // also available.
         engine.set_form_replacement_guarantee(ReplacementGuarantee::VerifiedSurroundingText);
-        // Keep IBus key handling non-blocking for broker actions. Direct
-        // programs are still rejected by the backend-specific gate below.
-        let _ = engine.enable_async_commands();
+        // Text-only input contexts need no command workers. Keep IBus key
+        // handling non-blocking only for configurations that actually enable
+        // command expansions or hotkeys; direct programs are still rejected
+        // by the backend-specific gate below.
+        if engine.requires_async_workers() && !engine.enable_async_commands() {
+            warn!(
+                "IBus asynchronous workers could not start; command-backed actions are unavailable"
+            );
+        }
         // A new engine has no content type yet: capture stays off until the
         // client reports a known non-sensitive field.
         engine.process(InputEvent::FocusChanged { sensitive: true });
@@ -405,7 +411,7 @@ impl IbusEngineAdapter {
         let mut engine = ExpansionEngine::new(config)?;
         engine.apply_administrator_policy(&self.policy)?;
         engine.inherit_runtime_state(&self.engine);
-        if self.engine.async_commands_enabled() && !engine.enable_async_commands() {
+        if engine.requires_async_workers() && !engine.enable_async_commands() {
             warn!(
                 "IBus asynchronous workers could not restart after configuration reload; command-backed actions are unavailable"
             );
@@ -421,13 +427,13 @@ impl IbusEngineAdapter {
     pub fn replace_validated_config(&mut self, validated: Arc<ValidatedConfig>) {
         let mut engine = ExpansionEngine::from_validated(validated);
         policy::apply_to_engine(&mut engine, &self.policy);
+        engine.inherit_runtime_state(&self.engine);
         engine.set_form_replacement_guarantee(ReplacementGuarantee::VerifiedSurroundingText);
-        if self.engine.async_commands_enabled() && !engine.enable_async_commands() {
+        if engine.requires_async_workers() && !engine.enable_async_commands() {
             warn!(
                 "IBus asynchronous workers could not restart after configuration reload; command-backed actions are unavailable"
             );
         }
-        engine.inherit_runtime_state(&self.engine);
         self.engine = engine;
     }
 
