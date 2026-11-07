@@ -453,15 +453,22 @@ PY
             cat "$test_log"
             exit 1
         fi
-        focus_tries=$((focus_tries - 1))
-        if [ "$(python3 - "$status_file" <<PY
+        if [ "$(python3 - "$status_file" "$base_focus" <<'PY'
 import json
 import sys
 
 with open(sys.argv[1], encoding="utf-8") as status_file:
-    print(json.load(status_file).get("totals", {}).get("focus_ins", 0))
+    status = json.load(status_file)
+baseline = int(sys.argv[2])
+focused = any(
+    field.get("sequence", 0) > baseline
+    and field.get("focused") is True
+    and field.get("content_type") == "normal"
+    for field in status.get("recent_fields", [])
+)
+print(int(focused))
 PY
-)" -gt "$base_focus" ]; then
+)" -eq 1 ]; then
             break
         fi
         focus_tries=$((focus_tries - 1))
