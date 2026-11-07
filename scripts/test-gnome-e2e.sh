@@ -301,7 +301,7 @@ case "$live_build" in
     *) log "fail extension-pre-upgrade-build unexpected live identity: $live_build"; exit 1 ;;
 esac
 cp "$E2E_PROJECT_DIR/gnome-extension/$E2E_UUID/metadata.json" \
-    "$E2E_WORK/data/gnome-shell/extensions/$E2E_UUID/metadata.json"
+    "$E2E_WORK/home/.local/share/gnome-shell/extensions/$E2E_UUID/metadata.json"
 "$E2E_BIN_DIR/wayexpand" doctor --gnome --json \
     >"$E2E_WORK/doctor-after-extension-upgrade.json" \
     2>"$E2E_WORK/doctor-after-extension-upgrade.err" || true
