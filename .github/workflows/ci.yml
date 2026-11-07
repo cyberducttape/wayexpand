@@ -663,14 +663,15 @@ jobs:
           dbus-daemon --system --fork --nopidfile
           mkdir -p /run/systemd/seats /run/systemd/sessions /run/systemd/users
           /usr/lib/systemd/systemd-logind &
-          for attempt in $(seq 1 50); do
-            if busctl --system status org.freedesktop.login1 >/dev/null 2>&1; then
-              exit 0
+          attempt=0
+          until busctl --system status org.freedesktop.login1 >/dev/null 2>&1; do
+            attempt=$((attempt + 1))
+            if [ "$attempt" -ge 50 ]; then
+              echo "systemd-logind did not acquire org.freedesktop.login1 after $attempt attempts" >&2
+              exit 1
             fi
             sleep 0.1
           done
-          echo 'systemd-logind did not acquire org.freedesktop.login1' >&2
-          exit 1
       - name: Load the extension and verify live input-source and layout APIs
         run: >-
           runuser -u wayexpand-test -- env
