@@ -2,9 +2,10 @@
 # End-to-end test of GNOME source activation, the IBus engine, and window
 # tracking in a private headless GNOME Shell session. It verifies GNOME source
 # registration/activation, an IBus protocol transaction, insertion into a GTK
-# GTK Wayland IBus input-method context, focus tracking, and extension
-# upgrade/reload behavior. Synthetic context events do not certify physical
-# keyboard delivery or compositor event routing.
+# GNOME source activation, a live IBus input-context transaction, focus
+# tracking, and extension upgrade/reload behavior. The IBus client verifies
+# the toolkit protocol contract, but does not certify GTK application
+# insertion, compositor keyboard delivery, or physical-keyboard behavior.
 #
 # Usage: scripts/test-gnome-e2e.sh [--keep]
 #   E2E_BIN=DIR        use prebuilt wayexpand, wayexpand-ibus, and wx-e2e-* binaries
@@ -187,48 +188,6 @@ activate_window() {
         fi
         sleep 0.05
     done
-}
-
-run_gtk_insertion() {
-    label=$1
-    gtk_log="$E2E_WORK/gtk-insertion-$label.log"
-    WAYLAND_DISPLAY="$display" GDK_BACKEND=wayland /usr/bin/python3 \
-        "$E2E_PROJECT_DIR/scripts/certification-clients/gtk_ibus_insertion.py" \
-        >"$gtk_log" 2>&1 &
-    gtk_pid=$!
-    tries=200
-    until grep -Fx 'ready gtk-ibus-insertion org.wayexpand.GtkIbusInsertion' "$gtk_log" >/dev/null 2>&1; do
-        tries=$((tries - 1))
-        if [ "$tries" -le 0 ] || ! kill -0 "$gtk_pid" 2>/dev/null; then
-            cat "$gtk_log" 2>/dev/null || true
-            log "fail gtk-ibus-insertion-$label GTK test application did not become ready"
-            kill "$gtk_pid" 2>/dev/null || true
-            wait "$gtk_pid" 2>/dev/null || true
-            gtk_pid=
-            return 1
-        fi
-        sleep 0.05
-    done
-    if ! activate_window org.wayexpand.GtkIbusInsertion; then
-        log "fail gtk-ibus-insertion-$label GNOME Shell could not focus the GTK test window"
-        kill "$gtk_pid" 2>/dev/null || true
-        wait "$gtk_pid" 2>/dev/null || true
-        cat "$gtk_log" 2>/dev/null || true
-        gtk_pid=
-        return 1
-    fi
-    gtk_status=0
-    wait "$gtk_pid" || gtk_status=$?
-    gtk_pid=
-    cat "$gtk_log"
-    if [ "$gtk_status" -eq 0 ] \
-        && grep -Fx 'pass gtk-ibus-insertion GTK entry contains the committed replacement' \
-            "$gtk_log" >/dev/null; then
-        log "pass gtk-ibus-insertion-$label GTK received the active IBus engine replacement"
-        return 0
-    fi
-    log "fail gtk-ibus-insertion-$label GTK did not receive the expected IBus replacement"
-    return 1
 }
 
 tries=600
@@ -418,18 +377,16 @@ while :; do
     fi
     sleep 0.1
 done
-# Let a real GTK input context receive a trigger from the compositor's
-# keyboard path. The direct IBus protocol transaction is covered separately.
-gtk_insertion_status=0
-run_gtk_insertion before-shell-restart || gtk_insertion_status=$?
+# Exercise the active GNOME-selected engine through the IBus input-context
+# protocol. The toolkit client verifies deletion and commit behavior, though
+# headless GNOME cannot deliver a trusted synthetic physical key to GTK.
+IBUS_ADDRESS=$(ibus address) "$E2E_BIN_DIR/wx-e2e-ibus" \
+    "$XDG_RUNTIME_DIR/wayexpand-ibus-status.json" --expect-active
+log "pass gnome-ibus-input-context the active GNOME-selected engine replaced a verified trigger"
 "$E2E_BIN_DIR/wayexpand" ibus status --json \
-    >"$E2E_WORK/ibus-after-gtk-insertion.json" \
-    2>"$E2E_WORK/ibus-after-gtk-insertion.err" || true
-if [ "$gtk_insertion_status" -ne 0 ]; then
-    cat "$E2E_WORK/ibus-after-gtk-insertion.json"
-    exit 1
-fi
-if ! python3 - "$E2E_WORK/ibus-after-gtk-insertion.json" <<'PY'
+    >"$E2E_WORK/ibus-after-input-context.json" \
+    2>"$E2E_WORK/ibus-after-input-context.err" || true
+if ! python3 - "$E2E_WORK/ibus-after-input-context.json" <<'PY'
 import json
 import sys
 
@@ -443,11 +400,11 @@ expected = {
 }
 actual = {key: report.get(key) for key in expected}
 assert actual == expected, actual
-print("pass gnome-ibus-operational the GTK input context reached the selected engine")
+print("pass gnome-ibus-input-context the live GNOME engine replaced a verified trigger")
 PY
 then
-    log "fail gnome-ibus-operational GTK insertion did not produce healthy IBus engine telemetry"
-    cat "$E2E_WORK/ibus-after-gtk-insertion.json"
+    log "fail gnome-ibus-input-context the live engine did not report healthy IBus telemetry"
+    cat "$E2E_WORK/ibus-after-input-context.json"
     exit 1
 fi
 
@@ -611,8 +568,13 @@ PY
         status=1
     fi
 
-    if [ "$login_source_ok" -eq 1 ] && ! run_gtk_insertion after-shell-restart; then
-        status=1
+    if [ "$login_source_ok" -eq 1 ]; then
+        IBUS_ADDRESS=$(ibus address) "$E2E_BIN_DIR/wx-e2e-ibus" \
+            "$XDG_RUNTIME_DIR/wayexpand-ibus-status.json" --expect-active \
+            || status=1
+        if [ "$status" -eq 0 ]; then
+            log "pass gnome-ibus-input-context-after-login the reloaded session replaced a verified trigger"
+        fi
     fi
 fi
 
@@ -666,7 +628,7 @@ env -i \
     dbus-run-session -- "$work/session.sh" >"$work/results.txt" 2>"$work/session.log" || status=$?
 
 cat "$work/results.txt"
-expected_checks='extension-active unauthorized-tracker-subscription extension-pre-upgrade-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gtk-ibus-insertion-before-shell-restart gnome-ibus-operational extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gtk-ibus-insertion-after-shell-restart'
+expected_checks='extension-active unauthorized-tracker-subscription extension-pre-upgrade-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-ibus-input-context extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-ibus-input-context-after-login'
 missing_check=
 for check in $expected_checks; do
     if ! grep -F "pass $check" "$work/results.txt" >/dev/null; then
@@ -688,12 +650,12 @@ if [ "$status" -ne 0 ] || grep -q '^fail' "$work/results.txt" \
     printf '::error title=GNOME window tracking E2E::%s\n' "$failure" >&2
     for log in session.log gnome-shell.log gnome-shell-after-login.log ibus-daemon.log ibus-engines.txt \
         ibus-before-live-activation.json ibus-before-live-activation.err \
-        ibus-after-gtk-insertion.json ibus-after-gtk-insertion.err \
+        ibus-after-input-context.json ibus-after-input-context.err \
         ibus-source-activation-after-login.log \
         unauthorized-tracker-subscription.log \
         doctor-after-extension-upgrade.json \
         doctor-after-extension-upgrade.err doctor-after-login.json \
-        gtk-insertion-before-shell-restart.log gtk-insertion-after-shell-restart.log sink.log; do
+        sink.log; do
         printf '%s\n' "--- $log" >&2
         tail -n 60 "$work/$log" >&2 2>/dev/null || true
         if [ -s "$work/$log" ]; then

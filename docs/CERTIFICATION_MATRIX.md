@@ -67,11 +67,13 @@ coverage required before making GNOME IBus support claims. The existing
 `test-gnome-e2e.sh` now runs GNOME Shell with its session-managed IBus daemon. It
 checks component discovery, GNOME source registration, Shell activation, an
 already-active WayExpand engine, a controlled IBus input-context replacement,
-and window tracking. It also sends harmless test keys through GTK 3's IBus
-input-method context and verifies the delete/commit result in a GTK entry,
-then simulates an extension upgrade with an old Shell instance and a Shell
-restart. This checks the GTK IBus context path in a headless GNOME session; it
-does not certify compositor keyboard routing or physical keyboard delivery.
+and window tracking. It also drives a toolkit-style IBus input context against
+the active GNOME-selected engine, verifies trigger deletion and replacement
+commit, checks password-field refusal and content-free telemetry, then
+simulates an extension upgrade with an old Shell instance and a Shell restart.
+This validates the IBus protocol path in a headless GNOME session; it does not
+certify GTK application insertion, compositor keyboard routing, or physical
+keyboard delivery.
 `test-ibus-e2e.sh` additionally exercises IBus engine focus, content-type and
 telemetry cases. These headless tests do not prove physical keyboard routing,
 compositor-delivered key events, persistence across an actual user logout, or
