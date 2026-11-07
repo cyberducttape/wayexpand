@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Send harmless GTK key events through a focused Wayland IBus context."""
+"""Send harmless XTest key events through a focused GTK IBus context."""
 
 import json
 import os
@@ -107,23 +107,15 @@ def main():
             GLib.timeout_add(50, check_result)
             return GLib.SOURCE_REMOVE
 
-        keyboard = Gdk.Display.get_default().get_default_seat().get_keyboard()
         keyval = Gdk.unicode_to_keyval(ord(TRIGGER[index]))
-        for event_type in (Gdk.EventType.KEY_PRESS, Gdk.EventType.KEY_RELEASE):
-            event = Gdk.Event.new(event_type)
-            event.key.window = state["entry"].get_window()
-            event.key.send_event = True
-            event.key.time = Gdk.CURRENT_TIME
-            event.key.state = Gdk.ModifierType(0)
-            event.key.keyval = keyval
-            event.key.hardware_keycode = 0
-            event.key.group = 0
-            if keyboard is not None:
-                event.set_device(keyboard)
-            # Queue through GDK's normal event dispatcher. Calling
-            # Gtk.Widget.event() directly bypasses the toplevel's IM-context
-            # filter, so WayExpand's IBus engine never sees those key events.
-            event.put()
+        # GTK's test helper uses XTest on the focused Xwayland window. This
+        # reaches the ordinary GTK/IBus event path; app-created Gdk.Event
+        # objects are filtered by the Wayland compositor and never reach IBus.
+        if not Gtk.test_widget_send_key(
+            state["entry"], keyval, Gdk.ModifierType(0)
+        ):
+            print("fail gtk-ibus-insertion GTK XTest key dispatch failed", flush=True)
+            return finish(1)
         state["trigger_index"] += 1
         GLib.timeout_add(50, send_next_key)
         return GLib.SOURCE_REMOVE
