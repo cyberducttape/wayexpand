@@ -1946,6 +1946,33 @@ fn gnome_selects_ibus_engine_through_shell(desktop: IbusDesktop) -> bool {
     desktop == IbusDesktop::Gnome
 }
 
+fn ensure_ibus_engine_selected(shell_managed: bool) -> Result<()> {
+    let shell_activation_window = if shell_managed {
+        Duration::from_secs(2)
+    } else {
+        Duration::ZERO
+    };
+    if wait_until(
+        shell_activation_window,
+        wayexpand_backend_ibus::global_engine_selected,
+    ) {
+        return Ok(());
+    }
+
+    // Shell's source activation can complete its UI update before IBus changes
+    // engines. Give that asynchronous request time to finish before applying a
+    // bounded fallback; issuing both requests concurrently cancels activation.
+    let _ = run_setup_command("ibus", &["engine", "wayexpand"]);
+    if wait_until(
+        Duration::from_secs(5),
+        wayexpand_backend_ibus::global_engine_selected,
+    ) {
+        Ok(())
+    } else {
+        bail!("could not select the WayExpand IBus engine; check that `ibus list-engine --name-only` lists `wayexpand`")
+    }
+}
+
 fn restart_failure(desktop: IbusDesktop, reason: &str) -> anyhow::Error {
     if desktop != IbusDesktop::Gnome {
         return anyhow::anyhow!("could not refresh the IBus component registry: {reason}");
@@ -2273,13 +2300,7 @@ fn activate_and_verify(
         // and can cancel it, leaving WayExpand selected without a live engine.
         let _ = run_setup_command("ibus", &["engine", "wayexpand"]);
     }
-    // The exit status is meaningless for `default`-layout engines; read back.
-    if !wait_until(
-        Duration::from_secs(5),
-        wayexpand_backend_ibus::global_engine_selected,
-    ) {
-        bail!("could not select the WayExpand IBus engine; check that `ibus list-engine --name-only` lists `wayexpand`");
-    }
+    ensure_ibus_engine_selected(gnome_managed_source)?;
     stop_global_capture(options, companion)?;
     match companion {
         CompanionService::Terminals => {
@@ -2346,14 +2367,9 @@ pub(crate) fn repair_gnome_input_source() -> Result<()> {
         crate::gnome_input_sources::Snapshot::register_and_activate(
             &mut snapshot.gnome_input_sources,
         )?;
-        // GNOME's live source manager is the sole engine selector in this
-        // session. A concurrent `ibus engine` command can cancel its request.
-        if !wait_until(
-            Duration::from_secs(5),
-            wayexpand_backend_ibus::global_engine_selected,
-        ) {
-            bail!("IBus did not report WayExpand as the active engine");
-        }
+        // Let Shell finish its asynchronous source activation before falling
+        // back to IBus directly; concurrent selection requests can cancel.
+        ensure_ibus_engine_selected(true)?;
         let report = chain::diagnose();
         let failed = gnome_activation_failures(&report);
         if !failed.is_empty() {
