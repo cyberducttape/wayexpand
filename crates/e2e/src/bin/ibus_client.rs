@@ -277,14 +277,15 @@ fn select_engine(connection: &Connection, field: &Field<'_>, expect_active: bool
 /// Wait for content-free engine telemetry to confirm that IBus has created
 /// and focused the actual engine context. `GetGlobalEngine` can return the
 /// selected descriptor before the first input context is fully attached.
-fn wait_for_focused_engine(status_file: &Path) -> Result<()> {
+fn wait_for_focused_engine(status_file: &Path, after_focus_sequence: u64) -> Result<()> {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         if let Some(reading) = wayexpand_backend_ibus::telemetry::read_status_at(status_file) {
             let status = reading.status;
             if status.engines > 0
                 && status.recent_fields.iter().any(|field| {
-                    field.focused
+                    field.sequence > after_focus_sequence
+                        && field.focused
                         && field.content_type
                             == wayexpand_backend_ibus::telemetry::IbusContentTypeState::Normal
                         && field.surrounding_capability
@@ -372,6 +373,9 @@ fn main() -> Result<()> {
         }
     });
 
+    let focus_baseline = wayexpand_backend_ibus::telemetry::read_status_at(&status_file)
+        .map(|reading| reading.status.totals.focus_ins)
+        .unwrap_or(0);
     let mut results = Results { failed: false };
     let full_caps = CAP_PREEDIT | CAP_FOCUS | CAP_SURROUNDING_TEXT;
     let mut editor = create_field(&connection, &events, "e2e-editor", full_caps, true)?;
@@ -393,7 +397,7 @@ fn main() -> Result<()> {
     // Wait for WayExpand to publish a focused normal-text context before
     // sending even a harmless probe key: older IBus releases may report the
     // key handled while that attachment is still in flight.
-    wait_for_focused_engine(&status_file)?;
+    wait_for_focused_engine(&status_file, focus_baseline)?;
     if single_expansion {
         // Check that a non-trigger printable key still reaches the client
         // after the newly selected IBus context is ready.

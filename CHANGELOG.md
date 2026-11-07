@@ -5,10 +5,11 @@ All notable changes to WayExpand are documented here.
 ## [Unreleased]
 
 - Make the GNOME IBus acceptance test wait for a focused engine context before
-  sending its harmless key probe; Ubuntu 24.04 CI had shown the first key could
-  be consumed during post-Shell-restart engine attachment. Extend the GTK 3
-  headless acceptance client to verify Unicode output and password-purpose
-  field refusal alongside ordinary replacement.
+  sending its harmless key probe, correlated to a new IBus focus sequence so a
+  stale pre-restart context cannot satisfy readiness. Ubuntu 24.04 CI had shown
+  the first key could be consumed during post-Shell-restart engine attachment.
+  Extend the GTK 3 headless acceptance client to verify Unicode output and
+  password-purpose field refusal alongside ordinary replacement.
 - Expand the GNOME IBus acceptance plan to Fedora 45/GNOME 51 and supported
   Ubuntu 24.04/26.04 releases, with independent GTK 3/4, Qt, Firefox,
   Chromium, Electron, and terminal cells for US, German, French, AltGr, and
