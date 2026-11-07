@@ -23,9 +23,11 @@ All notable changes to WayExpand are documented here.
   installs or enables the extension, and backend selection failures no longer
   initialize a configuration file.
 - Install GNOME Shell extension updates from a staged, fully verified directory
-  and switch the complete payload together, retaining the prior directory if
-  the activation rename fails. Isolate GNOME's internal keyboard-manager calls
-  behind a feature-detecting compatibility boundary with fail-closed tests.
+  and switch the complete payload atomically. Retain the prior directory and
+  GNOME enablement settings until live activation, tracker protocol, and build
+  identity checks pass; restore them on failure. Isolate GNOME's internal
+  keyboard-manager calls behind a feature-detecting compatibility boundary
+  with fail-closed tests.
 - Include the optional Action Broker PolicyKit policy in binary release
   archives and assert its presence and action identity in release packaging
   tests.

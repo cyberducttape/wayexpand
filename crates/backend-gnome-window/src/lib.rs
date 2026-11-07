@@ -762,6 +762,23 @@ pub fn enable_extension() -> Result<bool, GnomeWindowError> {
         .deserialize::<bool>()?)
 }
 
+/// Ask GNOME Shell to disable the extension. Setup uses this only to unwind
+/// an activation it attempted when readiness verification subsequently fails.
+pub fn disable_extension() -> Result<bool, GnomeWindowError> {
+    let connection = plain_connection()?;
+    shell_owner(&connection)?;
+    Ok(connection
+        .call_method(
+            Some(SHELL_NAME),
+            EXTENSIONS_PATH,
+            Some(EXTENSIONS_IFACE),
+            "DisableExtension",
+            &(EXTENSION_UUID,),
+        )?
+        .body()
+        .deserialize::<bool>()?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
