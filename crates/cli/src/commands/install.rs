@@ -156,6 +156,24 @@ fn readiness_check(
     }
 }
 
+fn integrated_readiness_status(checks: &[ReadinessCheck]) -> &'static str {
+    if checks.iter().any(|check| {
+        matches!(
+            check.status.as_str(),
+            "fail" | "unavailable" | "unknown" | "not_tested"
+        )
+    }) {
+        "incomplete"
+    } else if checks
+        .iter()
+        .any(|check| check.status.as_str() == "warning")
+    {
+        "degraded"
+    } else {
+        "pass"
+    }
+}
+
 fn systemd_property(unit: &str, property: &str) -> Option<String> {
     crate::setup_ibus::command_output(
         "systemctl",
@@ -341,6 +359,7 @@ fn integrated_checks(ibus: &wayexpand_backend_ibus::chain::IbusChainReport) -> V
             "manifest":ibus.check("manifest").map(|check| serde_json::json!({"state":format!("{:?}",check.state).to_lowercase(),"detail":check.detail})),
         }),
     ));
+    checks.extend(ibus_integration_checks(ibus));
     let identity = installation_identity();
     let mismatch = identity["path_shadow_detected"] == true
         || identity["mixed_cli_daemon_installation"] == true;
@@ -351,6 +370,44 @@ fn integrated_checks(ibus: &wayexpand_backend_ibus::chain::IbusChainReport) -> V
         identity,
     ));
     checks
+}
+
+/// Copy the bounded, content-free desktop routing evidence into setup
+/// readiness. A registered and running IBus engine does not imply that the
+/// compositor routes application input to it.
+fn ibus_integration_checks(
+    ibus: &wayexpand_backend_ibus::chain::IbusChainReport,
+) -> Vec<ReadinessCheck> {
+    [
+        "desktop",
+        "manifest-scope",
+        "gnome-session",
+        "gnome-source-registered",
+        "gnome-source-active",
+        "toolkit-environment",
+        "desktop-shell-environment",
+    ]
+    .into_iter()
+    .filter_map(|id| {
+        let check = ibus.check(id)?;
+        let status = match check.state {
+            wayexpand_backend_ibus::chain::IbusCheckState::Pass => "pass",
+            wayexpand_backend_ibus::chain::IbusCheckState::Warn => "warning",
+            wayexpand_backend_ibus::chain::IbusCheckState::Fail => "fail",
+            wayexpand_backend_ibus::chain::IbusCheckState::Skip => "not_applicable",
+            wayexpand_backend_ibus::chain::IbusCheckState::Unknown => "unknown",
+        };
+        Some(readiness_check(
+            format!("ibus_route:{id}"),
+            status,
+            check.detail.clone(),
+            serde_json::json!({
+                "problem_id":check.problem_id,
+                "remediation":check.fix,
+            }),
+        ))
+    })
+    .collect()
 }
 
 fn operational_checks(
@@ -364,6 +421,30 @@ fn operational_checks(
         if ibus_active { "pass" } else { "not_tested" },
         if ibus_active { "selected engine process is running; target text receipt/insertion remains a separate test" } else { "IBus engine activation has not been verified" },
         serde_json::json!({"selected":ibus.selected,"engine_running":ibus.engine_running,"text_received":ibus.text_received,"expanded":ibus.expanded}),
+    ));
+    checks.push(readiness_check(
+        "ibus_field_input",
+        if ibus.text_received {
+            "pass"
+        } else {
+            "not_tested"
+        },
+        if ibus.text_received {
+            "a normal IBus text field has supplied input telemetry"
+        } else {
+            "no normal text-field input has been verified by the IBus engine"
+        },
+        serde_json::json!({"text_received":ibus.text_received}),
+    ));
+    checks.push(readiness_check(
+        "ibus_expansion",
+        if ibus.expanded { "pass" } else { "not_tested" },
+        if ibus.expanded {
+            "the IBus engine reports a committed expansion"
+        } else {
+            "no IBus expansion has been observed; actual target insertion remains unverified"
+        },
+        serde_json::json!({"expanded":ibus.expanded}),
     ));
     let daemon_ready = daemon.is_some_and(|status| {
         crate::doctor::status::status_schema_compatible(status)
@@ -675,13 +756,10 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
     });
     let ibus_report = wayexpand_backend_ibus::chain::diagnose();
     let ibus_readiness = ibus_report.readiness();
-    let hello_sample_available =
-        wayexpand_core::Config::load(wayexpand_core::default_config_path()).is_ok_and(|config| {
-            config
-                .expansion
-                .iter()
-                .any(|item| item.enabled && item.answers_to(";;hello"))
-        });
+    let first_run_test_available =
+        wayexpand_core::Config::load(wayexpand_core::default_config_path())
+            .ok()
+            .is_some_and(|config| crate::commands::system::setup_test_trigger(&config).is_some());
     let daemon_status = crate::doctor::status::read_daemon_status()
         .ok()
         .and_then(|response| crate::doctor::status::status_as_json(&response).ok());
@@ -708,7 +786,7 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
             "schema":2, "title":"WayExpand setup readiness", "ready":ready,
                 "readiness_levels":{
                     "installed":{"status":if installed {"pass"} else {"fail"},"checks":rows.iter().map(|row| serde_json::json!({"component":row.component,"status":row.status,"path":row.path,"detail":row.detail})).collect::<Vec<_>>()},
-                    "integrated":{"status":if integration.iter().all(|check| check.status == "pass" || check.status == "warning") {"pass"} else {"incomplete"},"checks":integration},
+                    "integrated":{"status":integrated_readiness_status(&integration),"checks":integration},
                     "operational":{"status":if operational.iter().any(|check| check.component == "daemon_runtime" && check.status == "pass") || operational.iter().any(|check| check.component == "ibus_engine" && check.status == "pass") {"partial"} else {"not_ready"},"checks":operational},
                     "target_insertion":{"status":"not_tested","verified":false},
                     "terminal_matching_self_test":&terminal_match,
@@ -725,7 +803,7 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
             "ibus_runtime":ibus_readiness,
                 "terminal_matching_self_test":&terminal_match,
                 "activation":{"required":true,"command":"wayexpand setup --apply","real_insertion_verified":false,"consent_granted":false},
-                "first_run_test":{"trigger":";;hello","command":"wayexpand debug --test ';;hello'","available":hello_sample_available,"real_application_confirmation_required":true,"verified":false}
+                "first_run_test":{"command":"wayexpand setup --apply","manual_command":"wayexpand debug --test <trigger>","selection":"prefer a testable ;;hello sample, otherwise an enabled static snippet","available":first_run_test_available,"real_application_confirmation_required":true,"verified":false}
             })
         );
     } else {
@@ -801,7 +879,7 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
                 .as_str()
                 .unwrap_or("could not evaluate terminal matching")
         );
-        println!("\nDesktop: {}\nRecommended: {} ({})\nSetup preflight: {}\nTarget insertion: NOT TESTED\nFirst-run test: {}\n\nNext: wayexpand setup --apply\n\nPreflight does not grant raw-input/portal consent or verify target-app insertion.", crate::doctor::backends::session_description(), recommendation.label, recommendation.detail, if ready {"ready to configure"} else {"prerequisites incomplete"}, if hello_sample_available {"`wayexpand debug --test ';;hello'` (requires real-app confirmation)"} else {"no enabled ;;hello sample is configured"});
+        println!("\nDesktop: {}\nRecommended: {} ({})\nSetup preflight: {}\nTarget insertion: NOT TESTED\nFirst-run test: {}\n\nNext: wayexpand setup --apply\n\nPreflight does not grant raw-input/portal consent or verify target-app insertion.", crate::doctor::backends::session_description(), recommendation.label, recommendation.detail, if ready {"ready to configure"} else {"prerequisites incomplete"}, if first_run_test_available {"`wayexpand setup --apply` can offer a real-app test using an enabled static snippet (requires confirmation)"} else {"no enabled static snippet is configured; add a harmless one for an optional test"});
     }
     if !ready {
         bail!("setup prerequisites are incomplete; see the failed checks")
@@ -818,6 +896,12 @@ fn terminal_match_self_test(
     terminal_only_runtime: bool,
 ) -> serde_json::Value {
     if terminal_only_runtime {
+        // Do not send a command that may not exist to an older daemon. In
+        // particular, older control servers can return a status string that
+        // looks like malformed JSON, obscuring the real CLI/daemon mismatch.
+        if daemon_status.is_some_and(|status| !daemon_build_matches_cli(status)) {
+            return stale_daemon_terminal_match_report(daemon_status);
+        }
         let response =
             crate::control_operation(wayexpand_core::DaemonOperation::TerminalMatchSelfTest);
         return parse_terminal_match_self_test(response, daemon_status);
@@ -838,6 +922,43 @@ fn terminal_match_self_test(
     let mut report = terminal_match_self_test_for(&config);
     report["configuration_path"] = serde_json::json!(config_path);
     report["configuration_source"] = serde_json::json!(configuration_source);
+    report
+}
+
+fn daemon_build_matches_cli(status: &serde_json::Value) -> bool {
+    crate::doctor::status::build_identities_match(
+        status
+            .get("daemon_commit")
+            .and_then(serde_json::Value::as_str),
+        status
+            .get("daemon_version")
+            .and_then(serde_json::Value::as_str),
+        crate::build_info::COMMIT,
+        crate::build_info::VERSION,
+    )
+}
+
+fn stale_daemon_terminal_match_report(
+    daemon_status: Option<&serde_json::Value>,
+) -> serde_json::Value {
+    let mut report = serde_json::json!({
+        "status": "fail",
+        "problem_id": "WX-VERSION-001",
+        "detail": "the running daemon is from a different or unverifiable build; its terminal matcher was not tested",
+        "remediation": "wayexpand upgrade --apply",
+        "configuration_source": "not_tested_stale_daemon"
+    });
+    if let Some(status) = daemon_status {
+        if let Some(path) = status.get("config_active_path") {
+            report["configuration_path"] = path.clone();
+        }
+        if let Some(commit) = status.get("daemon_commit") {
+            report["daemon_commit"] = commit.clone();
+        }
+        if let Some(version) = status.get("daemon_version") {
+            report["daemon_version"] = version.clone();
+        }
+    }
     report
 }
 
@@ -1019,6 +1140,115 @@ mod tests {
     use super::*;
 
     #[test]
+    fn integrated_readiness_does_not_promote_warnings_or_unknowns_to_pass() {
+        let pass = || readiness_check("unit", "pass", "loaded", serde_json::Value::Null);
+        let not_applicable = readiness_check(
+            "optional",
+            "not_applicable",
+            "not used on this desktop",
+            serde_json::Value::Null,
+        );
+        assert_eq!(
+            integrated_readiness_status(&[pass(), not_applicable]),
+            "pass"
+        );
+
+        let warning = readiness_check(
+            "ibus_route",
+            "warning",
+            "recent helper crash",
+            serde_json::Value::Null,
+        );
+        assert_eq!(integrated_readiness_status(&[pass(), warning]), "degraded");
+
+        let unknown = readiness_check("input", "unknown", "not observed", serde_json::Value::Null);
+        assert_eq!(
+            integrated_readiness_status(&[pass(), unknown]),
+            "incomplete"
+        );
+    }
+
+    #[test]
+    fn setup_readiness_exposes_compositor_routing_failure_and_repair() {
+        let report = wayexpand_backend_ibus::chain::IbusChainReport {
+            desktop: wayexpand_backend_ibus::chain::IbusDesktop::KdeWayland,
+            checks: vec![
+                wayexpand_backend_ibus::chain::IbusCheck {
+                    id: "desktop",
+                    title: "KWin sends input to IBus",
+                    state: wayexpand_backend_ibus::chain::IbusCheckState::Fail,
+                    problem_id: Some("WX-KWIN-IBUS-001"),
+                    detail: "KWin has no Virtual Keyboard configured".into(),
+                    fix: Some("Select IBus Wayland in KWin settings".into()),
+                },
+                wayexpand_backend_ibus::chain::IbusCheck {
+                    id: "manifest-scope",
+                    title: "Shared IBus registration is multi-user safe",
+                    state: wayexpand_backend_ibus::chain::IbusCheckState::Warn,
+                    problem_id: Some("WX-IBUS-MULTIUSER-001"),
+                    detail: "shared manifest points into a user home".into(),
+                    fix: Some("install the shared engine".into()),
+                },
+            ],
+            activity: None,
+        };
+
+        let checks = ibus_integration_checks(&report);
+        let routing = checks
+            .iter()
+            .find(|check| check.component == "ibus_route:desktop")
+            .expect("desktop routing evidence should be included");
+        assert_eq!(routing.status, "fail");
+        assert_eq!(routing.evidence["problem_id"], "WX-KWIN-IBUS-001");
+        assert_eq!(
+            routing.evidence["remediation"],
+            "Select IBus Wayland in KWin settings"
+        );
+        assert!(routing.detail.contains("no Virtual Keyboard"));
+        let manifest = checks
+            .iter()
+            .find(|check| check.component == "ibus_route:manifest-scope")
+            .expect("shared IBus scope evidence should be included");
+        assert_eq!(manifest.status, "warning");
+        assert_eq!(manifest.evidence["problem_id"], "WX-IBUS-MULTIUSER-001");
+    }
+
+    #[test]
+    fn setup_readiness_separates_a_running_engine_from_received_input() {
+        let readiness = wayexpand_backend_ibus::chain::IbusReadiness {
+            selected: true,
+            engine_running: true,
+            text_received: false,
+            expanded: false,
+            ..Default::default()
+        };
+
+        let checks = operational_checks(&readiness, None);
+        assert_eq!(
+            checks
+                .iter()
+                .find(|check| check.component == "ibus_engine")
+                .unwrap()
+                .status,
+            "pass"
+        );
+        let field = checks
+            .iter()
+            .find(|check| check.component == "ibus_field_input")
+            .unwrap();
+        assert_eq!(field.status, "not_tested");
+        assert!(field.detail.contains("no normal text-field input"));
+        assert_eq!(
+            checks
+                .iter()
+                .find(|check| check.component == "ibus_expansion")
+                .unwrap()
+                .status,
+            "not_tested"
+        );
+    }
+
+    #[test]
     fn terminal_matching_self_test_exercises_the_terminal_only_engine_gate() {
         let config = wayexpand_core::Config::parse(
             r#"
@@ -1065,6 +1295,43 @@ mod tests {
         assert_eq!(invalid["status"], "fail");
         let unavailable = parse_terminal_match_self_test(Err(anyhow::anyhow!("offline")), None);
         assert_eq!(unavailable["status"], "fail");
+    }
+
+    #[test]
+    fn terminal_matching_self_test_reports_a_stale_daemon_before_calling_it() {
+        let status = serde_json::json!({
+            "daemon_commit": "older-daemon-build",
+            "daemon_version": "1.3.3-dev+older-daemon-build",
+            "config_active_path": "/home/operator/.config/wayexpand/expansions.toml"
+        });
+        assert!(!daemon_build_matches_cli(&status));
+
+        let report = stale_daemon_terminal_match_report(Some(&status));
+        assert_eq!(report["status"], "fail");
+        assert_eq!(report["problem_id"], "WX-VERSION-001");
+        assert_eq!(report["remediation"], "wayexpand upgrade --apply");
+        assert_eq!(report["configuration_source"], "not_tested_stale_daemon");
+        assert_eq!(report["configuration_path"], status["config_active_path"]);
+        assert!(report["detail"]
+            .as_str()
+            .unwrap()
+            .contains("matcher was not tested"));
+    }
+
+    #[test]
+    fn terminal_matching_self_test_accepts_a_matching_daemon_build() {
+        assert!(crate::doctor::status::build_identities_match(
+            Some("known-build"),
+            Some("1.3.3-dev+known-build"),
+            "known-build",
+            "1.3.3-dev+known-build",
+        ));
+        assert!(!crate::doctor::status::build_identities_match(
+            Some("known-build"),
+            Some("1.3.3-dev+known-build.dirty-unknown"),
+            "known-build",
+            "1.3.3-dev+known-build.dirty-unknown",
+        ));
     }
 
     #[test]

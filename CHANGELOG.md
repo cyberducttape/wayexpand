@@ -4,11 +4,27 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Require the GUI's IBus setup preflight to verify that a shared component is
+  multi-user safe before skipping administrator integration consent. A legacy
+  system manifest that points into one user's home now offers the repair path.
+- Detect a stale or unverifiable daemon before requesting the terminal-only
+  matcher self-test. Report `WX-VERSION-001` with the upgrade command instead
+  of mislabeling an old daemon's unsupported response as invalid test data.
+- Include compositor input-method routing, normal-field input, and observed
+  expansion stages in setup readiness, including warnings for shared IBus
+  manifests that point into one user's home. A registered and running IBus
+  engine no longer obscures the case where KWin is not routing application
+  input to IBus. Summarize integrated checks as degraded when warnings exist
+  and incomplete when a prerequisite is failed or unknown.
 - Add a machine-readable `route_safety` section to `wayexpand health --json`
   so an operationally connected route also reports missing sensitive-field
   detection, target-identity evidence, non-atomic compatibility overrides,
   and the lack of production certification. Operational health and security
   readiness remain separate.
+- Make GNOME interactive diagnostics and setup preflight use any enabled static
+  snippet for an optional real-app test. Prefer `;;hello` only when it is
+  testable; exclude command-backed and templated snippets so existing custom
+  libraries do not appear to lack a desktop test.
 - Pass IBus key events through untouched when the client lacks advertised
   surrounding-text support. This prevents matching from consuming trigger
   characters that cannot be safely replaced; browser and real-daemon acceptance
