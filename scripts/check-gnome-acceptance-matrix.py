@@ -26,9 +26,11 @@ REQUIRED_APPLICATIONS = {
 REQUIRED_SCENARIOS = {
     "real-trigger-replacement",
     "unicode-replacement",
+    "multiple-layout-switching",
     "password-field-refusal",
     "focus-change-during-replacement",
 }
+REQUIRED_KEYBOARD_PROFILES = {"us", "de", "fr", "altgr", "multi-layout-switching"}
 REQUIRED_LIFECYCLE = {
     "clean-user-install",
     "component-registration",
@@ -54,6 +56,8 @@ IDENTITY_FIELDS = {
     "package_identity",
     "distribution_release",
     "gnome_shell_version",
+    "session_kind",
+    "physical_keyboard",
     "test_date",
     "reviewed_by",
 }
@@ -69,6 +73,7 @@ def validate_plan(plan):
     applications = set(plan.get("application_classes", []))
     lifecycle = set(plan.get("required_lifecycle_scenarios", []))
     scenarios = set(plan.get("required_application_scenarios", []))
+    keyboard_profiles = set(plan.get("required_keyboard_profiles", []))
     platforms = {item.get("id") for item in plan.get("platforms", [])}
     if missing := REQUIRED_APPLICATIONS - applications:
         errors.append(f"matrix omits application classes: {', '.join(sorted(missing))}")
@@ -76,6 +81,8 @@ def validate_plan(plan):
         errors.append(f"matrix omits lifecycle scenarios: {', '.join(sorted(missing))}")
     if missing := REQUIRED_SCENARIOS - scenarios:
         errors.append(f"matrix omits application scenarios: {', '.join(sorted(missing))}")
+    if missing := REQUIRED_KEYBOARD_PROFILES - keyboard_profiles:
+        errors.append(f"matrix omits keyboard profiles: {', '.join(sorted(missing))}")
     if missing := REQUIRED_PLATFORMS - platforms:
         errors.append(f"matrix omits supported platforms: {', '.join(sorted(missing))}")
     if plan.get("initial_status") != "not-tested":
@@ -97,15 +104,18 @@ def validate_report(plan, report):
         errors.append("reported distribution release does not match the matrix")
     if platform_id == "fedora-45-gnome51" and not report.get("gnome_shell_version", "").startswith("51."):
         errors.append("Fedora 45 report must identify GNOME Shell 51.x")
+    if report.get("session_kind") != "physical-wayland-session":
+        errors.append("evidence must come from a real Wayland session with a physical keyboard")
 
     expected = {
-        (app, scenario)
+        (app, scenario, profile)
         for app in plan["application_classes"]
         for scenario in plan["required_application_scenarios"]
+        for profile in plan["required_keyboard_profiles"]
     }
     observed = set()
     for item in report.get("application_results", []):
-        key = (item.get("application_class"), item.get("scenario"))
+        key = (item.get("application_class"), item.get("scenario"), item.get("keyboard_profile"))
         if key in observed:
             errors.append(f"duplicate application result: {key}")
         observed.add(key)
@@ -113,7 +123,7 @@ def validate_report(plan, report):
             errors.append(f"unexpected application result: {key}")
         if item.get("result") not in APPLICATION_STATUSES:
             errors.append(f"invalid result for {key}: {item.get('result')!r}")
-        for field in ("application_id", "application_version", "input_route", "keyboard_profiles"):
+        for field in ("application_id", "application_version", "input_route", "evidence_ref"):
             value = item.get(field)
             if not value:
                 errors.append(f"{key} lacks {field}")
@@ -130,6 +140,8 @@ def validate_report(plan, report):
             errors.append(f"unexpected lifecycle scenario: {scenario}")
         if item.get("result") not in APPLICATION_STATUSES:
             errors.append(f"invalid lifecycle result for {scenario}: {item.get('result')!r}")
+        if not item.get("evidence_ref"):
+            errors.append(f"{scenario} lacks an evidence_ref")
     if missing := REQUIRED_LIFECYCLE - lifecycle_seen:
         errors.append(f"missing lifecycle cells: {', '.join(sorted(missing))}")
 

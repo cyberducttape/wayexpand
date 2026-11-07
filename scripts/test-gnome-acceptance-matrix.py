@@ -17,6 +17,8 @@ def complete_report():
         "package_identity": "test-package-1",
         "distribution_release": platform["release"],
         "gnome_shell_version": "51.1",
+        "session_kind": "physical-wayland-session",
+        "physical_keyboard": "reviewer-recorded keyboard model",
         "test_date": "2026-11-07",
         "reviewed_by": "test-reviewer",
         "status": "passed",
@@ -27,14 +29,16 @@ def complete_report():
                 "application_id": application,
                 "application_version": "1.0",
                 "input_route": "ibus",
-                "keyboard_profiles": ["us", "de"],
+                "keyboard_profile": profile,
                 "result": "pass",
+                "evidence_ref": f"artifacts/{application}-{scenario}-{profile}.json",
             }
             for application in PLAN["application_classes"]
             for scenario in PLAN["required_application_scenarios"]
+            for profile in PLAN["required_keyboard_profiles"]
         ],
         "lifecycle_results": [
-            {"scenario": scenario, "result": "pass"}
+            {"scenario": scenario, "result": "pass", "evidence_ref": f"artifacts/{scenario}.json"}
             for scenario in PLAN["required_lifecycle_scenarios"]
         ],
     }
@@ -66,6 +70,20 @@ class AcceptanceMatrixTests(unittest.TestCase):
         report["status"] = "incomplete"
         errors = CHECKER["validate_report"](PLAN, report)
         self.assertTrue(any("GNOME Shell 51.x" in error for error in errors))
+
+    def test_headless_reports_cannot_be_passed_as_physical_session_evidence(self):
+        report = complete_report()
+        report["session_kind"] = "headless"
+        report["status"] = "incomplete"
+        errors = CHECKER["validate_report"](PLAN, report)
+        self.assertTrue(any("physical keyboard" in error for error in errors))
+
+    def test_application_cells_must_link_reviewable_evidence(self):
+        report = complete_report()
+        report["application_results"][0].pop("evidence_ref")
+        report["status"] = "incomplete"
+        errors = CHECKER["validate_report"](PLAN, report)
+        self.assertTrue(any("evidence_ref" in error for error in errors))
 
 
 if __name__ == "__main__":

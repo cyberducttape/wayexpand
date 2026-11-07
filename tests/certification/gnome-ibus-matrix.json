@@ -41,9 +41,11 @@
   "required_application_scenarios": [
     "real-trigger-replacement",
     "unicode-replacement",
+    "multiple-layout-switching",
     "password-field-refusal",
     "focus-change-during-replacement"
   ],
+  "required_keyboard_profiles": ["us", "de", "fr", "altgr", "multi-layout-switching"],
   "required_evidence_fields": [
     "wayexpand_commit",
     "package_identity",
@@ -52,7 +54,9 @@
     "application_id",
     "application_version",
     "input_route",
-    "keyboard_profiles",
+    "keyboard_profile_per_application_result",
+    "session_kind",
+    "physical_keyboard",
     "test_date",
     "result",
     "reviewed_by"

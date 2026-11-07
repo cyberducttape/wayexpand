@@ -6,8 +6,10 @@ All notable changes to WayExpand are documented here.
 
 - Expand the GNOME IBus acceptance plan to Fedora 45/GNOME 51 and supported
   Ubuntu 24.04/26.04 releases, with independent GTK 3/4, Qt, Firefox,
-  Chromium, Electron, and terminal cells. Require Unicode, layout-switching,
-  password-field, focus-change, Shell restart, upgrade, and uninstall results.
+  Chromium, Electron, and terminal cells for US, German, French, AltGr, and
+  active layout switching. Require Unicode, password-field, focus-change,
+  Shell restart, upgrade, and uninstall results. Require per-cell review
+  artifacts and reject evidence from headless sessions.
   Validate evidence reports without promoting missing or unsupported cells;
   run the hosted headless GNOME acceptance suite on both Ubuntu releases and
   keep physical-session certification explicitly separate.

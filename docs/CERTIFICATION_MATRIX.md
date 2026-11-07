@@ -73,16 +73,21 @@ GNOME route.
 `tests/certification/gnome-ibus-matrix.json` defines the platform and client
 coverage required before making GNOME IBus support claims. It explicitly
 requires Fedora 45/GNOME 51 and Ubuntu 24.04/26.04, with separate GTK 3, GTK 4,
-Qt, Firefox, Chromium, Electron, and terminal results. Each application needs
-real replacement, Unicode, password-field refusal, and focus-change results;
+Qt, Firefox, Chromium, Electron, and terminal results for each declared
+keyboard profile (`us`, `de`, `fr`, `altgr`, and active layout switching). Each
+application/profile combination needs real replacement, Unicode,
+password-field refusal, layout-switching, and focus-change results;
 each platform also needs source activation, multiple-layout switching,
 logout/login persistence, Shell/extension restart, package upgrade, and
 uninstall results. `scripts/check-gnome-acceptance-matrix.py` checks that the
 plan retains every required cell and validates reviewed per-platform JSON
-reports without accepting missing or unsupported cells as passes. CI runs the
-headless GNOME IBus acceptance test on Ubuntu 24.04 and 26.04 and the extension
-runtime test on Fedora 45/GNOME 51. These hosted jobs validate their stated
-headless scope only; they do not fill the real-session matrix.
+reports without accepting missing or unsupported cells as passes. Each
+application result is a separate scenario × keyboard-profile cell and links to
+reviewable evidence. Report validation rejects headless sessions and requires
+a physical keyboard and reviewer identity. CI runs the headless GNOME IBus
+acceptance test on Ubuntu 24.04 and 26.04 and the extension runtime test on
+Fedora 45/GNOME 51. These hosted jobs validate their stated headless scope
+only; they do not fill the real-session matrix.
 
 The existing
 `test-gnome-e2e.sh` now runs GNOME Shell with its session-managed IBus daemon. It
