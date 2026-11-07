@@ -373,7 +373,19 @@ pub(crate) fn doctor_report() -> Option<serde_json::Value> {
         .is_some_and(|(directory, identity)| disk_metadata_matches_build(directory, identity));
     let (state, user_extensions_enabled) = match extension_status() {
         Ok(status) => (Some(status.state), status.user_extensions_enabled),
-        Err(_) => (None, true),
+        Err(_) => {
+            // Some headless and restarted GNOME sessions temporarily fail
+            // the Extensions manager query while the extension's own tracker
+            // object is already live. Its exported identity exists only
+            // between enable() and disable(), so a response is direct evidence
+            // that the extension instance is running. The later Ping and
+            // build-identity checks still verify its protocol and version.
+            if wayexpand_backend_gnome_window::extension_build_identity().is_ok() {
+                (Some(ExtensionState::Active), true)
+            } else {
+                (None, true)
+            }
+        }
     };
     let (protocol_state, protocol_detail) = match &state {
         Some(ExtensionState::Active) => match probe_if_active(&ExtensionState::Active) {
