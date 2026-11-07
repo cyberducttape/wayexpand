@@ -12,14 +12,12 @@ import sys
 import gi
 
 gi.require_version("Gtk", "3.0")
-gi.require_version("Gdk", "3.0")
-from gi.repository import Gdk, GLib, Gtk  # noqa: E402
+from gi.repository import GLib, Gtk  # noqa: E402
 
 
-TRIGGER = ";e2e"
 EXPECTED = "expanded"
 APP_ID = "org.wayexpand.GnomeGtkIbus"
-TIMEOUT_MS = 10000
+TIMEOUT_MS = 15000
 
 
 def main():
@@ -27,6 +25,8 @@ def main():
         raise SystemExit("GTK_IM_MODULE must be set to ibus")
     if not os.environ.get("IBUS_ADDRESS"):
         raise SystemExit("IBUS_ADDRESS must identify the private IBus daemon")
+    if not os.environ.get("DISPLAY"):
+        raise SystemExit("DISPLAY must identify GNOME's private XWayland server")
     focus_marker = os.environ.get("GTK_E2E_FOCUS_MARKER")
     if not focus_marker:
         raise SystemExit("GTK_E2E_FOCUS_MARKER must be set by the Mutter focus test")
@@ -40,13 +40,11 @@ def main():
     window.present()
     entry.grab_focus()
 
-    sent = 0
     failed = False
-
     started_at = GLib.get_monotonic_time()
 
-    def send_next():
-        nonlocal sent, failed
+    def wait_for_expansion():
+        nonlocal failed
         if not os.path.exists(focus_marker):
             if GLib.get_monotonic_time() - started_at >= TIMEOUT_MS * 1000:
                 print("Mutter did not activate the GTK acceptance window", file=sys.stderr)
@@ -54,25 +52,6 @@ def main():
                 Gtk.main_quit()
                 return False
             return True
-        if sent == 0:
-            window.set_focus(entry)
-            entry.grab_focus()
-        if sent >= len(TRIGGER):
-            return False
-        character = TRIGGER[sent]
-        keyval = Gdk.unicode_to_keyval(ord(character))
-        # The return value reports whether the widget handled the key event;
-        # an input method may consume it before Gtk.Entry's own handler. The
-        # authoritative assertion is the final widget text below.
-        Gtk.test_widget_send_key(entry, keyval, 0)
-        sent += 1
-        if sent < len(TRIGGER):
-            return True
-        GLib.timeout_add(25, wait_for_expansion)
-        return False
-
-    def wait_for_expansion():
-        nonlocal failed
         actual = entry.get_text()
         if actual == EXPECTED:
             Gtk.main_quit()
@@ -88,7 +67,7 @@ def main():
             return False
         return True
 
-    GLib.timeout_add(20, send_next)
+    GLib.timeout_add(20, wait_for_expansion)
     Gtk.main()
     window.destroy()
     if failed:

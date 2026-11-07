@@ -23,9 +23,9 @@ for argument in "$@"; do
         *) printf '%s\n' "usage: $0 [--keep]" >&2; exit 2 ;;
     esac
 done
-for tool in gnome-shell dbus-run-session gsettings gdbus; do
+for tool in gnome-shell dbus-run-session gsettings gdbus xdotool timeout; do
     if ! command -v "$tool" >/dev/null 2>&1; then
-        printf '%s\n' "error: $tool is required (install gnome-shell, dbus-daemon and libglib2.0-bin)" >&2
+        printf '%s\n' "error: $tool is required (install GNOME Shell, XWayland, xdotool and the GTK/IBus test dependencies)" >&2
         exit 2
     fi
 done
@@ -348,16 +348,23 @@ while :; do
     sleep 0.1
 done
 # Exercise the active GNOME-selected engine through the IBus input-context
-# protocol, then through GTK's own IBus module and Gtk.Entry widget. The GTK
-# test uses a toolkit test event; headless GNOME cannot certify compositor or
-# physical-keyboard event delivery.
+# protocol, then through GTK's own IBus module and Gtk.Entry widget hosted on
+# GNOME's private XWayland server. xdotool sends the harmless test trigger
+# through XTEST after Mutter confirms the target window is focused. This does
+# not certify native Wayland compositor or physical-keyboard event delivery.
 IBUS_ADDRESS=$(ibus address) "$E2E_BIN_DIR/wx-e2e-ibus" \
     "$XDG_RUNTIME_DIR/wayexpand-ibus-status.json" --expect-active --single-expansion
 log "pass gnome-ibus-input-context the active GNOME-selected engine replaced a verified trigger"
-timeout 15s env \
+x11_display=$(sed -n 's/.*Using public X11 display \([^,]*\),.*/\1/p' \
+    "$E2E_WORK/gnome-shell.log" | head -n 1)
+if [ -z "$x11_display" ]; then
+    log "fail gnome-gtk-insertion GNOME did not start its private XWayland server"
+    exit 1
+fi
+timeout 20s env \
     GTK_IM_MODULE=ibus \
-    GDK_BACKEND=wayland \
-    WAYLAND_DISPLAY="$display" \
+    GDK_BACKEND=x11 \
+    DISPLAY="$x11_display" \
     IBUS_ADDRESS="$(ibus address)" \
     GTK_E2E_FOCUS_MARKER="$E2E_WORK/gtk-window-focused" \
     python3 "$E2E_PROJECT_DIR/scripts/certification-clients/gtk_ibus_e2e.py" \
@@ -372,6 +379,14 @@ if ! activate_window org.wayexpand.GnomeGtkIbus; then
     exit 1
 fi
 : >"$E2E_WORK/gtk-window-focused"
+if ! DISPLAY="$x11_display" xdotool type --clearmodifiers --delay 40 -- ';e2e'; then
+    kill "$gtk_pid" 2>/dev/null || true
+    wait "$gtk_pid" 2>/dev/null || true
+    gtk_pid=
+    log "fail gnome-gtk-insertion XTEST could not type into the focused GTK window"
+    cat "$E2E_WORK/gtk-ibus-e2e.log"
+    exit 1
+fi
 gtk_status=0
 wait "$gtk_pid" || gtk_status=$?
 gtk_pid=
