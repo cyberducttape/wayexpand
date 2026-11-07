@@ -70,12 +70,21 @@ already-active WayExpand engine, a controlled IBus input-context replacement,
 and window tracking. It also opens a GTK 3 `Gtk.Entry` with `GTK_IM_MODULE=ibus`
 on GNOME's private XWayland server, activates the window through Mutter, types
 a fixed test trigger through XTEST, and verifies the resulting widget text.
-This exercises GTK's actual IBus module and target widget; the custom protocol
-client separately checks trigger deletion and replacement commit. The test
-checks password-field refusal and content-free telemetry, then simulates an
-extension upgrade with an old Shell instance and a Shell restart. XTEST on
-XWayland does not certify native Wayland compositor keyboard routing or
-physical keyboard delivery.
+The same test opens an isolated Google Chrome profile on a local page, focuses
+its textarea through Mutter, types the same harmless trigger through XTEST, and
+checks the textarea value using Chrome DevTools. The tested Chrome XWayland/IBus
+path did not advertise surrounding-text support: the acceptance test verifies
+that WayExpand refuses the replacement and leaves the trigger intact. This is
+browser fail-safe evidence, not successful browser replacement and not Firefox,
+native Wayland keyboard delivery, or physical keyboard input. Do not advertise
+Chrome IBus replacement as supported until the browser exposes a verified text
+replacement contract or a separately certified integration is available.
+The GTK portion exercises GTK's actual IBus module and target widget; the
+custom protocol client separately checks trigger deletion and replacement
+commit. The test checks password-field refusal and content-free telemetry, then
+simulates an extension upgrade with an old Shell instance and a Shell restart.
+XTEST on XWayland does not certify native Wayland compositor keyboard routing
+or physical keyboard delivery.
 `test-ibus-e2e.sh` additionally exercises IBus engine focus, content-type and
 telemetry cases. These headless tests do not prove physical keyboard routing,
 compositor-delivered key events, persistence across an actual user logout, or
