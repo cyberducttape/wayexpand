@@ -298,6 +298,7 @@ fn default_remediation_command(id: &str) -> Option<String> {
             "gnome-source-registered" | "gnome-source-active" => {
                 "wayexpand repair --gnome-input-source"
             }
+            "config-generation" => "wayexpand ibus status --json",
             "field-input" | "target-insertion" => "wayexpand debug --gnome --interactive",
             "output-backend" => "wayexpand backend list",
             "daemon-version" => "wayexpand upgrade --apply",
@@ -368,6 +369,9 @@ fn retest_instructions(id: &str) -> &'static str {
     match id {
         "field-input" | "engine" | "target-insertion" => {
             "Run `wayexpand debug --gnome --interactive` in a normal, disposable text field and confirm the exact result."
+        }
+        "config-generation" => {
+            "Run `wayexpand ibus status --json`, restart the WayExpand IBus engine from the desktop input-source controls, then rerun status and confirm requested and published generations match with zero stale contexts."
         }
         "window-focus-events"
         | "window-extension-handshake"
@@ -739,6 +743,7 @@ fn problem_for(check: &IbusCheck) -> Option<&'static str> {
         "manifest-scope" => "WX-IBUS-MULTIUSER-001",
         "gnome-source-registered" => "WX-GNOME-IM-001",
         "gnome-source-active" | "selected" => "WX-GNOME-IM-002",
+        "config-generation" => "WX-IBUS-RELOAD-001",
         "consent" => "WX-POLICY-001",
         "field-input" | "engine" => "WX-GNOME-IM-003",
         "target-insertion" => "WX-GNOME-IM-004",

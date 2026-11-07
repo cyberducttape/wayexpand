@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Treat IBus configuration-generation handoff failures as unhealthy and
+  expose the requested/published generation mismatch in stable GNOME/IBus
+  diagnostics. Keep async workers enabled for form-only libraries so field
+  completion continues to work after skipping workers for text-only configs.
 - Version GNOME setup continuations with their originating GNOME Wayland
   session and creation time. Resume only in a matching session, ignore expired
   or unsupported markers for route selection, and provide
