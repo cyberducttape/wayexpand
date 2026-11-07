@@ -648,6 +648,7 @@ env -i \
     GDK_BACKEND=wayland \
     XDG_CURRENT_DESKTOP=GNOME \
     XDG_SESSION_TYPE=wayland \
+    WAYEXPAND_GNOME_AUTH_DIAGNOSTICS=1 \
     E2E_WORK="$work" \
     E2E_BIN_DIR="$bin_dir" \
     E2E_PROJECT_DIR="$project_dir" \

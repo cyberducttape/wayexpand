@@ -402,6 +402,7 @@ export default class WayExpandWindowTracker extends Extension {
                         [uid] = connection.call_finish(userResult).deep_unpack();
                     } catch {
                         // Unknown peer identity must not gain access to focus metadata.
+                        this._logAuthorizationDiagnostic('could not resolve peer UID');
                         finish(false);
                         return;
                     }
@@ -413,8 +414,15 @@ export default class WayExpandWindowTracker extends Extension {
                                 try {
                                     const [pid] = pidConnection.call_finish(pidResult).deep_unpack();
                                     const executable = GLib.file_read_link(`/proc/${pid}/exe`);
-                                    finish(isAuthorizedTrackerClient(uid, GLib.get_user_id(), executable));
+                                    const authorized = isAuthorizedTrackerClient(
+                                        uid, GLib.get_user_id(), executable,
+                                    );
+                                    this._logAuthorizationDiagnostic(
+                                        `peer uid=${uid} executable=${executable.split('/').pop()} authorized=${authorized}`,
+                                    );
+                                    finish(authorized);
                                 } catch {
+                                    this._logAuthorizationDiagnostic('could not resolve peer executable');
                                     finish(false);
                                 }
                             });
@@ -425,6 +433,13 @@ export default class WayExpandWindowTracker extends Extension {
         } catch {
             finish(false);
         }
+    }
+
+    _logAuthorizationDiagnostic(message) {
+        // Opt-in only for the isolated CI session. Never log request text,
+        // snippet contents, or full executable paths.
+        if (GLib.getenv('WAYEXPAND_GNOME_AUTH_DIAGNOSTICS') === '1')
+            log(`WayExpand authorization diagnostic: ${message}`);
     }
 
     _withAuthorizedClient(invocation, operation) {
