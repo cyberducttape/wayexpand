@@ -849,7 +849,11 @@ pub(crate) fn upgrade_status_from_snapshot(snapshot: &serde_json::Value) -> serd
             "backend": snapshot.get("backend"),
         },
         "compatible": compatible,
-        "commit_matches": daemon_commit_matches(daemon_commit),
+        // A matching commit string is not verification when either side has
+        // an explicitly unknown build identity (for example a source archive
+        // without Git metadata). Keep the public result consistent with the
+        // `unverified` status and `build_matches` field.
+        "commit_matches": !build_unknown && daemon_commit_matches(daemon_commit),
         "build_matches": build_matches,
     })
 }
