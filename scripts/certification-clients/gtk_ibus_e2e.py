@@ -34,6 +34,9 @@ def main():
     focus_marker = os.environ.get("GTK_E2E_FOCUS_MARKER")
     if not focus_marker:
         raise SystemExit("GTK_E2E_FOCUS_MARKER must be set by the Mutter focus test")
+    ready_marker = os.environ.get("GTK_E2E_READY_MARKER")
+    if not ready_marker:
+        raise SystemExit("GTK_E2E_READY_MARKER must be set by the Mutter focus test")
 
     if args.gtk_version == "4":
         Gtk.init()
@@ -72,6 +75,9 @@ def main():
                 quit_loop()
                 return False
             return True
+        if entry.has_focus() and not os.path.exists(ready_marker):
+            with open(ready_marker, "w", encoding="ascii") as ready:
+                ready.write("focused\n")
         actual = entry.get_text()
         if actual == args.expected:
             quit_loop()
