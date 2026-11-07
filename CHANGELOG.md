@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Clarify that systemd AF_UNIX-only restrictions block direct IP sockets but
+  do not prevent network access relayed through an authorized local Unix-socket
+  service.
 - Require a live WayExpand engine process before reporting GNOME IBus selection
   ready, so stale global-engine state cannot mask a stopped engine. Update the
   IBus acceptance client to bind an already-selected global engine to its

@@ -624,8 +624,15 @@ Commands in `program=` expansions run under systemd sandbox:
 ```ini
 ProtectSystem=strict      # Read-only /
 ProtectHome=read-only     # Read-only $HOME
-RestrictAddressFamilies=AF_UNIX  # No network
+RestrictAddressFamilies=AF_UNIX  # No direct IP sockets
 ```
+
+This blocks commands from creating IPv4 or IPv6 sockets directly. It does not
+guarantee total network isolation: a command that can reach a local `AF_UNIX`
+service may ask that service to make a network request on its behalf. Treat
+this as direct-IP restriction, not a no-egress sandbox. The action broker's
+threat model describes this boundary and the additional packaged-service
+controls in [ACTION_BROKER_ARCHITECTURE](ACTION_BROKER_ARCHITECTURE.md).
 
 Commands that work manually may fail in expansions if they need write access.
 
