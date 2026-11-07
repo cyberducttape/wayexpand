@@ -65,6 +65,11 @@ def main():
     window.present()
     entry.grab_focus()
     if application is not None:
+        def activate_window(_application):
+            window.present()
+            window.set_focus(entry)
+
+        application.connect("activate", activate_window)
         application.activate()
 
     failed = False
