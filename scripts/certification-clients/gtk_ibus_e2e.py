@@ -50,21 +50,33 @@ def main():
     else:
         window = Gtk.Window(title=f"WayExpand GTK IBus acceptance {APP_ID}")
     window.set_default_size(500, 80)
-    entry = Gtk.Entry()
-    if args.password:
-        entry.set_visibility(False)
-        entry.set_input_purpose(Gtk.InputPurpose.PASSWORD)
-    if args.gtk_version == "4":
-        window.set_child(entry)
+    if args.gtk_version == "4" and not args.password:
+        focus_widget = Gtk.TextView()
+        text_buffer = focus_widget.get_buffer()
+
+        def current_text():
+            start, end = text_buffer.get_bounds()
+            return text_buffer.get_text(start, end, True)
     else:
-        window.add(entry)
+        focus_widget = Gtk.Entry()
+
+        def current_text():
+            return focus_widget.get_text()
+
+    if args.password:
+        focus_widget.set_visibility(False)
+        focus_widget.set_input_purpose(Gtk.InputPurpose.PASSWORD)
+    if args.gtk_version == "4":
+        window.set_child(focus_widget)
+    else:
+        window.add(focus_widget)
         window.show_all()
     window.present()
-    entry.grab_focus()
+    focus_widget.grab_focus()
     if application is not None:
         def activate_window(_application):
             window.present()
-            window.set_focus(entry)
+            window.set_focus(focus_widget)
 
         application.connect("activate", activate_window)
         application.activate()
@@ -88,15 +100,15 @@ def main():
                 quit_loop()
                 return False
             return True
-        if not entry.has_focus():
+        if not focus_widget.has_focus():
             # In GTK 4, grabbing focus before Mutter activates the toplevel
             # may be ignored. Retry only after the Shell focus controller has
             # confirmed this acceptance window is active.
             if args.gtk_version == "4":
-                window.set_focus(entry)
+                window.set_focus(focus_widget)
             else:
-                entry.grab_focus()
-        actual = entry.get_text()
+                focus_widget.grab_focus()
+        actual = current_text()
         if actual == args.expected:
             quit_loop()
             return False
@@ -108,7 +120,7 @@ def main():
             )
             print(
                 f"GTK focus diagnostic: active={window.is_active()} "
-                f"entry_focused={window.get_focus() is entry}",
+                f"widget_focused={window.get_focus() is focus_widget}",
                 file=sys.stderr,
             )
             failed = True

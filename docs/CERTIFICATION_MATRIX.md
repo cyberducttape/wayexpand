@@ -96,11 +96,9 @@ The existing
 `test-gnome-e2e.sh` now runs GNOME Shell with its session-managed IBus daemon. It
 checks component discovery, GNOME source registration, Shell activation, an
 already-active WayExpand engine, a controlled IBus input-context replacement,
-and window tracking. Its GTK 3 `Gtk.Entry` checks exact trigger replacement,
-Unicode output, and refusal to expand a password-purpose field. GTK 4 checks
-that triggers and Unicode input pass through unchanged when its IBus context
-does not advertise the verified surrounding-text contract, and also checks
-password-purpose pass-through. The test verifies a live switch to German and
+and window tracking. Its GTK 3 `Gtk.Entry` and GTK 4 `Gtk.TextView` check exact
+trigger replacement and Unicode output; password-purpose `Gtk.Entry` fields
+must preserve the trigger. The test verifies a live switch to German and
 French keyboard sources and checks expansion after returning to WayExpand. It also opens
 the field with `GTK_IM_MODULE=ibus`
 on GNOME's private XWayland server, activates the window through Mutter, types
