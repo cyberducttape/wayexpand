@@ -7,6 +7,11 @@ All notable changes to WayExpand are documented here.
 - Detect a stale or unverifiable daemon before requesting the terminal-only
   matcher self-test. Report `WX-VERSION-001` with the upgrade command instead
   of mislabeling an old daemon's unsupported response as invalid test data.
+- Add a machine-readable `route_safety` section to `wayexpand health --json`
+  so an operationally connected route also reports missing sensitive-field
+  detection, target-identity evidence, non-atomic compatibility overrides,
+  and the lack of production certification. Operational health and security
+  readiness remain separate.
 - Make GNOME interactive diagnostics and setup preflight use any enabled static
   snippet for an optional real-app test. Prefer `;;hello` only when it is
   testable; exclude command-backed and templated snippets so existing custom

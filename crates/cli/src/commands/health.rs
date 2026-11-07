@@ -90,6 +90,90 @@ fn application_coverage(snapshot: Option<&serde_json::Value>) -> serde_json::Val
     }
 }
 
+/// Summarize route-specific safety limits without making operational health
+/// pretend to be the independent security-readiness report. These fields make
+/// important limitations visible to monitoring that consumes `health` rather
+/// than `status` or `doctor --security`.
+fn route_safety(snapshot: Option<&serde_json::Value>) -> serde_json::Value {
+    let Some(snapshot) = snapshot else {
+        return serde_json::json!({
+            "sensitive_field_signal":"unknown",
+            "target_identity":"unknown",
+            "replacement":"unknown",
+            "production_certified":false,
+            "limitations":["daemon_status_unavailable"]
+        });
+    };
+
+    let sensitive_focus = snapshot
+        .get("capture_sensitive_focus")
+        .and_then(serde_json::Value::as_bool);
+    let atomic_replace = snapshot
+        .get("inject_atomic_replace")
+        .and_then(serde_json::Value::as_bool);
+    let exact_identity = snapshot
+        .get("window_identity_exact")
+        .and_then(serde_json::Value::as_bool);
+    let compatibility_mode = snapshot
+        .get("compatibility_mode")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown");
+    let mut limitations = Vec::new();
+
+    let sensitive_field_signal = match sensitive_focus {
+        Some(true) => "available",
+        Some(false) => {
+            limitations.push("input_privacy_unavailable");
+            "unavailable"
+        }
+        None => {
+            limitations.push("input_privacy_unknown");
+            "unknown"
+        }
+    };
+
+    let target_identity = match exact_identity {
+        Some(true) => "exact",
+        Some(false) => {
+            limitations.push("target_identity_not_exact");
+            "not_exact"
+        }
+        None => {
+            limitations.push("target_identity_unknown");
+            "unknown"
+        }
+    };
+
+    let replacement = match atomic_replace {
+        Some(true) => "atomic",
+        Some(false) if compatibility_mode == "off" => {
+            limitations.push("non_atomic_automatic_replacement_refused");
+            "non_atomic_refused_by_default"
+        }
+        Some(false) if matches!(compatibility_mode, "tracked-focus" | "untracked-focus") => {
+            limitations.push("non_atomic_compatibility_override_enabled");
+            "non_atomic_compatibility_override"
+        }
+        Some(false) | None => {
+            limitations.push("replacement_guarantee_unknown");
+            "unknown"
+        }
+    };
+
+    // No runtime capability probe is a substitute for reviewed, real-session
+    // certification. Keep this false until such evidence is explicitly
+    // connected to the active route.
+    limitations.push("route_not_production_certified");
+    serde_json::json!({
+        "sensitive_field_signal":sensitive_field_signal,
+        "target_identity":target_identity,
+        "replacement":replacement,
+        "compatibility_mode":compatibility_mode,
+        "production_certified":false,
+        "limitations":limitations
+    })
+}
+
 pub(crate) fn health_command(args: Args) -> Result<()> {
     let mut json = false;
     for arg in args {
@@ -135,6 +219,7 @@ pub(crate) fn health_command(args: Args) -> Result<()> {
         "reason": reason,
         "errors": errors,
         "application_coverage": application_coverage(daemon.as_ref()),
+        "route_safety": route_safety(daemon.as_ref()),
         "configuration": {
             "path": config_path,
             "valid": config_valid,
@@ -185,6 +270,18 @@ pub(crate) fn health_command(args: Args) -> Result<()> {
                     .as_str()
                     .unwrap_or("coverage unavailable"),
             );
+            let safety = route_safety(Some(daemon));
+            let limitations = safety["limitations"]
+                .as_array()
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(serde_json::Value::as_str)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default();
+            println!("Route safety: {limitations}");
         } else {
             println!("Daemon: unavailable");
         }
@@ -202,7 +299,7 @@ pub(crate) fn health_command(args: Args) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{application_coverage, classify_health};
+    use super::{application_coverage, classify_health, route_safety};
 
     #[test]
     fn terminal_only_daemon_route_does_not_claim_global_browser_coverage() {
@@ -228,6 +325,59 @@ mod tests {
         assert_eq!(coverage["scope"], "active_route");
         assert!(coverage["desktop_wide"].is_null());
         assert!(coverage["browser_fields_covered"].is_null());
+    }
+
+    #[test]
+    fn health_exposes_non_atomic_compatibility_and_privacy_limits() {
+        let snapshot = serde_json::json!({
+            "capture_sensitive_focus": false,
+            "window_identity_exact": false,
+            "inject_atomic_replace": false,
+            "compatibility_mode": "untracked-focus"
+        });
+        let safety = route_safety(Some(&snapshot));
+        assert_eq!(safety["sensitive_field_signal"], "unavailable");
+        assert_eq!(safety["target_identity"], "not_exact");
+        assert_eq!(safety["replacement"], "non_atomic_compatibility_override");
+        assert_eq!(safety["production_certified"], false);
+        assert!(safety["limitations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item == "non_atomic_compatibility_override_enabled"));
+        assert!(safety["limitations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item == "input_privacy_unavailable"));
+    }
+
+    #[test]
+    fn health_distinguishes_atomic_and_default_refusal_routes() {
+        let atomic = route_safety(Some(&serde_json::json!({
+            "capture_sensitive_focus": true,
+            "window_identity_exact": true,
+            "inject_atomic_replace": true,
+            "compatibility_mode": "off"
+        })));
+        assert_eq!(atomic["sensitive_field_signal"], "available");
+        assert_eq!(atomic["target_identity"], "exact");
+        assert_eq!(atomic["replacement"], "atomic");
+        let refused = route_safety(Some(&serde_json::json!({
+            "capture_sensitive_focus": false,
+            "inject_atomic_replace": false,
+            "compatibility_mode": "off"
+        })));
+        assert_eq!(refused["replacement"], "non_atomic_refused_by_default");
+        let unknown_mode = route_safety(Some(&serde_json::json!({
+            "inject_atomic_replace": false
+        })));
+        assert_eq!(unknown_mode["replacement"], "unknown");
+        assert!(unknown_mode["limitations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item == "replacement_guarantee_unknown"));
     }
 
     #[test]
