@@ -341,6 +341,12 @@ verified rather than merely free of hard failures.
   failures use `WX-GNOME-SESSION-001`, `WX-GNOME-IM-001`, or
   `WX-GNOME-IM-002`. The component checks read the running
   ibus-daemon's own `IBUS_COMPONENT_PATH`, not the caller's.
+  Runtime input and insertion checks use `WX-IBUS-003` when no normal-field
+  input was observed, `WX-IBUS-005` for a recorded output failure,
+  `WX-IBUS-006` for replacement actions whose target effect is unverified,
+  and `WX-IBUS-007` when no insertion was observed in the current engine
+  session. These distinctions are evidence states, not claims that a specific
+  application received or displayed the text.
 - `first_failure` (string or null): the `id` of the first failed check.
 - `readiness` (object): booleans for each separate condition —
   `component_installed`, `registered`, `ibus_running`, `selected`,
