@@ -164,6 +164,7 @@ fn install_user_copy() -> Result<(PathBuf, Option<ExtensionInstallTransaction>)>
 /// Keeps the previous complete directory until GNOME activation has been
 /// verified. Unless committed, dropping the transaction attempts to restore
 /// the prior directory atomically.
+#[derive(Debug)]
 struct ExtensionInstallTransaction {
     directory: PathBuf,
     previous: Option<PathBuf>,
@@ -354,7 +355,7 @@ fn exchange_directories(left: &Path, right: &Path) -> std::io::Result<()> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct ExtensionSettings {
     enabled: Vec<String>,
     disabled: Vec<String>,
@@ -374,6 +375,7 @@ fn write_extension_setting(key: &str, values: &[String]) -> Result<()> {
 /// Keep the GNOME enabled/disabled lists recoverable while extension
 /// activation is verified. A failed readiness check restores the exact
 /// pre-setup lists along with the prior extension directory.
+#[derive(Debug)]
 struct ExtensionSettingsTransaction {
     original: ExtensionSettings,
     committed: bool,
@@ -516,14 +518,44 @@ fn probe_if_active(state: &ExtensionState) -> Result<(), String> {
     }
 }
 
-/// Setup step on GNOME: install the extension if needed and enable it.
-/// App filters are optional, but IBus setup consumes this readiness result
-/// because its session snapshot depends on the live Shell bridge.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum SetupReadiness {
-    Ready,
-    SessionRestartRequired,
+pub(crate) enum SetupOutcome {
+    Ready(GnomeExtensionTransaction),
+    SessionRestartRequired(GnomeExtensionTransaction),
     Unavailable,
+}
+
+/// Holds extension files and GNOME enablement settings until the outer IBus
+/// setup transaction commits or rolls them back.
+#[derive(Debug)]
+pub(crate) struct GnomeExtensionTransaction {
+    install: Option<ExtensionInstallTransaction>,
+    settings: ExtensionSettingsTransaction,
+}
+
+impl GnomeExtensionTransaction {
+    pub(crate) fn commit(&mut self) {
+        if let Some(install) = self.install.as_mut() {
+            install.commit();
+        }
+        self.settings.commit();
+    }
+
+    pub(crate) fn rollback(&mut self) -> Result<()> {
+        let mut errors = Vec::new();
+        if let Err(error) = self.settings.rollback() {
+            errors.push(format!("GNOME extension enablement settings: {error}"));
+        }
+        if let Some(install) = self.install.as_mut() {
+            if let Err(error) = install.rollback() {
+                errors.push(format!("GNOME extension directory: {error}"));
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            bail!("{}", errors.join("; "))
+        }
+    }
 }
 
 fn stop_failed_activation() {
@@ -534,35 +566,35 @@ fn stop_failed_activation() {
     }
 }
 
-pub(crate) fn setup_gnome_window_tracker() -> SetupReadiness {
+pub(crate) fn setup_gnome_window_tracker() -> SetupOutcome {
     println!("GNOME window tracking (for snippets limited to certain apps):");
     let initial_status = match extension_status() {
         Ok(status) => status,
         Err(error) => {
             println!("  GNOME Shell state could not be read before changes ({error}); no extension files or settings were changed");
-            return SetupReadiness::Unavailable;
+            return SetupOutcome::Unavailable;
         }
     };
-    let (directory, mut install_transaction) = match install_user_copy() {
+    let (directory, install_transaction) = match install_user_copy() {
         Ok(installed) => installed,
         Err(error) => {
             println!("  could not install the WayExpand GNOME Shell extension: {error}");
-            return SetupReadiness::Unavailable;
+            return SetupOutcome::Unavailable;
         }
     };
     println!("  extension: {}", directory.display());
-    let mut settings_transaction = match persist_enabled() {
+    let settings_transaction = match persist_enabled() {
         Ok(transaction) => transaction,
         Err(error) => {
             println!("  could not prepare GNOME extension activation: {error}");
-            return SetupReadiness::Unavailable;
+            return SetupOutcome::Unavailable;
         }
     };
     let status = match extension_status() {
         Ok(status) => status,
         Err(error) => {
             println!("  GNOME Shell readiness could not be verified ({error}); rolling back the extension update");
-            return SetupReadiness::Unavailable;
+            return SetupOutcome::Unavailable;
         }
     };
     let mut activation_attempted = false;
@@ -577,7 +609,7 @@ pub(crate) fn setup_gnome_window_tracker() -> SetupReadiness {
             if initial_status.state != ExtensionState::Active {
                 stop_failed_activation();
             }
-            return SetupReadiness::Unavailable;
+            return SetupOutcome::Unavailable;
         }
         match extension_status() {
             Ok(status) => status,
@@ -586,7 +618,7 @@ pub(crate) fn setup_gnome_window_tracker() -> SetupReadiness {
                 if initial_status.state != ExtensionState::Active {
                     stop_failed_activation();
                 }
-                return SetupReadiness::Unavailable;
+                return SetupOutcome::Unavailable;
             }
         }
     } else {
@@ -672,23 +704,21 @@ pub(crate) fn setup_gnome_window_tracker() -> SetupReadiness {
         && metadata_matches
         && disk_identity.as_deref() == Some(bundled_identity.as_str())
     {
-        if let Some(transaction) = install_transaction.as_mut() {
-            transaction.commit();
-        }
-        settings_transaction.commit();
-        return SetupReadiness::SessionRestartRequired;
+        return SetupOutcome::SessionRestartRequired(GnomeExtensionTransaction {
+            install: install_transaction,
+            settings: settings_transaction,
+        });
     }
     if !ok {
         if activation_attempted && initial_status.state != ExtensionState::Active {
             stop_failed_activation();
         }
-        return SetupReadiness::Unavailable;
+        return SetupOutcome::Unavailable;
     }
-    if let Some(transaction) = install_transaction.as_mut() {
-        transaction.commit();
-    }
-    settings_transaction.commit();
-    SetupReadiness::Ready
+    SetupOutcome::Ready(GnomeExtensionTransaction {
+        install: install_transaction,
+        settings: settings_transaction,
+    })
 }
 
 /// Doctor's view of the extension, for human and JSON output. `None` outside

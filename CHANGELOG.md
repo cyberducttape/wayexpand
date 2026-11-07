@@ -21,7 +21,11 @@ All notable changes to WayExpand are documented here.
 - Defer GNOME extension setup until after backend selection, policy checks,
   IBus preflight, and replacement authorization. A rejected route no longer
   installs or enables the extension, and backend selection failures no longer
-  initialize a configuration file.
+  initialize a configuration file. Interactive setup now presents the
+  selected backend and planned changes for approval before applying them;
+  `--apply` selects the recommended route and approves that plan. GNOME
+  extension files and enablement settings remain in the IBus setup transaction
+  until verification succeeds, and route-verification failures roll them back.
 - Install GNOME Shell extension updates from a staged, fully verified directory
   and switch the complete payload atomically. Retain the prior directory and
   GNOME enablement settings until live activation, tracker protocol, and build

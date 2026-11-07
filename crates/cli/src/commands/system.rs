@@ -4,6 +4,40 @@ use super::Args;
 use crate::args::take_flag;
 use crate::*;
 
+fn setup_plan_actions(
+    backend: &str,
+    is_gnome_wayland: bool,
+    accept_non_atomic_replacement: bool,
+    install_system_integration: bool,
+    terminals_requested: bool,
+) -> Vec<&'static str> {
+    let mut actions = vec!["Create the default configuration only if it is missing"];
+    match backend {
+        "ibus" => {
+            actions.push("Check IBus prerequisites and replacement policy before applying integration changes");
+            if is_gnome_wayland {
+                actions.push("After IBus preflight and explicit replacement consent, prepare GNOME's window tracker and IBus source");
+                actions.push("Keep GNOME extension files and enablement settings in the IBus rollback transaction until verification");
+            }
+            actions.push("Register and activate the IBus engine, then verify the session route");
+        }
+        "input-method" => actions.push("Enable the input-method-v2 user service; portal authorization may be requested when it connects"),
+        "evdev" => actions.push("Configure global keyboard capture only with its separate privacy acknowledgment and device permission"),
+        _ => {}
+    }
+    if backend == "ibus" && !accept_non_atomic_replacement {
+        actions.push("Stop before changing GNOME or IBus if replacement authorization is not already configured");
+    }
+    if install_system_integration {
+        actions
+            .push("Request administrator authorization to install the system-wide IBus component");
+    }
+    if terminals_requested && backend == "ibus" {
+        actions.push("Offer optional terminal coverage only after the core route's insertion test");
+    }
+    actions
+}
+
 pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     let mut requested_backend: Option<String> = None;
     let mut requested_mode: Option<String> = None;
@@ -46,7 +80,7 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
             }
             _ => {
                 usage_bail!(
-                    "usage: wayexpand setup [--mode recommended|maximum|experimental | --backend ibus|input-method|evdev] [--terminals] [--yes] [--accept-non-atomic-replacement] [--install-system-integration]"
+                    "usage: wayexpand setup [--mode recommended|maximum|experimental | --backend ibus|input-method|evdev] [--apply] [--terminals] [--yes] [--accept-non-atomic-replacement] [--install-system-integration]"
                 )
             }
         }
@@ -195,10 +229,10 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
         setup_backend_for_mode(&mode, &capabilities, &policy)?
     } else if resume_pending {
         "ibus".to_owned()
-    } else if assume_yes {
+    } else if assume_yes || apply_requested {
         automatic.backend
     } else {
-        let prompt = format!("Configure Recommended mode ({})? [Y/n] ", automatic.label);
+        let prompt = format!("Use Recommended mode ({})? [Y/n] ", automatic.label);
         if prompt_yes_no(&prompt, true)? {
             automatic.backend
         } else {
@@ -220,6 +254,29 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     }
     if install_system_integration && backend != "ibus" {
         usage_bail!("--install-system-integration applies only to the IBus backend");
+    }
+    println!("\nSelected setup plan (read-only):");
+    println!("  Backend: {backend}");
+    println!(
+        "  Configuration: {}",
+        if default_config_path().exists() {
+            "validate existing configuration"
+        } else {
+            "create default configuration"
+        }
+    );
+    for action in setup_plan_actions(
+        &backend,
+        is_gnome_wayland && backend == "ibus",
+        accept_non_atomic_replacement,
+        install_system_integration,
+        terminals,
+    ) {
+        println!("  - {action}");
+    }
+    if !assume_yes && !apply_requested && !prompt_yes_no("Apply this setup plan? [Y/n] ", true)? {
+        println!("Setup plan declined. No configuration, GNOME extension, input-source, or service changes were made.");
+        return Ok(());
     }
     Config::ensure_user_config(default_config_path()).map_err(|error| {
         config_error(format!(
