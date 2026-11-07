@@ -104,28 +104,12 @@ if ! command -v wayexpand-ibus >"$E2E_WORK/wayexpand-ibus-path.txt"; then
 fi
 gsettings set org.gnome.shell disable-user-extensions false
 gsettings set org.gnome.shell enabled-extensions "['$E2E_UUID', '$E2E_CONTROLLER_UUID']"
-gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us'), ('xkb', 'de')]"
-ibus-daemon --single --panel=disable --emoji-extension=disable --cache=none \
-    >"$E2E_WORK/ibus-daemon.log" 2>&1 &
-ibus_pid=$!
-# Run the private fixture on the session bus, so GNOME Shell discovers and
-# reuses it instead of starting a second daemon. The daemon inherits the
-# isolated component path from the test session.
-tries=100
-while :; do
-    if ibus list-engine --name-only >"$E2E_WORK/ibus-engines.txt" 2>&1 \
-        && grep -Fx wayexpand "$E2E_WORK/ibus-engines.txt" >/dev/null; then
-        log "pass ibus-engine-registered"
-        break
-    fi
-    tries=$((tries - 1))
-    if [ "$tries" -le 0 ] || ! kill -0 "$ibus_pid" 2>/dev/null; then
-        log "fail ibus-engine-registered the session IBus registry did not load WayExpand"
-        cat "$E2E_WORK/ibus-engines.txt"
-        exit 1
-    fi
-    sleep 0.1
-done
+gsettings set org.gnome.desktop.input-sources sources \
+    "[('xkb', 'us'), ('xkb', 'de'), ('ibus', 'wayexpand')]"
+# Let GNOME Shell start and own its normal IBus session. Prestarting an IBus
+# daemon in --single mode makes Shell's normal restart path cancel engine
+# selection, leaving the source selected in settings but unable to deliver
+# key events to GTK.
 gnome-shell --headless --mode=user --wayland --virtual-monitor 1280x800 --wayland-display "$display" \
     >"$E2E_WORK/gnome-shell.log" 2>&1 &
 shell_pid=$!
@@ -170,8 +154,6 @@ finish() {
             kill "$engine_pid" 2>/dev/null || true
         fi
     fi
-    kill "$ibus_pid" 2>/dev/null || true
-    wait "$ibus_pid" 2>/dev/null || true
 }
 trap finish EXIT
 
@@ -263,6 +245,24 @@ until gnome_extension_state_active "$(extension_state)"; do
     sleep 0.1
 done
 log "pass extension-active"
+
+# Confirm the GNOME-managed IBus daemon loaded the private WayExpand
+# component. Checking after Shell starts avoids racing its session startup.
+tries=200
+while :; do
+    if ibus list-engine --name-only >"$E2E_WORK/ibus-engines.txt" 2>&1 \
+        && grep -Fx wayexpand "$E2E_WORK/ibus-engines.txt" >/dev/null; then
+        log "pass ibus-engine-registered"
+        break
+    fi
+    tries=$((tries - 1))
+    if [ "$tries" -le 0 ] || ! kill -0 "$shell_pid" 2>/dev/null; then
+        log "fail ibus-engine-registered GNOME's session IBus registry did not load WayExpand"
+        cat "$E2E_WORK/ibus-engines.txt"
+        exit 1
+    fi
+    sleep 0.1
+done
 
 # A generic session-bus client must not read focus/layout metadata, switch the
 # active input source, or subscribe to focused-window metadata. Check explicit
