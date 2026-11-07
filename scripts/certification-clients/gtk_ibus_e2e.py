@@ -42,7 +42,16 @@ def main():
         Gtk.init()
     else:
         Gtk.init(sys.argv)
-    window = Gtk.Window(title=f"WayExpand GTK IBus acceptance {APP_ID}")
+    application = None
+    if args.gtk_version == "4":
+        application = Gtk.Application(application_id=APP_ID)
+        application.register(None)
+        window = Gtk.ApplicationWindow(
+            application=application,
+            title=f"WayExpand GTK IBus acceptance {APP_ID}",
+        )
+    else:
+        window = Gtk.Window(title=f"WayExpand GTK IBus acceptance {APP_ID}")
     window.set_default_size(500, 80)
     entry = Gtk.Entry()
     if args.password:
@@ -55,6 +64,8 @@ def main():
         window.show_all()
     window.present()
     entry.grab_focus()
+    if application is not None:
+        application.activate()
 
     failed = False
     started_at = GLib.get_monotonic_time()
