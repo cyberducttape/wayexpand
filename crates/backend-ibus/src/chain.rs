@@ -648,6 +648,15 @@ fn check(
             })
             .or_else(|| (state == IbusCheckState::Fail && id == "daemon").then_some("WX-IBUS-004"))
             .or_else(|| {
+                (state != IbusCheckState::Pass && id == "field-input").then_some("WX-IBUS-003")
+            })
+            .or(match (id, state) {
+                ("target-insertion", IbusCheckState::Fail) => Some("WX-IBUS-005"),
+                ("target-insertion", IbusCheckState::Warn) => Some("WX-IBUS-006"),
+                ("target-insertion", IbusCheckState::Unknown) => Some("WX-IBUS-007"),
+                _ => None,
+            })
+            .or_else(|| {
                 (state != IbusCheckState::Pass
                     && matches!(id, "toolkit-environment" | "desktop-shell-environment"))
                 .then_some("WX-IBUS-TOOLKIT-001")
@@ -1731,6 +1740,40 @@ mod tests {
         );
         assert_eq!(registration.problem_id, Some("WX-IBUS-001"));
         assert_eq!(selection.problem_id, Some("WX-IBUS-002"));
+    }
+
+    #[test]
+    fn generic_ibus_runtime_checks_have_stable_ids_for_each_outcome() {
+        let no_input = check(
+            "field-input",
+            "Normal-field input observed",
+            IbusCheckState::Unknown,
+            "no safe-field activity observed",
+            None,
+        );
+        assert_eq!(no_input.problem_id, Some("WX-IBUS-003"));
+
+        for (state, expected) in [
+            (IbusCheckState::Fail, "WX-IBUS-005"),
+            (IbusCheckState::Warn, "WX-IBUS-006"),
+            (IbusCheckState::Unknown, "WX-IBUS-007"),
+        ] {
+            let insertion = check(
+                "target-insertion",
+                "Target application insertion verified",
+                state,
+                "target text was not independently verified",
+                None,
+            );
+            assert_eq!(insertion.problem_id, Some(expected));
+        }
+
+        for state in [IbusCheckState::Pass, IbusCheckState::Skip] {
+            assert_eq!(
+                check("target-insertion", "", state, "", None).problem_id,
+                None
+            );
+        }
     }
 
     #[test]

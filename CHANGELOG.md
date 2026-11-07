@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Give IBus normal-field input and target-insertion checks stable, distinct
+  problem IDs in `wayexpand ibus status --json`. Output failures, emitted but
+  unverified replacement actions, and no observed insertion now have separate
+  diagnoses and safe manual verification guidance.
+
 - Give missing or non-IBus KWin Virtual Keyboard configuration a stable
   `WX-KWIN-IBUS-001` finding and the same explicit selection, logout, and retest
   instructions used by other KWin input-routing failures.
