@@ -516,10 +516,27 @@ until gnome_extension_state_active "$(extension_state)"; do
     sleep 0.1
 done
 if [ "$tries" -gt 0 ]; then
+    # GNOME can report an extension active before its D-Bus object has been
+    # exported. Wait for the live identity itself, which proves that the new
+    # Shell instance loaded and registered the updated implementation.
+    live_build=
+    build_tries=100
+    while [ "$build_tries" -gt 0 ]; do
+        live_build=$(gdbus call --session --dest org.gnome.Shell \
+            --object-path /org/wayexpand/ShellWindowTracker \
+            --method org.freedesktop.DBus.Properties.Get \
+            org.wayexpand.ShellWindowTracker1 BuildIdentity 2>/dev/null || true)
+        case "$live_build" in
+            *"$expected_build"*) break ;;
+        esac
+        build_tries=$((build_tries - 1))
+        sleep 0.1
+    done
     "$E2E_BIN_DIR/wayexpand" doctor --gnome --json \
         >"$E2E_WORK/doctor-after-login.json" \
         2>"$E2E_WORK/doctor-after-login.err" || true
-    if python3 - "$E2E_WORK/doctor-after-login.json" <<'PY'
+    if [ "$build_tries" -gt 0 ] \
+        && python3 - "$E2E_WORK/doctor-after-login.json" <<'PY'
 import json
 import sys
 
