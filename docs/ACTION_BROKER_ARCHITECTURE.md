@@ -1,7 +1,7 @@
 # Action Broker Architecture
 
 **Version:** 1.3.3
-**Status:** Named-action execution with optional per-action Landlock filesystem and IP-socket restrictions; packaged service denies network access
+**Status:** Named-action execution with optional per-action Landlock filesystem and direct-IP-socket restrictions; local AF_UNIX proxying remains possible
 **Next:** Device policy, broader per-action syscall profiles, and operational verification
 
 ## Overview
@@ -20,7 +20,7 @@ The standalone binary is part of normal workspace builds and release packages. S
 `$XDG_RUNTIME_DIR`) and run the broker with a mode-0600 configuration.
 
 The design aims to provide:
-- **Daemon isolation** - Keyboard capture stays locked down (no network)
+- **Daemon isolation** - Keyboard capture cannot create direct IP sockets; authorized local AF_UNIX communication remains available and may reach a proxy
 - **Per-action control** - Fine-grained permissions for each action
 - **Audit trail** - Optional privacy-preserving JSONL execution audit sink
 - **Privilege separation** - Commands run with appropriate permissions
@@ -139,7 +139,8 @@ broker's journal only when the action's policy sets `log_output = true`.
 ```
 ┌─────────────────────────────┐
 │ Keyboard Capture Daemon     │
-│ • No network (AF_UNIX only) │
+│ • No direct IP sockets      │
+│ • Local AF_UNIX IPC remains │
 │ • Read-only /home           │
 │ • Input + Matching + Inject │
 └────────────────┬────────────┘
@@ -293,7 +294,7 @@ What could be added:
 require_absolute_paths = true
 strict_env = true
 
-# Action: Local report (no network)
+# Action: Local report (direct IP sockets are restricted by the service)
 [actions."local-report"]
 program = "/usr/local/bin/report"
 args = []
@@ -414,14 +415,17 @@ missing broker service from an unknown or disabled action.
 - Named `action` commands are sent to the standalone broker over its protected
   Unix socket; they are not executed in the daemon process.
 - Expansion and organization policy are checked before dispatch.
-- The daemon service sandbox supplies additional restrictions such as no
-  network access and read-only home/system protection.
+- The daemon service sandbox supplies additional restrictions such as blocking
+  direct IP sockets and read-only home/system protection. Local AF_UNIX
+  services may still proxy network requests.
 - Direct `program` commands remain subject to the daemon's systemd sandbox;
   named actions use the separate broker process and its action policy.
 
 ### Broker permissions and deployment boundary
-- The keyboard daemon retains a minimal AF_UNIX-only permission set and does
-  not spawn named action commands itself.
+- The keyboard daemon retains a minimal AF_UNIX-only socket-family permission
+  set and does not spawn named action commands itself. This blocks direct IP
+  socket creation but does not prevent indirect network access through a local
+  AF_UNIX proxy.
 - Only configured programs allowed
 - Action arguments are fixed by the validated action definition; any future
   request-supplied arguments must use a separately constrained allowlisted

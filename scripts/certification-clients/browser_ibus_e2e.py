@@ -49,6 +49,7 @@ def main():
     parser.add_argument("--page", required=True)
     parser.add_argument("--ready-marker", required=True)
     parser.add_argument("--focus-marker", required=True)
+    parser.add_argument("--armed-marker", required=True)
     parser.add_argument("--status-file", required=True)
     parser.add_argument("--log", required=True)
     args = parser.parse_args()
@@ -69,6 +70,19 @@ def main():
     )
     profile = Path(args.profile)
     profile.mkdir(mode=0o700, parents=True, exist_ok=True)
+    status_file = Path(args.status_file)
+
+    def status_snapshot():
+        try:
+            return json.loads(status_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return {}
+
+    # Take this before Chromium creates its input context. A snapshot taken
+    # after window activation can miss the FocusIn transition if the browser
+    # already reported focus while Mutter was mapping its XWayland window.
+    initial_status = status_snapshot()
+    initial_focus_ins = int(initial_status.get("totals", {}).get("focus_ins", 0))
     log_file = open(args.log, "wb")
     process = subprocess.Popen(
         [
@@ -153,23 +167,40 @@ def main():
         if evaluate("document.title") != TITLE:
             fail("unexpected browser title; refusing to activate an unrelated window")
         evaluate("document.querySelector('#target').focus()")
-        status_file = Path(args.status_file)
-
-        def status_snapshot():
-            try:
-                return json.loads(status_file.read_text(encoding="utf-8"))
-            except (OSError, ValueError, TypeError):
-                return {}
-
-        baseline = status_snapshot()
-        baseline_refusals = int(
-            baseline.get("totals", {}).get("refusals", {}).get(
-                "no_surrounding_capability", 0
-            )
-        )
-        baseline_keys = int(baseline.get("totals", {}).get("keys", 0))
         Path(args.ready_marker).touch(mode=0o600)
         wait_for(lambda: Path(args.focus_marker).exists(), "Mutter-confirmed browser focus")
+
+        def browser_context_focused():
+            status = status_snapshot()
+            fields = status.get("recent_fields", [])
+            latest_field = fields[-1] if fields else {}
+            focus_ins = int(status.get("totals", {}).get("focus_ins", 0))
+            return focus_ins > initial_focus_ins and latest_field.get("focused") is True
+
+        try:
+            wait_for(
+                browser_context_focused,
+                "a new focused Chromium IBus context",
+            )
+        except SystemExit as error:
+            status = status_snapshot()
+            totals = status.get("totals", {})
+            fields = status.get("recent_fields", [])
+            latest_field = fields[-1] if fields else {}
+            fail(
+                f"{error}; "
+                f"focus_ins_delta={int(totals.get('focus_ins', 0)) - initial_focus_ins}, "
+                f"keys={totals.get('keys', 0)}, "
+                f"latest_field_focused={latest_field.get('focused')}, "
+                f"latest_field_surrounding={latest_field.get('surrounding_capability')}"
+            )
+        baseline = status_snapshot()
+        baseline_keys = int(baseline.get("totals", {}).get("keys", 0))
+        baseline_uncaptured = int(
+            (baseline.get("recent_fields", [])[-1] if baseline.get("recent_fields") else {})
+            .get("keys_without_capture", 0)
+        )
+        Path(args.armed_marker).touch(mode=0o600)
 
         deadline = time.monotonic() + TIMEOUT_SECONDS
         actual = ""
@@ -181,24 +212,47 @@ def main():
             if actual == TRIGGER:
                 status = status_snapshot()
                 totals = status.get("totals", {})
-                refusals = totals.get("refusals", {})
                 fields = status.get("recent_fields", [])
                 latest_field = fields[-1] if fields else {}
+                uncaptured = int(latest_field.get("keys_without_capture", 0))
                 if (
                     int(totals.get("keys", 0)) > baseline_keys
                     and latest_field.get("surrounding_capability") is False
-                    and int(refusals.get("no_surrounding_capability", 0))
-                    > baseline_refusals
+                    and uncaptured - baseline_uncaptured >= len(TRIGGER)
                 ):
                     print(
-                        "pass Chromium input reached WayExpand; IBus did not advertise "
-                        "surrounding-text support, the replacement was refused, and the trigger remained intact"
+                        "pass Chromium input reached WayExpand; without IBus "
+                        "surrounding-text support, all trigger keys passed through unchanged"
                     )
                     return
             time.sleep(0.05)
+        final_status = status_snapshot()
+        final_totals = final_status.get("totals", {})
+        final_fields = final_status.get("recent_fields", [])
+        latest_field = final_fields[-1] if final_fields else {}
+        final_uncaptured = int(latest_field.get("keys_without_capture", 0))
+        value_state = (
+            "replacement"
+            if actual == EXPECTED
+            else "trigger"
+            if actual == TRIGGER
+            else "empty"
+            if not actual
+            else "other"
+        )
         fail(
-            "Chromium did not insert the expected text or record a safe refusal "
-            "for missing IBus surrounding-text support"
+            "Chromium did not insert the expected text or pass the trigger "
+            "through unchanged without surrounding-text support; "
+            f"value_state={value_state}, "
+            "test_value_codepoints="
+            f"{','.join(f'U+{ord(character):04X}' for character in actual) or 'empty'}, "
+            f"focus_ins_delta={int(final_totals.get('focus_ins', 0)) - initial_focus_ins}, "
+            f"keys_delta={int(final_totals.get('keys', 0)) - baseline_keys}, "
+            f"latest_field_focused={latest_field.get('focused')}, "
+            f"latest_field_keys={latest_field.get('keys', 0)}, "
+            f"latest_field_surrounding={latest_field.get('surrounding_capability')}, "
+            "uncaptured_keys_delta="
+            f"{final_uncaptured - baseline_uncaptured}"
         )
     finally:
         if connection is not None:

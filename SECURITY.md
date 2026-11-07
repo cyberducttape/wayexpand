@@ -379,7 +379,9 @@ SRE command-execution boundary:
 
 **Current design:**
 - Commands run directly in the daemon process, subject to systemd hardening
-- `ProtectHome=read-only`, `ProtectSystem=strict`, no network access
+- `ProtectHome=read-only`, `ProtectSystem=strict`, and direct IPv4/IPv6 socket
+  creation blocked. AF_UNIX IPC remains available, so a local proxy service
+  could relay requests; these settings do not establish total egress isolation.
 - Prevents legitimate SRE tools from working: `kubectl`, `aws`, `vault`, `ssh`, etc.
 
 The IBus integration keeps direct `program` commands disabled because IBus runs

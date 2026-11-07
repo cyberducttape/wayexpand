@@ -10,7 +10,8 @@
 //! ```text
 //! ┌─────────────────────────────┐
 //! │ Keyboard Capture Daemon     │
-//! │ (restricted: no network)    │
+//! │ (no direct IP sockets)      │
+//! │ (local AF_UNIX IPC remains) │
 //! └────────────────┬────────────┘
 //!                  │
 //!        [Authenticated IPC]

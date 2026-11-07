@@ -4,6 +4,22 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Pass IBus key events through untouched when the client lacks advertised
+  surrounding-text support. This prevents matching from consuming trigger
+  characters that cannot be safely replaced; browser and real-daemon acceptance
+  tests verify exact trigger preservation and content-free pass-through telemetry.
+- Synchronize the GNOME browser acceptance test with an armed marker after its
+  focus and telemetry baselines are recorded, so the shell sends the test trigger
+  only after the correlated browser measurement is ready.
+- Update the GNOME acceptance summary to require and describe browser pass-through
+  safety when Chromium does not support IBus surrounding text.
+- Correlate the Chromium IBus acceptance trigger with its new focused IBus
+  context, and include content-free focus, key, and refusal counters when the
+  acceptance run cannot verify insertion or safe pass-through. Failure
+  diagnostics encode only the fixed test-field value as Unicode code points.
+- Clarify that systemd AF_UNIX-only restrictions block direct IP sockets but
+  do not prevent network access relayed through an authorized local Unix-socket
+  service.
 - Require a live WayExpand engine process before reporting GNOME IBus selection
   ready, so stale global-engine state cannot mask a stopped engine. Update the
   IBus acceptance client to bind an already-selected global engine to its

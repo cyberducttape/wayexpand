@@ -451,6 +451,7 @@ env \
     --page "$E2E_WORK/browser-ibus-e2e.html" \
     --ready-marker "$E2E_WORK/browser-window-ready" \
     --focus-marker "$E2E_WORK/browser-window-focused" \
+    --armed-marker "$E2E_WORK/browser-window-armed" \
     --status-file "$XDG_RUNTIME_DIR/wayexpand-ibus-status.json" \
     --log "$E2E_WORK/browser-ibus-e2e-chrome.log" \
     >"$E2E_WORK/browser-ibus-e2e.log" 2>&1 &
@@ -484,6 +485,26 @@ if ! activate_window org.wayexpand.GnomeBrowserIbus; then
     exit 1
 fi
 : >"$E2E_WORK/browser-window-focused"
+tries=200
+while [ ! -e "$E2E_WORK/browser-window-armed" ]; do
+    if ! kill -0 "$browser_pid" 2>/dev/null; then
+        wait "$browser_pid" || true
+        browser_pid=
+        log "fail gnome-browser-insertion Chromium did not arm its correlated input check"
+        cat "$E2E_WORK/browser-ibus-e2e.log" "$E2E_WORK/browser-ibus-e2e-chrome.log"
+        exit 1
+    fi
+    tries=$((tries - 1))
+    if [ "$tries" -le 0 ]; then
+        kill "$browser_pid" 2>/dev/null || true
+        wait "$browser_pid" 2>/dev/null || true
+        browser_pid=
+        log "fail gnome-browser-insertion Chromium did not arm its correlated input check"
+        cat "$E2E_WORK/browser-ibus-e2e.log" "$E2E_WORK/browser-ibus-e2e-chrome.log"
+        exit 1
+    fi
+    sleep 0.1
+done
 if ! DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
     xdotool type --clearmodifiers --delay 40 -- ';e2e'; then
     kill "$browser_pid" 2>/dev/null || true
@@ -505,11 +526,11 @@ cat "$E2E_WORK/browser-ibus-e2e.log"
 if grep -F 'Chromium IBus input context replaced the test trigger' \
     "$E2E_WORK/browser-ibus-e2e.log" >/dev/null; then
     log "pass gnome-browser-insertion Chromium's IBus input context replaced the trigger in a textarea"
-elif grep -F 'Chromium input reached WayExpand; IBus did not advertise surrounding-text support' \
+elif grep -F 'Chromium input reached WayExpand; without IBus surrounding-text support, all trigger keys passed through unchanged' \
     "$E2E_WORK/browser-ibus-e2e.log" >/dev/null; then
-    log "pass gnome-browser-safe-refusal Chromium lacks IBus surrounding-text support; WayExpand refused replacement and preserved the trigger"
+    log "pass gnome-browser-safe-passthrough Chromium lacks IBus surrounding-text support; all trigger keys reached the field unchanged"
 else
-    log "fail gnome-browser-insertion browser result did not prove insertion or a safe refusal"
+    log "fail gnome-browser-insertion browser result did not prove insertion or safe pass-through"
     cat "$E2E_WORK/browser-ibus-e2e.log"
     exit 1
 fi
@@ -853,7 +874,7 @@ for check in $expected_checks; do
         break
     fi
 done
-if ! grep -Eq '^pass gnome-browser-(insertion|safe-refusal)' "$work/results.txt"; then
+if ! grep -Eq '^pass gnome-browser-(insertion|safe-passthrough)' "$work/results.txt"; then
     missing_check=${missing_check:-gnome-browser-result}
 fi
 if [ "$status" -ne 0 ] || grep -q '^fail' "$work/results.txt" \
@@ -886,4 +907,4 @@ if [ "$status" -ne 0 ] || grep -q '^fail' "$work/results.txt" \
     done
     exit 1
 fi
-printf '%s\n' "Headless GNOME input activation, GTK3 IBus insertion, Chromium IBus refusal safety, engine health, and extension upgrade/logout tests passed; physical desktop certification remains unverified"
+printf '%s\n' "Headless GNOME input activation, GTK3 IBus insertion, Chromium IBus pass-through safety, engine health, and extension upgrade/logout tests passed; physical desktop certification remains unverified"
