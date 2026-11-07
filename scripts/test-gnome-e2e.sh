@@ -436,6 +436,21 @@ run_gtk_ibus_case() {
         cat "$test_log"
         exit 1
     fi
+    gtk_window=$(DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+        xdotool search --onlyvisible --name "WayExpand GTK IBus acceptance org.wayexpand.GnomeGtkIbus" \
+        | head -n 1)
+    if [ -z "$gtk_window" ] \
+        || ! DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+            xdotool windowfocus --sync "$gtk_window" \
+        || ! DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+            xdotool mousemove --window "$gtk_window" 100 40 click 1; then
+        kill "$gtk_pid" 2>/dev/null || true
+        wait "$gtk_pid" 2>/dev/null || true
+        gtk_pid=
+        log "fail gnome-gtk-$case_name XTEST could not focus and click the GTK entry"
+        cat "$test_log"
+        exit 1
+    fi
     : >"$marker"
     focus_tries=200
     while [ ! -s "$ready_marker" ]; do
