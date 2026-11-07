@@ -8,7 +8,11 @@ Welcome! This guide will help you get up and running based on your desktop envir
 
 ## Five-Minute Quickstart
 
-This is the shortest path from an installed binary to a working snippet.
+This guide gets a snippet configured, then has you verify it in a real
+application before calling the route working. Backend readiness and a matcher
+preview do not prove that desktop typing or replacement works in a particular
+application. Check the [support matrix](SUPPORT_MATRIX.md) for the evidence
+available for your compositor and route.
 
 ### 1. Check the session
 
@@ -105,15 +109,31 @@ read its key pass-through and held-key/repeat limitations before enabling its
 service. For any route, read the security tradeoffs in
 [SECURITY.md](../SECURITY.md).
 
-### 4. Test without typing into an application
+### 4. Check matching, then verify a real insertion
 
 ```sh
 wayexpand test ';;hello'
 ```
 
-If this prints `Hello, world!`, type `;;hello` into a plain text field. If it
-prints `no expansion matched`, inspect the trigger with `wayexpand list` and
-`wayexpand validate` before debugging the backend.
+This is a matcher-only check: it confirms the saved configuration can match
+the trigger and render the replacement. It does not send input to your desktop
+or prove that an application will receive a replacement.
+
+For the desktop check, focus a disposable, non-sensitive text field and run:
+
+```sh
+wayexpand debug --test ';;hello'
+```
+
+Follow its prompt, type the trigger once, inspect the resulting text, and
+confirm only if it exactly matches the expected replacement. WayExpand never
+presses Enter or retries uncertain output. The GUI offers this as **Desktop
+Integration Test** during setup. Until you confirm an exact result, report the
+state as **Configured, untested**; after confirmation, it reports **Working in
+the tested application**. That result applies only to the tested app and
+session. It does not certify other applications or the compositor. If the
+matcher check instead prints `no expansion matched`, inspect the trigger with
+`wayexpand list` and `wayexpand validate` before debugging the backend.
 
 ### 5. Add an app-filtered snippet (optional)
 
@@ -265,7 +285,10 @@ Click "Add snippet" and enter:
 - **Trigger:** `;;hello`
 - **Replacement:** `Hello, world!`
 
-Click Save, then type `;;hello` in any text field.
+Click Save. First run the matcher check below, then use **Desktop Integration
+Test** from the GUI to verify insertion in a disposable text field. Do not
+assume the snippet works in every text field: application support and route
+certification are listed in the [support matrix](SUPPORT_MATRIX.md).
 
 **Via CLI:**
 ```bash
@@ -280,7 +303,10 @@ trigger = ";;hello"
 replacement = "Hello, world!"
 ```
 
-Save, then the daemon reloads automatically.
+Save, then the daemon reloads automatically. Run `wayexpand test ';;hello'`
+to check matching, followed by `wayexpand debug --test ';;hello'` for an
+explicit real-application insertion test. A passing matcher check alone is
+not a desktop test.
 
 ### 3. Common Patterns
 
@@ -343,7 +369,10 @@ See [COMPATIBILITY.md](COMPATIBILITY.md) for the configuration format, and [FOR_
 1. Run `wayexpand doctor` to check backend status
 2. Verify the daemon is running: `systemctl --user status wayexpand-input-method.service`
 3. Check logs: `journalctl --user -u wayexpand-input-method.service -n 20`
-4. Try a simple test: `;;hello` should become `Hello, world!`
+4. Run the matcher check, then complete **Desktop Integration Test** in a
+   disposable text field. Treat the route as working only in the application
+   where you confirmed the exact result; see the support matrix for what has
+   and has not been certified.
 
 **Password field protection not working?**
 - This requires input-method-v2 backend (shows in `wayexpand doctor`)

@@ -1236,7 +1236,7 @@ impl GuiApp {
             .resizable(false)
             .default_width(520.0)
             .show(ctx, |ui| {
-                ui.label(RichText::new("A real insertion test is optional. It is the only stage that verifies text in a target application.").color(palette.muted));
+                ui.label(RichText::new("Complete the Desktop Test during onboarding to confirm real insertion. Until you confirm an exact result, setup remains Configured, untested. You can defer the test and return here later.").color(palette.muted));
                 ui.label(RichText::new("Matcher Test").strong());
                 ui.label("Checks the loaded snippets and template rendering locally. It does not read keyboard input or modify another application.");
                 if ui.button("Open Matcher Test").clicked() {
@@ -1246,7 +1246,7 @@ impl GuiApp {
                 }
                 ui.separator();
                 ui.label(RichText::new("Desktop Test").strong());
-                ui.label("Tests the active route in a disposable text field. It never presses Enter or retries insertion. Activity counters are not tied to this test trigger; you must inspect the result and confirm it yourself.");
+                ui.label("Tests the active route in a disposable text field. It never presses Enter or retries insertion. Activity counters are not tied to this test trigger; inspect the resulting text and confirm an exact match yourself. This verifies only the selected application in this session.");
                 if desktop_tests.len() > 1 {
                     egui::ComboBox::from_id_salt("desktop_test_trigger_choice")
                         .selected_text(if self.desktop_test_trigger.is_empty() {
@@ -1314,7 +1314,7 @@ impl GuiApp {
                         ui.ctx().copy_text(command.clone());
                     }
                 } else {
-                    ui.label("No enabled static snippet is available for the optional desktop test. Setup is complete; save or enable a harmless static snippet, then open Test Expansion again. Templated and command-backed snippets are excluded.");
+                    ui.label("No enabled static snippet is available for the desktop test. Setup is configured but untested. Save or enable a harmless static snippet, then return here to complete the test. Templated and command-backed snippets are excluded.");
                 }
                 ui.colored_label(palette.warning, "If the matcher succeeds but desktop insertion fails, inspect the Input and Output route assessment and run the guided backend checks.");
                 if ui.button("Close").clicked() {

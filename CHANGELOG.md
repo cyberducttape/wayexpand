@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Make the real-application insertion test an explicit onboarding stage and
+  update Getting Started so matcher success is never described as desktop
+  verification. The GUI now labels configured-but-untested routes and maps
+  GNOME session restart and replacement-authorization failures to distinct
+  next steps; only a user-confirmed exact insertion is shown as working.
+
 - Defer GNOME extension setup until after backend selection, policy checks,
   IBus preflight, and replacement authorization. A rejected route no longer
   installs or enables the extension, and backend selection failures no longer
