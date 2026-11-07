@@ -126,12 +126,15 @@ find "$HOME/.local/share/gnome-shell/extensions" -mindepth 1 -maxdepth 2 \
 # `gnome-extensions enable`; it also avoids racing the asynchronous dconf
 # writer immediately after setting enabled-extensions above.
 for extension_uuid in "$E2E_UUID" "$E2E_CONTROLLER_UUID"; do
-    tries=100
+    # A cold headless Mutter startup can take longer than ten seconds while
+    # the renderer initializes. Keep retrying the supported D-Bus activation
+    # request for up to a minute before declaring the extension unavailable.
+    tries=600
     while ! gnome_shell_extensions_call EnableExtension "$extension_uuid" \
         >"$E2E_WORK/enable-$extension_uuid.log" 2>&1; do
         tries=$((tries - 1))
         if [ "$tries" -le 0 ] || ! kill -0 "$shell_pid" 2>/dev/null; then
-            log "fail extension-enable GNOME Shell could not enable $extension_uuid: $(cat "$E2E_WORK/enable-$extension_uuid.log")"
+            log "fail extension-enable GNOME Shell could not enable $extension_uuid after 60 seconds: $(cat "$E2E_WORK/enable-$extension_uuid.log")"
             exit 1
         fi
         sleep 0.1
