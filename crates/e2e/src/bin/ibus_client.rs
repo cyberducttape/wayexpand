@@ -23,7 +23,9 @@ use std::{
 };
 use zbus::{
     blocking::{Connection, MessageIterator},
+    message::Type as MessageType,
     zvariant::{OwnedObjectPath, OwnedValue, StructureBuilder, Value},
+    MatchRule,
 };
 
 const IBUS: &str = "org.freedesktop.IBus";
@@ -345,9 +347,21 @@ fn main() -> Result<()> {
     let address = env::var("IBUS_ADDRESS").context("IBUS_ADDRESS is not set")?;
     let connection = zbus::blocking::connection::Builder::address(address.as_str())?.build()?;
     let (sender, events) = mpsc::channel();
-    let messages = MessageIterator::from(&connection);
+    // Subscribe only to engine output signals. Reading every message on the
+    // private bus also feeds unrelated method traffic through zbus's header
+    // decoder; on Ubuntu 24.04 this caused its reader thread to panic on an
+    // unrelated message and silently lose CommitText events.
+    let signal_rule = MatchRule::builder()
+        .msg_type(MessageType::Signal)
+        .interface("org.freedesktop.IBus.Engine")?
+        .path_namespace("/org/freedesktop/IBus/Engine/WayExpand")?
+        .build();
+    let messages = MessageIterator::for_match_rule(signal_rule, &connection, Some(128))?;
     thread::spawn(move || {
-        for message in messages.flatten() {
+        for message in messages {
+            let Ok(message) = message else {
+                continue;
+            };
             let header = message.header();
             let (Some(member), Some(path)) = (header.member(), header.path()) else {
                 continue;
