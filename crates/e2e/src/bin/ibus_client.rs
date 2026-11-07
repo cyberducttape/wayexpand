@@ -249,6 +249,22 @@ fn select_engine(connection: &Connection, field: &Field<'_>, expect_active: bool
             _ => String::new(),
         };
         if name == "wayexpand" {
+            if expect_active {
+                // GNOME's Shell-selected global descriptor can precede the
+                // per-context engine binding. Reapply that already-verified
+                // selection after FocusIn so IBus attaches the selected
+                // engine to this test context, as it does when a toolkit
+                // context becomes active.
+                connection
+                    .call_method(
+                        Some(IBUS),
+                        IBUS_PATH,
+                        Some(IBUS),
+                        "SetGlobalEngine",
+                        &(name.as_str(),),
+                    )
+                    .context("SetGlobalEngine(wayexpand) for active context")?;
+            }
             return Ok(());
         }
         if Instant::now() > deadline {

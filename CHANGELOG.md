@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Require a live WayExpand engine process before reporting GNOME IBus selection
+  ready, so stale global-engine state cannot mask a stopped engine. Update the
+  IBus acceptance client to bind an already-selected global engine to its
+  focused diagnostic context, matching the toolkit focus path; otherwise the
+  selected descriptor could pass while the test context remained unattached.
 - Keep GNOME extension diagnostics useful across a Shell restart by verifying
   the live tracker identity when the Extensions manager query is temporarily
   unavailable. Treat matching `dirty-unknown` build labels as unverified in

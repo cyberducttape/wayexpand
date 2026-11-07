@@ -1946,16 +1946,24 @@ fn gnome_selects_ibus_engine_through_shell(desktop: IbusDesktop) -> bool {
     desktop == IbusDesktop::Gnome
 }
 
+fn ibus_selection_ready(shell_managed: bool, selected: bool, engine_live: bool) -> bool {
+    selected && (!shell_managed || engine_live)
+}
+
 fn ensure_ibus_engine_selected(shell_managed: bool) -> Result<()> {
     let shell_activation_window = if shell_managed {
         Duration::from_secs(2)
     } else {
         Duration::ZERO
     };
-    if wait_until(
-        shell_activation_window,
-        wayexpand_backend_ibus::global_engine_selected,
-    ) {
+    let ready = || {
+        ibus_selection_ready(
+            shell_managed,
+            wayexpand_backend_ibus::global_engine_selected(),
+            wayexpand_backend_ibus::telemetry::read_status().is_some_and(|reading| reading.live),
+        )
+    };
+    if wait_until(shell_activation_window, ready) {
         return Ok(());
     }
 
@@ -1963,10 +1971,7 @@ fn ensure_ibus_engine_selected(shell_managed: bool) -> Result<()> {
     // engines. Give that asynchronous request time to finish before applying a
     // bounded fallback; issuing both requests concurrently cancels activation.
     let _ = run_setup_command("ibus", &["engine", "wayexpand"]);
-    if wait_until(
-        Duration::from_secs(5),
-        wayexpand_backend_ibus::global_engine_selected,
-    ) {
+    if wait_until(Duration::from_secs(5), ready) {
         Ok(())
     } else {
         bail!("could not select the WayExpand IBus engine; check that `ibus list-engine --name-only` lists `wayexpand`")
@@ -2783,6 +2788,14 @@ mod tests {
         assert!(!gnome_selects_ibus_engine_through_shell(
             IbusDesktop::OtherWayland
         ));
+    }
+
+    #[test]
+    fn gnome_selection_requires_a_live_engine_not_a_stale_global_descriptor() {
+        assert!(!ibus_selection_ready(true, true, false));
+        assert!(ibus_selection_ready(true, true, true));
+        assert!(!ibus_selection_ready(true, false, true));
+        assert!(ibus_selection_ready(false, true, false));
     }
 
     #[test]
