@@ -93,7 +93,9 @@ The existing
 `test-gnome-e2e.sh` now runs GNOME Shell with its session-managed IBus daemon. It
 checks component discovery, GNOME source registration, Shell activation, an
 already-active WayExpand engine, a controlled IBus input-context replacement,
-and window tracking. It also opens a GTK 3 `Gtk.Entry` with `GTK_IM_MODULE=ibus`
+and window tracking. Its GTK 3 `Gtk.Entry` checks exact trigger replacement,
+Unicode output, and refusal to expand a password-purpose field. It also opens
+the field with `GTK_IM_MODULE=ibus`
 on GNOME's private XWayland server, activates the window through Mutter, types
 a fixed test trigger through XTEST, and verifies the resulting widget text.
 The same test opens an isolated Google Chrome profile on a local page, focuses

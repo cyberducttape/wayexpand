@@ -8,6 +8,7 @@ keyboard delivery. The only entered content is a fixed, harmless test trigger.
 
 import os
 import sys
+import argparse
 
 import gi
 
@@ -15,12 +16,15 @@ gi.require_version("Gtk", "3.0")
 from gi.repository import GLib, Gtk  # noqa: E402
 
 
-EXPECTED = "expanded"
 APP_ID = "org.wayexpand.GnomeGtkIbus"
 TIMEOUT_MS = 15000
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--expected", required=True)
+    parser.add_argument("--password", action="store_true")
+    args = parser.parse_args()
     if os.environ.get("GTK_IM_MODULE") != "ibus":
         raise SystemExit("GTK_IM_MODULE must be set to ibus")
     if not os.environ.get("IBUS_ADDRESS"):
@@ -35,6 +39,9 @@ def main():
     window = Gtk.Window(title=f"WayExpand GTK IBus acceptance {APP_ID}")
     window.set_default_size(500, 80)
     entry = Gtk.Entry()
+    if args.password:
+        entry.set_visibility(False)
+        entry.set_input_purpose(Gtk.InputPurpose.PASSWORD)
     window.add(entry)
     window.show_all()
     window.present()
@@ -53,13 +60,13 @@ def main():
                 return False
             return True
         actual = entry.get_text()
-        if actual == EXPECTED:
+        if actual == args.expected:
             Gtk.main_quit()
             return False
         if GLib.get_monotonic_time() - started_at >= TIMEOUT_MS * 1000:
             # The test text is fixed and deliberately non-sensitive.
             print(
-                f"GTK IBus insertion mismatch: expected {EXPECTED!r}, got {actual!r}",
+                f"GTK IBus result mismatch: expected {args.expected!r}, got {actual!r}",
                 file=sys.stderr,
             )
             failed = True
@@ -72,7 +79,8 @@ def main():
     window.destroy()
     if failed:
         raise SystemExit(1)
-    print("pass GTK 3 IBus input context replaced the test trigger in Gtk.Entry")
+    result = "preserved the trigger in a password-purpose field" if args.password else "replaced the trigger"
+    print(f"pass GTK 3 IBus input context {result} in Gtk.Entry")
 
 
 if __name__ == "__main__":

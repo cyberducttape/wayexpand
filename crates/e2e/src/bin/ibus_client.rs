@@ -388,11 +388,15 @@ fn main() -> Result<()> {
             std::process::exit(1);
         }
     }
+    // An IBus global engine descriptor can be selected before the new
+    // per-context engine is attached, especially after GNOME Shell restarts.
+    // Wait for WayExpand to publish a focused normal-text context before
+    // sending even a harmless probe key: older IBus releases may report the
+    // key handled while that attachment is still in flight.
+    wait_for_focused_engine(&status_file)?;
     if single_expansion {
-        // After a GNOME Shell restart, the global source can be selected before
-        // IBus has attached a fresh engine instance to a focused text context.
-        // Real toolkits discover that state while processing input, so send a
-        // harmless non-trigger character before requiring engine telemetry.
+        // Check that a non-trigger printable key still reaches the client
+        // after the newly selected IBus context is ready.
         editor.type_text("x")?;
         results.check(
             "engine-start-probe",
@@ -407,17 +411,11 @@ fn main() -> Result<()> {
         }
         editor.clear()?;
     }
-    match wait_for_focused_engine(&status_file) {
-        Ok(()) => results.check(
-            "engine-context-ready",
-            true,
-            "IBus reports a focused normal-text context with surrounding-text capability",
-        ),
-        Err(error) => {
-            results.check("engine-context-ready", false, format!("{error:#}"));
-            std::process::exit(1);
-        }
-    }
+    results.check(
+        "engine-context-ready",
+        true,
+        "IBus reports a focused normal-text context with surrounding-text capability",
+    );
 
     editor.clear()?;
     editor.type_text(TRIGGER)?;

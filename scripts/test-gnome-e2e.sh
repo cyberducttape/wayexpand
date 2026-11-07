@@ -80,6 +80,10 @@ compatibility_mode = "tracked-focus"
 [[expansion]]
 trigger = ";e2e"
 replacement = "expanded"
+
+[[expansion]]
+trigger = ";unicode"
+replacement = "Grüße 世界 🖥️"
 EOF
 chmod 0700 "$work/config" "$work/config/wayexpand"
 chmod 0600 "$work/config/wayexpand/expansions.toml"
@@ -400,43 +404,59 @@ if [ -z "$xwayland_auth" ]; then
     log "fail gnome-gtk-insertion GNOME's private XWayland authorization file could not be resolved"
     exit 1
 fi
-timeout 20s env \
-    GTK_IM_MODULE=ibus \
-    GDK_BACKEND=x11 \
-    DISPLAY="$x11_display" \
-    XAUTHORITY="$xwayland_auth" \
-    IBUS_ADDRESS="$(ibus address)" \
-    GTK_E2E_FOCUS_MARKER="$E2E_WORK/gtk-window-focused" \
-    python3 "$E2E_PROJECT_DIR/scripts/certification-clients/gtk_ibus_e2e.py" \
-    >"$E2E_WORK/gtk-ibus-e2e.log" 2>&1 &
-gtk_pid=$!
-if ! activate_window org.wayexpand.GnomeGtkIbus; then
-    kill "$gtk_pid" 2>/dev/null || true
-    wait "$gtk_pid" 2>/dev/null || true
+run_gtk_ibus_case() {
+    case_name=$1
+    trigger=$2
+    expected=$3
+    password=$4
+    marker="$E2E_WORK/gtk-window-focused-$case_name"
+    test_log="$E2E_WORK/gtk-ibus-e2e-$case_name.log"
+    set --
+    if [ "$password" = true ]; then
+        set -- --password
+    fi
+    timeout 20s env \
+        GTK_IM_MODULE=ibus \
+        GDK_BACKEND=x11 \
+        DISPLAY="$x11_display" \
+        XAUTHORITY="$xwayland_auth" \
+        IBUS_ADDRESS="$(ibus address)" \
+        GTK_E2E_FOCUS_MARKER="$marker" \
+        python3 "$E2E_PROJECT_DIR/scripts/certification-clients/gtk_ibus_e2e.py" \
+        --expected "$expected" "$@" >"$test_log" 2>&1 &
+    gtk_pid=$!
+    if ! activate_window org.wayexpand.GnomeGtkIbus; then
+        kill "$gtk_pid" 2>/dev/null || true
+        wait "$gtk_pid" 2>/dev/null || true
+        gtk_pid=
+        log "fail gnome-gtk-$case_name Mutter could not focus the GTK IBus acceptance window"
+        cat "$test_log"
+        exit 1
+    fi
+    : >"$marker"
+    if ! DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+        xdotool type --clearmodifiers --delay 40 -- "$trigger"; then
+        kill "$gtk_pid" 2>/dev/null || true
+        wait "$gtk_pid" 2>/dev/null || true
+        gtk_pid=
+        log "fail gnome-gtk-$case_name XTEST could not type into the focused GTK window"
+        cat "$test_log"
+        exit 1
+    fi
+    gtk_status=0
+    wait "$gtk_pid" || gtk_status=$?
     gtk_pid=
-    log "fail gnome-gtk-insertion Mutter could not focus the GTK IBus acceptance window"
-    cat "$E2E_WORK/gtk-ibus-e2e.log"
-    exit 1
-fi
-: >"$E2E_WORK/gtk-window-focused"
-if ! DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
-    xdotool type --clearmodifiers --delay 40 -- ';e2e'; then
-    kill "$gtk_pid" 2>/dev/null || true
-    wait "$gtk_pid" 2>/dev/null || true
-    gtk_pid=
-    log "fail gnome-gtk-insertion XTEST could not type into the focused GTK window"
-    cat "$E2E_WORK/gtk-ibus-e2e.log"
-    exit 1
-fi
-gtk_status=0
-wait "$gtk_pid" || gtk_status=$?
-gtk_pid=
-if [ "$gtk_status" -ne 0 ]; then
-    log "fail gnome-gtk-insertion GTK's focused Entry did not receive the WayExpand replacement"
-    cat "$E2E_WORK/gtk-ibus-e2e.log"
-    exit 1
-fi
-log "pass gnome-gtk-insertion GTK's IBus input context replaced the trigger in Gtk.Entry"
+    if [ "$gtk_status" -ne 0 ]; then
+        log "fail gnome-gtk-$case_name GTK's IBus input context produced an incorrect result"
+        cat "$test_log"
+        exit 1
+    fi
+    log "pass gnome-gtk-$case_name $(cat "$test_log")"
+}
+
+run_gtk_ibus_case insertion ';e2e' expanded false
+run_gtk_ibus_case unicode ';unicode' 'Grüße 世界 🖥️' false
+run_gtk_ibus_case password ';e2e' ';e2e' true
 # Exercise the same active engine in a real browser renderer. The isolated
 # Chromium profile uses a local page, XTEST sends only the harmless `;e2e`
 # trigger, and DevTools reads only that test textarea's final value.
@@ -868,7 +888,7 @@ env -i \
     dbus-run-session -- "$work/session.sh" >"$work/results.txt" 2>"$work/session.log" || status=$?
 
 cat "$work/results.txt"
-expected_checks='extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-ibus-input-context gnome-gtk-insertion extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-ibus-input-context-after-login'
+expected_checks='extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-ibus-input-context gnome-gtk-insertion gnome-gtk-unicode gnome-gtk-password extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-ibus-input-context-after-login'
 missing_check=
 for check in $expected_checks; do
     if ! grep -F "pass $check" "$work/results.txt" >/dev/null; then
@@ -909,4 +929,4 @@ if [ "$status" -ne 0 ] || grep -q '^fail' "$work/results.txt" \
     done
     exit 1
 fi
-printf '%s\n' "Headless GNOME input activation, GTK3 IBus insertion, Chromium IBus pass-through safety, engine health, and extension upgrade/logout tests passed; physical desktop certification remains unverified"
+printf '%s\n' "Headless GNOME input activation, GTK3 replacement/Unicode/password-field behavior, Chromium IBus pass-through safety, engine health, and extension upgrade/logout tests passed; GTK4, Qt, Firefox, Electron, terminal, and physical desktop certification remain unverified"
