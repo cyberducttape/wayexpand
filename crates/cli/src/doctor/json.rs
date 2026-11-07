@@ -140,11 +140,16 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
                 let daemon_commit = snapshot
                     .get("daemon_commit")
                     .and_then(serde_json::Value::as_str);
+                let daemon_version = snapshot
+                    .get("daemon_version")
+                    .and_then(serde_json::Value::as_str);
                 serde_json::json!({
                     "available": true,
                     "compatible": status_schema_compatible(&snapshot),
                     "commit_matches": crate::doctor::status::daemon_commit_matches(daemon_commit),
+                    "build_matches": crate::doctor::status::daemon_build_matches(daemon_commit, daemon_version),
                     "daemon_commit": daemon_commit,
+                    "daemon_version": daemon_version,
                     "command_containment": snapshot.get("command_containment"),
                     "command_containment_mode": snapshot.get("command_containment_mode"),
                     "status_schema": snapshot.get("status_schema"),
@@ -204,6 +209,17 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
             "Cgroup cleanup reaper is within its configured backlog limit."
         },
     });
+    let ibus_route = crate::commands::ibus::report_json(
+        &wayexpand_backend_ibus::chain::diagnose(),
+        &crate::commands::ibus::RouteOverlap::from_status(daemon_status_snapshot.as_ref()),
+    );
+    // `healthy` is consumed by monitoring and fleet automation. If IBus is
+    // the selected desktop route, a diagnosed route failure must affect the
+    // exit status too; otherwise a browser can receive no input while doctor
+    // still reports a healthy machine. Unidentified field-level evidence
+    // remains in the route report and does not by itself fail host health;
+    // a stable route check marked unknown must fail closed.
+    let selected_ibus_has_problem = selected_ibus_has_problem(&ibus_route);
     let healthy = config_ok
         && policy_ok
         && display_session_available()
@@ -212,6 +228,7 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
         && broker["healthy"].as_bool().unwrap_or(false)
         && daemon["output"]["health"].as_str() != Some("stalled")
         && daemon["insertion"]["assurance"].as_str() != Some("blocked")
+        && !selected_ibus_has_problem
         && !cleanup_degraded;
     println!(
         "{}",
@@ -239,12 +256,7 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
             "ibus": {
                 "installed": ibus_installed,
                 "status": if ibus_installed { "available to configure" } else { "not installed" },
-                "route": crate::commands::ibus::report_json(
-                    &wayexpand_backend_ibus::chain::diagnose(),
-                    &crate::commands::ibus::RouteOverlap::from_status(
-                        daemon_status_snapshot.as_ref(),
-                    ),
-                ),
+                "route": ibus_route,
             },
             "gnome_window_tracker": crate::gnome_extension::doctor_report(),
             "feature_support": {
@@ -275,6 +287,20 @@ pub(crate) fn print_json_diagnostics(path: &Path) -> Result<bool> {
         })
     );
     Ok(healthy)
+}
+
+pub(crate) fn selected_ibus_has_problem(route: &serde_json::Value) -> bool {
+    let Some(checks) = route["checks"].as_array() else {
+        return false;
+    };
+    let selected = checks
+        .iter()
+        .any(|check| check["id"] == "selected" && check["state"] == "pass");
+    selected
+        && checks.iter().any(|check| {
+            matches!(check["state"].as_str(), Some("fail" | "warn" | "unknown"))
+                && check["problem_id"].as_str().is_some()
+        })
 }
 
 /// Report live protocol checks separately from environment-level backend
@@ -386,4 +412,78 @@ pub(crate) fn production_readiness(daemon: &serde_json::Value) -> serde_json::Va
         "capabilities": daemon_capabilities,
         "blockers": readiness_blockers,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::selected_ibus_has_problem;
+    use serde_json::json;
+
+    #[test]
+    fn selected_ibus_route_problem_blocks_overall_health() {
+        let report = json!({
+            "checks": [
+                { "id": "selected", "state": "pass" },
+                {
+                    "id": "desktop-shell-environment",
+                    "state": "warn",
+                    "problem_id": "WX-IBUS-TOOLKIT-001"
+                }
+            ]
+        });
+        assert!(selected_ibus_has_problem(&report));
+    }
+
+    #[test]
+    fn unknown_selected_ibus_route_with_a_stable_id_fails_closed() {
+        let report = json!({
+            "checks": [
+                { "id": "selected", "state": "pass" },
+                {
+                    "id": "gnome-source-active",
+                    "state": "unknown",
+                    "problem_id": "WX-GNOME-IM-002"
+                }
+            ]
+        });
+        assert!(selected_ibus_has_problem(&report));
+    }
+
+    #[test]
+    fn selected_ibus_daemon_failure_blocks_overall_health() {
+        let report = json!({
+            "checks": [
+                { "id": "selected", "state": "pass" },
+                {
+                    "id": "daemon",
+                    "state": "fail",
+                    "problem_id": "WX-IBUS-004"
+                }
+            ]
+        });
+        assert!(selected_ibus_has_problem(&report));
+    }
+
+    #[test]
+    fn unrelated_or_unidentified_ibus_warnings_do_not_fail_health() {
+        let unselected = json!({
+            "checks": [
+                { "id": "selected", "state": "fail" },
+                {
+                    "id": "desktop-shell-environment",
+                    "state": "warn",
+                    "problem_id": "WX-IBUS-TOOLKIT-001"
+                }
+            ]
+        });
+        let unknown_field_activity = json!({
+            "checks": [
+                { "id": "selected", "state": "pass" },
+                { "id": "field-input", "state": "unknown" },
+                { "id": "target-insertion", "state": "warn" }
+            ]
+        });
+        assert!(!selected_ibus_has_problem(&unselected));
+        assert!(!selected_ibus_has_problem(&unknown_field_activity));
+    }
 }

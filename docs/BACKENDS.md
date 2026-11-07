@@ -88,8 +88,14 @@ The EIS keymap remains authoritative for actual key synthesis; requiring all
 non-text keysyms to match would reject otherwise compatible maps (for example,
 when media-key definitions differ). Missing, reordered, or ambiguous layout
 state is refused rather than guessed. KWin's provider reads its
-keyboard-layout service; Hyprland uses compositor-owned keyboard data. These
-paths still require live certification. A
+keyboard-layout service; Hyprland uses compositor-owned keyboard data; GNOME
+uses the Shell extension's live `currentSource.xkbId` plus the model and
+options from the exact settings source GNOME's InputSourceManager applies
+(session GSettings or systemd-localed); GNOME 45's session settings lack a
+model field, so the provider uses Mutter's `pc105` default for that case.
+GNOME evdev matching remains disabled if the Shell extension cannot provide
+that active state or XKB cannot compile the reported map. These paths still
+require live certification. A
 replacement
 containing an unreachable character is rejected with an error before
 anything is typed, rather than partially or incorrectly inserted. Portal use

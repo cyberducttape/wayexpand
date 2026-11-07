@@ -156,7 +156,8 @@ pub struct IbusReadiness {
     pub selected: bool,
     /// The engine process is running and publishing activity.
     pub engine_running: bool,
-    /// A field sent keys and reported its text, so triggers can be verified.
+    /// At least one recent field sent keys and reported text. IBus telemetry
+    /// does not identify the application, so this is not target-specific proof.
     pub text_received: bool,
     /// At least one expansion was committed since the engine started.
     pub expanded: bool,
@@ -211,6 +212,7 @@ impl IbusChainReport {
             "tools",
             "component",
             "manifest",
+            "manifest-scope",
             "registered",
             "consent",
             "gnome-session",
@@ -231,6 +233,10 @@ impl IbusChainReport {
         // evidence. Its desktop name alone is never a routing pass.
         if self.desktop != IbusDesktop::Gnome {
             ids.push("desktop");
+        }
+        if self.desktop == IbusDesktop::KdeWayland {
+            ids.push("toolkit-environment");
+            ids.push("desktop-shell-environment");
         }
         self.aggregate(&ids)
     }
@@ -478,6 +484,49 @@ fn resolve_exec(exec: &str, search_path: Option<&OsStr>) -> Option<PathBuf> {
         .find(|candidate| executable(candidate))
 }
 
+fn shared_manifest_uses_user_home(
+    manifest_path: &Path,
+    resolved_exec: &Path,
+    homes: &[PathBuf],
+) -> bool {
+    // A manifest in a shared IBus directory must not bind all desktop users
+    // to an executable installed in one account's home directory. Ignore a
+    // per-user manifest path; it is not a shared registration.
+    !homes.iter().any(|home| manifest_path.starts_with(home))
+        && homes.iter().any(|home| resolved_exec.starts_with(home))
+}
+
+fn known_user_homes() -> Vec<PathBuf> {
+    const MAX_PASSWD_BYTES: u64 = 1024 * 1024;
+    let mut homes = Vec::new();
+    if let Ok(metadata) = fs::metadata("/etc/passwd") {
+        if metadata.is_file() && metadata.len() <= MAX_PASSWD_BYTES {
+            if let Ok(contents) = fs::read_to_string("/etc/passwd") {
+                homes.extend(contents.lines().take(4096).filter_map(|line| {
+                    let mut fields = line.split(':');
+                    let _name = fields.next()?;
+                    let _password = fields.next()?;
+                    let _uid = fields.next()?;
+                    let _gid = fields.next()?;
+                    let _gecos = fields.next()?;
+                    let home = PathBuf::from(fields.next()?);
+                    (home.is_absolute() && home != Path::new("/") && home.is_dir()).then_some(home)
+                }));
+            }
+        }
+    }
+    if let Some(home) = env::var_os("HOME").map(PathBuf::from) {
+        homes.push(home);
+    }
+    homes = homes
+        .into_iter()
+        .map(|home| fs::canonicalize(&home).unwrap_or(home))
+        .collect();
+    homes.sort();
+    homes.dedup();
+    homes
+}
+
 /// Read KWin's configured input method (`[Wayland] InputMethod`).
 pub fn kwin_input_method() -> Option<String> {
     let config_home = env::var_os("XDG_CONFIG_HOME")
@@ -485,13 +534,24 @@ pub fn kwin_input_method() -> Option<String> {
         .map(PathBuf::from)
         .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
     let text = fs::read_to_string(config_home.join("kwinrc")).ok()?;
+    parse_kwin_input_method(&text)
+}
+
+fn parse_kwin_input_method(text: &str) -> Option<String> {
     let mut in_wayland = false;
     for line in text.lines() {
         let line = line.trim();
         if line.starts_with('[') {
             in_wayland = line == "[Wayland]";
         } else if in_wayland {
-            if let Some(value) = line.strip_prefix("InputMethod=") {
+            let Some((key, value)) = line.split_once('=') else {
+                continue;
+            };
+            // KConfig appends [$e] when a value uses environment expansion.
+            // Compare the base key so an ordinary `InputMethod=` fixture and
+            // KWin's persisted `InputMethod[$e]=...` form mean the same thing.
+            let key = key.trim();
+            if key.split_once('[').map_or(key, |(base, _)| base) == "InputMethod" {
                 return Some(value.trim().to_owned());
             }
         }
@@ -564,12 +624,37 @@ fn check(
         id,
         title,
         state,
-        problem_id: (state != IbusCheckState::Pass
-            && matches!(
-                id,
-                "gnome-session" | "gnome-source-registered" | "gnome-source-active"
-            ))
-        .then_some("WX-GNOME-IM-001"),
+        problem_id: (state != IbusCheckState::Pass && id == "gnome-session")
+            .then_some("WX-GNOME-SESSION-001")
+            .or_else(|| {
+                (state != IbusCheckState::Pass && id == "gnome-source-registered")
+                    .then_some("WX-GNOME-IM-001")
+            })
+            .or_else(|| {
+                (state != IbusCheckState::Pass && id == "gnome-source-active")
+                    .then_some("WX-GNOME-IM-002")
+            })
+            .or_else(|| {
+                (state == IbusCheckState::Fail
+                    && matches!(id, "component" | "manifest" | "registered" | "tools"))
+                .then_some("WX-IBUS-001")
+            })
+            .or_else(|| {
+                (state != IbusCheckState::Pass && id == "manifest-scope")
+                    .then_some("WX-IBUS-MULTIUSER-001")
+            })
+            .or_else(|| {
+                (state == IbusCheckState::Fail && id == "selected").then_some("WX-IBUS-002")
+            })
+            .or_else(|| (state == IbusCheckState::Fail && id == "daemon").then_some("WX-IBUS-004"))
+            .or_else(|| {
+                (state != IbusCheckState::Pass
+                    && matches!(id, "toolkit-environment" | "desktop-shell-environment"))
+                .then_some("WX-IBUS-TOOLKIT-001")
+            })
+            .or_else(|| {
+                (state == IbusCheckState::Fail && id == "consent").then_some("WX-POLICY-001")
+            }),
         detail: detail.into(),
         fix,
     }
@@ -654,11 +739,11 @@ pub fn diagnose() -> IbusChainReport {
                     Some(start_ibus_fix(desktop)),
                 )
             } else {
-                match kwin_input_method_available() {
-                    Some(true) => check("desktop", "KWin sends input to IBus", IbusCheckState::Pass, "KWin's Virtual Keyboard is IBus Wayland and running", None),
-                    Some(false) => check("desktop", "KWin sends input to IBus", IbusCheckState::Fail, "KWin is configured for IBus but has not started it", Some("reselect \"IBus Wayland\" in System Settings → Keyboard → Virtual Keyboard, or run `wayexpand setup --backend ibus`".into())),
-                    None => check("desktop", "KWin sends input to IBus", IbusCheckState::Warn, "KWin is configured for IBus; its state could not be queried", None),
-                }
+                kwin_input_method_check(
+                    kwin_input_method_available(),
+                    ibus_wayland_helper_running(),
+                    recent_ibus_wayland_segv(),
+                )
             }
         }
         IbusDesktop::Gnome => skipped(
@@ -670,6 +755,17 @@ pub fn diagnose() -> IbusChainReport {
         IbusDesktop::X11 => check("desktop", "Applications use IBus", IbusCheckState::Warn, "X11 applications reach IBus through GTK_IM_MODULE/QT_IM_MODULE/XMODIFIERS", Some("set GTK_IM_MODULE=ibus QT_IM_MODULE=ibus XMODIFIERS=@im=ibus for your session".into())),
         IbusDesktop::Unknown => check("desktop", "The desktop sends input to IBus", IbusCheckState::Skip, "no graphical session detected", None),
     });
+    if desktop == IbusDesktop::KdeWayland {
+        let activation_environment = bounded_command_output(
+            "systemctl",
+            &["--user", "show-environment"],
+            Duration::from_secs(2),
+        );
+        checks.push(plasma_toolkit_environment_check(
+            activation_environment.as_deref(),
+        ));
+        checks.push(plasma_shell_environment_check(plasma_shell_environments()));
+    }
 
     // GNOME keeps a separate typed input-source list; IBus preload/selection
     // alone does not make the engine survive GNOME source switching.
@@ -711,7 +807,56 @@ pub fn diagnose() -> IbusChainReport {
         }
     });
 
-    // 5. The manifest describes this engine.
+    // 5. A shared system manifest must not be tied to one user's executable.
+    checks.push(match &manifest {
+        None => skipped(
+            "manifest-scope",
+            "Shared IBus registration is multi-user safe",
+            "no component found",
+        ),
+        Some(found) => {
+            let exec = found.exec.as_deref().unwrap_or("");
+            let search_path = daemon
+                .as_ref()
+                .and_then(IbusDaemonProcess::path)
+                .or_else(|| env::var_os("PATH"));
+            let resolved = resolve_exec(exec, search_path.as_deref());
+            let homes = known_user_homes();
+            let resolved_real = resolved
+                .as_deref()
+                .map(|path| fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()));
+            match resolved_real.as_deref() {
+                Some(program) if shared_manifest_uses_user_home(&found.path, program, &homes) => {
+                    check(
+                        "manifest-scope",
+                        "Shared IBus registration is multi-user safe",
+                        IbusCheckState::Warn,
+                        format!(
+                            "{} is a shared component, but its executable resolves into one user's home directory",
+                            found.path.display()
+                        ),
+                        Some("run `wayexpand setup --backend ibus --install-system-integration` to install the shared engine, or install WayExpand using the distribution package".into()),
+                    )
+                }
+                Some(_) if !homes.is_empty() => check(
+                    "manifest-scope",
+                    "Shared IBus registration is multi-user safe",
+                    IbusCheckState::Pass,
+                    "the shared component does not resolve its engine into the current user's home directory",
+                    None,
+                ),
+                _ => check(
+                    "manifest-scope",
+                    "Shared IBus registration is multi-user safe",
+                    IbusCheckState::Unknown,
+                    "the IBus executable or current home directory could not be resolved",
+                    Some("run `wayexpand doctor --gnome` after restoring the IBus engine executable and HOME environment".into()),
+                ),
+            }
+        }
+    });
+
+    // 6. The manifest describes this engine.
     checks.push(match &manifest {
         None => skipped("manifest", "The component matches this engine", "no component found"),
         Some(found) => {
@@ -831,6 +976,280 @@ pub fn diagnose() -> IbusChainReport {
     }
 }
 
+fn kwin_input_method_check(
+    available: Option<bool>,
+    helper_running: bool,
+    recent_helper_segv_pid: Option<u32>,
+) -> IbusCheck {
+    match available {
+        Some(true) if recent_helper_segv_pid.is_some() => {
+            kwin_input_method_crash(recent_helper_segv_pid.unwrap(), helper_running)
+        }
+        Some(true) => check(
+            "desktop",
+            "KWin sends input to IBus",
+            IbusCheckState::Pass,
+            "KWin's Virtual Keyboard is IBus Wayland and running",
+            None,
+        ),
+        Some(false) if recent_helper_segv_pid.is_some() => {
+            kwin_input_method_crash(recent_helper_segv_pid.unwrap(), helper_running)
+        }
+        Some(false) => kwin_input_method_failure(
+            "KWin reports that its configured IBus Wayland input method is not running",
+        ),
+        None if !helper_running && recent_helper_segv_pid.is_some() => {
+            kwin_input_method_crash(recent_helper_segv_pid.unwrap(), false)
+        }
+        None if recent_helper_segv_pid.is_some() => {
+            kwin_input_method_crash(recent_helper_segv_pid.unwrap(), true)
+        }
+        None if !helper_running => kwin_input_method_failure(
+            "KWin is configured for IBus, but its IBus Wayland helper is not running and KWin's status interface could not be queried",
+        ),
+        None => {
+            let mut result = check(
+                "desktop",
+                "KWin sends input to IBus",
+                IbusCheckState::Unknown,
+                "KWin is configured for IBus and the helper process exists, but KWin's live input-method state could not be queried",
+                Some("open System Settings → Keyboard → Virtual Keyboard and confirm IBus Wayland is selected, then run `wayexpand ibus status --json` again".into()),
+            );
+            result.problem_id = Some("WX-KWIN-IBUS-001");
+            result
+        }
+    }
+}
+
+fn kwin_input_method_crash(pid: u32, helper_running: bool) -> IbusCheck {
+    let mut result = check(
+        "desktop",
+        "KWin sends input to IBus",
+        if helper_running { IbusCheckState::Warn } else { IbusCheckState::Fail },
+        format!(
+            "coredumpctl recorded a recent SIGSEGV for ibus-ui-gtk3 (PID {pid}); the IBus Wayland helper {}",
+            if helper_running { "is running again, but has crashed recently" } else { "is not running" }
+        ),
+        Some(format!("inspect `coredumpctl info {pid}`, install the latest IBus package supported by your distribution, then log out of Plasma and back in. Rerun `wayexpand ibus status --json` and test a real application; if the crash recurs, report the backtrace and exact package version to your distribution or IBus maintainers")),
+    );
+    result.problem_id = Some("WX-KWIN-IBUS-002");
+    result
+}
+
+fn kwin_input_method_failure(detail: impl Into<String>) -> IbusCheck {
+    let mut result = check(
+        "desktop",
+        "KWin sends input to IBus",
+        IbusCheckState::Fail,
+        detail,
+        Some("In System Settings → Keyboard → Virtual Keyboard, select IBus Wayland. Then log out of Plasma and back in, and run `wayexpand ibus status --json`. If KWin's IBus helper keeps crashing, update or repair the system IBus package and inspect `coredumpctl info ibus-ui-gtk3`.".into()),
+    );
+    result.problem_id = Some("WX-KWIN-IBUS-001");
+    result
+}
+
+/// KWin launches this process to provide the Wayland input-method bridge.
+/// An installed/selected IBus engine cannot receive native Wayland client
+/// input while this bridge is absent.
+fn ibus_wayland_helper_running() -> bool {
+    let Ok(entries) = fs::read_dir("/proc") else {
+        return false;
+    };
+    let Some(uid) = fs::metadata("/proc/self")
+        .ok()
+        .map(|metadata| metadata.uid())
+    else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let name = entry.file_name();
+        let Some(pid) = name.to_str().and_then(|name| name.parse::<u32>().ok()) else {
+            return false;
+        };
+        let proc_dir = PathBuf::from("/proc").join(pid.to_string());
+        fs::metadata(&proc_dir).is_ok_and(|metadata| metadata.uid() == uid)
+            && fs::read_to_string(proc_dir.join("comm"))
+                .is_ok_and(|comm| comm.trim() == "ibus-ui-gtk3")
+    })
+}
+
+#[derive(serde::Deserialize)]
+struct CoredumpRecord {
+    pid: u32,
+    uid: u32,
+    sig: u32,
+    exe: String,
+}
+
+fn recent_ibus_wayland_segv() -> Option<u32> {
+    let uid = unsafe { libc::geteuid() };
+    let uid_filter = coredump_uid_filter(uid);
+    let output = bounded_command_output(
+        "coredumpctl",
+        &[
+            "--no-pager",
+            "--json=short",
+            "--since",
+            "7 days ago",
+            "--reverse",
+            "-n",
+            "20",
+            "list",
+            "COREDUMP_COMM=ibus-ui-gtk3",
+            uid_filter.as_str(),
+        ],
+        Duration::from_secs(2),
+    )?;
+    recent_ibus_wayland_segv_from_json(&output, uid)
+}
+
+fn coredump_uid_filter(uid: u32) -> String {
+    format!("COREDUMP_UID={uid}")
+}
+
+fn recent_ibus_wayland_segv_from_json(output: &str, current_uid: u32) -> Option<u32> {
+    let records: Vec<CoredumpRecord> = serde_json::from_str(output).ok()?;
+    records.into_iter().find_map(|record| {
+        (record.uid == current_uid
+            && record.sig == libc::SIGSEGV as u32
+            && Path::new(&record.exe).file_name() == Some(OsStr::new("ibus-ui-gtk3")))
+        .then_some(record.pid)
+    })
+}
+
+/// The native KWin/IBus Wayland route must not be forced through the legacy
+/// GTK/Qt IBus modules. They are useful for some X11 clients but conflict with
+/// IBus's compositor-managed Wayland integration.
+fn plasma_toolkit_environment_check(manager_environment: Option<&str>) -> IbusCheck {
+    let Some(manager_environment) = manager_environment else {
+        return check(
+            "toolkit-environment",
+            "Legacy GTK/Qt overrides do not conflict with IBus Wayland",
+            IbusCheckState::Unknown,
+            "the user activation environment could not be inspected",
+            Some("run `systemctl --user unset-environment GTK_IM_MODULE QT_IM_MODULE`, remove those overrides from Plasma login files, log out and back in, then rerun `wayexpand ibus status --json`".into()),
+        );
+    };
+
+    const FORBIDDEN: [&str; 2] = ["GTK_IM_MODULE", "QT_IM_MODULE"];
+    let configured: Vec<_> = FORBIDDEN
+        .iter()
+        .filter_map(|name| {
+            let actual = manager_environment
+                .lines()
+                .find_map(|line| line.strip_prefix(name)?.strip_prefix('='));
+            actual
+                .is_some_and(|value| !value.is_empty())
+                .then_some(*name)
+        })
+        .collect();
+    if configured.is_empty() {
+        check(
+            "toolkit-environment",
+            "Legacy GTK/Qt overrides do not conflict with IBus Wayland",
+            IbusCheckState::Pass,
+            "the user activation environment does not force GTK_IM_MODULE or QT_IM_MODULE; native Wayland clients use KWin's input-method bridge",
+            None,
+        )
+    } else {
+        check(
+            "toolkit-environment",
+            "Legacy GTK/Qt overrides do not conflict with IBus Wayland",
+            IbusCheckState::Warn,
+            format!(
+                "the user activation environment sets legacy Wayland input-method overrides: {}",
+                configured.join(", ")
+            ),
+            Some("remove GTK_IM_MODULE and QT_IM_MODULE from Plasma login files, run `systemctl --user unset-environment GTK_IM_MODULE QT_IM_MODULE`, log out and back in, then rerun `wayexpand ibus status --json`".into()),
+        )
+    }
+}
+
+/// Check the running Plasma shell too: it can carry legacy overrides even
+/// after the systemd manager environment has been corrected.
+fn plasma_shell_environments() -> Option<Vec<Vec<(OsString, OsString)>>> {
+    let uid = unsafe { libc::geteuid() };
+    let processes = fs::read_dir("/proc").ok()?;
+    let mut environments = Vec::new();
+    for entry in processes.flatten() {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let proc_dir = PathBuf::from("/proc").join(pid.to_string());
+        if fs::metadata(&proc_dir).map(|metadata| metadata.uid()).ok() != Some(uid) {
+            continue;
+        }
+        if !fs::read_to_string(proc_dir.join("comm")).is_ok_and(|comm| comm.trim() == "plasmashell")
+        {
+            continue;
+        }
+        environments.push(read_environment(&proc_dir.join("environ"))?);
+    }
+    Some(environments)
+}
+
+fn plasma_shell_environment_check(
+    environments: Option<Vec<Vec<(OsString, OsString)>>>,
+) -> IbusCheck {
+    let Some(environments) = environments else {
+        return check(
+            "desktop-shell-environment",
+            "Plasma shell does not force legacy IBus modules on Wayland",
+            IbusCheckState::Unknown,
+            "the current Plasma shell environment could not be inspected",
+            Some("log out of Plasma and back in, then rerun `wayexpand ibus status --json`".into()),
+        );
+    };
+    if environments.is_empty() {
+        return check(
+            "desktop-shell-environment",
+            "Plasma shell does not force legacy IBus modules on Wayland",
+            IbusCheckState::Unknown,
+            "no running plasmashell process was found to inspect its input-method environment",
+            Some("log out of Plasma and back in, then rerun `wayexpand ibus status --json`".into()),
+        );
+    }
+
+    const FORBIDDEN: [&str; 2] = ["GTK_IM_MODULE", "QT_IM_MODULE"];
+    let configured = FORBIDDEN
+        .iter()
+        .filter_map(|name| {
+            environments
+                .iter()
+                .any(|environment| {
+                    environment
+                        .iter()
+                        .any(|(key, value)| key == OsStr::new(name) && !value.is_empty())
+                })
+                .then_some(*name)
+        })
+        .collect::<Vec<_>>();
+    if configured.is_empty() {
+        check(
+            "desktop-shell-environment",
+            "Plasma shell does not force legacy IBus modules on Wayland",
+            IbusCheckState::Pass,
+            "the inspected Plasma shell process(es) do not force GTK_IM_MODULE or QT_IM_MODULE",
+            None,
+        )
+    } else {
+        check(
+            "desktop-shell-environment",
+            "Plasma shell does not force legacy IBus modules on Wayland",
+            IbusCheckState::Warn,
+            format!(
+                "the running Plasma shell inherited legacy Wayland input-method overrides: {}",
+                configured.join(", ")
+            ),
+            Some("remove GTK_IM_MODULE and QT_IM_MODULE from Plasma login files, log out of Plasma and back in, then rerun `wayexpand ibus status --json`".into()),
+        )
+    }
+}
+
 fn gnome_session_check() -> IbusCheck {
     let desktop = env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
     let session_type = env::var("XDG_SESSION_TYPE").unwrap_or_default();
@@ -937,8 +1356,47 @@ fn session_bus_name_has_owner(name: &str) -> Option<bool> {
 }
 
 fn ibus_daemon_check(daemon: Option<&IbusDaemonProcess>, desktop: IbusDesktop) -> IbusCheck {
-    let owner = daemon.and_then(|_| session_bus_name_has_owner("org.freedesktop.IBus"));
-    ibus_daemon_check_from(daemon, owner, desktop)
+    let responsive = daemon.and_then(|_| ibus_private_bus_responsive());
+    ibus_daemon_check_from(daemon, responsive, desktop)
+}
+
+/// IBus owns a private D-Bus address. Checking `org.freedesktop.IBus` on the
+/// desktop's general session bus is not reliable: a healthy IBus instance can
+/// answer `ibus` clients on its own bus without owning that name on the
+/// session bus. Probe the address reported by `ibus` itself and call Peer.Ping.
+fn ibus_private_bus_responsive() -> Option<bool> {
+    let address = bounded_command_output("ibus", &["address"], Duration::from_millis(500))?;
+    let address = address.trim();
+    if !address.starts_with("unix:") || address.len() > 4096 {
+        return Some(false);
+    }
+    let response = bounded_command_output(
+        "gdbus",
+        &[
+            "call",
+            "--address",
+            address,
+            "--dest",
+            "org.freedesktop.IBus",
+            "--object-path",
+            "/org/freedesktop/IBus",
+            "--method",
+            "org.freedesktop.DBus.Peer.Ping",
+        ],
+        Duration::from_millis(750),
+    );
+    match response {
+        Some(response) => Some(response.trim() == "()"),
+        // `gdbus` is optional even when IBus is installed. The IBus CLI uses
+        // the same private bus, so a successful engine listing is a valid
+        // fallback liveness probe without adding a runtime dependency.
+        None => bounded_command_output(
+            "ibus",
+            &["list-engine", "--name-only"],
+            Duration::from_millis(750),
+        )
+        .map(|engines| !engines.is_empty()),
+    }
 }
 
 fn ibus_daemon_check_from(
@@ -949,7 +1407,7 @@ fn ibus_daemon_check_from(
     let Some(process) = daemon else {
         return check(
             "daemon",
-            "IBus daemon responds on the session bus",
+            "IBus daemon responds on its private bus",
             IbusCheckState::Fail,
             "no ibus-daemon process is running for this user",
             Some(start_ibus_fix(desktop)),
@@ -958,26 +1416,29 @@ fn ibus_daemon_check_from(
     match bus_owner {
         Some(true) => check(
             "daemon",
-            "IBus daemon responds on the session bus",
+            "IBus daemon responds on its private bus",
             IbusCheckState::Pass,
-            format!("ibus-daemon pid {} owns org.freedesktop.IBus", process.pid),
+            format!(
+                "ibus-daemon pid {} answered a D-Bus ping at the address reported by `ibus`",
+                process.pid
+            ),
             None,
         ),
         Some(false) => check(
             "daemon",
-            "IBus daemon responds on the session bus",
+            "IBus daemon responds on its private bus",
             IbusCheckState::Fail,
             format!(
-                "ibus-daemon pid {} is present, but org.freedesktop.IBus has no session-bus owner",
+                "ibus-daemon pid {} is present, but the private IBus D-Bus did not answer",
                 process.pid
             ),
             Some(start_ibus_fix(desktop)),
         ),
         None => check(
             "daemon",
-            "IBus daemon responds on the session bus",
+            "IBus daemon responds on its private bus",
             IbusCheckState::Unknown,
-            "the IBus process is present, but its session-bus name could not be checked",
+            "the IBus process is present, but its private D-Bus address could not be checked",
             None,
         ),
     }
@@ -1145,7 +1606,6 @@ fn field_input_check(activity: Option<&IbusStatusReading>) -> IbusCheck {
             reading.status.recent_fields.iter().any(|field| {
                 field.keys > 0
                     && field.content_type == crate::telemetry::IbusContentTypeState::Normal
-                    && field.surrounding_capability
                     && field.surrounding_reports > 0
             })
         });
@@ -1154,7 +1614,7 @@ fn field_input_check(activity: Option<&IbusStatusReading>) -> IbusCheck {
             "field-input",
             "Normal-field input observed",
             IbusCheckState::Pass,
-            "the engine received key events and surrounding-text reports from a normal field; contents are not recorded",
+            "at least one recent IBus field sent key events and surrounding text; contents and application identity are not recorded, so this does not verify input from a particular browser",
             None,
         )
     } else {
@@ -1162,8 +1622,8 @@ fn field_input_check(activity: Option<&IbusStatusReading>) -> IbusCheck {
             "field-input",
             "Normal-field input observed",
             IbusCheckState::Unknown,
-            "no normal text field has yet provided verifiable input telemetry",
-            Some("focus a normal text field, type harmless test text, then run `wayexpand ibus status` again".into()),
+            "no recent normal field has provided verifiable input telemetry; the check cannot identify an application",
+            Some("focus the browser field, run `wayexpand ibus watch --seconds 30`, and type harmless text; increased counters confirm activity only, not replacement".into()),
         )
     }
 }
@@ -1220,6 +1680,57 @@ mod tests {
     use super::*;
 
     #[test]
+    fn kwin_input_method_parser_accepts_kconfig_environment_marker() {
+        let value = "/usr/share/applications/org.freedesktop.IBus.Panel.Wayland.Gtk3.desktop";
+        assert_eq!(
+            parse_kwin_input_method(&format!("[Wayland]\nInputMethod[$e]={value}\n")),
+            Some(value.to_owned())
+        );
+        assert_eq!(
+            parse_kwin_input_method(&format!("[Wayland]\nInputMethod={value}\n")),
+            Some(value.to_owned())
+        );
+        assert_eq!(
+            parse_kwin_input_method(&format!(
+                "[Other]\nInputMethod[$e]={value}\n[Wayland]\nVirtualKeyboardEnabled=true\n"
+            )),
+            None
+        );
+    }
+
+    #[test]
+    fn denied_ibus_replacement_has_the_stable_policy_finding() {
+        let denied = check(
+            "consent",
+            "Replacements are allowed",
+            IbusCheckState::Fail,
+            "replacement is disabled by policy",
+            Some("review and authorize replacement".into()),
+        );
+        assert_eq!(denied.problem_id, Some("WX-POLICY-001"));
+    }
+
+    #[test]
+    fn generic_ibus_registration_and_selection_failures_have_stable_ids() {
+        let registration = check(
+            "registered",
+            "Engine registered",
+            IbusCheckState::Fail,
+            "missing",
+            None,
+        );
+        let selection = check(
+            "selected",
+            "Engine selected",
+            IbusCheckState::Fail,
+            "not selected",
+            None,
+        );
+        assert_eq!(registration.problem_id, Some("WX-IBUS-001"));
+        assert_eq!(selection.problem_id, Some("WX-IBUS-002"));
+    }
+
+    #[test]
     fn manifest_parsing_reads_the_component_name_not_the_engine_name() {
         let directory =
             std::env::temp_dir().join(format!("wayexpand-chain-manifest-{}", std::process::id()));
@@ -1247,6 +1758,50 @@ mod tests {
             Some(PathBuf::from("/bin/sh"))
         );
         assert_eq!(resolve_exec("sh", Some(OsStr::new("/nonexistent"))), None);
+    }
+
+    #[test]
+    fn shared_ibus_manifest_cannot_bind_the_engine_to_one_users_home() {
+        let homes = vec![PathBuf::from("/home/alice"), PathBuf::from("/home/bob")];
+        let shared_manifest = Path::new("/usr/share/ibus/component/wayexpand.xml");
+        let alice_engine = Path::new("/home/alice/.local/bin/wayexpand-ibus");
+        let bob_engine = Path::new("/home/bob/.local/bin/wayexpand-ibus");
+        let shared_engine = Path::new("/usr/local/libexec/wayexpand/wayexpand-ibus");
+        let per_user_manifest = Path::new("/home/alice/.local/share/ibus/component/wayexpand.xml");
+
+        // A different account must diagnose Alice's path too.
+        assert!(shared_manifest_uses_user_home(
+            shared_manifest,
+            alice_engine,
+            &homes
+        ));
+        assert!(!shared_manifest_uses_user_home(
+            shared_manifest,
+            shared_engine,
+            &homes
+        ));
+        assert!(!shared_manifest_uses_user_home(
+            per_user_manifest,
+            alice_engine,
+            &homes
+        ));
+        assert!(shared_manifest_uses_user_home(
+            shared_manifest,
+            bob_engine,
+            &homes
+        ));
+    }
+
+    #[test]
+    fn shared_ibus_manifest_scope_warning_has_stable_problem_id() {
+        let warning = check(
+            "manifest-scope",
+            "Shared IBus registration is multi-user safe",
+            IbusCheckState::Warn,
+            "shared manifest points to one user's executable",
+            Some("repair the system integration".into()),
+        );
+        assert_eq!(warning.problem_id, Some("WX-IBUS-MULTIUSER-001"));
     }
 
     #[test]
@@ -1356,18 +1911,16 @@ mod tests {
             pid: 123,
             environment: None,
         };
-        assert_eq!(
-            ibus_daemon_check_from(Some(&process), None, IbusDesktop::Gnome).state,
-            IbusCheckState::Unknown
-        );
-        assert_eq!(
-            ibus_daemon_check_from(Some(&process), Some(false), IbusDesktop::Gnome).state,
-            IbusCheckState::Fail
-        );
-        assert_eq!(
-            ibus_daemon_check_from(Some(&process), Some(true), IbusDesktop::Gnome).state,
-            IbusCheckState::Pass
-        );
+        let unavailable = ibus_daemon_check_from(Some(&process), None, IbusDesktop::Gnome);
+        assert_eq!(unavailable.state, IbusCheckState::Unknown);
+        assert!(unavailable.title.contains("private bus"));
+        let unresponsive = ibus_daemon_check_from(Some(&process), Some(false), IbusDesktop::Gnome);
+        assert_eq!(unresponsive.state, IbusCheckState::Fail);
+        assert_eq!(unresponsive.problem_id, Some("WX-IBUS-004"));
+        assert!(unresponsive.detail.contains("private IBus D-Bus"));
+        let responsive = ibus_daemon_check_from(Some(&process), Some(true), IbusDesktop::Gnome);
+        assert_eq!(responsive.state, IbusCheckState::Pass);
+        assert!(responsive.detail.contains("address reported by `ibus`"));
     }
 
     #[test]
@@ -1416,7 +1969,7 @@ mod tests {
     }
 
     #[test]
-    fn safe_field_input_is_required_for_input_operational_pass() {
+    fn field_input_pass_is_aggregate_and_never_claims_app_identity() {
         let telemetry = crate::telemetry::IbusTelemetry::new();
         let field = telemetry.focus_in(None);
         telemetry.capabilities(Some(field), true);
@@ -1431,7 +1984,185 @@ mod tests {
             field_input_check(Some(&reading)).state,
             IbusCheckState::Pass
         );
-        assert_eq!(field_input_check(None).state, IbusCheckState::Unknown);
+        let observed = field_input_check(Some(&reading));
+        assert!(observed
+            .detail
+            .contains("application identity are not recorded"));
+        assert!(observed.detail.contains("particular browser"));
+
+        let missing = field_input_check(None);
+        assert_eq!(missing.state, IbusCheckState::Unknown);
+        assert!(missing.detail.contains("cannot identify an application"));
+        let fix = missing
+            .fix
+            .expect("missing field activity has safe guidance");
+        assert!(fix.contains("wayexpand ibus watch --seconds 30"));
+        assert!(fix.contains("activity only, not replacement"));
+    }
+
+    #[test]
+    fn actual_surrounding_reports_prove_field_input_even_if_capability_flag_is_absent() {
+        let telemetry = crate::telemetry::IbusTelemetry::new();
+        let field = telemetry.focus_in(None);
+        telemetry.content_type(Some(field), false);
+        telemetry.surrounding_text(Some(field), true);
+        telemetry.key(Some(field), true);
+        let reading = IbusStatusReading {
+            status: telemetry.snapshot(),
+            live: true,
+        };
+        assert_eq!(
+            field_input_check(Some(&reading)).state,
+            IbusCheckState::Pass
+        );
+    }
+
+    #[test]
+    fn kde_wayland_rejects_legacy_toolkit_overrides() {
+        let clean = plasma_toolkit_environment_check(Some("XMODIFIERS=@im=ibus\n"));
+        assert_eq!(clean.state, IbusCheckState::Pass);
+        assert!(clean.detail.contains("native Wayland clients"));
+
+        let legacy = plasma_toolkit_environment_check(Some(
+            "GTK_IM_MODULE=ibus\nQT_IM_MODULE=ibus\nXMODIFIERS=@im=ibus\n",
+        ));
+        assert_eq!(legacy.state, IbusCheckState::Warn);
+        assert_eq!(legacy.problem_id, Some("WX-IBUS-TOOLKIT-001"));
+        assert!(legacy.detail.contains("GTK_IM_MODULE"));
+        assert!(legacy.detail.contains("QT_IM_MODULE"));
+        assert!(!legacy.detail.contains("XMODIFIERS"));
+
+        let unavailable = plasma_toolkit_environment_check(None);
+        assert_eq!(unavailable.state, IbusCheckState::Unknown);
+        assert_eq!(unavailable.problem_id, Some("WX-IBUS-TOOLKIT-001"));
+
+        let report = IbusChainReport {
+            desktop: IbusDesktop::KdeWayland,
+            checks: vec![
+                check("daemon", "", IbusCheckState::Pass, "", None),
+                check("selected", "", IbusCheckState::Pass, "", None),
+                check("engine", "", IbusCheckState::Pass, "", None),
+                check("desktop", "", IbusCheckState::Pass, "", None),
+                check("field-input", "", IbusCheckState::Pass, "", None),
+                check("target-insertion", "", IbusCheckState::Pass, "", None),
+                check(
+                    "desktop-shell-environment",
+                    "",
+                    IbusCheckState::Pass,
+                    "",
+                    None,
+                ),
+                clean,
+            ],
+            activity: None,
+        };
+        assert_eq!(report.operational_readiness(), IbusCheckState::Pass);
+        assert!(report.ready());
+
+        let mut legacy_toolkit = report;
+        legacy_toolkit.checks.pop();
+        legacy_toolkit.checks.push(legacy);
+        assert_eq!(legacy_toolkit.operational_readiness(), IbusCheckState::Warn);
+        assert!(!legacy_toolkit.ready());
+    }
+
+    #[test]
+    fn plasma_shell_environment_check_rejects_legacy_wayland_overrides() {
+        let clean = vec![vec![(
+            OsString::from("XMODIFIERS"),
+            OsString::from("@im=ibus"),
+        )]];
+        assert_eq!(
+            plasma_shell_environment_check(Some(clean)).state,
+            IbusCheckState::Pass
+        );
+        let legacy = plasma_shell_environment_check(Some(vec![vec![(
+            OsString::from("GTK_IM_MODULE"),
+            OsString::from("ibus"),
+        )]]));
+        assert_eq!(legacy.state, IbusCheckState::Warn);
+        assert_eq!(legacy.problem_id, Some("WX-IBUS-TOOLKIT-001"));
+        assert!(legacy.fix.as_deref().unwrap().contains("log out of Plasma"));
+        assert!(legacy.detail.contains("GTK_IM_MODULE"));
+
+        let unavailable = plasma_shell_environment_check(None);
+        assert_eq!(unavailable.state, IbusCheckState::Unknown);
+    }
+
+    #[test]
+    fn missing_kwin_ibus_bridge_is_a_stable_failure() {
+        let check = kwin_input_method_check(None, false, None);
+        assert_eq!(check.state, IbusCheckState::Fail);
+        assert_eq!(check.problem_id, Some("WX-KWIN-IBUS-001"));
+        assert!(check.detail.contains("helper is not running"));
+        assert!(check.fix.as_deref().unwrap().contains("log out of Plasma"));
+    }
+
+    #[test]
+    fn inaccessible_kwin_status_with_helper_present_stays_unknown() {
+        let check = kwin_input_method_check(None, true, None);
+        assert_eq!(check.state, IbusCheckState::Unknown);
+        assert_eq!(check.problem_id, Some("WX-KWIN-IBUS-001"));
+    }
+
+    #[test]
+    fn kwin_active_bridge_is_required_for_a_pass() {
+        let active = kwin_input_method_check(Some(true), false, None);
+        let inactive = kwin_input_method_check(Some(false), true, None);
+        assert_eq!(active.state, IbusCheckState::Pass);
+        assert_eq!(inactive.state, IbusCheckState::Fail);
+        assert_eq!(inactive.problem_id, Some("WX-KWIN-IBUS-001"));
+    }
+
+    #[test]
+    fn kwin_helper_segfault_has_specific_repair_finding() {
+        let check = kwin_input_method_check(None, false, Some(1234));
+        assert_eq!(check.state, IbusCheckState::Fail);
+        assert_eq!(check.problem_id, Some("WX-KWIN-IBUS-002"));
+        assert!(check.detail.contains("recent SIGSEGV"));
+        assert!(check
+            .fix
+            .as_deref()
+            .unwrap()
+            .contains("coredumpctl info 1234"));
+        let fix = check.fix.as_deref().unwrap();
+        assert!(fix.contains("latest IBus package supported by your distribution"));
+        assert!(fix.contains("report the backtrace and exact package version"));
+        assert!(!fix.contains("5bbe88a"));
+        assert!(!fix.contains("surrounding-text crash"));
+    }
+
+    #[test]
+    fn recovered_kwin_helper_does_not_hide_a_recent_segfault() {
+        let check = kwin_input_method_check(Some(true), true, Some(1234));
+        assert_eq!(check.state, IbusCheckState::Warn);
+        assert_eq!(check.problem_id, Some("WX-KWIN-IBUS-002"));
+        assert!(check
+            .detail
+            .contains("is running again, but has crashed recently"));
+        assert!(check
+            .fix
+            .as_deref()
+            .unwrap()
+            .contains("coredumpctl info 1234"));
+    }
+
+    #[test]
+    fn recent_ibus_segv_parser_ignores_other_signals_users_and_programs() {
+        let records = r#"[
+            {"pid":1,"uid":1000,"sig":6,"exe":"/usr/libexec/ibus-ui-gtk3"},
+            {"pid":2,"uid":1001,"sig":11,"exe":"/usr/libexec/ibus-ui-gtk3"},
+            {"pid":3,"uid":1000,"sig":11,"exe":"/usr/bin/other"},
+            {"pid":4,"uid":1000,"sig":11,"exe":"/usr/libexec/ibus-ui-gtk3"}
+        ]"#;
+        assert_eq!(recent_ibus_wayland_segv_from_json(records, 1000), Some(4));
+        assert_eq!(recent_ibus_wayland_segv_from_json("[]", 1000), None);
+        assert_eq!(recent_ibus_wayland_segv_from_json("not json", 1000), None);
+    }
+
+    #[test]
+    fn coredump_query_limits_results_to_the_current_user_before_the_result_cap() {
+        assert_eq!(coredump_uid_filter(1000), "COREDUMP_UID=1000");
     }
 
     #[test]

@@ -233,22 +233,32 @@ until gnome_extension_state_active "$(extension_state)"; do
 done
 log "pass extension-active"
 
-# A generic session-bus client must not subscribe to focused-window metadata,
-# especially title-bearing snapshots. Check the explicit authorization error
-# rather than accepting any failure as evidence that access was denied.
-if gdbus call --session --dest org.gnome.Shell \
-    --object-path /org/wayexpand/ShellWindowTracker \
-    --method org.wayexpand.ShellWindowTracker1.SubscribeWithTitles true \
-    >"$E2E_WORK/unauthorized-tracker-subscription.log" 2>&1; then
-    log "fail unauthorized-tracker-subscription a generic session-bus client received tracker access"
-    exit 1
-elif grep -qi 'AccessDenied' "$E2E_WORK/unauthorized-tracker-subscription.log"; then
-    log "pass unauthorized-tracker-subscription GNOME Shell denied the non-WayExpand peer"
-else
-    log "fail unauthorized-tracker-subscription the request failed without an access-denied result"
-    cat "$E2E_WORK/unauthorized-tracker-subscription.log"
-    exit 1
-fi
+# A generic session-bus client must not read focus/layout metadata, switch the
+# active input source, or subscribe to focused-window metadata. Check explicit
+# authorization errors rather than accepting any failure as evidence.
+assert_tracker_method_denied() {
+    label=$1
+    method=$2
+    shift 2
+    output="$E2E_WORK/$label.log"
+    if gdbus call --session --dest org.gnome.Shell \
+        --object-path /org/wayexpand/ShellWindowTracker \
+        --method "org.wayexpand.ShellWindowTracker1.$method" "$@" \
+        >"$output" 2>&1; then
+        log "fail $label a generic session-bus client received tracker access"
+        exit 1
+    elif grep -qi 'AccessDenied' "$output"; then
+        log "pass $label GNOME Shell denied the non-WayExpand peer"
+    else
+        log "fail $label the request failed without an access-denied result"
+        cat "$output"
+        exit 1
+    fi
+}
+assert_tracker_method_denied unauthorized-tracker-subscription SubscribeWithTitles true
+assert_tracker_method_denied unauthorized-input-source-query GetActiveInputSource
+assert_tracker_method_denied unauthorized-keyboard-layout-query GetActiveKeyboardLayout
+assert_tracker_method_denied unauthorized-input-source-activation ActivateInputSource xkb de
 
 # Start Shell with an older on-disk identity, then install the current
 # metadata while that extension remains loaded. Diagnostics must identify
@@ -288,16 +298,17 @@ fi
 # Verify source activation and readback through GNOME Shell's live
 # InputSourceManager. Then write the deprecated `current` key to request a
 # different source and assert that Shell's observed active source is unchanged.
-gdbus call --session --dest org.gnome.Shell \
-    --object-path /org/wayexpand/ShellWindowTracker \
-    --method org.wayexpand.ShellWindowTracker1.ActivateInputSource xkb de \
+"$E2E_BIN_DIR/wx-e2e-gnome-tracker" --activate-source xkb de \
     >"$E2E_WORK/source-activation.log"
-active_source=$(gdbus call --session --dest org.gnome.Shell \
-    --object-path /org/wayexpand/ShellWindowTracker \
-    --method org.wayexpand.ShellWindowTracker1.GetActiveInputSource)
+active_source=$("$E2E_BIN_DIR/wx-e2e-gnome-tracker" --active-source)
 case "$active_source" in
-    *"'xkb', 'de'"*) log "pass active-input-source $active_source" ;;
+    *"active-source xkb de"*) log "pass active-input-source $active_source" ;;
     *) log "fail active-input-source GNOME Shell reported $active_source"; exit 1 ;;
+esac
+active_layout=$("$E2E_BIN_DIR/wx-e2e-gnome-tracker" --active-layout)
+case "$active_layout" in
+    *"active-layout xkb de"*) log "pass active-keyboard-layout $active_layout" ;;
+    *) log "fail active-keyboard-layout GNOME Shell reported $active_layout"; exit 1 ;;
 esac
 if ! gsettings set org.gnome.desktop.input-sources current 0 \
     >"$E2E_WORK/deprecated-current.log" 2>&1; then
@@ -309,18 +320,18 @@ case "$configured_current" in
     *0*) log "pass deprecated-current-readback $configured_current" ;;
     *) log "fail deprecated-current-readback unexpected value $configured_current"; exit 1 ;;
 esac
-active_source=$(gdbus call --session --dest org.gnome.Shell \
-    --object-path /org/wayexpand/ShellWindowTracker \
-    --method org.wayexpand.ShellWindowTracker1.GetActiveInputSource)
+active_source=$("$E2E_BIN_DIR/wx-e2e-gnome-tracker" --active-source)
 case "$active_source" in
-    *"'xkb', 'de'"*) log "pass ignored-current-setting $active_source" ;;
+    *"active-source xkb de"*) log "pass ignored-current-setting $active_source" ;;
     *) log "fail ignored-current-setting GNOME Shell reported $active_source"; exit 1 ;;
 esac
-if gdbus call --session --dest org.gnome.Shell \
-    --object-path /org/wayexpand/ShellWindowTracker \
-    --method org.wayexpand.ShellWindowTracker1.ActivateInputSource ibus wayexpand \
-    >/dev/null 2>&1; then
+if "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --activate-source ibus wayexpand \
+    >"$E2E_WORK/unavailable-input-source.log" 2>&1; then
     log "fail unavailable-input-source GNOME activated an unregistered IBus engine"
+    exit 1
+elif grep -qi 'AccessDenied' "$E2E_WORK/unavailable-input-source.log"; then
+    log "fail unavailable-input-source the authorized test client was denied"
+    cat "$E2E_WORK/unavailable-input-source.log"
     exit 1
 fi
 log "pass unavailable-input-source"
@@ -339,11 +350,9 @@ esac
 # still xkb/de. The CLI readiness check must use Shell's active-source bridge,
 # not accept the setting's successful readback as activation evidence.
 gsettings set org.gnome.desktop.input-sources current 2
-active_source=$(gdbus call --session --dest org.gnome.Shell \
-    --object-path /org/wayexpand/ShellWindowTracker \
-    --method org.wayexpand.ShellWindowTracker1.GetActiveInputSource)
+active_source=$("$E2E_BIN_DIR/wx-e2e-gnome-tracker" --active-source)
 case "$active_source" in
-    *"'xkb', 'de'"*) ;;
+    *"active-source xkb de"*) ;;
     *) log "fail deprecated-current-no-activation GNOME Shell reported $active_source"; exit 1 ;;
 esac
 "$E2E_BIN_DIR/wayexpand" ibus status --json \
@@ -367,15 +376,11 @@ then
     exit 1
 fi
 
-gdbus call --session --dest org.gnome.Shell \
-    --object-path /org/wayexpand/ShellWindowTracker \
-    --method org.wayexpand.ShellWindowTracker1.ActivateInputSource ibus wayexpand \
+"$E2E_BIN_DIR/wx-e2e-gnome-tracker" --activate-source ibus wayexpand \
     >"$E2E_WORK/ibus-source-activation.log"
-active_source=$(gdbus call --session --dest org.gnome.Shell \
-    --object-path /org/wayexpand/ShellWindowTracker \
-    --method org.wayexpand.ShellWindowTracker1.GetActiveInputSource)
+active_source=$("$E2E_BIN_DIR/wx-e2e-gnome-tracker" --active-source)
 case "$active_source" in
-    *"'ibus', 'wayexpand'"*) log "pass gnome-ibus-source-active $active_source" ;;
+    *"active-source ibus wayexpand"*) log "pass gnome-ibus-source-active $active_source" ;;
     *) log "fail gnome-ibus-source-active GNOME Shell reported $active_source"; exit 1 ;;
 esac
 # GNOME's active-source manager and IBus engine selection are separate
@@ -562,15 +567,11 @@ if [ "$tries" -gt 0 ]; then
     esac
 
     login_source_ok=0
-    if gdbus call --session --dest org.gnome.Shell \
-        --object-path /org/wayexpand/ShellWindowTracker \
-        --method org.wayexpand.ShellWindowTracker1.ActivateInputSource ibus wayexpand \
+    if "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --activate-source ibus wayexpand \
         >"$E2E_WORK/ibus-source-activation-after-login.log"; then
-        active_source=$(gdbus call --session --dest org.gnome.Shell \
-            --object-path /org/wayexpand/ShellWindowTracker \
-            --method org.wayexpand.ShellWindowTracker1.GetActiveInputSource)
+        active_source=$("$E2E_BIN_DIR/wx-e2e-gnome-tracker" --active-source)
         case "$active_source" in
-            *"'ibus', 'wayexpand'"*)
+            *"active-source ibus wayexpand"*)
                 login_source_ok=1
                 log "pass gnome-ibus-source-after-login $active_source"
                 ;;

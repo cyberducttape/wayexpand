@@ -149,6 +149,55 @@ pub(crate) fn collect(trigger: Option<&str>) -> serde_json::Value {
             ["Enable an expansion with `wayexpand set-enabled <trigger> on`."],
         ));
     }
+    let plasma_environment = ibus
+        .check("toolkit-environment")
+        .filter(|check| check.state != wayexpand_backend_ibus::chain::IbusCheckState::Pass)
+        .or_else(|| {
+            ibus.check("desktop-shell-environment")
+                .filter(|check| check.state != wayexpand_backend_ibus::chain::IbusCheckState::Pass)
+        });
+    let plasma_environment_blocked = plasma_environment.is_some();
+    let ibus_input_path_blocked = !ibus_readiness.ibus_running
+        || ibus.check("desktop").is_some_and(|check| {
+            check.state == wayexpand_backend_ibus::chain::IbusCheckState::Fail
+                && matches!(
+                    check.problem_id,
+                    Some("WX-KWIN-IBUS-001" | "WX-KWIN-IBUS-002")
+                )
+        });
+    if let Some(check) = plasma_environment {
+        findings.push(finding(
+            "WX-IBUS-TOOLKIT-001",
+            Severity::Warning,
+            Component::Ibus,
+            "Legacy GTK/Qt environment overrides conflict with Plasma's native IBus Wayland route",
+            [check.detail.clone()],
+            [check.fix.as_deref().unwrap_or(
+                "Remove GTK_IM_MODULE and QT_IM_MODULE from Plasma login files, log out and back in, then rerun `wayexpand ibus status`.",
+            )],
+        ));
+    }
+    if let Some(check) = ibus.check("desktop") {
+        if let Some(bridge_finding) = kwin_bridge_finding(check) {
+            findings.push(bridge_finding);
+        }
+    }
+    if !ibus_readiness.ibus_running {
+        if let Some(check) = ibus.check("daemon") {
+            if check.state == wayexpand_backend_ibus::chain::IbusCheckState::Fail {
+                findings.push(finding(
+                    "WX-IBUS-004",
+                    Severity::Error,
+                    Component::Ibus,
+                    "The IBus daemon is not responding; browser and other IBus clients cannot reach WayExpand",
+                    [check.detail.clone()],
+                    [check.fix.as_deref().unwrap_or(
+                        "Restore the desktop-managed IBus session, then run `wayexpand ibus status --json` and confirm the daemon check passes.",
+                    )],
+                ));
+            }
+        }
+    }
     if !ibus_readiness.registered {
         findings.push(finding(
             "WX-IBUS-001",
@@ -170,7 +219,10 @@ pub(crate) fn collect(trigger: Option<&str>) -> serde_json::Value {
             [format!("IBus running: {}", ibus_readiness.ibus_running)],
             ["Select WayExpand from the desktop input-method menu, then run `wayexpand ibus status`."],
         ));
-    } else if !ibus_readiness.text_received {
+    } else if !ibus_readiness.text_received
+        && !plasma_environment_blocked
+        && !ibus_input_path_blocked
+    {
         findings.push(finding(
             "WX-IBUS-003",
             Severity::Warning,
@@ -214,17 +266,20 @@ pub(crate) fn collect(trigger: Option<&str>) -> serde_json::Value {
                 ["Run `wayexpand explain-backend` and inspect the active route's layout and capture requirements."],
             ));
         }
-        if daemon
-            .get("daemon_commit")
-            .and_then(serde_json::Value::as_str)
-            .is_some_and(|commit| commit != crate::build_info::COMMIT)
-        {
+        if !crate::doctor::status::daemon_build_matches(
+            daemon
+                .get("daemon_commit")
+                .and_then(serde_json::Value::as_str),
+            daemon
+                .get("daemon_version")
+                .and_then(serde_json::Value::as_str),
+        ) {
             findings.push(finding(
                 "WX-VERSION-001",
                 Severity::Warning,
                 Component::Version,
-                "The running daemon and CLI were built from different commits",
-                ["CLI and daemon build identities differ"],
+                "The running daemon and CLI build identities differ or cannot be verified",
+                ["CLI and daemon build identities differ, or an older daemon cannot report an exact source-tree version"],
                 ["Run `wayexpand upgrade --check`, then `wayexpand upgrade --apply`."],
             ));
         }
@@ -337,6 +392,31 @@ pub(crate) fn collect(trigger: Option<&str>) -> serde_json::Value {
     })
 }
 
+fn kwin_bridge_finding(
+    check: &wayexpand_backend_ibus::chain::IbusCheck,
+) -> Option<DiagnosticFinding> {
+    let id = check.problem_id?;
+    let (summary, fallback) = match id {
+        "WX-KWIN-IBUS-001" => (
+            "KWin's IBus Wayland bridge is unavailable",
+            "Select IBus Wayland in Plasma's Virtual Keyboard settings, log out and back in, then run `wayexpand ibus status --json`.",
+        ),
+        "WX-KWIN-IBUS-002" => (
+            "KWin's IBus Wayland helper recently crashed",
+            "Install the latest IBus package supported by your distribution, log out and back in, then rerun `wayexpand ibus status --json`. If the crash recurs, report its backtrace and exact package version to your distribution or IBus maintainers.",
+        ),
+        _ => return None,
+    };
+    Some(finding(
+        id,
+        Severity::Error,
+        Component::Ibus,
+        summary,
+        [check.detail.clone()],
+        [check.fix.as_deref().unwrap_or(fallback)],
+    ))
+}
+
 pub(crate) fn print(report: &serde_json::Value, json: bool) -> anyhow::Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(report)?);
@@ -442,4 +522,38 @@ pub(crate) fn print(report: &serde_json::Value, json: bool) -> anyhow::Result<()
         "\nCaptured sensitive input, trigger text, replacements, and clipboard contents are never printed. An explicitly supplied --trigger is analyzed without rendering its replacement."
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{kwin_bridge_finding, Component, Severity};
+    use wayexpand_backend_ibus::chain::{IbusCheck, IbusCheckState};
+
+    fn check(problem_id: &'static str) -> IbusCheck {
+        IbusCheck {
+            id: "desktop",
+            title: "KWin sends input to IBus",
+            state: IbusCheckState::Fail,
+            problem_id: Some(problem_id),
+            detail: "sanitized bridge diagnostic".into(),
+            fix: Some("specific repair and retest".into()),
+        }
+    }
+
+    #[test]
+    fn doctor_preserves_kwin_bridge_problem_ids_and_remediation() {
+        for id in ["WX-KWIN-IBUS-001", "WX-KWIN-IBUS-002"] {
+            let finding = kwin_bridge_finding(&check(id)).unwrap();
+            assert_eq!(finding.id, id);
+            assert_eq!(finding.severity, Severity::Error);
+            assert_eq!(finding.component, Component::Ibus);
+            assert_eq!(finding.evidence, ["sanitized bridge diagnostic"]);
+            assert_eq!(finding.suggested_actions, ["specific repair and retest"]);
+        }
+    }
+
+    #[test]
+    fn doctor_ignores_unrelated_kwin_check_ids() {
+        assert!(kwin_bridge_finding(&check("WX-IBUS-001")).is_none());
+    }
 }

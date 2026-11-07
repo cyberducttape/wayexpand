@@ -26,9 +26,19 @@ signatures, active organization policy admission, and operational form fields.
 In command or configuration snippets, every free-text field must use a
 context-appropriate `validate=...` rule or explicitly declare
 `free_text=true` when arbitrary content is intentional. The JSON report lists
-each failing trigger, source file, and field in `field_findings`. Add
+each failing trigger, source file, and field in `field_findings`. Use
 `--require-signature --signers ./allowed_signers` to require a trusted SSH
-signature in release CI. `pack test` imports the pack with all command and
+signature in release CI.
+For shell commands, validation must also keep an unquoted value to shell-safe
+token characters; otherwise interpolate it with `{{shellq:...}}`. Shell
+quoting protects command boundaries, while a validator checks that the value
+has the intended meaning. `free_text=true` does not waive shell quoting. The
+same rule applies to `{{env:NAME}}`, `{{context:FIELD}}`, and `{{clipboard}}`;
+allowlisted environment and session values can be quoted with
+`{{shellq:env:NAME}}` and `{{shellq:context:FIELD}}`. These forms require an
+explicitly reported supported shell in session context and fail closed when
+that shell is unavailable.
+`pack test` imports the pack with all command and
 hotkey execution disabled, renders declared test cases, and compares exact
 output against files under `examples/`. A failing lint or test returns exit
 code 1; malformed command usage returns 2; invalid WayExpand or policy

@@ -494,7 +494,7 @@ impl IbusFieldVerdict {
             }
             Self::Sensitive => "password, PIN, or private field: expansion is intentionally off",
             Self::NoSurroundingText => {
-                "the app does not show IBus the text before the cursor (typical of terminals), so IBus cannot replace a trigger here; list the app in `terminal_apps` and use `wayexpand setup --mode terminals`"
+                "this app did not provide IBus with the text before the cursor, so replacement was refused; telemetry does not identify the app. Some terminal emulators need the terminal-only route (`wayexpand setup --backend ibus --terminals`), but that is not a browser workaround—do not add a browser to `terminal_apps`."
             }
             Self::Mismatch => {
                 "the app's reported text did not end with the trigger (cursor moved, selection, or autocorrect), so the replacement was refused"
@@ -578,6 +578,11 @@ mod tests {
             IbusFieldVerdict::of(&terminal),
             IbusFieldVerdict::NoSurroundingText
         );
+        let explanation = IbusFieldVerdict::NoSurroundingText.explanation();
+        assert!(explanation.contains("telemetry does not identify the app"));
+        assert!(explanation.contains("not a browser workaround"));
+        assert!(explanation.contains("wayexpand setup --backend ibus --terminals"));
+        assert!(!explanation.contains("--mode terminals"));
 
         let field = Some(telemetry.focus_in(field));
         telemetry.content_type(field, true);

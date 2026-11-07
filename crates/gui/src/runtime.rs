@@ -725,15 +725,27 @@ pub(crate) enum DaemonBuildState {
 /// Compare exact build identities when available, as `wayexpand doctor` does.
 pub(crate) fn daemon_build_state(response: &str) -> DaemonBuildState {
     let daemon_commit = status_field(response, "daemon_commit");
+    let daemon_version = status_field(response, "daemon_version");
     let gui_commit = env!("WAYEXPAND_COMMIT");
-    match (daemon_commit.as_deref(), gui_commit) {
-        (Some(daemon), gui) if daemon != "unknown" && gui != "unknown" && daemon == gui => {
-            DaemonBuildState::Current
-        }
-        (Some(daemon), gui) if daemon != "unknown" && gui != "unknown" => {
-            DaemonBuildState::RestartRequired
-        }
-        _ => DaemonBuildState::Unverified,
+    let gui_version = env!("WAYEXPAND_BUILD_VERSION");
+    if gui_version.contains(".dirty-unknown") {
+        return DaemonBuildState::Unverified;
+    }
+    let Some(daemon_commit) = daemon_commit.filter(|commit| commit != "unknown") else {
+        return DaemonBuildState::Unverified;
+    };
+    if gui_commit == "unknown" {
+        return DaemonBuildState::Unverified;
+    }
+    if daemon_commit != gui_commit {
+        return DaemonBuildState::RestartRequired;
+    }
+    match daemon_version.as_deref() {
+        Some("unknown") => DaemonBuildState::Unverified,
+        Some(version) if version == gui_version => DaemonBuildState::Current,
+        Some(_) => DaemonBuildState::RestartRequired,
+        None if gui_version.contains(".dirty.") => DaemonBuildState::Unverified,
+        None => DaemonBuildState::Current,
     }
 }
 
@@ -796,11 +808,32 @@ mod tests {
     }
 
     #[test]
-    fn daemon_build_state_requires_exact_commit_identity() {
+    fn daemon_build_state_requires_exact_tree_identity_for_dirty_builds() {
         let commit = env!("WAYEXPAND_COMMIT");
+        let version = env!("WAYEXPAND_BUILD_VERSION");
+        assert_eq!(
+            super::daemon_build_state(&format!(
+                "daemon_commit={commit}\ndaemon_version={version}\n"
+            )),
+            if commit == "unknown" || version == "unknown" {
+                super::DaemonBuildState::Unverified
+            } else {
+                super::DaemonBuildState::Current
+            }
+        );
+        assert_eq!(
+            super::daemon_build_state(&format!(
+                "daemon_commit={commit}\ndaemon_version={version}-other-tree\n"
+            )),
+            if commit == "unknown" {
+                super::DaemonBuildState::Unverified
+            } else {
+                super::DaemonBuildState::RestartRequired
+            }
+        );
         assert_eq!(
             super::daemon_build_state(&format!("daemon_commit={commit}\n")),
-            if commit == "unknown" {
+            if commit == "unknown" || version.contains(".dirty.") {
                 super::DaemonBuildState::Unverified
             } else {
                 super::DaemonBuildState::Current

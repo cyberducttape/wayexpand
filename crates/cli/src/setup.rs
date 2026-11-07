@@ -30,11 +30,19 @@ fn setup_command_timeout(program: &str, arguments: &[&str]) -> Duration {
 }
 
 pub(crate) fn run_setup_command(program: &str, arguments: &[&str]) -> Result<ExitStatus> {
+    run_setup_command_with_env(program, arguments, &[])
+}
+
+pub(crate) fn run_setup_command_with_env(
+    program: &str,
+    arguments: &[&str],
+    environment: &[(&str, &str)],
+) -> Result<ExitStatus> {
     let timeout = setup_command_timeout(program, arguments);
     let mut command = Command::new(program);
+    command.args(arguments).envs(environment.iter().copied());
     configure_process_group(&mut command);
     let child = command
-        .args(arguments)
         .spawn()
         .map_err(|error| anyhow::anyhow!("could not start {program}: {error}"))?;
     let mut supervisor = ChildSupervisor::new(child);

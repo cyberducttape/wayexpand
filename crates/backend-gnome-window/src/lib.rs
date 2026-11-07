@@ -35,6 +35,7 @@ const EXTENSIONS_IFACE: &str = "org.gnome.Shell.Extensions";
 /// The extension protocol this tracker speaks.
 const PROTOCOL_VERSION: u32 = 2;
 const INPUT_SOURCE_CONTROL_VERSION: u32 = 1;
+const KEYBOARD_LAYOUT_VERSION: u32 = 2;
 const DBUS_CONNECTION_TIMEOUT: Duration = Duration::from_secs(3);
 const DBUS_METHOD_TIMEOUT: Duration = Duration::from_secs(1);
 const TRACKER_HEALTH_CHECK_INTERVAL: Duration = Duration::from_secs(1);
@@ -83,6 +84,10 @@ pub enum GnomeWindowError {
     BuildIdentityMismatch(String),
     #[error("GNOME Shell input-source control is unavailable; update or enable the WayExpand GNOME Shell extension")]
     InputSourceControlUnavailable,
+    #[error("GNOME Shell did not provide the active XKB keyboard model and options")]
+    KeyboardLayoutUnavailable,
+    #[error("the WayExpand GNOME Shell extension speaks keyboard-layout protocol {0}; this WayExpand needs {KEYBOARD_LAYOUT_VERSION}")]
+    KeyboardLayoutProtocolMismatch(u32),
     #[error("the WayExpand GNOME Shell extension speaks input-source protocol {0}; this WayExpand needs {INPUT_SOURCE_CONTROL_VERSION}")]
     InputSourceControlProtocolMismatch(u32),
     #[error("GNOME Shell did not activate the requested input source")]
@@ -221,6 +226,48 @@ pub fn active_input_source() -> Result<(String, String), GnomeWindowError> {
     let owner = shell_owner(&connection)?;
     input_source_control_version(&connection, &owner)?;
     read_active_input_source(&connection, &owner)
+}
+
+/// Read GNOME Shell's live keyboard source and the model/options its active
+/// InputSourceManager settings object applies. An IBus source is returned as
+/// such so callers fail closed rather than substituting stale settings.
+pub fn active_keyboard_layout(
+) -> Result<(String, String, String, String, Vec<String>), GnomeWindowError> {
+    let connection = plain_connection()?;
+    let owner = shell_owner(&connection)?;
+    let reply = connection.call_method(
+        Some(SHELL_NAME),
+        TRACKER_PATH,
+        Some("org.freedesktop.DBus.Properties"),
+        "Get",
+        &(TRACKER_IFACE, "KeyboardLayoutVersion"),
+    )?;
+    if reply.header().sender().map(|name| name.as_str()) != Some(owner.as_str()) {
+        return Err(GnomeWindowError::ShellRestarted);
+    }
+    let version = reply
+        .body()
+        .deserialize::<OwnedValue>()
+        .ok()
+        .and_then(|value| u32::try_from(value).ok());
+    match version {
+        Some(KEYBOARD_LAYOUT_VERSION) => {}
+        Some(other) => return Err(GnomeWindowError::KeyboardLayoutProtocolMismatch(other)),
+        None => return Err(GnomeWindowError::KeyboardLayoutUnavailable),
+    }
+    let reply = connection.call_method(
+        Some(SHELL_NAME),
+        TRACKER_PATH,
+        Some(TRACKER_IFACE),
+        "GetActiveKeyboardLayout",
+        &(),
+    )?;
+    if reply.header().sender().map(|name| name.as_str()) != Some(owner.as_str()) {
+        return Err(GnomeWindowError::ShellRestarted);
+    }
+    Ok(reply
+        .body()
+        .deserialize::<(String, String, String, String, Vec<String>)>()?)
 }
 
 /// Build identity reported by the currently loaded extension instance. GNOME
@@ -822,7 +869,21 @@ mod tests {
         assert!(script.contains("<method name=\"SubscribeWithTitles\">"));
         assert!(script.contains("this._subscribe(invocation, false)"));
         assert!(script.contains("isAuthorizedTrackerClient(uid, GLib.get_user_id(), executable)"));
+        assert!(script.contains("GetActiveInputSourceAsync(_parameters, invocation) {\n        this._withAuthorizedClient(invocation"));
+        assert!(script.contains("GetActiveKeyboardLayoutAsync(_parameters, invocation) {\n        this._withAuthorizedClient(invocation"));
+        assert!(script.contains("ActivateInputSourceAsync([kind, id], invocation) {\n        this._withAuthorizedClient(invocation"));
+        assert!(script.contains(
+            "invocation.return_error_literal(Gio.DBusError, Gio.DBusError.ACCESS_DENIED"
+        ));
         assert!(script.contains("InputSourceControlVersion"));
+        assert!(script.contains("GetActiveKeyboardLayout"));
+        assert!(script.contains("new GLib.Variant('(ssssas)'"));
+        assert!(script.contains("source.xkbId"));
+        assert!(script.contains("activeXkbSettings(manager._settings)"));
+        assert!(queue.contains("settings.keyboardModel"));
+        assert!(queue.contains("settings.keyboardOptions"));
+        assert!(queue.contains("model = 'pc105'"));
+        assert!(script.contains("KeyboardLayoutVersion"));
         assert!(script.contains("Keyboard.getInputSourceManager().currentSource"));
         assert!(!script.contains("org.gnome.desktop.input-sources current"));
         assert!(script.contains("LatestOnlyDelivery"));

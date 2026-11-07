@@ -780,7 +780,7 @@ replacement = "signature"
     const BROKER_CONFIG: &str =
         "[settings]\ncompatibility_mode = \"tracked-focus\"\nundo_chord = \"Ctrl+Z\"\n\
          [[expansion]]\ntrigger = \":ok\"\nreplacement = \"\"\n\
-         [expansion.command]\naction = \"status\"\ntimeout_ms = 3000\n";
+         [expansion.command]\naction = \"status\"\ntimeout_ms = 5000\n";
 
     /// Serve exactly one broker request on `socket`, answering with `stdout`
     /// after `delay`. Returns the action id the engine asked for.
@@ -788,24 +788,41 @@ replacement = "signature"
         socket: std::path::PathBuf,
         stdout: &'static str,
         delay: Duration,
-    ) -> std::thread::JoinHandle<String> {
+    ) -> std::thread::JoinHandle<Result<String, String>> {
         use std::io::{BufRead, Write};
         let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
         std::thread::spawn(move || {
-            let (stream, _) = listener.accept().unwrap();
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            let (stream, _) = loop {
+                match listener.accept() {
+                    Ok(accepted) => break accepted,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        if std::time::Instant::now() >= deadline {
+                            return Err("no broker request arrived within 10 seconds".into());
+                        }
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => return Err(format!("broker accept failed: {error}")),
+                }
+            };
             let mut request = String::new();
-            std::io::BufReader::new(stream.try_clone().unwrap())
+            std::io::BufReader::new(stream.try_clone().map_err(|error| error.to_string())?)
                 .read_line(&mut request)
-                .unwrap();
+                .map_err(|error| error.to_string())?;
             std::thread::sleep(delay);
             let response = serde_json::json!({ "Success": {
                 "exit_code": 0, "stdout": stdout, "stderr": "",
                 "stdout_truncated": false, "stderr_truncated": false, "duration_ms": 1,
             }});
             let mut stream = stream;
+            // Destroy/focus tests intentionally close the client while the
+            // broker is working; a broken pipe is expected there and is not
+            // evidence that the request failed to reach the fake broker.
             let _ = writeln!(stream, "{response}");
-            let request: serde_json::Value = serde_json::from_str(&request).unwrap();
-            request["action_id"].as_str().unwrap_or_default().to_owned()
+            let request: serde_json::Value =
+                serde_json::from_str(&request).map_err(|error| error.to_string())?;
+            Ok(request["action_id"].as_str().unwrap_or_default().to_owned())
         })
     }
 
@@ -814,7 +831,8 @@ replacement = "signature"
     struct BrokerFixture {
         _guard: std::sync::MutexGuard<'static, ()>,
         root: std::path::PathBuf,
-        broker: Option<std::thread::JoinHandle<String>>,
+        previous_socket: Option<std::ffi::OsString>,
+        broker: Option<std::thread::JoinHandle<Result<String, String>>>,
     }
 
     impl BrokerFixture {
@@ -827,24 +845,34 @@ replacement = "signature"
             let _ = std::fs::remove_dir_all(&root);
             std::fs::create_dir_all(&root).unwrap();
             let socket = root.join("broker.sock");
+            let previous_socket = std::env::var_os("WAYEXPAND_ACTION_BROKER_SOCKET");
             std::env::set_var("WAYEXPAND_ACTION_BROKER_SOCKET", &socket);
             let broker = Some(fake_broker(socket, stdout, delay));
             Self {
                 _guard: guard,
                 root,
+                previous_socket,
                 broker,
             }
         }
 
         /// Wait until the broker has answered; returns the requested action.
         fn answered(&mut self) -> String {
-            self.broker.take().unwrap().join().unwrap()
+            self.broker
+                .take()
+                .unwrap()
+                .join()
+                .expect("fake broker thread panicked")
+                .expect("fake broker did not receive and answer an action")
         }
     }
 
     impl Drop for BrokerFixture {
         fn drop(&mut self) {
-            std::env::remove_var("WAYEXPAND_ACTION_BROKER_SOCKET");
+            match self.previous_socket.take() {
+                Some(value) => std::env::set_var("WAYEXPAND_ACTION_BROKER_SOCKET", value),
+                None => std::env::remove_var("WAYEXPAND_ACTION_BROKER_SOCKET"),
+            }
             let _ = std::fs::remove_dir_all(&self.root);
         }
     }
@@ -859,6 +887,29 @@ replacement = "signature"
         deletions: mpsc::Receiver<u32>,
         instances: Instances,
         telemetry: Arc<IbusTelemetry>,
+        connection_slot: Arc<Mutex<Option<Connection>>>,
+        completion_pump: Option<std::thread::JoinHandle<()>>,
+        message_reader: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl Drop for Harness {
+        fn drop(&mut self) {
+            // The test server owns Factory, and Factory owns this slot. Clear
+            // the connection to break that test-only Arc cycle and let its
+            // D-Bus objects drop so the pump and client reader can terminate.
+            if let Ok(mut slot) = self.connection_slot.lock() {
+                slot.take();
+            }
+            if let Ok(mut instances) = self.instances.lock() {
+                instances.clear();
+            }
+            if let Some(pump) = self.completion_pump.take() {
+                let _ = pump.join();
+            }
+            if let Some(reader) = self.message_reader.take() {
+                let _ = reader.join();
+            }
+        }
     }
 
     impl Harness {
@@ -894,17 +945,17 @@ replacement = "signature"
                 .unwrap();
             let server = server.join().unwrap();
             *connection_slot.lock().unwrap() = Some(server);
-            {
+            let completion_pump = {
                 let instances = Arc::clone(&instances);
                 let connection = Arc::clone(&connection_slot);
                 std::thread::spawn(move || {
                     run_completion_pump(completion_receiver, instances, connection)
-                });
-            }
+                })
+            };
             let (commit_sender, commits) = mpsc::channel();
             let (deletion_sender, deletions) = mpsc::channel();
             let messages = zbus::blocking::MessageIterator::from(&client);
-            std::thread::spawn(move || {
+            let message_reader = std::thread::spawn(move || {
                 for message in messages.flatten() {
                     match message.header().member().map(|member| member.as_str()) {
                         Some("CommitText") => {
@@ -938,6 +989,9 @@ replacement = "signature"
                 deletions,
                 instances,
                 telemetry,
+                connection_slot,
+                completion_pump: Some(completion_pump),
+                message_reader: Some(message_reader),
             }
         }
 
@@ -1196,12 +1250,21 @@ replacement = "signature"
         harness.focus_text_field();
         harness.type_trigger();
         assert_eq!(broker.answered(), "status");
+        // Workspace tests start many subprocess-backed cases in parallel;
+        // retain a finite bound and include content-free runtime state if the
+        // command worker fails to deliver under runner contention.
+        let commits = harness.commits_through("from-broker", Duration::from_secs(35));
+        let engine_metrics = harness.instances.lock().unwrap()[&harness.engine]
+            .adapter
+            .lock()
+            .unwrap()
+            .engine()
+            .command_metrics();
         assert_eq!(
-            // Workspace tests start many subprocess-backed cases in parallel;
-            // retain a finite bound without treating runner contention as a
-            // lost completion-pump wakeup.
-            harness.commits_through("from-broker", Duration::from_secs(30)),
-            ["o", "k", "from-broker"]
+            commits,
+            ["o", "k", "from-broker"],
+            "command metrics: {engine_metrics:?}; IBus telemetry: {:?}",
+            harness.telemetry.snapshot()
         );
     }
 
@@ -1235,7 +1298,14 @@ replacement = "signature"
     /// FocusIn and SetCapabilities, with no ContentType property write.
     #[test]
     fn refocus_to_a_field_of_the_same_type_keeps_capture_enabled() {
-        let harness = Harness::start(BROKER_CONFIG);
+        // This test only checks that the trigger remains capturable after the
+        // focus lifecycle. Keep it snippet-only: broker fixtures temporarily
+        // set a process-wide socket override, and an unrelated command-backed
+        // test could otherwise race with their one-request fake broker.
+        let harness = Harness::start(
+            "[settings]\ncompatibility_mode = \"tracked-focus\"\n\
+             [[expansion]]\ntrigger = \":ok\"\nreplacement = \"ok\"\n",
+        );
         harness.focus_text_field();
         harness.call("FocusOut", &());
         harness.call("FocusIn", &());

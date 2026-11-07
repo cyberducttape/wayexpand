@@ -233,6 +233,7 @@ fn gnome_problem_for(check: &wayexpand_backend_ibus::chain::IbusCheck) -> Option
         "gnome-session" => "WX-GNOME-SESSION-001",
         "daemon" => "WX-GNOME-IBUS-001",
         "component" | "registered" => "WX-IBUS-001",
+        "manifest-scope" => "WX-IBUS-MULTIUSER-001",
         "gnome-source-registered" => "WX-GNOME-IM-001",
         "gnome-source-active" => "WX-GNOME-IM-002",
         "consent" => "WX-POLICY-001",

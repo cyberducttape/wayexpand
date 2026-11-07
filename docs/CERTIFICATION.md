@@ -52,8 +52,9 @@ The isolated smoke report also records the commit of the CLI and daemon
 binaries exercised. A mismatch with the reporting CLI fails the evidence
 check, preventing a stale source-checkout CLI from claiming a partial pass for
 binaries rebuilt from a newer checkout.
-The active route is verified only when its status schema and `daemon_commit`
-match the CLI that produced the report; a stale daemon is reported as
+The active route is verified only when its status schema and exact
+`daemon_version` match the CLI that produced the report, or when a clean CLI
+can verify the commit from a legacy daemon. A stale daemon is reported as
 unavailable and must be restarted or updated first. A build without Git
 metadata reports its commit as `unknown`, which cannot show a match either;
 set `WAYEXPAND_BUILD_SHA` when building packages from source archives. Debian and

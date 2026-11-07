@@ -41,9 +41,82 @@ separate user confirmation. Activity counters are not correlated to the test
 trigger, so the GUI labels them as observed activity and never treats them as
 proof of insertion by themselves.
 
-Finding IDs such as `WX-CONFIG-001`, `WX-GNOME-IM-001`, `WX-IBUS-002`, `WX-INPUT-001`,
-`WX-OUTPUT-001`, `WX-SERVICE-002`, and `WX-VERSION-001` are stable references
+Finding IDs such as `WX-CONFIG-001`, `WX-GNOME-IM-001`, `WX-IBUS-002`,
+`WX-INPUT-001`, `WX-OUTPUT-001`, `WX-POLICY-001`, `WX-SERVICE-002`, and
+`WX-VERSION-001` are stable references
 for support reports and automation.
+
+### Browser text fields do not expand
+
+Browser and Electron clients are not certified as a general WayExpand route.
+On Plasma, native Wayland browsers use KWin's IBus Wayland bridge. Do not set
+`GTK_IM_MODULE=ibus` or `QT_IM_MODULE=ibus` globally in a Plasma Wayland
+session; those legacy toolkit overrides can conflict with KWin's compositor-
+managed IBus integration. Check
+`wayexpand ibus status --json` for the `desktop` check. If it reports
+`WX-KWIN-IBUS-001`, select **IBus Wayland** in System Settings → Keyboard →
+Virtual Keyboard, then log out of Plasma and back in. If KWin repeatedly
+crashes `ibus-ui-gtk3`, update or repair the system IBus package and inspect
+`coredumpctl info ibus-ui-gtk3` before retesting.
+
+If the diagnostic reports `WX-KWIN-IBUS-002`, it found a recent IBus helper
+segmentation fault for the current user. The crash record identifies the
+process and stack, but does not by itself establish a fixed upstream version.
+In particular, a `g_utf8_pointer_to_offset` frame is not sufficient evidence
+to attribute the crash to an unrelated IBus change. Inspect the recorded PID
+with `coredumpctl info <PID>`, install the latest IBus package supported by
+your distribution, then log out of Plasma and back in. Run
+`wayexpand ibus status --json` and verify a harmless expansion in the affected
+application. If the crash recurs, report the backtrace and exact package
+version to your distribution or IBus maintainers. If the helper restarted,
+WayExpand reports the crash as degraded route health; it does not prove that
+the current helper is still down.
+
+If `wayexpand ibus status` reports `WX-IBUS-TOOLKIT-001`, remove the legacy
+variables from Plasma login files, run
+`systemctl --user unset-environment GTK_IM_MODULE QT_IM_MODULE`, then log out
+and back in so the session bus and compositor start with clean environment.
+
+If `wayexpand debug --json` reports `WX-IBUS-004`, the IBus daemon process is
+not answering on its private D-Bus. A running process or a remembered engine
+selection does not establish that the desktop can deliver browser input to
+WayExpand. Restore the desktop-managed IBus session, then confirm the daemon
+check passes in `wayexpand ibus status --json` before testing a browser field.
+
+An older WayExpand CLI may instead say that `org.freedesktop.IBus` has no
+owner on the desktop session bus. IBus normally serves clients on the private
+address returned by `ibus address`, so that message alone does not show that
+the daemon is down. Update WayExpand and rerun `wayexpand ibus status --json`;
+the current diagnostic probes IBus's private bus and checks KWin's Wayland
+bridge separately. Do not restart IBus solely because the old session-bus
+check failed.
+
+Check the capture scope with `wayexpand status --json`. If `source` is `evdev`
+and `terminal_apps_only` is `true`, that daemon intentionally handles terminal
+applications only; browser input must arrive through IBus. `wayexpand ibus
+status` reports the IBus route separately. Do not broaden the raw evdev route
+to browsers to work around an inactive IBus path.
+
+To observe whether the browser sends input to IBus, run
+`wayexpand ibus watch --seconds 30`, switch to the browser, and type harmless
+text. The watch reports counts and field capabilities only, not the typed text.
+If it reports no new keys, the browser is not routing this field through the
+WayExpand IBus engine. If it reports `no-surrounding-text`, IBus cannot safely
+replace a trigger in that field. The telemetry does not identify the app, so
+do not treat this result as proof about every browser field. Do not add a
+browser to `terminal_apps`: the terminal-only evdev route is intended for
+terminal emulators and has weaker input-privacy guarantees. Use a separately
+tested browser route or paste the reviewed text manually.
+
+### WX-POLICY-001
+
+IBus is active, but replacement is disabled because `compatibility_mode` is
+`"off"`. This is the default because IBus trigger deletion and replacement
+commit are separate operations. If you choose to accept that non-atomic route,
+run `wayexpand setup --backend ibus` interactively and review its replacement
+authorization prompt. Do not use `--yes` to grant consent. Managed systems
+should change this setting only through an approved policy. Then rerun
+`wayexpand ibus status` and test a harmless expansion in the intended app.
 
 ### WX-GNOME-IM-001
 

@@ -1,4 +1,4 @@
-//! `wx-e2e-gnome-tracker --expect-transition APP_ID | --expect-transition-empty | --expect-unavailable`
+//! `wx-e2e-gnome-tracker --expect-transition APP_ID | --expect-transition-empty | --expect-unavailable | --active-source | --active-layout | --activate-source KIND ID`
 //!
 //! For `scripts/test-gnome-e2e.sh`: connects WayExpand's GNOME window
 //! tracker to a private, headless GNOME Shell running the WayExpand
@@ -13,7 +13,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use wayexpand_backend_gnome_window::GnomeWindowTracker;
+use wayexpand_backend_gnome_window::{
+    activate_input_source, active_input_source, active_keyboard_layout, GnomeWindowTracker,
+};
 use wayexpand_core::WindowTracker;
 
 const CONNECT_DEADLINE: Duration = Duration::from_secs(20);
@@ -29,12 +31,37 @@ fn main() {
     match (arguments.next().as_deref(), arguments.next()) {
         (Some("--expect-transition"), Some(app_id)) => expect_transition(&app_id),
         (Some("--expect-transition-empty"), None) => expect_transition_empty(),
+        (Some("--active-source"), None) => match active_input_source() {
+            Ok((kind, id)) => println!("active-source {kind} {id}"),
+            Err(error) => fail(format!("could not read active input source: {error}")),
+        },
+        (Some("--active-layout"), None) => match active_keyboard_layout() {
+            Ok((kind, id, xkb_id, model, options)) => println!(
+                "active-layout {kind} {id} {xkb_id} {model} {}",
+                options.join(",")
+            ),
+            Err(error) => fail(format!("could not read active keyboard layout: {error}")),
+        },
+        (Some("--activate-source"), Some(kind)) => {
+            let Some(id) = arguments.next() else {
+                fail("--activate-source requires KIND ID");
+            };
+            if arguments.next().is_some() {
+                fail("--activate-source accepts only KIND ID");
+            }
+            match activate_input_source(&kind, &id) {
+                Ok((active_kind, active_id)) => {
+                    println!("activated-source {active_kind} {active_id}")
+                }
+                Err(error) => fail(format!("could not activate input source: {error}")),
+            }
+        }
         (Some("--expect-unavailable"), None) => match GnomeWindowTracker::probe() {
             Ok(()) => fail("tracker still available"),
             Err(error) => println!("pass tracker unavailable: {error}"),
         },
         _ => fail(
-            "usage: wx-e2e-gnome-tracker --expect-transition APP_ID | --expect-transition-empty | --expect-unavailable",
+            "usage: wx-e2e-gnome-tracker --expect-transition APP_ID | --expect-transition-empty | --expect-unavailable | --active-source | --active-layout | --activate-source KIND ID",
         ),
     }
 }

@@ -53,15 +53,15 @@ pub(crate) fn print_evdev_consent_diagnostics() -> bool {
 
 /// One-line IBus verdict for doctor, naming the first broken link and its
 /// fix; `wayexpand ibus status` prints every check.
-fn print_ibus_route_summary(policy_allowed: bool) {
+fn print_ibus_route_summary(policy_allowed: bool) -> bool {
     let report = wayexpand_backend_ibus::chain::diagnose();
     if !report.installed_anywhere() {
         println!("IBus WayExpand engine: not installed (install the IBus component to use it)");
-        return;
+        return true;
     }
     if !policy_allowed {
         println!("IBus WayExpand engine: installed but disallowed by organization policy");
-        return;
+        return true;
     }
     let status = super::status::read_daemon_status()
         .ok()
@@ -72,8 +72,13 @@ fn print_ibus_route_summary(policy_allowed: bool) {
         println!(
             "IBus route: ready (sensitive-field aware, verified non-atomic replacement); check an app with `wayexpand ibus watch`"
         );
+        return true;
     } else {
-        let (title, detail, fix) = match report.first_failure() {
+        // A live-shell toolkit environment warning is the actionable cause
+        // when IBus itself is selected but GTK/Qt apps are not sending input.
+        // Prefer it over downstream "no field input yet" evidence.
+        let first_issue = primary_ibus_issue(&report);
+        let (title, detail, fix) = match first_issue {
             Some(check) => (check.title, check.detail.clone(), check.fix.clone()),
             None => (
                 "No second route expands the same keys",
@@ -84,12 +89,36 @@ fn print_ibus_route_summary(policy_allowed: bool) {
                 route["other_route"]["fix"].as_str().map(str::to_owned),
             ),
         };
-        println!("IBus route: NOT READY — {title}: {detail}");
+        let problem_prefix = first_issue
+            .and_then(|check| check.problem_id)
+            .map(|problem_id| format!("{problem_id}: "))
+            .unwrap_or_default();
+        println!("IBus route: NOT READY — {problem_prefix}{title}: {detail}");
         if let Some(fix) = fix {
             println!("  Fix: {fix}");
         }
         println!("  Run `wayexpand ibus status` for every check.");
     }
+    !super::json::selected_ibus_has_problem(&route)
+}
+
+fn primary_ibus_issue(
+    report: &wayexpand_backend_ibus::chain::IbusChainReport,
+) -> Option<&wayexpand_backend_ibus::chain::IbusCheck> {
+    // Preserve hard failures first; a toolkit warning is the next useful
+    // cause when the engine is selected but has not received field input.
+    let readiness = report.readiness();
+    let actionable_environment = (readiness.registered && readiness.selected)
+        .then(|| report.check("desktop-shell-environment"))
+        .flatten()
+        .filter(|check| check.state != wayexpand_backend_ibus::chain::IbusCheckState::Pass);
+    let actionable_scope_warning = report
+        .check("manifest-scope")
+        .filter(|check| check.state == wayexpand_backend_ibus::chain::IbusCheckState::Warn);
+    report
+        .first_failure()
+        .or(actionable_scope_warning)
+        .or(actionable_environment)
 }
 
 pub(crate) fn print_backend_diagnostics(include_experimental_input_method: bool) -> bool {
@@ -133,7 +162,7 @@ pub(crate) fn print_backend_diagnostics(include_experimental_input_method: bool)
     }
     let ibus_policy_allowed = setup_backend_allowed(&policy, "ibus");
     let ibus_installed = ibus_engine_available();
-    print_ibus_route_summary(ibus_policy_allowed);
+    let ibus_route_healthy = print_ibus_route_summary(ibus_policy_allowed);
     // Doctor is also used in CI and for validating a config outside a desktop
     // session. Explain the session limitation; the caller still reports an
     // unhealthy result when no usable path can be established.
@@ -293,7 +322,7 @@ pub(crate) fn print_backend_diagnostics(include_experimental_input_method: bool)
             );
         }
     }
-    ibus_available || !available_combinations.is_empty()
+    ibus_route_healthy && (ibus_available || !available_combinations.is_empty())
 }
 
 pub(crate) fn print_backend_selection_explain() {
@@ -395,4 +424,73 @@ pub(crate) fn capture_readiness(
         "unavailable",
         "no non-invasive source and output path was detected",
     )
+}
+
+#[cfg(test)]
+mod ibus_summary_tests {
+    use super::primary_ibus_issue;
+    use wayexpand_backend_ibus::chain::{IbusChainReport, IbusCheck, IbusCheckState, IbusDesktop};
+
+    fn check(id: &'static str, state: IbusCheckState) -> IbusCheck {
+        IbusCheck {
+            id,
+            title: id,
+            state,
+            problem_id: None,
+            detail: String::new(),
+            fix: None,
+        }
+    }
+
+    fn report(shell: IbusCheckState, desktop: IbusCheckState) -> IbusChainReport {
+        IbusChainReport {
+            desktop: IbusDesktop::KdeWayland,
+            checks: vec![
+                check("registered", IbusCheckState::Pass),
+                check("selected", IbusCheckState::Pass),
+                check("desktop", desktop),
+                check("field-input", IbusCheckState::Unknown),
+                check("desktop-shell-environment", shell),
+            ],
+            activity: None,
+        }
+    }
+
+    #[test]
+    fn doctor_prefers_plasma_environment_cause_over_missing_field_activity() {
+        let report = report(IbusCheckState::Warn, IbusCheckState::Pass);
+        assert_eq!(
+            primary_ibus_issue(&report).map(|check| check.id),
+            Some("desktop-shell-environment")
+        );
+    }
+
+    #[test]
+    fn doctor_surfaces_a_shared_ibus_manifest_bound_to_one_users_home() {
+        let mut report = report(IbusCheckState::Pass, IbusCheckState::Pass);
+        report.checks.insert(
+            0,
+            IbusCheck {
+                id: "manifest-scope",
+                title: "Shared IBus registration is multi-user safe",
+                state: IbusCheckState::Warn,
+                problem_id: Some("WX-IBUS-MULTIUSER-001"),
+                detail: "shared manifest resolves into a user's home".into(),
+                fix: Some("repair the shared IBus registration".into()),
+            },
+        );
+        assert_eq!(
+            primary_ibus_issue(&report).map(|check| check.id),
+            Some("manifest-scope")
+        );
+    }
+
+    #[test]
+    fn doctor_preserves_hard_ibus_failures_ahead_of_environment_warnings() {
+        let report = report(IbusCheckState::Warn, IbusCheckState::Fail);
+        assert_eq!(
+            primary_ibus_issue(&report).map(|check| check.id),
+            Some("desktop")
+        );
+    }
 }

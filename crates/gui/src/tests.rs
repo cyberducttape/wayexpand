@@ -2235,8 +2235,9 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
     app.daemon_reachable = Some(true);
     app.route_state = Some(runtime::RouteState::Connected);
     app.daemon_status = format!(
-        "source=input-method · backend=input-method-v2 · daemon_commit={}",
-        env!("WAYEXPAND_COMMIT")
+        "source=input-method · backend=input-method-v2 · daemon_commit={} · daemon_version={}",
+        env!("WAYEXPAND_COMMIT"),
+        env!("WAYEXPAND_BUILD_VERSION")
     );
     app.language = Language::English;
     app.strings.set_language(Language::English);

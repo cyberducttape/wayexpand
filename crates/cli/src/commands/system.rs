@@ -690,13 +690,19 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
         .and_then(|response| crate::doctor::status::status_as_json(&response))
         .ok();
     let cli_commit = build_info::COMMIT;
+    let cli_version = build_info::VERSION;
     let daemon_commit = status_snapshot
         .as_ref()
         .and_then(|s| s.get("daemon_commit"))
         .and_then(serde_json::Value::as_str);
-    let mismatch = status_snapshot
+    let daemon_version = status_snapshot
         .as_ref()
-        .is_some_and(|_| daemon_commit != Some(cli_commit));
+        .and_then(|s| s.get("daemon_version"))
+        .and_then(serde_json::Value::as_str);
+    let mismatch = status_snapshot.as_ref().is_some_and(|snapshot| {
+        !crate::doctor::status::daemon_build_matches(daemon_commit, daemon_version)
+            || !crate::doctor::status::status_schema_compatible(snapshot)
+    });
     let source = status_snapshot
         .as_ref()
         .and_then(|s| s.get("source"))
@@ -731,9 +737,9 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
         })
         .collect();
     let report = serde_json::json!({
-        "schema":1, "action":action, "cli_commit":cli_commit,
+        "schema":1, "action":action, "cli_commit":cli_commit, "cli_version":cli_version,
         "current_install":current_target.as_ref().map(|v|v.to_string_lossy().into_owned()).or_else(|| installed_cli.as_ref().map(|p|p.display().to_string())),
-        "daemon_commit":daemon_commit, "daemon_running":status_snapshot.is_some(),
+        "daemon_commit":daemon_commit, "daemon_version":daemon_version, "daemon_running":status_snapshot.is_some(),
         "config_valid":config_valid, "version_mismatch":mismatch,
         "restart_service":service, "rollback_available":rollback_file.is_file(),
         "ibus_stale_engine_processes":stale_ibus_processes_json,
@@ -755,7 +761,10 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
                     "invalid or missing"
                 }
             );
-            println!("Daemon: {}", daemon_commit.unwrap_or("not responding"));
+            println!(
+                "Daemon: {}",
+                daemon_version.or(daemon_commit).unwrap_or("not responding")
+            );
             println!(
                 "Action: {}",
                 if status_snapshot.is_none() {
@@ -837,24 +846,34 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
     // daemon may still be initializing its control socket/status publisher, so
     // give it a short bounded window before treating an unavailable snapshot
     // as a failed upgrade.
-    let (health, restarted_commit) = wait_for_daemon_build(cli_commit);
-    let restarted_commit = restarted_commit.as_deref().unwrap_or("unknown");
+    let (health, restarted_build) = wait_for_daemon_build();
+    let restarted_build = restarted_build.as_deref().unwrap_or("unknown");
     let compatible = health.as_ref().is_ok_and(|verified| {
         crate::doctor::status::upgrade_status_from_snapshot(verified)["compatible"] == true
     });
-    if restarted_commit != cli_commit || !compatible {
+    let build_matches = health.as_ref().is_ok_and(|verified| {
+        crate::doctor::status::daemon_build_matches(
+            verified
+                .get("daemon_commit")
+                .and_then(serde_json::Value::as_str),
+            verified
+                .get("daemon_version")
+                .and_then(serde_json::Value::as_str),
+        )
+    });
+    if !build_matches || !compatible {
         if rollback_file.is_file() {
             let restored = restore_previous_install(&library, &current, &rollback_file, Some(unit));
             bail!(upgrade_health_failure(
-                cli_commit,
-                restarted_commit,
+                cli_version,
+                restarted_build,
                 health.is_ok(),
                 restored.is_ok()
             ))
         }
         bail!(upgrade_health_failure(
-            cli_commit,
-            restarted_commit,
+            cli_version,
+            restarted_build,
             health.is_ok(),
             false
         ))
@@ -888,7 +907,7 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
             bail!("action broker health check failed; no saved payload is available for automatic rollback")
         }
     }
-    println!("Restarted {unit}; daemon build {restarted_commit} now matches this CLI.");
+    println!("Restarted {unit}; daemon build {restarted_build} now matches this CLI.");
     let stale_ibus_processes = crate::setup_ibus::stale_engine_processes();
     if !stale_ibus_processes.is_empty() {
         print_ibus_engine_restart_guidance(&stale_ibus_processes);
@@ -908,29 +927,42 @@ fn print_ibus_engine_restart_guidance(processes: &[crate::setup_ibus::StaleEngin
     println!("Restart IBus to load the updated engine: `ibus restart` (input pauses briefly).");
 }
 
-fn wait_for_daemon_build(expected_commit: &str) -> (Result<serde_json::Value>, Option<String>) {
+fn wait_for_daemon_build() -> (Result<serde_json::Value>, Option<String>) {
     const ATTEMPTS: usize = 20;
     const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
 
     let mut last_health = Err(anyhow::anyhow!("daemon has not published status yet"));
-    let mut last_commit = None;
+    let mut last_build = None;
     for attempt in 0..ATTEMPTS {
         last_health = crate::doctor::status::read_daemon_status()
             .and_then(|response| crate::doctor::status::status_as_json(&response));
-        last_commit = last_health
-            .as_ref()
-            .ok()
-            .and_then(|snapshot| snapshot.get("daemon_commit"))
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_owned);
-        if last_commit.as_deref() == Some(expected_commit) {
+        last_build = last_health.as_ref().ok().and_then(|snapshot| {
+            let commit = snapshot
+                .get("daemon_commit")
+                .and_then(serde_json::Value::as_str);
+            let version = snapshot
+                .get("daemon_version")
+                .and_then(serde_json::Value::as_str);
+            crate::doctor::status::daemon_build_matches(commit, version)
+                .then(|| version.or(commit).unwrap_or("unknown").to_owned())
+        });
+        if last_build.is_some() {
             break;
         }
         if attempt + 1 < ATTEMPTS {
             std::thread::sleep(RETRY_DELAY);
         }
     }
-    (last_health, last_commit)
+    let reported_build = last_build.or_else(|| {
+        last_health.as_ref().ok().and_then(|snapshot| {
+            snapshot
+                .get("daemon_version")
+                .or_else(|| snapshot.get("daemon_commit"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        })
+    });
+    (last_health, reported_build)
 }
 
 fn upgrade_health_failure(
@@ -1413,7 +1445,11 @@ pub(crate) fn explain_command(mut args: Args) -> Result<()> {
     let mut daemon_unreachable = None;
     if !offline && app.is_none() && config_path.is_none() {
         match control_operation(wayexpand_core::DaemonOperation::Status) {
-            Ok(status) => match live_explain_build_gate(&status, crate::build_info::COMMIT) {
+            Ok(status) => match live_explain_build_gate(
+                &status,
+                crate::build_info::COMMIT,
+                crate::build_info::VERSION,
+            ) {
                 None => match control_operation(wayexpand_core::DaemonOperation::Explain {
                     text: text.clone(),
                     json: requested_json,
@@ -1501,6 +1537,7 @@ pub(crate) fn explain_command(mut args: Args) -> Result<()> {
 pub(crate) fn live_explain_build_gate(
     status_response: &str,
     cli_commit: &str,
+    cli_version: &str,
 ) -> Option<&'static str> {
     let status = wayexpand_core::DaemonStatus::parse(status_response);
     if status.status_schema() != Some(CONTROL_STATUS_SCHEMA) {
@@ -1509,11 +1546,30 @@ pub(crate) fn live_explain_build_gate(
         );
     }
     let daemon_commit = status.field("daemon_commit");
-    if cli_commit != "unknown"
-        && daemon_commit.is_some_and(|commit| commit != "unknown" && commit == cli_commit)
-    {
+    let daemon_version = status.field("daemon_version");
+    let commit_matches = cli_commit != "unknown"
+        && daemon_commit.is_some_and(|commit| commit != "unknown" && commit == cli_commit);
+    let build_matches = daemon_version.map_or_else(
+        || !cli_version.contains(".dirty.") && commit_matches,
+        |version| commit_matches && version == cli_version,
+    );
+    if build_matches {
         None
-    } else if cli_commit == "unknown" || daemon_commit.is_none_or(|commit| commit == "unknown") {
+    } else if cli_commit == "unknown"
+        || cli_version.contains(".dirty-unknown")
+        || daemon_version.map_or_else(
+            || {
+                cli_commit == "unknown"
+                    || daemon_commit.is_none_or(|commit| commit == "unknown")
+                    || (cli_version.contains(".dirty.") && daemon_commit == Some(cli_commit))
+            },
+            |version| {
+                version == "unknown"
+                    || version.contains(".dirty-unknown")
+                    || daemon_commit.is_none_or(|c| c == "unknown")
+            },
+        )
+    {
         Some(
             "the running daemon build cannot be verified; restart it before relying on live explanations",
         )

@@ -19,7 +19,10 @@ wayexpand 1.3.3-dev+<short-sha> (commit <short-sha>)
 
 An exact clean release tag reports the release version (`1.3.3`). A build from
 an unreleased Git revision reports `-dev+<commit>` so bug reports can be tied to
-the exact source tree. `wayexpand doctor --json` exposes the same values as
+the source revision; dirty development builds append a deterministic digest
+of build inputs. If Git marks the worktree dirty but that digest cannot be
+computed, the version ends in `.dirty-unknown` and runtime matching remains
+unverified. `wayexpand doctor --json` exposes the same values as
 `wayexpand_version` and `wayexpand_commit`; certification evidence records them
 as well. Builds made from source archives without Git metadata use the package
 version and report the commit as `unknown`, unless the packaging source carries
@@ -331,13 +334,23 @@ verified rather than merely free of hard failures.
   `engine`, GNOME session/source checks, `field-input`, and `target-insertion`),
   `title`, `state` (`pass`, `warn`, `fail`, `unknown`, or `skip`), `detail`,
   `problem_id` (stable diagnostic ID or null), and `fix` (string or null).
-  GNOME source-registration failures use `WX-GNOME-IM-001`. The component checks read the running
+  Component registration failures use `WX-IBUS-001`, an unselected engine
+  uses `WX-IBUS-002`, replacement refusal uses `WX-POLICY-001`, conflicting
+  Plasma Wayland toolkit overrides use `WX-IBUS-TOOLKIT-001`, an unavailable KWin IBus
+  Wayland bridge uses `WX-KWIN-IBUS-001`, and GNOME session/source
+  failures use `WX-GNOME-SESSION-001`, `WX-GNOME-IM-001`, or
+  `WX-GNOME-IM-002`. The component checks read the running
   ibus-daemon's own `IBUS_COMPONENT_PATH`, not the caller's.
 - `first_failure` (string or null): the `id` of the first failed check.
 - `readiness` (object): booleans for each separate condition —
   `component_installed`, `registered`, `ibus_running`, `selected`,
-  `engine_running`, `text_received` (a field sent keys and reported its
-  text), and `expanded` (at least one expansion since the engine started).
+  `engine_running`, `text_received` (a normal field sent keys and at least one
+  surrounding-text report), and `expanded` (at least one expansion since the
+  engine started). This input evidence is independent of the client's
+  advertised surrounding-text capability and does not imply that replacement
+  succeeded. It is aggregate across recent fields: IBus telemetry does not
+  record application identity, so `text_received` cannot certify a browser or
+  any other particular client.
 - `activity` (object or null): the engine's published status: `live`, `pid`,
   `version`, `engines`, `totals` (`focus_ins`, `keys`, `expansions`,
   `refusals`, `output_failures`), and `recent_fields` (up to 8, newest last)
@@ -486,7 +499,7 @@ Diagnostic output suitable for health checks and monitoring systems.
 ```
 
 **Field stability:**
-- `healthy` (bool): Overall health (an active display session, config and organization policy valid, a usable automatic input path or installed IBus path, and socket operational if configured)
+- `healthy` (bool): Host readiness: valid config and policy, active display session, an available automatic or recommended setup route, valid control-socket path when configured, required broker healthy, daemon output not stalled, insertion not blocked, and cleanup queue not degraded. If IBus is selected, an actionable stable IBus route problem also makes this false. An unselected optional IBus route and unverified per-field activity do not fail host health; this flag does not certify real-app insertion.
 - `wayland` (bool): Wayland session detected
 - `desktop` (string): Detected desktop/compositor identity used to bind certification evidence to the session actually probed (for example, `KDE Plasma`, `GNOME`, `Sway/wlroots`, or `Hyprland/wlroots`). `unknown` is not certifiable.
 - `config.path` (string): Configuration file path
@@ -562,18 +575,22 @@ plain-text control-socket status response (`response` is its first line;
 every subsequent `key=value` line becomes a field, with `true`/`false`
 parsed as JSON booleans and nonnegative integer values parsed as JSON numbers)
 rather than a purpose-built schema. The CLI adds `client_commit`,
-`daemon_build_matches_client`, and `daemon_build_warning` to make build skew
-visible; text output prints the same warning to stderr. A matching commit has
-no warning, while unknown build identity or a status protocol mismatch is
-reported as unverifiable.
+`client_version`, `daemon_build_matches_client`, and `daemon_build_warning`
+to make build skew visible; text output prints the same warning to stderr.
+Exact source-tree identity is preferred over a commit-only comparison; unknown
+build identity or a status protocol mismatch is reported as unverifiable.
 The optional `sandbox_security` object contains direct `/proc` and syscall
 probes from the daemon process for `wayexpand doctor --security`; older daemons
 omit it, and this optional additive field does not change the status schema.
 
-`daemon_commit` identifies the daemon binary that produced the response, so
-operators can distinguish a running process from newly installed binaries.
-Builds without Git metadata report `unknown`; an `unknown` commit on either
-side never counts as a match (`commit_matches` is then `false`).
+`daemon_commit` identifies the source revision, and `daemon_version` identifies
+the exact source-tree build. Dirty development builds include a short digest of
+tracked and untracked build inputs in the version, so two binaries from the
+same commit but different working-tree edits do not appear identical. New
+clients prefer exact version matching; they use commit matching for older clean
+daemons that do not report `daemon_version`. A dirty client cannot treat a
+legacy same-commit daemon as verified. Builds without Git metadata report
+`unknown`; an unknown commit never counts as a commit match.
 
 **Output shape:**
 ```json
@@ -585,7 +602,9 @@ side never counts as a match (`commit_matches` is then `false`).
   "backend_mode": "unknown",
   "status_schema": 26,
   "daemon_commit": "example-commit",
+  "daemon_version": "1.3.3-dev+example-commit",
   "client_commit": "example-commit",
+  "client_version": "1.3.3-dev+example-commit",
   "daemon_build_matches_client": true,
   "daemon_build_warning": null,
   "state": "connected",

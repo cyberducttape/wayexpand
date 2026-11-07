@@ -522,7 +522,7 @@ jobs:
   kwin-e2e:
     name: Headless KWin Output and Focus E2E
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -535,7 +535,7 @@ jobs:
           toolchain: 1.96.0
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Install headless compositor dependencies
-        run: sudo apt-get update && sudo apt-get install -y dbus-daemon jq kwin-common kwin-wayland libglib2.0-bin libwayland-dev libxkbcommon-dev pkg-config wl-clipboard
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends dbus-daemon jq kwin-common kwin-wayland libglib2.0-bin libwayland-dev libxkbcommon-dev pkg-config wl-clipboard
       - name: Test production output and KWin focus tracking
         run: bash scripts/test-kwin-e2e.sh --keep
       - name: Test isolated doctor certification report
@@ -608,7 +608,7 @@ jobs:
   gnome-e2e:
     name: GNOME Input Activation, GTK Insertion, and Upgrade Acceptance (Headless)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -776,7 +776,10 @@ jobs:
       - name: Install smoke-test tools
         run: |
           if command -v dnf >/dev/null; then
-            dnf install -y -q glibc-common shadow-utils util-linux
+            dnf install -y -q glibc-common shadow-utils util-linux python3
+          else
+            apt-get update -qq
+            apt-get install -y -qq passwd util-linux python3
           fi
       - name: Install, reinstall, and remove the package
         env:

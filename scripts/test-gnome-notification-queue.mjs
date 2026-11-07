@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import test from 'node:test';
 import {
+    activeXkbSettings,
     isAuthorizedTrackerClient,
     LatestOnlyDelivery,
     SubscriptionReservations,
@@ -16,10 +17,30 @@ const extensionSource = readFileSync(
 
 test('subscription is limited to the current user and WayExpand executables', () => {
     assert.equal(isAuthorizedTrackerClient(1000, 1000, '/usr/bin/wayexpand-daemon'), true);
+    // GJS exposes get_user_id() as a string; D-Bus uint32 unpacks as number.
+    assert.equal(isAuthorizedTrackerClient(1000, '1000', '/usr/bin/wayexpand-daemon'), true);
+    assert.equal(isAuthorizedTrackerClient('1000', 1000, '/usr/bin/wayexpand-daemon'), true);
     assert.equal(isAuthorizedTrackerClient(1000, 1000, '/opt/wayexpand/wayexpand'), true);
     assert.equal(isAuthorizedTrackerClient(1001, 1000, '/usr/bin/wayexpand'), false);
+    assert.equal(isAuthorizedTrackerClient('01000', 1000, '/usr/bin/wayexpand-daemon'), false);
+    assert.equal(isAuthorizedTrackerClient('unknown', 1000, '/usr/bin/wayexpand-daemon'), false);
     assert.equal(isAuthorizedTrackerClient(1000, 1000, '/usr/bin/terminal'), false);
     assert.equal(isAuthorizedTrackerClient(1000, 1000, ''), false);
+});
+
+test('XKB settings match GNOME source and Mutter defaults', () => {
+    assert.deepEqual(activeXkbSettings({keyboardOptions: ['grp:alt_shift_toggle']}), {
+        model: 'pc105',
+        options: ['grp:alt_shift_toggle'],
+    });
+    assert.deepEqual(activeXkbSettings({
+        keyboardModel: 'jp106',
+        keyboardOptions: ['compose:ralt'],
+    }), {
+        model: 'jp106',
+        options: ['compose:ralt'],
+    });
+    assert.equal(activeXkbSettings({keyboardModel: 'pc105', keyboardOptions: 'invalid'}), null);
 });
 
 test('pending authorization reservations are deduplicated, bounded, and released', () => {
@@ -41,6 +62,25 @@ test('GNOME Shell peer authorization uses asynchronous D-Bus calls', () => {
     assert.match(extensionSource, /GetConnectionUnixUser/);
     assert.match(extensionSource, /GetConnectionUnixProcessID/);
     assert.doesNotMatch(extensionSource, /\.call_sync\s*\(/);
+});
+
+test('every metadata and input-source control method authenticates its caller', () => {
+    for (const handler of [
+        'GetActiveInputSourceAsync(_parameters, invocation)',
+        'GetActiveKeyboardLayoutAsync(_parameters, invocation)',
+        'ActivateInputSourceAsync([kind, id], invocation)',
+    ]) {
+        const start = extensionSource.indexOf(handler);
+        assert.notEqual(start, -1, `${handler} must exist`);
+        const body = extensionSource.slice(start, start + 240);
+        assert.match(body, /this\._withAuthorizedClient\(invocation/,
+            `${handler} must authorize before reading or changing input-source state`);
+    }
+    assert.match(extensionSource,
+        /invocation\.return_error_literal\(Gio\.DBusError, Gio\.DBusError\.ACCESS_DENIED/);
+    assert.match(extensionSource, /MAX_PENDING_AUTHORIZATIONS = 8/);
+    assert.match(extensionSource, /this\._authorizationReservations\.reserve\(sender, 0\)/);
+    assert.match(extensionSource, /this\._pendingAuthorizedCalls\.clear\(\)/);
 });
 
 test('title access is opt-in per request and can be revoked on an active subscription', () => {

@@ -4537,6 +4537,9 @@ dependencies = [
 [[package]]
 name = "wayexpand-build-info"
 version = "1.3.3"
+dependencies = [
+ "sha2",
+]
 
 [[package]]
 name = "wayexpand-core"

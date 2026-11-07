@@ -367,10 +367,14 @@ fn operational_checks(
     ));
     let daemon_ready = daemon.is_some_and(|status| {
         crate::doctor::status::status_schema_compatible(status)
-            && status
-                .get("daemon_commit")
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|commit| crate::doctor::status::daemon_commit_matches(Some(commit)))
+            && crate::doctor::status::daemon_build_matches(
+                status
+                    .get("daemon_commit")
+                    .and_then(serde_json::Value::as_str),
+                status
+                    .get("daemon_version")
+                    .and_then(serde_json::Value::as_str),
+            )
             && status
                 .get("config_state")
                 .and_then(serde_json::Value::as_str)
@@ -681,11 +685,22 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
     let daemon_status = crate::doctor::status::read_daemon_status()
         .ok()
         .and_then(|response| crate::doctor::status::status_as_json(&response).ok());
+    let terminal_only_runtime = daemon_status
+        .as_ref()
+        .and_then(|status| status.get("terminal_apps_only"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let terminal_match = terminal_match_self_test(daemon_status.as_ref(), terminal_only_runtime);
     let integration = integrated_checks(&ibus_report);
     let operational = operational_checks(&ibus_readiness, daemon_status.as_ref());
     let installed = rows.iter().all(|r| r.status != "fail");
     let route_ready = recommendation.backend != "unavailable";
-    let ready = installed && route_ready;
+    let terminal_match_required = terminal_only_runtime;
+    let terminal_match_ok = terminal_match
+        .get("status")
+        .and_then(|value| value.as_str())
+        == Some("pass");
+    let ready = installed && route_ready && (!terminal_match_required || terminal_match_ok);
     if json {
         println!(
             "{}",
@@ -695,7 +710,8 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
                     "installed":{"status":if installed {"pass"} else {"fail"},"checks":rows.iter().map(|row| serde_json::json!({"component":row.component,"status":row.status,"path":row.path,"detail":row.detail})).collect::<Vec<_>>()},
                     "integrated":{"status":if integration.iter().all(|check| check.status == "pass" || check.status == "warning") {"pass"} else {"incomplete"},"checks":integration},
                     "operational":{"status":if operational.iter().any(|check| check.component == "daemon_runtime" && check.status == "pass") || operational.iter().any(|check| check.component == "ibus_engine" && check.status == "pass") {"partial"} else {"not_ready"},"checks":operational},
-                    "target_insertion":{"status":"not_tested","verified":false}
+                    "target_insertion":{"status":"not_tested","verified":false},
+                    "terminal_matching_self_test":&terminal_match,
                 },
             "installation_ready":installed, "route_ready":route_ready,
                 "installation_checks":rows,
@@ -707,6 +723,7 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
                     "assessment":&planned.assessment,
                 })).collect::<Vec<_>>(),
             "ibus_runtime":ibus_readiness,
+                "terminal_matching_self_test":&terminal_match,
                 "activation":{"required":true,"command":"wayexpand setup --apply","real_insertion_verified":false,"consent_granted":false},
                 "first_run_test":{"trigger":";;hello","command":"wayexpand debug --test ';;hello'","available":hello_sample_available,"real_application_confirmation_required":true,"verified":false}
             })
@@ -773,12 +790,138 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
                 check.detail
             );
         }
+        println!("\nTerminal matching self-test:");
+        println!(
+            "  {} — {}",
+            terminal_match["status"]
+                .as_str()
+                .unwrap_or("unknown")
+                .to_uppercase(),
+            terminal_match["detail"]
+                .as_str()
+                .unwrap_or("could not evaluate terminal matching")
+        );
         println!("\nDesktop: {}\nRecommended: {} ({})\nSetup preflight: {}\nTarget insertion: NOT TESTED\nFirst-run test: {}\n\nNext: wayexpand setup --apply\n\nPreflight does not grant raw-input/portal consent or verify target-app insertion.", crate::doctor::backends::session_description(), recommendation.label, recommendation.detail, if ready {"ready to configure"} else {"prerequisites incomplete"}, if hello_sample_available {"`wayexpand debug --test ';;hello'` (requires real-app confirmation)"} else {"no enabled ;;hello sample is configured"});
     }
     if !ready {
         bail!("setup prerequisites are incomplete; see the failed checks")
     }
     Ok(())
+}
+
+/// Exercise the actual matching engine under terminal-only admission. This
+/// catches regressions where the daemon is alive but terminal scoping or the
+/// configured terminal application list prevents every expansion from
+/// matching. No command-backed snippets are executed and no output is sent.
+fn terminal_match_self_test(
+    daemon_status: Option<&serde_json::Value>,
+    terminal_only_runtime: bool,
+) -> serde_json::Value {
+    if terminal_only_runtime {
+        let response =
+            crate::control_operation(wayexpand_core::DaemonOperation::TerminalMatchSelfTest);
+        return parse_terminal_match_self_test(response, daemon_status);
+    }
+    let config_path = wayexpand_core::default_config_path();
+    let configuration_source = "cli_default_path";
+    let config = match wayexpand_core::Config::load(&config_path) {
+        Ok(config) => config,
+        Err(error) => {
+            return serde_json::json!({
+                "status":"fail",
+                "detail":format!("configuration could not be loaded: {}", error.safe_summary()),
+                "configuration_path":config_path,
+                "configuration_source":configuration_source,
+            })
+        }
+    };
+    let mut report = terminal_match_self_test_for(&config);
+    report["configuration_path"] = serde_json::json!(config_path);
+    report["configuration_source"] = serde_json::json!(configuration_source);
+    report
+}
+
+fn parse_terminal_match_self_test(
+    response: Result<String>,
+    daemon_status: Option<&serde_json::Value>,
+) -> serde_json::Value {
+    let mut report = match response {
+        Ok(response) => serde_json::from_str::<serde_json::Value>(&response).unwrap_or_else(|_| {
+            serde_json::json!({
+                "status":"fail",
+                "detail":"the daemon returned an invalid terminal matching self-test response"
+            })
+        }),
+        Err(error) => serde_json::json!({
+            "status":"fail",
+            "detail":format!("the live daemon matcher could not be checked: {error}")
+        }),
+    };
+    if !matches!(
+        report.get("status").and_then(serde_json::Value::as_str),
+        Some("pass" | "fail")
+    ) {
+        report = serde_json::json!({
+            "status":"fail",
+            "detail":"the daemon returned an invalid terminal matching self-test status"
+        });
+    }
+    report["configuration_source"] = serde_json::json!("daemon_live_matcher");
+    if let Some(path) = daemon_status.and_then(|status| status.get("config_active_path")) {
+        report["configuration_path"] = path.clone();
+    }
+    report
+}
+
+fn terminal_match_self_test_for(config: &wayexpand_core::Config) -> serde_json::Value {
+    if config.settings.terminal_apps.is_empty() {
+        return serde_json::json!({"status":"not_applicable","detail":"no terminal application identifiers are configured"});
+    }
+    let mut engine = match wayexpand_core::ExpansionEngine::new(config.clone()) {
+        Ok(engine) => engine,
+        Err(error) => {
+            return serde_json::json!({"status":"fail","detail":format!("matcher could not be built: {error}")})
+        }
+    };
+    engine.set_terminal_apps_only(true);
+    for terminal_filter in &config.settings.terminal_apps {
+        let app_id = terminal_filter
+            .strip_prefix("app_id_exact:")
+            .or_else(|| terminal_filter.strip_prefix("app_id_glob:"))
+            .unwrap_or(terminal_filter);
+        let app_id = if terminal_filter.starts_with("app_id_glob:") {
+            app_id.replace('*', "terminal").replace('?', "x")
+        } else {
+            app_id.to_owned()
+        };
+        for expansion in config
+            .expansion
+            .iter()
+            .filter(|item| item.enabled && item.command.is_none())
+        {
+            engine.process(wayexpand_core::InputEvent::Reset);
+            engine.process(wayexpand_core::InputEvent::WindowChanged(Some(
+                wayexpand_core::WindowContext {
+                    app_id: Some(app_id.clone()),
+                    ..Default::default()
+                },
+            )));
+            let mut matches = Vec::new();
+            for character in expansion.trigger.chars() {
+                matches.extend(
+                    engine.process(wayexpand_core::InputEvent::Text(character.to_string())),
+                );
+            }
+            matches.extend(engine.process(wayexpand_core::InputEvent::Delimiter(' ')));
+            if matches
+                .iter()
+                .any(|matched| matched.trigger.as_ref() == expansion.trigger)
+            {
+                return serde_json::json!({"status":"pass","detail":"a configured static expansion matched through terminal-only admission","terminal_application_count":config.settings.terminal_apps.len()});
+            }
+        }
+    }
+    serde_json::json!({"status":"fail","detail":"no enabled static expansion matched for any configured terminal application under terminal-only admission","terminal_application_count":config.settings.terminal_apps.len()})
 }
 pub(crate) fn repair(args: Args) -> Result<()> {
     let mut check = false;
@@ -874,6 +1017,55 @@ pub(crate) fn repair(args: Args) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_matching_self_test_exercises_the_terminal_only_engine_gate() {
+        let config = wayexpand_core::Config::parse(
+            r#"
+            [settings]
+            terminal_apps = ["org.gnome.Terminal"]
+
+            [[expansion]]
+            trigger = ";;health"
+            replacement = "read only check"
+            "#,
+        )
+        .unwrap();
+        let report = terminal_match_self_test_for(&config);
+        assert_eq!(report["status"], "pass", "{report}");
+
+        let blocked = wayexpand_core::Config::parse(
+            r#"
+            [settings]
+            terminal_apps = ["org.gnome.Terminal"]
+
+            [[expansion]]
+            trigger = ";;health"
+            replacement = "read only check"
+            app_filter = ["app_id_exact:org.kde.konsole"]
+            "#,
+        )
+        .unwrap();
+        assert_eq!(terminal_match_self_test_for(&blocked)["status"], "fail");
+    }
+
+    #[test]
+    fn terminal_matching_self_test_uses_the_live_daemon_matcher_result() {
+        let path = "/home/operator/.config/wayexpand/expansions.toml";
+        let daemon_status = serde_json::json!({"config_active_path":path});
+        let report = parse_terminal_match_self_test(
+            Ok(r#"{"status":"pass","detail":"live match succeeded"}"#.into()),
+            Some(&daemon_status),
+        );
+        assert_eq!(report["status"], "pass");
+        assert_eq!(report["configuration_source"], "daemon_live_matcher");
+        assert_eq!(report["configuration_path"], path);
+
+        let invalid = parse_terminal_match_self_test(Ok("{}".into()), None);
+        assert_eq!(invalid["status"], "fail");
+        let unavailable = parse_terminal_match_self_test(Err(anyhow::anyhow!("offline")), None);
+        assert_eq!(unavailable["status"], "fail");
+    }
 
     #[test]
     fn xdg_home_resolution_matches_installers_for_empty_and_custom_values() {

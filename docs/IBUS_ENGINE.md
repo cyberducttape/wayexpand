@@ -127,7 +127,10 @@ the recorded session and says so. The steps are:
    installing user's home directory. Setup stages the current engine there,
    verifies ownership and permissions, and journals it with the manifest so
    failed activation can restore both. Later users reuse the same system
-   registration rather than replacing it with a home-specific path.
+   registration rather than replacing it with a home-specific path. The
+   IBus diagnostic reports `WX-IBUS-MULTIUSER-001` if an older shared
+   manifest still resolves its executable into one user's home; repair that
+   registration with `wayexpand setup --backend ibus --install-system-integration`.
    The GUI has a separate checkbox for that
    authorization. In scripts, `--yes` alone deliberately skips the privileged
    step; pass `--install-system-integration` only when that change is intended.
@@ -200,6 +203,14 @@ the interactive test was deferred, or `ACTION REQUIRED` when a prerequisite
 or attempted test fails. Component registration and engine activation alone
 are never reported as a working text expander. The test does not certify
 other applications or session persistence.
+
+If IBus is configured but a required route check fails, setup returns a
+nonzero result with `SETUP RESULT: ACTION REQUIRED` and a stable finding ID;
+the valid configuration is retained for diagnosis. A second unrestricted
+capture route beside IBus is also an action-required condition because it can
+expand the same trigger twice. Run `wayexpand help finding <WX-ID>` for the
+repair and retest steps. A route with no hard failure but no user-confirmed
+application insertion is reported as configured and awaiting test.
 
 ```sh
 wayexpand ibus status   # every link of the route, with the fix for each failure

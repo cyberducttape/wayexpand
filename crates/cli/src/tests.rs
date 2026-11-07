@@ -17,28 +17,29 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[test]
 fn live_explain_requires_matching_daemon_build_and_status_schema() {
     let cli_commit = "tested-cli-build";
+    let cli_version = crate::build_info::VERSION;
     let current = format!(
-        "running\nstatus_schema={}\ndaemon_commit={}\n",
-        CONTROL_STATUS_SCHEMA, cli_commit
+        "running\nstatus_schema={}\ndaemon_commit={}\ndaemon_version={}\n",
+        CONTROL_STATUS_SCHEMA, cli_commit, cli_version
     );
     assert_eq!(
-        crate::commands::system::live_explain_build_gate(&current, cli_commit),
+        crate::commands::system::live_explain_build_gate(&current, cli_commit, cli_version),
         None
     );
 
     let stale = format!(
-        "running\nstatus_schema={}\ndaemon_commit=older-build\n",
+        "running\nstatus_schema={}\ndaemon_commit=older-build\ndaemon_version=old-version\n",
         CONTROL_STATUS_SCHEMA
     );
     assert!(
-        crate::commands::system::live_explain_build_gate(&stale, cli_commit)
+        crate::commands::system::live_explain_build_gate(&stale, cli_commit, cli_version)
             .unwrap()
             .contains("different build")
     );
 
     let unknown = format!("running\nstatus_schema={}\n", CONTROL_STATUS_SCHEMA);
     assert!(
-        crate::commands::system::live_explain_build_gate(&unknown, cli_commit)
+        crate::commands::system::live_explain_build_gate(&unknown, cli_commit, cli_version)
             .unwrap()
             .contains("cannot be verified")
     );
@@ -47,22 +48,38 @@ fn live_explain_requires_matching_daemon_build_and_status_schema() {
         "running\nstatus_schema={}\ndaemon_commit=unknown\n",
         CONTROL_STATUS_SCHEMA
     );
-    assert!(
-        crate::commands::system::live_explain_build_gate(&source_archive, "unknown")
-            .unwrap()
-            .contains("cannot be verified")
+    assert!(crate::commands::system::live_explain_build_gate(
+        &source_archive,
+        "unknown",
+        cli_version
+    )
+    .unwrap()
+    .contains("cannot be verified"));
+
+    let dirty_identity_unknown = format!(
+        "running\nstatus_schema={}\ndaemon_commit={}\ndaemon_version=1.3.3-dev+{}.dirty-unknown\n",
+        CONTROL_STATUS_SCHEMA, cli_commit, cli_commit
     );
+    assert!(crate::commands::system::live_explain_build_gate(
+        &dirty_identity_unknown,
+        cli_commit,
+        cli_version
+    )
+    .unwrap()
+    .contains("cannot be verified"));
 
     let incompatible = format!(
         "running\nstatus_schema={}\ndaemon_commit={}\n",
         CONTROL_STATUS_SCHEMA - 1,
         cli_commit
     );
-    assert!(
-        crate::commands::system::live_explain_build_gate(&incompatible, cli_commit)
-            .unwrap()
-            .contains("incompatible status protocol")
-    );
+    assert!(crate::commands::system::live_explain_build_gate(
+        &incompatible,
+        cli_commit,
+        cli_version
+    )
+    .unwrap()
+    .contains("incompatible status protocol"));
 }
 
 #[test]
@@ -575,6 +592,7 @@ fn status_json_parses_optional_effective_sandbox_snapshot() {
 fn upgrade_status_distinguishes_current_stale_and_incompatible_daemons() {
     let current = crate::doctor::status::upgrade_status_from_snapshot(&serde_json::json!({
         "daemon_commit": crate::build_info::COMMIT,
+        "daemon_version": crate::build_info::VERSION,
         "status_schema": CONTROL_STATUS_SCHEMA,
         "state": "connected",
         "source": "input-method",
@@ -591,6 +609,7 @@ fn upgrade_status_distinguishes_current_stale_and_incompatible_daemons() {
 
     let stale = crate::doctor::status::upgrade_status_from_snapshot(&serde_json::json!({
         "daemon_commit": "older-build",
+        "daemon_version": "1.3.2-dev+older-build",
         "status_schema": CONTROL_STATUS_SCHEMA,
     }));
     let stale_status = if crate::build_info::COMMIT == "unknown" {
@@ -604,11 +623,7 @@ fn upgrade_status_distinguishes_current_stale_and_incompatible_daemons() {
         assert!(stale["action"]
             .as_str()
             .unwrap()
-            .contains("cannot tell whether"));
-        assert!(stale["action"]
-            .as_str()
-            .unwrap()
-            .contains("same launch method"));
+            .contains("cannot be verified"));
     } else {
         let action = stale["action"].as_str().unwrap();
         assert!(action.contains("same launch method"));
@@ -660,6 +675,7 @@ fn status_json_matches_documented_stable_contract() {
          backend_mode=unknown\n\
          status_schema=29\n\
          daemon_commit=test-commit\n\
+         daemon_version=1.3.3-dev+test-commit\n\
          state=connected\n\
          route_available=true\n\
          matching_available=true\n\
@@ -805,7 +821,7 @@ fn status_json_matches_documented_stable_contract() {
     let contract: serde_json::Value =
         serde_json::from_str(include_str!("../../../tests/contracts/status-json.json"))
             .expect("status contract fixture must be valid JSON");
-    assert_eq!(contract["schema_version"], 14);
+    assert_eq!(contract["schema_version"], 15);
     assert_eq!(contract["daemon_control_schema"], CONTROL_STATUS_SCHEMA);
     assert_ne!(
         contract["schema_version"],

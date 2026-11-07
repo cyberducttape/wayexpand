@@ -5,12 +5,13 @@ use anyhow::Result;
 use serde_json::{json, Value};
 use wayexpand_backend_ibus::chain::{self, IbusCheck, IbusCheckState, IbusDesktop};
 
-const INPUT_CAPTURE_CHECKS: [&str; 11] = [
+const INPUT_CAPTURE_CHECKS: [&str; 12] = [
     "gnome-session",
     "tools",
     "daemon",
     "component",
     "manifest",
+    "manifest-scope",
     "registered",
     "gnome-source-registered",
     "gnome-source-active",
@@ -100,6 +101,9 @@ pub(crate) fn run(json_output: bool) -> Result<()> {
         .iter()
         .filter_map(|id| report.check(id))
         .map(DoctorCheck::from_ibus)
+        .chain(std::iter::once(layout_provider_check(
+            crate::doctor::status::read_daemon_status().ok().as_deref(),
+        )))
         .collect::<Vec<_>>();
     let window_status = crate::doctor::status::read_daemon_status().ok();
     let insertion = ["consent", "target-insertion"]
@@ -287,6 +291,9 @@ fn default_remediation_command(id: &str) -> Option<String> {
             | "selected"
             | "consent" => "wayexpand setup --backend ibus",
             "daemon" => "ibus start",
+            "manifest-scope" => {
+                "wayexpand setup --backend ibus --install-system-integration"
+            }
             "gnome-source-registered" | "gnome-source-active" => {
                 "wayexpand repair --gnome-input-source"
             }
@@ -298,10 +305,62 @@ fn default_remediation_command(id: &str) -> Option<String> {
                 "gnome-extensions disable wayexpand-window-tracker@cyberducttape.github.io && gnome-extensions enable wayexpand-window-tracker@cyberducttape.github.io"
             }
             "window-extension-handshake" | "window-focus-events" => "wayexpand setup",
+            "window-extension-client-auth" => "wayexpand setup",
+            "evdev-layout-provider" => "wayexpand setup",
             _ => return None,
         }
         .to_owned(),
     )
+}
+
+fn layout_provider_check(status: Option<&str>) -> DoctorCheck {
+    let Some(status) = status else {
+        return DoctorCheck::new(
+            "evdev-layout-provider",
+            "GNOME keyboard-layout tracking",
+            "unknown",
+            "daemon status is unavailable, so the active layout provider cannot be checked",
+            Some("WX-EVDEV-LAYOUT-001"),
+            Some("start the WayExpand service, then run `wayexpand status` and `wayexpand doctor --gnome`".into()),
+        );
+    };
+    let source = status_field(status, "source").unwrap_or("unknown");
+    if source != "evdev" {
+        return DoctorCheck::new(
+            "evdev-layout-provider",
+            "GNOME keyboard-layout tracking",
+            "skip",
+            format!("the active capture source is {source}; raw evdev layout tracking is not used"),
+            None,
+            None,
+        );
+    }
+    match status_field(status, "capture_layout_state") {
+        Some("tracked") => DoctorCheck::new(
+            "evdev-layout-provider",
+            "GNOME keyboard-layout tracking",
+            "pass",
+            "the daemon has a GNOME Shell-reported XKB map for its active input source",
+            None,
+            None,
+        ),
+        Some(state) => DoctorCheck::new(
+            "evdev-layout-provider",
+            "GNOME keyboard-layout tracking",
+            "fail",
+            format!("the daemon's GNOME layout provider reports {state}; evdev matching is disabled until GNOME's active XKB source can be read"),
+            Some("WX-EVDEV-LAYOUT-001"),
+            Some("run `wayexpand setup` to update the GNOME Shell extension; if it reports that logout is required, log out and back in, select an XKB source in Settings → Keyboard → Input Sources, then run `wayexpand upgrade --apply` and confirm `capture_layout_state=tracked` in `wayexpand status`".into()),
+        ),
+        None => DoctorCheck::new(
+            "evdev-layout-provider",
+            "GNOME keyboard-layout tracking",
+            "unknown",
+            "the daemon status schema does not expose the active layout state",
+            Some("WX-EVDEV-LAYOUT-001"),
+            Some("upgrade the daemon and run `wayexpand status` again".into()),
+        ),
+    }
 }
 
 fn retest_instructions(id: &str) -> &'static str {
@@ -309,7 +368,11 @@ fn retest_instructions(id: &str) -> &'static str {
         "field-input" | "engine" | "target-insertion" => {
             "Run `wayexpand debug --gnome --interactive` in a normal, disposable text field and confirm the exact result."
         }
-        "window-focus-events" | "window-extension-handshake" | "window-extension-build" => {
+        "window-focus-events"
+        | "window-extension-handshake"
+        | "window-extension-build"
+        | "window-extension-client-auth"
+        | "evdev-layout-provider" => {
             "Focus a normal application window, then run `wayexpand doctor --gnome`; confirm the live tracker identity and build."
         }
         _ => "Run `wayexpand doctor --gnome` again and confirm this check reports pass.",
@@ -358,29 +421,30 @@ fn output_backend_check(status: Option<&str>) -> DoctorCheck {
 
 fn daemon_version_check(status: Option<&str>) -> DoctorCheck {
     let daemon_commit = status.and_then(|status| status_field(status, "daemon_commit"));
+    let daemon_version = status.and_then(|status| status_field(status, "daemon_version"));
     let schema = status.and_then(|status| status_field(status, "status_schema"));
     let schema_compatible = schema
         .and_then(|schema| schema.parse::<u64>().ok())
         .is_some_and(|schema| schema == u64::from(wayexpand_core::CONTROL_STATUS_SCHEMA));
     if schema_compatible
-        && daemon_commit
-            .is_some_and(|commit| crate::doctor::status::daemon_commit_matches(Some(commit)))
+        && crate::doctor::status::daemon_build_matches(daemon_commit, daemon_version)
     {
         DoctorCheck::new(
             "daemon-version",
             "Running daemon build matches this CLI",
             "pass",
             format!(
-                "daemon build {} matches CLI build {}",
+                "daemon version {} (commit {}) matches CLI version {} (commit {})",
+                daemon_version.unwrap_or("unknown"),
                 daemon_commit.unwrap_or("unknown"),
+                crate::build_info::VERSION,
                 crate::build_info::COMMIT
             ),
             None,
             None,
         )
     } else {
-        let unknown = daemon_commit
-            .is_none_or(|commit| crate::doctor::status::daemon_commit_unknown(Some(commit)))
+        let unknown = crate::doctor::status::daemon_build_unknown(daemon_commit, daemon_version)
             || schema.is_none();
         let state = if unknown { "unknown" } else { "fail" };
         let detail = if status.is_none() {
@@ -389,14 +453,16 @@ fn daemon_version_check(status: Option<&str>) -> DoctorCheck {
             format!("daemon status schema {} is not compatible with required schema {}; running commit {}", schema.unwrap_or("unknown"), wayexpand_core::CONTROL_STATUS_SCHEMA, daemon_commit.unwrap_or("unknown"))
         } else if unknown {
             format!(
-                "daemon commit identity is unavailable (status schema {}, CLI build {})",
+                "daemon build identity is unavailable (status schema {}, CLI build {})",
                 schema.unwrap_or("unknown"),
-                crate::build_info::COMMIT
+                crate::build_info::VERSION
             )
         } else {
             format!(
-                "running daemon build {} differs from CLI build {}",
+                "running daemon version {} (commit {}) differs from CLI version {} (commit {})",
+                daemon_version.unwrap_or("unknown"),
                 daemon_commit.unwrap_or("unknown"),
+                crate::build_info::VERSION,
                 crate::build_info::COMMIT
             )
         };
@@ -619,7 +685,46 @@ fn window_tracking_checks(
         }
     };
 
-    vec![installed, loaded, build_check, handshake, focus]
+    let client_auth = match (
+        handshake_verified,
+        status_field(daemon_status.unwrap_or_default(), "window_tracker_connected"),
+    ) {
+        (true, Some("true")) => DoctorCheck::new(
+            "window-extension-client-auth",
+            "Daemon authorized by GNOME tracker",
+            "pass",
+            "the daemon has an active tracker subscription; the extension accepted its same numeric UID and executable-identity checks",
+            None,
+            None,
+        ),
+        (true, Some("false")) => {
+            DoctorCheck::new(
+                "window-extension-client-auth",
+                "Daemon authorized by GNOME tracker",
+                "fail",
+                "the extension D-Bus interface responds, but the daemon has no accepted subscription; the caller must have the current user's numeric UID and an actual executable basename of `wayexpand-daemon` or `wayexpand` (process arguments are not used for authorization)",
+                Some("WX-GNOME-WINDOW-006"),
+                Some("run `wayexpand setup` to install the matching extension, then `wayexpand upgrade --apply` to restart the daemon; rerun `wayexpand doctor --gnome`".into()),
+            )
+        }
+        _ => DoctorCheck::new(
+            "window-extension-client-auth",
+            "Daemon authorized by GNOME tracker",
+            "unknown",
+            "no live daemon status is available to verify the authenticated tracker subscription",
+            Some("WX-GNOME-WINDOW-006"),
+            Some("start the daemon and rerun `wayexpand doctor --gnome`".into()),
+        ),
+    };
+
+    vec![
+        installed,
+        loaded,
+        build_check,
+        handshake,
+        client_auth,
+        focus,
+    ]
 }
 
 fn problem_for(check: &IbusCheck) -> Option<&'static str> {
@@ -630,6 +735,7 @@ fn problem_for(check: &IbusCheck) -> Option<&'static str> {
         "gnome-session" => "WX-GNOME-SESSION-001",
         "daemon" => "WX-GNOME-IBUS-001",
         "component" | "manifest" | "registered" | "tools" => "WX-IBUS-001",
+        "manifest-scope" => "WX-IBUS-MULTIUSER-001",
         "gnome-source-registered" => "WX-GNOME-IM-001",
         "gnome-source-active" | "selected" => "WX-GNOME-IM-002",
         "consent" => "WX-POLICY-001",
@@ -692,7 +798,7 @@ mod tests {
             Some(extension_report("active", "current", "pass")),
             Some("window_tracker_connected=true\nwindow_identity_exact=true\n"),
         );
-        assert_eq!(checks.len(), 5);
+        assert_eq!(checks.len(), 6);
         assert!(checks.iter().all(|check| check.state == "pass"));
     }
 
@@ -703,7 +809,7 @@ mod tests {
             Some("window_tracker_connected=true\nwindow_identity_exact=false\n"),
         );
         assert_eq!(checks[2].state, "warn");
-        assert_eq!(checks[4].state, "warn");
+        assert_eq!(checks[5].state, "warn");
         assert_eq!(section_state(&checks).0, "warn");
     }
 
@@ -718,6 +824,7 @@ mod tests {
         assert_eq!(checks[1].state, "unknown");
         assert_eq!(checks[3].state, "unknown");
         assert_eq!(checks[4].state, "unknown");
+        assert_eq!(checks[5].state, "unknown");
         assert!(!checks
             .iter()
             .any(|check| check.detail.contains("/redacted/extension")));
@@ -734,6 +841,46 @@ mod tests {
             "output_connection_state=disconnected\ninject_insertion_mode=ibus commit\n",
         ));
         assert_eq!(disconnected.state, "fail");
+    }
+
+    #[test]
+    fn doctor_reports_gnome_layout_failure_only_when_evdev_uses_it() {
+        let failed =
+            layout_provider_check(Some("source=evdev\ncapture_layout_state=unavailable\n"));
+        assert_eq!(failed.state, "fail");
+        assert_eq!(failed.problem_id, Some("WX-EVDEV-LAYOUT-001"));
+        assert!(failed.detail.contains("active XKB source"));
+        assert!(failed
+            .remediation_command
+            .unwrap()
+            .contains("wayexpand setup"));
+
+        let not_applicable =
+            layout_provider_check(Some("source=ibus\ncapture_layout_state=not-applicable\n"));
+        assert_eq!(not_applicable.state, "skip");
+
+        let tracked = layout_provider_check(Some("source=evdev\ncapture_layout_state=tracked\n"));
+        assert_eq!(tracked.state, "pass");
+    }
+
+    #[test]
+    fn doctor_explains_tracker_client_authorization_failure() {
+        let checks = window_tracking_checks(
+            Some(extension_report("active", "current", "pass")),
+            Some("window_tracker_connected=false\ndaemon_executable=/usr/bin/wayexpand-daemon\n"),
+        );
+        let auth = checks
+            .iter()
+            .find(|check| check.id == "window-extension-client-auth")
+            .unwrap();
+        assert_eq!(auth.problem_id, Some("WX-GNOME-WINDOW-006"));
+        assert_eq!(auth.state, "fail");
+        assert!(auth.detail.contains("current user's numeric UID"));
+        assert!(auth
+            .remedy
+            .as_deref()
+            .unwrap()
+            .contains("wayexpand upgrade --apply"));
     }
 
     #[test]
@@ -821,7 +968,7 @@ mod tests {
     #[test]
     fn running_daemon_build_is_reported_separately_from_route_health() {
         let status = format!(
-            "daemon_commit=old-build\nstatus_schema={}\n",
+            "daemon_commit=old-build\ndaemon_version=old-version\nstatus_schema={}\n",
             wayexpand_core::CONTROL_STATUS_SCHEMA
         );
         let check = daemon_version_check(Some(&status));

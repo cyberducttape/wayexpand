@@ -36,6 +36,7 @@ const INITIAL_SNAPSHOT_WAIT: Duration = Duration::from_millis(300);
 const HYPRLAND_SOCKET_TIMEOUT: Duration = Duration::from_millis(100);
 const HYPRLAND_RESPONSE_LIMIT: usize = 256 * 1024;
 const HYPRLAND_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const GNOME_LAYOUT_POLL_INTERVAL: Duration = Duration::from_millis(500);
 
 static SHARED_PROVIDER: std::sync::OnceLock<Arc<Mutex<Box<dyn KeyboardLayoutProvider>>>> =
     std::sync::OnceLock::new();
@@ -78,9 +79,19 @@ fn create_provider() -> Box<dyn KeyboardLayoutProvider> {
         // a config file: includes, device overrides and runtime changes make
         // that an unverifiable approximation.
         Box::new(NoLayoutProvider)
+    } else if is_gnome_session() {
+        Box::new(GnomeKeyboardLayoutProvider::new())
     } else {
         Box::new(KwinKeyboardLayoutProvider::new())
     }
+}
+
+fn is_gnome_session() -> bool {
+    env::var("XDG_CURRENT_DESKTOP").ok().is_some_and(|desktop| {
+        desktop
+            .split(':')
+            .any(|part| part.eq_ignore_ascii_case("gnome"))
+    })
 }
 
 struct NoLayoutProvider;
@@ -147,6 +158,180 @@ impl Drop for HyprlandKeyboardLayoutProvider {
             let _ = worker.join();
         }
     }
+}
+
+/// Reads the live XKB source from the WayExpand GNOME Shell extension. The
+/// extension asks GNOME Shell's InputSourceManager, so source switching is
+/// observed independently of the deprecated gsettings `current` key.
+pub(crate) struct GnomeKeyboardLayoutProvider {
+    shared: Arc<SharedSnapshot>,
+    stopping: Arc<AtomicBool>,
+    worker: Option<JoinHandle<()>>,
+}
+
+impl GnomeKeyboardLayoutProvider {
+    pub(crate) fn new() -> Self {
+        let shared = Arc::new(SharedSnapshot {
+            value: Mutex::new(None),
+            first_attempt: Mutex::new(false),
+            ready: Condvar::new(),
+        });
+        let stopping = Arc::new(AtomicBool::new(false));
+        let worker_shared = Arc::clone(&shared);
+        let worker_stopping = Arc::clone(&stopping);
+        let worker = thread::Builder::new()
+            .name("wayexpand-gnome-layout".into())
+            .spawn(move || gnome_layout_worker(worker_shared, worker_stopping))
+            .ok();
+        if let Ok(attempted) = shared.first_attempt.lock() {
+            if !*attempted {
+                let _ = shared.ready.wait_timeout_while(
+                    attempted,
+                    INITIAL_SNAPSHOT_WAIT,
+                    |attempted| !*attempted,
+                );
+            }
+        }
+        Self {
+            shared,
+            stopping,
+            worker,
+        }
+    }
+}
+
+impl KeyboardLayoutProvider for GnomeKeyboardLayoutProvider {
+    fn snapshot(&mut self) -> Option<KeyboardLayoutSnapshot> {
+        self.shared
+            .value
+            .lock()
+            .ok()
+            .and_then(|value| value.clone())
+    }
+}
+
+impl Drop for GnomeKeyboardLayoutProvider {
+    fn drop(&mut self) {
+        self.stopping.store(true, Ordering::Release);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+fn gnome_layout_worker(shared: Arc<SharedSnapshot>, stopping: Arc<AtomicBool>) {
+    let mut last_layout: Option<(String, String, String, String, Vec<String>)> = None;
+    while !stopping.load(Ordering::Acquire) {
+        match wayexpand_backend_gnome_window::active_keyboard_layout() {
+            Ok((kind, id, xkb_id, model, options)) => {
+                let layout = (
+                    kind.clone(),
+                    id.clone(),
+                    xkb_id.clone(),
+                    model.clone(),
+                    options.clone(),
+                );
+                if last_layout.as_ref() != Some(&layout) {
+                    match snapshot_for_gnome_source(&kind, &id, &xkb_id, &model, &options) {
+                        Ok(snapshot) => {
+                            publish_snapshot(&shared, Some(snapshot));
+                            last_layout = Some(layout);
+                        }
+                        Err(error) => {
+                            tracing::debug!(%error, "GNOME active keyboard layout is unavailable or inconsistent");
+                            publish_snapshot(&shared, None);
+                            last_layout = None;
+                        }
+                    }
+                }
+            }
+            Err(error) => {
+                tracing::debug!(%error, "GNOME active keyboard layout could not be read");
+                publish_snapshot(&shared, None);
+                last_layout = None;
+            }
+        }
+        sleep_or_stop(&stopping, GNOME_LAYOUT_POLL_INTERVAL);
+    }
+}
+
+fn snapshot_for_gnome_source(
+    kind: &str,
+    source_id: &str,
+    xkb_id: &str,
+    model: &str,
+    options: &[String],
+) -> anyhow::Result<KeyboardLayoutSnapshot> {
+    if !matches!(kind, "xkb" | "ibus")
+        || source_id.is_empty()
+        || source_id.len() > 256
+        || source_id.chars().any(char::is_control)
+        || xkb_id.is_empty()
+        || xkb_id.len() > 128
+        || !valid_xkb_name(model)
+    {
+        anyhow::bail!("GNOME did not report a usable active source and XKB map");
+    }
+    let (layout, variant) = if let Some(value) = xkb_id.strip_prefix("xkb:") {
+        let fields = value.split(':').collect::<Vec<_>>();
+        if !(2..=3).contains(&fields.len()) {
+            anyhow::bail!("GNOME reported an invalid XKB source identifier");
+        }
+        (fields[0], fields[1])
+    } else {
+        let (layout, variant) = xkb_id.split_once('+').unwrap_or((xkb_id, ""));
+        (layout, variant)
+    };
+    if layout.is_empty()
+        || !layout
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"_-+".contains(&byte))
+        || !variant
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"_-+".contains(&byte))
+        || options.iter().any(|option| !valid_options(option))
+    {
+        anyhow::bail!("GNOME reported an invalid XKB source identifier or options");
+    }
+    let options = options.join(",");
+    let context =
+        Context::new(0).map_err(|error| anyhow::anyhow!("cannot initialize XKB: {error}"))?;
+    let keymap = Keymap::new_from_names(
+        context,
+        Some(RuleNames {
+            rules: Some("evdev".into()),
+            model: Some(model.into()),
+            layout: Some(layout.into()),
+            variant: Some(variant.into()),
+            options: Some(options.clone()),
+        }),
+        0,
+    )
+    .map_err(|error| anyhow::anyhow!("cannot compile GNOME's active XKB source: {error:?}"))?;
+    if keymap.num_layouts() != 1 {
+        anyhow::bail!("GNOME's active source did not resolve to one unambiguous XKB layout");
+    }
+    let config = KwinLayoutConfig {
+        model: model.into(),
+        layouts: vec![layout.into()],
+        variants: vec![variant.into()],
+        options: (!options.is_empty()).then_some(options),
+    };
+    let generation = layout_generation(
+        &config,
+        &[(layout.into(), variant.into())],
+        0,
+        Some("evdev"),
+    );
+    Ok(KeyboardLayoutSnapshot {
+        generation,
+        group: 0,
+        rules: Some("evdev".into()),
+        model: Some(config.model),
+        layout: Some(layout.into()),
+        variant: Some(variant.into()),
+        options: config.options,
+    })
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -880,6 +1065,45 @@ fn valid_options(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gnome_layout_uses_live_xkb_source_and_option_generation() {
+        let us = snapshot_for_gnome_source("xkb", "us", "us", "pc105", &[]).unwrap();
+        let de = snapshot_for_gnome_source(
+            "ibus",
+            "wayexpand",
+            "de+nodeadkeys",
+            "pc105",
+            &["grp:alt_shift_toggle".into()],
+        )
+        .unwrap();
+        assert_eq!(us.layout.as_deref(), Some("us"));
+        assert_eq!(de.layout.as_deref(), Some("de"));
+        assert_eq!(de.variant.as_deref(), Some("nodeadkeys"));
+        assert_eq!(de.options.as_deref(), Some("grp:alt_shift_toggle"));
+        assert_ne!(us.generation, de.generation);
+        let different_model = snapshot_for_gnome_source(
+            "ibus",
+            "wayexpand",
+            "de+nodeadkeys",
+            "pc104",
+            &["grp:alt_shift_toggle".into()],
+        )
+        .unwrap();
+        assert_ne!(de.generation, different_model.generation);
+    }
+
+    #[test]
+    fn gnome_layout_refuses_ibus_and_malformed_source_ids() {
+        assert!(snapshot_for_gnome_source("ibus", "wayexpand", "", "pc105", &[]).is_err());
+        assert!(snapshot_for_gnome_source("other", "source", "us", "pc105", &[]).is_err());
+        assert!(snapshot_for_gnome_source("xkb", "us", "us;rm", "pc105", &[]).is_err());
+        assert!(
+            snapshot_for_gnome_source("xkb", "us", "xkb:us:variant:lang:extra", "pc105", &[])
+                .is_err()
+        );
+        assert!(snapshot_for_gnome_source("xkb", "us", "us", "", &[]).is_err());
+    }
 
     fn hypr_keyboard(layout: &str, active_keymap: &str) -> HyprKeyboard {
         HyprKeyboard {

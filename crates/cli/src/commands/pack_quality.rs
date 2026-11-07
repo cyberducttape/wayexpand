@@ -7,9 +7,76 @@ use crate::*;
 use serde::Deserialize;
 use std::{collections::BTreeMap, path::Component, sync::Arc};
 use wayexpand_core::{
-    form_fields, import_pack, inspect_pack, render_template_with_cursor, ExpansionEngine,
-    FormValues, InputEvent, TemplateContext,
+    form_fields, import_pack, inspect_pack, render_template_with_cursor, template_variables,
+    ExpansionEngine, FormFieldKind, FormFieldValidation, FormValues, InputEvent, TemplateContext,
 };
+
+const OPERATIONAL_COMMANDS: &[&str] = &[
+    "ansible",
+    "ansible-playbook",
+    "ansible-inventory",
+    "apt",
+    "apt-get",
+    "apk",
+    "awk",
+    "aws",
+    "az",
+    "bash",
+    "cat",
+    "certbot",
+    "cpapi2",
+    "curl",
+    "docker",
+    "dig",
+    "dnf",
+    "echo",
+    "firewall-cmd",
+    "firewalld",
+    "find",
+    "gcloud",
+    "git",
+    "gh",
+    "grep",
+    "helm",
+    "iptables",
+    "journalctl",
+    "ip",
+    "kubectl",
+    "kustomize",
+    "mariadb",
+    "mysql",
+    "mysqladmin",
+    "nc",
+    "nginx",
+    "nft",
+    "nomad",
+    "openssl",
+    "pacman",
+    "pg_dump",
+    "printf",
+    "podman",
+    "psql",
+    "resolvectl",
+    "redis-cli",
+    "service",
+    "sudo",
+    "rpm",
+    "rsync",
+    "sed",
+    "sh",
+    "ss",
+    "ssh",
+    "systemctl",
+    "systemd-run",
+    "tee",
+    "terraform",
+    "ufw",
+    "uapi",
+    "vault",
+    "whmapi1",
+    "yum",
+    "zypper",
+];
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -280,96 +347,130 @@ fn operational_field_findings(
         .iter()
         .filter(|expansion| looks_operational_with_tools(&expansion.replacement, declared_tools))
         .flat_map(|expansion| {
-            form_fields(&expansion.replacement)
+            let shell_context = has_shell_code_fence(&expansion.replacement)
+                || contains_known_command(
+                    &expansion.replacement.to_ascii_lowercase(),
+                    OPERATIONAL_COMMANDS,
+                    declared_tools,
+                );
+            let raw_fields = raw_field_interpolations(&expansion.replacement);
+            let mut findings: Vec<_> = form_fields(&expansion.replacement)
                 .unwrap_or_default()
                 .into_iter()
-                .filter(|field| {
-                    field.validation.is_none()
-                        && !field.free_text
-                        && !matches!(field.kind, wayexpand_core::FormFieldKind::Choice { .. })
-                })
-                .map(|field| {
-                    serde_json::json!({
+                .filter_map(|field| {
+                    let choice = matches!(field.kind, FormFieldKind::Choice { .. });
+                    let missing_review = field.validation.is_none() && !field.free_text && !choice;
+                    let raw_shell_injection = shell_context
+                        && raw_fields.contains(&field.key)
+                        && !field
+                            .validation
+                            .is_some_and(shell_token_safe_validation);
+                    if !missing_review && !raw_shell_injection {
+                        return None;
+                    }
+                    let reason = match (missing_review, raw_shell_injection) {
+                        (true, true) => "operational field needs a domain validator or free_text=true, and shell command values must use {{shellq:...}} or a shell-token-safe validator",
+                        (true, false) => "operational interpolation needs a domain validator or explicit free_text=true justification",
+                        (false, true) => "raw shell interpolation can change command meaning; use {{shellq:...}} or a shell-token-safe validator",
+                        (false, false) => unreachable!(),
+                    };
+                    Some(serde_json::json!({
                         "file": expansion.file,
                         "trigger": expansion.trigger,
                         "field": field.label,
                         "key": field.key,
-                        "reason": "operational interpolation needs a domain validator or explicit free_text=true justification",
-                    })
+                        "reason": reason,
+                    }))
                 })
-                .collect::<Vec<_>>()
+                .collect();
+            if shell_context {
+                for variable in template_variables(&expansion.replacement) {
+                    let unsafe_source = variable == "clipboard"
+                        || variable.starts_with("env:")
+                        || variable.starts_with("context:");
+                    if unsafe_source {
+                        findings.push(serde_json::json!({
+                            "file": expansion.file,
+                            "trigger": expansion.trigger,
+                            "field": variable,
+                            "reason": "unquoted environment, clipboard, or session context can change shell command meaning; use {{shellq:env:NAME}}, {{shellq:context:FIELD}}, or a validated form field",
+                        }));
+                    }
+                }
+            }
+            findings
         })
         .collect()
 }
 
-fn looks_operational_with_tools(replacement: &str, declared_tools: &[String]) -> bool {
-    const COMMANDS: &[&str] = &[
-        "ansible",
-        "ansible-playbook",
-        "ansible-inventory",
-        "apt",
-        "apt-get",
-        "apk",
-        "awk",
-        "aws",
-        "az",
-        "bash",
-        "certbot",
-        "cpapi2",
-        "curl",
-        "docker",
-        "dig",
-        "dnf",
-        "firewall-cmd",
-        "firewalld",
-        "find",
-        "gcloud",
-        "git",
-        "gh",
-        "grep",
-        "helm",
-        "iptables",
-        "journalctl",
-        "ip",
-        "kubectl",
-        "kustomize",
-        "mariadb",
-        "mysql",
-        "mysqladmin",
-        "nc",
-        "nginx",
-        "nft",
-        "nomad",
-        "openssl",
-        "pacman",
-        "pg_dump",
-        "podman",
-        "psql",
-        "resolvectl",
-        "redis-cli",
-        "service",
-        "sudo",
-        "rpm",
-        "rsync",
-        "sed",
-        "sh",
-        "ss",
-        "ssh",
-        "systemctl",
-        "systemd-run",
-        "tee",
-        "terraform",
-        "ufw",
-        "uapi",
-        "vault",
-        "whmapi1",
-        "yum",
-        "zypper",
+fn raw_field_interpolations(template: &str) -> std::collections::HashSet<String> {
+    let mut raw_fields = std::collections::HashSet::new();
+    for variable in template_variables(template) {
+        if !variable.starts_with("field:") && !variable.starts_with("prompt:") {
+            continue;
+        }
+        let wrapped = format!("{{{{{variable}}}}}");
+        let Ok(fields) = form_fields(&wrapped) else {
+            continue;
+        };
+        let Some(field) = fields.first() else {
+            continue;
+        };
+        raw_fields.insert(field.key.clone());
+    }
+    raw_fields
+}
+
+fn shell_token_safe_validation(validation: FormFieldValidation) -> bool {
+    matches!(
+        validation,
+        FormFieldValidation::DnsLabel
+            | FormFieldValidation::DnsSubdomain
+            | FormFieldValidation::Hostname
+            | FormFieldValidation::Port
+            | FormFieldValidation::SystemdUnit
+            | FormFieldValidation::PositiveInteger
+            | FormFieldValidation::LinuxUser
+            | FormFieldValidation::AnsibleRoleName
+            | FormFieldValidation::ComposeService
+            | FormFieldValidation::ContainerImage
+            | FormFieldValidation::KubernetesName
+            | FormFieldValidation::KubernetesDuration
+            | FormFieldValidation::Duration
+            | FormFieldValidation::ContainerName
+    )
+}
+
+fn has_shell_code_fence(replacement: &str) -> bool {
+    const SHELL_FORMATS: &[&str] = &[
+        "bash", "console", "dash", "fish", "ksh", "sh", "shell", "zsh",
     ];
+    replacement.lines().any(|line| {
+        let line = line.trim_start();
+        let Some(marker @ ('`' | '~')) = line.chars().next() else {
+            return false;
+        };
+        let length = line
+            .chars()
+            .take_while(|character| *character == marker)
+            .count();
+        if length < 3 {
+            return false;
+        }
+        let language = line[marker.len_utf8() * length..]
+            .split_whitespace()
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        SHELL_FORMATS.contains(&language.as_str())
+    })
+}
+
+fn looks_operational_with_tools(replacement: &str, declared_tools: &[String]) -> bool {
     let lower = replacement.to_ascii_lowercase();
     has_operational_code_fence(&lower)
         || lower.contains("{{shellq:")
-        || contains_known_command(&lower, COMMANDS, declared_tools)
+        || contains_known_command(&lower, OPERATIONAL_COMMANDS, declared_tools)
         || lower.lines().any(|line| {
             let line = line.trim_start();
             ["select ", "insert into ", "update ", "delete from "]
@@ -878,7 +979,7 @@ mod tests {
         };
         let justified = wayexpand_core::PackExpansionReview {
             replacement:
-                "nft add rule {{field:comment=maintenance window|required|free_text=true}}".into(),
+                "nft add rule {{shellq:comment=maintenance window|required|free_text=true}}".into(),
             ..unreviewed.clone()
         };
         let validated = wayexpand_core::PackExpansionReview {
@@ -890,6 +991,88 @@ mod tests {
         let findings = operational_field_findings(&[unreviewed, justified, validated], &[]);
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0]["key"], "field:chain");
+    }
+
+    #[test]
+    fn shell_commands_require_escaped_or_shell_token_safe_form_values() {
+        let path = wayexpand_core::PackExpansionReview {
+            file: "snippets/inspect.toml".into(),
+            id: "inspect_path".into(),
+            trigger: ";inspect-path".into(),
+            description: "Inspect a path".into(),
+            replacement: "sudo cat {{field:path=/var/log|required|validate=absolute-path}}".into(),
+            command: None,
+        };
+        let url = wayexpand_core::PackExpansionReview {
+            replacement: "curl {{field:url=https://example.net|required|validate=url}}".into(),
+            ..path.clone()
+        };
+        let free_text = wayexpand_core::PackExpansionReview {
+            replacement: "echo {{field:value=message|required|free_text=true}}".into(),
+            ..path.clone()
+        };
+        let quoted_path = wayexpand_core::PackExpansionReview {
+            replacement: "sudo cat {{shellq:path=/var/log|required|validate=absolute-path}}".into(),
+            ..path.clone()
+        };
+        let safe_unit = wayexpand_core::PackExpansionReview {
+            replacement:
+                "systemctl status {{field:unit=nginx.service|required|validate=systemd-unit}}"
+                    .into(),
+            ..path.clone()
+        };
+
+        let findings =
+            operational_field_findings(&[path, url, free_text, quoted_path, safe_unit], &[]);
+        assert_eq!(findings.len(), 3);
+        assert!(findings
+            .iter()
+            .all(|finding| finding["reason"].as_str().unwrap().contains("shell")));
+        assert!(findings
+            .iter()
+            .any(|finding| finding["key"] == "field:path"));
+        assert!(findings.iter().any(|finding| finding["key"] == "field:url"));
+        assert!(findings
+            .iter()
+            .any(|finding| finding["key"] == "field:value"));
+    }
+
+    #[test]
+    fn shell_commands_require_quoted_environment_context_and_clipboard_values() {
+        let base = wayexpand_core::PackExpansionReview {
+            file: "snippets/diagnostics.toml".into(),
+            id: "diagnostic".into(),
+            trigger: ";diagnostic".into(),
+            description: "Diagnostic command".into(),
+            replacement: String::new(),
+            command: None,
+        };
+        let examples = [
+            "ssh {{env:TARGET}}",
+            "kubectl get pods -n {{context:environment}}",
+            "echo {{clipboard}}",
+        ];
+        let expansions: Vec<_> = examples
+            .iter()
+            .enumerate()
+            .map(|(index, replacement)| wayexpand_core::PackExpansionReview {
+                replacement: (*replacement).into(),
+                ..wayexpand_core::PackExpansionReview {
+                    id: format!("diagnostic_{index}"),
+                    trigger: format!(";diagnostic-{index}"),
+                    ..base.clone()
+                }
+            })
+            .collect();
+        let findings = operational_field_findings(&expansions, &[]);
+        assert_eq!(findings.len(), 3);
+
+        let safe = wayexpand_core::PackExpansionReview {
+            replacement: "ssh {{shellq:env:TARGET}} {{shellq:context:remote_host}}".into(),
+            ..base
+        };
+        let safe_findings = operational_field_findings(&[safe], &[]);
+        assert!(safe_findings.is_empty(), "{safe_findings:?}");
     }
 
     #[test]

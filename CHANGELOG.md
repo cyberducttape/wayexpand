@@ -4,6 +4,134 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Report terminal-only coverage as a limit of the daemon route, not proof that
+  browser fields are unsupported globally. Other input routes such as IBus may
+  cover browsers; `wayexpand health` now leaves that combined coverage unknown
+  unless it has been verified.
+- Detect a shared IBus component that resolves its engine executable inside
+  one user's home directory. Report `WX-IBUS-MULTIUSER-001` with the explicit
+  system-integration repair path instead of treating the registration as
+  fully healthy on multi-user workstations.
+- Prevent package smoke CI from depending on uninstalled Python/account tools,
+  and print the failing package-test stage on errors. Give the headless GNOME
+  and KWin jobs enough time to install desktop dependencies before their
+  acceptance tests run; omit recommended packages from KWin's install.
+- Correct the KWin/IBus crash guidance: a recent helper coredump is evidence
+  of a crash, not proof that the current helper is still down or that a
+  specific upstream patch fixes it. Direct users to the exact backtrace,
+  current distribution package, and a real application retest.
+- Require shell snippets in reviewed packs to quote untrusted environment,
+  clipboard, and session-context values. Add `{{shellq:env:NAME}}` for
+  allowlisted environment variables, using the explicitly reported shell.
+- Count an IBus field as having delivered input when the engine observed keys
+  and surrounding-text reports from a normal field, even if a later capability
+  update says the client does not advertise surrounding text. Keep target
+  insertion verification as a separate check.
+- Require the GNOME Shell tracker to authenticate callers before returning
+  active keyboard-source/layout data or switching the input source, using the
+  same UID and executable checks as window subscriptions. Bound outstanding
+  authorization calls and return pending calls when the extension is disabled.
+- Normalize GNOME Shell's string user ID and D-Bus's numeric peer UID before
+  comparing them. The tracker still requires the same UID and an approved
+  WayExpand executable; diagnostics now distinguish a rejected daemon client
+  from an unavailable extension.
+- Read GNOME's live active input-source XKB map, model, and options from the
+  exact Shell InputSourceManager settings source, then track changes for evdev
+  matching. GNOME 45, whose session settings lack a model field, uses
+  Mutter's `pc105` default. Unknown or unsupported sources continue to fail closed.
+  `wayexpand doctor --gnome` reports the layout-provider state with a repair
+  path.
+- Reuse the GNOME layout snapshot between unchanged polls so the daemon only
+  recompiles XKB state when the active source, map, model, or options change.
+- Exercise the matcher's live validated snapshot under terminal-only admission
+  during setup checks. The bounded self-test returns only status and detail,
+  never trigger or replacement text, so a stale file on disk cannot mask a
+  terminal app-scope or matching failure.
+- Remove the legacy Plasma GTK/Qt IBus overrides previously written by setup.
+  KWin's native IBus Wayland route is compositor-managed; setup and diagnostics
+  now catch conflicting toolkit overrides instead of encouraging them.
+- Make both human and JSON `doctor` health reflect stable blockers on the
+  currently selected IBus route. An unselected optional IBus route and
+  unknown per-field activity remain informational.
+- Give IBus replacement refusal under `compatibility_mode = "off"` the stable
+  `WX-POLICY-001` finding so setup, diagnostics, and support reports identify
+  missing replacement authorization consistently.
+- Attach the documented `WX-IBUS-001` and `WX-IBUS-002` IDs to generic engine
+  registration and selection failures, and include available IDs in the human
+  `doctor` route summary.
+- Keep recent KWin/IBus Wayland helper crashes visible after the helper has
+  restarted. Diagnostics now report a recovered bridge as unstable instead
+  of treating its current process presence as a clean pass.
+- Parse KWin's persisted `InputMethod[$e]` KConfig key as well as the plain
+  key, so KDE IBus routing is not falsely reported as missing. Include an
+  explicit terminal-only application scope in health output so `ready` does
+  not imply browser coverage when evdev matching is restricted to terminals.
+- Filter IBus Wayland crash history by the current user before applying the
+  diagnostic result limit, so another account's crash volume cannot hide it.
+- Require shell command pack fields to use shell quoting or a validator whose
+  allowed characters are safe as an unquoted shell token. A semantic
+  validator or `free_text=true` alone no longer clears shell-injection review.
+- Resolve IBus and GNOME input-readiness finding IDs through
+  `wayexpand help finding`, with the specific repair and retest steps for each.
+- Report an unreachable IBus daemon as `WX-IBUS-004` in `wayexpand debug`,
+  instead of treating a live engine process or remembered selection as enough
+  to diagnose browser input readiness.
+- Suppress the downstream “no field input” warning when a failed IBus daemon
+  or KWin bridge already explains why client text cannot reach the engine.
+- Inspect the running Plasma shell environment as well as the systemd manager
+  for legacy GTK/Qt overrides that can conflict with native Wayland IBus.
+  Setup removes its own recognized legacy override script and clears matching
+  values from the user service manager.
+- Make IBus's no-surrounding-text guidance app-agnostic. It no longer treats
+  every unsupported field as a terminal or suggests terminal-only evdev for a
+  browser; the status explicitly says that telemetry does not identify the app.
+- Clarify that IBus `field-input` readiness is aggregate across recent fields
+  and cannot verify input from a particular browser. Its recovery guidance now
+  describes the safe counter-only watch as activity evidence, not replacement
+  proof.
+- Stamp dirty development builds with a deterministic digest of tracked and
+  untracked Rust, extension, asset, systemd, and embedded manifest inputs;
+  publish the exact daemon version in runtime status; and use it to detect
+  same-commit CLI/daemon skew during upgrade and health checks. A dirty client
+  no longer treats a legacy same-commit daemon as verified. If a dirty-tree
+  digest cannot be computed, report the identity as unverifiable instead of
+  reusing the bare commit identity; daemon status also reports unknown build
+  metadata as unverifiable instead of mislabeling it as a build mismatch.
+- Correct backend tradeoff documentation that implied browser insertion was
+  supported, and add browser troubleshooting steps that distinguish missing
+  IBus input from unavailable surrounding text without recommending evdev.
+- Probe IBus liveness on the private bus address returned by `ibus`, avoiding
+  a false daemon-down report when the engine is responsive but does not own
+  `org.freedesktop.IBus` on the desktop's general session bus.
+- Diagnose an unavailable KWin IBus Wayland bridge separately from toolkit
+  environment settings. Native Wayland browser input depends on the compositor
+  bridge, and the doctor now reports `WX-KWIN-IBUS-001` with a repair and
+  retest path when that bridge is stopped or unavailable.
+- Detect recent per-user `ibus-ui-gtk3` segmentation faults through bounded,
+  sanitized `coredumpctl` metadata and report `WX-KWIN-IBUS-002` with the crash
+  PID and a package-update/retest path. Preserve the same stable finding in
+  `wayexpand debug --json` instead of dropping crash-specific IDs.
+- Bound the IBus fake-broker test listener, preserve the caller's broker-socket
+  environment across tests, and verify the request is received before checking
+  asynchronous insertion delivery.
+- Clean partial Git library checkouts explicitly and surface staging cleanup
+  failures instead of silently ignoring failed removal.
+- Parse the packaged IBus component XML in package smoke tests instead of
+  matching an indentation-sensitive line, so valid Debian and RPM manifests
+  pass the installation gate. Install Python and account-management tools
+  explicitly in both distro containers, and report smoke-test stages in CI.
+- Restrict the IBus action-collection helper that assumes emission succeeded
+  to unit tests. Production hosts must use the acknowledged emission callback
+  before expansion accounting or undo state is committed.
+- Publish validated Git libraries with Linux `RENAME_NOREPLACE`, so concurrent
+  add operations cannot replace a directory created after the initial check;
+  report directory-sync failures as activated-but-durability-uncertain.
+- Apply the aggregate Git library network budget across the initial clone and
+  approved-revision fetch, so each transfer is limited to the remaining
+  allowance instead of receiving a fresh full budget.
+- Make IBus setup stop with a stable `ACTION REQUIRED` result when route
+  diagnostics find a hard failure or a duplicate global capture route; a
+  configured-but-unavailable route is no longer reported as setup success.
 - Make the GNOME GTK insertion acceptance helper acknowledge window activation
   only after Mutter reports the target window focused, with bounded retries and
   a specific timeout error. This prevents the test from sending its IBus trigger

@@ -9,7 +9,19 @@ const WAYEXPAND_CLIENTS = new Set([
 
 /** Session-bus peer check; same-UID processes are still one trust domain. */
 export function isAuthorizedTrackerClient(peerUid, currentUid, executablePath) {
-    if (peerUid !== currentUid || typeof executablePath !== 'string')
+    // GetConnectionUnixUser() unpacks a D-Bus uint32 as a JS number, while
+    // GLib.get_user_id() returns the UID as a string on supported GJS builds.
+    // Compare canonical numeric identities; never fall back to username,
+    // process arguments, or executable basename without the UID check.
+    const normalizeUid = uid => {
+        if (typeof uid === 'number' && Number.isSafeInteger(uid) && uid >= 0)
+            return String(uid);
+        if (typeof uid === 'string' && /^(0|[1-9][0-9]*)$/.test(uid))
+            return uid;
+        return null;
+    };
+    const peer = normalizeUid(peerUid);
+    if (peer === null || peer !== normalizeUid(currentUid) || typeof executablePath !== 'string')
         return false;
     const executable = executablePath.slice(executablePath.lastIndexOf('/') + 1)
         .replace(/ \(deleted\)$/, '');
@@ -30,6 +42,20 @@ export function setTitleAccess(state, requested, titleFreeSnapshot = null) {
 export function subscriberSnapshot(appId, readTitle, instanceId, includeTitles = false) {
     const title = includeTitles && typeof readTitle === 'function' ? readTitle() : '';
     return [appId, title, instanceId];
+}
+
+/** Return the XKB model/options GNOME's InputSourceManager applies. GNOME 45
+ * has no session keyboard-model setting; its Mutter keymap uses pc105. */
+export function activeXkbSettings(settings) {
+    if (!settings)
+        return null;
+    let model = settings.keyboardModel;
+    if (typeof model !== 'string' || model.length === 0)
+        model = 'pc105';
+    const options = settings.keyboardOptions;
+    if (!Array.isArray(options) || options.some(option => typeof option !== 'string'))
+        return null;
+    return {model, options};
 }
 
 /** Bound authorization requests while allowing active subscribers to reconfigure. */

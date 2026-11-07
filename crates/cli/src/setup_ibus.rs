@@ -30,6 +30,8 @@ const MAX_COMMAND_OUTPUT: u64 = 64 * 1024;
 const MAX_COMPONENT_BYTES: u64 = 64 * 1024;
 const MAX_SHARED_ENGINE_BYTES: u64 = 512 * 1024 * 1024;
 const TERMINAL_DROP_IN: &str = "30-terminal-apps-only.conf";
+const LEGACY_PLASMA_IBUS_ENVIRONMENT_HEADER: &str =
+    "# Written by `wayexpand setup --backend ibus`.";
 /// Common terminal app IDs (normalized), used when `terminal_apps` is empty.
 pub(crate) const DEFAULT_TERMINAL_APPS: &[&str] = &[
     "org.kde.konsole",
@@ -1122,7 +1124,8 @@ fn companion_readiness_error(service: UserService, status: &serde_json::Value) -
     if !crate::doctor::status::status_schema_compatible(status) {
         return Some("daemon status schema is incompatible".into());
     }
-    if !crate::doctor::status::daemon_commit_matches(field("daemon_commit")) {
+    if !crate::doctor::status::daemon_build_matches(field("daemon_commit"), field("daemon_version"))
+    {
         return Some("daemon build identity does not match the setup CLI".into());
     }
     if field("source") != Some(expected_source) {
@@ -1186,6 +1189,104 @@ fn terminal_drop_in() -> Option<PathBuf> {
             .join("systemd/user/wayexpand-evdev.service.d")
             .join(TERMINAL_DROP_IN),
     )
+}
+
+fn plasma_ibus_environment_path() -> Option<PathBuf> {
+    let xdg_config_home = env::var_os("XDG_CONFIG_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    let home = env::var_os("HOME").map(PathBuf::from);
+    plasma_ibus_environment_path_from(xdg_config_home.as_deref(), home.as_deref())
+}
+
+fn plasma_ibus_environment_path_from(
+    xdg_config_home: Option<&Path>,
+    home: Option<&Path>,
+) -> Option<PathBuf> {
+    let config_home = match xdg_config_home {
+        Some(path) if path.is_absolute() => path.to_path_buf(),
+        Some(_) => return None,
+        None => home?.join(".config"),
+    };
+    config_home
+        .is_absolute()
+        .then(|| config_home.join("plasma-workspace/env/wayexpand-ibus.sh"))
+}
+
+fn is_legacy_plasma_ibus_environment(bytes: &[u8]) -> bool {
+    let Ok(contents) = std::str::from_utf8(bytes) else {
+        return false;
+    };
+    let mut lines = contents.lines();
+    if lines
+        .next()
+        .is_none_or(|line| line.trim() != LEGACY_PLASMA_IBUS_ENVIRONMENT_HEADER)
+    {
+        return false;
+    }
+    let mut gtk = false;
+    let mut qt = false;
+    let mut xim = false;
+    for line in lines.map(str::trim).filter(|line| !line.is_empty()) {
+        match line {
+            line if line.starts_with('#') => {}
+            "export GTK_IM_MODULE=ibus" if !gtk => gtk = true,
+            "export QT_IM_MODULE=ibus" if !qt => qt = true,
+            "export XMODIFIERS=@im=ibus" if !xim => xim = true,
+            _ => return false,
+        }
+    }
+    gtk && qt && xim
+}
+
+/// Remove only the obsolete login script written by earlier WayExpand setup
+/// versions. KWin's IBus Wayland integration is compositor-managed and must
+/// not inherit GTK_IM_MODULE=ibus or QT_IM_MODULE=ibus.
+fn remove_legacy_plasma_ibus_environment() -> Result<bool> {
+    let Some(path) = plasma_ibus_environment_path() else {
+        return Ok(false);
+    };
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_file() => metadata,
+        Ok(_) => return Ok(false),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => {
+            return Err(error).context("could not inspect the old Plasma IBus environment file")
+        }
+    };
+    if metadata.len() > 8 * 1024 || !is_legacy_plasma_ibus_environment(&fs::read(&path)?) {
+        return Ok(false);
+    }
+    fs::remove_file(&path)
+        .context("could not remove the obsolete WayExpand Plasma IBus environment file")?;
+
+    let Some(manager_environment) = command_output("systemctl", &["--user", "show-environment"])
+    else {
+        return Ok(true);
+    };
+    let mut variables = Vec::new();
+    for (name, expected) in [
+        ("GTK_IM_MODULE", "ibus"),
+        ("QT_IM_MODULE", "ibus"),
+        ("XMODIFIERS", "@im=ibus"),
+    ] {
+        if manager_environment
+            .lines()
+            .any(|line| line == format!("{name}={expected}"))
+        {
+            variables.push(name);
+        }
+    }
+    if variables.is_empty() {
+        return Ok(true);
+    }
+    let mut arguments = vec!["--user", "unset-environment"];
+    arguments.extend(variables);
+    let status = run_setup_command("systemctl", &arguments)?;
+    if !status.success() {
+        bail!("removed the obsolete Plasma IBus environment file, but could not clear its values from the user service manager; log out of Plasma to reset the D-Bus session environment");
+    }
+    Ok(true)
 }
 
 #[derive(Debug, Default)]
@@ -2284,7 +2385,11 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
     let inventory = ServiceInventory::probe();
     println!("Checking what the IBus route needs…");
     let companion = preflight(options, &inventory)?;
-    step("Preflight passed; nothing has been changed yet");
+    step("Preflight passed");
+    if IbusDesktop::detect() == IbusDesktop::KdeWayland && remove_legacy_plasma_ibus_environment()?
+    {
+        println!("Removed the obsolete WayExpand GTK/Qt overrides for Plasma Wayland; log out and back in before testing so KWin and the D-Bus session restart with clean input-method settings.");
+    }
 
     // Journal installation and persistent configuration before the first
     // mutation; activation state is captured immediately before it changes.
@@ -2343,7 +2448,6 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
         let summary = transaction_rollback_summary(rollback);
         bail!("IBus activation failed: {error}\n{summary}");
     }
-
     println!();
     let report = chain::diagnose();
     let status = crate::doctor::status::read_daemon_status()
@@ -2365,8 +2469,28 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
         }
         bail!("WX-POLICY-001: IBus is active, but replacement authorization is required before expansions can work")
     }
+    if let Some(problem_id) = setup_route_failure_problem_id(&report, &overlap) {
+        println!("SETUP RESULT: ACTION REQUIRED ({problem_id})");
+        if let Some(failure) = report.first_failure() {
+            println!(
+                "IBus configuration was retained, but a required route check failed: {}.",
+                failure.title
+            );
+            if let Some(fix) = &failure.fix {
+                println!("Repair: {fix}");
+            }
+        } else {
+            println!("IBus configuration was retained, but another global WayExpand capture route overlaps it.");
+            let control_installed = crate::services::ServiceInventory::probe()
+                .installed(crate::services::UserService::Control);
+            if let Some((_, _, Some(fix))) = overlap.finding(true, control_installed) {
+                println!("Repair: {fix}");
+            }
+        }
+        bail!("{problem_id}: IBus is configured but the selected desktop route is not operational")
+    }
     println!(
-        "IBus configuration and activation checks completed; actual target-app insertion: {}.",
+        "IBus is configured and active; actual target-app insertion: {}.",
         if options.real_insertion_verified {
             "user-confirmed for the tested application"
         } else {
@@ -2378,6 +2502,24 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
         println!("Terminal coverage is optional and is offered separately after the real IBus insertion test.");
     }
     Ok(())
+}
+
+fn setup_route_failure_problem_id(
+    report: &chain::IbusChainReport,
+    overlap: &crate::commands::ibus::RouteOverlap,
+) -> Option<&'static str> {
+    if let Some(check) = report.first_failure() {
+        return Some(check.problem_id.unwrap_or("WX-IBUS-SETUP-001"));
+    }
+    let ibus_active = report
+        .check("selected")
+        .is_some_and(|check| check.state == chain::IbusCheckState::Pass);
+    (ibus_active
+        && matches!(
+            overlap,
+            crate::commands::ibus::RouteOverlap::Everywhere { .. }
+        ))
+    .then_some("WX-IBUS-SETUP-002")
 }
 
 #[cfg(test)]
@@ -2396,6 +2538,53 @@ mod tests {
     }
 
     #[test]
+    fn plasma_ibus_environment_path_uses_xdg_home_then_home_fallback() {
+        assert_eq!(
+            plasma_ibus_environment_path_from(
+                Some(Path::new("/tmp/custom-config")),
+                Some(Path::new("/home/tester")),
+            ),
+            Some(PathBuf::from(
+                "/tmp/custom-config/plasma-workspace/env/wayexpand-ibus.sh"
+            )),
+        );
+        assert_eq!(
+            plasma_ibus_environment_path_from(None, Some(Path::new("/home/tester"))),
+            Some(PathBuf::from(
+                "/home/tester/.config/plasma-workspace/env/wayexpand-ibus.sh"
+            )),
+        );
+        assert_eq!(
+            plasma_ibus_environment_path_from(Some(Path::new("relative")), None),
+            None,
+        );
+    }
+
+    #[test]
+    fn legacy_plasma_ibus_environment_is_recognized_for_cleanup() {
+        let legacy = b"# Written by `wayexpand setup --backend ibus`.\n\
+            # Restart GTK/Qt applications after changing this file.\n\
+            export GTK_IM_MODULE=ibus\n\
+            export QT_IM_MODULE=ibus\n\
+            export XMODIFIERS=@im=ibus\n";
+        assert!(is_legacy_plasma_ibus_environment(legacy));
+    }
+
+    #[test]
+    fn legacy_plasma_environment_cleanup_recognizer_keeps_user_scripts() {
+        assert!(!is_legacy_plasma_ibus_environment(
+            b"# user-managed content\nexport GTK_IM_MODULE=ibus\n"
+        ));
+        assert!(!is_legacy_plasma_ibus_environment(
+            b"# Written by `wayexpand setup --backend ibus`.\n\
+              export GTK_IM_MODULE=ibus\n\
+              export QT_IM_MODULE=ibus\n\
+              export XMODIFIERS=@im=ibus\n\
+              echo user-command\n"
+        ));
+    }
+
+    #[test]
     fn compatibility_off_is_reported_as_incomplete_setup() {
         assert!(replacement_authorization_required(
             wayexpand_core::CompatibilityMode::Off
@@ -2405,10 +2594,79 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn setup_route_failures_keep_stable_problem_ids() {
+        let report = chain::IbusChainReport {
+            desktop: chain::IbusDesktop::KdeWayland,
+            checks: vec![chain::IbusCheck {
+                id: "desktop",
+                title: "KWin sends input to IBus",
+                state: chain::IbusCheckState::Fail,
+                problem_id: Some("WX-KWIN-IBUS-002"),
+                detail: "test".into(),
+                fix: None,
+            }],
+            activity: None,
+        };
+        let no_overlap = crate::commands::ibus::RouteOverlap::None;
+        assert_eq!(
+            setup_route_failure_problem_id(&report, &no_overlap),
+            Some("WX-KWIN-IBUS-002")
+        );
+
+        let generic_failure = chain::IbusChainReport {
+            desktop: chain::IbusDesktop::KdeWayland,
+            checks: vec![chain::IbusCheck {
+                id: "desktop",
+                title: "KWin sends input to IBus",
+                state: chain::IbusCheckState::Fail,
+                problem_id: None,
+                detail: "test".into(),
+                fix: None,
+            }],
+            activity: None,
+        };
+        assert_eq!(
+            setup_route_failure_problem_id(&generic_failure, &no_overlap),
+            Some("WX-IBUS-SETUP-001")
+        );
+        let selected_with_overlap = chain::IbusChainReport {
+            desktop: chain::IbusDesktop::KdeWayland,
+            checks: vec![chain::IbusCheck {
+                id: "selected",
+                title: "WayExpand is the active input method",
+                state: chain::IbusCheckState::Pass,
+                problem_id: None,
+                detail: "test".into(),
+                fix: None,
+            }],
+            activity: None,
+        };
+        let everywhere = crate::commands::ibus::RouteOverlap::Everywhere {
+            source: "evdev".into(),
+        };
+        assert_eq!(
+            setup_route_failure_problem_id(&selected_with_overlap, &everywhere),
+            Some("WX-IBUS-SETUP-002")
+        );
+        assert_eq!(
+            setup_route_failure_problem_id(
+                &chain::IbusChainReport {
+                    desktop: chain::IbusDesktop::KdeWayland,
+                    checks: vec![],
+                    activity: None,
+                },
+                &no_overlap
+            ),
+            None
+        );
+    }
+
     fn healthy_companion_status(source: &str) -> serde_json::Value {
         serde_json::json!({
             "status_schema": crate::CONTROL_STATUS_SCHEMA,
             "daemon_commit": crate::build_info::COMMIT,
+            "daemon_version": crate::build_info::VERSION,
             "source": source,
             "backend": "libei",
             "config_state": "ok",
