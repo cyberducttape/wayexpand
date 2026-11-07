@@ -261,9 +261,10 @@ jobs:
         env:
           SOAK_REPORT_DIR: ${{ runner.temp }}/wayexpand-soak
         run: |
+          expected_source_revision=$(git rev-parse HEAD)
           SOAK_SECONDS=180 bash scripts/soak-daemon.sh
           grep -Fx 'result=passed' "$SOAK_REPORT_DIR/summary.txt"
-          grep -Fx "source_revision=$GITHUB_SHA" "$SOAK_REPORT_DIR/summary.txt"
+          grep -Fx "source_revision=$expected_source_revision" "$SOAK_REPORT_DIR/summary.txt"
           grep -Fx 'source_worktree=clean' "$SOAK_REPORT_DIR/summary.txt"
       - name: Verify failed daemon soaks preserve evidence
         run: bash scripts/test-soak-failure-evidence.sh
