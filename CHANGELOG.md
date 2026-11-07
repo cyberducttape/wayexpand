@@ -23,7 +23,8 @@ All notable changes to WayExpand are documented here.
   counters when the clipboard insertion case fails.
 - Activate GNOME E2E extensions through GNOME Shell's extension manager after
   writing the enabled-extension setting, and stage them under GNOME's
-  documented per-user extension directory before checking activation.
+  documented per-user extension directory before checking activation. Fail
+  before changing dconf if the test escapes its private HOME/XDG directories.
 - Correct the KWin/IBus crash guidance: a recent helper coredump is evidence
   of a crash, not proof that the current helper is still down or that a
   specific upstream patch fixes it. Direct users to the exact backtrace,

@@ -92,6 +92,12 @@ set -eu
 . "$E2E_DBUS_HELPER"
 display=wayexpand-gnome-e2e
 log() { printf '%s\n' "$*"; }
+if [ "$HOME" != "$E2E_WORK/home" ] \
+    || [ "$XDG_CONFIG_HOME" != "$E2E_WORK/config" ] \
+    || [ "$XDG_DATA_HOME" != "$HOME/.local/share" ]; then
+    log "fail session-isolation GNOME test escaped its private HOME/XDG directories"
+    exit 1
+fi
 gsettings set org.gnome.shell disable-user-extensions false
 gsettings set org.gnome.shell enabled-extensions "['$E2E_UUID', '$E2E_CONTROLLER_UUID']"
 gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us'), ('xkb', 'de')]"
@@ -633,6 +639,8 @@ EOF
 chmod 0755 "$work/session.sh"
 
 status=0
+# Keep WayExpand's private test component while retaining the system IBus
+# engines GNOME needs for the configured xkb sources.
 env -i \
     HOME="$work/home" \
     PATH="$PATH" \
@@ -641,8 +649,6 @@ env -i \
     XDG_DATA_HOME="$work/home/.local/share" \
     XDG_DATA_DIRS="${XDG_DATA_DIRS:-/usr/local/share:/usr/share}" \
     XDG_RUNTIME_DIR="$runtime" \
-    # Keep WayExpand's private test component while retaining the system IBus
-    # engines GNOME needs for the configured xkb sources.
     IBUS_COMPONENT_PATH="$work/component:/usr/share/ibus/component" \
     GTK_IM_MODULE=ibus \
     GDK_BACKEND=wayland \
