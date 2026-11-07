@@ -15,7 +15,11 @@ All notable changes to WayExpand are documented here.
 - Prevent package smoke CI from depending on uninstalled Python/account tools,
   and print the failing package-test stage on errors. Give the headless GNOME
   and KWin jobs enough time to install desktop dependencies before their
-  acceptance tests run; omit recommended packages from KWin's install.
+  acceptance tests run; install Xwayland for GNOME Shell's headless session and
+  omit recommended packages from KWin's install.
+- Wait until the Wayland clipboard selection's MIME types arrive before
+  reading its data-control offer. Preserve content-free daemon counters when
+  the clipboard insertion E2E case fails.
 - Correct the KWin/IBus crash guidance: a recent helper coredump is evidence
   of a crash, not proof that the current helper is still down or that a
   specific upstream patch fixes it. Direct users to the exact backtrace,

@@ -1,4 +1,4 @@
-# Review-only bash commands; environment=staging; SSH target=web-staging
+# Review-only 'bash' commands; environment='staging'; SSH target='web-staging'
 # Expected host: web-01.example.net
 # Compare `hostname -f` with the expected host before running any line.
 hostname -f

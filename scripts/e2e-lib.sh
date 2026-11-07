@@ -735,6 +735,9 @@ scenario_clipboard_variable() {
         printf 'the session clipboard did not report the copied text'
         return 2
     }
+    # Record only advertised MIME types (never clipboard contents) to make
+    # protocol capability failures diagnosable from CI artifacts.
+    wl-paste --list-types >"$case_dir/clipboard-types.txt" 2>&1 || true
     activate e2e-a || return 2
     expand_in e2e-a "" ";quote" || return 2
     wait_until 50 sink_text_is e2e-a "> copied text"
