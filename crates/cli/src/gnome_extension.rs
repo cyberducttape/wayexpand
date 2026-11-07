@@ -423,11 +423,23 @@ impl ExtensionSettingsTransaction {
         if self.committed {
             return Ok(());
         }
+        let mut errors = Vec::new();
         if self.changed_enabled {
-            write_extension_setting("enabled-extensions", &self.original.enabled)?;
+            if let Err(error) =
+                write_extension_setting("enabled-extensions", &self.original.enabled)
+            {
+                errors.push(format!("enabled-extensions: {error}"));
+            }
         }
         if self.changed_disabled {
-            write_extension_setting("disabled-extensions", &self.original.disabled)?;
+            if let Err(error) =
+                write_extension_setting("disabled-extensions", &self.original.disabled)
+            {
+                errors.push(format!("disabled-extensions: {error}"));
+            }
+        }
+        if !errors.is_empty() {
+            bail!("could not restore {}", errors.join("; "));
         }
         self.committed = true;
         Ok(())
@@ -1006,6 +1018,10 @@ mod tests {
                 |path, contents| {
                     writes += 1;
                     if writes == 2 {
+                        if errno == libc::ENOSPC {
+                            let partial = &contents[..contents.len() / 2];
+                            fs::write(path, partial)?;
+                        }
                         return Err(std::io::Error::from_raw_os_error(errno).into());
                     }
                     write_extension_file(path, contents)
