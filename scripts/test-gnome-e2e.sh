@@ -23,12 +23,24 @@ for argument in "$@"; do
         *) printf '%s\n' "usage: $0 [--keep]" >&2; exit 2 ;;
     esac
 done
-for tool in gnome-shell dbus-run-session gsettings gdbus xdotool timeout; do
+for tool in gnome-shell dbus-run-session gsettings gdbus xdotool timeout python3; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         printf '%s\n' "error: $tool is required (install GNOME Shell, XWayland, xdotool and the GTK/IBus test dependencies)" >&2
         exit 2
     fi
 done
+browser_bin=${E2E_BROWSER_BIN:-}
+if [ -z "$browser_bin" ]; then
+    browser_bin=$(command -v google-chrome-stable || command -v google-chrome || true)
+fi
+if [ -z "$browser_bin" ] || [ ! -x "$browser_bin" ]; then
+    printf '%s\n' "error: Google Chrome is required (or set E2E_BROWSER_BIN)" >&2
+    exit 2
+fi
+if ! python3 -c 'import websocket' >/dev/null 2>&1; then
+    printf '%s\n' "error: python3-websocket is required for Chromium DevTools verification" >&2
+    exit 2
+fi
 
 bin_dir=${E2E_BIN:-"$project_dir/target/debug"}
 if [ "${E2E_SKIP_BUILD:-0}" != 1 ]; then
@@ -127,11 +139,16 @@ for extension_uuid in "$E2E_UUID" "$E2E_CONTROLLER_UUID"; do
 done
 sinks=
 gtk_pid=
+browser_pid=
 finish() {
     for pid in $sinks; do kill "$pid" 2>/dev/null || true; done
     if [ -n "$gtk_pid" ]; then
         kill "$gtk_pid" 2>/dev/null || true
         wait "$gtk_pid" 2>/dev/null || true
+    fi
+    if [ -n "$browser_pid" ]; then
+        kill "$browser_pid" 2>/dev/null || true
+        wait "$browser_pid" 2>/dev/null || true
     fi
     kill "$shell_pid" 2>/dev/null || true
     wait "$shell_pid" 2>/dev/null || true
@@ -415,6 +432,72 @@ if [ "$gtk_status" -ne 0 ]; then
     exit 1
 fi
 log "pass gnome-gtk-insertion GTK's IBus input context replaced the trigger in Gtk.Entry"
+# Exercise the same active engine in a real browser renderer. The isolated
+# Chromium profile uses a local page, XTEST sends only the harmless `;e2e`
+# trigger, and DevTools reads only that test textarea's final value.
+env \
+    GTK_IM_MODULE=ibus \
+    DISPLAY="$x11_display" \
+    XAUTHORITY="$xwayland_auth" \
+    IBUS_ADDRESS="$(ibus address)" \
+    E2E_BROWSER_BIN="$browser_bin" \
+    python3 "$E2E_PROJECT_DIR/scripts/certification-clients/browser_ibus_e2e.py" \
+    --browser "$browser_bin" \
+    --profile "$E2E_WORK/browser-profile" \
+    --page "$E2E_WORK/browser-ibus-e2e.html" \
+    --ready-marker "$E2E_WORK/browser-window-ready" \
+    --focus-marker "$E2E_WORK/browser-window-focused" \
+    --log "$E2E_WORK/browser-ibus-e2e-chrome.log" \
+    >"$E2E_WORK/browser-ibus-e2e.log" 2>&1 &
+browser_pid=$!
+tries=200
+while [ ! -e "$E2E_WORK/browser-window-ready" ]; do
+    if ! kill -0 "$browser_pid" 2>/dev/null; then
+        wait "$browser_pid" || true
+        browser_pid=
+        log "fail gnome-browser-insertion Chromium could not open the isolated acceptance page"
+        cat "$E2E_WORK/browser-ibus-e2e.log" "$E2E_WORK/browser-ibus-e2e-chrome.log"
+        exit 1
+    fi
+    tries=$((tries - 1))
+    if [ "$tries" -le 0 ]; then
+        kill "$browser_pid" 2>/dev/null || true
+        wait "$browser_pid" 2>/dev/null || true
+        browser_pid=
+        log "fail gnome-browser-insertion Chromium did not become ready"
+        cat "$E2E_WORK/browser-ibus-e2e.log" "$E2E_WORK/browser-ibus-e2e-chrome.log"
+        exit 1
+    fi
+    sleep 0.1
+done
+if ! activate_window org.wayexpand.GnomeBrowserIbus; then
+    kill "$browser_pid" 2>/dev/null || true
+    wait "$browser_pid" 2>/dev/null || true
+    browser_pid=
+    log "fail gnome-browser-insertion Mutter could not focus Chromium's acceptance window"
+    cat "$E2E_WORK/browser-ibus-e2e.log" "$E2E_WORK/browser-ibus-e2e-chrome.log"
+    exit 1
+fi
+: >"$E2E_WORK/browser-window-focused"
+if ! DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+    xdotool type --clearmodifiers --delay 40 -- ';e2e'; then
+    kill "$browser_pid" 2>/dev/null || true
+    wait "$browser_pid" 2>/dev/null || true
+    browser_pid=
+    log "fail gnome-browser-insertion XTEST could not type into the focused browser window"
+    cat "$E2E_WORK/browser-ibus-e2e.log" "$E2E_WORK/browser-ibus-e2e-chrome.log"
+    exit 1
+fi
+browser_status=0
+wait "$browser_pid" || browser_status=$?
+browser_pid=
+if [ "$browser_status" -ne 0 ]; then
+    log "fail gnome-browser-insertion Chromium's IBus text field did not receive the replacement"
+    cat "$E2E_WORK/browser-ibus-e2e.log" "$E2E_WORK/browser-ibus-e2e-chrome.log"
+    exit 1
+fi
+cat "$E2E_WORK/browser-ibus-e2e.log"
+log "pass gnome-browser-insertion Chromium's IBus input context replaced the trigger in a textarea"
 "$E2E_BIN_DIR/wayexpand" ibus status --json \
     >"$E2E_WORK/ibus-after-input-context.json" \
     2>"$E2E_WORK/ibus-after-input-context.err" || true
@@ -746,7 +829,7 @@ env -i \
     dbus-run-session -- "$work/session.sh" >"$work/results.txt" 2>"$work/session.log" || status=$?
 
 cat "$work/results.txt"
-expected_checks='extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-ibus-input-context gnome-gtk-insertion extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-ibus-input-context-after-login'
+expected_checks='extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-ibus-input-context gnome-gtk-insertion gnome-browser-insertion extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-ibus-input-context-after-login'
 missing_check=
 for check in $expected_checks; do
     if ! grep -F "pass $check" "$work/results.txt" >/dev/null; then
@@ -770,6 +853,7 @@ if [ "$status" -ne 0 ] || grep -q '^fail' "$work/results.txt" \
         ibus-before-live-activation.json ibus-before-live-activation.err \
         ibus-after-input-context.json ibus-after-input-context.err \
         ibus-source-activation-after-login.log \
+        browser-ibus-e2e.log browser-ibus-e2e-chrome.log \
         unauthorized-tracker-subscription.log \
         doctor-after-extension-upgrade.json \
         doctor-after-extension-upgrade.err doctor-after-login.json \
@@ -783,4 +867,4 @@ if [ "$status" -ne 0 ] || grep -q '^fail' "$work/results.txt" \
     done
     exit 1
 fi
-printf '%s\n' "Headless GNOME input activation, GTK3 IBus insertion, engine health, and extension upgrade/logout tests passed; physical desktop certification remains unverified"
+printf '%s\n' "Headless GNOME input activation, GTK3 and Chromium IBus insertion, engine health, and extension upgrade/logout tests passed; physical desktop certification remains unverified"

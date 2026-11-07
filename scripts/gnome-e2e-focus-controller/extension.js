@@ -33,7 +33,7 @@ export default class GnomeE2eFocusController extends Extension {
             .find(candidate => candidate && (
                 candidate.get_gtk_application_id() === appId ||
                 candidate.get_wm_class() === appId ||
-                candidate.get_title()?.endsWith(appId)
+                candidate.get_title()?.includes(appId)
             ));
         if (!window) {
             invocation.return_dbus_error(
