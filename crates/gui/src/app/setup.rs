@@ -543,14 +543,14 @@ impl GuiApp {
                 Status::warning(
                     "Needs desktop restart: GNOME must load the installed extension after you log out and back in. Setup is not yet verified; resume it after the new session starts.",
                 ),
-                true,
+                false,
             )
         } else if output.contains("WX-POLICY-001") {
             (
                 Status::warning(
                     "Needs permission: replacement is disabled. Review and explicitly authorize the non-atomic replacement behavior before expecting trigger expansion.",
                 ),
-                true,
+                false,
             )
         } else if output
             .lines()
@@ -817,9 +817,13 @@ impl GuiApp {
                                 self.strings.status_setup_failed(&summary),
                             )
                             .0;
+                            let (_, open_diagnostics) = Self::setup_completion_status(
+                                &report,
+                                self.strings.status_setup_failed(&summary),
+                            );
                             self.setup_failure_report = Some(report);
                             self.setup_failure_report_open = true;
-                            self.diagnostics_open = true;
+                            self.diagnostics_open = open_diagnostics;
                             outcome
                         } else if task_kind.as_deref() == Some("setup-preflight") {
                             self.diagnostics_open = true;
@@ -987,6 +991,30 @@ impl GuiApp {
         egui::Modal::new(egui::Id::new("ibus_replacement_consent")).show(ctx, |ui| {
                 ui.set_width(430.0);
                 ui.heading("Set up WayExpand");
+                ui.add_space(8.0);
+                ui.label(RichText::new("Setup checks").strong());
+                for (id, label) in [
+                    ("tools", "Required tools and desktop dependencies"),
+                    ("component", "IBus engine component installed"),
+                    ("registered", "IBus engine registered"),
+                    ("gnome-source-registered", "GNOME input source registered"),
+                    ("gnome-source-active", "WayExpand selected in GNOME"),
+                    ("consent", "Replacement authorization"),
+                ] {
+                    let state = self
+                        .ibus_route
+                        .as_ref()
+                        .and_then(|report| report.check(id))
+                        .map(|check| check.state);
+                    let (symbol, detail) = match state {
+                        Some(wayexpand_backend_ibus::chain::IbusCheckState::Pass) => ("✓", "Ready"),
+                        Some(wayexpand_backend_ibus::chain::IbusCheckState::Warn) => ("!", "Action may be needed"),
+                        Some(wayexpand_backend_ibus::chain::IbusCheckState::Fail) => ("✗", "Will be addressed during setup"),
+                        Some(wayexpand_backend_ibus::chain::IbusCheckState::Skip) => ("·", "Not required here"),
+                        _ => ("·", "Checked during setup"),
+                    };
+                    ui.label(format!("{symbol} {label}: {detail}"));
+                }
                 ui.add_space(8.0);
                 for (number, title, detail) in [
                     (
@@ -1302,14 +1330,14 @@ mod tests {
             "setup failed".into(),
         );
         assert!(restart.text().contains("Needs desktop restart"));
-        assert!(open_diagnostics);
+        assert!(!open_diagnostics);
 
         let (permission, open_diagnostics) = GuiApp::setup_completion_status(
             "WX-POLICY-001: replacement is disabled",
             "setup incomplete".into(),
         );
         assert!(permission.text().contains("Needs permission"));
-        assert!(open_diagnostics);
+        assert!(!open_diagnostics);
     }
 
     #[test]

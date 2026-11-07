@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Make first-run GNOME setup a guided path: show prerequisite and IBus checks,
+  distinguish a registered source from an active one, and offer source
+  activation/recheck actions directly in onboarding. An IBus connection alone
+  no longer marks GNOME configured. Restart and replacement-authorization
+  states stay in the guide instead of forcing users into advanced Diagnostics;
+  the dedicated real-application test remains the only way to mark the route
+  verified.
 - Recover interrupted GNOME Shell extension installs from a private, fsynced
   transaction journal. The installer holds a per-extension flock, rolls back
   an uncommitted directory exchange on the next setup run, retains a committed
