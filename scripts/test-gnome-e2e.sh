@@ -2,8 +2,8 @@
 # End-to-end test of GNOME source activation, the IBus engine, and window
 # tracking in a private headless GNOME Shell session. It verifies GNOME source
 # registration/activation, an IBus protocol transaction, insertion into a GTK
-# 3 entry, focus tracking, and extension upgrade/reload behavior. The GTK
-# test uses a CI uinput keyboard; it is not physical-keyboard certification.
+# 3 Xwayland entry through XTest, focus tracking, and extension upgrade/reload
+# behavior. This is not physical-keyboard certification.
 #
 # Usage: scripts/test-gnome-e2e.sh [--keep]
 #   E2E_BIN=DIR        use prebuilt wayexpand, wayexpand-ibus, and wx-e2e-* binaries
@@ -191,7 +191,7 @@ activate_window() {
 run_gtk_insertion() {
     label=$1
     gtk_log="$E2E_WORK/gtk-insertion-$label.log"
-    WAYLAND_DISPLAY="$display" /usr/bin/python3 \
+    DISPLAY=:0 GDK_BACKEND=x11 /usr/bin/python3 \
         "$E2E_PROJECT_DIR/scripts/certification-clients/gtk_ibus_insertion.py" \
         >"$gtk_log" 2>&1 &
     gtk_pid=$!
