@@ -684,6 +684,7 @@ fn extension_state_from_info(
         info.get(key).and_then(|value| {
             f64::try_from(value.clone())
                 .ok()
+                .or_else(|| i32::try_from(value.clone()).ok().map(f64::from))
                 .or_else(|| u32::try_from(value.clone()).ok().map(f64::from))
         })
     };
@@ -818,6 +819,15 @@ mod tests {
             extension_state_from_info(&info(3.0)),
             ExtensionState::Error(_)
         ));
+
+        let signed_state = HashMap::from([(
+            "state".to_owned(),
+            OwnedValue::try_from(zbus::zvariant::Value::from(1_i32)).unwrap(),
+        )]);
+        assert_eq!(
+            extension_state_from_info(&signed_state),
+            ExtensionState::Active
+        );
     }
 
     #[test]
