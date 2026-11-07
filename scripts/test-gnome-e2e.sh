@@ -51,12 +51,12 @@ cleanup() {
 trap cleanup EXIT INT TERM
 chmod 0700 "$runtime"
 mkdir -p "$work/home" "$work/config/wayexpand" "$work/cache" "$work/component" \
-    "$work/data/gnome-shell/extensions/$uuid" \
-    "$work/data/gnome-shell/extensions/$controller_uuid"
+    "$work/home/.local/share/gnome-shell/extensions/$uuid" \
+    "$work/home/.local/share/gnome-shell/extensions/$controller_uuid"
 cp "$project_dir/gnome-extension/$uuid/metadata.json" "$project_dir/gnome-extension/$uuid/extension.js" \
     "$project_dir/gnome-extension/$uuid/notification-queue.js" \
-    "$work/data/gnome-shell/extensions/$uuid/"
-python3 - "$work/data/gnome-shell/extensions/$uuid/metadata.json" <<'PY'
+    "$work/home/.local/share/gnome-shell/extensions/$uuid/"
+python3 - "$work/home/.local/share/gnome-shell/extensions/$uuid/metadata.json" <<'PY'
 import json
 import sys
 
@@ -70,7 +70,7 @@ with open(path, "w", encoding="utf-8") as destination:
 PY
 cp "$project_dir/scripts/gnome-e2e-focus-controller/metadata.json" \
     "$project_dir/scripts/gnome-e2e-focus-controller/extension.js" \
-    "$work/data/gnome-shell/extensions/$controller_uuid/"
+    "$work/home/.local/share/gnome-shell/extensions/$controller_uuid/"
 cat >"$work/config/wayexpand/expansions.toml" <<'EOF'
 [settings]
 compatibility_mode = "tracked-focus"
@@ -631,7 +631,7 @@ env -i \
     PATH="$PATH" \
     XDG_CONFIG_HOME="$work/config" \
     XDG_CACHE_HOME="$work/cache" \
-    XDG_DATA_HOME="$work/data" \
+    XDG_DATA_HOME="$work/home/.local/share" \
     XDG_DATA_DIRS="${XDG_DATA_DIRS:-/usr/local/share:/usr/share}" \
     XDG_RUNTIME_DIR="$runtime" \
     # Keep WayExpand's private test component while retaining the system IBus
