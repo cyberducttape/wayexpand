@@ -382,7 +382,8 @@ fi
 "$E2E_BIN_DIR/wayexpand" repair --gnome-input-source --json \
     >"$E2E_WORK/ibus-source-activation.json"
 "$E2E_BIN_DIR/wayexpand" doctor --gnome --json \
-    >"$E2E_WORK/doctor-after-cli-activation.json" 2>&1 || true
+    >"$E2E_WORK/doctor-after-cli-activation.json" \
+    2>"$E2E_WORK/doctor-after-cli-activation.err" || true
 python3 - "$E2E_WORK/ibus-source-activation.json" \
     "$E2E_WORK/doctor-after-cli-activation.json" <<'PY'
 import json
@@ -584,7 +585,8 @@ if [ "$tries" -gt 0 ]; then
     if "$E2E_BIN_DIR/wayexpand" repair --gnome-input-source --json \
         >"$E2E_WORK/ibus-source-activation-after-login.json" \
         && { "$E2E_BIN_DIR/wayexpand" doctor --gnome --json \
-            >"$E2E_WORK/doctor-source-after-login.json" 2>&1 || true; } \
+            >"$E2E_WORK/doctor-source-after-login.json" \
+            2>"$E2E_WORK/doctor-source-after-login.err" || true; } \
         && python3 - "$E2E_WORK/ibus-source-activation-after-login.json" \
             "$E2E_WORK/doctor-source-after-login.json" <<'PY'
 import json
