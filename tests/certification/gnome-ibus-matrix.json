@@ -14,6 +14,7 @@
     "uninstall-preserves-original-desktop-settings"
   ],
   "platforms": [
+    {"id": "fedora-45-gnome51-runtime", "distribution": "Fedora", "release": "45", "gnome_shell": "51.x", "automated_extension_runtime_compatibility": "scripts/test-gnome51-extension-runtime.sh; not desktop route certification"},
     {"id": "fedora-gnome", "distribution": "Fedora", "release": "record-exact-supported-release", "gnome_shell": "record-exact-version"},
     {"id": "ubuntu-24.04-gnome", "distribution": "Ubuntu", "release": "24.04 LTS", "gnome_shell": "record-exact-version"},
     {"id": "ubuntu-26.04-gnome", "distribution": "Ubuntu", "release": "26.04 LTS", "gnome_shell": "record-exact-version"},

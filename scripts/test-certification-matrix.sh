@@ -33,7 +33,8 @@ jq -e '
 jq -e '
   .schema == 1 and
   .initial_status == "not-tested" and
-  ([.platforms[].id] | sort == ["fedora-gnome", "gnome-newest-supported-shell", "gnome-oldest-supported-shell", "ubuntu-24.04-gnome", "ubuntu-26.04-gnome"]) and
+  ([.platforms[].id] | sort == ["fedora-45-gnome51-runtime", "fedora-gnome", "gnome-newest-supported-shell", "gnome-oldest-supported-shell", "ubuntu-24.04-gnome", "ubuntu-26.04-gnome"]) and
+  ([.platforms[] | select(.id == "fedora-45-gnome51-runtime" and .gnome_shell == "51.x" and (.automated_extension_runtime_compatibility | contains("not desktop route certification")))] | length == 1) and
   (.application_classes | sort == ["browser", "gtk3", "gtk4", "qt", "terminal"]) and
   ([.required_lifecycle_scenarios[]] | unique | sort == ["clean-user-install", "component-registration", "gnome-source-registration-and-activation", "logout-login-persistence", "real-trigger-replacement", "switch-away-and-back", "uninstall-preserves-original-desktop-settings", "upgrade-preserves-input-sources"]) and
   (.evidence_requirement | contains("exact package") and contains("GNOME Shell version") and contains("physical-session evidence"))
