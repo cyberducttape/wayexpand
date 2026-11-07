@@ -121,6 +121,13 @@ log "pass ibus-engine-registered"
 gnome-shell --headless --mode=user --wayland --virtual-monitor 1280x800 --wayland-display "$display" \
     >"$E2E_WORK/gnome-shell.log" 2>&1 &
 shell_pid=$!
+# Preserve safe activation diagnostics: configuration values, extension IDs,
+# and paths only. This helps distinguish an undiscovered extension from one
+# that GNOME refused to enable; no snippet or keyboard data is collected.
+gsettings get org.gnome.shell enabled-extensions >"$E2E_WORK/enabled-extensions.txt" 2>&1 || true
+gnome-extensions list >"$E2E_WORK/installed-extensions.txt" 2>&1 || true
+find "$HOME/.local/share/gnome-shell/extensions" -mindepth 1 -maxdepth 2 \
+    -type f -name metadata.json -print >"$E2E_WORK/user-extension-metadata-paths.txt" 2>&1 || true
 # Ask GNOME's extension manager to activate both installed test extensions.
 # This is the same supported activation API the user can reach with
 # `gnome-extensions enable`; it also avoids racing the asynchronous dconf
