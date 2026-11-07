@@ -362,6 +362,25 @@ systemctl --user restart wayexpand-evdev.service
 
 ## Compositor-Specific Issues
 
+### GNOME Shell extension readiness
+
+`wayexpand doctor --gnome --json` reports extension readiness independently
+from the extension files on disk:
+
+- `not-loaded-this-session` means GNOME answered the status query, the enabled
+  extension matches the installed build, and Shell has not loaded it this
+  session. Log out and back in, then rerun the doctor.
+- `session-bus-unavailable` means the Shell status query could not establish a
+  usable session-bus connection. Run the doctor from the active GNOME session
+  and inspect the D-Bus/extension evidence; this state alone is not a reason to
+  log out.
+- `extension-failed` means GNOME reported a load error or the tracker protocol
+  failed. Inspect the reported extension error and handshake before reinstalling
+  or restarting anything.
+- `unknown` means there is not enough evidence to choose one of those causes.
+  Follow the targeted command in the report; do not assume a desktop restart is
+  required.
+
 ### KDE Plasma (KWin) — app_filter / window tracking issues
 
 #### Window tracking unavailable

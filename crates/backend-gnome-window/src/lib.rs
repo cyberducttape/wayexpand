@@ -102,6 +102,24 @@ pub enum GnomeWindowError {
     Cancelled,
 }
 
+impl GnomeWindowError {
+    /// Whether establishing the session-bus connection itself failed.
+    /// Failures after connecting, including a missing Shell owner, are not
+    /// evidence that the session bus is unavailable.
+    pub fn is_session_bus_unavailable(&self) -> bool {
+        matches!(self, Self::ConnectionTimedOut)
+            || matches!(
+                self,
+                Self::DBus(
+                    zbus::Error::Address(_)
+                        | zbus::Error::InputOutput(_)
+                        | zbus::Error::Handshake(_)
+                        | zbus::Error::Connection(_, _)
+                )
+            )
+    }
+}
+
 struct WindowTrackerService {
     sender: Mutex<WindowUpdateSender>,
     /// Session-bus methods are callable by any local client; accept focus
@@ -677,8 +695,9 @@ pub enum ExtensionState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtensionStatus {
     pub state: ExtensionState,
-    /// `false` when the user switched off all user extensions.
-    pub user_extensions_enabled: bool,
+    /// `Some(false)` when user extensions are disabled, `Some(true)` when
+    /// enabled, and `None` when Shell did not provide this property.
+    pub user_extensions_enabled: Option<bool>,
 }
 
 fn extension_state_from_info(
@@ -736,8 +755,7 @@ pub fn extension_status() -> Result<ExtensionStatus, GnomeWindowError> {
         )
         .ok()
         .and_then(|reply| reply.body().deserialize::<OwnedValue>().ok())
-        .and_then(|value| bool::try_from(value).ok())
-        .unwrap_or(true);
+        .and_then(|value| bool::try_from(value).ok());
     Ok(ExtensionStatus {
         state: extension_state_from_info(&info),
         user_extensions_enabled,

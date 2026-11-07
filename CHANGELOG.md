@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Keep GNOME extension readiness distinct when Shell status queries fail:
+  session-bus failures and unknown state now produce targeted diagnostics,
+  and logout/login is recommended only when the live Shell reports that the
+  installed extension build is not loaded in this session. A missing
+  `UserExtensionsEnabled` property is no longer treated as enabled.
 - Strengthen release-archive validation for the optional PolicyKit action
   policy: assert the policy action and authentication defaults, regular-file
   type, and mode 0644. The binary packager includes the policy artifact.

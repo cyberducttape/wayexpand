@@ -12,7 +12,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use wayexpand_backend_gnome_window::{
     disable_extension, enable_extension, extension_files, extension_status, ExtensionState,
-    GnomeWindowTracker, EXTENSION_UUID,
+    GnomeWindowError, GnomeWindowTracker, EXTENSION_UUID,
 };
 
 const SYSTEM_EXTENSION_DIRS: [&str; 2] = [
@@ -82,6 +82,70 @@ struct BuildAssessment {
     fix: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExtensionReadiness {
+    Ready,
+    NotLoadedThisSession,
+    SessionBusUnavailable,
+    ExtensionFailed,
+    Inactive,
+    Unknown,
+}
+
+impl ExtensionReadiness {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Ready => "ready",
+            Self::NotLoadedThisSession => "not-loaded-this-session",
+            Self::SessionBusUnavailable => "session-bus-unavailable",
+            Self::ExtensionFailed => "extension-failed",
+            Self::Inactive => "inactive",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+fn session_bus_unavailable(error: &GnomeWindowError) -> bool {
+    error.is_session_bus_unavailable()
+}
+
+fn extension_readiness(
+    status: Option<&wayexpand_backend_gnome_window::ExtensionStatus>,
+    status_error: Option<&GnomeWindowError>,
+    installed_matches: bool,
+    metadata_matches: bool,
+    protocol_failure: Option<ExtensionReadiness>,
+    confirmed_stale_build: bool,
+) -> ExtensionReadiness {
+    if status.is_none() {
+        return match status_error {
+            Some(error) if session_bus_unavailable(error) => {
+                ExtensionReadiness::SessionBusUnavailable
+            }
+            _ => ExtensionReadiness::Unknown,
+        };
+    }
+    let status = status.expect("checked above");
+    match status.user_extensions_enabled {
+        Some(false) => return ExtensionReadiness::Inactive,
+        None if !matches!(status.state, ExtensionState::Active) => {
+            return ExtensionReadiness::Unknown;
+        }
+        Some(true) | None => {}
+    }
+    match &status.state {
+        ExtensionState::Active if confirmed_stale_build => ExtensionReadiness::NotLoadedThisSession,
+        ExtensionState::Active if protocol_failure.is_some() => protocol_failure.unwrap(),
+        ExtensionState::Active => ExtensionReadiness::Ready,
+        ExtensionState::Inactive => ExtensionReadiness::Inactive,
+        ExtensionState::Error(_) | ExtensionState::OutOfDate => ExtensionReadiness::ExtensionFailed,
+        ExtensionState::Unknown if installed_matches && metadata_matches => {
+            ExtensionReadiness::NotLoadedThisSession
+        }
+        ExtensionState::Unknown | ExtensionState::Other(_) => ExtensionReadiness::Unknown,
+    }
+}
+
 fn assess_build_identity(
     on_disk: Option<&str>,
     metadata_matches: bool,
@@ -129,10 +193,10 @@ fn assess_build_identity(
             fix: Some("log out of GNOME and log back in to load the installed extension build".into()),
         },
         None => BuildAssessment {
-            state: "logout-required",
+            state: "unknown",
             ready: false,
-            detail: format!("the installed extension is build {bundled}, but its live build identity could not be verified{}", live_error.map(|error| format!(": {error}")).unwrap_or_default()),
-            fix: Some("log out of GNOME and log back in to load and verify the installed extension build".into()),
+            detail: format!("the installed extension is build {bundled}, but GNOME Shell's live build identity could not be verified{}", live_error.map(|error| format!(": {error}")).unwrap_or_default()),
+            fix: Some("run `wayexpand doctor --gnome --json` to inspect session-bus and extension-protocol readiness; log out only if the report confirms an older extension build is loaded".into()),
         },
     }
 }
@@ -469,9 +533,9 @@ fn persist_enabled() -> Result<ExtensionSettingsTransaction> {
 /// A plain-language line and an optional fix for the extension's state.
 pub(crate) fn describe_state(
     state: &ExtensionState,
-    user_extensions_enabled: bool,
+    user_extensions_enabled: Option<bool>,
 ) -> (bool, String, Option<String>) {
-    if !user_extensions_enabled {
+    if user_extensions_enabled == Some(false) {
         return (
             false,
             "GNOME has user extensions switched off, so the WayExpand window tracker cannot run".into(),
@@ -483,7 +547,7 @@ pub(crate) fn describe_state(
         ExtensionState::Inactive => (false, "the WayExpand GNOME Shell extension is installed but turned off".into(), Some("run `wayexpand setup`, or `gnome-extensions enable wayexpand-window-tracker@cyberducttape.github.io`".into())),
         ExtensionState::Error(error) => (false, format!("GNOME Shell could not load the WayExpand extension: {}", if error.is_empty() { "no error text" } else { error }), Some("reinstall WayExpand and run `wayexpand setup`; see `journalctl --user -b | grep -i wayexpand` for details".into())),
         ExtensionState::OutOfDate => (false, "this GNOME Shell version is not supported by the WayExpand extension (GNOME 45 or newer is required)".into(), None),
-        ExtensionState::Unknown => (false, "GNOME Shell has not loaded the WayExpand extension".into(), Some("run `wayexpand setup`; a newly installed extension starts after you log out and back in once".into())),
+        ExtensionState::Unknown => (false, "GNOME Shell has not reported the WayExpand extension; setup must confirm whether it is a newly installed extension or an unavailable extension state".into(), Some("run `wayexpand doctor --gnome --json` to inspect the Shell session and extension state".into())),
         ExtensionState::Other(number) => (false, format!("the WayExpand GNOME Shell extension is in state {number}"), Some("check again in a moment".into())),
     }
 }
@@ -510,9 +574,9 @@ fn verify_tracker_protocol(
     }
 }
 
-fn probe_if_active(state: &ExtensionState) -> Result<(), String> {
+fn probe_if_active(state: &ExtensionState) -> Result<(), GnomeWindowError> {
     if state == &ExtensionState::Active {
-        GnomeWindowTracker::probe().map_err(|error| error.to_string())
+        GnomeWindowTracker::probe()
     } else {
         Ok(())
     }
@@ -571,7 +635,13 @@ pub(crate) fn setup_gnome_window_tracker() -> SetupOutcome {
     let initial_status = match extension_status() {
         Ok(status) => status,
         Err(error) => {
-            println!("  GNOME Shell state could not be read before changes ({error}); no extension files or settings were changed");
+            let readiness = if session_bus_unavailable(&error) {
+                ExtensionReadiness::SessionBusUnavailable
+            } else {
+                ExtensionReadiness::Unknown
+            };
+            println!("  readiness: {} — {error}", readiness.label());
+            println!("  Fix: run `wayexpand doctor --gnome --json` to inspect the GNOME Shell session bus and extension state; setup did not change extension files or settings");
             return SetupOutcome::Unavailable;
         }
     };
@@ -593,28 +663,60 @@ pub(crate) fn setup_gnome_window_tracker() -> SetupOutcome {
     let status = match extension_status() {
         Ok(status) => status,
         Err(error) => {
-            println!("  GNOME Shell readiness could not be verified ({error}); rolling back the extension update");
+            let readiness = if session_bus_unavailable(&error) {
+                ExtensionReadiness::SessionBusUnavailable
+            } else {
+                ExtensionReadiness::Unknown
+            };
+            println!(
+                "  readiness: {} — {error}; rolling back the extension update",
+                readiness.label()
+            );
+            println!("  Fix: run `wayexpand doctor --gnome --json` for the targeted session-bus and extension-state diagnosis");
             return SetupOutcome::Unavailable;
         }
     };
     let mut activation_attempted = false;
-    let status = if status.user_extensions_enabled && status.state != ExtensionState::Active {
+    let status = if status.user_extensions_enabled == Some(true)
+        && status.state != ExtensionState::Active
+    {
         // Shell enables extensions it already knows at once; one installed
         // after this login is refused until the next login.
         activation_attempted = true;
-        if let Err(error) = enable_extension() {
-            println!(
-                "  GNOME Shell could not activate the extension ({error}); rolling back the update"
-            );
-            if initial_status.state != ExtensionState::Active {
-                stop_failed_activation();
+        match enable_extension() {
+            Ok(true) => {}
+            Ok(false) => {
+                println!("  readiness: not-loaded-this-session — GNOME Shell did not accept activation of the newly installed extension");
+                println!("  Fix: log out of GNOME and log back in only after confirming the installed extension in `wayexpand doctor --gnome --json`");
+                if initial_status.state != ExtensionState::Active {
+                    stop_failed_activation();
+                }
+                return SetupOutcome::Unavailable;
             }
-            return SetupOutcome::Unavailable;
+            Err(error) => {
+                let readiness = if session_bus_unavailable(&error) {
+                    ExtensionReadiness::SessionBusUnavailable
+                } else {
+                    ExtensionReadiness::ExtensionFailed
+                };
+                println!("  readiness: {} — GNOME Shell could not activate the extension ({error}); rolling back the update", readiness.label());
+                println!("  Fix: run `wayexpand doctor --gnome --json` to inspect the session bus, extension state, and tracker protocol");
+                if initial_status.state != ExtensionState::Active {
+                    stop_failed_activation();
+                }
+                return SetupOutcome::Unavailable;
+            }
         }
         match extension_status() {
             Ok(status) => status,
             Err(error) => {
-                println!("  activation was requested, but GNOME Shell readiness could not be verified ({error}); rolling back the update");
+                let readiness = if session_bus_unavailable(&error) {
+                    ExtensionReadiness::SessionBusUnavailable
+                } else {
+                    ExtensionReadiness::Unknown
+                };
+                println!("  readiness: {} — activation was requested but GNOME Shell state could not be verified ({error}); rolling back the update", readiness.label());
+                println!("  Fix: run `wayexpand doctor --gnome --json` to inspect the GNOME Shell session and extension protocol");
                 if initial_status.state != ExtensionState::Active {
                     stop_failed_activation();
                 }
@@ -626,9 +728,20 @@ pub(crate) fn setup_gnome_window_tracker() -> SetupOutcome {
     };
     let readiness = describe_state(&status.state, status.user_extensions_enabled);
     let protocol = probe_if_active(&status.state);
-    let (mut ok, mut message, mut fix) =
-        verify_tracker_protocol(&status.state, readiness, protocol);
+    let protocol_failure = protocol.as_ref().err().map(|error| {
+        if session_bus_unavailable(error) {
+            ExtensionReadiness::SessionBusUnavailable
+        } else {
+            ExtensionReadiness::ExtensionFailed
+        }
+    });
+    let (mut ok, mut message, mut fix) = verify_tracker_protocol(
+        &status.state,
+        readiness,
+        protocol.map_err(|error| error.to_string()),
+    );
     let mut session_restart_required = false;
+    let mut build_readiness_failure = None;
     let bundled_identity = wayexpand_backend_gnome_window::bundled_extension_build_identity();
     let disk_identity = disk_build_identity(&directory);
     let metadata_matches = disk_identity
@@ -651,6 +764,10 @@ pub(crate) fn setup_gnome_window_tracker() -> SetupOutcome {
         if !assessment.ready {
             message = assessment.detail.clone();
             fix = assessment.fix.clone();
+            build_readiness_failure = Some(match assessment.state {
+                "unknown" | "unavailable" => ExtensionReadiness::Unknown,
+                _ => ExtensionReadiness::ExtensionFailed,
+            });
             if assessment.state == "logout-required"
                 && metadata_matches
                 && disk_identity.as_deref() == Some(bundled_identity.as_str())
@@ -670,6 +787,7 @@ pub(crate) fn setup_gnome_window_tracker() -> SetupOutcome {
             live_identity.unwrap_or("unverified")
         );
     } else if status.state == ExtensionState::Unknown
+        && status.user_extensions_enabled == Some(true)
         && metadata_matches
         && disk_identity.as_deref() == Some(bundled_identity.as_str())
     {
@@ -690,17 +808,21 @@ pub(crate) fn setup_gnome_window_tracker() -> SetupOutcome {
                 println!("  ✓ GNOME live input-source control: Shell reports {source}");
             }
             Err(error) => println!(
-                "  ! GNOME live input-source control is unavailable ({error}); a newly updated extension may require logging out and back in"
+                "  ! GNOME live input-source control is unavailable ({error}); run `wayexpand doctor --gnome --json` to distinguish a bus failure from an extension-protocol issue"
             ),
         }
     }
-    if status.state == ExtensionState::Unknown && status.user_extensions_enabled {
-        println!("  GNOME Shell on Wayland loads newly installed extensions at login: log out and back in once, and app filters start working (it stays enabled after that).");
+    let not_loaded_this_session = status.state == ExtensionState::Unknown
+        && status.user_extensions_enabled == Some(true)
+        && metadata_matches
+        && disk_identity.as_deref() == Some(bundled_identity.as_str());
+    if not_loaded_this_session {
+        println!("  readiness: not-loaded-this-session — GNOME answered and the installed extension matches this build, but Shell has not loaded it in this session");
+        println!("  Fix: log out of GNOME and log back in once, then rerun `wayexpand doctor --gnome --json`");
     } else if let Some(fix) = fix {
         println!("  Fix: {fix}");
     }
-    if (session_restart_required
-        || (status.state == ExtensionState::Unknown && status.user_extensions_enabled))
+    if (session_restart_required || not_loaded_this_session)
         && metadata_matches
         && disk_identity.as_deref() == Some(bundled_identity.as_str())
     {
@@ -713,6 +835,17 @@ pub(crate) fn setup_gnome_window_tracker() -> SetupOutcome {
         if activation_attempted && initial_status.state != ExtensionState::Active {
             stop_failed_activation();
         }
+        let readiness = build_readiness_failure.unwrap_or_else(|| {
+            extension_readiness(
+                Some(&status),
+                None,
+                disk_identity.as_deref() == Some(bundled_identity.as_str()),
+                metadata_matches,
+                protocol_failure,
+                session_restart_required,
+            )
+        });
+        println!("  readiness: {} — {message}", readiness.label());
         return SetupOutcome::Unavailable;
     }
     SetupOutcome::Ready(GnomeExtensionTransaction {
@@ -737,8 +870,10 @@ pub(crate) fn doctor_report() -> Option<serde_json::Value> {
         .as_deref()
         .zip(disk_identity.as_deref())
         .is_some_and(|(directory, identity)| disk_metadata_matches_build(directory, identity));
-    let (state, user_extensions_enabled) = match extension_status() {
-        Ok(status) => (Some(status.state), status.user_extensions_enabled),
+    let status_result = extension_status();
+    let status_error = status_result.as_ref().err();
+    let (state, user_extensions_enabled) = match &status_result {
+        Ok(status) => (Some(status.state.clone()), status.user_extensions_enabled),
         Err(_) => {
             // Some headless and restarted GNOME sessions temporarily fail
             // the Extensions manager query while the extension's own tracker
@@ -747,30 +882,41 @@ pub(crate) fn doctor_report() -> Option<serde_json::Value> {
             // that the extension instance is running. The later Ping and
             // build-identity checks still verify its protocol and version.
             if wayexpand_backend_gnome_window::extension_build_identity().is_ok() {
-                (Some(ExtensionState::Active), true)
+                (Some(ExtensionState::Active), Some(true))
             } else {
-                (None, true)
+                (None, None)
             }
         }
     };
-    let (protocol_state, protocol_detail) = match &state {
+    let (protocol_state, protocol_detail, protocol_failure) = match &state {
         Some(ExtensionState::Active) => match probe_if_active(&ExtensionState::Active) {
             Ok(()) => (
                 "pass",
                 "the tracker D-Bus protocol and live build identity responded".to_owned(),
+                None,
             ),
-            Err(error) => (
-                "fail",
-                format!("the tracker D-Bus handshake failed: {error}"),
-            ),
+            Err(error) => {
+                let readiness = if session_bus_unavailable(&error) {
+                    ExtensionReadiness::SessionBusUnavailable
+                } else {
+                    ExtensionReadiness::ExtensionFailed
+                };
+                (
+                    "fail",
+                    format!("the tracker D-Bus handshake failed: {error}"),
+                    Some(readiness),
+                )
+            }
         },
         Some(_) => (
             "unknown",
             "the extension is not loaded, so its D-Bus handshake cannot be tested".to_owned(),
+            None,
         ),
         None => (
             "unknown",
             "GNOME Shell did not answer on the session bus".to_owned(),
+            None,
         ),
     };
     let (mut ok, mut message, mut fix) = match &state {
@@ -785,7 +931,16 @@ pub(crate) fn doctor_report() -> Option<serde_json::Value> {
         }
         None => (
             false,
-            "GNOME Shell is not answering on the session bus".into(),
+            status_error.map_or_else(
+                || "GNOME Shell extension state is unknown".to_owned(),
+                |error| {
+                    if session_bus_unavailable(error) {
+                        format!("GNOME Shell session bus is unavailable: {error}")
+                    } else {
+                        format!("GNOME Shell extension status query failed; cause is unclassified: {error}")
+                    }
+                },
+            ),
             None,
         ),
     };
@@ -828,6 +983,35 @@ pub(crate) fn doctor_report() -> Option<serde_json::Value> {
             detail: "GNOME Shell has not confirmed a running extension instance".into(),
             fix: None,
         }
+    };
+    let readiness = if state == Some(ExtensionState::Active)
+        && protocol_failure == Some(ExtensionReadiness::SessionBusUnavailable)
+    {
+        ExtensionReadiness::SessionBusUnavailable
+    } else if state == Some(ExtensionState::Active)
+        && protocol_state == "pass"
+        && build.state == "current"
+    {
+        ExtensionReadiness::Ready
+    } else if state == Some(ExtensionState::Active)
+        && matches!(build.state, "unknown" | "unavailable" | "not-running")
+    {
+        ExtensionReadiness::Unknown
+    } else if state == Some(ExtensionState::Active)
+        && matches!(build.state, "invalid-on-disk" | "update-required")
+    {
+        ExtensionReadiness::ExtensionFailed
+    } else {
+        extension_readiness(
+            status_result.as_ref().ok(),
+            status_error,
+            current,
+            metadata_matches,
+            protocol_failure,
+            build.state == "logout-required"
+                && live_identity.is_some()
+                && live_identity != Some(bundled_identity.as_str()),
+        )
     };
     if state == Some(ExtensionState::Active) && !build.ready {
         ok = false;
@@ -874,6 +1058,7 @@ pub(crate) fn doctor_report() -> Option<serde_json::Value> {
             "fix": build.fix,
         },
         "state": state_label,
+        "readiness": readiness.label(),
         "protocol_handshake": {
             "state": protocol_state,
             "detail": protocol_detail,
@@ -900,22 +1085,22 @@ mod tests {
             ExtensionState::Unknown,
             ExtensionState::Other(6),
         ] {
-            let (ok, message, _) = describe_state(&state, true);
+            let (ok, message, _) = describe_state(&state, Some(true));
             assert_eq!(ok, state == ExtensionState::Active, "{state:?}");
             assert!(!message.is_empty());
         }
-        let (ok, _, fix) = describe_state(&ExtensionState::Active, false);
+        let (ok, _, fix) = describe_state(&ExtensionState::Active, Some(false));
         assert!(!ok);
         assert!(fix.unwrap().contains("disable-user-extensions false"));
-        let (_, _, fix) = describe_state(&ExtensionState::Unknown, true);
-        assert!(fix.unwrap().contains("log out"));
+        let (_, _, fix) = describe_state(&ExtensionState::Unknown, Some(true));
+        assert!(fix.unwrap().contains("doctor --gnome --json"));
     }
 
     #[test]
     fn active_extension_is_not_ready_when_tracker_protocol_probe_fails() {
         let result = verify_tracker_protocol(
             &ExtensionState::Active,
-            describe_state(&ExtensionState::Active, true),
+            describe_state(&ExtensionState::Active, Some(true)),
             Err("protocol version mismatch".into()),
         );
         assert!(!result.0);
@@ -924,7 +1109,7 @@ mod tests {
 
         let ready = verify_tracker_protocol(
             &ExtensionState::Active,
-            describe_state(&ExtensionState::Active, true),
+            describe_state(&ExtensionState::Active, Some(true)),
             Ok(()),
         );
         assert!(ready.0);
@@ -954,7 +1139,8 @@ mod tests {
         let unverified =
             assess_build_identity(Some(expected), true, expected, None, Some("no property"));
         assert!(!unverified.ready);
-        assert_eq!(unverified.state, "logout-required");
+        assert_eq!(unverified.state, "unknown");
+        assert!(unverified.fix.unwrap().contains("doctor --gnome --json"));
 
         let outdated = assess_build_identity(
             Some("sha256:old-disk"),
@@ -965,6 +1151,96 @@ mod tests {
         );
         assert_eq!(outdated.state, "update-required");
         assert!(outdated.fix.unwrap().contains("wayexpand setup"));
+    }
+
+    #[test]
+    fn extension_readiness_keeps_bus_failure_load_failure_and_unknown_distinct() {
+        use wayexpand_backend_gnome_window::ExtensionStatus;
+
+        let status = |state, user_extensions_enabled| ExtensionStatus {
+            state,
+            user_extensions_enabled: Some(user_extensions_enabled),
+        };
+        assert_eq!(
+            extension_readiness(
+                None,
+                Some(&GnomeWindowError::ConnectionTimedOut),
+                false,
+                false,
+                None,
+                false,
+            ),
+            ExtensionReadiness::SessionBusUnavailable
+        );
+        assert_eq!(
+            extension_readiness(
+                None,
+                Some(&GnomeWindowError::ShellNotRunning),
+                true,
+                true,
+                None,
+                false,
+            ),
+            ExtensionReadiness::Unknown
+        );
+        assert_eq!(
+            extension_readiness(
+                Some(&status(ExtensionState::Unknown, true)),
+                None,
+                true,
+                true,
+                None,
+                false,
+            ),
+            ExtensionReadiness::NotLoadedThisSession
+        );
+        assert_eq!(
+            extension_readiness(
+                Some(&ExtensionStatus {
+                    state: ExtensionState::Unknown,
+                    user_extensions_enabled: None,
+                }),
+                None,
+                true,
+                true,
+                None,
+                false,
+            ),
+            ExtensionReadiness::Unknown
+        );
+        assert_eq!(
+            extension_readiness(
+                Some(&status(ExtensionState::Unknown, true)),
+                None,
+                false,
+                false,
+                None,
+                false,
+            ),
+            ExtensionReadiness::Unknown
+        );
+        assert_eq!(
+            extension_readiness(
+                Some(&status(ExtensionState::Error("boom".into()), true)),
+                None,
+                true,
+                true,
+                None,
+                false,
+            ),
+            ExtensionReadiness::ExtensionFailed
+        );
+        assert_eq!(
+            extension_readiness(
+                Some(&status(ExtensionState::Active, true)),
+                None,
+                true,
+                true,
+                Some(ExtensionReadiness::ExtensionFailed),
+                false,
+            ),
+            ExtensionReadiness::ExtensionFailed
+        );
     }
 
     #[test]

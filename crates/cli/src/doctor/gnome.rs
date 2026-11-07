@@ -284,17 +284,10 @@ fn default_remediation_command(id: &str) -> Option<String> {
     Some(
         match id {
             "gnome-session" => "wayexpand setup --check",
-            "tools"
-            | "component"
-            | "manifest"
-            | "registered"
-            | "engine"
-            | "selected"
+            "tools" | "component" | "manifest" | "registered" | "engine" | "selected"
             | "consent" => "wayexpand setup --backend ibus",
             "daemon" => "ibus start",
-            "manifest-scope" => {
-                "wayexpand setup --backend ibus --install-system-integration"
-            }
+            "manifest-scope" => "wayexpand setup --backend ibus --install-system-integration",
             "gnome-source-registered" | "gnome-source-active" => {
                 "wayexpand repair --gnome-input-source"
             }
@@ -302,9 +295,9 @@ fn default_remediation_command(id: &str) -> Option<String> {
             "field-input" | "target-insertion" => "wayexpand debug --gnome --interactive",
             "output-backend" => "wayexpand backend list",
             "daemon-version" => "wayexpand upgrade --apply",
-            "window-extension-installed" | "window-extension-loaded" => "wayexpand setup",
-            "window-extension-build" => {
-                "gnome-extensions disable wayexpand-window-tracker@cyberducttape.github.io && gnome-extensions enable wayexpand-window-tracker@cyberducttape.github.io"
+            "window-extension-installed" => "wayexpand setup",
+            "window-extension-loaded" | "window-extension-build" => {
+                "wayexpand doctor --gnome --json"
             }
             "window-extension-handshake" | "window-focus-events" => "wayexpand setup",
             "window-extension-client-auth" => "wayexpand setup",
@@ -529,7 +522,52 @@ fn window_tracking_checks(
         .and_then(|value| value.get("state"))
         .and_then(Value::as_str)
         .unwrap_or("unknown");
-    let loaded = match extension_state {
+    let readiness = report
+        .and_then(|value| value.get("readiness"))
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let loaded = match readiness {
+        "not-loaded-this-session" => DoctorCheck::new(
+            "window-extension-loaded",
+            "Extension loaded in GNOME Shell",
+            "warn",
+            "GNOME Shell answered the status query and the complete current extension is installed and enabled, but this Shell session has not loaded it",
+            Some("WX-GNOME-WINDOW-003"),
+            Some("log out of GNOME and back in once, then rerun `wayexpand doctor --gnome --json`".into()),
+        ),
+        "session-bus-unavailable" => DoctorCheck::new(
+            "window-extension-loaded",
+            "Extension loaded in GNOME Shell",
+            "unknown",
+            report.and_then(|value| value.get("detail")).and_then(Value::as_str).unwrap_or("the GNOME Shell session bus could not be queried"),
+            Some("WX-GNOME-WINDOW-007"),
+            Some("run `wayexpand doctor --gnome --json` from the active GNOME desktop session; do not log out solely because this query failed".into()),
+        ),
+        "extension-failed" => DoctorCheck::new(
+            "window-extension-loaded",
+            "Extension loaded in GNOME Shell",
+            "fail",
+            report.and_then(|value| value.get("detail")).and_then(Value::as_str).unwrap_or("GNOME reported an extension or tracker-protocol failure"),
+            Some("WX-GNOME-WINDOW-008"),
+            report.and_then(|value| value.get("fix")).and_then(Value::as_str).map(str::to_owned).or_else(|| Some("run `wayexpand doctor --gnome --json` and inspect the extension error and tracker handshake".into())),
+        ),
+        "inactive" => DoctorCheck::new(
+            "window-extension-loaded",
+            "Extension loaded in GNOME Shell",
+            "fail",
+            "GNOME user extensions are disabled or the WayExpand extension is inactive",
+            Some("WX-GNOME-WINDOW-002"),
+            Some("enable user extensions in GNOME Settings, then run `wayexpand doctor --gnome`".into()),
+        ),
+        "unknown" => DoctorCheck::new(
+            "window-extension-loaded",
+            "Extension loaded in GNOME Shell",
+            "unknown",
+            report.and_then(|value| value.get("detail")).and_then(Value::as_str).unwrap_or("the GNOME Shell extension state is unknown; no session-restart diagnosis is established"),
+            Some("WX-GNOME-WINDOW-009"),
+            Some("run `wayexpand doctor --gnome --json` to inspect GNOME Shell availability and the extension state".into()),
+        ),
+        _ => match extension_state {
         "active" => DoctorCheck::new(
             "window-extension-loaded",
             "Extension loaded in GNOME Shell",
@@ -554,6 +592,7 @@ fn window_tracking_checks(
             Some("WX-GNOME-WINDOW-002"),
             report.and_then(|value| value.get("fix")).and_then(Value::as_str).map(str::to_owned),
         ),
+        },
     };
 
     let build = report.and_then(|value| value.get("build_identity"));
@@ -791,6 +830,7 @@ mod tests {
             "installed_path": "/redacted/extension",
             "installed_matches_bundled": true,
             "state": state,
+            "readiness": if state == "active" && build_state == "current" && handshake == "pass" { "ready" } else { "unknown" },
             "detail": "extension state detail",
             "fix": "run setup",
             "build_identity": {"runtime_state": build_state, "live": "sha256:test", "detail": "build detail", "fix": "log out and in"},
@@ -817,6 +857,45 @@ mod tests {
         assert_eq!(checks[2].state, "warn");
         assert_eq!(checks[5].state, "warn");
         assert_eq!(section_state(&checks).0, "warn");
+    }
+
+    #[test]
+    fn extension_readiness_does_not_turn_bus_or_unknown_errors_into_restart_advice() {
+        for (readiness, expected_state, expected_problem, restart_advice) in [
+            (
+                "not-loaded-this-session",
+                "warn",
+                Some("WX-GNOME-WINDOW-003"),
+                true,
+            ),
+            (
+                "session-bus-unavailable",
+                "unknown",
+                Some("WX-GNOME-WINDOW-007"),
+                false,
+            ),
+            (
+                "extension-failed",
+                "fail",
+                Some("WX-GNOME-WINDOW-008"),
+                false,
+            ),
+            ("unknown", "unknown", Some("WX-GNOME-WINDOW-009"), false),
+        ] {
+            let mut report = extension_report("shell-unavailable", "unknown", "unknown");
+            report["readiness"] = json!(readiness);
+            report["detail"] = json!(format!("observed {readiness}"));
+            let loaded = window_tracking_checks(Some(report), None)
+                .into_iter()
+                .find(|check| check.id == "window-extension-loaded")
+                .unwrap();
+            assert_eq!(loaded.state, expected_state, "{readiness}");
+            assert_eq!(loaded.problem_id, expected_problem, "{readiness}");
+            let remedy = loaded.remedy.as_deref().unwrap_or_default();
+            let recommends_restart =
+                remedy.contains("log out") && !remedy.contains("do not log out");
+            assert_eq!(recommends_restart, restart_advice, "{readiness}");
+        }
     }
 
     #[test]
