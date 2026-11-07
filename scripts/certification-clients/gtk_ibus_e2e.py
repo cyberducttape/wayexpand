@@ -75,6 +75,11 @@ def main():
                 quit_loop()
                 return False
             return True
+        if not entry.has_focus():
+            # In GTK 4, grabbing focus before Mutter activates the toplevel
+            # may be ignored. Retry only after the Shell focus controller has
+            # confirmed this acceptance window is active.
+            entry.grab_focus()
         if entry.has_focus() and not os.path.exists(ready_marker):
             with open(ready_marker, "w", encoding="ascii") as ready:
                 ready.write("focused\n")
