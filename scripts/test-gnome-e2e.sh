@@ -643,6 +643,7 @@ env -i \
     XDG_DATA_HOME="$work/home/.local/share" \
     XDG_DATA_DIRS="${XDG_DATA_DIRS:-/usr/local/share:/usr/share}" \
     XDG_RUNTIME_DIR="$runtime" \
+    WAYLAND_DISPLAY=wayexpand-gnome-e2e \
     IBUS_COMPONENT_PATH="$work/component:/usr/share/ibus/component" \
     GTK_IM_MODULE=ibus \
     GDK_BACKEND=wayland \
