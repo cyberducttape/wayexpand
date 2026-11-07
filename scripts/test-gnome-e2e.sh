@@ -421,6 +421,7 @@ run_gtk_ibus_case() {
     password=$4
     gtk_version=${5:-3}
     marker="$E2E_WORK/gtk-window-focused-$case_name"
+    ready_marker="$E2E_WORK/gtk-input-ready-$case_name"
     test_log="$E2E_WORK/gtk-ibus-e2e-$case_name.log"
     status_file="$XDG_RUNTIME_DIR/wayexpand-ibus-status.json"
     set --
@@ -434,6 +435,7 @@ run_gtk_ibus_case() {
         XAUTHORITY="$xwayland_auth" \
         IBUS_ADDRESS="$(ibus address)" \
         GTK_E2E_FOCUS_MARKER="$marker" \
+        GTK_E2E_READY_MARKER="$ready_marker" \
         python3 "$E2E_PROJECT_DIR/scripts/certification-clients/gtk_ibus_e2e.py" \
         --gtk-version "$gtk_version" --expected "$expected" "$@" >"$test_log" 2>&1 &
     gtk_pid=$!
@@ -446,6 +448,26 @@ run_gtk_ibus_case() {
         exit 1
     fi
     : >"$marker"
+    ready_tries=100
+    while [ ! -s "$ready_marker" ]; do
+        if ! kill -0 "$gtk_pid" 2>/dev/null; then
+            wait "$gtk_pid" || true
+            gtk_pid=
+            log "fail gnome-gtk-$case_name GTK input context exited before readiness"
+            cat "$test_log"
+            exit 1
+        fi
+        ready_tries=$((ready_tries - 1))
+        if [ "$ready_tries" -le 0 ]; then
+            kill "$gtk_pid" 2>/dev/null || true
+            wait "$gtk_pid" 2>/dev/null || true
+            gtk_pid=
+            log "fail gnome-gtk-$case_name GTK field did not report stable active focus"
+            cat "$test_log"
+            exit 1
+        fi
+        sleep 0.05
+    done
     if ! DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
         xdotool type --clearmodifiers --delay 40 -- "$trigger"; then
         kill "$gtk_pid" 2>/dev/null || true

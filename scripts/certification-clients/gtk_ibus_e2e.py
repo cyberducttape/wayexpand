@@ -34,6 +34,9 @@ def main():
     focus_marker = os.environ.get("GTK_E2E_FOCUS_MARKER")
     if not focus_marker:
         raise SystemExit("GTK_E2E_FOCUS_MARKER must be set by the Mutter focus test")
+    ready_marker = os.environ.get("GTK_E2E_READY_MARKER")
+    if not ready_marker:
+        raise SystemExit("GTK_E2E_READY_MARKER must be set by the Mutter focus test")
 
     if args.gtk_version == "4":
         Gtk.init()
@@ -83,6 +86,7 @@ def main():
 
     failed = False
     started_at = GLib.get_monotonic_time()
+    focused_since = None
     loop = GLib.MainLoop() if args.gtk_version == "4" else None
 
     def quit_loop():
@@ -92,7 +96,7 @@ def main():
             Gtk.main_quit()
 
     def wait_for_expansion():
-        nonlocal failed
+        nonlocal failed, focused_since
         if not os.path.exists(focus_marker):
             if GLib.get_monotonic_time() - started_at >= TIMEOUT_MS * 1000:
                 print("Mutter did not activate the GTK acceptance window", file=sys.stderr)
@@ -100,6 +104,23 @@ def main():
                 quit_loop()
                 return False
             return True
+        # Mutter focus confirmation only proves that the toplevel was raised.
+        # Wait for GTK's actual child focus to remain stable before the test
+        # sends its first key; otherwise a fast XTEST event can race IBus
+        # InputContext creation and lose the first character.
+        child_focused = window.is_active() and window.get_focus() is focus_widget
+        if child_focused:
+            if focused_since is None:
+                focused_since = GLib.get_monotonic_time()
+            elif GLib.get_monotonic_time() - focused_since >= 250_000:
+                try:
+                    fd = os.open(ready_marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                except FileExistsError:
+                    pass
+                else:
+                    os.close(fd)
+        else:
+            focused_since = None
         if not focus_widget.has_focus():
             # In GTK 4, grabbing focus before Mutter activates the toplevel
             # may be ignored. Retry only after the Shell focus controller has
