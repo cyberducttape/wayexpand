@@ -411,6 +411,7 @@ run_gtk_ibus_case() {
     password=$4
     gtk_version=${5:-3}
     marker="$E2E_WORK/gtk-window-focused-$case_name"
+    ready_marker="$E2E_WORK/gtk-field-focused-$case_name"
     test_log="$E2E_WORK/gtk-ibus-e2e-$case_name.log"
     status_file="$XDG_RUNTIME_DIR/wayexpand-ibus-status.json"
     base_focus=$(python3 - "$status_file" <<'PY'
@@ -432,6 +433,7 @@ PY
         XAUTHORITY="$xwayland_auth" \
         IBUS_ADDRESS="$(ibus address)" \
         GTK_E2E_FOCUS_MARKER="$marker" \
+        GTK_E2E_READY_MARKER="$ready_marker" \
         python3 "$E2E_PROJECT_DIR/scripts/certification-clients/gtk_ibus_e2e.py" \
         --gtk-version "$gtk_version" --expected "$expected" "$@" >"$test_log" 2>&1 &
     gtk_pid=$!
@@ -453,7 +455,7 @@ PY
             cat "$test_log"
             exit 1
         fi
-        if [ "$(python3 - "$status_file" "$base_focus" <<'PY'
+        if [ -s "$ready_marker" ] && [ "$(python3 - "$status_file" "$base_focus" <<'PY'
 import json
 import sys
 
