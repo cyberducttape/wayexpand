@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Rework Getting Started around the GUI-first onboarding flow, and document
+  app-filter availability by route. GNOME focus updates are supplied by the
+  Shell extension and bound to IBus contexts, but remain uncertified in
+  real-session applications.
 - Build release payloads against Ubuntu 24.04 LTS and pin distro package
   install smoke checks to Ubuntu 24.04/26.04 and Fedora 45. Clarify in
   packaging docs that CI coverage is not the same as published package
