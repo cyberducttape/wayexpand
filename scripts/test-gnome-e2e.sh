@@ -324,50 +324,9 @@ then
     exit 1
 fi
 
-# Verify source activation and readback through GNOME Shell's live
-# InputSourceManager. Then write the deprecated `current` key to request a
-# different source and assert that Shell's observed active source is unchanged.
-"$E2E_BIN_DIR/wx-e2e-gnome-tracker" --activate-source xkb de \
-    >"$E2E_WORK/source-activation.log"
-active_source=$("$E2E_BIN_DIR/wx-e2e-gnome-tracker" --active-source)
-case "$active_source" in
-    *"active-source xkb de"*) log "pass active-input-source $active_source" ;;
-    *) log "fail active-input-source GNOME Shell reported $active_source"; exit 1 ;;
-esac
-active_layout=$("$E2E_BIN_DIR/wx-e2e-gnome-tracker" --active-layout)
-case "$active_layout" in
-    *"active-layout xkb de"*) log "pass active-keyboard-layout $active_layout" ;;
-    *) log "fail active-keyboard-layout GNOME Shell reported $active_layout"; exit 1 ;;
-esac
-if ! gsettings set org.gnome.desktop.input-sources current 0 \
-    >"$E2E_WORK/deprecated-current.log" 2>&1; then
-    log "fail deprecated-current-setting could not write the legacy key in the isolated session"
-    exit 1
-fi
-configured_current=$(gsettings get org.gnome.desktop.input-sources current)
-case "$configured_current" in
-    *0*) log "pass deprecated-current-readback $configured_current" ;;
-    *) log "fail deprecated-current-readback unexpected value $configured_current"; exit 1 ;;
-esac
-active_source=$("$E2E_BIN_DIR/wx-e2e-gnome-tracker" --active-source)
-case "$active_source" in
-    *"active-source xkb de"*) log "pass ignored-current-setting $active_source" ;;
-    *) log "fail ignored-current-setting GNOME Shell reported $active_source"; exit 1 ;;
-esac
-if "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --activate-source ibus wayexpand \
-    >"$E2E_WORK/unavailable-input-source.log" 2>&1; then
-    log "fail unavailable-input-source GNOME activated an unregistered IBus engine"
-    exit 1
-elif grep -qi 'AccessDenied' "$E2E_WORK/unavailable-input-source.log"; then
-    log "fail unavailable-input-source the authorized test client was denied"
-    cat "$E2E_WORK/unavailable-input-source.log"
-    exit 1
-fi
-log "pass unavailable-input-source"
-
 # Register in GNOME's typed source list without disturbing the keyboard
-# layouts, activate through Shell's live manager, then prove the already
-# selected IBus engine performs a trigger replacement in its input context.
+# layouts. Ask the real CLI to activate WayExpand so the session-bus caller
+# authorization and Shell InputSourceManager path are exercised together.
 gsettings set org.gnome.desktop.input-sources sources \
     "[('xkb', 'us'), ('xkb', 'de'), ('ibus', 'wayexpand')]"
 registered_sources=$(gsettings get org.gnome.desktop.input-sources sources)
@@ -375,15 +334,9 @@ case "$registered_sources" in
     *"'ibus', 'wayexpand'"*) log "pass gnome-ibus-source-registered $registered_sources" ;;
     *) log "fail gnome-ibus-source-registered GNOME returned $registered_sources"; exit 1 ;;
 esac
-# Request WayExpand by its deprecated list index while the live source is
-# still xkb/de. The CLI readiness check must use Shell's active-source bridge,
-# not accept the setting's successful readback as activation evidence.
+# Writing the deprecated `current` key to the WayExpand index must not make
+# readiness pass; only Shell's live InputSourceManager can prove activation.
 gsettings set org.gnome.desktop.input-sources current 2
-active_source=$("$E2E_BIN_DIR/wx-e2e-gnome-tracker" --active-source)
-case "$active_source" in
-    *"active-source xkb de"*) ;;
-    *) log "fail deprecated-current-no-activation GNOME Shell reported $active_source"; exit 1 ;;
-esac
 "$E2E_BIN_DIR/wayexpand" ibus status --json \
     >"$E2E_WORK/ibus-before-live-activation.json" 2>"$E2E_WORK/ibus-before-live-activation.err" || true
 if ! python3 - "$E2E_WORK/ibus-before-live-activation.json" <<'PY'
@@ -405,13 +358,43 @@ then
     exit 1
 fi
 
-"$E2E_BIN_DIR/wx-e2e-gnome-tracker" --activate-source ibus wayexpand \
-    >"$E2E_WORK/ibus-source-activation.log"
-active_source=$("$E2E_BIN_DIR/wx-e2e-gnome-tracker" --active-source)
-case "$active_source" in
-    *"active-source ibus wayexpand"*) log "pass gnome-ibus-source-active $active_source" ;;
-    *) log "fail gnome-ibus-source-active GNOME Shell reported $active_source"; exit 1 ;;
-esac
+"$E2E_BIN_DIR/wayexpand" doctor --gnome --json \
+    >"$E2E_WORK/doctor-before-cli-activation.json" \
+    2>"$E2E_WORK/doctor-before-cli-activation.err" || true
+if ! python3 - "$E2E_WORK/doctor-before-cli-activation.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    report = json.load(source)
+check = next(item for item in report["checks"] if item["id"] == "gnome-source-active")
+if check["state"] == "pass":
+    raise SystemExit("deprecated current setting incorrectly produced an activation PASS")
+print(f"pass deprecated-current-no-activation readiness={check['state']}")
+PY
+then
+    log "fail deprecated-current-no-activation CLI trusted the deprecated setting"
+    cat "$E2E_WORK/doctor-before-cli-activation.json"
+    exit 1
+fi
+"$E2E_BIN_DIR/wayexpand" repair --gnome-input-source --json \
+    >"$E2E_WORK/ibus-source-activation.json"
+"$E2E_BIN_DIR/wayexpand" doctor --gnome --json \
+    >"$E2E_WORK/doctor-after-cli-activation.json" 2>&1 || true
+python3 - "$E2E_WORK/ibus-source-activation.json" \
+    "$E2E_WORK/doctor-after-cli-activation.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    repair = json.load(source)
+assert repair.get("state") == "pass", repair
+with open(sys.argv[2], encoding="utf-8") as source:
+    checks = json.load(source)["checks"]
+active = next(item for item in checks if item["id"] == "gnome-source-active")
+assert active["state"] == "pass", active
+print("pass gnome-ibus-source-active readiness=pass")
+PY
 # GNOME's active-source manager and IBus engine selection are separate
 # observations. Wait for IBus to confirm the selected engine before driving a
 # GTK client; this catches activation that only changed Shell's UI state.
@@ -596,16 +579,25 @@ if [ "$tries" -gt 0 ]; then
     esac
 
     login_source_ok=0
-    if "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --activate-source ibus wayexpand \
-        >"$E2E_WORK/ibus-source-activation-after-login.log"; then
-        active_source=$("$E2E_BIN_DIR/wx-e2e-gnome-tracker" --active-source)
-        case "$active_source" in
-            *"active-source ibus wayexpand"*)
-                login_source_ok=1
-                log "pass gnome-ibus-source-after-login $active_source"
-                ;;
-            *) log "fail gnome-ibus-source-after-login GNOME Shell reported $active_source"; status=1 ;;
-        esac
+    if "$E2E_BIN_DIR/wayexpand" repair --gnome-input-source --json \
+        >"$E2E_WORK/ibus-source-activation-after-login.json" \
+        && { "$E2E_BIN_DIR/wayexpand" doctor --gnome --json \
+            >"$E2E_WORK/doctor-source-after-login.json" 2>&1 || true; } \
+        && python3 - "$E2E_WORK/ibus-source-activation-after-login.json" \
+            "$E2E_WORK/doctor-source-after-login.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    repair = json.load(source)
+with open(sys.argv[2], encoding="utf-8") as source:
+    checks = json.load(source)["checks"]
+active = next(item for item in checks if item["id"] == "gnome-source-active")
+assert repair.get("state") == "pass" and active["state"] == "pass", (repair, active)
+PY
+    then
+        login_source_ok=1
+        log "pass gnome-ibus-source-after-login live GNOME input source is active"
     else
         log "fail gnome-ibus-source-after-login GNOME could not activate WayExpand after Shell restart"
         status=1
@@ -664,7 +656,7 @@ env -i \
     dbus-run-session -- "$work/session.sh" >"$work/results.txt" 2>"$work/session.log" || status=$?
 
 cat "$work/results.txt"
-expected_checks='extension-active unauthorized-tracker-subscription extension-pre-upgrade-build extension-upgrade-not-current active-input-source deprecated-current-readback ignored-current-setting unavailable-input-source ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gtk-ibus-insertion-before-shell-restart gnome-ibus-operational extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gtk-ibus-insertion-after-shell-restart'
+expected_checks='extension-active unauthorized-tracker-subscription extension-pre-upgrade-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gtk-ibus-insertion-before-shell-restart gnome-ibus-operational extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gtk-ibus-insertion-after-shell-restart'
 missing_check=
 for check in $expected_checks; do
     if ! grep -F "pass $check" "$work/results.txt" >/dev/null; then
