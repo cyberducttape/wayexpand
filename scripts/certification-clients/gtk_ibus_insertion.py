@@ -1,8 +1,11 @@
 #!/usr/bin/python3
 """Type a harmless trigger into a focused GTK3 IBus context via XTest."""
 
+import json
+import os
 import subprocess
 import sys
+import time
 
 import gi
 gi.require_version("Gtk", "3.0")
@@ -92,6 +95,33 @@ def main():
                 stderr=subprocess.PIPE,
                 text=True,
             )
+            # GTK can report widget focus before GNOME's newly selected IBus
+            # source has finished creating its engine process. Wait for the
+            # engine's content-free live status before sending the trigger so
+            # the acceptance test does not race source activation.
+            cli = os.path.join(os.environ["E2E_BIN_DIR"], "wayexpand")
+            deadline = time.monotonic() + 8
+            engine_live = False
+            while time.monotonic() < deadline:
+                status = subprocess.run(
+                    [cli, "ibus", "status", "--json"],
+                    check=False,
+                    timeout=3,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                )
+                try:
+                    report = json.loads(status.stdout)
+                    engine_live = report.get("readiness", {}).get("engine_running") is True
+                except json.JSONDecodeError:
+                    engine_live = False
+                if engine_live:
+                    break
+                time.sleep(0.1)
+            if not engine_live:
+                raise RuntimeError("GNOME selected WayExpand but its IBus engine did not become live")
+            time.sleep(0.2)
             subprocess.run(
                 ["xdotool", "key", "--clearmodifiers", "--delay", "50",
                  "semicolon", "e", "2", "e"],
