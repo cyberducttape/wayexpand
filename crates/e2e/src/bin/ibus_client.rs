@@ -347,16 +347,15 @@ fn main() -> Result<()> {
     let address = env::var("IBUS_ADDRESS").context("IBUS_ADDRESS is not set")?;
     let connection = zbus::blocking::connection::Builder::address(address.as_str())?.build()?;
     let (sender, events) = mpsc::channel();
-    // Subscribe only to IBus engine output signals. Reading every message on
+    // Subscribe only to D-Bus signals. IBus may rewrite the engine interface
+    // while forwarding signals to an input context, so matching that interface
+    // at the bus would drop valid CommitText messages. Reading every message on
     // the private bus also feeds unrelated method traffic through zbus's
     // header decoder; on Ubuntu 24.04 that reader panicked on unrelated bus
     // traffic and silently lost CommitText events. Keep the match rule to
     // fields supported by older D-Bus daemons; the event loop checks each
     // signal's exact engine path before applying it.
-    let signal_rule = MatchRule::builder()
-        .msg_type(MessageType::Signal)
-        .interface("org.freedesktop.IBus.Engine")?
-        .build();
+    let signal_rule = MatchRule::builder().msg_type(MessageType::Signal).build();
     let messages = MessageIterator::for_match_rule(signal_rule, &connection, Some(128))?;
     thread::spawn(move || {
         for message in messages {
