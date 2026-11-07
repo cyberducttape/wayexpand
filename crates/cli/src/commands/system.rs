@@ -292,23 +292,19 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     Ok(())
 }
 
-/// Pick a harmless configured expansion for the optional real-client test.
-/// The conventional sample remains preferred, but a custom configuration is
-/// not required to keep that sample. Command-backed entries are excluded so
-/// setup never triggers an operational action as part of a desktop test.
-fn setup_test_trigger(config: &Config) -> Option<String> {
+/// Pick an enabled, static expansion for the optional real-client test. The
+/// conventional sample remains preferred when it is testable, but custom
+/// configurations need not keep it. Command-backed and templated entries are
+/// excluded so setup never executes actions or starts an incomplete form.
+pub(crate) fn setup_test_trigger(config: &Config) -> Option<String> {
+    let is_testable = |expansion: &&wayexpand_core::ExpansionConfig| {
+        expansion.enabled && expansion.command.is_none() && !expansion.replacement.contains("{{")
+    };
     config
         .expansion
         .iter()
-        .find(|expansion| {
-            expansion.enabled && expansion.command.is_none() && expansion.answers_to(";;hello")
-        })
-        .or_else(|| {
-            config
-                .expansion
-                .iter()
-                .find(|expansion| expansion.enabled && expansion.command.is_none())
-        })
+        .find(|expansion| is_testable(expansion) && expansion.answers_to(";;hello"))
+        .or_else(|| config.expansion.iter().find(is_testable))
         .map(|expansion| expansion.trigger.clone())
 }
 
@@ -1605,6 +1601,22 @@ replacement = "hello"
     }
 
     #[test]
+    fn setup_skips_templated_hello_and_uses_a_static_custom_snippet() {
+        let config = Config::parse(
+            r#"[[expansion]]
+trigger = ";;hello"
+replacement = "Hello {{field:name}}"
+
+[[expansion]]
+trigger = ";custom"
+replacement = "safe static test"
+"#,
+        )
+        .unwrap();
+        assert_eq!(setup_test_trigger(&config).as_deref(), Some(";custom"));
+    }
+
+    #[test]
     fn setup_can_offer_an_existing_custom_trigger_without_hello() {
         let config = Config::parse(
             r#"[[expansion]]
@@ -1641,6 +1653,15 @@ program = "/usr/bin/true"
         )
         .unwrap();
         assert_eq!(setup_test_trigger(&command_only), None);
+
+        let template_only = Config::parse(
+            r#"[[expansion]]
+trigger = ";template"
+replacement = "value: {{field:value}}"
+"#,
+        )
+        .unwrap();
+        assert_eq!(setup_test_trigger(&template_only), None);
     }
 
     #[test]

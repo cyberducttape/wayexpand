@@ -675,13 +675,10 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
     });
     let ibus_report = wayexpand_backend_ibus::chain::diagnose();
     let ibus_readiness = ibus_report.readiness();
-    let hello_sample_available =
-        wayexpand_core::Config::load(wayexpand_core::default_config_path()).is_ok_and(|config| {
-            config
-                .expansion
-                .iter()
-                .any(|item| item.enabled && item.answers_to(";;hello"))
-        });
+    let first_run_test_available =
+        wayexpand_core::Config::load(wayexpand_core::default_config_path())
+            .ok()
+            .is_some_and(|config| crate::commands::system::setup_test_trigger(&config).is_some());
     let daemon_status = crate::doctor::status::read_daemon_status()
         .ok()
         .and_then(|response| crate::doctor::status::status_as_json(&response).ok());
@@ -725,7 +722,7 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
             "ibus_runtime":ibus_readiness,
                 "terminal_matching_self_test":&terminal_match,
                 "activation":{"required":true,"command":"wayexpand setup --apply","real_insertion_verified":false,"consent_granted":false},
-                "first_run_test":{"trigger":";;hello","command":"wayexpand debug --test ';;hello'","available":hello_sample_available,"real_application_confirmation_required":true,"verified":false}
+                "first_run_test":{"command":"wayexpand setup --apply","manual_command":"wayexpand debug --test <trigger>","selection":"prefer a testable ;;hello sample, otherwise an enabled static snippet","available":first_run_test_available,"real_application_confirmation_required":true,"verified":false}
             })
         );
     } else {
@@ -801,7 +798,7 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
                 .as_str()
                 .unwrap_or("could not evaluate terminal matching")
         );
-        println!("\nDesktop: {}\nRecommended: {} ({})\nSetup preflight: {}\nTarget insertion: NOT TESTED\nFirst-run test: {}\n\nNext: wayexpand setup --apply\n\nPreflight does not grant raw-input/portal consent or verify target-app insertion.", crate::doctor::backends::session_description(), recommendation.label, recommendation.detail, if ready {"ready to configure"} else {"prerequisites incomplete"}, if hello_sample_available {"`wayexpand debug --test ';;hello'` (requires real-app confirmation)"} else {"no enabled ;;hello sample is configured"});
+        println!("\nDesktop: {}\nRecommended: {} ({})\nSetup preflight: {}\nTarget insertion: NOT TESTED\nFirst-run test: {}\n\nNext: wayexpand setup --apply\n\nPreflight does not grant raw-input/portal consent or verify target-app insertion.", crate::doctor::backends::session_description(), recommendation.label, recommendation.detail, if ready {"ready to configure"} else {"prerequisites incomplete"}, if first_run_test_available {"`wayexpand setup --apply` can offer a real-app test using an enabled static snippet (requires confirmation)"} else {"no enabled static snippet is configured; add a harmless one for an optional test"});
     }
     if !ready {
         bail!("setup prerequisites are incomplete; see the failed checks")

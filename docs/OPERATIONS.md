@@ -24,9 +24,11 @@ route; an operator must still verify output in the target application.
 For the first-run path, use `wayexpand setup --check` to inspect the detected
 desktop, installation identity, PATH resolution, and setup recommendation.
 Then run `wayexpand setup --apply`. Interactive setup offers a real-app test
-using the enabled `;;hello` sample and asks you to confirm the exact replacement
-in a focused text field. A connected backend or active service is reported
-separately and is not a successful insertion test. Automated `--yes` setup does
+using an enabled static snippet (`;;hello` is preferred when it is testable,
+but is not required) and asks you to confirm the exact replacement in a focused
+text field. Command-backed and templated snippets are excluded. A connected
+backend or active service is reported separately and is not a successful
+insertion test. Automated `--yes` setup does
 not claim an insertion was verified; it prints the command for a later
 interactive test. `wayexpand install-check --json` also reports the CLI, PATH,
 and running daemon installation methods and warns when PATH shadows the current

@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Make GNOME interactive diagnostics and setup preflight use any enabled static
+  snippet for an optional real-app test. Prefer `;;hello` only when it is
+  testable; exclude command-backed and templated snippets so existing custom
+  libraries do not appear to lack a desktop test.
 - Pass IBus key events through untouched when the client lacks advertised
   surrounding-text support. This prevents matching from consuming trigger
   characters that cannot be safely replaced; browser and real-daemon acceptance

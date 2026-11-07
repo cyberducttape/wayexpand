@@ -430,20 +430,17 @@ fn gnome_interactive_test() -> Result<()> {
     }
     let Some(trigger) = wayexpand_core::Config::load(wayexpand_core::default_config_path())
         .ok()
-        .and_then(|config| {
-            config
-                .expansion
-                .iter()
-                .find(|item| item.enabled && item.answers_to(";;hello"))
-                .map(|_| ";;hello")
-        })
+        .and_then(|config| crate::commands::system::setup_test_trigger(&config))
     else {
-        println!("No enabled `;;hello` sample is available for the harmless test.");
-        println!("Add or enable the sample expansion, then rerun `wayexpand debug --gnome --interactive`.");
+        println!("No enabled static expansion is available for the harmless test.");
+        println!(
+            "Add a harmless static expansion, then rerun `wayexpand debug --gnome --interactive`."
+        );
         return Ok(());
     };
+    println!("Using an enabled static snippet for the optional test; `;;hello` is preferred when available.");
     println!("Use a normal GNOME text field. Do not use a password field, terminal command prompt, or production session.");
-    let test_result = desktop_test_for(trigger, true, DesktopTestOptions::default())?;
+    let test_result = desktop_test_for(&trigger, true, DesktopTestOptions::default())?;
     if test_result == DesktopTestResult::Verified {
         println!("GNOME test: user-confirmed insertion in the reported application only.");
         println!("Logout persistence and other application/toolkit coverage remain untested.");
