@@ -620,12 +620,16 @@ jobs:
       - name: Install GNOME Shell, GTK, IBus, and D-Bus
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gnome-shell xwayland ibus ibus-gtk3 dconf-service dbus-daemon libglib2.0-bin libgl1-mesa-dri libwayland-dev libxkbcommon-dev pkg-config python3-gi python3-evdev gir1.2-gtk-3.0
       - name: Prepare isolated virtual keyboard for GTK acceptance test
-        run: sudo modprobe uinput && sudo chown "$(id -u):$(id -g)" /dev/uinput && test -c /dev/uinput
+        run: |
+          sudo modprobe uinput
+          sudo usermod -aG input "$USER"
+          sudo chown "$(id -u):$(id -g)" /dev/uinput
+          test -c /dev/uinput
       - name: Record tested revision
         id: tested_revision
         run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Accept live GNOME source activation, GTK replacement, and Shell restart lifecycle
-        run: bash scripts/test-gnome-e2e.sh --keep
+        run: sg input -c 'bash scripts/test-gnome-e2e.sh --keep'
       - name: Upload isolated GNOME diagnostics
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
