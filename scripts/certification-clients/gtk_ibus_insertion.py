@@ -69,32 +69,6 @@ def main():
             # input still traverses GTK's IBus context and the selected IBus
             # engine; the compositor/input-method integration is checked by
             # the source activation and service diagnostics alongside this.
-            window_ids = subprocess.run(
-                ["xdotool", "search", "--sync", "--name", "^WayExpand GTK insertion acceptance$"],
-                check=True,
-                timeout=3,
-                capture_output=True,
-                text=True,
-            ).stdout.splitlines()
-            if not window_ids:
-                raise RuntimeError("GTK test window was not found by Xwayland")
-            window_id = window_ids[-1]
-            subprocess.run(
-                ["xdotool", "windowactivate", "--sync", window_id],
-                check=True,
-                timeout=3,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-            subprocess.run(
-                ["xdotool", "windowfocus", "--sync", window_id],
-                check=True,
-                timeout=3,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
             # GTK can report widget focus before GNOME's newly selected IBus
             # source has finished creating its engine process. Wait for the
             # engine's content-free live status before sending the trigger so
