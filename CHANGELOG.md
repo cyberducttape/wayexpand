@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Strengthen release-archive validation for the optional PolicyKit action
+  policy: assert the policy action and authentication defaults, regular-file
+  type, and mode 0644. The binary packager includes the policy artifact.
 - Limit first-run desktop verification to the dedicated harmless, global
   `:wayexpand-test` tutorial expansion. App-filtered snippets are excluded from
   desktop-test choices, and the dialog presents the exact trigger and expected
