@@ -191,7 +191,38 @@ activate_window() {
 run_gtk_insertion() {
     label=$1
     gtk_log="$E2E_WORK/gtk-insertion-$label.log"
-    DISPLAY=:0 GDK_BACKEND=x11 /usr/bin/python3 \
+    xwayland_info=$(python3 - <<'PY'
+from pathlib import Path
+import os
+import sys
+
+for process in Path('/proc').iterdir():
+    if not process.name.isdigit():
+        continue
+    try:
+        args = (process / 'cmdline').read_bytes().split(b'\0')
+        args = [arg.decode(errors='replace') for arg in args if arg]
+    except OSError:
+        continue
+    if not args or Path(args[0]).name != 'Xwayland':
+        continue
+    display = next((arg for arg in args[1:] if arg.startswith(':')), None)
+    try:
+        auth = args[args.index('-auth') + 1]
+    except (ValueError, IndexError):
+        auth = None
+    if display and auth and os.path.isfile(auth):
+        print(f'{display}\t{auth}')
+        break
+PY
+    )
+    x_display=${xwayland_info%%"$(printf '\t')"*}
+    x_authority=${xwayland_info#*"$(printf '\t')"}
+    if [ -z "$xwayland_info" ] || [ "$x_authority" = "$xwayland_info" ]; then
+        log "fail gtk-ibus-insertion-$label GNOME Shell's Xwayland display credentials were unavailable"
+        return 1
+    fi
+    DISPLAY="$x_display" XAUTHORITY="$x_authority" GDK_BACKEND=x11 /usr/bin/python3 \
         "$E2E_PROJECT_DIR/scripts/certification-clients/gtk_ibus_insertion.py" \
         >"$gtk_log" 2>&1 &
     gtk_pid=$!
