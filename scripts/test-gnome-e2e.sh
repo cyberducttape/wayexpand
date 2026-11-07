@@ -361,10 +361,28 @@ if [ -z "$x11_display" ]; then
     log "fail gnome-gtk-insertion GNOME did not start its private XWayland server"
     exit 1
 fi
+xwayland_auth=
+for process_cmdline in /proc/[0-9]*/cmdline; do
+    [ -r "$process_cmdline" ] || continue
+    process_args=$(tr '\000' '\n' <"$process_cmdline" 2>/dev/null || true)
+    process_display=$(printf '%s\n' "$process_args" | awk '/^:[0-9]+$/ { print; exit }')
+    if [ "$process_display" = "$x11_display" ]; then
+        candidate_auth=$(printf '%s\n' "$process_args" | awk 'previous == "-auth" { print; exit } { previous = $0 }')
+        if [ -n "$candidate_auth" ] && [ -r "$candidate_auth" ]; then
+            xwayland_auth=$candidate_auth
+            break
+        fi
+    fi
+done
+if [ -z "$xwayland_auth" ]; then
+    log "fail gnome-gtk-insertion GNOME's private XWayland authorization file could not be resolved"
+    exit 1
+fi
 timeout 20s env \
     GTK_IM_MODULE=ibus \
     GDK_BACKEND=x11 \
     DISPLAY="$x11_display" \
+    XAUTHORITY="$xwayland_auth" \
     IBUS_ADDRESS="$(ibus address)" \
     GTK_E2E_FOCUS_MARKER="$E2E_WORK/gtk-window-focused" \
     python3 "$E2E_PROJECT_DIR/scripts/certification-clients/gtk_ibus_e2e.py" \
@@ -379,7 +397,8 @@ if ! activate_window org.wayexpand.GnomeGtkIbus; then
     exit 1
 fi
 : >"$E2E_WORK/gtk-window-focused"
-if ! DISPLAY="$x11_display" xdotool type --clearmodifiers --delay 40 -- ';e2e'; then
+if ! DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+    xdotool type --clearmodifiers --delay 40 -- ';e2e'; then
     kill "$gtk_pid" 2>/dev/null || true
     wait "$gtk_pid" 2>/dev/null || true
     gtk_pid=
