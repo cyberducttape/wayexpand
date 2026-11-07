@@ -532,11 +532,16 @@ if [ "$tries" -gt 0 ]; then
         build_tries=$((build_tries - 1))
         sleep 0.1
     done
-    "$E2E_BIN_DIR/wayexpand" doctor --gnome --json \
-        >"$E2E_WORK/doctor-after-login.json" \
-        2>"$E2E_WORK/doctor-after-login.err" || true
-    if [ "$build_tries" -gt 0 ] \
-        && python3 - "$E2E_WORK/doctor-after-login.json" <<'PY'
+    # The extension's build property can become available just before its
+    # tracker handshake is ready. Wait for the complete doctor result instead
+    # of treating that brief startup window as a failed logout/login test.
+    readiness_tries=100
+    readiness_ok=0
+    while [ "$build_tries" -gt 0 ] && [ "$readiness_tries" -gt 0 ]; do
+        "$E2E_BIN_DIR/wayexpand" doctor --gnome --json \
+            >"$E2E_WORK/doctor-after-login.json" \
+            2>"$E2E_WORK/doctor-after-login.err" || true
+        if python3 - "$E2E_WORK/doctor-after-login.json" <<'PY'
 import json
 import sys
 
@@ -548,10 +553,16 @@ check = next(
 )
 assert check["state"] == "pass", check
 assert "running the installed build" in check["detail"], check
-print("pass extension-after-login the reloaded GNOME Shell runs the upgraded extension")
 PY
-    then
-        :
+        then
+            readiness_ok=1
+            break
+        fi
+        readiness_tries=$((readiness_tries - 1))
+        sleep 0.1
+    done
+    if [ "$build_tries" -gt 0 ] && [ "$readiness_ok" -eq 1 ]; then
+        log "pass extension-after-login the reloaded GNOME Shell runs the upgraded extension"
     else
         log "fail extension-after-login installed and loaded extension builds still differ"
         cat "$E2E_WORK/doctor-after-login.json"
