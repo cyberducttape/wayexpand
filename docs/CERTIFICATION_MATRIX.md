@@ -72,9 +72,13 @@ on GNOME's private XWayland server, activates the window through Mutter, types
 a fixed test trigger through XTEST, and verifies the resulting widget text.
 The same test opens an isolated Google Chrome profile on a local page, focuses
 its textarea through Mutter, types the same harmless trigger through XTEST, and
-checks the textarea value using Chrome DevTools. This exercises Chrome's IBus
-integration and browser renderer, but does not represent Firefox, native
-Wayland keyboard delivery, or physical keyboard input.
+checks the textarea value using Chrome DevTools. The tested Chrome XWayland/IBus
+path did not advertise surrounding-text support: the acceptance test verifies
+that WayExpand refuses the replacement and leaves the trigger intact. This is
+browser fail-safe evidence, not successful browser replacement and not Firefox,
+native Wayland keyboard delivery, or physical keyboard input. Do not advertise
+Chrome IBus replacement as supported until the browser exposes a verified text
+replacement contract or a separately certified integration is available.
 The GTK portion exercises GTK's actual IBus module and target widget; the
 custom protocol client separately checks trigger deletion and replacement
 commit. The test checks password-field refusal and content-free telemetry, then

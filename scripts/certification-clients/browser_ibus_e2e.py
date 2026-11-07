@@ -11,8 +11,8 @@ import argparse
 import json
 import os
 import signal
+import shutil
 import subprocess
-import sys
 import time
 import urllib.error
 import urllib.request
@@ -23,6 +23,7 @@ import websocket
 
 APP_ID = "org.wayexpand.GnomeBrowserIbus"
 TITLE = f"WayExpand browser IBus acceptance {APP_ID}"
+TRIGGER = ";e2e"
 EXPECTED = "expanded"
 TIMEOUT_SECONDS = 20
 
@@ -48,6 +49,7 @@ def main():
     parser.add_argument("--page", required=True)
     parser.add_argument("--ready-marker", required=True)
     parser.add_argument("--focus-marker", required=True)
+    parser.add_argument("--status-file", required=True)
     parser.add_argument("--log", required=True)
     args = parser.parse_args()
 
@@ -151,6 +153,21 @@ def main():
         if evaluate("document.title") != TITLE:
             fail("unexpected browser title; refusing to activate an unrelated window")
         evaluate("document.querySelector('#target').focus()")
+        status_file = Path(args.status_file)
+
+        def status_snapshot():
+            try:
+                return json.loads(status_file.read_text(encoding="utf-8"))
+            except (OSError, ValueError, TypeError):
+                return {}
+
+        baseline = status_snapshot()
+        baseline_refusals = int(
+            baseline.get("totals", {}).get("refusals", {}).get(
+                "no_surrounding_capability", 0
+            )
+        )
+        baseline_keys = int(baseline.get("totals", {}).get("keys", 0))
         Path(args.ready_marker).touch(mode=0o600)
         wait_for(lambda: Path(args.focus_marker).exists(), "Mutter-confirmed browser focus")
 
@@ -161,8 +178,28 @@ def main():
             if actual == EXPECTED:
                 print("pass Chromium IBus input context replaced the test trigger in a textarea")
                 return
+            if actual == TRIGGER:
+                status = status_snapshot()
+                totals = status.get("totals", {})
+                refusals = totals.get("refusals", {})
+                fields = status.get("recent_fields", [])
+                latest_field = fields[-1] if fields else {}
+                if (
+                    int(totals.get("keys", 0)) > baseline_keys
+                    and latest_field.get("surrounding_capability") is False
+                    and int(refusals.get("no_surrounding_capability", 0))
+                    > baseline_refusals
+                ):
+                    print(
+                        "pass Chromium input reached WayExpand; IBus did not advertise "
+                        "surrounding-text support, the replacement was refused, and the trigger remained intact"
+                    )
+                    return
             time.sleep(0.05)
-        fail(f"Chromium IBus insertion mismatch: expected {EXPECTED!r}, got {actual!r}")
+        fail(
+            "Chromium did not insert the expected text or record a safe refusal "
+            "for missing IBus surrounding-text support"
+        )
     finally:
         if connection is not None:
             try:
@@ -182,6 +219,7 @@ def main():
                 pass
             process.wait(timeout=5)
         log_file.close()
+        shutil.rmtree(profile, ignore_errors=True)
 
 
 if __name__ == "__main__":

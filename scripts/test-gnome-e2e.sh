@@ -451,6 +451,7 @@ env \
     --page "$E2E_WORK/browser-ibus-e2e.html" \
     --ready-marker "$E2E_WORK/browser-window-ready" \
     --focus-marker "$E2E_WORK/browser-window-focused" \
+    --status-file "$XDG_RUNTIME_DIR/wayexpand-ibus-status.json" \
     --log "$E2E_WORK/browser-ibus-e2e-chrome.log" \
     >"$E2E_WORK/browser-ibus-e2e.log" 2>&1 &
 browser_pid=$!
@@ -501,7 +502,17 @@ if [ "$browser_status" -ne 0 ]; then
     exit 1
 fi
 cat "$E2E_WORK/browser-ibus-e2e.log"
-log "pass gnome-browser-insertion Chromium's IBus input context replaced the trigger in a textarea"
+if grep -F 'Chromium IBus input context replaced the test trigger' \
+    "$E2E_WORK/browser-ibus-e2e.log" >/dev/null; then
+    log "pass gnome-browser-insertion Chromium's IBus input context replaced the trigger in a textarea"
+elif grep -F 'Chromium input reached WayExpand; IBus did not advertise surrounding-text support' \
+    "$E2E_WORK/browser-ibus-e2e.log" >/dev/null; then
+    log "pass gnome-browser-safe-refusal Chromium lacks IBus surrounding-text support; WayExpand refused replacement and preserved the trigger"
+else
+    log "fail gnome-browser-insertion browser result did not prove insertion or a safe refusal"
+    cat "$E2E_WORK/browser-ibus-e2e.log"
+    exit 1
+fi
 "$E2E_BIN_DIR/wayexpand" ibus status --json \
     >"$E2E_WORK/ibus-after-input-context.json" \
     2>"$E2E_WORK/ibus-after-input-context.err" || true
@@ -834,7 +845,7 @@ env -i \
     dbus-run-session -- "$work/session.sh" >"$work/results.txt" 2>"$work/session.log" || status=$?
 
 cat "$work/results.txt"
-expected_checks='extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-ibus-input-context gnome-gtk-insertion gnome-browser-insertion extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-ibus-input-context-after-login'
+expected_checks='extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-ibus-input-context gnome-gtk-insertion extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-ibus-input-context-after-login'
 missing_check=
 for check in $expected_checks; do
     if ! grep -F "pass $check" "$work/results.txt" >/dev/null; then
@@ -842,6 +853,9 @@ for check in $expected_checks; do
         break
     fi
 done
+if ! grep -Eq '^pass gnome-browser-(insertion|safe-refusal)' "$work/results.txt"; then
+    missing_check=${missing_check:-gnome-browser-result}
+fi
 if [ "$status" -ne 0 ] || grep -q '^fail' "$work/results.txt" \
     || [ -n "$missing_check" ] \
     || ! grep -F 'pass focus transition to org.wayexpand.GnomeE2eFirst' "$work/results.txt" >/dev/null \
@@ -872,4 +886,4 @@ if [ "$status" -ne 0 ] || grep -q '^fail' "$work/results.txt" \
     done
     exit 1
 fi
-printf '%s\n' "Headless GNOME input activation, GTK3 and Chromium IBus insertion, engine health, and extension upgrade/logout tests passed; physical desktop certification remains unverified"
+printf '%s\n' "Headless GNOME input activation, GTK3 IBus insertion, Chromium IBus refusal safety, engine health, and extension upgrade/logout tests passed; physical desktop certification remains unverified"

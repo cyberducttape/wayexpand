@@ -606,7 +606,7 @@ jobs:
           retention-days: 14
 
   gnome-e2e:
-    name: GNOME IBus GTK/Browser, Activation, and Upgrade Acceptance (Headless)
+    name: GNOME IBus GTK, Browser Safety, Activation, and Upgrade Acceptance (Headless)
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -624,7 +624,7 @@ jobs:
       - name: Record tested revision
         id: tested_revision
         run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - name: Accept GNOME IBus activation and GTK/browser insertion, and Shell restart lifecycle
+      - name: Accept GNOME IBus activation, GTK insertion, browser safety, and Shell restart lifecycle
         run: bash scripts/test-gnome-e2e.sh --keep
       - name: Upload isolated GNOME diagnostics
         if: always()
