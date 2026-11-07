@@ -526,11 +526,11 @@ cat "$E2E_WORK/browser-ibus-e2e.log"
 if grep -F 'Chromium IBus input context replaced the test trigger' \
     "$E2E_WORK/browser-ibus-e2e.log" >/dev/null; then
     log "pass gnome-browser-insertion Chromium's IBus input context replaced the trigger in a textarea"
-elif grep -F 'Chromium input reached WayExpand; IBus did not advertise surrounding-text support' \
+elif grep -F 'Chromium input reached WayExpand; without IBus surrounding-text support, all trigger keys passed through unchanged' \
     "$E2E_WORK/browser-ibus-e2e.log" >/dev/null; then
-    log "pass gnome-browser-safe-refusal Chromium lacks IBus surrounding-text support; WayExpand refused replacement and preserved the trigger"
+    log "pass gnome-browser-safe-passthrough Chromium lacks IBus surrounding-text support; all trigger keys reached the field unchanged"
 else
-    log "fail gnome-browser-insertion browser result did not prove insertion or a safe refusal"
+    log "fail gnome-browser-insertion browser result did not prove insertion or safe pass-through"
     cat "$E2E_WORK/browser-ibus-e2e.log"
     exit 1
 fi
