@@ -244,6 +244,8 @@ def main():
             "Chromium did not insert the expected text or record a safe refusal "
             "for missing IBus surrounding-text support; "
             f"value_state={value_state}, "
+            "test_value_codepoints="
+            f"{','.join(f'U+{ord(character):04X}' for character in actual) or 'empty'}, "
             f"focus_ins_delta={int(final_totals.get('focus_ins', 0)) - initial_focus_ins}, "
             f"keys_delta={int(final_totals.get('keys', 0)) - baseline_keys}, "
             f"latest_field_focused={latest_field.get('focused')}, "
