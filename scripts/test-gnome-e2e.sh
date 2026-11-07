@@ -98,6 +98,10 @@ if [ "$HOME" != "$E2E_WORK/home" ] \
     log "fail session-isolation GNOME test escaped its private HOME/XDG directories"
     exit 1
 fi
+if ! command -v wayexpand-ibus >"$E2E_WORK/wayexpand-ibus-path.txt"; then
+    log "fail ibus-engine-executable WayExpand's IBus engine executable is not on PATH"
+    exit 1
+fi
 gsettings set org.gnome.shell disable-user-extensions false
 gsettings set org.gnome.shell enabled-extensions "['$E2E_UUID', '$E2E_CONTROLLER_UUID']"
 gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us'), ('xkb', 'de')]"
