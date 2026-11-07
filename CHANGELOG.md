@@ -8,6 +8,9 @@ All notable changes to WayExpand are documented here.
   the live tracker identity when the Extensions manager query is temporarily
   unavailable. Treat matching `dirty-unknown` build labels as unverified in
   live daemon explanations.
+- Let GNOME Shell's input-source manager select the IBus engine without a
+  competing `ibus engine` request, which could cancel activation and leave the
+  source selected without a live engine after a Shell restart.
 - Report terminal-only coverage as a limit of the daemon route, not proof that
   browser fields are unsupported globally. Other input routes such as IBus may
   cover browsers; `wayexpand health` now leaves that combined coverage unknown

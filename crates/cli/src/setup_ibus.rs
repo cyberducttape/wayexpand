@@ -1942,6 +1942,10 @@ fn gnome_activation_failures(report: &chain::IbusChainReport) -> Vec<String> {
     .collect()
 }
 
+fn gnome_selects_ibus_engine_through_shell(desktop: IbusDesktop) -> bool {
+    desktop == IbusDesktop::Gnome
+}
+
 fn restart_failure(desktop: IbusDesktop, reason: &str) -> anyhow::Error {
     if desktop != IbusDesktop::Gnome {
         return anyhow::anyhow!("could not refresh the IBus component registry: {reason}");
@@ -2256,15 +2260,20 @@ fn activate_and_verify(
     )?;
     restart_stale_engine();
     step("Selecting WayExpand as the active input method");
-    if IbusDesktop::detect() == IbusDesktop::Gnome {
+    let gnome_managed_source = gnome_selects_ibus_engine_through_shell(IbusDesktop::detect());
+    if gnome_managed_source {
         crate::gnome_input_sources::Snapshot::register_and_activate(
             &mut snapshot.gnome_input_sources,
         )
         .context("GNOME input-source settings are unavailable; refusing partial IBus setup")?;
         step("Registered and activated WayExpand in GNOME input sources");
+    } else {
+        // GNOME's InputSourceManager owns IBus activation. Sending a second
+        // SetGlobalEngine request here races Shell's asynchronous activation
+        // and can cancel it, leaving WayExpand selected without a live engine.
+        let _ = run_setup_command("ibus", &["engine", "wayexpand"]);
     }
     // The exit status is meaningless for `default`-layout engines; read back.
-    let _ = run_setup_command("ibus", &["engine", "wayexpand"]);
     if !wait_until(
         Duration::from_secs(5),
         wayexpand_backend_ibus::global_engine_selected,
@@ -2337,7 +2346,8 @@ pub(crate) fn repair_gnome_input_source() -> Result<()> {
         crate::gnome_input_sources::Snapshot::register_and_activate(
             &mut snapshot.gnome_input_sources,
         )?;
-        let _ = run_setup_command("ibus", &["engine", "wayexpand"]);
+        // GNOME's live source manager is the sole engine selector in this
+        // session. A concurrent `ibus engine` command can cancel its request.
         if !wait_until(
             Duration::from_secs(5),
             wayexpand_backend_ibus::global_engine_selected,
@@ -2746,6 +2756,17 @@ mod tests {
             format_string_list(&["xkb:us::eng".into(), "wayexpand".into()]),
             "['xkb:us::eng', 'wayexpand']"
         );
+    }
+
+    #[test]
+    fn gnome_shell_is_the_only_ibus_engine_selector_on_gnome() {
+        assert!(gnome_selects_ibus_engine_through_shell(IbusDesktop::Gnome));
+        assert!(!gnome_selects_ibus_engine_through_shell(
+            IbusDesktop::KdeWayland
+        ));
+        assert!(!gnome_selects_ibus_engine_through_shell(
+            IbusDesktop::OtherWayland
+        ));
     }
 
     #[test]
