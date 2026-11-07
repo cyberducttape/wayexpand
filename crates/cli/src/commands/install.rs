@@ -815,6 +815,12 @@ fn terminal_match_self_test(
     terminal_only_runtime: bool,
 ) -> serde_json::Value {
     if terminal_only_runtime {
+        // Do not send a command that may not exist to an older daemon. In
+        // particular, older control servers can return a status string that
+        // looks like malformed JSON, obscuring the real CLI/daemon mismatch.
+        if daemon_status.is_some_and(|status| !daemon_build_matches_cli(status)) {
+            return stale_daemon_terminal_match_report(daemon_status);
+        }
         let response =
             crate::control_operation(wayexpand_core::DaemonOperation::TerminalMatchSelfTest);
         return parse_terminal_match_self_test(response, daemon_status);
@@ -835,6 +841,41 @@ fn terminal_match_self_test(
     let mut report = terminal_match_self_test_for(&config);
     report["configuration_path"] = serde_json::json!(config_path);
     report["configuration_source"] = serde_json::json!(configuration_source);
+    report
+}
+
+fn daemon_build_matches_cli(status: &serde_json::Value) -> bool {
+    crate::doctor::status::daemon_build_matches(
+        status
+            .get("daemon_commit")
+            .and_then(serde_json::Value::as_str),
+        status
+            .get("daemon_version")
+            .and_then(serde_json::Value::as_str),
+    )
+}
+
+fn stale_daemon_terminal_match_report(
+    daemon_status: Option<&serde_json::Value>,
+) -> serde_json::Value {
+    let mut report = serde_json::json!({
+        "status": "fail",
+        "problem_id": "WX-VERSION-001",
+        "detail": "the running daemon is from a different or unverifiable build; its terminal matcher was not tested",
+        "remediation": "wayexpand upgrade --apply",
+        "configuration_source": "not_tested_stale_daemon"
+    });
+    if let Some(status) = daemon_status {
+        if let Some(path) = status.get("config_active_path") {
+            report["configuration_path"] = path.clone();
+        }
+        if let Some(commit) = status.get("daemon_commit") {
+            report["daemon_commit"] = commit.clone();
+        }
+        if let Some(version) = status.get("daemon_version") {
+            report["daemon_version"] = version.clone();
+        }
+    }
     report
 }
 
@@ -1062,6 +1103,36 @@ mod tests {
         assert_eq!(invalid["status"], "fail");
         let unavailable = parse_terminal_match_self_test(Err(anyhow::anyhow!("offline")), None);
         assert_eq!(unavailable["status"], "fail");
+    }
+
+    #[test]
+    fn terminal_matching_self_test_reports_a_stale_daemon_before_calling_it() {
+        let status = serde_json::json!({
+            "daemon_commit": "older-daemon-build",
+            "daemon_version": "1.3.3-dev+older-daemon-build",
+            "config_active_path": "/home/operator/.config/wayexpand/expansions.toml"
+        });
+        assert!(!daemon_build_matches_cli(&status));
+
+        let report = stale_daemon_terminal_match_report(Some(&status));
+        assert_eq!(report["status"], "fail");
+        assert_eq!(report["problem_id"], "WX-VERSION-001");
+        assert_eq!(report["remediation"], "wayexpand upgrade --apply");
+        assert_eq!(report["configuration_source"], "not_tested_stale_daemon");
+        assert_eq!(report["configuration_path"], status["config_active_path"]);
+        assert!(report["detail"]
+            .as_str()
+            .unwrap()
+            .contains("matcher was not tested"));
+    }
+
+    #[test]
+    fn terminal_matching_self_test_accepts_a_matching_daemon_build() {
+        let status = serde_json::json!({
+            "daemon_commit": crate::build_info::COMMIT,
+            "daemon_version": crate::build_info::VERSION,
+        });
+        assert!(daemon_build_matches_cli(&status));
     }
 
     #[test]
