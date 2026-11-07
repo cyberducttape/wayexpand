@@ -471,8 +471,17 @@ for layout in de fr; do
         cat "$E2E_WORK/layout-$layout-activation.log" "$E2E_WORK/layout-$layout-active.log"
         exit 1
     fi
-    "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --activate-source ibus wayexpand \
-        >"$E2E_WORK/layout-$layout-ibus-activation.log"
+    activation_tries=50
+    while ! "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --activate-source ibus wayexpand \
+        >"$E2E_WORK/layout-$layout-ibus-activation.log" 2>&1; do
+        activation_tries=$((activation_tries - 1))
+        if [ "$activation_tries" -le 0 ]; then
+            log "fail gnome-layout-$layout GNOME did not restore WayExpand after a layout switch"
+            cat "$E2E_WORK/layout-$layout-ibus-activation.log"
+            exit 1
+        fi
+        sleep 0.1
+    done
     run_gtk_ibus_case "layout-$layout" ';e2e' expanded false
     log "pass gnome-layout-$layout expansion remained correct after switching layouts"
 done
