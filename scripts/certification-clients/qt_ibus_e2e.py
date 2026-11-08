@@ -59,6 +59,7 @@ def main():
                 except FileExistsError:
                     pass
                 else:
+                    os.write(fd, b"1")
                     os.close(fd)
         else:
             ready_since = None
