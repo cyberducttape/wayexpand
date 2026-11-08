@@ -4351,3 +4351,6 @@ This is the first stable release. WayExpand is now recommended for production us
   dedicated password widget, while retaining exact focus and text checks.
 - Recognize GTK 4 composite password controls as focused when their internal
   text child owns focus; exact contents remain the pass criterion.
+- Run Qt XIM's Unicode pass-through case with German-layout characters that
+  the XTEST keyboard driver can generate, while keeping broad Unicode commit
+  coverage in the GTK IBus cases.

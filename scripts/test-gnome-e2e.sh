@@ -608,7 +608,6 @@ run_qt_xim_case() {
     log "pass gnome-qt-$case_name $(cat "$test_log")"
 }
 run_qt_xim_case safe-passthrough ';e2e' ';e2e' false
-run_qt_xim_case unicode-passthrough 'Grüße 世界 🖥️' 'Grüße 世界 🖥️' false
 run_qt_xim_case password ';e2e' ';e2e' true
 run_terminal_xim_case() {
     case_name=$1
@@ -692,6 +691,12 @@ for layout in de fr; do
         fi
         sleep 0.1
     done
+    if [ "$layout" = de ]; then
+        # XTEST can only type symbols present in the active XKB keymap. Exercise
+        # non-ASCII pass-through using characters available on the German
+        # layout; GTK's IBus commit tests cover broader CJK and emoji output.
+        run_qt_xim_case unicode-passthrough 'Grüße' 'Grüße' false
+    fi
     run_gtk_ibus_case "layout-$layout" ';e2e' expanded false
     log "pass gnome-layout-$layout expansion remained correct after switching layouts"
 done
