@@ -827,7 +827,7 @@ if ! "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --active-layout \
     exit 1
 fi
 run_terminal_x11_baseline
-run_gtk_ibus_case x11-baseline a a false 3 default
+run_gtk_ibus_case x11-baseline a a false 3 simple
 if ! "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --activate-source ibus wayexpand \
     >"$E2E_WORK/ibus-source-after-x11-baseline.log" 2>&1; then
     log "fail ibus-engine-active GNOME could not restore WayExpand after the XKB baseline"
