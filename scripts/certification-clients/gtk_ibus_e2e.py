@@ -27,6 +27,19 @@ def update_focus_stability(window_active, widget_focused, focused_since, now):
     return focused_since, now - focused_since >= FOCUS_STABLE_FOR_US
 
 
+def input_mode_environment_error(im_mode, environ):
+    """Check only the environment contract required by the selected IM mode."""
+    if im_mode == "ibus" and environ.get("GTK_IM_MODULE") != "ibus":
+        return "GTK_IM_MODULE must be set to ibus"
+    if im_mode == "default" and environ.get("GTK_IM_MODULE"):
+        return "GTK_IM_MODULE must be unset for the default GTK input path"
+    if im_mode == "default" and environ.get("XMODIFIERS"):
+        return "XMODIFIERS must be unset for the default GTK input path"
+    if im_mode == "ibus" and not environ.get("IBUS_ADDRESS"):
+        return "IBUS_ADDRESS must identify the private IBus daemon"
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--expected", required=True)
@@ -37,14 +50,9 @@ def main():
     gi.require_version("Gdk", "4.0" if args.gtk_version == "4" else "3.0")
     gi.require_version("Gtk", "4.0" if args.gtk_version == "4" else "3.0")
     from gi.repository import Gdk, GLib, Gtk
-    if args.im_mode == "ibus" and os.environ.get("GTK_IM_MODULE") != "ibus":
-        raise SystemExit("GTK_IM_MODULE must be set to ibus")
-    if args.im_mode == "default" and os.environ.get("GTK_IM_MODULE"):
-        raise SystemExit("GTK_IM_MODULE must be unset for the default GTK input path")
-    if args.im_mode == "default" and os.environ.get("XMODIFIERS"):
-        raise SystemExit("XMODIFIERS must be unset for the default GTK input path")
-    if not os.environ.get("IBUS_ADDRESS"):
-        raise SystemExit("IBUS_ADDRESS must identify the private IBus daemon")
+    environment_error = input_mode_environment_error(args.im_mode, os.environ)
+    if environment_error:
+        raise SystemExit(environment_error)
     if not os.environ.get("DISPLAY"):
         raise SystemExit("DISPLAY must identify GNOME's private XWayland server")
     focus_marker = os.environ.get("GTK_E2E_FOCUS_MARKER")

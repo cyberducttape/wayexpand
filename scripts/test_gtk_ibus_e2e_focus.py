@@ -48,5 +48,41 @@ class FocusReadinessTests(unittest.TestCase):
         self.assertFalse(ready)
 
 
+class InputModeEnvironmentTests(unittest.TestCase):
+    def test_default_xkb_baseline_does_not_require_private_ibus_address(self):
+        self.assertIsNone(GTK_E2E.input_mode_environment_error("default", {}))
+
+    def test_default_xkb_baseline_rejects_ibus_module_overrides(self):
+        self.assertEqual(
+            GTK_E2E.input_mode_environment_error(
+                "default", {"GTK_IM_MODULE": "ibus"}
+            ),
+            "GTK_IM_MODULE must be unset for the default GTK input path",
+        )
+        self.assertEqual(
+            GTK_E2E.input_mode_environment_error(
+                "default", {"XMODIFIERS": "@im=ibus"}
+            ),
+            "XMODIFIERS must be unset for the default GTK input path",
+        )
+
+    def test_ibus_test_requires_module_and_private_address(self):
+        self.assertEqual(
+            GTK_E2E.input_mode_environment_error("ibus", {}),
+            "GTK_IM_MODULE must be set to ibus",
+        )
+        self.assertEqual(
+            GTK_E2E.input_mode_environment_error(
+                "ibus", {"GTK_IM_MODULE": "ibus"}
+            ),
+            "IBUS_ADDRESS must identify the private IBus daemon",
+        )
+        self.assertIsNone(
+            GTK_E2E.input_mode_environment_error(
+                "ibus", {"GTK_IM_MODULE": "ibus", "IBUS_ADDRESS": "unix:path=/tmp/ibus"}
+            )
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -585,11 +585,13 @@ run_gtk_ibus_case() {
         set -- --password
     fi
     if [ "$im_mode" = default ]; then
-        timeout 20s env -u GTK_IM_MODULE -u XMODIFIERS \
+        # Keep this XKB control independent of the private IBus daemon. The
+        # following IBus cases explicitly supply its address and test that
+        # route separately.
+        timeout 20s env -u GTK_IM_MODULE -u XMODIFIERS -u IBUS_ADDRESS \
             GDK_BACKEND=x11 \
             DISPLAY="$x11_display" \
             XAUTHORITY="$xwayland_auth" \
-            IBUS_ADDRESS="$(ibus address)" \
             GTK_E2E_FOCUS_MARKER="$marker" \
             GTK_E2E_READY_MARKER="$ready_marker" \
             GTK_E2E_APP_ID="$app_id" \

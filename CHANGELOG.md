@@ -6,10 +6,11 @@ All notable changes to WayExpand are documented here.
 
 - Verify XTEST delivery into an IBus-free X11 terminal and then ordinary US
   XKB-to-GTK key delivery with a direct synthetic key event before
-  WayExpand-specific IBus insertion. Refresh XWayland focus once before the
-  GTK baseline event. Count sanitized GDK-to-widget key events
-  and report GTK's effective IM-module, X11 focus, active window, XTEST
-  availability, and
+  WayExpand-specific IBus insertion. Keep that baseline disconnected from the
+  private IBus daemon, and validate separate GTK/XIM environment requirements.
+  Refresh XWayland focus once before the GTK baseline event. Count sanitized
+  GDK-to-widget key events and report GTK's effective IM-module, X11 focus,
+  active window, XTEST availability, and
   content-free IBus focus/key counters on failures. Force and validate a UTF-8
   locale for xdotool text injection so Unicode passthrough tests exercise the
   target client rather than failing during multibyte decoding. Exercise the
