@@ -165,6 +165,9 @@ if ! command -v wayexpand-ibus >"$E2E_WORK/wayexpand-ibus-path.txt"; then
 fi
 gsettings set org.gnome.shell disable-user-extensions false
 gsettings set org.gnome.shell enabled-extensions "['$E2E_UUID', '$E2E_CONTROLLER_UUID']"
+# Where GNOME Tour is installed (Fedora), a fresh profile opens the modal
+# WelcomeDialog. It holds the stage grab, so no client receives keyboard input.
+gsettings set org.gnome.shell welcome-dialog-last-shown-version 99.0
 gsettings set org.gnome.desktop.input-sources sources \
     "[('xkb', 'us'), ('xkb', 'de'), ('xkb', 'fr'), ('ibus', 'wayexpand')]"
 # Let GNOME Shell start and own its normal IBus session. Prestarting an IBus
