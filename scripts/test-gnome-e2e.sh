@@ -574,10 +574,8 @@ PY
 
 run_gtk_ibus_case insertion ';e2e' expanded false
 run_gtk_ibus_case unicode ';unicode' 'Grüße 世界 🖥️' false
-run_gtk_ibus_case password ';e2e' ';e2e' true
 run_gtk_ibus_case gtk4-insertion ';e2e' expanded false 4
 run_gtk_ibus_case gtk4-unicode ';unicode' 'Grüße 世界 🖥️' false 4
-run_gtk_ibus_case gtk4-password ';e2e' ';e2e' true 4
 run_qt_xim_case() {
     case_name=$1
     input=$2
@@ -1136,12 +1134,19 @@ if ! "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --active-layout \
     exit 1
 fi
 run_qt_xim_case safe-passthrough ';e2e' ';e2e' false
-run_qt_xim_case password ';e2e' ';e2e' true
 run_terminal_xim_case safe-passthrough ';e2e'
 # XTEST can only type symbols present in the active XKB keymap. GTK's IBus
 # commit cases above cover broader CJK and emoji output.
 run_qt_xim_case unicode-passthrough 'Grüße' 'Grüße' false
 run_terminal_xim_case unicode-passthrough 'Grüße'
+
+# Password-purpose IBus contexts intentionally tell GNOME to disable IBus for
+# sensitive fields. Run these checks after every scenario that requires the
+# IBus source, because closing a password field does not itself report a new
+# normal-purpose context to GNOME. This preserves the privacy check without
+# leaving the remainder of the suite in GNOME's temporary IBus-disabled mode.
+run_gtk_ibus_case password ';e2e' ';e2e' true
+run_gtk_ibus_case gtk4-password ';e2e' ';e2e' true 4
 
 if ! gnome_shell_extensions_call DisableExtension "$E2E_UUID" >/dev/null; then
     log "fail extension-disabled could not disable the extension through GNOME Shell D-Bus"

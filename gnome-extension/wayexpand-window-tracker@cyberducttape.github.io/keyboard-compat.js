@@ -46,6 +46,21 @@ export function activateSource(keyboard, kind, id, refreshIfMissing = true) {
         !manager.inputSources || typeof manager.inputSources !== 'object')
         return {error: 'unsupported-manager'};
     try {
+        // Shell updates currentSource optimistically. For IBus sources that
+        // does not prove the IBus daemon accepted the engine switch: the
+        // manager can report WayExpand as current while its IBus connection
+        // is still unavailable. Keep these version-sensitive fields inside
+        // this compatibility boundary and fail closed when their state is
+        // unknown.
+        const ibusManager = kind === 'ibus' ? manager._ibusManager : null;
+        if (kind === 'ibus') {
+            if (manager._disableIBus)
+                return {error: 'ibus-disabled-by-content-purpose'};
+            if (manager._ibusReady !== true || !ibusManager ||
+                ibusManager._ready !== true)
+                return {error: 'ibus-not-ready'};
+        }
+
         let source = Object.values(manager.inputSources).find(candidate =>
             candidate && candidate.type === kind && candidate.id === id);
         // Reloading an already complete manager can cancel GNOME's pending
@@ -69,10 +84,15 @@ export function activateSource(keyboard, kind, id, refreshIfMissing = true) {
         }
         if (!source || typeof source.activate !== 'function')
             return {error: 'source-unavailable'};
-        source.activate(true);
+        const current = manager.currentSource;
+        if (!current || current.type !== kind || current.id !== id ||
+            (kind === 'ibus' && ibusManager._currentEngineName !== id))
+            source.activate(true);
         const active = manager.currentSource;
         if (!active || active.type !== kind || active.id !== id)
             return {error: 'activation-unverified'};
+        if (kind === 'ibus' && ibusManager._currentEngineName !== id)
+            return {error: 'engine-pending'};
         return {source: active};
     } catch (_error) {
         return {error: 'activation-failed'};

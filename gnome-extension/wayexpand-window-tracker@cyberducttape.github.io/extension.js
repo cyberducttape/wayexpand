@@ -257,18 +257,27 @@ export default class WayExpandWindowTracker extends Extension {
             const sourceDetails = result.error === 'source-pending'
                 ? `; available sources: ${(result.availableSources ?? []).join(', ') || 'none'}`
                 : '';
+            const engineDetails = result.error === 'ibus-not-ready'
+                ? '; GNOME has no ready IBus connection'
+                : result.error === 'engine-pending'
+                    ? '; GNOME has not confirmed the requested IBus engine'
+                    : result.error === 'ibus-disabled-by-content-purpose'
+                        ? '; GNOME disabled IBus for the focused sensitive field'
+                        : '';
             invocation.return_dbus_error(
-                result.error === 'source-pending'
+                ['source-pending', 'ibus-not-ready', 'engine-pending'].includes(result.error)
                     ? 'org.wayexpand.ShellWindowTracker1.Error.InputSourceUnavailable'
                     : 'org.wayexpand.ShellWindowTracker1.Error.ActivationFailed',
-                `GNOME Shell input-source activation failed (${result.error})${sourceDetails}`,
+                `GNOME Shell input-source activation failed (${result.error})${sourceDetails}${engineDetails}`,
             );
         };
         const activate = () => {
             const refreshIfMissing = attempts % 5 === 0;
             const result = activateSource(Keyboard, kind, id, refreshIfMissing);
             const pending = result.error === 'source-pending'
-                || result.error === 'activation-unverified';
+                || result.error === 'activation-unverified'
+                || result.error === 'ibus-not-ready'
+                || result.error === 'engine-pending';
             if (!pending || attempts >= 80) {
                 finish(result);
                 return;

@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Verify GNOME IBus activation against the live IBus manager state and
+  confirmed engine name instead of trusting Shell's optimistic current source.
+  Report disconnected or sensitive-field-disabled IBus states explicitly, and
+  keep password-purpose acceptance checks after layout and restart scenarios so
+  they cannot leave the remaining GNOME tests in privacy mode.
 - Require both an active GTK toplevel and actual focus within the test widget
   for the full stability interval before sending XTEST input. Cover focus loss,
   inactive windows, and the timing boundary with focused regression tests.
