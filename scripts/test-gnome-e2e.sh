@@ -240,33 +240,6 @@ extension_state() {
     gnome_shell_extensions_call GetExtensionInfo "$E2E_UUID" || true
 }
 
-activate_window() {
-    tries=100
-    activate_error="$E2E_WORK/activate-window.err"
-    while :; do
-        if gdbus call --timeout 5 --session --dest org.gnome.Shell \
-            --object-path /org/wayexpand/GnomeE2eFocusController \
-            --method org.wayexpand.GnomeE2eFocusController.ActivateWindow "$1" \
-            >/dev/null 2>"$activate_error"; then
-            return 0
-        fi
-        # The controller already spent up to five seconds asking Mutter to
-        # focus a mapped window. Retrying a focus timeout multiplies that
-        # bound by 100 and hides the actual failure; only retry transient
-        # lookup/session startup errors.
-        if grep -Eq 'FocusTimeout|did not focus' "$activate_error"; then
-            cat "$activate_error" >&2
-            return 1
-        fi
-        tries=$((tries - 1))
-        if [ "$tries" -le 0 ]; then
-            cat "$activate_error" >&2
-            return 1
-        fi
-        sleep 0.05
-    done
-}
-
 click_test_field() {
     app_id=$1
     test_window_id=$(DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
@@ -346,8 +319,12 @@ type_x11_input() {
 type_gnome_remote_input() {
     case_name=$1
     input_text=$2
+    app_id=$3
+    focus_marker=$4
+    ready_marker=$5
     python3 "$E2E_PROJECT_DIR/scripts/certification-clients/gnome_remote_input.py" \
-        --delay-ms 60 --text "$input_text" \
+        --delay-ms 60 --text "$input_text" --app-id "$app_id" \
+        --focus-marker "$focus_marker" --ready-marker "$ready_marker" \
         >"$E2E_WORK/mutter-input-$case_name.txt" \
         2>"$E2E_WORK/mutter-input-$case_name.err"
 }
@@ -608,45 +585,12 @@ run_gtk_ibus_case() {
             --gtk-version "$gtk_version" --im-mode ibus --expected "$expected" "$@" >"$test_log" 2>&1 &
     fi
     gtk_pid=$!
-    if ! activate_window "$app_id"; then
-        kill "$gtk_pid" 2>/dev/null || true
-        wait "$gtk_pid" 2>/dev/null || true
-        gtk_pid=
-        log "fail gnome-gtk-$case_name Mutter could not focus the GTK acceptance window"
-        cat "$test_log"
-        exit 1
-    fi
-    # GTK is a native Wayland client. It grabs child focus itself, and its
-    # readiness marker requires stable Mutter activation and widget focus.
-    # XTEST cannot target native Wayland surfaces.
-    : >"$marker"
-    # Let the GTK fixture reach its own 15-second timeout and report a
-    # content-free focus snapshot before the parent tears it down.
-    ready_tries=350
-    while [ ! -s "$ready_marker" ]; do
-        if ! kill -0 "$gtk_pid" 2>/dev/null; then
-            wait "$gtk_pid" || true
-            gtk_pid=
-            log "fail gnome-gtk-$case_name GTK input context exited before readiness"
-            cat "$test_log"
-            exit 1
-        fi
-        ready_tries=$((ready_tries - 1))
-        if [ "$ready_tries" -le 0 ]; then
-            kill "$gtk_pid" 2>/dev/null || true
-            wait "$gtk_pid" 2>/dev/null || true
-            gtk_pid=
-            log "fail gnome-gtk-$case_name GTK field did not report stable active focus"
-            cat "$test_log"
-            exit 1
-        fi
-        sleep 0.05
-    done
     if [ -f "$status_file" ]; then
         cp "$status_file" "$E2E_WORK/ibus-context-before-$case_name.json"
     fi
     input_status=0
-    type_gnome_remote_input "$case_name" "$trigger" || input_status=$?
+    type_gnome_remote_input "$case_name" "$trigger" "$app_id" \
+        "$marker" "$ready_marker" || input_status=$?
     if [ "$input_status" -ne 0 ]; then
         if [ -f "$status_file" ]; then
             cp "$status_file" "$E2E_WORK/ibus-context-after-$case_name.json"
@@ -654,7 +598,11 @@ run_gtk_ibus_case() {
         kill "$gtk_pid" 2>/dev/null || true
         wait "$gtk_pid" 2>/dev/null || true
         gtk_pid=
-        if [ "$case_name" = wayland-baseline ]; then
+        if grep -F 'GTK did not confirm stable active input focus' \
+            "$E2E_WORK/mutter-input-$case_name.err" >/dev/null; then
+            log "fail gnome-gtk-$case_name GTK never acquired active keyboard focus; no test input was sent"
+            cat "$test_log" "$E2E_WORK/mutter-input-$case_name.err"
+        elif [ "$case_name" = wayland-baseline ]; then
             log "fail gnome-gtk-$case_name Mutter RemoteDesktop could not send a key to the focused GTK window"
             cat "$test_log" "$E2E_WORK/mutter-input-$case_name.txt" \
                 "$E2E_WORK/mutter-input-$case_name.err"

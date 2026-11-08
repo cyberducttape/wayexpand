@@ -8,6 +8,7 @@ log the test text.
 """
 
 import argparse
+import os
 import sys
 import time
 
@@ -21,6 +22,9 @@ BUS_NAME = "org.gnome.Mutter.RemoteDesktop"
 ROOT_PATH = "/org/gnome/Mutter/RemoteDesktop"
 ROOT_INTERFACE = "org.gnome.Mutter.RemoteDesktop"
 SESSION_INTERFACE = "org.gnome.Mutter.RemoteDesktop.Session"
+FOCUS_CONTROLLER_PATH = "/org/wayexpand/GnomeE2eFocusController"
+FOCUS_CONTROLLER_INTERFACE = "org.wayexpand.GnomeE2eFocusController"
+SHIFT_L_KEYSYM = 0xFFE1
 
 
 def key_event(bus, path, keysym, pressed):
@@ -53,10 +57,54 @@ def send_text(bus, path, text, delay_seconds):
         time.sleep(delay_seconds)
 
 
+def prime_keyboard_device(bus, path):
+    """Create Mutter's virtual keyboard before asking it to activate GTK."""
+    try:
+        key_event(bus, path, SHIFT_L_KEYSYM, True)
+    finally:
+        # A single modifier press/release creates the virtual device without
+        # inserting text into whichever application was focused beforehand.
+        key_event(bus, path, SHIFT_L_KEYSYM, False)
+
+
+def activate_test_window(bus, app_id):
+    bus.call_sync(
+        "org.gnome.Shell",
+        FOCUS_CONTROLLER_PATH,
+        FOCUS_CONTROLLER_INTERFACE,
+        "ActivateWindow",
+        GLib.Variant("(s)", (app_id,)),
+        GLib.VariantType.new("()"),
+        Gio.DBusCallFlags.NONE,
+        10000,
+        None,
+    )
+
+
+def publish_focus_confirmation(path):
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        os.write(descriptor, b"1")
+    finally:
+        os.close(descriptor)
+
+
+def wait_for_gtk_input_ready(path, timeout_seconds):
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if os.path.isfile(path):
+            return True
+        time.sleep(0.02)
+    return os.path.isfile(path)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--delay-ms", type=int, default=60)
     parser.add_argument("--text", required=True)
+    parser.add_argument("--app-id", required=True)
+    parser.add_argument("--focus-marker", required=True)
+    parser.add_argument("--ready-marker", required=True)
     args = parser.parse_args()
     if args.delay_ms < 0 or args.delay_ms > 1000:
         parser.error("--delay-ms must be between 0 and 1000")
@@ -90,8 +138,19 @@ def main():
             5000,
             None,
         )
+        # Mutter creates its virtual keyboard lazily on the first press. Make
+        # it available before Shell activation, or headless GNOME can update
+        # MetaWindow focus without sending active/focus state to the GTK
+        # Wayland surface.
+        prime_keyboard_device(bus, session_path)
+        activate_test_window(bus, args.app_id)
+        publish_focus_confirmation(args.focus_marker)
+        if not wait_for_gtk_input_ready(args.ready_marker, 13.0):
+            raise RuntimeError(
+                "GTK did not confirm stable active input focus; test text was not sent"
+            )
         send_text(bus, session_path, args.text, args.delay_ms / 1000)
-    except (GLib.Error, OSError, ValueError) as error:
+    except (GLib.Error, OSError, RuntimeError, ValueError) as error:
         print(f"Mutter RemoteDesktop keyboard input failed: {error}", file=sys.stderr)
         return 1
     finally:

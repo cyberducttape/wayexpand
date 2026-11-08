@@ -234,6 +234,18 @@ class MutterRemoteInputTests(unittest.TestCase):
         self.assertEqual(bus.calls, expected)
         self.assertTrue(all(method != "NotifyKeyboardKeycode" for method, _ in bus.calls))
 
+    def test_keyboard_is_created_before_window_activation_without_text_input(self):
+        bus = self.FakeBus()
+        REMOTE_INPUT.prime_keyboard_device(bus, "/session")
+
+        self.assertEqual(
+            bus.calls,
+            [
+                ("NotifyKeyboardKeysym", (REMOTE_INPUT.SHIFT_L_KEYSYM, True)),
+                ("NotifyKeyboardKeysym", (REMOTE_INPUT.SHIFT_L_KEYSYM, False)),
+            ],
+        )
+
     def test_failed_press_reply_still_attempts_key_release(self):
         bus = self.FakeBus(fail_first=True)
         with mock.patch.object(REMOTE_INPUT.time, "sleep"):
