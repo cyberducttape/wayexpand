@@ -550,13 +550,13 @@ class MutterRemoteInputTests(unittest.TestCase):
             ],
         )
 
-    def test_gtk_target_is_clicked_before_focus_is_reported_to_mutter(self):
+    def test_gtk_focus_retries_start_before_pointer_click(self):
         source = REMOTE_INPUT_SCRIPT.read_text(encoding="utf-8")
         click = source.index("click_test_field(bus, session_path, window_rect)")
         publish = source.index("publish_focus_confirmation(args.focus_marker)")
         wait = source.index("wait_for_gtk_input_ready(args.ready_marker, 13.0)")
-        self.assertLess(click, publish)
-        self.assertLess(publish, wait)
+        self.assertLess(publish, click)
+        self.assertLess(click, wait)
 
     def test_shell_focus_controller_reports_mapped_window_geometry(self):
         source = FOCUS_CONTROLLER_SCRIPT.read_text(encoding="utf-8")

@@ -308,8 +308,13 @@ def main():
         activate_test_window(bus, args.app_id)
         window_rect = get_test_window_rect(bus, args.app_id)
         print(f"Mutter test target geometry: window={window_rect!r}", flush=True)
-        click_test_field(bus, session_path, window_rect)
+        # Start GTK's bounded present()/grab_focus() retries as soon as Mutter
+        # confirms its window focus. Waiting until after the click deadlocks on
+        # Mutter versions where a click on the not-yet-active Wayland surface
+        # is not delivered to GTK; the client would not request focus until
+        # that same click had succeeded.
         publish_focus_confirmation(args.focus_marker)
+        click_test_field(bus, session_path, window_rect)
         if not wait_for_gtk_input_ready(args.ready_marker, 13.0):
             raise RuntimeError(
                 "GTK did not confirm stable active input focus; test text was not sent"
