@@ -58,9 +58,11 @@ class GnomeAcceptanceShellContractTests(unittest.TestCase):
     def test_pointer_click_converts_absolute_target_to_relative_delta(self):
         source = REMOTE_INPUT_SCRIPT.read_text(encoding="utf-8")
         self.assertIn('def get_pointer_position(bus):', source)
-        self.assertIn('target_x - pointer_x, target_y - pointer_y', source)
+        self.assertIn('start = (pointer_x, pointer_y)', source)
         self.assertIn('actual_x, actual_y = get_pointer_position(bus)', source)
-        self.assertIn('Mutter pointer did not reach GTK target', source)
+        self.assertIn('Mutter pointer {axis}-axis motion was not applied', source)
+        self.assertIn('delta if axis == "x" else 0.0', source)
+        self.assertIn('delta if axis == "y" else 0.0', source)
         self.assertNotIn('pointer_motion(bus, path, -2000.0, -2000.0)', source)
 
     def test_x11_clients_have_a_window_activation_helper(self):
@@ -482,11 +484,36 @@ class MutterRemoteInputTests(unittest.TestCase):
             bus.calls,
             [
                 ("GetPointerPosition", ()),
-                ("NotifyPointerMotionRelative", (540.0, 350.0)),
+                ("NotifyPointerMotionRelative", (540.0, 0.0)),
+                ("GetPointerPosition", ()),
+                ("NotifyPointerMotionRelative", (0.0, 350.0)),
+                ("GetPointerPosition", ()),
                 ("GetPointerPosition", ()),
                 ("NotifyPointerButton", (REMOTE_INPUT.BTN_LEFT, True)),
                 ("NotifyPointerButton", (REMOTE_INPUT.BTN_LEFT, False)),
             ],
+        )
+
+    def test_click_test_field_rejects_axis_motion_that_did_not_reach_target(self):
+        class DroppedHorizontalMotionBus(self.FakeBus):
+            def call_sync(self, bus_name, path, interface, method, parameters, *_args):
+                values = parameters.unpack() if parameters is not None else ()
+                if method == "NotifyPointerMotionRelative" and values[0] != 0.0:
+                    self.calls.append((method, values))
+                    return
+                return super().call_sync(
+                    bus_name, path, interface, method, parameters, *_args
+                )
+
+        bus = DroppedHorizontalMotionBus()
+        with mock.patch.object(REMOTE_INPUT.time, "sleep"):
+            with self.assertRaisesRegex(
+                RuntimeError, r"Mutter pointer x-axis motion was not applied"
+            ):
+                REMOTE_INPUT.click_test_field(bus, "/session", (390, 360, 500, 80))
+
+        self.assertNotIn(
+            ("NotifyPointerButton", (REMOTE_INPUT.BTN_LEFT, True)), bus.calls
         )
 
     def test_test_window_rect_comes_from_shell_for_the_requested_app(self):

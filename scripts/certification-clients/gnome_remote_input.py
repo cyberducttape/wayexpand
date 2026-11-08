@@ -113,12 +113,40 @@ def click_test_field(bus, path, window_rect):
     # instead of assuming an edge-clamped starting position or a zero-origin
     # monitor. Both values come from Mutter's global coordinate space.
     pointer_x, pointer_y = get_pointer_position(bus)
-    pointer_motion(bus, path, target_x - pointer_x, target_y - pointer_y)
-    time.sleep(0.1)
+    start = (pointer_x, pointer_y)
+    # Keep the axes in separate RemoteDesktop events. Headless Mutter has
+    # occasionally applied only one component of a combined relative motion;
+    # read the compositor position after each event so the click is never sent
+    # on the strength of a successful D-Bus method return alone.
+    for axis, current, target in (
+        ("x", pointer_x, target_x),
+        ("y", pointer_y, target_y),
+    ):
+        delta = target - current
+        if abs(delta) <= 2:
+            continue
+        pointer_motion(
+            bus,
+            path,
+            delta if axis == "x" else 0.0,
+            delta if axis == "y" else 0.0,
+        )
+        time.sleep(0.1)
+        actual_x, actual_y = get_pointer_position(bus)
+        actual = actual_x if axis == "x" else actual_y
+        if abs(actual - target) > 2:
+            raise RuntimeError(
+                f"Mutter pointer {axis}-axis motion was not applied: "
+                f"start=({start[0]}, {start[1]}) "
+                f"requested_delta={delta} target=({target_x}, {target_y}) "
+                f"actual=({actual_x}, {actual_y})"
+            )
+        pointer_x, pointer_y = actual_x, actual_y
     actual_x, actual_y = get_pointer_position(bus)
     if abs(actual_x - target_x) > 2 or abs(actual_y - target_y) > 2:
         raise RuntimeError(
             "Mutter pointer did not reach GTK target: "
+            f"start=({start[0]}, {start[1]}) "
             f"target=({target_x}, {target_y}) actual=({actual_x}, {actual_y})"
         )
     print(
