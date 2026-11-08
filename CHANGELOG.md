@@ -15,7 +15,9 @@ All notable changes to WayExpand are documented here.
   widget's IM module because a desktop-level setting can override the process
   environment. Keep that baseline disconnected from the private IBus daemon,
   validate separate GTK/XIM environment requirements, and record GDK's core
-  device event setting in sanitized GTK failure diagnostics.
+  device event setting in sanitized GTK failure diagnostics. Drive GTK's X11
+  fixture through the XInput test keyboard after Fedora GDK stopped receiving
+  core XTEST events even when focus and the widget were confirmed.
   Refresh XWayland focus once before the GTK baseline event. Count sanitized
   GDK-to-widget key events and report GTK's effective IM-module, X11 focus,
   active window, XTEST availability, and
