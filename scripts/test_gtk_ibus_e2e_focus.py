@@ -75,6 +75,12 @@ class GnomeAcceptanceShellContractTests(unittest.TestCase):
             source,
         )
 
+    def test_native_gtk_baseline_uses_evdev_keycode_probe(self):
+        source = GNOME_ACCEPTANCE_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('if [ "$case_name" = wayland-baseline ]; then', source)
+        self.assertIn('keycode_probe=true', source)
+        self.assertIn('--keycode-probe', source)
+
 
 class FocusReadinessTests(unittest.TestCase):
     def test_readiness_marker_is_removed_when_focus_is_lost(self):
@@ -408,6 +414,36 @@ class MutterRemoteInputTests(unittest.TestCase):
         ]
         self.assertEqual(bus.calls, expected)
         self.assertTrue(all(method != "NotifyKeyboardKeycode" for method, _ in bus.calls))
+
+    def test_xkb_baseline_can_probe_evdev_keycode_translation(self):
+        bus = self.FakeBus()
+        with tempfile.TemporaryDirectory() as directory:
+            marker = Path(directory) / "ready"
+            marker.write_text("1", encoding="ascii")
+            with mock.patch.object(REMOTE_INPUT.time, "sleep"):
+                REMOTE_INPUT.send_text(
+                    bus, "/session", "a", 0.06, marker, keycode_probe=True
+                )
+
+        self.assertEqual(
+            bus.calls,
+            [
+                ("NotifyKeyboardKeycode", (30, True)),
+                ("NotifyKeyboardKeycode", (30, False)),
+            ],
+        )
+
+    def test_evdev_keycode_probe_rejects_text_beyond_its_fixed_baseline(self):
+        bus = self.FakeBus()
+        with tempfile.TemporaryDirectory() as directory:
+            marker = Path(directory) / "ready"
+            marker.write_text("1", encoding="ascii")
+            with self.assertRaisesRegex(ValueError, "limited to the fixed ASCII"):
+                REMOTE_INPUT.send_text(
+                    bus, "/session", ";e2e", 0.06, marker, keycode_probe=True
+                )
+
+        self.assertEqual(bus.calls, [])
 
     def test_keyboard_priming_uses_only_a_modifier_pair(self):
         bus = self.FakeBus()

@@ -349,9 +349,14 @@ type_gnome_remote_input() {
     app_id=$3
     focus_marker=$4
     ready_marker=$5
+    keycode_probe=${6:-false}
+    set --
+    if [ "$keycode_probe" = true ]; then
+        set -- --keycode-probe
+    fi
     python3 "$E2E_PROJECT_DIR/scripts/certification-clients/gnome_remote_input.py" \
         --delay-ms 60 --text "$input_text" --app-id "$app_id" \
-        --focus-marker "$focus_marker" --ready-marker "$ready_marker" \
+        --focus-marker "$focus_marker" --ready-marker "$ready_marker" "$@" \
         >"$E2E_WORK/mutter-input-$case_name.txt" \
         2>"$E2E_WORK/mutter-input-$case_name.err"
 }
@@ -616,8 +621,12 @@ run_gtk_ibus_case() {
         cp "$status_file" "$E2E_WORK/ibus-context-before-$case_name.json"
     fi
     input_status=0
+    keycode_probe=false
+    if [ "$case_name" = wayland-baseline ]; then
+        keycode_probe=true
+    fi
     type_gnome_remote_input "$case_name" "$trigger" "$app_id" \
-        "$marker" "$ready_marker" || input_status=$?
+        "$marker" "$ready_marker" "$keycode_probe" || input_status=$?
     if [ "$input_status" -ne 0 ]; then
         if [ -f "$status_file" ]; then
             cp "$status_file" "$E2E_WORK/ibus-context-after-$case_name.json"

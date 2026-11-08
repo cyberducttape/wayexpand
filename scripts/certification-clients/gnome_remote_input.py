@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Send fixed ASCII test keysyms through GNOME Mutter's private test interface.
+"""Send fixed ASCII keyboard input through Mutter's private test interface.
 
 This is only for the isolated GNOME acceptance suite. It uses Mutter's
 RemoteDesktop D-Bus interface so test input follows the compositor's keyboard
@@ -30,13 +30,13 @@ FOCUS_CONTROLLER_NOT_FOUND = (
 SHIFT_L_KEYSYM = 0xFFE1
 
 
-def key_event(bus, path, keysym, pressed):
+def key_event(bus, path, key, pressed, *, keycode=False):
     bus.call_sync(
         BUS_NAME,
         path,
         SESSION_INTERFACE,
-        "NotifyKeyboardKeysym",
-        GLib.Variant("(ub)", (keysym, pressed)),
+        "NotifyKeyboardKeycode" if keycode else "NotifyKeyboardKeysym",
+        GLib.Variant("(ub)", (key, pressed)),
         GLib.VariantType.new("()"),
         Gio.DBusCallFlags.NONE,
         5000,
@@ -44,23 +44,33 @@ def key_event(bus, path, keysym, pressed):
     )
 
 
-def send_text(bus, path, text, delay_seconds, ready_marker):
-    """Inject keysyms so test text remains stable across XKB layout switches."""
+def send_text(
+    bus, path, text, delay_seconds, ready_marker, *, keycode_probe=False
+):
+    """Inject fixed test text as keysyms or a single US evdev-keycode probe."""
+    if keycode_probe and text != "a":
+        raise ValueError("the evdev-keycode probe is limited to the fixed ASCII 'a' input")
     for character in text:
         if not os.path.isfile(ready_marker):
             raise RuntimeError(
                 "GTK active focus was lost; stopped before sending remaining test input"
             )
-        keysym = ord(character)
-        if not 0x20 <= keysym <= 0x7E:
-            raise ValueError("test input must use printable ASCII keysyms")
+        if keycode_probe:
+            # Linux input-event-codes.h defines KEY_A as evdev keycode 30.
+            # The US XKB source is active for this baseline, so this exercises
+            # compositor keycode-to-text translation before testing IBus.
+            key = 30
+        else:
+            key = ord(character)
+            if not 0x20 <= key <= 0x7E:
+                raise ValueError("test input must use printable ASCII keysyms")
         try:
-            key_event(bus, path, keysym, True)
+            key_event(bus, path, key, True, keycode=keycode_probe)
             time.sleep(delay_seconds)
         finally:
             # A failed reply can leave it uncertain whether Mutter accepted
             # the press, so always attempt the matching release.
-            key_event(bus, path, keysym, False)
+            key_event(bus, path, key, False, keycode=keycode_probe)
         time.sleep(delay_seconds)
 
 
@@ -131,6 +141,11 @@ def main():
     parser.add_argument("--app-id", required=True)
     parser.add_argument("--focus-marker", required=True)
     parser.add_argument("--ready-marker", required=True)
+    parser.add_argument(
+        "--keycode-probe",
+        action="store_true",
+        help="send only the fixed US-layout 'a' baseline as evdev KEY_A",
+    )
     args = parser.parse_args()
     if args.delay_ms < 0 or args.delay_ms > 1000:
         parser.error("--delay-ms must be between 0 and 1000")
@@ -184,6 +199,7 @@ def main():
             args.text,
             args.delay_ms / 1000,
             args.ready_marker,
+            keycode_probe=args.keycode_probe,
         )
     except (GLib.Error, OSError, RuntimeError, ValueError) as error:
         print(f"Mutter RemoteDesktop keyboard input failed: {error}", file=sys.stderr)
@@ -204,7 +220,10 @@ def main():
                 )
             except GLib.Error:
                 pass
-    print("Mutter RemoteDesktop delivered the fixed ASCII test input")
+    if args.keycode_probe:
+        print("Mutter accepted the fixed KEY_A evdev probe; GTK verifies delivery")
+    else:
+        print("Mutter accepted the fixed ASCII keysym input; GTK verifies delivery")
     return 0
 
 
