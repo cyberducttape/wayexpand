@@ -13,7 +13,7 @@ import argparse
 import gi
 
 
-APP_ID = "org.wayexpand.GnomeGtkIbus"
+DEFAULT_APP_ID = "org.wayexpand.GnomeGtkIbus"
 TIMEOUT_MS = 15000
 
 
@@ -43,15 +43,16 @@ def main():
     else:
         Gtk.init(sys.argv)
     application = None
+    application_id = os.environ.get("GTK_E2E_APP_ID", DEFAULT_APP_ID)
     if args.gtk_version == "4":
-        application = Gtk.Application(application_id=APP_ID)
+        application = Gtk.Application(application_id=application_id)
         application.register(None)
         window = Gtk.ApplicationWindow(
             application=application,
-            title=f"WayExpand GTK IBus acceptance {APP_ID}",
+            title=f"WayExpand GTK IBus acceptance {application_id}",
         )
     else:
-        window = Gtk.Window(title=f"WayExpand GTK IBus acceptance {APP_ID}")
+        window = Gtk.Window(title=f"WayExpand GTK IBus acceptance {application_id}")
     window.set_default_size(500, 80)
     if args.gtk_version == "4" and not args.password:
         focus_widget = Gtk.TextView()
@@ -108,14 +109,10 @@ def main():
         # Wait for GTK's actual child focus to remain stable before the test
         # sends its first key; otherwise a fast XTEST event can race IBus
         # InputContext creation and lose the first character.
-        # GTK 3's X11 widget focus flag, and GTK 4 password Entry's flag, stay
-        # false in this private Mutter session after the focus controller has
-        # observed the exact WM target. Those cases rely on Mutter's exact
-        # window confirmation plus the exact resulting field text. GTK 4's
-        # normal TextView also exposes child focus and waits for it directly.
-        child_focused = (
-            args.gtk_version == "3" or args.password or focus_widget.has_focus()
-        )
+        # GTK 3's X11 widget focus flag stays false in this private Mutter
+        # session after the focus controller has observed the exact WM target.
+        # GTK 4 reports child focus; require it for Entry and TextView alike.
+        child_focused = args.gtk_version == "3" or focus_widget.has_focus()
         if child_focused:
             if focused_since is None:
                 focused_since = GLib.get_monotonic_time()

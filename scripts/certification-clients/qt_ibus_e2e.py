@@ -25,10 +25,11 @@ def main():
     ready_marker = os.environ.get("QT_E2E_READY_MARKER")
     if not ready_marker:
         raise SystemExit("QT_E2E_READY_MARKER must be set by the focus controller")
+    app_id = os.environ.get("QT_E2E_APP_ID", "org.wayexpand.GnomeQtIbus")
 
     app = QApplication(sys.argv)
     window = QWidget()
-    window.setWindowTitle("WayExpand Qt acceptance org.wayexpand.GnomeQtIbus")
+    window.setWindowTitle(f"WayExpand Qt acceptance {app_id}")
     layout = QVBoxLayout(window)
     field = QLineEdit()
     if args.password:

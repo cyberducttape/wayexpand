@@ -420,6 +420,7 @@ run_gtk_ibus_case() {
     expected=$3
     password=$4
     gtk_version=${5:-3}
+    app_id="org.wayexpand.GnomeGtkIbus.$case_name"
     marker="$E2E_WORK/gtk-window-focused-$case_name"
     ready_marker="$E2E_WORK/gtk-input-ready-$case_name"
     test_log="$E2E_WORK/gtk-ibus-e2e-$case_name.log"
@@ -436,10 +437,11 @@ run_gtk_ibus_case() {
         IBUS_ADDRESS="$(ibus address)" \
         GTK_E2E_FOCUS_MARKER="$marker" \
         GTK_E2E_READY_MARKER="$ready_marker" \
+        GTK_E2E_APP_ID="$app_id" \
         python3 "$E2E_PROJECT_DIR/scripts/certification-clients/gtk_ibus_e2e.py" \
         --gtk-version "$gtk_version" --expected "$expected" "$@" >"$test_log" 2>&1 &
     gtk_pid=$!
-    if ! activate_window org.wayexpand.GnomeGtkIbus; then
+    if ! activate_window "$app_id"; then
         kill "$gtk_pid" 2>/dev/null || true
         wait "$gtk_pid" 2>/dev/null || true
         gtk_pid=
@@ -513,6 +515,7 @@ run_qt_xim_case() {
     input=$2
     expected=$3
     password=$4
+    app_id="org.wayexpand.GnomeQtIbus.$case_name"
     marker="$E2E_WORK/qt-window-focused-$case_name"
     ready_marker="$E2E_WORK/qt-input-ready-$case_name"
     test_log="$E2E_WORK/qt-ibus-e2e-$case_name.log"
@@ -528,10 +531,11 @@ run_qt_xim_case() {
         IBUS_ADDRESS="$(ibus address)" \
         QT_E2E_FOCUS_MARKER="$marker" \
         QT_E2E_READY_MARKER="$ready_marker" \
+        QT_E2E_APP_ID="$app_id" \
         python3 "$E2E_PROJECT_DIR/scripts/certification-clients/qt_ibus_e2e.py" \
         --expected "$expected" "$@" >"$test_log" 2>&1 &
     qt_pid=$!
-    if ! activate_window org.wayexpand.GnomeQtIbus; then
+    if ! activate_window "$app_id"; then
         kill "$qt_pid" 2>/dev/null || true
         wait "$qt_pid" 2>/dev/null || true
         log "fail gnome-qt-$case_name Mutter could not focus the Qt XIM acceptance window"

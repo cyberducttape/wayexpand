@@ -4337,3 +4337,7 @@ This is the first stable release. WayExpand is now recommended for production us
   before XTEST sends the first key. This prevents window activation from being
   mistaken for a ready input context and keeps the result check tied to the
   actual focused text widget.
+- Give each GTK and Qt desktop acceptance window a unique identity so Mutter's
+  focus controller cannot select a stale window from a previous case. Require
+  GTK 4 password-field focus before sending test input and verify exact
+  pass-through text.
