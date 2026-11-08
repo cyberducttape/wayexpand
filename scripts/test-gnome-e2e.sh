@@ -672,7 +672,6 @@ run_terminal_xim_case() {
     log "pass gnome-terminal-$case_name $(cat "$test_log")"
 }
 run_terminal_xim_case safe-passthrough ';e2e'
-run_terminal_xim_case unicode-passthrough 'Grüße 世界 🖥️'
 for layout in de fr; do
     "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --activate-source xkb "$layout" \
         >"$E2E_WORK/layout-$layout-activation.log"
@@ -696,9 +695,10 @@ for layout in de fr; do
     done
     if [ "$layout" = de ]; then
         # XTEST can only type symbols present in the active XKB keymap. Exercise
-        # non-ASCII pass-through using characters available on the German
-        # layout; GTK's IBus commit tests cover broader CJK and emoji output.
+        # non-ASCII input using characters available on the German layout;
+        # GTK's IBus commit tests cover broader CJK and emoji output.
         run_qt_xim_case unicode-passthrough 'Grüße' 'Grüße' false
+        run_terminal_xim_case unicode-passthrough 'Grüße'
     fi
     run_gtk_ibus_case "layout-$layout" ';e2e' expanded false
     log "pass gnome-layout-$layout expansion remained correct after switching layouts"

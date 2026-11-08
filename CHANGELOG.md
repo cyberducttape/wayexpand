@@ -4359,3 +4359,5 @@ This is the first stable release. WayExpand is now recommended for production us
   desktop session.
 - Teach the pinned Actionlint validator about the Ubuntu 26.04 hosted-runner
   label used by the GNOME acceptance matrix.
+- Run the terminal Unicode XIM pass-through scenario under the German layout
+  so the synthetic XTEST keyboard uses available keysyms.
