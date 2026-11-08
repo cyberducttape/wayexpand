@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Send fixed ASCII test keys through GNOME Mutter's private test interface.
+"""Send fixed ASCII test keysyms through GNOME Mutter's private test interface.
 
 This is only for the isolated GNOME acceptance suite. It uses Mutter's
 RemoteDesktop D-Bus interface so test input follows the compositor's keyboard
@@ -22,37 +22,14 @@ ROOT_PATH = "/org/gnome/Mutter/RemoteDesktop"
 ROOT_INTERFACE = "org.gnome.Mutter.RemoteDesktop"
 SESSION_INTERFACE = "org.gnome.Mutter.RemoteDesktop.Session"
 
-# Linux evdev keycodes for a US keyboard. Shift is represented separately so
-# Mutter resolves the code using the active XKB layout, as a keyboard would.
-LETTERS = {
-    "a": 30, "b": 48, "c": 46, "d": 32, "e": 18, "f": 33,
-    "g": 34, "h": 35, "i": 23, "j": 36, "k": 37, "l": 38,
-    "m": 50, "n": 49, "o": 24, "p": 25, "q": 16, "r": 19,
-    "s": 31, "t": 20, "u": 22, "v": 47, "w": 17, "x": 45,
-    "y": 21, "z": 44,
-}
-DIGITS = {"1": 2, "2": 3, "3": 4, "4": 5, "5": 6,
-          "6": 7, "7": 8, "8": 9, "9": 10, "0": 11}
-PUNCTUATION = {
-    ";": (39, False), ":": (39, True),
-    "'": (40, False), '"': (40, True),
-    ",": (51, False), "<": (51, True),
-    ".": (52, False), ">": (52, True),
-    "/": (53, False), "?": (53, True),
-    "-": (12, False), "_": (12, True),
-    "=": (13, False), "+": (13, True),
-    " ": (57, False),
-}
-SHIFT = 42
 
-
-def key_event(bus, path, code, pressed):
+def key_event(bus, path, keysym, pressed):
     bus.call_sync(
         BUS_NAME,
         path,
         SESSION_INTERFACE,
-        "NotifyKeyboardKeycode",
-        GLib.Variant("(ub)", (code, pressed)),
+        "NotifyKeyboardKeysym",
+        GLib.Variant("(ub)", (keysym, pressed)),
         GLib.VariantType.new("()"),
         Gio.DBusCallFlags.NONE,
         5000,
@@ -61,26 +38,18 @@ def key_event(bus, path, code, pressed):
 
 
 def send_text(bus, path, text, delay_seconds):
+    """Inject keysyms so test text remains stable across XKB layout switches."""
     for character in text:
-        shifted = character.isalpha() and character.isupper()
-        code = LETTERS.get(character.lower()) if character.isalpha() else DIGITS.get(character)
-        if code is None and character in PUNCTUATION:
-            code, shifted = PUNCTUATION[character]
-        if code is None:
-            raise ValueError("test input contains a character not supported by the US keymap")
-        if shifted:
-            key_event(bus, path, SHIFT, True)
+        keysym = ord(character)
+        if not 0x20 <= keysym <= 0x7E:
+            raise ValueError("test input must use printable ASCII keysyms")
         try:
-            key_event(bus, path, code, True)
+            key_event(bus, path, keysym, True)
             time.sleep(delay_seconds)
         finally:
             # A failed reply can leave it uncertain whether Mutter accepted
             # the press, so always attempt the matching release.
-            try:
-                key_event(bus, path, code, False)
-            finally:
-                if shifted:
-                    key_event(bus, path, SHIFT, False)
+            key_event(bus, path, keysym, False)
         time.sleep(delay_seconds)
 
 
@@ -91,8 +60,8 @@ def main():
     args = parser.parse_args()
     if args.delay_ms < 0 or args.delay_ms > 1000:
         parser.error("--delay-ms must be between 0 and 1000")
-    if not args.text or not args.text.isascii():
-        parser.error("--text must contain non-empty ASCII acceptance-test input")
+    if not args.text or any(not 0x20 <= ord(character) <= 0x7E for character in args.text):
+        parser.error("--text must contain non-empty printable ASCII acceptance-test input")
 
     bus = None
     session_path = None

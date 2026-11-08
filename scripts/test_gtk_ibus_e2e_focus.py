@@ -4,12 +4,20 @@
 import importlib.util
 from pathlib import Path
 import unittest
+from unittest import mock
 
 
 SCRIPT = Path(__file__).parent / "certification-clients" / "gtk_ibus_e2e.py"
 SPEC = importlib.util.spec_from_file_location("gtk_ibus_e2e", SCRIPT)
 GTK_E2E = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(GTK_E2E)
+
+REMOTE_INPUT_SCRIPT = Path(__file__).parent / "certification-clients" / "gnome_remote_input.py"
+REMOTE_INPUT_SPEC = importlib.util.spec_from_file_location(
+    "gnome_remote_input", REMOTE_INPUT_SCRIPT
+)
+REMOTE_INPUT = importlib.util.module_from_spec(REMOTE_INPUT_SPEC)
+REMOTE_INPUT_SPEC.loader.exec_module(REMOTE_INPUT)
 
 
 class FocusReadinessTests(unittest.TestCase):
@@ -175,6 +183,47 @@ class WidgetInputModuleTests(unittest.TestCase):
     def test_gtk4_does_not_read_gtk3_only_widget_property(self):
         widget = object()
         self.assertIsNone(GTK_E2E.configure_widget_im_module(widget, "4", "simple"))
+
+
+class MutterRemoteInputTests(unittest.TestCase):
+    class FakeBus:
+        def __init__(self, fail_first=False):
+            self.calls = []
+            self.fail_first = fail_first
+
+        def call_sync(self, _bus, _path, _interface, method, parameters, *_args):
+            values = parameters.unpack()
+            self.calls.append((method, values))
+            if self.fail_first:
+                self.fail_first = False
+                raise RuntimeError("simulated lost method reply")
+
+    def test_fixed_text_uses_layout_independent_keysyms_and_releases_them(self):
+        bus = self.FakeBus()
+        with mock.patch.object(REMOTE_INPUT.time, "sleep"):
+            REMOTE_INPUT.send_text(bus, "/session", ";e2e", 0.06)
+
+        expected = [
+            ("NotifyKeyboardKeysym", (ord(character), pressed))
+            for character in ";e2e"
+            for pressed in (True, False)
+        ]
+        self.assertEqual(bus.calls, expected)
+        self.assertTrue(all(method != "NotifyKeyboardKeycode" for method, _ in bus.calls))
+
+    def test_failed_press_reply_still_attempts_key_release(self):
+        bus = self.FakeBus(fail_first=True)
+        with mock.patch.object(REMOTE_INPUT.time, "sleep"):
+            with self.assertRaisesRegex(RuntimeError, "simulated lost method reply"):
+                REMOTE_INPUT.send_text(bus, "/session", "a", 0.06)
+
+        self.assertEqual(
+            bus.calls,
+            [
+                ("NotifyKeyboardKeysym", (ord("a"), True)),
+                ("NotifyKeyboardKeysym", (ord("a"), False)),
+            ],
+        )
 
 
 if __name__ == "__main__":
