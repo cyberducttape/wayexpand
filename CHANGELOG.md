@@ -9,6 +9,8 @@ All notable changes to WayExpand are documented here.
   WayExpand-specific IBus insertion. Route GTK, Qt/XIM, and terminal input
   through the compositor virtual device so headless XWayland delivery failures
   and xdotool multibyte conversion do not masquerade as target-client failures.
+  Resolve Mutter's Clutter backend through the stage context on GNOME 51, with
+  the older backend accessor retained for earlier supported Shell versions.
   Refresh XWayland focus once before the
   GTK baseline event. Count sanitized GDK-to-widget key events
   and report GTK's effective IM-module, X11 focus, active window, XTEST

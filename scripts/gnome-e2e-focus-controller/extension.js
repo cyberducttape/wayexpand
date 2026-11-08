@@ -64,7 +64,13 @@ export default class GnomeE2eFocusController extends Extension {
 
         try {
             if (!this._virtualKeyboard) {
-                const seat = Clutter.get_default_backend().get_default_seat();
+                // GNOME Shell 51 removed Clutter.get_default_backend(). Keep
+                // the old accessor only as a compatibility fallback for
+                // older Shell versions.
+                const backend = typeof global.stage?.context?.get_backend === 'function'
+                    ? global.stage.context.get_backend()
+                    : Clutter.get_default_backend();
+                const seat = backend.get_default_seat();
                 this._virtualKeyboard = seat.create_virtual_device(
                     Clutter.InputDeviceType.KEYBOARD_DEVICE,
                 );
