@@ -16,6 +16,13 @@ All notable changes to WayExpand are documented here.
   lifecycle coverage. Keep generated Cargo vendor state outside CI checkouts,
   preserve relocatable vendor configuration in source archives, and let active
   GNOME acceptance runs complete instead of cancelling them on every push.
+- Keep the exact test-client executable paths isolated to the headless GNOME
+  test session, including the CLI and IBus engine binaries needed to exercise
+  source repair and engine activation. Let Debian package builds consume the
+  verified external Cargo vendor tree from `CARGO_HOME`, so package CI no
+  longer needs to materialize generated vendor files in the Git checkout.
+  Refresh the GNOME extension content identity and its metadata contract after
+  changing the authorization helper.
 - Authorize the same-UID `wayexpand-ibus` engine process for the GNOME
   Shell's existing authenticated input-source and keyboard-layout bridge.
   GNOME previously rejected the real IBus client while the test helper was

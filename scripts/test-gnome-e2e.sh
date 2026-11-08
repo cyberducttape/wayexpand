@@ -1172,7 +1172,7 @@ env -i \
     XDG_CURRENT_DESKTOP=GNOME \
     XDG_SESSION_TYPE=wayland \
     WAYEXPAND_GNOME_AUTH_DIAGNOSTICS=1 \
-    WAYEXPAND_GNOME_TEST_CLIENT="$bin_dir/wx-e2e-gnome-tracker" \
+    WAYEXPAND_GNOME_TEST_CLIENTS="$bin_dir/wayexpand:$bin_dir/wayexpand-ibus:$bin_dir/wx-e2e-gnome-tracker" \
     E2E_WORK="$work" \
     E2E_BIN_DIR="$bin_dir" \
     E2E_BROWSER_BIN="$browser_bin" \

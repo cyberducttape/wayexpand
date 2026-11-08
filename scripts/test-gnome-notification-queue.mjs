@@ -35,9 +35,10 @@ test('subscription requires the current user and an installed executable path', 
         '/home/alice/.local/bin/wayexpand', '/home/alice'), false);
     assert.equal(isAuthorizedTrackerClient(1000, 1000,
         '/home/alice/.local/lib/wayexpand/../other/bin/wayexpand', '/home/alice'), false);
-    const testClient = '/tmp/wx-e2e-gnome-tracker';
-    assert.equal(isAuthorizedTrackerClient(1000, 1000, testClient, null, testClient), true);
-    assert.equal(isAuthorizedTrackerClient(1000, 1000, '/tmp/other', null, testClient), false);
+    const testClients = '/tmp/wayexpand:/tmp/wayexpand-ibus:/tmp/wx-e2e-gnome-tracker';
+    assert.equal(isAuthorizedTrackerClient(1000, 1000, '/tmp/wx-e2e-gnome-tracker', null, testClients), true);
+    assert.equal(isAuthorizedTrackerClient(1000, 1000, '/tmp/wayexpand-ibus', null, testClients), true);
+    assert.equal(isAuthorizedTrackerClient(1000, 1000, '/tmp/other', null, testClients), false);
     assert.equal(isAuthorizedTrackerClient(1001, 1000, '/usr/bin/wayexpand'), false);
     assert.equal(isAuthorizedTrackerClient('01000', 1000, '/usr/bin/wayexpand-daemon'), false);
     assert.equal(isAuthorizedTrackerClient('unknown', 1000, '/usr/bin/wayexpand-daemon'), false);

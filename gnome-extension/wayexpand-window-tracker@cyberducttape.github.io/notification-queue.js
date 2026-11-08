@@ -16,7 +16,7 @@ const SYSTEM_WAYEXPAND_CLIENTS = new Set([
  * accepted identity but does not isolate malicious processes of the same UID.
  */
 export function isAuthorizedTrackerClient(peerUid, currentUid, executablePath, homeDirectory = null,
-    isolatedTestClientPath = null) {
+    isolatedTestClientPaths = null) {
     // GetConnectionUnixUser() supplies both peer and Shell UIDs. Compare
     // canonical numeric identities; never fall back to username, process
     // arguments, or executable basename without the UID check.
@@ -40,8 +40,9 @@ export function isAuthorizedTrackerClient(peerUid, currentUid, executablePath, h
     }
     // Only the isolated CI session sets this exact-path exception. No test
     // executable name or basename is trusted by normal desktop sessions.
-    return typeof isolatedTestClientPath === 'string'
-        && isolatedTestClientPath.startsWith('/') && executable === isolatedTestClientPath;
+    return typeof isolatedTestClientPaths === 'string'
+        && isolatedTestClientPaths.split(':').some(path =>
+            path.startsWith('/') && executable === path);
 }
 
 /** Keep title access scoped to the caller's current request and clear any

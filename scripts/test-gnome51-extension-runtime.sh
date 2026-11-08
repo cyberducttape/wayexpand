@@ -167,6 +167,6 @@ PY
     esac
 EOF
 chmod 0600 "$work/session.sh"
-export WAYEXPAND_GNOME_TEST_CLIENT="$tracker_bin"
+export WAYEXPAND_GNOME_TEST_CLIENTS="$tracker_bin"
 dbus-run-session -- sh "$work/session.sh" "$uuid" "$work" \
     "$WAYLAND_DISPLAY" "$project_dir" "$tracker_bin"

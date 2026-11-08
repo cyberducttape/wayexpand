@@ -798,7 +798,11 @@ jobs:
           cargo_home="$RUNNER_TEMP/wayexpand-cargo-home"
           mkdir -p "$cargo_home"
           CARGO_HOME="$cargo_home" cargo vendor --locked "$cargo_home/vendor" > "$cargo_home/config.toml"
-          echo "CARGO_HOME=$cargo_home" >> "$GITHUB_ENV"
+          {
+            echo "CARGO_HOME=$cargo_home"
+            echo "WAYEXPAND_VENDOR_CONFIG=$cargo_home/config.toml"
+            echo "WAYEXPAND_VENDOR_DIR=$cargo_home/vendor"
+          } >> "$GITHUB_ENV"
       - name: Build Debian package
         run: |
           # The pinned rust-toolchain supplies rustc/cargo; -d bypasses the

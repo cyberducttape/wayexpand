@@ -928,7 +928,8 @@ mod tests {
         assert!(script.contains("<method name=\"ActivateInputSource\">"));
         assert!(script.contains("<method name=\"SubscribeWithTitles\">"));
         assert!(script.contains("this._subscribe(invocation, false)"));
-        assert!(script.contains("isAuthorizedTrackerClient(uid, ownUid, executable)"));
+        assert!(script.contains("uid, ownUid, executable, GLib.get_home_dir()"));
+        assert!(script.contains("GLib.getenv('WAYEXPAND_GNOME_TEST_CLIENTS')"));
         assert!(script.contains("GetConnectionUnixUser",));
         assert!(script.contains("GetActiveInputSourceAsync(_parameters, invocation) {\n        this._withAuthorizedClient(invocation"));
         assert!(script.contains("GetActiveKeyboardLayoutAsync(_parameters, invocation) {\n        this._withAuthorizedClient(invocation"));
