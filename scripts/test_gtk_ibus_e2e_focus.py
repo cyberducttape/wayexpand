@@ -554,9 +554,24 @@ class MutterRemoteInputTests(unittest.TestCase):
         source = REMOTE_INPUT_SCRIPT.read_text(encoding="utf-8")
         click = source.index("click_test_field(bus, session_path, window_rect)")
         publish = source.index("publish_focus_confirmation(args.focus_marker)")
-        wait = source.index("wait_for_gtk_input_ready(args.ready_marker, 13.0)")
+        wait = source.index("if not wait_for_gtk_input_ready(")
         self.assertLess(publish, click)
         self.assertLess(click, wait)
+
+    def test_gtk_readiness_reissues_shell_activation_until_stable(self):
+        times = [0.0, 0.0, 0.0, 0.26, 0.26]
+        with (
+            mock.patch.object(REMOTE_INPUT.time, "monotonic", side_effect=times),
+            mock.patch.object(REMOTE_INPUT.time, "sleep"),
+            mock.patch.object(REMOTE_INPUT.os.path, "isfile", return_value=True),
+            mock.patch.object(REMOTE_INPUT, "activate_test_window") as activate,
+        ):
+            self.assertTrue(
+                REMOTE_INPUT.wait_for_gtk_input_ready(
+                    object(), "org.example.Test", "/tmp/ready", 13.0
+                )
+            )
+        self.assertEqual(activate.call_count, 2)
 
     def test_shell_focus_controller_reports_mapped_window_geometry(self):
         source = FOCUS_CONTROLLER_SCRIPT.read_text(encoding="utf-8")

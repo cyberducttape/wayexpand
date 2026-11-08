@@ -237,14 +237,22 @@ def publish_focus_confirmation(path):
         os.close(descriptor)
 
 
-def wait_for_gtk_input_ready(path, timeout_seconds):
+def wait_for_gtk_input_ready(bus, app_id, path, timeout_seconds):
     deadline = time.monotonic() + timeout_seconds
     ready_since = None
+    next_activation_at = 0.0
     while time.monotonic() < deadline:
+        now = time.monotonic()
+        if now >= next_activation_at:
+            # Shell can report Meta.Window focus before GTK receives the
+            # corresponding Wayland activation. Reissue the compositor-side
+            # activation while GTK is confirming its own active/focus state.
+            activate_test_window(bus, app_id)
+            next_activation_at = now + 0.25
         if os.path.isfile(path):
             if ready_since is None:
-                ready_since = time.monotonic()
-            elif time.monotonic() - ready_since >= 0.25:
+                ready_since = now
+            elif now - ready_since >= 0.25:
                 return True
         else:
             ready_since = None
@@ -315,7 +323,9 @@ def main():
         # that same click had succeeded.
         publish_focus_confirmation(args.focus_marker)
         click_test_field(bus, session_path, window_rect)
-        if not wait_for_gtk_input_ready(args.ready_marker, 13.0):
+        if not wait_for_gtk_input_ready(
+            bus, args.app_id, args.ready_marker, 13.0
+        ):
             raise RuntimeError(
                 "GTK did not confirm stable active input focus; test text was not sent"
             )
