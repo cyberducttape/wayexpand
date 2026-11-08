@@ -4349,3 +4349,5 @@ This is the first stable release. WayExpand is now recommended for production us
   relying only on toplevel activation.
 - Exercise GTK 4 password handling with `Gtk.PasswordEntry`, the toolkit's
   dedicated password widget, while retaining exact focus and text checks.
+- Recognize GTK 4 composite password controls as focused when their internal
+  text child owns focus; exact contents remain the pass criterion.

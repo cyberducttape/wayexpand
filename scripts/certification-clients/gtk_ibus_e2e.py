@@ -79,6 +79,14 @@ def main():
     focused_since = None
     loop = GLib.MainLoop() if args.gtk_version == "4" else None
 
+    def focus_is_within_test_widget():
+        focused = window.get_focus()
+        while focused is not None:
+            if focused == focus_widget:
+                return True
+            focused = focused.get_parent()
+        return False
+
     def quit_loop():
         if loop is not None:
             loop.quit()
@@ -98,10 +106,9 @@ def main():
         # Wait for GTK's actual child focus to remain stable before the test
         # sends its first key; otherwise a fast XTEST event can race IBus
         # InputContext creation and lose the first character.
-        # GTK 3's X11 widget focus flag stays false in this private Mutter
-        # session after the focus controller has observed the exact WM target.
-        # GTK 4 reports child focus; require it for Entry and TextView alike.
-        child_focused = args.gtk_version == "3" or focus_widget.has_focus()
+        # Some GTK 4 controls, notably PasswordEntry, delegate keyboard focus
+        # to an internal child. Accept focus anywhere inside the test widget.
+        child_focused = args.gtk_version == "3" or focus_is_within_test_widget()
         if child_focused:
             if focused_since is None:
                 focused_since = GLib.get_monotonic_time()
@@ -115,7 +122,7 @@ def main():
                     os.close(fd)
         else:
             focused_since = None
-        if not focus_widget.has_focus():
+        if not focus_is_within_test_widget():
             # In GTK 4, grabbing focus before Mutter activates the toplevel
             # may be ignored. Retry only after the Shell focus controller has
             # confirmed this acceptance window is active.
@@ -136,7 +143,8 @@ def main():
             print(
                 f"GTK focus diagnostic: active={window.is_active()} "
                 f"widget_focused={focus_widget.has_focus()} "
-                f"window_focus_matches_widget={window.get_focus() == focus_widget}",
+                f"focus_within_widget={focus_is_within_test_widget()} "
+                f"focused_widget_type={type(window.get_focus()).__name__ if window.get_focus() else 'none'}",
                 file=sys.stderr,
             )
             failed = True
