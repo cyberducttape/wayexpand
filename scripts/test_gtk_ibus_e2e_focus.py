@@ -29,13 +29,15 @@ REMOTE_INPUT_SPEC.loader.exec_module(REMOTE_INPUT)
 
 
 class GnomeAcceptanceShellContractTests(unittest.TestCase):
-    def test_focus_controller_uses_shell_activation_with_workspace_handling(self):
+    def test_focus_controller_uses_atomic_workspace_activation(self):
         source = FOCUS_CONTROLLER_SCRIPT.read_text(encoding="utf-8")
         self.assertIn(
             "import * as Main from 'resource:///org/gnome/shell/ui/main.js';",
             source,
         )
-        self.assertEqual(source.count("Main.activateWindow(window, global.get_current_time());"), 2)
+        self.assertEqual(source.count("this._activateWindow(window);"), 2)
+        self.assertIn("workspace.activate_with_focus(window, timestamp)", source)
+        self.assertIn("window.activate(timestamp)", source)
 
     def test_shell_reactivates_window_after_keyboard_priming(self):
         source = REMOTE_INPUT_SCRIPT.read_text(encoding="utf-8")

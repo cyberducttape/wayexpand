@@ -56,6 +56,21 @@ export default class GnomeE2eFocusController extends Extension {
         );
     }
 
+    _activateWindow(window) {
+        const timestamp = global.get_current_time();
+        const workspace = window.get_workspace();
+        if (workspace && typeof workspace.activate_with_focus === 'function') {
+            // Activate the workspace and its target together. Shell's
+            // Main.activateWindow can report MetaWindow focus before the
+            // Wayland client receives the corresponding activation state in
+            // headless Mutter sessions.
+            workspace.activate_with_focus(window, timestamp);
+        } else {
+            window.activate(timestamp);
+        }
+        Main.overview.hide();
+    }
+
     GetWindowRectAsync([appId], invocation) {
         const window = this._findWindow(appId);
         if (!window) {
@@ -100,11 +115,11 @@ export default class GnomeE2eFocusController extends Extension {
                 return GLib.SOURCE_REMOVE;
             }
 
-            Main.activateWindow(window, global.get_current_time());
+            this._activateWindow(window);
             return GLib.SOURCE_CONTINUE;
         };
 
-        Main.activateWindow(window, global.get_current_time());
+        this._activateWindow(window);
         GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, confirmFocus);
     }
 }
