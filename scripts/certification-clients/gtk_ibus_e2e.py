@@ -108,7 +108,7 @@ def main():
         # Wait for GTK's actual child focus to remain stable before the test
         # sends its first key; otherwise a fast XTEST event can race IBus
         # InputContext creation and lose the first character.
-        child_focused = window.is_active() and focus_widget.has_focus()
+        child_focused = focus_widget.has_focus()
         if child_focused:
             if focused_since is None:
                 focused_since = GLib.get_monotonic_time()

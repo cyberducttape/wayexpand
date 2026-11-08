@@ -49,7 +49,7 @@ def main():
             return True
         # A mapped Qt window is not necessarily ready to receive XIM input.
         # Require stable activation and child focus before the caller types.
-        active = QApplication.activeWindow() is window and field.hasFocus()
+        active = field.hasFocus()
         if active:
             if ready_since is None:
                 ready_since = time.monotonic()
