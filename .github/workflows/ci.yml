@@ -735,9 +735,10 @@ jobs:
           --bin wx-e2e-ibus
       - name: Register the test engine through Fedora's system IBus component path
         run: |
-          sed "s|<exec>wayexpand-ibus</exec>|$GITHUB_WORKSPACE/target/debug/wayexpand-ibus|" \
+          sed "s|<exec>wayexpand-ibus</exec>|<exec>$GITHUB_WORKSPACE/target/debug/wayexpand-ibus</exec>|" \
             desktop/wayexpand-ibus.xml \
             > /usr/share/ibus/component/wayexpand.xml
+          python3 -c 'import xml.etree.ElementTree as ET; ET.parse("/usr/share/ibus/component/wayexpand.xml")'
           chmod 0644 /usr/share/ibus/component/wayexpand.xml
       - name: Start the isolated system bus required by GNOME Shell
         run: |
