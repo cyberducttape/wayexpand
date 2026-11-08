@@ -4,10 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
-- Count XInput2 raw key presses without retaining keycodes or text during GNOME
-  GTK acceptance tests. This distinguishes XTEST-to-XWayland delivery failures
-  from GTK/IBus event-routing failures while keeping diagnostic output
-  content-free.
+- Verify ordinary US XKB-to-GTK key delivery before WayExpand-specific IBus
+  insertion, and report X11 focus, active window, XTEST availability, and
+  content-free IBus focus/key counters on failures. Force and validate a UTF-8
+  locale for xdotool text injection so Unicode passthrough tests exercise the
+  target client rather than failing during multibyte decoding.
 - Verify GNOME IBus activation against the live IBus manager state and
   confirmed engine name instead of trusting Shell's optimistic current source.
   Report disconnected or sensitive-field-disabled IBus states explicitly, and

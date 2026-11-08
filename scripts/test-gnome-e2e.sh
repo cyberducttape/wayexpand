@@ -23,12 +23,19 @@ for argument in "$@"; do
         *) printf '%s\n' "usage: $0 [--keep]" >&2; exit 2 ;;
     esac
 done
-for tool in gnome-shell dbus-run-session gsettings gdbus xdotool xinput stdbuf xterm timeout python3; do
+for tool in gnome-shell dbus-run-session gsettings gdbus xdotool xprop xdpyinfo \
+    iconv locale xterm timeout python3; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         printf '%s\n' "error: $tool is required (install GNOME Shell, XWayland, xdotool and the GTK/IBus test dependencies)" >&2
         exit 2
     fi
 done
+utf8_charmap=$(LC_ALL=C.UTF-8 locale charmap 2>/dev/null || true)
+if [ "$utf8_charmap" != UTF-8 ]; then
+    printf '%s\n' "fail gnome-unicode-locale C.UTF-8 locale unavailable (charmap=${utf8_charmap:-unknown})" >&2
+    locale -a >&2 2>&1 || true
+    exit 1
+fi
 shell_version=$(gnome-shell --version | sed -n 's/.* \([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1/p')
 if [ -z "$shell_version" ] || ! python3 - "$project_dir/scripts/gnome-e2e-focus-controller/metadata.json" "$shell_version" <<'PY'
 import json
@@ -262,12 +269,78 @@ activate_window() {
 
 click_test_field() {
     app_id=$1
-    window_id=$(DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+    test_window_id=$(DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
         xdotool search --onlyvisible --name "$app_id" 2>/dev/null | tail -n 1)
-    if [ -z "$window_id" ] || ! DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
-        xdotool mousemove --window "$window_id" 100 40 click 1; then
+    if [ -z "$test_window_id" ] || ! DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+        xdotool mousemove --window "$test_window_id" 100 40 click 1; then
         return 1
     fi
+}
+
+diagnose_x11_input() {
+    case_name=$1
+    report="$E2E_WORK/x11-input-$case_name.txt"
+    {
+        printf 'target_window=%s\n' "${test_window_id:-unknown}"
+        focused_window=$(DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+            xdotool getwindowfocus 2>&1 || true)
+        active_window=$(DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+            xdotool getactivewindow 2>&1 || true)
+        printf 'x11_keyboard_focus=%s\n' "$focused_window"
+        printf 'x11_active_window=%s\n' "$active_window"
+        if [ "$focused_window" = "${test_window_id:-}" ] \
+            || [ "$active_window" = "${test_window_id:-}" ]; then
+            printf '%s\n' 'x11_test_window_has_focus=yes'
+        else
+            printf '%s\n' 'x11_test_window_has_focus=no'
+            if [ -n "${test_window_id:-}" ]; then
+                printf '%s\n' 'attempting targeted windowfocus experiment'
+                DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+                    xdotool windowfocus --sync "$test_window_id" 2>&1 || true
+                printf 'focus_after_windowfocus=%s\n' \
+                    "$(DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" xdotool getwindowfocus 2>&1 || true)"
+            fi
+        fi
+        printf '%s\n' 'focused_window_name:'
+        DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+            xdotool getwindowfocus getwindowname 2>&1 || true
+        printf '%s\n' 'active_window_name:'
+        DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+            xdotool getactivewindow getwindowname 2>&1 || true
+        if [ -n "${test_window_id:-}" ]; then
+            printf '%s\n' 'target_window_properties:'
+            DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+                xprop -id "$test_window_id" WM_CLASS _NET_WM_NAME 2>&1 || true
+        fi
+        printf '%s\n' 'root_active_window:'
+        DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+            xprop -root _NET_ACTIVE_WINDOW 2>&1 || true
+        printf '%s\n' 'XTEST extension:'
+        DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+            xdpyinfo -queryExtensions 2>&1 | awk 'tolower($0) ~ /xtest/ {print; found=1} END {if (!found) print "not advertised"}'
+    } >"$report" 2>&1
+}
+
+type_x11_input() {
+    case_name=$1
+    input_text=$2
+    locale_report="$E2E_WORK/locale-$case_name.txt"
+    {
+        locale
+        locale charmap
+        locale -a
+        printf 'LC_ALL=%s LANG=%s LC_CTYPE=%s\n' \
+            "${LC_ALL:-}" "${LANG:-}" "${LC_CTYPE:-}"
+        printf 'forced_charmap='
+        LC_ALL=C.UTF-8 locale charmap
+    } >"$locale_report" 2>&1
+    if ! printf '%s' "$input_text" | iconv -f UTF-8 -t UTF-8 >/dev/null; then
+        printf '%s\n' 'input is not valid UTF-8' >"$E2E_WORK/xdotool-$case_name.err"
+        return 1
+    fi
+    LC_ALL=C.UTF-8 DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+        xdotool type --clearmodifiers --delay 40 -- "$input_text" \
+        2>"$E2E_WORK/xdotool-$case_name.err"
 }
 
 tries=600
@@ -490,6 +563,7 @@ run_gtk_ibus_case() {
     expected=$3
     password=$4
     gtk_version=${5:-3}
+    im_mode=${6:-ibus}
     app_id="org.wayexpand.GnomeGtkIbus.$case_name"
     marker="$E2E_WORK/gtk-window-focused-$case_name"
     ready_marker="$E2E_WORK/gtk-input-ready-$case_name"
@@ -502,17 +576,30 @@ run_gtk_ibus_case() {
     if [ "$password" = true ]; then
         set -- --password
     fi
-    timeout 20s env \
-        GTK_IM_MODULE=ibus \
-        GDK_BACKEND=x11 \
-        DISPLAY="$x11_display" \
-        XAUTHORITY="$xwayland_auth" \
-        IBUS_ADDRESS="$(ibus address)" \
-        GTK_E2E_FOCUS_MARKER="$marker" \
-        GTK_E2E_READY_MARKER="$ready_marker" \
-        GTK_E2E_APP_ID="$app_id" \
-        python3 "$E2E_PROJECT_DIR/scripts/certification-clients/gtk_ibus_e2e.py" \
-        --gtk-version "$gtk_version" --expected "$expected" "$@" >"$test_log" 2>&1 &
+    if [ "$im_mode" = default ]; then
+        timeout 20s env -u GTK_IM_MODULE -u XMODIFIERS \
+            GDK_BACKEND=x11 \
+            DISPLAY="$x11_display" \
+            XAUTHORITY="$xwayland_auth" \
+            IBUS_ADDRESS="$(ibus address)" \
+            GTK_E2E_FOCUS_MARKER="$marker" \
+            GTK_E2E_READY_MARKER="$ready_marker" \
+            GTK_E2E_APP_ID="$app_id" \
+            python3 "$E2E_PROJECT_DIR/scripts/certification-clients/gtk_ibus_e2e.py" \
+            --gtk-version "$gtk_version" --im-mode default --expected "$expected" "$@" >"$test_log" 2>&1 &
+    else
+        timeout 20s env \
+            GTK_IM_MODULE=ibus \
+            GDK_BACKEND=x11 \
+            DISPLAY="$x11_display" \
+            XAUTHORITY="$xwayland_auth" \
+            IBUS_ADDRESS="$(ibus address)" \
+            GTK_E2E_FOCUS_MARKER="$marker" \
+            GTK_E2E_READY_MARKER="$ready_marker" \
+            GTK_E2E_APP_ID="$app_id" \
+            python3 "$E2E_PROJECT_DIR/scripts/certification-clients/gtk_ibus_e2e.py" \
+            --gtk-version "$gtk_version" --im-mode ibus --expected "$expected" "$@" >"$test_log" 2>&1 &
+    fi
     gtk_pid=$!
     if ! activate_window "$app_id"; then
         kill "$gtk_pid" 2>/dev/null || true
@@ -551,14 +638,24 @@ run_gtk_ibus_case() {
         fi
         sleep 0.05
     done
-    if ! DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
-        xdotool type --clearmodifiers --delay 40 -- "$trigger"; then
+    diagnose_x11_input "$case_name"
+    if [ -f "$status_file" ]; then
+        cp "$status_file" "$E2E_WORK/ibus-context-before-$case_name.json"
+    fi
+    if ! type_x11_input "$case_name" "$trigger"; then
+        if [ -f "$status_file" ]; then
+            cp "$status_file" "$E2E_WORK/ibus-context-after-$case_name.json"
+        fi
         kill "$gtk_pid" 2>/dev/null || true
         wait "$gtk_pid" 2>/dev/null || true
         gtk_pid=
         log "fail gnome-gtk-$case_name XTEST could not type into the focused GTK window"
-        cat "$test_log"
+        cat "$test_log" "$E2E_WORK/x11-input-$case_name.txt" \
+            "$E2E_WORK/locale-$case_name.txt" "$E2E_WORK/xdotool-$case_name.err"
         exit 1
+    fi
+    if [ -f "$status_file" ]; then
+        cp "$status_file" "$E2E_WORK/ibus-context-after-$case_name.json"
     fi
     gtk_status=0
     wait "$gtk_pid" || gtk_status=$?
@@ -567,9 +664,36 @@ run_gtk_ibus_case() {
     ibus engine >>"$engine_log" 2>&1 || true
     if [ "$gtk_status" -ne 0 ]; then
         cp "$status_file" "$E2E_WORK/ibus-status-$case_name.json" 2>/dev/null || true
-        log "fail gnome-gtk-$case_name GTK's IBus input context produced an incorrect result"
+        if [ "$im_mode" = default ]; then
+            log "fail gnome-gtk-$case_name XTEST_INPUT_NOT_DELIVERED: ordinary XKB input did not reach the GTK field"
+        else
+            log "fail gnome-gtk-$case_name GTK's IBus input context produced an incorrect result"
+        fi
         cat "$test_log"
         cat "$engine_log"
+        cat "$E2E_WORK/x11-input-$case_name.txt" \
+            "$E2E_WORK/locale-$case_name.txt" \
+            "$E2E_WORK/xdotool-$case_name.err" 2>/dev/null || true
+        python3 - "$E2E_WORK/ibus-context-before-$case_name.json" \
+            "$E2E_WORK/ibus-context-after-$case_name.json" <<'PY'
+import json
+import pathlib
+import sys
+
+for filename in sys.argv[1:]:
+    path = pathlib.Path(filename)
+    if not path.is_file():
+        continue
+    status = json.loads(path.read_text(encoding="utf-8"))
+    print(path.name, json.dumps({
+        "totals": status.get("totals"),
+        "recent_fields": [
+            {key: field.get(key) for key in
+             ("sequence", "focused", "keys", "expansions", "content_type")}
+            for field in status.get("recent_fields", [])
+        ],
+    }, sort_keys=True))
+PY
         if [ -s "$E2E_WORK/ibus-status-$case_name.json" ]; then
             python3 - "$E2E_WORK/ibus-status-$case_name.json" <<'PY'
 import json
@@ -587,6 +711,45 @@ PY
     fi
     log "pass gnome-gtk-$case_name $(cat "$test_log")"
 }
+
+# Prove XTEST, X11 focus, and ordinary GTK input separately from WayExpand's
+# IBus engine. The baseline uses the US XKB source and GTK's default IM path.
+if ! "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --activate-source xkb us \
+    >"$E2E_WORK/layout-us-baseline-activation.log" 2>&1; then
+    log "fail gnome-gtk-x11-baseline GNOME could not activate the ordinary US XKB source"
+    cat "$E2E_WORK/layout-us-baseline-activation.log"
+    exit 1
+fi
+if ! "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --active-layout \
+    >"$E2E_WORK/layout-us-baseline-active.log" 2>&1 \
+    || ! grep -F 'active-layout xkb us ' "$E2E_WORK/layout-us-baseline-active.log" >/dev/null; then
+    log "fail gnome-gtk-x11-baseline the ordinary US XKB source is not active"
+    cat "$E2E_WORK/layout-us-baseline-activation.log" "$E2E_WORK/layout-us-baseline-active.log"
+    exit 1
+fi
+run_gtk_ibus_case x11-baseline a a false 3 default
+if ! "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --activate-source ibus wayexpand \
+    >"$E2E_WORK/ibus-source-after-x11-baseline.log" 2>&1; then
+    log "fail ibus-engine-active GNOME could not restore WayExpand after the XKB baseline"
+    cat "$E2E_WORK/ibus-source-after-x11-baseline.log"
+    exit 1
+fi
+tries=100
+while :; do
+    active_engine=$(ibus engine 2>/dev/null || true)
+    case "$active_engine" in
+        *wayexpand*)
+            log "pass ibus-engine-active WayExpand restored after XKB baseline"
+            break
+            ;;
+    esac
+    tries=$((tries - 1))
+    if [ "$tries" -le 0 ]; then
+        log "fail ibus-engine-active WayExpand did not resume after XKB baseline: $active_engine"
+        exit 1
+    fi
+    sleep 0.1
+done
 
 run_gtk_ibus_case insertion ';e2e' expanded false
 run_gtk_ibus_case unicode ';unicode' 'Grüße 世界 🖥️' false
@@ -653,12 +816,13 @@ run_qt_xim_case() {
         fi
         sleep 0.05
     done
-    if ! DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
-        xdotool type --clearmodifiers --delay 40 -- "$input"; then
+    diagnose_x11_input "$case_name"
+    if ! type_x11_input "$case_name" "$input"; then
         kill "$qt_pid" 2>/dev/null || true
         wait "$qt_pid" 2>/dev/null || true
         log "fail gnome-qt-$case_name XTEST could not type into the Qt field"
-        cat "$test_log"
+        cat "$test_log" "$E2E_WORK/x11-input-$case_name.txt" \
+            "$E2E_WORK/locale-$case_name.txt" "$E2E_WORK/xdotool-$case_name.err"
         exit 1
     fi
     qt_status=0
@@ -714,13 +878,13 @@ run_terminal_xim_case() {
         cat "$test_log"
         exit 1
     fi
-    if ! DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
-        xdotool type --clearmodifiers --delay 40 -- "$input"; then
+    if ! type_x11_input "$case_name" "$input"; then
         kill "$terminal_pid" 2>/dev/null || true
         wait "$terminal_pid" 2>/dev/null || true
         terminal_pid=
         log "fail gnome-terminal-$case_name XTEST could not type into the terminal"
-        cat "$test_log"
+        cat "$test_log" "$E2E_WORK/locale-$case_name.txt" \
+            "$E2E_WORK/xdotool-$case_name.err"
         exit 1
     fi
     terminal_status=0
@@ -1221,7 +1385,7 @@ env -i \
     dbus-run-session -- "$work/session.sh" >"$work/results.txt" 2>"$work/session.log" || status=$?
 
 cat "$work/results.txt"
-expected_checks='extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-gtk-insertion gnome-gtk-unicode gnome-gtk-password gnome-gtk-gtk4-insertion gnome-gtk-gtk4-unicode gnome-gtk-gtk4-password gnome-qt-safe-passthrough gnome-qt-unicode-passthrough gnome-qt-password gnome-terminal-safe-passthrough gnome-terminal-unicode-passthrough gnome-layout-de gnome-layout-fr extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-gtk-after-login'
+expected_checks='extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-gtk-x11-baseline gnome-gtk-insertion gnome-gtk-unicode gnome-gtk-password gnome-gtk-gtk4-insertion gnome-gtk-gtk4-unicode gnome-gtk-gtk4-password gnome-qt-safe-passthrough gnome-qt-unicode-passthrough gnome-qt-password gnome-terminal-safe-passthrough gnome-terminal-unicode-passthrough gnome-layout-de gnome-layout-fr extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-gtk-after-login'
 missing_check=
 for check in $expected_checks; do
     if ! grep -F "pass $check" "$work/results.txt" >/dev/null; then

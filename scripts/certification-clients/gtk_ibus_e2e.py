@@ -9,11 +9,6 @@ keyboard delivery. The only entered content is a fixed, harmless test trigger.
 import os
 import sys
 import argparse
-import shutil
-import signal
-import subprocess
-import threading
-import time
 
 import gi
 
@@ -21,86 +16,6 @@ import gi
 DEFAULT_APP_ID = "org.wayexpand.GnomeGtkIbus"
 TIMEOUT_MS = 15000
 FOCUS_STABLE_FOR_US = 250_000
-
-
-class X11RawKeyCounter:
-    """Count XInput2 raw key presses without retaining keycodes or text."""
-
-    def __init__(self):
-        self._count = 0
-        self._lock = threading.Lock()
-        self._process = None
-        self._reader = None
-        self._closed = False
-        if shutil.which("xinput") is None:
-            raise RuntimeError("xinput is required for content-free key-delivery diagnostics")
-        stdbuf = shutil.which("stdbuf")
-        if stdbuf is None:
-            raise RuntimeError("stdbuf is required for content-free key-delivery diagnostics")
-        try:
-            self._process = subprocess.Popen(
-                [stdbuf, "-oL", "xinput", "test-xi2", "--root"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                text=True,
-                bufsize=1,
-                start_new_session=True,
-            )
-        except OSError:
-            raise RuntimeError("could not start the XInput2 key-delivery monitor")
-        self._reader = threading.Thread(target=self._read, daemon=True)
-        self._reader.start()
-        time.sleep(0.05)
-        if self._process.poll() is not None:
-            returncode = self._process.returncode
-            self._process = None
-            self._reader = None
-            raise RuntimeError(f"XInput2 key-delivery monitor exited during startup ({returncode})")
-
-    @property
-    def available(self):
-        return self._process is not None
-
-    def _read(self):
-        assert self._process is not None
-        assert self._process.stdout is not None
-        for line in self._process.stdout:
-            if "RawKeyPress" in line:
-                with self._lock:
-                    self._count += 1
-
-    def count(self):
-        with self._lock:
-            return self._count
-
-    def close(self):
-        if self._process is None or self._closed:
-            return
-        self._closed = True
-        process_group = self._process.pid
-        try:
-            os.killpg(process_group, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        try:
-            self._process.wait(timeout=1)
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(process_group, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            self._process.wait(timeout=1)
-        else:
-            # xinput is a single process, but contain any wrapper descendants
-            # too so a failed diagnostic cannot outlive the GTK test client.
-            try:
-                os.killpg(process_group, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-        if self._reader is not None:
-            self._reader.join(timeout=1)
-        if self._process.stdout is not None:
-            self._process.stdout.close()
 
 
 def update_focus_stability(window_active, widget_focused, focused_since, now):
@@ -117,11 +32,16 @@ def main():
     parser.add_argument("--expected", required=True)
     parser.add_argument("--password", action="store_true")
     parser.add_argument("--gtk-version", choices=("3", "4"), default="3")
+    parser.add_argument("--im-mode", choices=("ibus", "default"), default="ibus")
     args = parser.parse_args()
     gi.require_version("Gtk", "4.0" if args.gtk_version == "4" else "3.0")
     from gi.repository import GLib, Gtk
-    if os.environ.get("GTK_IM_MODULE") != "ibus":
+    if args.im_mode == "ibus" and os.environ.get("GTK_IM_MODULE") != "ibus":
         raise SystemExit("GTK_IM_MODULE must be set to ibus")
+    if args.im_mode == "default" and os.environ.get("GTK_IM_MODULE"):
+        raise SystemExit("GTK_IM_MODULE must be unset for the default GTK input path")
+    if args.im_mode == "default" and os.environ.get("XMODIFIERS"):
+        raise SystemExit("XMODIFIERS must be unset for the default GTK input path")
     if not os.environ.get("IBUS_ADDRESS"):
         raise SystemExit("IBUS_ADDRESS must identify the private IBus daemon")
     if not os.environ.get("DISPLAY"):
@@ -168,13 +88,11 @@ def main():
         window.show_all()
     window.present()
     focus_widget.grab_focus()
-    x11_key_counter = X11RawKeyCounter()
 
     failed = False
     started_at = GLib.get_monotonic_time()
     focused_since = None
     gtk_key_events = 0
-    raw_key_events_at_ready = 0
     loop = GLib.MainLoop() if args.gtk_version == "4" else None
 
     def count_key_event(*_event):
@@ -208,7 +126,7 @@ def main():
             Gtk.main_quit()
 
     def wait_for_expansion():
-        nonlocal failed, focused_since, raw_key_events_at_ready
+        nonlocal failed, focused_since
         if not os.path.exists(focus_marker):
             if GLib.get_monotonic_time() - started_at >= TIMEOUT_MS * 1000:
                 print("Mutter did not activate the GTK acceptance window", file=sys.stderr)
@@ -237,7 +155,6 @@ def main():
             else:
                 os.write(fd, b"1")
                 os.close(fd)
-                raw_key_events_at_ready = x11_key_counter.count()
         if not child_focused:
             # In GTK 4, grabbing focus before Mutter activates the toplevel
             # may be ignored. Retry only after the Shell focus controller has
@@ -251,10 +168,14 @@ def main():
             quit_loop()
             return False
         if GLib.get_monotonic_time() - started_at >= TIMEOUT_MS * 1000:
-            x11_key_counter.close()
             # The test text is fixed and deliberately non-sensitive.
+            mismatch_kind = (
+                "GTK default-input result mismatch"
+                if args.im_mode == "default"
+                else "GTK IBus result mismatch"
+            )
             print(
-                f"GTK IBus result mismatch: expected {args.expected!r}, got {actual!r}",
+                f"{mismatch_kind}: expected {args.expected!r}, got {actual!r}",
                 file=sys.stderr,
             )
             print(
@@ -268,14 +189,6 @@ def main():
                 f"GTK key events observed at target widget: {gtk_key_events}",
                 file=sys.stderr,
             )
-            if x11_key_counter.available:
-                print(
-                    "X11 raw key events observed after readiness: "
-                    f"{x11_key_counter.count() - raw_key_events_at_ready}",
-                    file=sys.stderr,
-                )
-            else:
-                print("X11 raw key event monitor unavailable", file=sys.stderr)
             failed = True
             quit_loop()
             return False
@@ -286,14 +199,15 @@ def main():
         loop.run()
     else:
         Gtk.main()
-    x11_key_counter.close()
     if args.gtk_version == "4":
         window.close()
     else:
         window.destroy()
     if failed:
         raise SystemExit(1)
-    if args.password:
+    if args.im_mode == "default":
+        result = "received ordinary XKB input in Gtk.Entry"
+    elif args.password:
         result = "preserved the trigger in a password-purpose field"
     elif args.expected.startswith(";"):
         result = "passed the trigger through unchanged"
