@@ -774,7 +774,7 @@ jobs:
           browser=$(command -v chromium || command -v chromium-browser)
           runuser -u wayexpand-test -- env \
             E2E_BIN="$GITHUB_WORKSPACE/target/debug" \
-            E2E_SKIP_BUILD=1 E2E_BROWSER_BIN="$browser" \
+            E2E_SKIP_BUILD=1 E2E_BROWSER_BIN="$browser" E2E_BROWSER_NO_SANDBOX=1 \
             E2E_IBUS_COMPONENT_PATH=/usr/share/ibus/component \
             bash scripts/test-gnome-e2e.sh --keep
       - name: Upload Fedora GNOME acceptance diagnostics

@@ -177,6 +177,23 @@ def report_shell_input_state(bus, moment):
         print(f"shell-input-state {moment}: unavailable: {error}", flush=True)
 
 
+def release_shell_key_focus(bus):
+    """Return keyboard routing to the focused client if a Shell actor holds it."""
+    released = bus.call_sync(
+        "org.gnome.Shell",
+        FOCUS_CONTROLLER_PATH,
+        FOCUS_CONTROLLER_INTERFACE,
+        "ReleaseShellKeyFocus",
+        None,
+        GLib.VariantType.new("(s)"),
+        Gio.DBusCallFlags.NONE,
+        5000,
+        None,
+    ).unpack()[0]
+    if released:
+        print(f"shell-input-state released-key-focus: {released}", flush=True)
+
+
 def publish_focus_confirmation(path):
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
@@ -260,6 +277,7 @@ def main():
             raise RuntimeError(
                 "GTK did not confirm stable active input focus; test text was not sent"
             )
+        release_shell_key_focus(bus)
         report_shell_input_state(bus, "before-input")
         send_text(
             bus,

@@ -100,6 +100,9 @@ def main():
         [
             args.browser,
             f"--user-data-dir={profile}",
+            # Unprivileged containers cannot start Chromium's sandbox. Only
+            # the disposable CI container sets this, for a local test page.
+            *(["--no-sandbox"] if os.environ.get("E2E_BROWSER_NO_SANDBOX") == "1" else []),
             "--no-first-run",
             "--no-default-browser-check",
             "--disable-background-networking",

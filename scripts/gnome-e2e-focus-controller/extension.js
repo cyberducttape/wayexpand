@@ -14,6 +14,9 @@ const INTERFACE = `
     <method name="GetShellInputState">
       <arg type="s" direction="out" name="state"/>
     </method>
+    <method name="ReleaseShellKeyFocus">
+      <arg type="s" direction="out" name="released"/>
+    </method>
     <method name="ActivateWindow">
       <arg type="s" direction="in" name="app_id"/>
     </method>
@@ -45,6 +48,23 @@ export default class GnomeE2eFocusController extends Extension {
             stageKeyFocus: global.stage.key_focus?.constructor.name ?? null,
             focusWindow: focus ? focus.get_wm_class() : null,
         })]));
+    }
+
+    ReleaseShellKeyFocusAsync(_args, invocation) {
+        // A Shell actor holding stage key focus receives keys instead of the
+        // focused client, even though the client has wl_keyboard focus. Name
+        // the actor so a recurrence stays visible, and leave real modals alone.
+        const names = [];
+        let actor = global.stage.key_focus;
+        const held = actor;
+        while (actor && names.length < 6) {
+            names.push(`${actor.constructor.name}` +
+                `[name=${actor.name ?? ''},style=${actor.style_class ?? ''}]`);
+            actor = actor.get_parent();
+        }
+        if (held && Main.modalCount === 0)
+            global.stage.set_key_focus(null);
+        invocation.return_value(new GLib.Variant('(s)', [names.join(' < ')]));
     }
 
     ActivateWindowAsync([appId], invocation) {
