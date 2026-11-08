@@ -343,6 +343,14 @@ type_x11_input() {
         2>"$E2E_WORK/xdotool-$case_name.err"
 }
 
+press_x11_key() {
+    case_name=$1
+    key_name=$2
+    LC_ALL=C.UTF-8 DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+        xdotool key --clearmodifiers --delay 40 "$key_name" \
+        2>"$E2E_WORK/xdotool-$case_name.err"
+}
+
 tries=600
 until gnome_extension_state_active "$(extension_state)"; do
     tries=$((tries - 1))
@@ -642,16 +650,29 @@ run_gtk_ibus_case() {
     if [ -f "$status_file" ]; then
         cp "$status_file" "$E2E_WORK/ibus-context-before-$case_name.json"
     fi
-    if ! type_x11_input "$case_name" "$trigger"; then
+    if [ "$case_name" = x11-baseline ]; then
+        input_status=0
+        press_x11_key "$case_name" a || input_status=$?
+    else
+        input_status=0
+        type_x11_input "$case_name" "$trigger" || input_status=$?
+    fi
+    if [ "$input_status" -ne 0 ]; then
         if [ -f "$status_file" ]; then
             cp "$status_file" "$E2E_WORK/ibus-context-after-$case_name.json"
         fi
         kill "$gtk_pid" 2>/dev/null || true
         wait "$gtk_pid" 2>/dev/null || true
         gtk_pid=
-        log "fail gnome-gtk-$case_name XTEST could not type into the focused GTK window"
-        cat "$test_log" "$E2E_WORK/x11-input-$case_name.txt" \
-            "$E2E_WORK/locale-$case_name.txt" "$E2E_WORK/xdotool-$case_name.err"
+        if [ "$case_name" = x11-baseline ]; then
+            log "fail gnome-gtk-$case_name XTEST could not send a key to the focused GTK window"
+            cat "$test_log" "$E2E_WORK/x11-input-$case_name.txt" \
+                "$E2E_WORK/xdotool-$case_name.err"
+        else
+            log "fail gnome-gtk-$case_name XTEST could not type into the focused GTK window"
+            cat "$test_log" "$E2E_WORK/x11-input-$case_name.txt" \
+                "$E2E_WORK/locale-$case_name.txt" "$E2E_WORK/xdotool-$case_name.err"
+        fi
         exit 1
     fi
     if [ -f "$status_file" ]; then
