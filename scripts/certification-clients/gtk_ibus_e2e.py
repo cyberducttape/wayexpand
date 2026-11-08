@@ -108,11 +108,14 @@ def main():
         # Wait for GTK's actual child focus to remain stable before the test
         # sends its first key; otherwise a fast XTEST event can race IBus
         # InputContext creation and lose the first character.
-        # GTK 3's X11 widget focus flag stays false in the private Mutter
-        # session even after the focus controller has observed the exact WM
-        # focus target; its existing end-to-end text check is the stronger
-        # evidence. GTK 4 does report the text widget focus and waits for it.
-        child_focused = args.gtk_version == "3" or focus_widget.has_focus()
+        # GTK 3's X11 widget focus flag, and GTK 4 password Entry's flag, stay
+        # false in this private Mutter session after the focus controller has
+        # observed the exact WM target. Those cases rely on Mutter's exact
+        # window confirmation plus the exact resulting field text. GTK 4's
+        # normal TextView also exposes child focus and waits for it directly.
+        child_focused = (
+            args.gtk_version == "3" or args.password or focus_widget.has_focus()
+        )
         if child_focused:
             if focused_since is None:
                 focused_since = GLib.get_monotonic_time()
