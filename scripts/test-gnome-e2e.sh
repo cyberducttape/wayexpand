@@ -614,7 +614,10 @@ run_terminal_xim_case() {
     input=$2
     ready_marker="$E2E_WORK/terminal-ready-$case_name"
     test_log="$E2E_WORK/terminal-ibus-e2e-$case_name.log"
-    XMODIFIERS='@im=ibus' \
+    DISPLAY="$x11_display" \
+        XAUTHORITY="$xwayland_auth" \
+        IBUS_ADDRESS="$(ibus address)" \
+        XMODIFIERS='@im=ibus' \
         xterm -title "WayExpand terminal acceptance org.wayexpand.GnomeTerminalIbus" \
         -geometry 80x3+0+0 -e python3 \
         "$E2E_PROJECT_DIR/scripts/certification-clients/terminal_ibus_e2e.py" \

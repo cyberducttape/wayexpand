@@ -4354,3 +4354,6 @@ This is the first stable release. WayExpand is now recommended for production us
 - Run Qt XIM's Unicode pass-through case with German-layout characters that
   the XTEST keyboard driver can generate, while keeping broad Unicode commit
   coverage in the GTK IBus cases.
+- Pass GNOME's private XWayland display, authorization file, and IBus address
+  into the xterm acceptance client so terminal scenarios run in the isolated
+  desktop session.
