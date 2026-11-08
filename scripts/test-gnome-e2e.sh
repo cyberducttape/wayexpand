@@ -350,8 +350,8 @@ report_wayland_trace() {
         return 0
     fi
     trace="$1.wayland-trace"
-    grep -E '^\[ *[0-9]+\.[0-9]+\]' "$1" >"$trace" || true
-    grep -vE '^\[ *[0-9]+\.[0-9]+\]' "$1" >"$1.tmp" || true
+    grep -E '^\[ *[0-9:]+\.[0-9]+\]' "$1" >"$trace" || true
+    grep -vE '^\[ *[0-9:]+\.[0-9]+\]' "$1" >"$1.tmp" || true
     mv -f "$1.tmp" "$1"
     log "wayland-trace lines=$(wc -l <"$trace")"
     grep -E 'wl_seat[@#][0-9]+\.(capabilities|get_keyboard|get_pointer)|wl_keyboard[@#][0-9]+\.(enter|leave|key|keymap)|xdg_toplevel[@#][0-9]+\.configure' \

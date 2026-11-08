@@ -754,6 +754,11 @@ jobs:
           mkdir -p /run/dbus
           dbus-daemon --system --fork --nopidfile
           mkdir -p /run/systemd/seats /run/systemd/sessions /run/systemd/users
+          # GNOME Shell asks logind for its user at startup; the state machine
+          # that follows fails without one. A linger entry registers the test
+          # user with this standalone logind (no login session exists here).
+          mkdir -p /var/lib/systemd/linger
+          touch /var/lib/systemd/linger/wayexpand-test
           /usr/lib/systemd/systemd-logind &
           attempt=0
           until busctl --system status org.freedesktop.login1 >/dev/null 2>&1; do
