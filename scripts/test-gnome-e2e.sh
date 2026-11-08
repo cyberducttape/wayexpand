@@ -1,8 +1,8 @@
 #!/bin/sh
 # End-to-end test of GNOME source activation, the IBus engine, and window
 # tracking in a private headless GNOME Shell session. It verifies GNOME source
-# registration/activation, an IBus protocol transaction, live GTK 3/4 IBus
-# input context, focus tracking, and extension upgrade/reload behavior. GTK's
+# registration/activation, live GTK 3/4 IBus input contexts, focus tracking,
+# and extension upgrade/reload behavior. GTK's
 # test event is sent to a focused Entry through GTK's actual IBus module; it
 # does not certify compositor keyboard delivery or physical-keyboard behavior.
 #
@@ -29,6 +29,20 @@ for tool in gnome-shell dbus-run-session gsettings gdbus xdotool xterm timeout p
         exit 2
     fi
 done
+shell_version=$(gnome-shell --version | sed -n 's/.* \([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1/p')
+if [ -z "$shell_version" ] || ! python3 - "$project_dir/scripts/gnome-e2e-focus-controller/metadata.json" "$shell_version" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    metadata = json.load(source)
+if sys.argv[2] not in metadata.get("shell-version", []):
+    raise SystemExit(1)
+PY
+then
+    printf '%s\n' "error: the GNOME E2E focus controller does not declare support for GNOME Shell ${shell_version:-unknown}" >&2
+    exit 2
+fi
 browser_bin=${E2E_BROWSER_BIN:-}
 if [ -z "$browser_bin" ]; then
     browser_bin=$(command -v google-chrome-stable || command -v google-chrome || true)

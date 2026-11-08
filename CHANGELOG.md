@@ -10,7 +10,10 @@ All notable changes to WayExpand are documented here.
   GTK text fields; keep the zbus-only protocol probe in the dedicated IBus CI
   job so it cannot perturb GNOME's session-managed engine. Refresh the live
   GNOME source list during bounded source activation retries after layout
-  switches, and verify GTK insertion again after a Shell restart.
+  switches, and verify GTK insertion again after a Shell restart. Declare and
+  check GNOME 51 compatibility for the test-only focus-controller extension;
+  its missing version had prevented the headless acceptance test from focusing
+  GTK clients on Fedora 45.
 - Bind GNOME Shell tracker authorization to exact resolved executable paths
   instead of trusted basenames, remove the test helper from production's
   trusted-client list, and add negative tests for executable-name spoofing.
