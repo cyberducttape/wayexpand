@@ -1,10 +1,10 @@
 #!/bin/sh
 # End-to-end test of GNOME source activation, the IBus engine, and window
 # tracking in a private headless GNOME Shell session. It verifies GNOME source
-# registration/activation, live GTK 3/4 IBus input contexts, focus tracking,
-# and extension upgrade/reload behavior. GTK's
-# test event is sent to a focused Entry through GTK's actual IBus module; it
-# does not certify compositor keyboard delivery or physical-keyboard behavior.
+# registration/activation, GTK 3/4 input contexts, focus tracking, and
+# extension upgrade/reload behavior. The XKB control uses GTK's simple input
+# context; IBus cases use the actual IBus module. It does not certify physical
+# keyboard behavior.
 #
 # Usage: scripts/test-gnome-e2e.sh [--keep]
 #   E2E_BIN=DIR        use prebuilt wayexpand, wayexpand-ibus, and wx-e2e-* binaries
@@ -584,11 +584,11 @@ run_gtk_ibus_case() {
     if [ "$password" = true ]; then
         set -- --password
     fi
-    if [ "$im_mode" = default ]; then
-        # Keep this XKB control independent of the private IBus daemon. The
-        # following IBus cases explicitly supply its address and test that
-        # route separately.
-        timeout 20s env -u GTK_IM_MODULE -u XMODIFIERS -u IBUS_ADDRESS \
+    if [ "$im_mode" = simple ]; then
+        # Force GTK's built-in simple context so this XKB control cannot
+        # attach to IBus. The following cases test the IBus module explicitly.
+        timeout 20s env -u XMODIFIERS -u IBUS_ADDRESS \
+            GTK_IM_MODULE=gtk-im-context-simple \
             GDK_BACKEND=x11 \
             DISPLAY="$x11_display" \
             XAUTHORITY="$xwayland_auth" \
@@ -596,7 +596,7 @@ run_gtk_ibus_case() {
             GTK_E2E_READY_MARKER="$ready_marker" \
             GTK_E2E_APP_ID="$app_id" \
             python3 "$E2E_PROJECT_DIR/scripts/certification-clients/gtk_ibus_e2e.py" \
-            --gtk-version "$gtk_version" --im-mode default --expected "$expected" "$@" >"$test_log" 2>&1 &
+            --gtk-version "$gtk_version" --im-mode simple --expected "$expected" "$@" >"$test_log" 2>&1 &
     else
         timeout 20s env \
             GTK_IM_MODULE=ibus \
@@ -615,7 +615,7 @@ run_gtk_ibus_case() {
         kill "$gtk_pid" 2>/dev/null || true
         wait "$gtk_pid" 2>/dev/null || true
         gtk_pid=
-        log "fail gnome-gtk-$case_name Mutter could not focus the GTK IBus acceptance window"
+        log "fail gnome-gtk-$case_name Mutter could not focus the GTK acceptance window"
         cat "$test_log"
         exit 1
     fi
@@ -699,7 +699,7 @@ run_gtk_ibus_case() {
     ibus engine >>"$engine_log" 2>&1 || true
     if [ "$gtk_status" -ne 0 ]; then
         cp "$status_file" "$E2E_WORK/ibus-status-$case_name.json" 2>/dev/null || true
-        if [ "$im_mode" = default ]; then
+        if [ "$im_mode" = simple ]; then
             log "fail gnome-gtk-$case_name XTEST_INPUT_NOT_DELIVERED: ordinary XKB input did not reach the GTK field"
         else
             log "fail gnome-gtk-$case_name GTK's IBus input context produced an incorrect result"
@@ -812,7 +812,7 @@ run_terminal_x11_baseline() {
 }
 
 # Prove XTEST, X11 focus, and ordinary GTK input separately from WayExpand's
-# IBus engine. The baseline uses the US XKB source and GTK's default IM path.
+# IBus engine. The baseline uses the US XKB source and GtkIMContextSimple.
 if ! "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --activate-source xkb us \
     >"$E2E_WORK/layout-us-baseline-activation.log" 2>&1; then
     log "fail gnome-gtk-x11-baseline GNOME could not activate the ordinary US XKB source"

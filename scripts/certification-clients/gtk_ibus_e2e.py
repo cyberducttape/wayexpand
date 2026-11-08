@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Exercise the GTK 3 or GTK 4 IBus module in the private GNOME session.
+"""Exercise GTK 3/4 input contexts in the private GNOME session.
 
-This drives GTK's focused Entry test widget, so key events traverse GTK's
-actual IMContext and IBus module. It does not simulate compositor or physical
-keyboard delivery. The only entered content is a fixed, harmless test trigger.
+This drives GTK's focused test widget, so key events traverse GTK's actual
+IMContext. The IBus mode also traverses the IBus module; the simple mode is an
+XKB control. It does not simulate physical keyboard delivery. The only
+entered content is fixed, harmless test text.
 """
 
 import os
@@ -31,10 +32,12 @@ def input_mode_environment_error(im_mode, environ):
     """Check only the environment contract required by the selected IM mode."""
     if im_mode == "ibus" and environ.get("GTK_IM_MODULE") != "ibus":
         return "GTK_IM_MODULE must be set to ibus"
-    if im_mode == "default" and environ.get("GTK_IM_MODULE"):
-        return "GTK_IM_MODULE must be unset for the default GTK input path"
-    if im_mode == "default" and environ.get("XMODIFIERS"):
-        return "XMODIFIERS must be unset for the default GTK input path"
+    if im_mode == "simple" and environ.get("GTK_IM_MODULE") != "gtk-im-context-simple":
+        return "GTK_IM_MODULE must be set to gtk-im-context-simple"
+    if im_mode == "simple" and environ.get("XMODIFIERS"):
+        return "XMODIFIERS must be unset for the GTK simple input path"
+    if im_mode == "simple" and environ.get("IBUS_ADDRESS"):
+        return "IBUS_ADDRESS must be unset for the GTK simple input path"
     if im_mode == "ibus" and not environ.get("IBUS_ADDRESS"):
         return "IBUS_ADDRESS must identify the private IBus daemon"
     return None
@@ -45,7 +48,7 @@ def main():
     parser.add_argument("--expected", required=True)
     parser.add_argument("--password", action="store_true")
     parser.add_argument("--gtk-version", choices=("3", "4"), default="3")
-    parser.add_argument("--im-mode", choices=("ibus", "default"), default="ibus")
+    parser.add_argument("--im-mode", choices=("ibus", "simple"), default="ibus")
     args = parser.parse_args()
     gi.require_version("Gdk", "4.0" if args.gtk_version == "4" else "3.0")
     gi.require_version("Gtk", "4.0" if args.gtk_version == "4" else "3.0")
@@ -67,11 +70,9 @@ def main():
     else:
         Gtk.init(sys.argv)
     gtk_im_module_setting = None
-    if args.im_mode == "default":
-        # GTK can obtain this setting from the desktop's XSettings even when
-        # GTK_IM_MODULE is absent from the process environment. Record the
-        # effective value so an XKB baseline does not mistake an IBus/XIM
-        # module-selection problem for missing GTK key delivery.
+    if args.im_mode == "simple":
+        # Record desktop settings too, but GTK_IM_MODULE explicitly selects
+        # GtkIMContextSimple so this XKB control cannot attach to IBus.
         settings = Gtk.Settings.get_default()
         if settings is not None:
             try:
@@ -116,7 +117,7 @@ def main():
     gtk_key_events = 0
     gtk_gdk_key_events = 0
 
-    if args.gtk_version == "3" and args.im_mode == "default":
+    if args.gtk_version == "3" and args.im_mode == "simple":
         # Count key events as GDK first receives them, before GTK routes them
         # to the focused widget. This distinguishes an X11/GDK delivery loss
         # from a GTK focus/dispatch issue without retaining key values.
@@ -204,8 +205,8 @@ def main():
         if GLib.get_monotonic_time() - started_at >= TIMEOUT_MS * 1000:
             # The test text is fixed and deliberately non-sensitive.
             mismatch_kind = (
-                "GTK default-input result mismatch"
-                if args.im_mode == "default"
+                "GTK simple-input result mismatch"
+                if args.im_mode == "simple"
                 else "GTK IBus result mismatch"
             )
             print(
@@ -253,8 +254,8 @@ def main():
         window.destroy()
     if failed:
         raise SystemExit(1)
-    if args.im_mode == "default":
-        result = "received ordinary XKB input in Gtk.Entry"
+    if args.im_mode == "simple":
+        result = "received ordinary XKB input through GtkIMContextSimple"
     elif args.password:
         result = "preserved the trigger in a password-purpose field"
     elif args.expected.startswith(";"):

@@ -49,21 +49,43 @@ class FocusReadinessTests(unittest.TestCase):
 
 
 class InputModeEnvironmentTests(unittest.TestCase):
-    def test_default_xkb_baseline_does_not_require_private_ibus_address(self):
-        self.assertIsNone(GTK_E2E.input_mode_environment_error("default", {}))
+    def test_simple_xkb_baseline_requires_builtin_simple_context(self):
+        self.assertEqual(
+            GTK_E2E.input_mode_environment_error("simple", {}),
+            "GTK_IM_MODULE must be set to gtk-im-context-simple",
+        )
+        self.assertIsNone(
+            GTK_E2E.input_mode_environment_error(
+                "simple", {"GTK_IM_MODULE": "gtk-im-context-simple"}
+            )
+        )
 
-    def test_default_xkb_baseline_rejects_ibus_module_overrides(self):
+    def test_simple_xkb_baseline_rejects_ibus_module_overrides(self):
         self.assertEqual(
             GTK_E2E.input_mode_environment_error(
-                "default", {"GTK_IM_MODULE": "ibus"}
+                "simple", {"GTK_IM_MODULE": "ibus"}
             ),
-            "GTK_IM_MODULE must be unset for the default GTK input path",
+            "GTK_IM_MODULE must be set to gtk-im-context-simple",
         )
         self.assertEqual(
             GTK_E2E.input_mode_environment_error(
-                "default", {"XMODIFIERS": "@im=ibus"}
+                "simple",
+                {
+                    "GTK_IM_MODULE": "gtk-im-context-simple",
+                    "XMODIFIERS": "@im=ibus",
+                },
             ),
-            "XMODIFIERS must be unset for the default GTK input path",
+            "XMODIFIERS must be unset for the GTK simple input path",
+        )
+        self.assertEqual(
+            GTK_E2E.input_mode_environment_error(
+                "simple",
+                {
+                    "GTK_IM_MODULE": "gtk-im-context-simple",
+                    "IBUS_ADDRESS": "unix:path=/tmp/ibus",
+                },
+            ),
+            "IBUS_ADDRESS must be unset for the GTK simple input path",
         )
 
     def test_ibus_test_requires_module_and_private_address(self):
