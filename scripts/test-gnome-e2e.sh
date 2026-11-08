@@ -343,6 +343,15 @@ type_x11_input() {
         2>"$E2E_WORK/xdotool-$case_name.err"
 }
 
+type_gnome_remote_input() {
+    case_name=$1
+    input_text=$2
+    python3 "$project_dir/scripts/certification-clients/gnome_remote_input.py" \
+        --delay-ms 60 --text "$input_text" \
+        >"$E2E_WORK/mutter-input-$case_name.txt" \
+        2>"$E2E_WORK/mutter-input-$case_name.err"
+}
+
 tries=600
 until gnome_extension_state_active "$(extension_state)"; do
     tries=$((tries - 1))
@@ -658,13 +667,12 @@ run_gtk_ibus_case() {
         sleep 0.1
         diagnose_x11_input "$case_name"
         input_status=0
-        # Use the same XTEST text-input path already proven by the xterm
-        # baseline. `xdotool key` exercises a different keysym path and was
-        # returning success without delivering any GDK event in Fedora GNOME.
-        type_x11_input "$case_name" a || input_status=$?
+        # Route a virtual key through Mutter's RemoteDesktop interface. XTEST
+        # reached xterm and Ubuntu GTK but failed to reach GTK on Fedora 45.
+        type_gnome_remote_input "$case_name" a || input_status=$?
     else
         input_status=0
-        type_x11_input "$case_name" "$trigger" || input_status=$?
+        type_gnome_remote_input "$case_name" "$trigger" || input_status=$?
     fi
     if [ "$input_status" -ne 0 ]; then
         if [ -f "$status_file" ]; then
@@ -674,13 +682,15 @@ run_gtk_ibus_case() {
         wait "$gtk_pid" 2>/dev/null || true
         gtk_pid=
         if [ "$case_name" = x11-baseline ]; then
-            log "fail gnome-gtk-$case_name XTEST could not send a key to the focused GTK window"
+            log "fail gnome-gtk-$case_name Mutter RemoteDesktop could not send a key to the focused GTK window"
             cat "$test_log" "$E2E_WORK/x11-input-$case_name.txt" \
-                "$E2E_WORK/xdotool-$case_name.err"
+                "$E2E_WORK/mutter-input-$case_name.txt" \
+                "$E2E_WORK/mutter-input-$case_name.err"
         else
-            log "fail gnome-gtk-$case_name XTEST could not type into the focused GTK window"
+            log "fail gnome-gtk-$case_name Mutter RemoteDesktop could not type into the focused GTK window"
             cat "$test_log" "$E2E_WORK/x11-input-$case_name.txt" \
-                "$E2E_WORK/locale-$case_name.txt" "$E2E_WORK/xdotool-$case_name.err"
+                "$E2E_WORK/mutter-input-$case_name.txt" \
+                "$E2E_WORK/mutter-input-$case_name.err"
         fi
         exit 1
     fi
@@ -695,15 +705,15 @@ run_gtk_ibus_case() {
     if [ "$gtk_status" -ne 0 ]; then
         cp "$status_file" "$E2E_WORK/ibus-status-$case_name.json" 2>/dev/null || true
         if [ "$im_mode" = simple ]; then
-            log "fail gnome-gtk-$case_name XTEST_INPUT_NOT_DELIVERED: ordinary XKB input did not reach the GTK field"
+            log "fail gnome-gtk-$case_name GNOME_INPUT_NOT_DELIVERED: ordinary XKB input did not reach the GTK field"
         else
             log "fail gnome-gtk-$case_name GTK's IBus input context produced an incorrect result"
         fi
         cat "$test_log"
         cat "$engine_log"
         cat "$E2E_WORK/x11-input-$case_name.txt" \
-            "$E2E_WORK/locale-$case_name.txt" \
-            "$E2E_WORK/xdotool-$case_name.err" 2>/dev/null || true
+            "$E2E_WORK/mutter-input-$case_name.txt" \
+            "$E2E_WORK/mutter-input-$case_name.err" 2>/dev/null || true
         python3 - "$E2E_WORK/ibus-context-before-$case_name.json" \
             "$E2E_WORK/ibus-context-after-$case_name.json" <<'PY'
 import json

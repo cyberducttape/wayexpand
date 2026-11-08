@@ -101,8 +101,13 @@ trigger replacement and Unicode output; password-purpose `Gtk.Entry` fields
 must preserve the trigger. The test verifies a live switch to German and
 French keyboard sources and checks expansion after returning to WayExpand. It also opens
 the field with `GTK_IM_MODULE=ibus`
-on GNOME's private XWayland server, activates the window through Mutter, types
-a fixed test trigger through XTEST, and verifies the resulting widget text.
+on GNOME's private XWayland server, activates the window through Mutter, and
+types fixed ASCII test input through Mutter's private RemoteDesktop D-Bus
+keyboard interface. This avoids XTEST paths that failed to deliver keys to GTK
+on Fedora 45/GNOME 51. The interface is version-specific and is used only by
+the isolated acceptance fixture; it is not a WayExpand production backend.
+This remains headless compositor-path evidence, not physical-keyboard
+certification. The test verifies the resulting widget text.
 The Qt 6 `QLineEdit` fixture uses the IBus XIM bridge and verifies exact
 trigger/Unicode pass-through plus password-field preservation; it does not
 claim Qt replacement support without a verified surrounding-text contract.
