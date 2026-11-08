@@ -244,20 +244,36 @@ export default class WayExpandWindowTracker extends Extension {
         }
 
         // Use Shell's live source manager, never the deprecated gsettings
-        // `current` value. The compatibility helper verifies the active
-        // source after activation and reports unsupported runtime shapes.
-        const result = activateSource(Keyboard, kind, id);
-        if (result.error) {
+        // `current` value. Reload can update the XKB sources synchronously but
+        // receive IBus source registrations asynchronously, so wait briefly
+        // for the requested source rather than reporting a false unavailable.
+        let attempts = 0;
+        const finish = result => {
+            if (!result.error) {
+                const active = result.source;
+                invocation.return_value(new GLib.Variant('(ss)', [active.type, active.id]));
+                return;
+            }
             invocation.return_dbus_error(
-                result.error === 'source-unavailable'
+                result.error === 'source-pending'
                     ? 'org.wayexpand.ShellWindowTracker1.Error.InputSourceUnavailable'
                     : 'org.wayexpand.ShellWindowTracker1.Error.ActivationFailed',
                 `GNOME Shell input-source activation failed (${result.error})`,
             );
-            return;
-        }
-        const active = result.source;
-        invocation.return_value(new GLib.Variant('(ss)', [active.type, active.id]));
+        };
+        const activate = () => {
+            const result = activateSource(Keyboard, kind, id, attempts === 0);
+            if (result.error !== 'source-pending' || attempts >= 40) {
+                finish(result);
+                return;
+            }
+            attempts++;
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, () => {
+                activate();
+                return GLib.SOURCE_REMOVE;
+            });
+        };
+        activate();
     }
 
     SubscribeAsync(_parameters, invocation) {

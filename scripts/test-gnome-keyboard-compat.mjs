@@ -34,19 +34,20 @@ assert.equal(reloads, 0, 'keep a live manager when the target source is already 
 const refreshableSources = {};
 const refreshable = {
     currentSource: active,
-    reload() {
-        reloads++;
-        refreshableSources.ibus = {
-            type: 'ibus', id: 'wayexpand', activate() { this.isActive = true; refreshable.currentSource = this; },
-        };
-    },
+    reload() { reloads++; },
     inputSources: refreshableSources,
 };
-assert.deepEqual(activateSource({getInputSourceManager: () => refreshable}, 'ibus', 'wayexpand'), {
+const refreshableKeyboard = {getInputSourceManager: () => refreshable};
+assert.equal(activateSource(refreshableKeyboard, 'ibus', 'wayexpand').error, 'source-pending');
+assert.equal(reloads, 1, 'refresh only once while GNOME asynchronously registers the IBus source');
+refreshableSources.ibus = {
+    type: 'ibus', id: 'wayexpand', activate() { refreshable.currentSource = this; },
+};
+assert.deepEqual(activateSource(refreshableKeyboard, 'ibus', 'wayexpand', false), {
     source: refreshableSources.ibus,
 });
 assert.equal(reloads, 1, 'reload only to discover a source missing from the live manager');
-assert.equal(activateSource(keyboard, 'xkb', 'missing').error, 'source-unavailable');
+assert.equal(activateSource(keyboard, 'xkb', 'missing').error, 'source-pending');
 
 const unsupported = {getInputSourceManager: () => ({currentSource: active})};
 assert.equal(activateSource(unsupported, 'xkb', 'de').error, 'unsupported-manager');

@@ -4367,3 +4367,6 @@ This is the first stable release. WayExpand is now recommended for production us
 - Run Qt and xterm XIM pass-through cases only after GNOME IBus layout,
   GTK-replacement, and relogin checks. The first XIM client can restart the
   session IBus daemon and otherwise invalidate those GNOME scenarios.
+- Wait briefly for GNOME's asynchronously registered IBus source after a
+  source-manager refresh, while retaining a bounded failure when it never
+  appears.

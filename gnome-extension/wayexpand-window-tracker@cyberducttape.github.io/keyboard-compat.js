@@ -40,7 +40,7 @@ export function keyboardLayoutSettings(manager) {
     return {model, options};
 }
 
-export function activateSource(keyboard, kind, id) {
+export function activateSource(keyboard, kind, id, refreshIfMissing = true) {
     const manager = inputSourceManager(keyboard);
     if (!manager || typeof manager.reload !== 'function' ||
         !manager.inputSources || typeof manager.inputSources !== 'object')
@@ -53,9 +53,13 @@ export function activateSource(keyboard, kind, id) {
         // XKB layout. Preserve the live source objects and refresh only when
         // the requested source is absent (for example after registration).
         if (!source) {
-            manager.reload();
-            source = Object.values(manager.inputSources).find(candidate =>
-                candidate && candidate.type === kind && candidate.id === id);
+            if (refreshIfMissing) {
+                manager.reload();
+                source = Object.values(manager.inputSources).find(candidate =>
+                    candidate && candidate.type === kind && candidate.id === id);
+            }
+            if (!source)
+                return {error: 'source-pending'};
         }
         if (!source || typeof source.activate !== 'function')
             return {error: 'source-unavailable'};
