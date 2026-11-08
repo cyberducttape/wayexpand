@@ -42,17 +42,8 @@ def main():
         Gtk.init()
     else:
         Gtk.init(sys.argv)
-    application = None
     application_id = os.environ.get("GTK_E2E_APP_ID", DEFAULT_APP_ID)
-    if args.gtk_version == "4":
-        application = Gtk.Application(application_id=application_id)
-        application.register(None)
-        window = Gtk.ApplicationWindow(
-            application=application,
-            title=f"WayExpand GTK IBus acceptance {application_id}",
-        )
-    else:
-        window = Gtk.Window(title=f"WayExpand GTK IBus acceptance {application_id}")
+    window = Gtk.Window(title=f"WayExpand GTK IBus acceptance {application_id}")
     window.set_default_size(500, 80)
     if args.gtk_version == "4" and not args.password:
         focus_widget = Gtk.TextView()
@@ -77,13 +68,6 @@ def main():
         window.show_all()
     window.present()
     focus_widget.grab_focus()
-    if application is not None:
-        def activate_window(_application):
-            window.present()
-            window.set_focus(focus_widget)
-
-        application.connect("activate", activate_window)
-        application.activate()
 
     failed = False
     started_at = GLib.get_monotonic_time()

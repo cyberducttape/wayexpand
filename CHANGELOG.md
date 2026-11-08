@@ -4341,3 +4341,6 @@ This is the first stable release. WayExpand is now recommended for production us
   focus controller cannot select a stale window from a previous case. Require
   GTK 4 password-field focus before sending test input and verify exact
   pass-through text.
+- Run GTK 3/4 acceptance widgets in plain GTK toplevels instead of an
+  application-managed GTK 4 window, leaving focus management to the focused
+  widget and Mutter test controller.
