@@ -18,6 +18,8 @@ All notable changes to WayExpand are documented here.
 - Record a content-free GTK key-event count on failed desktop insertion checks,
   so XTEST/widget delivery failures can be distinguished from IBus engine
   routing failures without logging key contents.
+- Re-resolve XWayland's current display authorization after the simulated
+  GNOME logout/login before running the final GTK insertion test.
 - Require both an active GTK toplevel and actual focus within the test widget
   for the full stability interval before sending XTEST input. Cover focus loss,
   inactive windows, and the timing boundary with focused regression tests.

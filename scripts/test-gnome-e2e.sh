@@ -450,27 +450,38 @@ done
 # Real GTK text-field checks below are the authoritative GNOME route test.
 # The standalone zbus protocol probe is covered by the dedicated real-IBus CI
 # job; running it here can perturb older GNOME-managed IBus sessions.
-x11_display=$(sed -n 's/.*Using public X11 display \([^,]*\),.*/\1/p' \
-    "$E2E_WORK/gnome-shell.log" | head -n 1)
-if [ -z "$x11_display" ]; then
-    log "fail gnome-gtk-insertion GNOME did not start its private XWayland server"
-    exit 1
-fi
-xwayland_auth=
-for process_cmdline in /proc/[0-9]*/cmdline; do
-    [ -r "$process_cmdline" ] || continue
-    process_args=$(tr '\000' '\n' <"$process_cmdline" 2>/dev/null || true)
-    process_display=$(printf '%s\n' "$process_args" | awk '/^:[0-9]+$/ { print; exit }')
-    if [ "$process_display" = "$x11_display" ]; then
-        candidate_auth=$(printf '%s\n' "$process_args" | awk 'previous == "-auth" { print; exit } { previous = $0 }')
-        if [ -n "$candidate_auth" ] && [ -r "$candidate_auth" ]; then
-            xwayland_auth=$candidate_auth
-            break
-        fi
-    fi
-done
-if [ -z "$xwayland_auth" ]; then
-    log "fail gnome-gtk-insertion GNOME's private XWayland authorization file could not be resolved"
+resolve_xwayland_connection() {
+    shell_log=$1
+    x11_display=$(sed -n 's/.*Using public X11 display \([^,]*\),.*/\1/p' \
+        "$shell_log" | head -n 1)
+    [ -n "$x11_display" ] || return 1
+
+    # GNOME Shell restarts XWayland during the simulated logout/login. The
+    # display number may be reused while its authorization file changes, so
+    # resolve a readable auth file for the current XWayland process each time.
+    xwayland_auth=
+    xwayland_tries=100
+    while [ "$xwayland_tries" -gt 0 ]; do
+        for process_cmdline in /proc/[0-9]*/cmdline; do
+            [ -r "$process_cmdline" ] || continue
+            process_args=$(tr '\000' '\n' <"$process_cmdline" 2>/dev/null || true)
+            process_display=$(printf '%s\n' "$process_args" | awk '/^:[0-9]+$/ { print; exit }')
+            if [ "$process_display" = "$x11_display" ]; then
+                candidate_auth=$(printf '%s\n' "$process_args" | awk 'previous == "-auth" { print; exit } { previous = $0 }')
+                if [ -n "$candidate_auth" ] && [ -r "$candidate_auth" ]; then
+                    xwayland_auth=$candidate_auth
+                    return 0
+                fi
+            fi
+        done
+        xwayland_tries=$((xwayland_tries - 1))
+        sleep 0.1
+    done
+    return 1
+}
+
+if ! resolve_xwayland_connection "$E2E_WORK/gnome-shell.log"; then
+    log "fail gnome-gtk-insertion GNOME's private XWayland display or authorization file could not be resolved"
     exit 1
 fi
 run_gtk_ibus_case() {
@@ -1119,8 +1130,13 @@ PY
     fi
 
     if [ "$login_source_ok" -eq 1 ]; then
-        run_gtk_ibus_case after-login ';e2e' expanded false 3
-        log "pass gnome-gtk-after-login the reloaded session replaced a verified trigger in GTK"
+        if ! resolve_xwayland_connection "$E2E_WORK/gnome-shell-after-login.log"; then
+            log "fail gnome-gtk-after-login the reloaded session's XWayland display or authorization file could not be resolved"
+            status=1
+        else
+            run_gtk_ibus_case after-login ';e2e' expanded false 3
+            log "pass gnome-gtk-after-login the reloaded session replaced a verified trigger in GTK"
+        fi
     fi
 fi
 
