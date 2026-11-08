@@ -19,9 +19,11 @@ TIMEOUT_MS = 15000
 FOCUS_STABLE_FOR_US = 250_000
 
 
-def update_focus_stability(mutter_focus_confirmed, widget_focused, focused_since, now):
-    """Track child focus while Mutter has confirmed the target window active."""
-    if not (mutter_focus_confirmed and widget_focused):
+def update_focus_stability(
+    mutter_focus_confirmed, window_active, widget_has_keyboard_focus, focused_since, now
+):
+    """Track real GTK focus after Mutter confirms the target window active."""
+    if not (mutter_focus_confirmed and window_active and widget_has_keyboard_focus):
         return None, False
     if focused_since is None:
         return now, False
@@ -156,6 +158,7 @@ def main():
     gtk_key_events = 0
     gtk_gdk_key_events = 0
     focus_diagnostic_reported = False
+    focus_requested_after_activation = False
 
     if args.gtk_version == "3" and args.im_mode == "simple":
         # Count key events as GDK first receives them, before GTK routes them
@@ -186,13 +189,18 @@ def main():
         # widget delivery boundary even when IBus consumes the key event.
         focus_widget.connect("key-press-event", count_key_event)
 
-    def focus_is_within_test_widget():
+    def focused_widget_has_keyboard_focus():
         focused = window.get_focus()
+        is_within_test_widget = False
         while focused is not None:
             if focused == focus_widget:
-                return True
+                is_within_test_widget = True
+                break
             focused = focused.get_parent()
-        return False
+        if not is_within_test_widget:
+            return False
+        focused = window.get_focus()
+        return focused is not None and focused.has_focus()
 
     def quit_loop():
         if loop is not None:
@@ -202,6 +210,7 @@ def main():
 
     def wait_for_expansion():
         nonlocal failed, focused_since, focus_diagnostic_reported
+        nonlocal focus_requested_after_activation
         if not os.path.exists(focus_marker):
             if GLib.get_monotonic_time() - started_at >= TIMEOUT_MS * 1000:
                 print("Mutter did not activate the GTK acceptance window", file=sys.stderr)
@@ -210,18 +219,23 @@ def main():
                 return False
             return True
         # The marker is written only after the Shell-side controller confirms
-        # global.display.get_focus_window() is this window. GTK's
-        # Gtk.Window.is_active() can remain false in the headless Mutter
-        # acceptance session even after that compositor confirmation. Require
-        # GTK's actual child focus to remain stable before sending input.
+        # global.display.get_focus_window() is this window. Also require GTK
+        # to report the active toplevel and actual keyboard focus on the entry
+        # (or its internal focused child). get_focus() alone only reports the
+        # designated focus widget and can be non-NULL while the widget is not
+        # receiving keyboard events.
         # GTK 4 controls such as PasswordEntry can delegate focus to an
         # internal child, so accept any focused descendant of the test widget.
         # GTK 3 must pass the same check; treating the version as proof of focus
         # can send synthetic input before the entry owns keyboard focus.
-        child_focused = focus_is_within_test_widget()
+        widget_has_keyboard_focus = focused_widget_has_keyboard_focus()
         window_active = window.is_active()
         focused_since, child_focus_stable = update_focus_stability(
-            True, child_focused, focused_since, GLib.get_monotonic_time()
+            True,
+            window_active,
+            widget_has_keyboard_focus,
+            focused_since,
+            GLib.get_monotonic_time(),
         )
         if (
             not child_focus_stable
@@ -235,7 +249,7 @@ def main():
                 "mutter_focus_confirmed=True "
                 f"active={window_active} "
                 f"widget_focused={focus_widget.has_focus()} "
-                f"focus_within_widget={child_focused} "
+                f"focus_within_widget={widget_has_keyboard_focus} "
                 f"focused_widget_type={type(window.get_focus()).__name__ if window.get_focus() else 'none'} "
                 f"GDK_BACKEND={os.environ.get('GDK_BACKEND')!r} "
                 f"WAYLAND_DISPLAY={os.environ.get('WAYLAND_DISPLAY')!r}",
@@ -250,14 +264,17 @@ def main():
             else:
                 os.write(fd, b"1")
                 os.close(fd)
-        if not child_focused:
-            # In GTK 4, grabbing focus before Mutter activates the toplevel
-            # may be ignored. Retry only after the Shell focus controller has
-            # confirmed this acceptance window is active.
+        if not widget_has_keyboard_focus and not focus_requested_after_activation:
+            # GTK may remember the designated focus child even though the
+            # early grab_focus() happened before Mutter activated the window.
+            # Retry once after compositor confirmation, then wait for GTK's
+            # active and actual-focus state before sending any keys.
+            window.present()
             if args.gtk_version == "4":
                 window.set_focus(focus_widget)
             else:
                 focus_widget.grab_focus()
+            focus_requested_after_activation = True
         actual = current_text()
         if actual == args.expected:
             quit_loop()
@@ -277,7 +294,7 @@ def main():
                 f"GTK focus diagnostic: mutter_focus_confirmed=True "
                 f"active={window.is_active()} "
                 f"widget_focused={focus_widget.has_focus()} "
-                f"focus_within_widget={focus_is_within_test_widget()} "
+                f"focus_within_widget={focused_widget_has_keyboard_focus()} "
                 f"focused_widget_type={type(window.get_focus()).__name__ if window.get_focus() else 'none'}",
                 file=sys.stderr,
             )
