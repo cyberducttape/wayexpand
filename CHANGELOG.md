@@ -4361,3 +4361,6 @@ This is the first stable release. WayExpand is now recommended for production us
   label used by the GNOME acceptance matrix.
 - Run the terminal Unicode XIM pass-through scenario under the German layout
   so the synthetic XTEST keyboard uses available keysyms.
+- Avoid reloading GNOME's live input-source manager when the target source is
+  already registered. Reloading during a layout-to-IBus switch cancelled the
+  pending engine activation in the Ubuntu 26.04 headless acceptance run.

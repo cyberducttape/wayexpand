@@ -46,9 +46,17 @@ export function activateSource(keyboard, kind, id) {
         !manager.inputSources || typeof manager.inputSources !== 'object')
         return {error: 'unsupported-manager'};
     try {
-        manager.reload();
-        const source = Object.values(manager.inputSources).find(candidate =>
+        let source = Object.values(manager.inputSources).find(candidate =>
             candidate && candidate.type === kind && candidate.id === id);
+        // Reloading an already complete manager can cancel GNOME's pending
+        // IBus engine switch, especially immediately after returning from an
+        // XKB layout. Preserve the live source objects and refresh only when
+        // the requested source is absent (for example after registration).
+        if (!source) {
+            manager.reload();
+            source = Object.values(manager.inputSources).find(candidate =>
+                candidate && candidate.type === kind && candidate.id === id);
+        }
         if (!source || typeof source.activate !== 'function')
             return {error: 'source-unavailable'};
         source.activate(true);

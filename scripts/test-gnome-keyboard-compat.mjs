@@ -29,7 +29,23 @@ assert.deepEqual(keyboardLayoutSettings(manager), {
 assert.deepEqual(activateSource(keyboard, 'xkb', 'de'), {
     source: manager.inputSources.de,
 });
-assert.equal(reloads, 1);
+assert.equal(reloads, 0, 'keep a live manager when the target source is already registered');
+
+const refreshableSources = {};
+const refreshable = {
+    currentSource: active,
+    reload() {
+        reloads++;
+        refreshableSources.ibus = {
+            type: 'ibus', id: 'wayexpand', activate() { this.isActive = true; refreshable.currentSource = this; },
+        };
+    },
+    inputSources: refreshableSources,
+};
+assert.deepEqual(activateSource({getInputSourceManager: () => refreshable}, 'ibus', 'wayexpand'), {
+    source: refreshableSources.ibus,
+});
+assert.equal(reloads, 1, 'reload only to discover a source missing from the live manager');
 assert.equal(activateSource(keyboard, 'xkb', 'missing').error, 'source-unavailable');
 
 const unsupported = {getInputSourceManager: () => ({currentSource: active})};
