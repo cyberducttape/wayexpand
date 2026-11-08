@@ -44,6 +44,8 @@ All notable changes to WayExpand are documented here.
 - Require both an active GTK toplevel and actual focus within the test widget
   for the full stability interval before sending XTEST input. Cover focus loss,
   inactive windows, and the timing boundary with focused regression tests.
+  Retry GTK focus requests at a bounded cadence after Mutter activation, while
+  keeping the live readiness marker closed until GTK confirms stable focus.
   Capture the active IBus engine before and after each GTK case alongside the
   existing content-free engine counters.
 - Register the GNOME acceptance engine through the standard system IBus
