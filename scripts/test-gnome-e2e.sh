@@ -1129,7 +1129,7 @@ env -i \
     XDG_DATA_DIRS="${XDG_DATA_DIRS:-/usr/local/share:/usr/share}" \
     XDG_RUNTIME_DIR="$runtime" \
     WAYLAND_DISPLAY=wayexpand-gnome-e2e \
-    IBUS_COMPONENT_PATH="$work/component:/usr/share/ibus/component" \
+    IBUS_COMPONENT_PATH="${E2E_IBUS_COMPONENT_PATH:-$work/component:/usr/share/ibus/component}" \
     GTK_IM_MODULE=ibus \
     GDK_BACKEND=wayland \
     XDG_CURRENT_DESKTOP=GNOME \
