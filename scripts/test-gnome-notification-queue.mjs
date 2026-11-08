@@ -17,6 +17,7 @@ const extensionSource = readFileSync(
 
 test('subscription is limited to the current user and WayExpand executables', () => {
     assert.equal(isAuthorizedTrackerClient(1000, 1000, '/usr/bin/wayexpand-daemon'), true);
+    assert.equal(isAuthorizedTrackerClient(1000, 1000, '/usr/libexec/wayexpand-ibus'), true);
     // GJS exposes get_user_id() as a string; D-Bus uint32 unpacks as number.
     assert.equal(isAuthorizedTrackerClient(1000, '1000', '/usr/bin/wayexpand-daemon'), true);
     assert.equal(isAuthorizedTrackerClient('1000', 1000, '/usr/bin/wayexpand-daemon'), true);

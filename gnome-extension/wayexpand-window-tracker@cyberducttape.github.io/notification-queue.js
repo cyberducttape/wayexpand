@@ -3,6 +3,9 @@
 const WAYEXPAND_CLIENTS = new Set([
     'wayexpand',
     'wayexpand-daemon',
+    // IBus owns a separate engine process that needs authenticated GNOME
+    // input-source and keyboard-layout state for its focused input context.
+    'wayexpand-ibus',
     // This binary is built only for the isolated headless GNOME E2E test.
     'wx-e2e-gnome-tracker',
 ]);
