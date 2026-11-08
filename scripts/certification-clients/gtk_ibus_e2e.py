@@ -34,8 +34,9 @@ def main():
     parser.add_argument("--gtk-version", choices=("3", "4"), default="3")
     parser.add_argument("--im-mode", choices=("ibus", "default"), default="ibus")
     args = parser.parse_args()
+    gi.require_version("Gdk", "4.0" if args.gtk_version == "4" else "3.0")
     gi.require_version("Gtk", "4.0" if args.gtk_version == "4" else "3.0")
-    from gi.repository import GLib, Gtk
+    from gi.repository import Gdk, GLib, Gtk
     if args.im_mode == "ibus" and os.environ.get("GTK_IM_MODULE") != "ibus":
         raise SystemExit("GTK_IM_MODULE must be set to ibus")
     if args.im_mode == "default" and os.environ.get("GTK_IM_MODULE"):
@@ -105,6 +106,19 @@ def main():
     started_at = GLib.get_monotonic_time()
     focused_since = None
     gtk_key_events = 0
+    gtk_gdk_key_events = 0
+
+    if args.gtk_version == "3" and args.im_mode == "default":
+        # Count key events as GDK first receives them, before GTK routes them
+        # to the focused widget. This distinguishes an X11/GDK delivery loss
+        # from a GTK focus/dispatch issue without retaining key values.
+        def dispatch_gdk_event(event, _data):
+            nonlocal gtk_gdk_key_events
+            if event.type == Gdk.EventType.KEY_PRESS:
+                gtk_gdk_key_events += 1
+            Gtk.main_do_event(event)
+
+        Gdk.event_handler_set(dispatch_gdk_event, None)
     loop = GLib.MainLoop() if args.gtk_version == "4" else None
 
     def count_key_event(*_event):
@@ -199,6 +213,10 @@ def main():
             )
             print(
                 f"GTK key events observed at target widget: {gtk_key_events}",
+                file=sys.stderr,
+            )
+            print(
+                f"GDK key events received by GTK process: {gtk_gdk_key_events}",
                 file=sys.stderr,
             )
             print(

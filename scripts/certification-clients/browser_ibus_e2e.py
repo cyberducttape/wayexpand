@@ -42,6 +42,18 @@ def wait_for(predicate, description, timeout=TIMEOUT_SECONDS):
     fail(f"timed out waiting for {description}")
 
 
+def find_acceptance_page(targets, expected_url):
+    """Ignore Chromium startup tabs and select only the isolated test page."""
+    for target in targets:
+        if (
+            target.get("type") == "page"
+            and target.get("url") == expected_url
+            and target.get("webSocketDebuggerUrl")
+        ):
+            return target["webSocketDebuggerUrl"]
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--browser", required=True)
@@ -114,6 +126,8 @@ def main():
     try:
         active_port = profile / "DevToolsActivePort"
 
+        expected_page_url = page.resolve().as_uri()
+
         def devtools_url():
             if process.poll() is not None:
                 fail(f"browser exited during startup ({process.returncode}); see {args.log}")
@@ -130,12 +144,9 @@ def main():
                     targets = json.load(response)
             except (OSError, urllib.error.URLError):
                 return None
-            for target in targets:
-                if target.get("type") == "page" and target.get("webSocketDebuggerUrl"):
-                    return target["webSocketDebuggerUrl"]
-            return None
+            return find_acceptance_page(targets, expected_page_url)
 
-        ws_url = wait_for(devtools_url, "Chromium DevTools page")
+        ws_url = wait_for(devtools_url, "Chromium's isolated acceptance page")
         connection = websocket.create_connection(ws_url, timeout=2)
         next_id = 0
 

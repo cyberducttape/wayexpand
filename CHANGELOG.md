@@ -5,12 +5,16 @@ All notable changes to WayExpand are documented here.
 ## [Unreleased]
 
 - Verify XTEST delivery into an IBus-free X11 terminal and then ordinary US
-  XKB-to-GTK key delivery before WayExpand-specific IBus insertion. Report X11
-  focus, active window, XTEST availability, and
+  XKB-to-GTK key delivery with a direct synthetic key event before
+  WayExpand-specific IBus insertion. Count sanitized GDK-to-widget key events
+  and report GTK's effective IM-module, X11 focus, active window, XTEST
+  availability, and
   content-free IBus focus/key counters on failures. Force and validate a UTF-8
   locale for xdotool text injection so Unicode passthrough tests exercise the
   target client rather than failing during multibyte decoding. Exercise the
-  expected Qt/XIM password-field pass-through checkpoint as well as GTK.
+  expected Qt/XIM password-field pass-through checkpoint as well as GTK. Wait
+  for Chromium's exact local acceptance page before inspecting its title or
+  focusing the browser, avoiding a race with its startup tab.
 - Verify GNOME IBus activation against the live IBus manager state and
   confirmed engine name instead of trusting Shell's optimistic current source.
   Report disconnected or sensitive-field-disabled IBus states explicitly, and
