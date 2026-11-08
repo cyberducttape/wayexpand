@@ -101,10 +101,8 @@ trigger replacement and Unicode output; password-purpose `Gtk.Entry` fields
 must preserve the trigger. The test verifies a live switch to German and
 French keyboard sources and checks expansion after returning to WayExpand. It also opens
 the field with `GTK_IM_MODULE=ibus`
-on GNOME's private XWayland server, activates the window through Mutter, sends
-a fixed test trigger through Mutter's test-only virtual keyboard, and verifies
-the resulting widget text. This tests compositor-to-client routing but does
-not certify physical keyboard behavior.
+on GNOME's private XWayland server, activates the window through Mutter, types
+a fixed test trigger through XTEST, and verifies the resulting widget text.
 The Qt 6 `QLineEdit` fixture uses the IBus XIM bridge and verifies exact
 trigger/Unicode pass-through plus password-field preservation; it does not
 claim Qt replacement support without a verified surrounding-text contract.
@@ -113,9 +111,8 @@ pass-through, and exits without submitting a command. These XIM checks are
 limited to the hosted XWayland session and do not certify native Wayland
 terminal clients or physical keyboards.
 The same test opens an isolated Google Chrome profile on a local page, focuses
-its textarea through Mutter, sends the same harmless trigger through Mutter's
-test-only virtual keyboard, and checks the textarea value using Chrome
-DevTools. The tested Chrome XWayland/IBus
+its textarea through Mutter, types the same harmless trigger through XTEST, and
+checks the textarea value using Chrome DevTools. The tested Chrome XWayland/IBus
 path did not advertise surrounding-text support: the acceptance test verifies
 that WayExpand refuses the replacement and leaves the trigger intact. This is
 browser fail-safe evidence, not successful browser replacement and not Firefox,
@@ -126,10 +123,8 @@ The GTK portion exercises GTK's actual IBus module and target widget; the
 custom protocol client separately checks trigger deletion and replacement
 commit. The test checks password-field refusal and content-free telemetry, then
 simulates an extension upgrade with an old Shell instance and a Shell restart.
-XTEST on XWayland is retained only for the basic terminal control check. It does
-not certify native Wayland compositor keyboard routing or physical keyboard
-delivery. Mutter virtual-device acceptance checks exercise compositor-routed
-input, but do not certify physical-keyboard behavior.
+XTEST on XWayland does not certify native Wayland compositor keyboard routing
+or physical keyboard delivery.
 `test-ibus-e2e.sh` additionally exercises IBus engine focus, content-type and
 telemetry cases. These headless tests do not prove physical keyboard routing,
 compositor-delivered key events, persistence across an actual user logout, or

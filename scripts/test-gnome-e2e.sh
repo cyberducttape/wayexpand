@@ -3,9 +3,8 @@
 # tracking in a private headless GNOME Shell session. It verifies GNOME source
 # registration/activation, live GTK 3/4 IBus input contexts, focus tracking,
 # and extension upgrade/reload behavior. GTK's
-# test event is sent through Mutter's virtual keyboard to a focused client and
-# then through GTK's actual IBus module; it does not certify physical-keyboard
-# behavior.
+# test event is sent to a focused Entry through GTK's actual IBus module; it
+# does not certify compositor keyboard delivery or physical-keyboard behavior.
 #
 # Usage: scripts/test-gnome-e2e.sh [--keep]
 #   E2E_BIN=DIR        use prebuilt wayexpand, wayexpand-ibus, and wx-e2e-* binaries
@@ -268,22 +267,6 @@ activate_window() {
     done
 }
 
-type_mutter_input() {
-    case_name=$1
-    target_app_id=$2
-    input_text=$3
-    if ! printf '%s' "$input_text" | iconv -f UTF-8 -t UTF-8 >/dev/null; then
-        printf '%s\n' 'input is not valid UTF-8' >"$E2E_WORK/mutter-input-$case_name.err"
-        return 1
-    fi
-    gdbus call --timeout 10 --session --dest org.gnome.Shell \
-        --object-path /org/wayexpand/GnomeE2eFocusController \
-        --method org.wayexpand.GnomeE2eFocusController.TypeText \
-        "$target_app_id" "$input_text" \
-        >"$E2E_WORK/mutter-input-$case_name.log" \
-        2>"$E2E_WORK/mutter-input-$case_name.err"
-}
-
 click_test_field() {
     app_id=$1
     test_window_id=$(DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
@@ -357,6 +340,14 @@ type_x11_input() {
     fi
     LC_ALL=C.UTF-8 DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
         xdotool type --clearmodifiers --delay 40 -- "$input_text" \
+        2>"$E2E_WORK/xdotool-$case_name.err"
+}
+
+press_x11_key() {
+    case_name=$1
+    key_name=$2
+    LC_ALL=C.UTF-8 DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+        xdotool key --clearmodifiers --delay 40 "$key_name" \
         2>"$E2E_WORK/xdotool-$case_name.err"
 }
 
@@ -673,10 +664,10 @@ run_gtk_ibus_case() {
         sleep 0.1
         diagnose_x11_input "$case_name"
         input_status=0
-        type_mutter_input "$case_name" "$app_id" a || input_status=$?
+        press_x11_key "$case_name" a || input_status=$?
     else
         input_status=0
-        type_mutter_input "$case_name" "$app_id" "$trigger" || input_status=$?
+        type_x11_input "$case_name" "$trigger" || input_status=$?
     fi
     if [ "$input_status" -ne 0 ]; then
         if [ -f "$status_file" ]; then
@@ -686,13 +677,13 @@ run_gtk_ibus_case() {
         wait "$gtk_pid" 2>/dev/null || true
         gtk_pid=
         if [ "$case_name" = x11-baseline ]; then
-            log "fail gnome-gtk-$case_name Mutter virtual keyboard could not send a key to the focused GTK window"
+            log "fail gnome-gtk-$case_name XTEST could not send a key to the focused GTK window"
             cat "$test_log" "$E2E_WORK/x11-input-$case_name.txt" \
-                "$E2E_WORK/mutter-input-$case_name.err"
+                "$E2E_WORK/xdotool-$case_name.err"
         else
-            log "fail gnome-gtk-$case_name Mutter virtual keyboard could not type into the focused GTK window"
+            log "fail gnome-gtk-$case_name XTEST could not type into the focused GTK window"
             cat "$test_log" "$E2E_WORK/x11-input-$case_name.txt" \
-                "$E2E_WORK/mutter-input-$case_name.err"
+                "$E2E_WORK/locale-$case_name.txt" "$E2E_WORK/xdotool-$case_name.err"
         fi
         exit 1
     fi
@@ -707,14 +698,15 @@ run_gtk_ibus_case() {
     if [ "$gtk_status" -ne 0 ]; then
         cp "$status_file" "$E2E_WORK/ibus-status-$case_name.json" 2>/dev/null || true
         if [ "$im_mode" = default ]; then
-            log "fail gnome-gtk-$case_name COMPOSITOR_INPUT_NOT_DELIVERED: ordinary XKB input did not reach the GTK field"
+            log "fail gnome-gtk-$case_name XTEST_INPUT_NOT_DELIVERED: ordinary XKB input did not reach the GTK field"
         else
             log "fail gnome-gtk-$case_name GTK's IBus input context produced an incorrect result"
         fi
         cat "$test_log"
         cat "$engine_log"
         cat "$E2E_WORK/x11-input-$case_name.txt" \
-            "$E2E_WORK/mutter-input-$case_name.err" 2>/dev/null || true
+            "$E2E_WORK/locale-$case_name.txt" \
+            "$E2E_WORK/xdotool-$case_name.err" 2>/dev/null || true
         python3 - "$E2E_WORK/ibus-context-before-$case_name.json" \
             "$E2E_WORK/ibus-context-after-$case_name.json" <<'PY'
 import json
@@ -817,9 +809,8 @@ run_terminal_x11_baseline() {
     log "pass gnome-x11-terminal-baseline $(cat "$test_log")"
 }
 
-# Prove XTEST delivery to a basic terminal, then X11 focus and Mutter-delivered
-# ordinary GTK input separately from WayExpand's IBus engine. The GTK baseline
-# uses the US XKB source and GTK's default IM path.
+# Prove XTEST, X11 focus, and ordinary GTK input separately from WayExpand's
+# IBus engine. The baseline uses the US XKB source and GTK's default IM path.
 if ! "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --activate-source xkb us \
     >"$E2E_WORK/layout-us-baseline-activation.log" 2>&1; then
     log "fail gnome-gtk-x11-baseline GNOME could not activate the ordinary US XKB source"
@@ -924,12 +915,12 @@ run_qt_xim_case() {
         sleep 0.05
     done
     diagnose_x11_input "$case_name"
-    if ! type_mutter_input "$case_name" "$app_id" "$input"; then
+    if ! type_x11_input "$case_name" "$input"; then
         kill "$qt_pid" 2>/dev/null || true
         wait "$qt_pid" 2>/dev/null || true
-        log "fail gnome-qt-$case_name Mutter virtual keyboard could not type into the Qt field"
+        log "fail gnome-qt-$case_name XTEST could not type into the Qt field"
         cat "$test_log" "$E2E_WORK/x11-input-$case_name.txt" \
-            "$E2E_WORK/mutter-input-$case_name.err"
+            "$E2E_WORK/locale-$case_name.txt" "$E2E_WORK/xdotool-$case_name.err"
         exit 1
     fi
     qt_status=0
@@ -985,12 +976,13 @@ run_terminal_xim_case() {
         cat "$test_log"
         exit 1
     fi
-    if ! type_mutter_input "$case_name" org.wayexpand.GnomeTerminalIbus "$input"; then
+    if ! type_x11_input "$case_name" "$input"; then
         kill "$terminal_pid" 2>/dev/null || true
         wait "$terminal_pid" 2>/dev/null || true
         terminal_pid=
-        log "fail gnome-terminal-$case_name Mutter virtual keyboard could not type into the terminal"
-        cat "$test_log" "$E2E_WORK/mutter-input-$case_name.err"
+        log "fail gnome-terminal-$case_name XTEST could not type into the terminal"
+        cat "$test_log" "$E2E_WORK/locale-$case_name.txt" \
+            "$E2E_WORK/xdotool-$case_name.err"
         exit 1
     fi
     terminal_status=0
@@ -1030,9 +1022,8 @@ for layout in de fr; do
     log "pass gnome-layout-$layout expansion remained correct after switching layouts"
 done
 # Exercise the same active engine in a real browser renderer. The isolated
-# Chromium profile uses a local page, Mutter sends only the harmless `;e2e`
-# trigger through its virtual keyboard, and DevTools reads only that test
-# textarea's final value.
+# Chromium profile uses a local page, XTEST sends only the harmless `;e2e`
+# trigger, and DevTools reads only that test textarea's final value.
 env \
     GTK_IM_MODULE=ibus \
     DISPLAY="$x11_display" \
@@ -1099,13 +1090,13 @@ while [ ! -e "$E2E_WORK/browser-window-armed" ]; do
     fi
     sleep 0.1
 done
-if ! type_mutter_input browser-insertion org.wayexpand.GnomeBrowserIbus ';e2e'; then
+if ! DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+    xdotool type --clearmodifiers --delay 40 -- ';e2e'; then
     kill "$browser_pid" 2>/dev/null || true
     wait "$browser_pid" 2>/dev/null || true
     browser_pid=
-    log "fail gnome-browser-insertion Mutter virtual keyboard could not type into the focused browser window"
-    cat "$E2E_WORK/browser-ibus-e2e.log" "$E2E_WORK/browser-ibus-e2e-chrome.log" \
-        "$E2E_WORK/mutter-input-browser-insertion.err"
+    log "fail gnome-browser-insertion XTEST could not type into the focused browser window"
+    cat "$E2E_WORK/browser-ibus-e2e.log" "$E2E_WORK/browser-ibus-e2e-chrome.log"
     exit 1
 fi
 browser_status=0
@@ -1427,9 +1418,8 @@ if ! "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --active-layout \
 fi
 run_qt_xim_case safe-passthrough ';e2e' ';e2e' false
 run_terminal_xim_case safe-passthrough ';e2e'
-# Keep the legacy XTEST terminal check constrained to symbols in the active
-# XKB layout. The GTK IBus cases exercise CJK/emoji, while Qt/XIM uses the
-# compositor virtual keyboard for Unicode passthrough.
+# XTEST can only type symbols present in the active XKB keymap. GTK's IBus
+# commit cases above cover broader CJK and emoji output.
 run_qt_xim_case unicode-passthrough 'Grüße' 'Grüße' false
 run_terminal_xim_case unicode-passthrough 'Grüße'
 
