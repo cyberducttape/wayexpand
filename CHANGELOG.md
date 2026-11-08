@@ -5,8 +5,11 @@ All notable changes to WayExpand are documented here.
 ## [Unreleased]
 
 - Verify XTEST delivery into an IBus-free X11 terminal and then ordinary US
-  XKB-to-GTK key delivery with a direct synthetic key event before
-  WayExpand-specific IBus insertion. Refresh XWayland focus once before the
+  XKB-to-GTK key delivery using a test-only Mutter virtual keyboard before
+  WayExpand-specific IBus insertion. Route GTK, Qt/XIM, and terminal input
+  through the compositor virtual device so headless XWayland delivery failures
+  and xdotool multibyte conversion do not masquerade as target-client failures.
+  Refresh XWayland focus once before the
   GTK baseline event. Count sanitized GDK-to-widget key events
   and report GTK's effective IM-module, X11 focus, active window, XTEST
   availability, and
