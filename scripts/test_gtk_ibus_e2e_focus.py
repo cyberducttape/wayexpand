@@ -283,6 +283,33 @@ class MutterRemoteInputTests(unittest.TestCase):
                 self.assertEqual(bus.attempts, 1)
                 sleep.assert_not_called()
 
+    def test_window_activation_stops_retrying_after_the_map_deadline(self):
+        class FakeDbusError(Exception):
+            pass
+
+        class ActivationBus:
+            attempts = 0
+
+            def call_sync(self, *_args):
+                self.attempts += 1
+                raise FakeDbusError(
+                    "GDBus.Error:" + REMOTE_INPUT.FOCUS_CONTROLLER_NOT_FOUND
+                )
+
+        bus = ActivationBus()
+        with mock.patch.object(REMOTE_INPUT.GLib, "Error", FakeDbusError):
+            with mock.patch.object(
+                REMOTE_INPUT.time, "monotonic", side_effect=[10.0, 15.0]
+            ):
+                with mock.patch.object(REMOTE_INPUT.time, "sleep") as sleep:
+                    with self.assertRaisesRegex(
+                        FakeDbusError, REMOTE_INPUT.FOCUS_CONTROLLER_NOT_FOUND
+                    ):
+                        REMOTE_INPUT.activate_test_window(bus, "org.example.Test")
+
+        self.assertEqual(bus.attempts, 1)
+        sleep.assert_not_called()
+
     def test_fixed_text_uses_layout_independent_keysyms_and_releases_them(self):
         bus = self.FakeBus()
         with mock.patch.object(REMOTE_INPUT.time, "sleep"):
