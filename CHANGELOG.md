@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- In Diagnostics, show when IBus received input but safely declined automatic
+  replacement because the target did not provide verifiable surrounding text;
+  offer Quick Picker's copy-and-paste path directly from that finding. Explain
+  that browser and embedded-editor support depends on the client's text
+  capability, without weakening replacement checks or attempting synthetic
+  typing.
 - Preserve partially typed IBus triggers when Shift or an alternate-level
   modifier is pressed between characters, so triggers containing characters
   such as French AZERTY's shifted `2` can still match. Shortcut modifiers still

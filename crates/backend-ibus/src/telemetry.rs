@@ -557,7 +557,7 @@ impl IbusFieldVerdict {
             }
             Self::Sensitive => "password, PIN, or private field: expansion is intentionally off",
             Self::NoSurroundingText => {
-                "this app did not provide IBus with the text before the cursor, so replacement was refused; telemetry does not identify the app. Some terminal emulators need the terminal-only route (`wayexpand setup --backend ibus --terminals`), but that is not a browser workaround—do not add a browser to `terminal_apps`."
+                "this app did not provide IBus with the text before the cursor, so replacement was refused; telemetry does not identify the app. Use `wayexpand-gui --picker --copy-only` to copy a snippet and paste it manually. Some terminal emulators need the terminal-only route (`wayexpand setup --backend ibus --terminals`), but that is not a browser workaround—do not add a browser to `terminal_apps`."
             }
             Self::Mismatch => {
                 "the app's reported text did not end with the trigger (cursor moved, selection, or autocorrect), so the replacement was refused"

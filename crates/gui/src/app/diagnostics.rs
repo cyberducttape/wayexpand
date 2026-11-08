@@ -2067,6 +2067,18 @@ impl GuiApp {
                         .small()
                         .color(palette.muted),
                 );
+                if verdict == wayexpand_backend_ibus::IbusFieldVerdict::NoSurroundingText {
+                    ui.label(
+                        RichText::new(
+                            "Input reached WayExpand, but this field does not provide verifiable surrounding text. Automatic replacement stays disabled here. Use Quick Picker to copy a snippet and paste it yourself.",
+                        )
+                        .small()
+                        .color(palette.warning),
+                    );
+                    if ui.small_button("Open Quick Picker (copy and paste)").clicked() {
+                        self.open_copy_only_picker();
+                    }
+                }
             }
         }
         ui.label(
