@@ -862,7 +862,10 @@ jobs:
           tar -C "$top/sources" -czf "$top/rpmbuild/SOURCES/wayexpand-${version}-vendored.tar.gz" \
             "wayexpand-${version}"
           rm -rf "$top/sources"
-          timeout --signal=TERM --kill-after=60s 20m rpmbuild -bb --nodeps \
+          # Debian packaging above already runs the complete Cargo workspace
+          # suite. Keep this job focused on RPM build/install-manifest
+          # validation instead of compiling and running the same tests again.
+          timeout --signal=TERM --kill-after=60s 20m rpmbuild -bb --nocheck --nodeps \
             --define "_topdir $top/rpmbuild" \
             --define "_sourcedir $top/rpmbuild/SOURCES" \
             wayexpand.spec
