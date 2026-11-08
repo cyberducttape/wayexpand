@@ -30,6 +30,7 @@ FOCUS_CONTROLLER_NOT_FOUND = (
 )
 SHIFT_L_KEYSYM = 0xFFE1
 BTN_LEFT = 0x110
+IBUS_FOCUS_STABLE_FOR_US = 250_000
 
 
 def key_event(bus, path, key, pressed, *, keycode=False):
@@ -164,16 +165,37 @@ def click_test_field(bus, path, window_rect):
 
 
 def send_text(
-    bus, path, text, delay_seconds, ready_marker, *, keycode_probe=False
+    bus,
+    path,
+    text,
+    delay_seconds,
+    ready_marker,
+    *,
+    keycode_probe=False,
+    ibus_status_path=None,
+    ibus_sequence=None,
 ):
     """Inject fixed test text as keysyms or a single US evdev-keycode probe."""
     if keycode_probe and text != "a":
         raise ValueError("the evdev-keycode probe is limited to the fixed ASCII 'a' input")
+    if (ibus_status_path is None) != (ibus_sequence is None):
+        raise ValueError("IBus status path and focused sequence must be supplied together")
+    sent = 0
     for character in text:
         if not os.path.isfile(ready_marker):
             raise RuntimeError(
-                "GTK active focus was lost; stopped before sending remaining test input"
+                "GTK active focus was lost after "
+                f"{sent} of {len(text)} test characters; remaining input withheld"
             )
+        if ibus_status_path is not None:
+            current_sequence = latest_focused_ibus_context(
+                ibus_status_path, ibus_sequence - 1
+            )
+            if current_sequence != ibus_sequence:
+                raise RuntimeError(
+                    "the focused IBus context changed after "
+                    f"{sent} of {len(text)} test characters; remaining input withheld"
+                )
         if keycode_probe:
             # Linux input-event-codes.h defines KEY_A as evdev keycode 30.
             # The US XKB source is active for this baseline, so this exercises
@@ -190,6 +212,7 @@ def send_text(
             # A failed reply can leave it uncertain whether Mutter accepted
             # the press, so always attempt the matching release.
             key_event(bus, path, key, False, keycode=keycode_probe)
+        sent += 1
         time.sleep(delay_seconds)
 
 
@@ -239,19 +262,34 @@ def publish_focus_confirmation(path):
 
 
 def latest_focused_ibus_context(status_path, sequence_baseline):
-    """Require a newly focused IBus context before input is sent."""
+    """Return the newest newly focused IBus context sequence, if any."""
     try:
         with open(status_path, encoding="utf-8") as source:
             status = json.load(source)
         fields = status.get("recent_fields") or []
         newest = max(fields, key=lambda field: int(field.get("sequence", 0)), default=None)
-        return bool(
+        if (
             newest
             and int(newest.get("sequence", 0)) > sequence_baseline
             and newest.get("focused") is True
-        )
+        ):
+            return int(newest["sequence"])
+        return None
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
-        return False
+        return None
+
+
+def update_ibus_focus_stability(sequence, current_sequence, focused_since, now):
+    """Require the same newest focused IBus context for a stable interval."""
+    if sequence is None:
+        return None, None, False
+    if sequence != current_sequence:
+        return sequence, now, False
+    return (
+        current_sequence,
+        focused_since,
+        now - focused_since >= IBUS_FOCUS_STABLE_FOR_US,
+    )
 
 
 def wait_for_gtk_input_ready(
@@ -261,12 +299,15 @@ def wait_for_gtk_input_ready(
     timeout_seconds,
     ibus_status_path=None,
     ibus_sequence_baseline=0,
+    window_rect=None,
 ):
     deadline = time.monotonic() + timeout_seconds
     ready_since = None
     next_activation_at = 0.0
+    next_click_at = 0.0
     next_ibus_probe_at = 0.0
-    ibus_context_ready = ibus_status_path is None
+    ibus_context_sequence = None
+    ibus_context_focused_since = None
     while time.monotonic() < deadline:
         now = time.monotonic()
         if now >= next_activation_at:
@@ -275,19 +316,40 @@ def wait_for_gtk_input_ready(
             # activation while GTK is confirming its own active/focus state.
             activate_test_window(bus, app_id)
             next_activation_at = now + 0.25
+        if window_rect is not None and now >= next_click_at:
+            # Some headless Mutter versions acknowledge window activation
+            # before forwarding pointer focus to the Wayland client. Retry a
+            # click only at the verified test widget while readiness is still
+            # closed; never send trigger text until GTK and IBus both settle.
+            click_test_field(bus, path, window_rect)
+            next_click_at = now + 0.5
         if os.path.isfile(path):
             if ready_since is None:
                 ready_since = now
             elif now - ready_since >= 0.25:
-                if ibus_context_ready:
+                if ibus_status_path is None:
                     return True
                 if now >= next_ibus_probe_at:
-                    ibus_context_ready = latest_focused_ibus_context(
+                    focused_sequence = latest_focused_ibus_context(
                         ibus_status_path, ibus_sequence_baseline
                     )
+                    (
+                        ibus_context_sequence,
+                        ibus_context_focused_since,
+                        ibus_ready,
+                    ) = update_ibus_focus_stability(
+                        focused_sequence,
+                        ibus_context_sequence,
+                        ibus_context_focused_since,
+                        int(now * 1_000_000),
+                    )
                     next_ibus_probe_at = now + 0.1
+                    if ibus_ready:
+                        return ibus_context_sequence
         else:
             ready_since = None
+            ibus_context_sequence = None
+            ibus_context_focused_since = None
         time.sleep(0.02)
     return False
 
@@ -351,24 +413,26 @@ def main():
         window_rect = get_test_window_rect(bus, args.app_id)
         print(f"Mutter test target geometry: window={window_rect!r}", flush=True)
         # Start GTK's bounded present()/grab_focus() retries as soon as Mutter
-        # confirms its window focus. Waiting until after the click deadlocks on
-        # Mutter versions where a click on the not-yet-active Wayland surface
-        # is not delivered to GTK; the client would not request focus until
-        # that same click had succeeded.
+        # confirms its window focus. The readiness loop then retries the click
+        # only at the verified test widget until GTK and IBus confirm focus.
         publish_focus_confirmation(args.focus_marker)
-        click_test_field(bus, session_path, window_rect)
-        if not wait_for_gtk_input_ready(
+        ready = wait_for_gtk_input_ready(
             bus,
             args.app_id,
             args.ready_marker,
             13.0,
             args.ibus_status_path,
             args.ibus_sequence_baseline,
-        ):
+            window_rect,
+        )
+        if not ready:
             raise RuntimeError(
                 "GTK or IBus did not confirm a stable focused input context; "
                 "test text was not sent"
             )
+        ibus_context_sequence = (
+            ready if args.ibus_status_path is not None else None
+        )
         send_text(
             bus,
             session_path,
@@ -376,6 +440,8 @@ def main():
             args.delay_ms / 1000,
             args.ready_marker,
             keycode_probe=args.keycode_probe,
+            ibus_status_path=args.ibus_status_path,
+            ibus_sequence=ibus_context_sequence,
         )
     except (GLib.Error, OSError, RuntimeError, ValueError) as error:
         print(f"Mutter RemoteDesktop keyboard input failed: {error}", file=sys.stderr)
@@ -398,13 +464,13 @@ def main():
                 pass
     if args.keycode_probe:
         print(
-            "Mutter accepted the fixed KEY_A evdev probe; "
-            f"GTK verifies delivery (window={window_rect!r})"
+            "Mutter submitted the fixed KEY_A evdev probe; "
+            f"GTK fixture will verify delivery (window={window_rect!r})"
         )
     else:
         print(
-            "Mutter accepted the fixed ASCII keysym input; "
-            f"GTK verifies delivery (window={window_rect!r})"
+            "Mutter submitted the fixed ASCII keysym input; "
+            f"GTK fixture will verify delivery (window={window_rect!r})"
         )
     return 0
 

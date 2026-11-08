@@ -555,11 +555,14 @@ class MutterRemoteInputTests(unittest.TestCase):
 
     def test_gtk_focus_retries_start_before_pointer_click(self):
         source = REMOTE_INPUT_SCRIPT.read_text(encoding="utf-8")
-        click = source.index("click_test_field(bus, session_path, window_rect)")
         publish = source.index("publish_focus_confirmation(args.focus_marker)")
-        wait = source.index("if not wait_for_gtk_input_ready(")
-        self.assertLess(publish, click)
-        self.assertLess(click, wait)
+        wait = source.index("ready = wait_for_gtk_input_ready(")
+        readiness = source[
+            source.index("def wait_for_gtk_input_ready(") : source.index("def main():")
+        ]
+        self.assertLess(publish, wait)
+        self.assertIn("click_test_field(bus, path, window_rect)", readiness)
+        self.assertIn("next_click_at = now + 0.5", readiness)
 
     def test_ibus_test_captures_sequence_baseline_before_launch_and_passes_status(self):
         source = GNOME_ACCEPTANCE_SCRIPT.read_text(encoding="utf-8")
@@ -599,10 +602,11 @@ class MutterRemoteInputTests(unittest.TestCase):
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8") as status_file:
             json.dump(report["activity"], status_file)
             status_file.flush()
-            self.assertTrue(
-                REMOTE_INPUT.latest_focused_ibus_context(status_file.name, 8)
+            self.assertEqual(
+                REMOTE_INPUT.latest_focused_ibus_context(status_file.name, 8),
+                9,
             )
-            self.assertFalse(
+            self.assertIsNone(
                 REMOTE_INPUT.latest_focused_ibus_context(status_file.name, 9)
             )
 
@@ -611,12 +615,39 @@ class MutterRemoteInputTests(unittest.TestCase):
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8") as status_file:
             json.dump(report, status_file)
             status_file.flush()
-            self.assertFalse(
+            self.assertIsNone(
                 REMOTE_INPUT.latest_focused_ibus_context(status_file.name, 8)
             )
 
+    def test_ibus_focus_stability_resets_when_latest_context_changes(self):
+        sequence, focused_since, ready = REMOTE_INPUT.update_ibus_focus_stability(
+            9, None, None, 1_000_000
+        )
+        self.assertEqual(sequence, 9)
+        self.assertEqual(focused_since, 1_000_000)
+        self.assertFalse(ready)
+
+        sequence, focused_since, ready = REMOTE_INPUT.update_ibus_focus_stability(
+            10, sequence, focused_since, 1_300_000
+        )
+        self.assertEqual(sequence, 10)
+        self.assertEqual(focused_since, 1_300_000)
+        self.assertFalse(ready)
+
+        _sequence, _focused_since, ready = REMOTE_INPUT.update_ibus_focus_stability(
+            10, sequence, focused_since, 1_550_000
+        )
+        self.assertTrue(ready)
+
+        sequence, focused_since, ready = REMOTE_INPUT.update_ibus_focus_stability(
+            None, sequence, focused_since, 1_560_000
+        )
+        self.assertIsNone(sequence)
+        self.assertIsNone(focused_since)
+        self.assertFalse(ready)
+
     def test_readiness_waits_for_ibus_focus_after_gtk_focus(self):
-        times = [0.0, 0.0, 0.0, 0.26, 0.26, 0.28, 0.28]
+        times = [-1.0, 0.0, 0.0, 0.26, 0.26, 0.51, 0.51]
         with tempfile.NamedTemporaryFile(mode="w+", encoding="utf-8") as status_file:
             json.dump({"recent_fields": [{"sequence": 9, "focused": False}]}, status_file)
             status_file.flush()
@@ -633,11 +664,12 @@ class MutterRemoteInputTests(unittest.TestCase):
                 mock.patch.object(REMOTE_INPUT.os.path, "isfile", return_value=True),
                 mock.patch.object(REMOTE_INPUT, "activate_test_window"),
             ):
-                self.assertTrue(
+                self.assertEqual(
                     REMOTE_INPUT.wait_for_gtk_input_ready(
                         object(), "org.example.Test", "/tmp/ready", 13.0,
                         status_file.name, 8,
-                    )
+                    ),
+                    9,
                 )
 
     def test_shell_focus_controller_reports_mapped_window_geometry(self):
@@ -684,6 +716,54 @@ class MutterRemoteInputTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(RuntimeError, "focus was lost"):
                     REMOTE_INPUT.send_text(bus, "/session", "ab", 0.06, marker)
+
+        self.assertEqual(
+            bus.calls,
+            [
+                ("NotifyKeyboardKeysym", (ord("a"), True)),
+                ("NotifyKeyboardKeysym", (ord("a"), False)),
+            ],
+        )
+
+    def test_ibus_context_change_stops_remaining_text(self):
+        bus = self.FakeBus()
+        with tempfile.TemporaryDirectory() as directory:
+            marker = Path(directory) / "ready"
+            marker.write_text("1", encoding="ascii")
+            status = Path(directory) / "ibus-status.json"
+            status.write_text(
+                json.dumps({"recent_fields": [{"sequence": 9, "focused": True}]}),
+                encoding="utf-8",
+            )
+            changes = 0
+
+            def change_context(_delay):
+                nonlocal changes
+                changes += 1
+                if changes == 1:
+                    status.write_text(
+                        json.dumps(
+                            {"recent_fields": [{"sequence": 10, "focused": False}]}
+                        ),
+                        encoding="utf-8",
+                    )
+
+            with mock.patch.object(
+                REMOTE_INPUT.time, "sleep", side_effect=change_context
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "IBus context changed after 1 of 2 test characters",
+                ):
+                    REMOTE_INPUT.send_text(
+                        bus,
+                        "/session",
+                        "ab",
+                        0.06,
+                        marker,
+                        ibus_status_path=status,
+                        ibus_sequence=9,
+                    )
 
         self.assertEqual(
             bus.calls,

@@ -672,7 +672,7 @@ PY
             cat "$test_log" "$E2E_WORK/mutter-input-$case_name.txt" \
                 "$E2E_WORK/mutter-input-$case_name.err"
         else
-            log "fail gnome-gtk-$case_name Mutter RemoteDesktop could not type into the focused GTK window"
+            log "fail gnome-gtk-$case_name test input was interrupted or rejected; inspect the GTK and IBus context diagnostics; no retry was attempted"
             cat "$test_log" "$E2E_WORK/mutter-input-$case_name.txt" \
                 "$E2E_WORK/mutter-input-$case_name.err"
         fi
@@ -1032,7 +1032,10 @@ env \
     --log "$E2E_WORK/browser-ibus-e2e-chrome.log" \
     >"$E2E_WORK/browser-ibus-e2e.log" 2>&1 &
 browser_pid=$!
-tries=200
+# Give the child its full 20-second diagnostic timeout before the shell
+# watchdog terminates it. Equal parent/child deadlines used to kill Chromium
+# before it could report why DevTools or the acceptance page was unavailable.
+tries=350
 while [ ! -e "$E2E_WORK/browser-window-ready" ]; do
     if ! kill -0 "$browser_pid" 2>/dev/null; then
         wait "$browser_pid" || true
