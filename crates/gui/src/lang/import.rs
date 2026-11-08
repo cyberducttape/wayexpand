@@ -1106,13 +1106,13 @@ impl Strings {
     pub fn picker_footer_clipboard(&self) -> &'static str {
         match self.lang {
             Language::English => {
-                "Automatic insertion unavailable · Enter copies the snippet to the clipboard"
+                "Copy-only in this session · Enter copies · switch to your app and paste with Ctrl+V"
             }
             Language::Indonesian => {
-                "Penyisipan otomatis tidak tersedia · Enter menyalin cuplikan ke papan klip"
+                "Hanya salin pada sesi ini · Enter menyalin · pindah ke aplikasi lalu tempel dengan Ctrl+V"
             }
             Language::German => {
-                "Automatisches Einfügen nicht verfügbar · Enter kopiert das Snippet in die Zwischenablage"
+                "In dieser Sitzung nur kopieren · Enter kopiert · zur App wechseln und mit Strg+V einfügen"
             }
         }
     }
@@ -1120,13 +1120,13 @@ impl Strings {
     pub fn picker_copied(&self, trigger: &str) -> String {
         match self.lang {
             Language::English => {
-                format!("Copied {trigger} · paste it with Ctrl+V, then press Esc")
+                format!("Copied {trigger} · switch to your app and paste with Ctrl+V · return here to close the picker")
             }
             Language::Indonesian => {
-                format!("{trigger} disalin · tempel dengan Ctrl+V, lalu tekan Esc")
+                format!("{trigger} disalin · pindah ke aplikasi dan tempel dengan Ctrl+V · kembali ke sini untuk menutup pemilih")
             }
             Language::German => {
-                format!("{trigger} kopiert · mit Strg+V einfügen, dann Esc drücken")
+                format!("{trigger} kopiert · zur App wechseln und mit Strg+V einfügen · zum Schließen hierher zurückkehren")
             }
         }
     }

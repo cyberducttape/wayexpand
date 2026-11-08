@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Clarify Quick Picker's copy-only flow when verified insertion is unavailable:
+  switch to the target app and paste while the picker remains open to serve the
+  clipboard. Avoid suggesting that Escape be sent to the target application.
 - In Diagnostics, show when IBus received input but safely declined automatic
   replacement because the target did not provide verifiable surrounding text;
   offer Quick Picker's copy-and-paste path directly from that finding. Explain
