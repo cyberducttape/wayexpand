@@ -581,6 +581,7 @@ run_gtk_ibus_case() {
         # attach to IBus. The following cases test the IBus module explicitly.
         timeout 20s env -u XMODIFIERS -u IBUS_ADDRESS \
             GTK_IM_MODULE=gtk-im-context-simple \
+            GDK_CORE_DEVICE_EVENTS=1 \
             GDK_BACKEND=x11 \
             DISPLAY="$x11_display" \
             XAUTHORITY="$xwayland_auth" \

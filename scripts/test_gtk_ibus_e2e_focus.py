@@ -56,8 +56,18 @@ class InputModeEnvironmentTests(unittest.TestCase):
         )
         self.assertIsNone(
             GTK_E2E.input_mode_environment_error(
-                "simple", {"GTK_IM_MODULE": "gtk-im-context-simple"}
+                "simple",
+                {
+                    "GTK_IM_MODULE": "gtk-im-context-simple",
+                    "GDK_CORE_DEVICE_EVENTS": "1",
+                },
             )
+        )
+        self.assertEqual(
+            GTK_E2E.input_mode_environment_error(
+                "simple", {"GTK_IM_MODULE": "gtk-im-context-simple"}
+            ),
+            "GDK_CORE_DEVICE_EVENTS=1 is required for XTEST core-key delivery",
         )
 
     def test_simple_xkb_baseline_rejects_ibus_module_overrides(self):
@@ -72,6 +82,7 @@ class InputModeEnvironmentTests(unittest.TestCase):
                 "simple",
                 {
                     "GTK_IM_MODULE": "gtk-im-context-simple",
+                    "GDK_CORE_DEVICE_EVENTS": "1",
                     "XMODIFIERS": "@im=ibus",
                 },
             ),
@@ -82,6 +93,7 @@ class InputModeEnvironmentTests(unittest.TestCase):
                 "simple",
                 {
                     "GTK_IM_MODULE": "gtk-im-context-simple",
+                    "GDK_CORE_DEVICE_EVENTS": "1",
                     "IBUS_ADDRESS": "unix:path=/tmp/ibus",
                 },
             ),

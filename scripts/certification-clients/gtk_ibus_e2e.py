@@ -38,6 +38,8 @@ def input_mode_environment_error(im_mode, environ):
         return "XMODIFIERS must be unset for the GTK simple input path"
     if im_mode == "simple" and environ.get("IBUS_ADDRESS"):
         return "IBUS_ADDRESS must be unset for the GTK simple input path"
+    if im_mode == "simple" and environ.get("GDK_CORE_DEVICE_EVENTS") != "1":
+        return "GDK_CORE_DEVICE_EVENTS=1 is required for XTEST core-key delivery"
     if im_mode == "ibus" and not environ.get("IBUS_ADDRESS"):
         return "IBUS_ADDRESS must identify the private IBus daemon"
     return None
