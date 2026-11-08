@@ -254,11 +254,14 @@ export default class WayExpandWindowTracker extends Extension {
                 invocation.return_value(new GLib.Variant('(ss)', [active.type, active.id]));
                 return;
             }
+            const sourceDetails = result.error === 'source-pending'
+                ? `; available sources: ${(result.availableSources ?? []).join(', ') || 'none'}`
+                : '';
             invocation.return_dbus_error(
                 result.error === 'source-pending'
                     ? 'org.wayexpand.ShellWindowTracker1.Error.InputSourceUnavailable'
                     : 'org.wayexpand.ShellWindowTracker1.Error.ActivationFailed',
-                `GNOME Shell input-source activation failed (${result.error})`,
+                `GNOME Shell input-source activation failed (${result.error})${sourceDetails}`,
             );
         };
         const activate = () => {

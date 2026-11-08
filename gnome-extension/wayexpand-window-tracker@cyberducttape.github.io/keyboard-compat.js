@@ -58,8 +58,14 @@ export function activateSource(keyboard, kind, id, refreshIfMissing = true) {
                 source = Object.values(manager.inputSources).find(candidate =>
                     candidate && candidate.type === kind && candidate.id === id);
             }
-            if (!source)
-                return {error: 'source-pending'};
+            if (!source) {
+                const availableSources = Object.values(manager.inputSources)
+                    .filter(candidate => candidate && typeof candidate.type === 'string' &&
+                        typeof candidate.id === 'string')
+                    .map(candidate => `${candidate.type}:${candidate.id}`)
+                    .sort();
+                return {error: 'source-pending', availableSources};
+            }
         }
         if (!source || typeof source.activate !== 'function')
             return {error: 'source-unavailable'};

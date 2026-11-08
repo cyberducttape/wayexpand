@@ -4373,3 +4373,6 @@ This is the first stable release. WayExpand is now recommended for production us
 - Give the explicit GNOME input-source activation call a bounded five-second
   D-Bus deadline so the extension's asynchronous IBus registration wait can
   finish without expiring the caller first.
+- Include the currently visible source IDs in an explicit source-activation
+  refusal, making a missing IBus registration distinguishable from delayed
+  GNOME source discovery.

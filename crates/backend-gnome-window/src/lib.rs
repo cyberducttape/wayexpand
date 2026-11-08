@@ -935,6 +935,8 @@ mod tests {
         assert!(script.contains("ActivateInputSourceAsync([kind, id], invocation) {\n        this._withAuthorizedClient(invocation"));
         assert!(script.contains("attempts >= 40"));
         assert!(script.contains("GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50"));
+        assert!(script.contains("available sources:"));
+        assert!(keyboard.contains("availableSources"));
         assert!(tracker_source.contains(
             "const DBUS_INPUT_SOURCE_METHOD_TIMEOUT: Duration = Duration::from_secs(5);"
         ));
