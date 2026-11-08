@@ -159,7 +159,7 @@ fi
 gsettings set org.gnome.shell disable-user-extensions false
 gsettings set org.gnome.shell enabled-extensions "['$E2E_UUID', '$E2E_CONTROLLER_UUID']"
 gsettings set org.gnome.desktop.input-sources sources \
-    "[('xkb', 'us'), ('xkb', 'de'), ('ibus', 'wayexpand')]"
+    "[('xkb', 'us'), ('xkb', 'de'), ('xkb', 'fr'), ('ibus', 'wayexpand')]"
 # Let GNOME Shell start and own its normal IBus session. Prestarting an IBus
 # daemon in --single mode makes Shell's normal restart path cancel engine
 # selection, leaving the source selected in settings but unable to deliver
