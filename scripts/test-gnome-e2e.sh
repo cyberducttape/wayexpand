@@ -170,6 +170,15 @@ gsettings set org.gnome.shell enabled-extensions "['$E2E_UUID', '$E2E_CONTROLLER
 gsettings set org.gnome.shell welcome-dialog-last-shown-version 99.0
 gsettings set org.gnome.desktop.input-sources sources \
     "[('xkb', 'us'), ('xkb', 'de'), ('xkb', 'fr'), ('ibus', 'wayexpand')]"
+# Fedora's xdg-desktop-portal-gnome opens a Remote Desktop dialog in this session
+# that nothing can answer, and XTEST input to X11 clients then goes missing.
+# Mutter's own RemoteDesktop D-Bus API, which the GTK cases use, is unaffected.
+mkdir -p "$XDG_CONFIG_HOME/xdg-desktop-portal"
+cat >"$XDG_CONFIG_HOME/xdg-desktop-portal/gnome-portals.conf" <<'PORTALS'
+[preferred]
+default=gnome;gtk;
+org.freedesktop.impl.portal.RemoteDesktop=none
+PORTALS
 # Let GNOME Shell start and own its normal IBus session. Prestarting an IBus
 # daemon in --single mode makes Shell's normal restart path cancel engine
 # selection, leaving the source selected in settings but unable to deliver
