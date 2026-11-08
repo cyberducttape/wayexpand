@@ -24,6 +24,9 @@ ROOT_INTERFACE = "org.gnome.Mutter.RemoteDesktop"
 SESSION_INTERFACE = "org.gnome.Mutter.RemoteDesktop.Session"
 FOCUS_CONTROLLER_PATH = "/org/wayexpand/GnomeE2eFocusController"
 FOCUS_CONTROLLER_INTERFACE = "org.wayexpand.GnomeE2eFocusController"
+FOCUS_CONTROLLER_NOT_FOUND = (
+    "org.wayexpand.GnomeE2eFocusController.Error.NotFound"
+)
 SHIFT_L_KEYSYM = 0xFFE1
 
 
@@ -68,17 +71,30 @@ def prime_keyboard_device(bus, path):
 
 
 def activate_test_window(bus, app_id):
-    bus.call_sync(
-        "org.gnome.Shell",
-        FOCUS_CONTROLLER_PATH,
-        FOCUS_CONTROLLER_INTERFACE,
-        "ActivateWindow",
-        GLib.Variant("(s)", (app_id,)),
-        GLib.VariantType.new("()"),
-        Gio.DBusCallFlags.NONE,
-        10000,
-        None,
-    )
+    deadline = time.monotonic() + 5.0
+    while True:
+        try:
+            bus.call_sync(
+                "org.gnome.Shell",
+                FOCUS_CONTROLLER_PATH,
+                FOCUS_CONTROLLER_INTERFACE,
+                "ActivateWindow",
+                GLib.Variant("(s)", (app_id,)),
+                GLib.VariantType.new("()"),
+                Gio.DBusCallFlags.NONE,
+                10000,
+                None,
+            )
+            return
+        except GLib.Error as error:
+            # GTK can publish its application ID before Mutter maps the
+            # corresponding toplevel. Retry only that explicit transient
+            # condition; focus timeouts and authorization failures must fail
+            # immediately instead of being hidden by repeated activation.
+            message = getattr(error, "message", str(error))
+            if FOCUS_CONTROLLER_NOT_FOUND not in message or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.05)
 
 
 def publish_focus_confirmation(path):

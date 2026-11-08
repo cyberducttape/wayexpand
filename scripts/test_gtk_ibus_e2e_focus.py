@@ -232,6 +232,57 @@ class MutterRemoteInputTests(unittest.TestCase):
                 self.fail_first = False
                 raise RuntimeError("simulated lost method reply")
 
+    def test_window_activation_retries_only_while_window_is_unmapped(self):
+        class FakeDbusError(Exception):
+            pass
+
+        class ActivationBus:
+            def __init__(self):
+                self.attempts = 0
+
+            def call_sync(self, *_args):
+                self.attempts += 1
+                if self.attempts < 3:
+                    raise FakeDbusError(
+                        "GDBus.Error:" + REMOTE_INPUT.FOCUS_CONTROLLER_NOT_FOUND
+                    )
+
+        bus = ActivationBus()
+        with mock.patch.object(REMOTE_INPUT.GLib, "Error", FakeDbusError):
+            with mock.patch.object(REMOTE_INPUT.time, "monotonic", return_value=1.0):
+                with mock.patch.object(REMOTE_INPUT.time, "sleep") as sleep:
+                    REMOTE_INPUT.activate_test_window(bus, "org.example.Test")
+
+        self.assertEqual(bus.attempts, 3)
+        self.assertEqual(sleep.call_count, 2)
+
+    def test_window_activation_does_not_retry_focus_or_authorization_failures(self):
+        class FakeDbusError(Exception):
+            pass
+
+        class ActivationBus:
+            def __init__(self, message):
+                self.message = message
+                self.attempts = 0
+
+            def call_sync(self, *_args):
+                self.attempts += 1
+                raise FakeDbusError(self.message)
+
+        for message in (
+            "org.wayexpand.GnomeE2eFocusController.Error.FocusTimeout",
+            "org.freedesktop.DBus.Error.AccessDenied",
+        ):
+            with self.subTest(message=message):
+                bus = ActivationBus(message)
+                with mock.patch.object(REMOTE_INPUT.GLib, "Error", FakeDbusError):
+                    with mock.patch.object(REMOTE_INPUT.time, "monotonic", return_value=1.0):
+                        with mock.patch.object(REMOTE_INPUT.time, "sleep") as sleep:
+                            with self.assertRaisesRegex(FakeDbusError, message):
+                                REMOTE_INPUT.activate_test_window(bus, "org.example.Test")
+                self.assertEqual(bus.attempts, 1)
+                sleep.assert_not_called()
+
     def test_fixed_text_uses_layout_independent_keysyms_and_releases_them(self):
         bus = self.FakeBus()
         with mock.patch.object(REMOTE_INPUT.time, "sleep"):
