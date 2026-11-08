@@ -355,11 +355,16 @@ esac
 # layouts. Ask the real CLI to activate WayExpand so the session-bus caller
 # authorization and Shell InputSourceManager path are exercised together.
 gsettings set org.gnome.desktop.input-sources sources \
-    "[('xkb', 'us'), ('xkb', 'de'), ('ibus', 'wayexpand')]"
+    "[('xkb', 'us'), ('xkb', 'de'), ('xkb', 'fr'), ('ibus', 'wayexpand')]"
 registered_sources=$(gsettings get org.gnome.desktop.input-sources sources)
 case "$registered_sources" in
-    *"'ibus', 'wayexpand'"*) log "pass gnome-ibus-source-registered $registered_sources" ;;
-    *) log "fail gnome-ibus-source-registered GNOME returned $registered_sources"; exit 1 ;;
+    *"'xkb', 'us'"*"'xkb', 'de'"*"'xkb', 'fr'"*"'ibus', 'wayexpand'"*)
+        log "pass gnome-ibus-source-registered $registered_sources"
+        ;;
+    *)
+        log "fail gnome-ibus-source-registered GNOME did not retain the IBus, German, and French sources: $registered_sources"
+        exit 1
+        ;;
 esac
 # Writing the deprecated `current` key to the WayExpand index must not make
 # readiness pass; only Shell's live InputSourceManager can prove activation.

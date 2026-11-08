@@ -12,6 +12,9 @@ All notable changes to WayExpand are documented here.
   XKB layout exercised by the acceptance matrix before asking Shell to switch
   to it. Add a CI check and update helper for the content-bound GNOME extension
   identity so bundled JS changes cannot leave stale metadata and break installs.
+- Preserve both German and French keyboard sources when the GNOME acceptance
+  test re-registers WayExpand, and assert that every source used by layout
+  switching remains available.
 - Require both an active GTK toplevel and actual focus within the test widget
   for the full stability interval before sending XTEST input. Cover focus loss,
   inactive windows, and the timing boundary with focused regression tests.
