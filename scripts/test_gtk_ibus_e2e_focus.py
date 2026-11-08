@@ -150,6 +150,20 @@ class GnomeAcceptanceShellContractTests(unittest.TestCase):
         self.assertIn('keycode_probe=true', source)
         self.assertIn('--keycode-probe', source)
 
+    def test_password_field_does_not_require_ibus_focus_and_checks_capture(self):
+        source = GNOME_ACCEPTANCE_SCRIPT.read_text(encoding="utf-8")
+        start = source.index("run_gtk_ibus_case() {")
+        end = source.index("run_terminal_x11_baseline() {")
+        case = source[start:end]
+        self.assertIn(
+            'if [ "$password" = true ]; then\n'
+            '            ibus_status_path=',
+            case,
+        )
+        self.assertIn('keys != uncaptured', case)
+        self.assertIn('if expansions or keys != uncaptured:', case)
+        self.assertIn('pass password-field input was not captured by IBus ', case)
+
     def test_native_gtk_fixture_uses_undecorated_window_with_known_input_size(self):
         source = SCRIPT.read_text(encoding="utf-8")
         self.assertIn("window.set_default_size(500, 80)", source)
@@ -628,7 +642,7 @@ class MutterRemoteInputTests(unittest.TestCase):
         )
         self.assertIn('"$ibus_status_path" "$ibus_sequence_baseline"', case)
 
-    def test_gtk_readiness_reissues_shell_activation_until_stable(self):
+    def test_gtk_readiness_stops_shell_activation_after_client_focus_lease(self):
         times = [0.0, 0.0, 0.0, 0.26, 0.26]
         with (
             mock.patch.object(REMOTE_INPUT.time, "monotonic", side_effect=times),
@@ -641,7 +655,7 @@ class MutterRemoteInputTests(unittest.TestCase):
                     object(), "org.example.Test", "/tmp/ready", 13.0
                 )
             )
-        self.assertEqual(activate.call_count, 2)
+        activate.assert_not_called()
 
     def test_ibus_readiness_requires_a_newest_focused_context(self):
         report = {

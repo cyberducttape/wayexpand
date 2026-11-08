@@ -308,13 +308,16 @@ def wait_for_gtk_input_ready(
     ibus_context_focused_since = None
     while time.monotonic() < deadline:
         now = time.monotonic()
-        if now >= next_activation_at:
+        client_focus_ready = os.path.isfile(path)
+        if not client_focus_ready and now >= next_activation_at:
             # Shell can report Meta.Window focus before GTK receives the
             # corresponding Wayland activation. Reissue the compositor-side
-            # activation while GTK is confirming its own active/focus state.
+            # activation until the GTK client publishes its own active/focus
+            # lease. Once GTK confirms focus, do not perturb it while waiting
+            # for IBus context telemetry to stabilize.
             activate_test_window(bus, app_id)
             next_activation_at = now + 0.25
-        if os.path.isfile(path):
+        if client_focus_ready:
             if ready_since is None:
                 ready_since = now
             elif now - ready_since >= 0.25:

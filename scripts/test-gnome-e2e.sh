@@ -611,6 +611,13 @@ except (OSError, ValueError, TypeError):
     print(0)
 PY
 )
+        # GNOME deliberately bypasses IBus for password-purpose GTK fields.
+        # Keep the telemetry snapshots for the privacy assertion below, but
+        # do not require a focused IBus engine context before testing GTK's
+        # direct password-field pass-through path.
+        if [ "$password" = true ]; then
+            ibus_status_path=
+        fi
     fi
     printf 'before_gtk=' >"$engine_log"
     ibus engine >>"$engine_log" 2>&1 || true
@@ -684,6 +691,40 @@ PY
     gtk_status=0
     wait "$gtk_pid" || gtk_status=$?
     gtk_pid=
+    if [ "$password" = true ] && [ "$im_mode" = ibus ]; then
+        cp "$status_file" "$E2E_WORK/ibus-context-after-$case_name.json" 2>/dev/null || true
+        if ! python3 - "$E2E_WORK/ibus-context-after-$case_name.json" \
+            "$ibus_sequence_baseline" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    after = json.load(source)
+baseline = int(sys.argv[2])
+fields = [
+    field for field in after.get("recent_fields", [])
+    if int(field.get("sequence", 0)) > baseline
+]
+keys = sum(int(field.get("keys", 0)) for field in fields)
+uncaptured = sum(int(field.get("keys_without_capture", 0)) for field in fields)
+expansions = sum(int(field.get("expansions", 0)) for field in fields)
+if expansions or keys != uncaptured:
+    raise SystemExit(
+        "password field was not safely passed through: "
+        f"keys={keys} uncaptured={uncaptured} expansions={expansions}"
+    )
+print(
+    "pass password-field input was not captured by IBus "
+    f"(keys={keys}, uncaptured={uncaptured}, expansions={expansions})"
+)
+PY
+        then
+            log "fail gnome-gtk-$case_name IBus captured or expanded password-field input"
+            cat "$E2E_WORK/ibus-context-before-$case_name.json" \
+                "$E2E_WORK/ibus-context-after-$case_name.json"
+            exit 1
+        fi
+    fi
     printf 'after_gtk=' >>"$engine_log"
     ibus engine >>"$engine_log" 2>&1 || true
     if [ "$gtk_status" -ne 0 ]; then
