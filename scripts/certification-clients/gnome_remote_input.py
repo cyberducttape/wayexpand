@@ -154,12 +154,14 @@ def main():
             5000,
             None,
         )
-        # Mutter creates its virtual keyboard lazily on the first press. Make
-        # it available before Shell activation, or headless GNOME can update
-        # MetaWindow focus without sending active/focus state to the GTK
-        # Wayland surface.
-        prime_keyboard_device(bus, session_path)
+        # Ask Shell to activate the mapped window before creating Mutter's
+        # virtual keyboard. In headless sessions, creating the keyboard first
+        # can leave Mutter's MetaWindow focus ahead of the Wayland client's
+        # activated state. The modifier-only event below creates the device
+        # after focus is assigned; GTK readiness is still required before any
+        # text is sent.
         activate_test_window(bus, args.app_id)
+        prime_keyboard_device(bus, session_path)
         publish_focus_confirmation(args.focus_marker)
         if not wait_for_gtk_input_ready(args.ready_marker, 13.0):
             raise RuntimeError(

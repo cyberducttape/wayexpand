@@ -22,6 +22,14 @@ REMOTE_INPUT_SPEC.loader.exec_module(REMOTE_INPUT)
 
 
 class GnomeAcceptanceShellContractTests(unittest.TestCase):
+    def test_remote_keyboard_is_created_after_shell_assigns_window_focus(self):
+        source = REMOTE_INPUT_SCRIPT.read_text(encoding="utf-8")
+        activation = source.index("activate_test_window(bus, args.app_id)")
+        keyboard_setup = source.index("prime_keyboard_device(bus, session_path)")
+        marker = source.index("publish_focus_confirmation(args.focus_marker)")
+        self.assertLess(activation, keyboard_setup)
+        self.assertLess(keyboard_setup, marker)
+
     def test_x11_clients_have_a_window_activation_helper(self):
         source = GNOME_ACCEPTANCE_SCRIPT.read_text(encoding="utf-8")
         self.assertRegex(source, r"(?m)^activate_window\(\) \{")
