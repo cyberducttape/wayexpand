@@ -146,7 +146,7 @@ def main():
     application.register(None)
     window = Gtk.ApplicationWindow(application=application)
     window.set_title(f"WayExpand GTK IBus acceptance {application_id}")
-    window.set_default_size(500, 80)
+    window.set_default_size(1280, 800)
     widget_im_module = None
     if args.gtk_version == "4" and args.password:
         focus_widget = Gtk.PasswordEntry()
@@ -175,11 +175,22 @@ def main():
     if args.password and args.gtk_version == "3":
         focus_widget.set_visibility(False)
         focus_widget.set_input_purpose(Gtk.InputPurpose.PASSWORD)
+    # Keep the input target at a deterministic logical screen coordinate. The
+    # Mutter acceptance driver clicks the center of this isolated fullscreen
+    # window before sending test keys, so Shell focus alone is not mistaken
+    # for an activated Wayland surface.
+    focus_widget.set_size_request(400, 80)
+    test_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+    test_container.set_halign(Gtk.Align.CENTER)
+    test_container.set_valign(Gtk.Align.CENTER)
     if args.gtk_version == "4":
-        window.set_child(focus_widget)
+        test_container.append(focus_widget)
+        window.set_child(test_container)
     else:
-        window.add(focus_widget)
+        test_container.pack_start(focus_widget, False, False, 0)
+        window.add(test_container)
         window.show_all()
+    window.fullscreen()
     window.present()
     focus_widget.grab_focus()
 

@@ -28,6 +28,8 @@ FOCUS_CONTROLLER_NOT_FOUND = (
     "org.wayexpand.GnomeE2eFocusController.Error.NotFound"
 )
 SHIFT_L_KEYSYM = 0xFFE1
+BTN_LEFT = 0x110
+TEST_SCREEN_CENTER = (640.0, 400.0)
 
 
 def key_event(bus, path, key, pressed, *, keycode=False):
@@ -42,6 +44,51 @@ def key_event(bus, path, key, pressed, *, keycode=False):
         5000,
         None,
     )
+
+
+def pointer_motion(bus, path, dx, dy):
+    bus.call_sync(
+        BUS_NAME,
+        path,
+        SESSION_INTERFACE,
+        "NotifyPointerMotionRelative",
+        GLib.Variant("(dd)", (float(dx), float(dy))),
+        GLib.VariantType.new("()"),
+        Gio.DBusCallFlags.NONE,
+        5000,
+        None,
+    )
+
+
+def pointer_button(bus, path, pressed):
+    bus.call_sync(
+        BUS_NAME,
+        path,
+        SESSION_INTERFACE,
+        "NotifyPointerButton",
+        GLib.Variant("(ib)", (BTN_LEFT, pressed)),
+        GLib.VariantType.new("()"),
+        Gio.DBusCallFlags.NONE,
+        5000,
+        None,
+    )
+
+
+def click_test_field(bus, path):
+    """Click the known center of the GTK fixture to establish real focus."""
+    # The fixture is fullscreen on a 1280x800 virtual monitor. Relative input
+    # first clamps the pointer to the top-left edge, then moves it to the
+    # centered widget. This makes GTK's own active/focus state authoritative.
+    pointer_motion(bus, path, -2000.0, -2000.0)
+    time.sleep(0.05)
+    pointer_motion(bus, path, *TEST_SCREEN_CENTER)
+    time.sleep(0.1)
+    try:
+        pointer_button(bus, path, True)
+        time.sleep(0.05)
+    finally:
+        pointer_button(bus, path, False)
+    time.sleep(0.1)
 
 
 def send_text(
@@ -188,6 +235,7 @@ def main():
         activate_test_window(bus, args.app_id)
         prime_keyboard_device(bus, session_path)
         activate_test_window(bus, args.app_id)
+        click_test_field(bus, session_path)
         publish_focus_confirmation(args.focus_marker)
         if not wait_for_gtk_input_ready(args.ready_marker, 13.0):
             raise RuntimeError(

@@ -81,6 +81,13 @@ class GnomeAcceptanceShellContractTests(unittest.TestCase):
         self.assertIn('keycode_probe=true', source)
         self.assertIn('--keycode-probe', source)
 
+    def test_native_gtk_fixture_uses_fullscreen_centered_input_target(self):
+        source = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("window.set_default_size(1280, 800)", source)
+        self.assertIn("test_container.set_halign(Gtk.Align.CENTER)", source)
+        self.assertIn("test_container.set_valign(Gtk.Align.CENTER)", source)
+        self.assertIn("window.fullscreen()", source)
+
 
 class FocusReadinessTests(unittest.TestCase):
     def test_readiness_marker_is_removed_when_focus_is_lost(self):
@@ -432,6 +439,29 @@ class MutterRemoteInputTests(unittest.TestCase):
                 ("NotifyKeyboardKeycode", (30, False)),
             ],
         )
+
+    def test_click_test_field_uses_mutter_pointer_before_keyboard_input(self):
+        bus = self.FakeBus()
+        with mock.patch.object(REMOTE_INPUT.time, "sleep"):
+            REMOTE_INPUT.click_test_field(bus, "/session")
+
+        self.assertEqual(
+            bus.calls,
+            [
+                ("NotifyPointerMotionRelative", (-2000.0, -2000.0)),
+                ("NotifyPointerMotionRelative", (640.0, 400.0)),
+                ("NotifyPointerButton", (REMOTE_INPUT.BTN_LEFT, True)),
+                ("NotifyPointerButton", (REMOTE_INPUT.BTN_LEFT, False)),
+            ],
+        )
+
+    def test_gtk_target_is_clicked_before_focus_is_reported_to_mutter(self):
+        source = REMOTE_INPUT_SCRIPT.read_text(encoding="utf-8")
+        click = source.index("click_test_field(bus, session_path)")
+        publish = source.index("publish_focus_confirmation(args.focus_marker)")
+        wait = source.index("wait_for_gtk_input_ready(args.ready_marker, 13.0)")
+        self.assertLess(click, publish)
+        self.assertLess(publish, wait)
 
     def test_evdev_keycode_probe_rejects_text_beyond_its_fixed_baseline(self):
         bus = self.FakeBus()
