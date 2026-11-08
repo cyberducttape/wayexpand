@@ -348,6 +348,16 @@ type_x11_input() {
 
 # Move libwayland's client trace out of a GTK log into its own file and print
 # the events that show whether the client got a keyboard and focus.
+report_browser_input_state() {
+    x11_focus=$(DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+        xdotool getwindowfocus getwindowname 2>&1 | head -n 1 | cut -c1-100) || true
+    log "browser-input-state $1 x11-focus=$x11_focus"
+    gdbus call --session --dest org.gnome.Shell \
+        --object-path /org/wayexpand/GnomeE2eFocusController \
+        --method org.wayexpand.GnomeE2eFocusController.GetShellInputState 2>&1 \
+        | cut -c1-700 | sed "s/^/browser-input-state $1 shell=/" || true
+}
+
 report_wayland_trace() {
     if [ "$2" != client ]; then
         return 0
@@ -1082,6 +1092,7 @@ while [ ! -e "$E2E_WORK/browser-window-armed" ]; do
     fi
     sleep 0.1
 done
+report_browser_input_state before-typing
 if ! DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
     xdotool type --clearmodifiers --delay 40 -- ';e2e'; then
     kill "$browser_pid" 2>/dev/null || true
@@ -1091,6 +1102,7 @@ if ! DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
     cat "$E2E_WORK/browser-ibus-e2e.log" "$E2E_WORK/browser-ibus-e2e-chrome.log"
     exit 1
 fi
+report_browser_input_state after-typing
 browser_status=0
 wait "$browser_pid" || browser_status=$?
 browser_pid=

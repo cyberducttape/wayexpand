@@ -77,7 +77,9 @@ def main():
         "<!doctype html><meta charset=utf-8>"
         f"<title>{TITLE}</title>"
         "<label>WayExpand IBus acceptance "
-        "<textarea id=target autofocus></textarea></label>",
+        "<textarea id=target autofocus></textarea></label>"
+        "<script>window.wxKeydowns=0;"
+        "addEventListener('keydown',()=>window.wxKeydowns++,true)</script>",
         encoding="utf-8",
     )
     profile = Path(args.profile)
@@ -258,6 +260,8 @@ def main():
             "Chromium did not insert the expected text or pass the trigger "
             "through unchanged without surrounding-text support; "
             f"value_state={value_state}, "
+            f"page_keydowns={evaluate('window.wxKeydowns')}, "
+            f"page_has_focus={evaluate('document.hasFocus()')}, "
             "test_value_codepoints="
             f"{','.join(f'U+{ord(character):04X}' for character in actual) or 'empty'}, "
             f"focus_ins_delta={int(final_totals.get('focus_ins', 0)) - initial_focus_ins}, "

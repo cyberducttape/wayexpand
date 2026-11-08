@@ -47,6 +47,10 @@ export default class GnomeE2eFocusController extends Extension {
             stageGrab: grab ? grab.constructor.name : null,
             stageKeyFocus: global.stage.key_focus?.constructor.name ?? null,
             focusWindow: focus ? focus.get_wm_class() : null,
+            windows: global.get_window_actors().map(actor => {
+                const window = actor.meta_window;
+                return `${window.get_wm_class()}|${window.get_title()}`;
+            }),
         })]));
     }
 
