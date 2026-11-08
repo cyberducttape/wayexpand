@@ -51,28 +51,30 @@ local, offline, no account, no telemetry.
 | Linux architectures | x86_64 and aarch64 build paths |
 | Desktop integration | Wayland backends available; compositor support varies |
 | Production certification | Run `wayexpand doctor`; see the [support matrix](docs/SUPPORT_MATRIX.md) |
-| Distribution packages | Experimental (uncertified) `.deb`, `.rpm`, and archives on the release page; Ubuntu 26.04 amd64 daily package in the PPA; certified releases pending |
+| Distribution packages | Ubuntu 26.04 amd64 daily PPA package; no assets on the latest GitHub release and no published Fedora Copr repository; certification pending |
 
 ## Install
 
-### Distribution packages (recommended when available; currently experimental)
+### Distribution packages
 
-Uncertified builds are published as GitHub prereleases named
-*Experimental build …* on the [releases page](https://github.com/cyberducttape/wayexpand/releases).
-They pass the full CI suite but not real-desktop certification, and need no
-Rust toolchain. Each includes x86_64 and aarch64 archives, a `.deb`, and an
-`.rpm`, with `.sha256` files and build provenance. Prefer the `.deb`, `.rpm`,
-or Arch package over the per-user archive installer: distribution packages
-install the shared IBus component manifest and its system-owned
-`wayexpand-ibus` executable together, avoiding setup-time `pkexec` registration
-for those files. The package builds remain experimental and are not desktop
-certification.
+The currently published package channel is an experimental daily PPA build
+for Ubuntu 26.04 amd64. The latest GitHub release currently has no downloadable
+assets, and no Fedora Copr repository is published. Package recipes and CI
+install tests exist for Ubuntu 24.04/26.04 and Fedora 45, but that does not
+mean installable release packages are available for those distributions.
+The Ubuntu daily package is not compositor-certified.
 
 ```sh
-sudo apt install ./wayexpand_*_amd64.deb
-# or: sudo dnf install ./wayexpand-*.x86_64.rpm
+sudo add-apt-repository ppa:cyberducttape/ppa
+sudo apt update
+sudo apt install wayexpand
 # Arch packaging preview: see docs/PACKAGING.md#arch-linux-packaging-preview
 ```
+
+The PPA currently publishes current daily builds for Ubuntu 26.04 (Resolute)
+amd64. Ubuntu 24.04's PPA package is stale. Read the [packaging status](docs/PACKAGING.md)
+before choosing an installation method; do not assume CI artifacts are
+published packages.
 
 Launch **WayExpand** from the desktop application menu or run `wayexpand-gui`.
 Its first-run guide checks the installation and route, then asks you to verify

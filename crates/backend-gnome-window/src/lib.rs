@@ -38,6 +38,7 @@ const INPUT_SOURCE_CONTROL_VERSION: u32 = 1;
 const KEYBOARD_LAYOUT_VERSION: u32 = 2;
 const DBUS_CONNECTION_TIMEOUT: Duration = Duration::from_secs(3);
 const DBUS_METHOD_TIMEOUT: Duration = Duration::from_secs(1);
+const DBUS_INPUT_SOURCE_METHOD_TIMEOUT: Duration = Duration::from_secs(12);
 const TRACKER_HEALTH_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 /// GNOME Shell answers D-Bus on its main thread, which can stall under load;
 /// tolerate unanswered checks this long before treating the tracker as lost.
@@ -55,14 +56,18 @@ const EXTENSION_SCRIPT: &str = include_str!(
 const EXTENSION_NOTIFICATION_QUEUE: &str = include_str!(
     "../../../gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/notification-queue.js"
 );
+const EXTENSION_KEYBOARD_COMPAT: &str = include_str!(
+    "../../../gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/keyboard-compat.js"
+);
 
 /// The extension's files as `(file name, contents)`, so any installation
 /// method can install the exact bundled version.
-pub fn extension_files() -> [(&'static str, &'static str); 3] {
+pub fn extension_files() -> [(&'static str, &'static str); 4] {
     [
         ("metadata.json", EXTENSION_METADATA),
         ("extension.js", EXTENSION_SCRIPT),
         ("notification-queue.js", EXTENSION_NOTIFICATION_QUEUE),
+        ("keyboard-compat.js", EXTENSION_KEYBOARD_COMPAT),
     ]
 }
 
@@ -96,6 +101,24 @@ pub enum GnomeWindowError {
     ShellRestarted,
     #[error("window tracking setup was cancelled")]
     Cancelled,
+}
+
+impl GnomeWindowError {
+    /// Whether establishing the session-bus connection itself failed.
+    /// Failures after connecting, including a missing Shell owner, are not
+    /// evidence that the session bus is unavailable.
+    pub fn is_session_bus_unavailable(&self) -> bool {
+        matches!(self, Self::ConnectionTimedOut)
+            || matches!(
+                self,
+                Self::DBus(
+                    zbus::Error::Address(_)
+                        | zbus::Error::InputOutput(_)
+                        | zbus::Error::Handshake(_)
+                        | zbus::Error::Connection(_, _)
+                )
+            )
+    }
 }
 
 struct WindowTrackerService {
@@ -166,8 +189,14 @@ fn bounded_session_connection(
 }
 
 fn plain_connection() -> Result<Connection, GnomeWindowError> {
+    plain_connection_with_method_timeout(DBUS_METHOD_TIMEOUT)
+}
+
+fn plain_connection_with_method_timeout(
+    method_timeout: Duration,
+) -> Result<Connection, GnomeWindowError> {
     bounded_session_connection(
-        zbus::connection::Builder::session()?.method_timeout(DBUS_METHOD_TIMEOUT),
+        zbus::connection::Builder::session()?.method_timeout(method_timeout),
         DBUS_CONNECTION_TIMEOUT,
     )
 }
@@ -371,7 +400,10 @@ pub fn activate_input_source(kind: &str, id: &str) -> Result<(String, String), G
     if !matches!(kind, "ibus" | "xkb") || id.is_empty() || id.len() > 256 {
         return Err(GnomeWindowError::InputSourceActivationFailed);
     }
-    let connection = plain_connection()?;
+    // GNOME may need to refresh its asynchronous IBus source registry before
+    // acknowledging activation. Give this single user-requested operation a
+    // longer bounded method deadline than ordinary diagnostic calls.
+    let connection = plain_connection_with_method_timeout(DBUS_INPUT_SOURCE_METHOD_TIMEOUT)?;
     let owner = shell_owner(&connection)?;
     input_source_control_version(&connection, &owner)?;
     let reply = connection.call_method(
@@ -673,8 +705,9 @@ pub enum ExtensionState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtensionStatus {
     pub state: ExtensionState,
-    /// `false` when the user switched off all user extensions.
-    pub user_extensions_enabled: bool,
+    /// `Some(false)` when user extensions are disabled, `Some(true)` when
+    /// enabled, and `None` when Shell did not provide this property.
+    pub user_extensions_enabled: Option<bool>,
 }
 
 fn extension_state_from_info(
@@ -732,8 +765,7 @@ pub fn extension_status() -> Result<ExtensionStatus, GnomeWindowError> {
         )
         .ok()
         .and_then(|reply| reply.body().deserialize::<OwnedValue>().ok())
-        .and_then(|value| bool::try_from(value).ok())
-        .unwrap_or(true);
+        .and_then(|value| bool::try_from(value).ok());
     Ok(ExtensionStatus {
         state: extension_state_from_info(&info),
         user_extensions_enabled,
@@ -752,6 +784,23 @@ pub fn enable_extension() -> Result<bool, GnomeWindowError> {
             EXTENSIONS_PATH,
             Some(EXTENSIONS_IFACE),
             "EnableExtension",
+            &(EXTENSION_UUID,),
+        )?
+        .body()
+        .deserialize::<bool>()?)
+}
+
+/// Ask GNOME Shell to disable the extension. Setup uses this only to unwind
+/// an activation it attempted when readiness verification subsequently fails.
+pub fn disable_extension() -> Result<bool, GnomeWindowError> {
+    let connection = plain_connection()?;
+    shell_owner(&connection)?;
+    Ok(connection
+        .call_method(
+            Some(SHELL_NAME),
+            EXTENSIONS_PATH,
+            Some(EXTENSIONS_IFACE),
+            "DisableExtension",
             &(EXTENSION_UUID,),
         )?
         .body()
@@ -862,7 +911,8 @@ mod tests {
 
     #[test]
     fn bundled_extension_matches_this_tracker() {
-        let [(_, metadata), (_, script), (_, queue)] = extension_files();
+        let [(_, metadata), (_, script), (_, queue), (_, keyboard)] = extension_files();
+        let tracker_source = include_str!("lib.rs");
         assert!(metadata.contains(EXTENSION_UUID));
         assert!(script.contains(TRACKER_PATH));
         assert!(script.contains(TRACKER_IFACE));
@@ -878,11 +928,22 @@ mod tests {
         assert!(script.contains("<method name=\"ActivateInputSource\">"));
         assert!(script.contains("<method name=\"SubscribeWithTitles\">"));
         assert!(script.contains("this._subscribe(invocation, false)"));
-        assert!(script.contains("isAuthorizedTrackerClient(uid, ownUid, executable)"));
+        assert!(script.contains("uid, ownUid, executable, GLib.get_home_dir()"));
+        assert!(script.contains("GLib.getenv('WAYEXPAND_GNOME_TEST_CLIENTS')"));
         assert!(script.contains("GetConnectionUnixUser",));
         assert!(script.contains("GetActiveInputSourceAsync(_parameters, invocation) {\n        this._withAuthorizedClient(invocation"));
         assert!(script.contains("GetActiveKeyboardLayoutAsync(_parameters, invocation) {\n        this._withAuthorizedClient(invocation"));
         assert!(script.contains("ActivateInputSourceAsync([kind, id], invocation) {\n        this._withAuthorizedClient(invocation"));
+        assert!(script.contains("attempts >= 80"));
+        assert!(script.contains("attempts % 5 === 0"));
+        assert!(script.contains("GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100"));
+        assert!(script.contains("available sources:"));
+        assert!(keyboard.contains("availableSources"));
+        assert!(tracker_source.contains(
+            "const DBUS_INPUT_SOURCE_METHOD_TIMEOUT: Duration = Duration::from_secs(12);"
+        ));
+        assert!(tracker_source
+            .contains("plain_connection_with_method_timeout(DBUS_INPUT_SOURCE_METHOD_TIMEOUT)?"));
         assert!(script.contains(
             "invocation.return_error_literal(Gio.DBusError, Gio.DBusError.ACCESS_DENIED"
         ));
@@ -890,12 +951,15 @@ mod tests {
         assert!(script.contains("GetActiveKeyboardLayout"));
         assert!(script.contains("new GLib.Variant('(ssssas)'"));
         assert!(script.contains("source.xkbId"));
-        assert!(script.contains("activeXkbSettings(manager._settings)"));
+        assert!(script.contains("keyboardLayoutSettings(manager)"));
+        assert!(keyboard.contains("manager?._settings"));
+        assert!(keyboard.contains("typeof manager.reload !== 'function'"));
+        assert!(keyboard.contains("typeof source.activate !== 'function'"));
         assert!(queue.contains("settings.keyboardModel"));
         assert!(queue.contains("settings.keyboardOptions"));
         assert!(queue.contains("model = 'pc105'"));
         assert!(script.contains("KeyboardLayoutVersion"));
-        assert!(script.contains("Keyboard.getInputSourceManager().currentSource"));
+        assert!(script.contains("activeSource(Keyboard)"));
         assert!(!script.contains("org.gnome.desktop.input-sources current"));
         assert!(script.contains("LatestOnlyDelivery"));
         assert!(queue.contains("class LatestOnlyDelivery"));

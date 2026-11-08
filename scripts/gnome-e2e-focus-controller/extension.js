@@ -4,12 +4,19 @@
 
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 const OBJECT_PATH = '/org/wayexpand/GnomeE2eFocusController';
 const INTERFACE = `
 <node>
   <interface name="org.wayexpand.GnomeE2eFocusController">
+    <method name="GetShellInputState">
+      <arg type="s" direction="out" name="state"/>
+    </method>
+    <method name="ReleaseShellKeyFocus">
+      <arg type="s" direction="out" name="released"/>
+    </method>
     <method name="ActivateWindow">
       <arg type="s" direction="in" name="app_id"/>
     </method>
@@ -25,6 +32,43 @@ export default class GnomeE2eFocusController extends Extension {
     disable() {
         this._exported?.unexport();
         this._exported = null;
+    }
+
+    GetShellInputStateAsync(_args, invocation) {
+        // Why input might not reach a focused client: a Shell grab or modal
+        // (overview, startup) takes key and pointer events first.
+        const grab = global.stage.get_grab_actor?.();
+        const focus = global.display.get_focus_window();
+        invocation.return_value(new GLib.Variant('(s)', [JSON.stringify({
+            modalCount: Main.modalCount ?? null,
+            overviewVisible: Main.overview.visible,
+            overviewAnimating: Main.overview.animationInProgress ?? null,
+            startingUp: Main.layoutManager._startingUp ?? null,
+            stageGrab: grab ? grab.constructor.name : null,
+            stageKeyFocus: global.stage.key_focus?.constructor.name ?? null,
+            focusWindow: focus ? focus.get_wm_class() : null,
+            windows: global.get_window_actors().map(actor => {
+                const window = actor.meta_window;
+                return `${window.get_wm_class()}|${window.get_title()}`;
+            }),
+        })]));
+    }
+
+    ReleaseShellKeyFocusAsync(_args, invocation) {
+        // A Shell actor holding stage key focus receives keys instead of the
+        // focused client, even though the client has wl_keyboard focus. Name
+        // the actor so a recurrence stays visible, and leave real modals alone.
+        const names = [];
+        let actor = global.stage.key_focus;
+        const held = actor;
+        while (actor && names.length < 6) {
+            names.push(`${actor.constructor.name}` +
+                `[name=${actor.name ?? ''},style=${actor.style_class ?? ''}]`);
+            actor = actor.get_parent();
+        }
+        if (held && Main.modalCount === 0)
+            global.stage.set_key_focus(null);
+        invocation.return_value(new GLib.Variant('(s)', [names.join(' < ')]));
     }
 
     ActivateWindowAsync([appId], invocation) {
@@ -63,11 +107,11 @@ export default class GnomeE2eFocusController extends Extension {
                 return GLib.SOURCE_REMOVE;
             }
 
-            window.activate(global.get_current_time());
+            Main.activateWindow(window, global.get_current_time());
             return GLib.SOURCE_CONTINUE;
         };
 
-        window.activate(global.get_current_time());
+        Main.activateWindow(window, global.get_current_time());
         GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, confirmFocus);
     }
 }

@@ -24,8 +24,14 @@ translates actions into `CommitText`/`DeleteSurroundingText` signals. The
 adapter remains separate so matching and deletion semantics stay testable
 without an IBus session.
 
-`app_filter` entries fail closed in this mode because IBus does not provide a
-portable focused-window identity.
+On GNOME, the IBus service can use the authenticated WayExpand Shell tracker
+to bind an active IBus context to the focused window observed at `FocusIn`.
+The app ID is used only while the tracker continues to report that same window;
+focus changes and tracker loss clear the identity and require a fresh IBus
+focus event before app-filtered matching resumes. If the Shell tracker is
+unavailable, `app_filter` entries fail closed. IBus context identity remains
+separate from the GNOME window identity and is retained for target-scoped
+operations.
 
 ## Sensitive fields
 
@@ -225,6 +231,13 @@ cannot be verified by IBus, and `WX-IBUS-007` means no replacement was
 observed in the current engine session. These distinguish capture activity
 from target-side success; never automatically replay an uncertain insertion.
 Use `wayexpand help finding <WX-ID>` for a next step.
+
+`WX-IBUS-RELOAD-001` means the service could not publish a validated
+configuration generation to the factory and all existing input contexts as
+one handoff. The status JSON reports the last published and requested
+generations, the count of contexts still on an older generation, and the
+cumulative handoff-failure count. Restart the WayExpand IBus engine through
+the desktop input-source controls, then rerun `wayexpand ibus status`.
 
 `wayexpand doctor --gnome` presents three diagnostic sections: IBus input
 capture, snippet insertion (including replacement consent, output route, and

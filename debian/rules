@@ -35,7 +35,16 @@ override_dh_clean:
 	dh_clean -X.orig
 
 override_dh_auto_configure:
-	if [ ! -f .cargo/config.toml ] || [ ! -d vendor ]; then \
+	if [ -f .cargo/config.toml ] && [ -d vendor ]; then \
+		true; \
+	elif [ -n "$${WAYEXPAND_VENDOR_CONFIG:-}" ] \
+		&& [ -n "$${WAYEXPAND_VENDOR_DIR:-}" ] \
+		&& [ -f "$$WAYEXPAND_VENDOR_CONFIG" ] \
+		&& [ -d "$$WAYEXPAND_VENDOR_DIR" ] \
+		&& [ "$${CARGO_HOME:-}/config.toml" = "$$WAYEXPAND_VENDOR_CONFIG" ] \
+		&& grep -Fq "directory = \"$$WAYEXPAND_VENDOR_DIR\"" "$$WAYEXPAND_VENDOR_CONFIG"; then \
+		true; \
+	else \
 		echo "error: Debian builds require the vendored source archive" >&2; \
 		echo "       build from wayexpand-<version>-vendored.tar.gz" >&2; \
 		echo "       clean Launchpad Git recipes cannot fetch crates.io dependencies" >&2; \
@@ -73,7 +82,7 @@ override_dh_install:
 	install -Dm644 scripts/e2e-lib.sh debian/wayexpand/usr/libexec/wayexpand-certification/e2e-lib.sh
 	install -Dm644 scripts/kwin-e2e-report.sh debian/wayexpand/usr/libexec/wayexpand-certification/kwin-e2e-report.sh
 	dh_install --package=wayexpand desktop/wayexpand-ibus.xml usr/share/ibus/component/
-	dh_install --package=wayexpand gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/metadata.json gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/extension.js gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/notification-queue.js usr/share/gnome-shell/extensions/wayexpand-window-tracker@cyberducttape.github.io/
+	dh_install --package=wayexpand gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/metadata.json gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/extension.js gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/notification-queue.js gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/keyboard-compat.js usr/share/gnome-shell/extensions/wayexpand-window-tracker@cyberducttape.github.io/
 	dh_install --package=wayexpand desktop/wayexpand.desktop usr/share/applications/
 	dh_install --package=wayexpand installer-components.toml usr/share/wayexpand/
 	install -Dm644 polkit/org.wayexpand.action.policy \

@@ -109,6 +109,51 @@ latency, compositor delivery, or a live layout switch.
 cargo bench --locked -p wayexpand-backend-evdev --features benchmark --bench capture_translate
 ```
 
+## IBus context runtime profile
+
+Run the focused profile with:
+
+```sh
+cargo bench --locked -p wayexpand-backend-ibus --bench runtime-profile
+```
+
+It measures construction and reload of text-only and async-capable IBus engine
+contexts, process thread count, Linux RSS/PSS, and p50/p95/p99 for a single
+`ProcessKeyEvent` call. The typing timing excludes D-Bus transport and the
+client application. RSS/PSS and thread counts come from `/proc`; other
+platforms print `n/a` for those values. Worker counts reported by the adapter
+are included alongside actual process threads to make per-context scaling
+visible.
+
+### Baseline: 2026-11-07
+
+Captured on AMD Ryzen 7 7735U (16 logical CPUs), Linux 7.0.0-42-generic,
+x86_64, Rust 1.96.0. Text-only contexts start no asynchronous workers. An
+async-capable context currently starts four command workers and one hotkey
+worker of its own:
+
+| Async contexts | Context construction median | Worker threads | Process threads | RSS | PSS |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 0.256 ms | 5 | 6 | 4,120 KiB | 2,048 KiB |
+| 4 | 0.855 ms | 20 | 21 | 4,352 KiB | 2,280 KiB |
+| 16 | 3.411 ms | 80 | 81 | 5,364 KiB | 3,292 KiB |
+
+Command-capable configuration reload, measured as the time to reconfigure all
+contexts in the row (25 samples):
+
+| Contexts | p50 | p95 | p99 |
+| ---: | ---: | ---: | ---: |
+| 1 | 0.228 ms | 0.396 ms | 0.447 ms |
+| 4 | 1.058 ms | 1.311 ms | 1.384 ms |
+| 16 | 4.107 ms | 4.986 ms | 6.482 ms |
+
+The per-key processing profile reported p50/p95/p99 of 3.771/3.911/4.400 µs
+with no async contexts and 3.771/3.911/4.400 µs while 16 async contexts were
+live. These values are a single-run baseline, not an end-to-end desktop latency
+claim. The result motivates sharing a fixed-size worker pool across IBus
+contexts; that refactor must keep context-specific cancellation, completion
+routing, and independent command/hotkey queue limits intact.
+
 The poll loop reuses thread-local descriptor and ready/lost-index buffers, so
 the repeated benchmark iterations exercise the warmed path. Use a separate
 real-session soak to measure process idle CPU and compositor layout-switch

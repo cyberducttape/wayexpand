@@ -55,7 +55,7 @@ trap cleanup EXIT HUP INT TERM
 mkdir -p "$work/home/.local/share/gnome-shell/extensions/$uuid" \
     "$work/config" "$work/cache"
 cp "$extension_dir/metadata.json" "$extension_dir/extension.js" \
-    "$extension_dir/notification-queue.js" \
+    "$extension_dir/notification-queue.js" "$extension_dir/keyboard-compat.js" \
     "$work/home/.local/share/gnome-shell/extensions/$uuid/"
 chmod 0700 "$work" "$work/home" "$work/config" "$work/cache"
 chmod 0700 "$work/home/.local/share/gnome-shell/extensions/$uuid"
@@ -122,7 +122,7 @@ assert "51" in metadata["shell-version"], "metadata omits GNOME 51"
 print(metadata["x-wayexpand-build-id"])
 PY
 )
-    live=$(gdbus call --session --dest org.gnome.Shell \
+    live=$(gdbus call --timeout 5 --session --dest org.gnome.Shell \
         --object-path /org/wayexpand/ShellWindowTracker \
         --method org.freedesktop.DBus.Properties.Get \
         org.wayexpand.ShellWindowTracker1 BuildIdentity)
@@ -167,5 +167,6 @@ PY
     esac
 EOF
 chmod 0600 "$work/session.sh"
+export WAYEXPAND_GNOME_TEST_CLIENTS="$tracker_bin"
 dbus-run-session -- sh "$work/session.sh" "$uuid" "$work" \
     "$WAYLAND_DISPLAY" "$project_dir" "$tracker_bin"

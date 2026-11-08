@@ -531,7 +531,28 @@ impl GuiApp {
     }
 
     fn setup_completion_status(output: &str, fallback: String) -> (Status, bool) {
-        if output
+        if output.contains("WX-GNOME-SESSION-RESTART-001")
+            || output
+                .to_ascii_lowercase()
+                .contains("log out of gnome and log back in")
+            || output
+                .to_ascii_lowercase()
+                .contains("restart your gnome session")
+        {
+            (
+                Status::warning(
+                    "Needs desktop restart: GNOME must load the installed extension after you log out and back in. Setup is not yet verified; resume it after the new session starts.",
+                ),
+                false,
+            )
+        } else if output.contains("WX-POLICY-001") {
+            (
+                Status::warning(
+                    "Needs permission: replacement is disabled. Review and explicitly authorize the non-atomic replacement behavior before expecting trigger expansion.",
+                ),
+                false,
+            )
+        } else if output
             .lines()
             .any(|line| line.trim() == "DESKTOP TEST RESULT: OUTPUT OBSERVED, AWAITING REVIEW")
         {
@@ -562,7 +583,7 @@ impl GuiApp {
         {
             (
                 Status::info(
-                    "Configured, awaiting test: run Desktop Integration Test to verify a real insertion.",
+                    "Configured, untested: complete Desktop Integration Test to verify a real insertion in a target application.",
                 ),
                 true,
             )
@@ -618,28 +639,7 @@ impl GuiApp {
     }
 
     pub(crate) fn select_default_desktop_test(&mut self) -> bool {
-        let selected_is_testable = self
-            .selected_index()
-            .and_then(|index| self.config.expansion.get(index))
-            .is_some_and(|expansion| {
-                expansion.enabled
-                    && expansion.command.is_none()
-                    && !expansion.replacement.contains("{{")
-            });
-        if selected_is_testable {
-            if let Some(expansion) = self
-                .selected_index()
-                .and_then(|index| self.config.expansion.get(index))
-            {
-                self.desktop_test_trigger = expansion.trigger.clone();
-                return true;
-            }
-        }
-        if let Some(expansion) = self.config.expansion.iter().find(|expansion| {
-            expansion.enabled
-                && expansion.command.is_none()
-                && !expansion.replacement.contains("{{")
-        }) {
+        if let Some(expansion) = super::first_run::onboarding_test_snippet(&self.config) {
             self.desktop_test_trigger = expansion.trigger.clone();
             true
         } else {
@@ -729,9 +729,9 @@ impl GuiApp {
                             self.desktop_test_verified = false;
                             self.desktop_test_verified_application = None;
                             if self.desktop_test_dialog_required {
-                                Status::info("WayExpand was selected in GNOME. Refreshing readiness; first-run setup still requires a real-app test.")
+                                Status::info("WayExpand was selected in GNOME. Input-source configuration is updated; first-run setup still requires a real-app test.")
                             } else {
-                                Status::success("WayExpand was selected in GNOME. Refreshing source and IBus readiness; a real-app test remains unverified.")
+                                Status::info("WayExpand was selected in GNOME. Input-source configuration is updated; real insertion remains unverified.")
                             }
                         } else {
                             match task_kind.as_deref() {
@@ -784,7 +784,7 @@ impl GuiApp {
                                     if let Some(error) = onboarding_state_error {
                                         Status::warning(format!("WayExpand is configured but unverified. The incomplete first-run state could not be saved, so the guide may not reopen automatically: {error}"))
                                     } else {
-                                        Status::info("WayExpand is configured, but first-run setup is incomplete until a real-app test is reviewed. Choose a harmless static snippet and continue to the tested-application result.")
+                                        Status::info("Configured, unverified: complete the Desktop Integration Test and confirm the exact result in a real application. You can defer it, but WayExpand will not mark the route Working until confirmation.")
                                     }
                                 } else {
                                     self.diagnostics_open |= open_diagnostics;
@@ -812,10 +812,19 @@ impl GuiApp {
                                 )
                             };
                             let summary = setup_failure_summary(&report);
+                            let outcome = Self::setup_completion_status(
+                                &report,
+                                self.strings.status_setup_failed(&summary),
+                            )
+                            .0;
+                            let (_, open_diagnostics) = Self::setup_completion_status(
+                                &report,
+                                self.strings.status_setup_failed(&summary),
+                            );
                             self.setup_failure_report = Some(report);
                             self.setup_failure_report_open = true;
-                            self.diagnostics_open = true;
-                            Status::error(self.strings.status_setup_failed(&summary))
+                            self.diagnostics_open = open_diagnostics;
+                            outcome
                         } else if task_kind.as_deref() == Some("setup-preflight") {
                             self.diagnostics_open = true;
                             Status::error(format!(
@@ -828,10 +837,15 @@ impl GuiApp {
                                 "GNOME input-source activation failed",
                             );
                             let summary = setup_failure_summary(&report);
+                            let outcome = Self::setup_completion_status(
+                                &report,
+                                self.strings.status_setup_failed(&summary),
+                            )
+                            .0;
                             self.setup_failure_report = Some(report);
                             self.setup_failure_report_open = true;
                             self.diagnostics_open = true;
-                            Status::error(self.strings.status_setup_failed(&summary))
+                            outcome
                         } else {
                             Status::error(self.strings.status_setup_failed(&detail))
                         }
@@ -977,6 +991,30 @@ impl GuiApp {
         egui::Modal::new(egui::Id::new("ibus_replacement_consent")).show(ctx, |ui| {
                 ui.set_width(430.0);
                 ui.heading("Set up WayExpand");
+                ui.add_space(8.0);
+                ui.label(RichText::new("Setup checks").strong());
+                for (id, label) in [
+                    ("tools", "Required tools and desktop dependencies"),
+                    ("component", "IBus engine component installed"),
+                    ("registered", "IBus engine registered"),
+                    ("gnome-source-registered", "GNOME input source registered"),
+                    ("gnome-source-active", "WayExpand selected in GNOME"),
+                    ("consent", "Replacement authorization"),
+                ] {
+                    let state = self
+                        .ibus_route
+                        .as_ref()
+                        .and_then(|report| report.check(id))
+                        .map(|check| check.state);
+                    let (symbol, detail) = match state {
+                        Some(wayexpand_backend_ibus::chain::IbusCheckState::Pass) => ("✓", "Ready"),
+                        Some(wayexpand_backend_ibus::chain::IbusCheckState::Warn) => ("!", "Action may be needed"),
+                        Some(wayexpand_backend_ibus::chain::IbusCheckState::Fail) => ("✗", "Will be addressed during setup"),
+                        Some(wayexpand_backend_ibus::chain::IbusCheckState::Skip) => ("·", "Not required here"),
+                        _ => ("·", "Checked during setup"),
+                    };
+                    ui.label(format!("{symbol} {label}: {detail}"));
+                }
                 ui.add_space(8.0);
                 for (number, title, detail) in [
                     (
@@ -1244,7 +1282,7 @@ mod tests {
     }
 
     #[test]
-    fn setup_output_retains_real_test_result_even_if_optional_steps_follow() {
+    fn setup_output_retains_real_test_result_even_if_followup_steps_follow() {
         let output = b"SETUP RESULT: WORKING\nA real expansion was user-confirmed in the tested application.\nOptional terminal coverage is not configured.\n";
         let visible = GuiApp::setup_output_text(output);
         assert!(visible.contains("SETUP RESULT: WORKING"));
@@ -1268,7 +1306,7 @@ mod tests {
         );
         assert_eq!(
             status.text(),
-            "Configured, awaiting test: run Desktop Integration Test to verify a real insertion."
+            "Configured, untested: complete Desktop Integration Test to verify a real insertion in a target application."
         );
         assert!(!status.is_error());
         assert!(open_diagnostics);
@@ -1282,6 +1320,23 @@ mod tests {
             status.text(),
             "Working: a real insertion was confirmed in the tested application."
         );
+        assert!(!open_diagnostics);
+    }
+
+    #[test]
+    fn setup_status_explains_restart_and_replacement_authorization_states() {
+        let (restart, open_diagnostics) = GuiApp::setup_completion_status(
+            "WX-GNOME-SESSION-RESTART-001: log out of GNOME and log back in",
+            "setup failed".into(),
+        );
+        assert!(restart.text().contains("Needs desktop restart"));
+        assert!(!open_diagnostics);
+
+        let (permission, open_diagnostics) = GuiApp::setup_completion_status(
+            "WX-POLICY-001: replacement is disabled",
+            "setup incomplete".into(),
+        );
+        assert!(permission.text().contains("Needs permission"));
         assert!(!open_diagnostics);
     }
 

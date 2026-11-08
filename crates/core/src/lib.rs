@@ -92,7 +92,9 @@ pub use policy::{
 pub use profiles::{ProfileAssignments, ProfileAssignmentsError};
 pub use session_context::SessionContextReport;
 pub use setup_resume::{
-    clear_gnome_ibus_setup_resume, gnome_ibus_setup_resume_pending, mark_gnome_ibus_setup_resume,
+    clear_gnome_ibus_setup_resume, gnome_ibus_setup_resume_marker_present,
+    gnome_ibus_setup_resume_pending, gnome_ibus_setup_resume_pending_for_session,
+    gnome_ibus_setup_resume_transaction_pending, mark_gnome_ibus_setup_resume,
 };
 pub use store::{ConfigSnapshot, ConfigStore, ConfigStoreStatus};
 pub use template::{

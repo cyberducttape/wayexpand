@@ -71,13 +71,53 @@ not certify physical keyboard delivery, text replacement, or a production
 GNOME route.
 
 `tests/certification/gnome-ibus-matrix.json` defines the platform and client
-coverage required before making GNOME IBus support claims. The existing
+coverage required before making GNOME IBus support claims. It explicitly
+requires Fedora 45/GNOME 51 and Ubuntu 24.04/26.04, with separate GTK 3, GTK 4,
+Qt, Firefox, Chromium, Electron, and terminal results for each declared
+keyboard profile (`us`, `de`, `fr`, `altgr`, and active layout switching). Each
+application/profile combination needs real replacement, Unicode,
+password-field refusal, layout-switching, and focus-change results;
+each platform also needs source activation, multiple-layout switching,
+logout/login persistence, Shell/extension restart, package upgrade, and
+uninstall results. `scripts/check-gnome-acceptance-matrix.py` checks that the
+plan retains every required cell and validates reviewed per-platform JSON
+reports without accepting missing or unsupported cells as passes. Each
+application result is a separate scenario × keyboard-profile cell and links to
+reviewable evidence. Report validation rejects headless sessions and requires
+a physical keyboard and reviewer identity. CI runs the headless GNOME IBus
+acceptance test on Ubuntu 24.04 and 26.04 and the extension runtime test on
+Fedora 45/GNOME 51. The Ubuntu headless test covers GTK 3 and GTK 4 text
+replacement, Unicode, password-purpose pass-through, source switching between
+US, German, and French layouts, and Shell restart/extension upgrade behavior.
+It exercises Chromium's safe pass-through behavior. These hosted jobs validate
+their stated headless scope only; they do not fill the real-session matrix.
+
+The existing
 `test-gnome-e2e.sh` now runs GNOME Shell with its session-managed IBus daemon. It
 checks component discovery, GNOME source registration, Shell activation, an
 already-active WayExpand engine, a controlled IBus input-context replacement,
-and window tracking. It also opens a GTK 3 `Gtk.Entry` with `GTK_IM_MODULE=ibus`
-on GNOME's private XWayland server, activates the window through Mutter, types
-a fixed test trigger through XTEST, and verifies the resulting widget text.
+and window tracking. Its GTK 3 `Gtk.Entry` and GTK 4 `Gtk.TextView` check exact
+trigger replacement and Unicode output; password-purpose `Gtk.Entry` fields
+must preserve the trigger. The test verifies a live switch to German and
+French keyboard sources and checks expansion after returning to WayExpand. It also opens
+the field as a native Wayland client with `GTK_IM_MODULE=ibus`, activates the
+window through Mutter, and types fixed ASCII test input through Mutter's
+private RemoteDesktop D-Bus keyboard interface. The simple-input baseline uses
+the same native Wayland path, independently of IBus. The interface is
+version-specific and used only by the isolated acceptance fixture; it is not a
+WayExpand production backend. This remains headless compositor-path evidence,
+not physical-keyboard certification. The test verifies the resulting widget
+text. Its RemoteDesktop helper injects keysyms, so the German/French cases
+verify expansion after input-source changes; they do not certify physical
+key-to-character mapping for those layouts.
+The Qt 6 `QLineEdit` fixture uses the IBus XIM bridge and verifies exact
+trigger/Unicode pass-through plus password-field preservation; it does not
+claim Qt replacement support without a verified surrounding-text contract.
+An xterm fixture reads test bytes in raw mode, verifies trigger and Unicode
+pass-through, and exits without submitting a command. These XIM checks are
+limited to the hosted XWayland session and do not certify native Wayland
+terminal clients or physical keyboards. The xterm baseline separately checks
+XTEST delivery in an XWayland client.
 The same test opens an isolated Google Chrome profile on a local page, focuses
 its textarea through Mutter, types the same harmless trigger through XTEST, and
 checks the textarea value using Chrome DevTools. The tested Chrome XWayland/IBus
@@ -91,8 +131,9 @@ The GTK portion exercises GTK's actual IBus module and target widget; the
 custom protocol client separately checks trigger deletion and replacement
 commit. The test checks password-field refusal and content-free telemetry, then
 simulates an extension upgrade with an old Shell instance and a Shell restart.
-XTEST on XWayland does not certify native Wayland compositor keyboard routing
-or physical keyboard delivery.
+The GTK fixture exercises Mutter's native Wayland keyboard path with synthetic
+test input; it does not certify physical keyboard delivery. XTEST checks are
+limited to the listed XWayland fixtures.
 `test-ibus-e2e.sh` additionally exercises IBus engine focus, content-type and
 telemetry cases. These headless tests do not prove physical keyboard routing,
 compositor-delivered key events, persistence across an actual user logout, or
@@ -100,13 +141,11 @@ replacement in every GTK/Qt/browser/terminal application.
 They must not be counted as physical-session passes in the platform matrix
 below.
 
-| Platform/session | GTK 3 | GTK 4 | Qt | Browser | Terminal | Install/activation lifecycle | Status |
+| Platform/session | GTK 3 | GTK 4 | Qt | Firefox / Chromium | Electron | Terminal | Unicode / layouts / password | Restart / upgrade / uninstall | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Fedora GNOME (exact supported release required) | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
-| Ubuntu 24.04 LTS GNOME | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
-| Ubuntu 26.04 LTS GNOME | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
-| Oldest GNOME Shell supported by the extension | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
-| Newest GNOME Shell supported by the extension | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
+| Fedora 45 / GNOME 51 | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
+| Ubuntu 24.04 LTS GNOME | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
+| Ubuntu 26.04 LTS GNOME | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Not certified** |
 
 Each cell requires a separate result. Lifecycle coverage includes clean-user
 installation, component registration, GNOME source activation, a real trigger

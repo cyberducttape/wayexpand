@@ -5,3 +5,4 @@ self-hosted-runner:
     - gnome
     - sway
     - hyprland
+    - ubuntu-26.04

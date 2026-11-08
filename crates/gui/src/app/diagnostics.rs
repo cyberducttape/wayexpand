@@ -7,6 +7,7 @@ fn desktop_test_options(expansions: &[ExpansionConfig]) -> Vec<(String, String)>
         .iter()
         .filter(|expansion| {
             expansion.enabled
+                && expansion.app_filter.is_empty()
                 && expansion.command.is_none()
                 && !expansion.replacement.contains("{{")
         })
@@ -1197,7 +1198,14 @@ impl GuiApp {
         }
         let mut open = self.test_expansion_dialog_open;
         let mut close = false;
-        let desktop_tests = desktop_test_options(&self.config.expansion);
+        let first_run_verification = self.desktop_test_dialog_required;
+        let desktop_tests = if first_run_verification {
+            super::first_run::onboarding_test_snippet(&self.config)
+                .map(|expansion| vec![(expansion.trigger.clone(), expansion.replacement.clone())])
+                .unwrap_or_default()
+        } else {
+            desktop_test_options(&self.config.expansion)
+        };
         if !desktop_tests
             .iter()
             .any(|(trigger, _)| trigger == &self.desktop_test_trigger)
@@ -1207,6 +1215,7 @@ impl GuiApp {
                 .and_then(|index| self.config.expansion.get(index))
                 .filter(|expansion| {
                     expansion.enabled
+                        && expansion.app_filter.is_empty()
                         && expansion.command.is_none()
                         && !expansion.replacement.contains("{{")
                 })
@@ -1228,7 +1237,6 @@ impl GuiApp {
                 .desktop_test_application_class
                 .chars()
                 .any(char::is_control);
-        let first_run_verification = self.desktop_test_dialog_required;
         egui::Window::new("Test Expansion")
             .id(egui::Id::new("test_expansion_mode_picker"))
             .order(egui::Order::Foreground)
@@ -1238,7 +1246,7 @@ impl GuiApp {
             .default_width(520.0)
             .show(ctx, |ui| {
                 ui.label(RichText::new(if first_run_verification {
-                    "Complete this real-app test to finish first-run setup. Until you confirm the exact result, WayExpand remains configured but unverified."
+                    "Complete this real-app test to finish first-run setup. Until you confirm the exact result, WayExpand remains configured but unverified. You can defer and return to the guide later."
                 } else {
                     "A real insertion test verifies text in a target application. It never presses Enter or retries an uncertain insertion."
                 }).color(palette.muted));
@@ -1251,7 +1259,7 @@ impl GuiApp {
                 }
                 ui.separator();
                 ui.label(RichText::new("Desktop Test").strong());
-                ui.label("Tests the active route in a disposable text field. It never presses Enter or retries insertion. Activity counters are not tied to this test trigger; you must inspect the result and confirm it yourself.");
+                ui.label("Tests the active route in a disposable text field. It never presses Enter or retries insertion. Activity counters are not tied to this test trigger; inspect the resulting text and confirm an exact match yourself. This verifies only the selected application in this session.");
                 if desktop_tests.len() > 1 {
                     egui::ComboBox::from_id_salt("desktop_test_trigger_choice")
                         .selected_text(if self.desktop_test_trigger.is_empty() {
@@ -1270,8 +1278,12 @@ impl GuiApp {
                         });
                 }
                 if let Some((trigger, replacement)) = &desktop_test {
-                    ui.label(format!("Trigger to type once: {trigger}"));
-                    ui.label("Expected replacement:");
+                    ui.label(
+                        RichText::new(format!("Type this once: {trigger}"))
+                            .heading()
+                            .strong(),
+                    );
+                    ui.label(RichText::new("Expected replacement").strong());
                     ui.add(
                         egui::TextEdit::multiline(&mut replacement.as_str())
                             .code_editor()
@@ -1281,8 +1293,24 @@ impl GuiApp {
                     );
                 }
                 ui.horizontal(|ui| {
-                    ui.label("Application class");
-                    ui.text_edit_singleline(&mut self.desktop_test_application_class);
+                    ui.label("Application type (for the test report)");
+                    egui::ComboBox::from_id_salt("desktop_test_application_type")
+                        .selected_text(&self.desktop_test_application_class)
+                        .show_ui(ui, |ui| {
+                            for application_type in [
+                                "Text editor",
+                                "Browser",
+                                "Terminal",
+                                "Office application",
+                                "Other",
+                            ] {
+                                ui.selectable_value(
+                                    &mut self.desktop_test_application_class,
+                                    application_type.to_owned(),
+                                    application_type,
+                                );
+                            }
+                        });
                 });
                 ui.checkbox(
                     &mut self.desktop_test_target_acknowledged,
@@ -2389,7 +2417,7 @@ mod desktop_test_review_tests {
     use super::*;
 
     #[test]
-    fn desktop_test_picker_uses_any_enabled_static_snippet_without_a_sample_trigger() {
+    fn desktop_test_picker_excludes_disabled_dynamic_and_application_scoped_snippets() {
         let config = Config::parse(
             r#"[[expansion]]
 trigger = ";custom-check"
@@ -2409,6 +2437,11 @@ trigger = ";action"
 replacement = "action"
 [expansion.command]
 program = "/usr/bin/true"
+
+[[expansion]]
+trigger = ";editor-only"
+replacement = "editor check"
+app_filter = ["app_id_exact:org.example.Editor"]
 "#,
         )
         .unwrap();

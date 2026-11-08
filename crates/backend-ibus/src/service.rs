@@ -13,8 +13,10 @@ use std::{
     time::Duration,
 };
 use tracing::{info, warn};
+use wayexpand_backend_gnome_window::GnomeWindowTracker;
 use wayexpand_core::{
-    default_config_path, Config, ConfigStore, OrganizationPolicy, ValidatedConfig,
+    default_config_path, Config, ConfigStore, OrganizationPolicy, ValidatedConfig, WindowContext,
+    WindowTracker,
 };
 use zbus::{
     blocking::{connection::Builder, Connection},
@@ -42,12 +44,53 @@ pub enum IbusServiceError {
     Policy(String),
 }
 
+/// Feed only authenticated GNOME Shell focus updates to IBus engines. A
+/// tracker error clears the snapshot before reconnecting, so consumers
+/// immediately lose app identity instead of retaining stale focus metadata.
+fn spawn_gnome_focus_tracker(
+    focus: Arc<Mutex<Option<WindowContext>>>,
+) -> Result<(), IbusServiceError> {
+    std::thread::Builder::new()
+        .name("wayexpand-ibus-gnome-focus".into())
+        .spawn(move || loop {
+            match GnomeWindowTracker::new() {
+                Ok(mut tracker) => loop {
+                    match tracker.next_window_timeout(Duration::from_millis(250)) {
+                        Ok(Some(window)) => {
+                            if let Ok(mut current) = focus.lock() {
+                                *current = window;
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(error) => {
+                            warn!(%error, "GNOME focus tracking unavailable to IBus; app-filtered expansions fail closed");
+                            if let Ok(mut current) = focus.lock() {
+                                *current = None;
+                            }
+                            break;
+                        }
+                    }
+                },
+                Err(error) => {
+                    warn!(%error, "GNOME focus tracking unavailable to IBus; app-filtered expansions fail closed");
+                    if let Ok(mut current) = focus.lock() {
+                        *current = None;
+                    }
+                }
+            }
+            std::thread::sleep(Duration::from_secs(1));
+        })
+        .map_err(|error| IbusServiceError::Thread(error.to_string()))?;
+    Ok(())
+}
+
 /// IBus factory state. Each CreateEngine call gets its own adapter and object
 /// path; IBus may create multiple engines for separate input contexts. Engine
 /// objects are removed from this map by their Destroy method.
 struct Factory {
     connection: Arc<Mutex<Option<Connection>>>,
     validated_config: Arc<Mutex<Arc<ValidatedConfig>>>,
+    config_generation: Arc<AtomicU64>,
     policy: Arc<OrganizationPolicy>,
     instances: Arc<Mutex<HashMap<OwnedObjectPath, EngineInstance>>>,
     next_id: AtomicU64,
@@ -56,12 +99,14 @@ struct Factory {
     completions: mpsc::Sender<OwnedObjectPath>,
     /// Content-free activity shared by every engine of this process.
     telemetry: Option<Arc<IbusTelemetry>>,
+    gnome_focus: Arc<Mutex<Option<WindowContext>>>,
 }
 
 type Instances = Arc<Mutex<HashMap<OwnedObjectPath, EngineInstance>>>;
 
 struct EngineInstance {
     adapter: Arc<Mutex<IbusEngineAdapter>>,
+    config_generation: AtomicU64,
 }
 
 #[interface(name = "org.freedesktop.IBus.Factory")]
@@ -79,11 +124,16 @@ impl Factory {
 
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let path = engine_path(id);
-        let validated = self
-            .validated_config
-            .lock()
-            .map_err(|_| zbus::fdo::Error::Failed("IBus config lock poisoned".into()))?
-            .clone();
+        let (validated, generation) = {
+            let current = self
+                .validated_config
+                .lock()
+                .map_err(|_| zbus::fdo::Error::Failed("IBus config lock poisoned".into()))?;
+            (
+                Arc::clone(&current),
+                self.config_generation.load(Ordering::Acquire),
+            )
+        };
         let mut adapter =
             IbusEngineAdapter::with_validated_config(validated, (*self.policy).clone());
         let completions = self.completions.clone();
@@ -101,6 +151,7 @@ impl Factory {
             path: path.clone(),
             instances: Arc::clone(&self.instances),
             telemetry: self.telemetry.clone(),
+            gnome_focus: Arc::clone(&self.gnome_focus),
         };
         let connection = self
             .connection
@@ -108,25 +159,131 @@ impl Factory {
             .map_err(|_| zbus::fdo::Error::Failed("IBus connection lock poisoned".into()))?
             .clone()
             .ok_or_else(|| zbus::fdo::Error::Failed("IBus connection unavailable".into()))?;
-        connection
-            .inner()
-            .object_server()
-            .at(path.as_str(), engine)
-            .await
-            .map_err(zbus::fdo::Error::ZBus)?;
-        let engines = {
+        {
+            // Lock order is config snapshot, then instances, then adapter.
+            // Reload uses the same order. Re-read after adapter construction
+            // so a context racing a reload is brought to the current
+            // generation before it becomes visible to IBus.
+            let current = self
+                .validated_config
+                .lock()
+                .map_err(|_| zbus::fdo::Error::Failed("IBus config lock poisoned".into()))?;
             let mut instances = self
                 .instances
                 .lock()
                 .map_err(|_| zbus::fdo::Error::Failed("IBus instance lock poisoned".into()))?;
-            instances.insert(path.clone(), EngineInstance { adapter });
-            instances.len()
-        };
+            let current_generation = self.config_generation.load(Ordering::Acquire);
+            if current_generation != generation {
+                let mut adapter = adapter
+                    .lock()
+                    .map_err(|_| zbus::fdo::Error::Failed("IBus engine lock poisoned".into()))?;
+                adapter.replace_validated_config(Arc::clone(&current));
+            }
+            instances.insert(
+                path.clone(),
+                EngineInstance {
+                    adapter: Arc::clone(&adapter),
+                    config_generation: AtomicU64::new(current_generation),
+                },
+            );
+        }
+        if let Err(error) = connection
+            .inner()
+            .object_server()
+            .at(path.as_str(), engine)
+            .await
+        {
+            let removed = self
+                .instances
+                .lock()
+                .map_err(|_| zbus::fdo::Error::Failed("IBus instance lock poisoned".into()))?
+                .remove(&path)
+                .is_some();
+            if removed {
+                if let Some(telemetry) = &self.telemetry {
+                    refresh_context_diagnostics(self.instances.as_ref(), telemetry);
+                }
+            }
+            return Err(zbus::fdo::Error::ZBus(error));
+        }
         if let Some(telemetry) = &self.telemetry {
-            telemetry.set_engines(engines);
+            refresh_context_diagnostics(self.instances.as_ref(), telemetry);
         }
         Ok(path)
     }
+}
+
+fn config_generation_mismatch_count(
+    instances: &HashMap<OwnedObjectPath, EngineInstance>,
+    generation: u64,
+) -> usize {
+    instances
+        .values()
+        .filter(|instance| instance.config_generation.load(Ordering::Acquire) != generation)
+        .count()
+}
+
+fn refresh_context_diagnostics(
+    instances: &Mutex<HashMap<OwnedObjectPath, EngineInstance>>,
+    telemetry: &IbusTelemetry,
+) {
+    let generation = telemetry.snapshot().config_generation_requested;
+    if let Ok(instances) = instances.lock() {
+        telemetry.set_context_diagnostics(
+            generation,
+            instances.len(),
+            config_generation_mismatch_count(&instances, generation),
+        );
+    }
+}
+
+/// Install a validated generation as one handoff. The caller already holds
+/// the factory snapshot mutex. The instance map blocks context creation and
+/// destruction while all adapter locks are first acquired. If any lock is
+/// poisoned, no adapter or factory snapshot is changed.
+fn publish_config_generation(
+    current: &mut Arc<ValidatedConfig>,
+    current_generation: &AtomicU64,
+    instances: &Instances,
+    validated: Arc<ValidatedConfig>,
+    generation: u64,
+) -> Result<(), (&'static str, usize, String)> {
+    let instances = instances.lock().map_err(|_| {
+        (
+            "WX-IBUS-RELOAD-001",
+            0,
+            "IBus engine-instance registry lock is poisoned".to_owned(),
+        )
+    })?;
+    let mut adapters = Vec::with_capacity(instances.len());
+    for instance in instances.values() {
+        match instance.adapter.lock() {
+            Ok(adapter) => adapters.push(adapter),
+            Err(_) => {
+                let mismatches = instances
+                    .values()
+                    .filter(|instance| {
+                        instance.config_generation.load(Ordering::Acquire) != generation
+                    })
+                    .count();
+                return Err((
+                    "WX-IBUS-RELOAD-001",
+                    mismatches,
+                    "an IBus engine-context lock is poisoned".to_owned(),
+                ));
+            }
+        }
+    }
+
+    for (instance, adapter) in instances.values().zip(adapters.iter_mut()) {
+        adapter.replace_validated_config(Arc::clone(&validated));
+        instance
+            .config_generation
+            .store(generation, Ordering::Release);
+    }
+    *current = validated;
+    current_generation.store(generation, Ordering::Release);
+    Ok(())
 }
 
 fn validate_config_for_policy(
@@ -149,6 +306,7 @@ struct EngineObject {
     path: OwnedObjectPath,
     instances: Arc<Mutex<HashMap<OwnedObjectPath, EngineInstance>>>,
     telemetry: Option<Arc<IbusTelemetry>>,
+    gnome_focus: Arc<Mutex<Option<WindowContext>>>,
 }
 
 impl EngineObject {
@@ -306,7 +464,11 @@ fn ibus_text_string(value: &Value<'_>) -> Option<String> {
 impl EngineObject {
     async fn process_key_event(&self, keyval: u32, keycode: u32, state: u32) -> bool {
         let result = match self.adapter.lock() {
-            Ok(mut adapter) => adapter.process_key_event(keyval, keycode, state),
+            Ok(mut adapter) => {
+                let focus = self.gnome_focus.lock().ok().and_then(|focus| focus.clone());
+                adapter.update_gnome_focus(focus.as_ref());
+                adapter.process_key_event(keyval, keycode, state)
+            }
             Err(_) => return false,
         };
         if self.emit_actions(&result.actions).await.is_err() {
@@ -328,6 +490,8 @@ impl EngineObject {
     async fn focus_in(&self) {
         if let Ok(mut adapter) = self.adapter.lock() {
             adapter.focus_in_for_context(Some(self.path.as_str()));
+            let focus = self.gnome_focus.lock().ok().and_then(|focus| focus.clone());
+            adapter.bind_gnome_focus(focus.as_ref());
         }
         self.require_surrounding_text().await;
     }
@@ -360,18 +524,18 @@ impl EngineObject {
     /// rather than blocking it: removal takes the object tree's write lock,
     /// which a blocking call from inside a handler could wait on forever.
     async fn destroy(&self) -> zbus::fdo::Result<()> {
-        let (removed, engines) = {
+        let removed = {
             let mut instances = self
                 .instances
                 .lock()
                 .map_err(|_| zbus::fdo::Error::Failed("IBus instance lock poisoned".into()))?;
-            (instances.remove(&self.path).is_some(), instances.len())
+            instances.remove(&self.path).is_some()
         };
         if !removed {
             return Ok(());
         }
         if let Some(telemetry) = &self.telemetry {
-            telemetry.set_engines(engines);
+            refresh_context_diagnostics(self.instances.as_ref(), telemetry);
         }
         let connection = self
             .connection
@@ -439,19 +603,31 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
     );
     let connection_slot = Arc::new(Mutex::new(None));
     let telemetry = Arc::new(IbusTelemetry::new());
-    start_status_writer(Arc::clone(&telemetry))?;
     let initial_validated = validate_config_for_policy(&initial_snapshot.config, &policy)?;
+    telemetry.config_generation_published(initial_snapshot.generation, 0);
+    start_status_writer(Arc::clone(&telemetry))?;
     let factory_config = Arc::new(Mutex::new(initial_validated));
+    let config_generation = Arc::new(AtomicU64::new(initial_snapshot.generation));
     let instances: Instances = Arc::new(Mutex::new(HashMap::new()));
+    let gnome_focus = Arc::new(Mutex::new(None));
+    if env::var("XDG_CURRENT_DESKTOP")
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .contains("gnome")
+    {
+        spawn_gnome_focus_tracker(Arc::clone(&gnome_focus))?;
+    }
     let (completion_sender, completion_receiver) = mpsc::channel();
     let factory = Factory {
         connection: Arc::clone(&connection_slot),
         validated_config: Arc::clone(&factory_config),
+        config_generation: Arc::clone(&config_generation),
         policy: Arc::clone(&policy),
         instances: Arc::clone(&instances),
         next_id: AtomicU64::new(1),
         completions: completion_sender,
         telemetry: Some(Arc::clone(&telemetry)),
+        gnome_focus,
     };
     let pump_instances = Arc::clone(&instances);
     let pump_connection = Arc::clone(&connection_slot);
@@ -464,6 +640,8 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
     let reload_instances = Arc::clone(&instances);
     let reload_policy = Arc::clone(&policy);
     let reload_validated_config = Arc::clone(&factory_config);
+    let reload_config_generation = Arc::clone(&config_generation);
+    let reload_telemetry = Arc::clone(&telemetry);
     let config_watch_path = path;
     std::thread::Builder::new()
         .name("wayexpand-ibus-config".into())
@@ -538,14 +716,57 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
                         }
                     };
                     if let Ok(mut current) = reload_validated_config.lock() {
-                        *current = Arc::clone(&validated);
-                    }
-                    if let Ok(instances) = reload_instances.lock() {
-                        for instance in instances.values() {
-                            if let Ok(mut adapter) = instance.adapter.lock() {
-                                adapter.replace_validated_config(Arc::clone(&validated));
+                        let publish = publish_config_generation(
+                            &mut current,
+                            &reload_config_generation,
+                            &reload_instances,
+                            Arc::clone(&validated),
+                            snapshot.generation,
+                        );
+                        match publish {
+                            Ok(()) => {
+                                reload_telemetry
+                                    .config_generation_published(snapshot.generation, 0);
+                                reload_error = None;
+                            }
+                            Err((error_id, mismatches, detail)) => {
+                                let mismatches = if mismatches == 0 {
+                                    reload_telemetry.snapshot().engines as usize
+                                } else {
+                                    mismatches
+                                };
+                                reload_telemetry.config_generation_failed(
+                                    snapshot.generation,
+                                    error_id,
+                                    mismatches,
+                                );
+                                if reload_error.as_deref() != Some(error_id) {
+                                    warn!(
+                                        problem_id = error_id,
+                                        config_generation = snapshot.generation,
+                                        context_mismatches = mismatches,
+                                        error = detail,
+                                        "IBus configuration generation handoff failed; retaining previous published generation"
+                                    );
+                                }
+                                reload_error = Some(error_id.to_owned());
                             }
                         }
+                    } else {
+                        let error_id = "WX-IBUS-RELOAD-001";
+                        let mismatches = reload_telemetry.snapshot().engines as usize;
+                        reload_telemetry.config_generation_failed(
+                            snapshot.generation,
+                            error_id,
+                            mismatches,
+                        );
+                        warn!(
+                            problem_id = error_id,
+                            config_generation = snapshot.generation,
+                            context_mismatches = mismatches,
+                            "IBus factory config lock poisoned; retaining previous generation"
+                        );
+                        reload_error = Some(error_id.to_owned());
                     }
                 }
             }
@@ -673,11 +894,13 @@ mod tests {
             validated_config: Arc::new(Mutex::new(
                 validate_config_for_policy(&config, &policy).unwrap(),
             )),
+            config_generation: Arc::new(AtomicU64::new(1)),
             policy,
             instances: Arc::new(Mutex::new(HashMap::new())),
             next_id: AtomicU64::new(1),
             completions: mpsc::channel().0,
             telemetry: None,
+            gnome_focus: Arc::new(Mutex::new(None)),
         };
         assert!(matches!(
             zbus::block_on(factory.create_engine("not-wayexpand")),
@@ -697,6 +920,7 @@ mod tests {
                 adapter: Arc::new(Mutex::new(IbusEngineAdapter::new(
                     ExpansionEngine::new(config).unwrap(),
                 ))),
+                config_generation: AtomicU64::new(1),
             },
         );
         let engine = EngineObject {
@@ -711,6 +935,7 @@ mod tests {
             path,
             instances: Arc::clone(&instances),
             telemetry: None,
+            gnome_focus: Arc::new(Mutex::new(None)),
         };
 
         assert!(zbus::block_on(engine.destroy()).is_err());
@@ -730,6 +955,7 @@ mod tests {
             path: engine_path(1),
             instances: Arc::new(Mutex::new(HashMap::new())),
             telemetry: None,
+            gnome_focus: Arc::new(Mutex::new(None)),
         };
         engine.set_content_type((8, 0));
         assert!(!zbus::block_on(engine.process_key_event('a' as u32, 0, 0)));
@@ -765,6 +991,7 @@ replacement = "signature"
             path: engine_path(2),
             instances: Arc::new(Mutex::new(HashMap::new())),
             telemetry: None,
+            gnome_focus: Arc::new(Mutex::new(None)),
         };
 
         // Ordinary key output fails because there is no live D-Bus transport.
@@ -891,6 +1118,7 @@ replacement = "signature"
     struct Harness {
         client: Connection,
         engine: OwnedObjectPath,
+        gnome_focus: Arc<Mutex<Option<WindowContext>>>,
         commits: mpsc::Receiver<String>,
         deletions: mpsc::Receiver<u32>,
         instances: Instances,
@@ -928,16 +1156,19 @@ replacement = "signature"
             let instances: Instances = Arc::new(Mutex::new(HashMap::new()));
             let telemetry = Arc::new(IbusTelemetry::new());
             let (completion_sender, completion_receiver) = mpsc::channel();
+            let gnome_focus = Arc::new(Mutex::new(None));
             let factory = Factory {
                 connection: Arc::clone(&connection_slot),
                 validated_config: Arc::new(Mutex::new(
                     validate_config_for_policy(&config, &policy).unwrap(),
                 )),
+                config_generation: Arc::new(AtomicU64::new(1)),
                 policy,
                 instances: Arc::clone(&instances),
                 next_id: AtomicU64::new(1),
                 completions: completion_sender,
                 telemetry: Some(Arc::clone(&telemetry)),
+                gnome_focus: Arc::clone(&gnome_focus),
             };
             let (server_stream, client_stream) = std::os::unix::net::UnixStream::pair().unwrap();
             let server = std::thread::spawn(move || {
@@ -996,6 +1227,7 @@ replacement = "signature"
             Self {
                 client,
                 engine,
+                gnome_focus,
                 commits,
                 deletions,
                 instances,
@@ -1010,10 +1242,17 @@ replacement = "signature"
         where
             B: zbus::export::serde::Serialize + zbus::zvariant::DynamicType,
         {
+            self.call_on(&self.engine, method, body)
+        }
+
+        fn call_on<B>(&self, engine: &OwnedObjectPath, method: &str, body: &B) -> zbus::Message
+        where
+            B: zbus::export::serde::Serialize + zbus::zvariant::DynamicType,
+        {
             self.client
                 .call_method(
                     None::<&str>,
-                    self.engine.as_str(),
+                    engine.as_str(),
                     Some("org.freedesktop.IBus.Engine"),
                     method,
                     body,
@@ -1057,20 +1296,60 @@ replacement = "signature"
         /// The sequence ibus-daemon sends when an ordinary text field gains
         /// focus.
         fn focus_text_field(&self) {
-            self.call("FocusIn", &());
-            self.call("Enable", &());
-            self.call("SetCapabilities", &(crate::IBUS_CAP_SURROUNDING_TEXT,));
-            self.set_content_type(0, 0);
+            self.focus_text_field_on(&self.engine);
+        }
+
+        fn focus_text_field_on(&self, engine: &OwnedObjectPath) {
+            self.call_on(engine, "FocusIn", &());
+            self.call_on(engine, "Enable", &());
+            self.call_on(
+                engine,
+                "SetCapabilities",
+                &(crate::IBUS_CAP_SURROUNDING_TEXT,),
+            );
+            self.client
+                .call_method(
+                    None::<&str>,
+                    engine.as_str(),
+                    Some("org.freedesktop.DBus.Properties"),
+                    "Set",
+                    &(
+                        "org.freedesktop.IBus.Engine",
+                        "ContentType",
+                        Value::from((0_u32, 0_u32)),
+                    ),
+                )
+                .unwrap();
         }
 
         /// Report `before` as the text before the cursor, then press `key`.
         fn key(&self, key: char, before: &str) -> bool {
+            self.key_on(&self.engine, key, before)
+        }
+
+        fn key_on(&self, engine: &OwnedObjectPath, key: char, before: &str) -> bool {
             let cursor = before.chars().count() as u32;
-            self.call(
+            self.call_on(
+                engine,
                 "SetSurroundingText",
                 &(Value::from(ibus_text_value(before)), cursor, cursor),
             );
-            self.call("ProcessKeyEvent", &(key as u32, 0_u32, 0_u32))
+            self.call_on(engine, "ProcessKeyEvent", &(key as u32, 0_u32, 0_u32))
+                .body()
+                .deserialize()
+                .unwrap()
+        }
+
+        fn create_engine(&self) -> OwnedObjectPath {
+            self.client
+                .call_method(
+                    None::<&str>,
+                    FACTORY_PATH,
+                    Some("org.freedesktop.IBus.Factory"),
+                    "CreateEngine",
+                    &("wayexpand",),
+                )
+                .unwrap()
                 .body()
                 .deserialize()
                 .unwrap()
@@ -1165,6 +1444,112 @@ replacement = "signature"
         assert_eq!(
             adapter.engine().form_replacement_guarantee(),
             ReplacementGuarantee::VerifiedSurroundingText
+        );
+    }
+
+    #[test]
+    fn app_filtered_expansion_is_bound_to_each_ibus_context_across_focus_changes() {
+        let harness = Harness::start(
+            "[settings]\ncompatibility_mode = 'tracked-focus'\n\
+             [[expansion]]\ntrigger = ';ok'\nreplacement = 'editor-only'\n\
+             app_filter = ['app_id_exact:org.gnome.TextEditor']\n",
+        );
+        let editor = WindowContext {
+            app_id: Some("org.gnome.TextEditor".into()),
+            title: None,
+            instance_id: Some("mutter:editor-window".into()),
+        };
+        *harness.gnome_focus.lock().unwrap() = Some(editor.clone());
+        harness.focus_text_field();
+
+        let first_identity = harness.instances.lock().unwrap()[&harness.engine]
+            .adapter
+            .lock()
+            .unwrap()
+            .engine()
+            .current_window()
+            .unwrap()
+            .instance_id
+            .clone()
+            .unwrap();
+        assert_eq!(
+            first_identity,
+            format!("ibus-context:{}", harness.engine.as_str())
+        );
+
+        let second_engine = harness.create_engine();
+        let terminal = WindowContext {
+            app_id: Some("org.gnome.Terminal".into()),
+            title: None,
+            instance_id: Some("mutter:terminal-window".into()),
+        };
+        harness.call_on(&harness.engine, "FocusOut", &());
+        *harness.gnome_focus.lock().unwrap() = Some(terminal.clone());
+        harness.focus_text_field_on(&second_engine);
+
+        let instances = harness.instances.lock().unwrap();
+        let first_context = instances[&harness.engine]
+            .adapter
+            .lock()
+            .unwrap()
+            .engine()
+            .current_window()
+            .cloned();
+        let second_context = instances[&second_engine]
+            .adapter
+            .lock()
+            .unwrap()
+            .engine()
+            .current_window()
+            .cloned()
+            .expect("second IBus context should have its own target");
+        drop(instances);
+        assert!(first_context.is_none(), "FocusOut must clear context one");
+        assert_eq!(second_context.app_id.as_deref(), Some("org.gnome.Terminal"));
+        assert_eq!(
+            second_context.instance_id.as_deref(),
+            Some(format!("ibus-context:{}", second_engine.as_str()).as_str())
+        );
+        assert_ne!(
+            second_context.instance_id.as_deref(),
+            Some(first_identity.as_str()),
+            "IBus context identities must remain isolated"
+        );
+
+        // An app-filtered trigger in the terminal is passed through; it must
+        // not emit a deletion or replacement into that unrelated context.
+        let terminal_handled = [(';', ""), ('o', ";"), ('k', ";o")]
+            .into_iter()
+            .map(|(key, before)| harness.key_on(&second_engine, key, before))
+            .collect::<Vec<_>>();
+        assert_eq!(terminal_handled, [false, true, true]);
+        assert!(harness
+            .deletions
+            .recv_timeout(Duration::from_millis(100))
+            .is_err());
+        assert!(!harness
+            .commits(Duration::from_millis(100))
+            .iter()
+            .any(|text| text == "editor-only"));
+
+        // The same IBus context may later focus the allowed editor. A fresh
+        // FocusIn binds the new tracker identity and permits the expansion.
+        harness.call_on(&second_engine, "FocusOut", &());
+        *harness.gnome_focus.lock().unwrap() = Some(editor.clone());
+        harness.focus_text_field_on(&second_engine);
+        let editor_handled = [(';', ""), ('o', ";"), ('k', ";o")]
+            .into_iter()
+            .map(|(key, before)| harness.key_on(&second_engine, key, before))
+            .collect::<Vec<_>>();
+        assert_eq!(editor_handled, [false, true, true]);
+        assert_eq!(
+            harness.deletions.recv_timeout(Duration::from_secs(2)),
+            Ok(2)
+        );
+        let commits = harness.commits_through("editor-only", Duration::from_secs(2));
+        assert!(
+            commits.iter().any(|text| text == "editor-only"),
+            "the allowed app-filtered result was not committed: {commits:?}"
         );
     }
 

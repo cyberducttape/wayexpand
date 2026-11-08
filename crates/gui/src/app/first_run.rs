@@ -4,22 +4,29 @@ use crate::*;
 const ONBOARDING_TRIGGER: &str = ":wayexpand-test";
 const ONBOARDING_REPLACEMENT: &str = "WayExpand is working!";
 
+fn gnome_ibus_is_configured(
+    ibus_route_active: bool,
+    source_registered: wayexpand_backend_ibus::chain::IbusCheckState,
+    source_active: wayexpand_backend_ibus::chain::IbusCheckState,
+) -> bool {
+    ibus_route_active
+        && source_registered == wayexpand_backend_ibus::chain::IbusCheckState::Pass
+        && source_active == wayexpand_backend_ibus::chain::IbusCheckState::Pass
+}
+
 fn onboarding_snippet(config: &Config) -> Option<&ExpansionConfig> {
     config.expansion.iter().find(|expansion| {
         expansion.enabled
+            && expansion.app_filter.is_empty()
+            && expansion.command.is_none()
+            && !expansion.replacement.contains("{{")
             && expansion.replacement == ONBOARDING_REPLACEMENT
             && expansion.tags.iter().any(|tag| tag == "tutorial")
     })
 }
 
-fn onboarding_test_snippet(config: &Config) -> Option<&ExpansionConfig> {
-    onboarding_snippet(config).or_else(|| {
-        config.expansion.iter().find(|expansion| {
-            expansion.enabled
-                && expansion.command.is_none()
-                && !expansion.replacement.contains("{{")
-        })
-    })
+pub(super) fn onboarding_test_snippet(config: &Config) -> Option<&ExpansionConfig> {
+    onboarding_snippet(config)
 }
 
 impl GuiApp {
@@ -141,8 +148,48 @@ impl GuiApp {
             && !self.paused
             && self.route_state == Some(runtime::RouteState::Connected);
         let daemon_build = daemon_running.then(|| runtime::daemon_build_state(&self.daemon_status));
-        let route_ready = ibus_only
-            || route_connected && daemon_build == Some(runtime::DaemonBuildState::Current);
+        let gnome_ibus = wayexpand_backend_selection::Compositor::detect()
+            == wayexpand_backend_selection::Compositor::Gnome
+            && (ibus_only
+                || self
+                    .recommended_route
+                    .is_some_and(|route| route.setup_backend() == "ibus"));
+        let source_registered = self.ibus_route.as_ref().is_some_and(|report| {
+            report
+                .check("gnome-source-registered")
+                .is_some_and(|check| {
+                    check.state == wayexpand_backend_ibus::chain::IbusCheckState::Pass
+                })
+        });
+        let source_active = self.ibus_route.as_ref().is_some_and(|report| {
+            report.check("gnome-source-active").is_some_and(|check| {
+                check.state == wayexpand_backend_ibus::chain::IbusCheckState::Pass
+            })
+        });
+        // A running IBus engine is only a configured GNOME route when GNOME
+        // has registered and actually selected the source. A connection by
+        // itself must never look like a working desktop integration.
+        let route_ready = if gnome_ibus {
+            gnome_ibus_is_configured(
+                ibus_only,
+                self.ibus_route
+                    .as_ref()
+                    .and_then(|report| report.check("gnome-source-registered"))
+                    .map_or(
+                        wayexpand_backend_ibus::chain::IbusCheckState::Unknown,
+                        |check| check.state,
+                    ),
+                self.ibus_route
+                    .as_ref()
+                    .and_then(|report| report.check("gnome-source-active"))
+                    .map_or(
+                        wayexpand_backend_ibus::chain::IbusCheckState::Unknown,
+                        |check| check.state,
+                    ),
+            )
+        } else {
+            ibus_only || route_connected && daemon_build == Some(runtime::DaemonBuildState::Current)
+        };
         let test_snippet = onboarding_test_snippet(&self.config)
             .map(|expansion| (expansion.trigger.clone(), expansion.replacement.clone()));
         let sample_trigger = test_snippet
@@ -365,6 +412,31 @@ impl GuiApp {
                                 self.refresh_diagnostics(false);
                             }
                         });
+                        if gnome_ibus {
+                            ui.add_space(4.0);
+                            ui.label(RichText::new("GNOME input source").strong());
+                            ui.label(format!(
+                                "Registration: {} · Active: {}",
+                                if source_registered { "ready" } else { "needs setup" },
+                                if source_active { "WayExpand selected" } else { "select WayExpand" },
+                            ));
+                            if !source_registered {
+                                ui.label("Continue guided setup to check dependencies, register the engine, and explain any required administrator authorization.");
+                                if theme::primary_button(ui, palette, "Continue guided setup").clicked() {
+                                    self.start_guided_setup();
+                                }
+                            } else if !source_active {
+                                ui.label("Choose WayExpand from GNOME’s keyboard/input-source menu. Your existing keyboard layouts remain available.");
+                                ui.horizontal_wrapped(|ui| {
+                                    if theme::primary_button(ui, palette, "Activate WayExpand").clicked() {
+                                        self.retry_gnome_source_activation();
+                                    }
+                                    if theme::secondary_button(ui, palette, "I selected it — check again").clicked() {
+                                        self.refresh_diagnostics(true);
+                                    }
+                                });
+                            }
+                        }
                         if !route_ready {
                             ui.label(
                                 RichText::new(self.strings.onboarding_probe_caveat())
@@ -611,18 +683,80 @@ impl GuiApp {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::onboarding_test_snippet;
-    use wayexpand_core::Config;
+mod guided_setup_tests {
+    use super::gnome_ibus_is_configured;
+    use wayexpand_backend_ibus::chain::IbusCheckState;
 
     #[test]
-    fn custom_static_snippet_can_be_used_for_first_run_verification() {
+    fn gnome_ibus_requires_a_live_engine_and_registered_active_source() {
+        assert!(!gnome_ibus_is_configured(
+            false,
+            IbusCheckState::Pass,
+            IbusCheckState::Pass
+        ));
+        assert!(!gnome_ibus_is_configured(
+            true,
+            IbusCheckState::Unknown,
+            IbusCheckState::Pass
+        ));
+        assert!(!gnome_ibus_is_configured(
+            true,
+            IbusCheckState::Pass,
+            IbusCheckState::Warn
+        ));
+        assert!(gnome_ibus_is_configured(
+            true,
+            IbusCheckState::Pass,
+            IbusCheckState::Pass
+        ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::onboarding_test_snippet;
+    use wayexpand_core::{Config, ExpansionConfig};
+
+    #[test]
+    fn first_run_uses_only_the_dedicated_global_tutorial_snippet() {
         let config = Config::parse(
             "[[expansion]]\ntrigger = ';custom-check'\nreplacement = 'Custom check passed'\n",
         )
         .unwrap();
-        let snippet = onboarding_test_snippet(&config).expect("static snippet is testable");
-        assert_eq!(snippet.trigger, ";custom-check");
-        assert_eq!(snippet.replacement, "Custom check passed");
+        assert!(onboarding_test_snippet(&config).is_none());
+
+        let mut config = Config::parse("").unwrap();
+        let mut tutorial = ExpansionConfig {
+            id: ExpansionConfig::new_id(),
+            trigger: ":wayexpand-test".into(),
+            aliases: Vec::new(),
+            replacement: "WayExpand is working!".into(),
+            description: String::new(),
+            tags: vec!["tutorial".into()],
+            category: String::new(),
+            app_filter: vec!["app_id_exact:org.example.Editor".into()],
+            match_mode: Default::default(),
+            command: None,
+            enabled: true,
+            propagate_case: false,
+            output_file: None,
+        };
+        config.expansion.push(tutorial.clone());
+        assert!(onboarding_test_snippet(&config).is_none());
+
+        tutorial.app_filter.clear();
+        config.expansion[0] = tutorial;
+        let snippet = onboarding_test_snippet(&config).expect("global tutorial is testable");
+        assert_eq!(snippet.trigger, ":wayexpand-test");
+        assert_eq!(snippet.replacement, "WayExpand is working!");
+    }
+
+    #[test]
+    fn invalid_tutorial_variants_are_not_selected_for_first_run() {
+        let config = Config::parse(
+            "[[expansion]]\ntrigger = ':wayexpand-test'\nreplacement = 'WayExpand is working! {{field:review}}'\ntags = ['tutorial']\n",
+        )
+        .unwrap();
+        assert!(onboarding_test_snippet(&config).is_none());
     }
 }

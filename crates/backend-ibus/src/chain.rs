@@ -23,7 +23,7 @@ use std::{
     os::unix::{ffi::OsStrExt, fs::MetadataExt, fs::PermissionsExt},
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::mpsc,
+    sync::{mpsc, OnceLock},
     thread,
     time::Duration,
 };
@@ -225,6 +225,7 @@ impl IbusChainReport {
             "daemon",
             "selected",
             "engine",
+            "config-generation",
             "gnome-source-active",
             "field-input",
             "target-insertion",
@@ -562,25 +563,40 @@ fn parse_kwin_input_method(text: &str) -> Option<String> {
 /// Ask KWin whether its virtual-keyboard (input method) slot is running.
 /// `None` when KWin does not answer within a second.
 pub fn kwin_input_method_available() -> Option<bool> {
+    // Dropping a timed-out receiver cannot cancel a blocking D-Bus call.
+    // Route every probe through one shared worker with a one-item queue so a
+    // stalled KWin service cannot accumulate one detached thread per probe.
+    static PROBES: OnceLock<mpsc::SyncSender<mpsc::Sender<Option<bool>>>> = OnceLock::new();
+    let worker = PROBES.get_or_init(|| {
+        let (sender, requests) = mpsc::sync_channel::<mpsc::Sender<Option<bool>>>(1);
+        if let Err(error) = thread::Builder::new()
+            .name("wayexpand-kwin-im-probe".into())
+            .spawn(move || {
+                while let Ok(reply_to) = requests.recv() {
+                    let answer = (|| -> zbus::Result<bool> {
+                        let connection = zbus::blocking::Connection::session()?;
+                        let reply = connection.call_method(
+                            Some("org.kde.KWin"),
+                            "/VirtualKeyboard",
+                            Some("org.freedesktop.DBus.Properties"),
+                            "Get",
+                            &("org.kde.kwin.VirtualKeyboard", "available"),
+                        )?;
+                        let value: zbus::zvariant::OwnedValue = reply.body().deserialize()?;
+                        bool::try_from(value).map_err(zbus::Error::from)
+                    })();
+                    let _ = reply_to.send(answer.ok());
+                }
+            })
+        {
+            tracing::warn!("could not start bounded KWin probe worker: {error}");
+        }
+        sender
+    });
     let (sender, receiver) = mpsc::channel();
-    thread::Builder::new()
-        .name("wayexpand-kwin-im-probe".into())
-        .spawn(move || {
-            let answer = (|| -> zbus::Result<bool> {
-                let connection = zbus::blocking::Connection::session()?;
-                let reply = connection.call_method(
-                    Some("org.kde.KWin"),
-                    "/VirtualKeyboard",
-                    Some("org.freedesktop.DBus.Properties"),
-                    "Get",
-                    &("org.kde.kwin.VirtualKeyboard", "available"),
-                )?;
-                let value: zbus::zvariant::OwnedValue = reply.body().deserialize()?;
-                bool::try_from(value).map_err(zbus::Error::from)
-            })();
-            let _ = sender.send(answer.ok());
-        })
-        .ok()?;
+    if worker.try_send(sender).is_err() {
+        return None;
+    }
     receiver.recv_timeout(Duration::from_secs(1)).ok().flatten()
 }
 
@@ -967,6 +983,7 @@ pub fn diagnose() -> IbusChainReport {
     });
 
     checks.push(field_input_check(activity.as_ref()));
+    checks.push(config_generation_check(activity.as_ref()));
     checks.push(target_insertion_check(activity.as_ref()));
 
     IbusChainReport {
@@ -974,6 +991,60 @@ pub fn diagnose() -> IbusChainReport {
         checks,
         activity,
     }
+}
+
+fn config_generation_check(activity: Option<&IbusStatusReading>) -> IbusCheck {
+    let Some(reading) = activity.filter(|reading| reading.live) else {
+        return check(
+            "config-generation",
+            "IBus contexts use one configuration generation",
+            IbusCheckState::Skip,
+            "the live IBus engine has not published configuration-generation diagnostics",
+            None,
+        );
+    };
+    let status = &reading.status;
+    if !status.config_generation_diagnostics_available {
+        return check(
+            "config-generation",
+            "IBus contexts use one configuration generation",
+            IbusCheckState::Unknown,
+            "the running IBus engine predates configuration-generation diagnostics",
+            Some("restart the WayExpand IBus engine from the desktop input-source controls, then rerun `wayexpand ibus status`".into()),
+        );
+    }
+    let detail = format!(
+        "published generation {}, requested generation {}, {} context(s) out of date, {} failed handoff(s){}",
+        status.config_generation,
+        status.config_generation_requested,
+        status.config_generation_mismatches,
+        status.config_reload_failures,
+        status
+            .config_reload_error
+            .as_deref()
+            .map(|error| format!(", last error {error}"))
+            .unwrap_or_default(),
+    );
+    let healthy = status.config_generation == status.config_generation_requested
+        && status.config_generation_mismatches == 0
+        && status.config_reload_error.is_none();
+    let mut result = check(
+        "config-generation",
+        "IBus contexts use one configuration generation",
+        if healthy {
+            IbusCheckState::Pass
+        } else {
+            IbusCheckState::Fail
+        },
+        detail,
+        (!healthy).then(|| {
+            "restart the WayExpand IBus engine from the desktop input-source controls, then rerun `wayexpand doctor --gnome` or `wayexpand ibus status`".into()
+        }),
+    );
+    if !healthy {
+        result.problem_id = Some("WX-IBUS-RELOAD-001");
+    }
+    result
 }
 
 fn kwin_input_method_check(

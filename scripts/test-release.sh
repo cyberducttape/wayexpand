@@ -102,6 +102,35 @@ for path in \
         exit 1
     }
 done
+policy_path="wayexpand-test-linux-$release_arch/polkit/org.wayexpand.action.policy"
+grep -Fxq "$policy_path" "$archive_listing" || {
+    printf '%s\n' "release archive is missing $policy_path" >&2
+    exit 1
+}
+grep -F 'id="org.wayexpand.execute-action"' "$extracted_archive/$policy_path" >/dev/null || {
+    printf '%s\n' 'release archive PolicyKit policy is invalid' >&2
+    exit 1
+}
+grep -F '<allow_any>no</allow_any>' "$extracted_archive/$policy_path" >/dev/null || {
+    printf '%s\n' 'release archive PolicyKit policy permits unauthenticated remote actions' >&2
+    exit 1
+}
+grep -F '<allow_inactive>no</allow_inactive>' "$extracted_archive/$policy_path" >/dev/null || {
+    printf '%s\n' 'release archive PolicyKit policy has an unexpected inactive-session default' >&2
+    exit 1
+}
+grep -F '<allow_active>auth_self</allow_active>' "$extracted_archive/$policy_path" >/dev/null || {
+    printf '%s\n' 'release archive PolicyKit policy has an unexpected active-session default' >&2
+    exit 1
+}
+test -f "$extracted_archive/$policy_path" || {
+    printf '%s\n' "release archive PolicyKit policy is not a regular file: $policy_path" >&2
+    exit 1
+}
+test "$(stat -c '%a' "$extracted_archive/$policy_path")" = 644 || {
+    printf '%s\n' "release archive PolicyKit policy has unexpected permissions: $policy_path" >&2
+    exit 1
+}
 desktop_entry="wayexpand-test-linux-$release_arch/desktop/wayexpand.desktop"
 grep -Fxq "$desktop_entry" "$archive_listing" || {
     printf '%s\n' "release archive is missing $desktop_entry" >&2

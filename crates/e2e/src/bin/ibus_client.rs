@@ -23,7 +23,9 @@ use std::{
 };
 use zbus::{
     blocking::{Connection, MessageIterator},
+    message::Type as MessageType,
     zvariant::{OwnedObjectPath, OwnedValue, StructureBuilder, Value},
+    MatchRule,
 };
 
 const IBUS: &str = "org.freedesktop.IBus";
@@ -277,14 +279,15 @@ fn select_engine(connection: &Connection, field: &Field<'_>, expect_active: bool
 /// Wait for content-free engine telemetry to confirm that IBus has created
 /// and focused the actual engine context. `GetGlobalEngine` can return the
 /// selected descriptor before the first input context is fully attached.
-fn wait_for_focused_engine(status_file: &Path) -> Result<()> {
+fn wait_for_focused_engine(status_file: &Path, after_focus_sequence: u64) -> Result<()> {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         if let Some(reading) = wayexpand_backend_ibus::telemetry::read_status_at(status_file) {
             let status = reading.status;
             if status.engines > 0
                 && status.recent_fields.iter().any(|field| {
-                    field.focused
+                    field.sequence > after_focus_sequence
+                        && field.focused
                         && field.content_type
                             == wayexpand_backend_ibus::telemetry::IbusContentTypeState::Normal
                         && field.surrounding_capability
@@ -342,11 +345,28 @@ fn main() -> Result<()> {
         }
     }
     let address = env::var("IBUS_ADDRESS").context("IBUS_ADDRESS is not set")?;
-    let connection = zbus::blocking::connection::Builder::address(address.as_str())?.build()?;
+    // A broken or wedged session IBus daemon must fail this acceptance probe
+    // promptly. Without a method deadline, calls such as SetGlobalEngine can
+    // block until the entire CI job is cancelled, hiding the failed stage.
+    let connection = zbus::blocking::connection::Builder::address(address.as_str())?
+        .method_timeout(Duration::from_secs(5))
+        .build()?;
     let (sender, events) = mpsc::channel();
-    let messages = MessageIterator::from(&connection);
+    // Subscribe only to D-Bus signals. IBus may rewrite the engine interface
+    // while forwarding signals to an input context, so matching that interface
+    // at the bus would drop valid CommitText messages. Reading every message on
+    // the private bus also feeds unrelated method traffic through zbus's
+    // header decoder; on Ubuntu 24.04 that reader panicked on unrelated bus
+    // traffic and silently lost CommitText events. Keep the match rule to
+    // fields supported by older D-Bus daemons; the event loop checks each
+    // signal's exact engine path before applying it.
+    let signal_rule = MatchRule::builder().msg_type(MessageType::Signal).build();
+    let messages = MessageIterator::for_match_rule(signal_rule, &connection, Some(128))?;
     thread::spawn(move || {
-        for message in messages.flatten() {
+        for message in messages {
+            let Ok(message) = message else {
+                continue;
+            };
             let header = message.header();
             let (Some(member), Some(path)) = (header.member(), header.path()) else {
                 continue;
@@ -372,6 +392,9 @@ fn main() -> Result<()> {
         }
     });
 
+    let focus_baseline = wayexpand_backend_ibus::telemetry::read_status_at(&status_file)
+        .map(|reading| reading.status.totals.focus_ins)
+        .unwrap_or(0);
     let mut results = Results { failed: false };
     let full_caps = CAP_PREEDIT | CAP_FOCUS | CAP_SURROUNDING_TEXT;
     let mut editor = create_field(&connection, &events, "e2e-editor", full_caps, true)?;
@@ -388,11 +411,15 @@ fn main() -> Result<()> {
             std::process::exit(1);
         }
     }
+    // An IBus global engine descriptor can be selected before the new
+    // per-context engine is attached, especially after GNOME Shell restarts.
+    // Wait for WayExpand to publish a focused normal-text context before
+    // sending even a harmless probe key: older IBus releases may report the
+    // key handled while that attachment is still in flight.
+    wait_for_focused_engine(&status_file, focus_baseline)?;
     if single_expansion {
-        // After a GNOME Shell restart, the global source can be selected before
-        // IBus has attached a fresh engine instance to a focused text context.
-        // Real toolkits discover that state while processing input, so send a
-        // harmless non-trigger character before requiring engine telemetry.
+        // Check that a non-trigger printable key still reaches the client
+        // after the newly selected IBus context is ready.
         editor.type_text("x")?;
         results.check(
             "engine-start-probe",
@@ -407,17 +434,11 @@ fn main() -> Result<()> {
         }
         editor.clear()?;
     }
-    match wait_for_focused_engine(&status_file) {
-        Ok(()) => results.check(
-            "engine-context-ready",
-            true,
-            "IBus reports a focused normal-text context with surrounding-text capability",
-        ),
-        Err(error) => {
-            results.check("engine-context-ready", false, format!("{error:#}"));
-            std::process::exit(1);
-        }
-    }
+    results.check(
+        "engine-context-ready",
+        true,
+        "IBus reports a focused normal-text context with surrounding-text capability",
+    );
 
     editor.clear()?;
     editor.type_text(TRIGGER)?;

@@ -60,7 +60,6 @@ impl CommandMetricsState {
 
 pub(super) enum QueueSendError {
     Full,
-    Disconnected,
     Unavailable,
 }
 

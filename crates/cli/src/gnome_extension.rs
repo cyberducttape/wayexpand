@@ -7,10 +7,13 @@ use crate::*;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Write;
-use std::os::unix::fs::PermissionsExt;
+use std::os::fd::AsRawFd;
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::path::PathBuf;
 use wayexpand_backend_gnome_window::{
-    enable_extension, extension_files, extension_status, ExtensionState, GnomeWindowTracker,
-    EXTENSION_UUID,
+    disable_extension, enable_extension, extension_files, extension_status, ExtensionState,
+    GnomeWindowError, GnomeWindowTracker, EXTENSION_UUID,
 };
 
 const SYSTEM_EXTENSION_DIRS: [&str; 2] = [
@@ -80,6 +83,70 @@ struct BuildAssessment {
     fix: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExtensionReadiness {
+    Ready,
+    NotLoadedThisSession,
+    SessionBusUnavailable,
+    ExtensionFailed,
+    Inactive,
+    Unknown,
+}
+
+impl ExtensionReadiness {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Ready => "ready",
+            Self::NotLoadedThisSession => "not-loaded-this-session",
+            Self::SessionBusUnavailable => "session-bus-unavailable",
+            Self::ExtensionFailed => "extension-failed",
+            Self::Inactive => "inactive",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+fn session_bus_unavailable(error: &GnomeWindowError) -> bool {
+    error.is_session_bus_unavailable()
+}
+
+fn extension_readiness(
+    status: Option<&wayexpand_backend_gnome_window::ExtensionStatus>,
+    status_error: Option<&GnomeWindowError>,
+    installed_matches: bool,
+    metadata_matches: bool,
+    protocol_failure: Option<ExtensionReadiness>,
+    confirmed_stale_build: bool,
+) -> ExtensionReadiness {
+    if status.is_none() {
+        return match status_error {
+            Some(error) if session_bus_unavailable(error) => {
+                ExtensionReadiness::SessionBusUnavailable
+            }
+            _ => ExtensionReadiness::Unknown,
+        };
+    }
+    let status = status.expect("checked above");
+    match status.user_extensions_enabled {
+        Some(false) => return ExtensionReadiness::Inactive,
+        None if !matches!(status.state, ExtensionState::Active) => {
+            return ExtensionReadiness::Unknown;
+        }
+        Some(true) | None => {}
+    }
+    match &status.state {
+        ExtensionState::Active if confirmed_stale_build => ExtensionReadiness::NotLoadedThisSession,
+        ExtensionState::Active if protocol_failure.is_some() => protocol_failure.unwrap(),
+        ExtensionState::Active => ExtensionReadiness::Ready,
+        ExtensionState::Inactive => ExtensionReadiness::Inactive,
+        ExtensionState::Error(_) | ExtensionState::OutOfDate => ExtensionReadiness::ExtensionFailed,
+        ExtensionState::Unknown if installed_matches && metadata_matches => {
+            ExtensionReadiness::NotLoadedThisSession
+        }
+        ExtensionState::Unknown | ExtensionState::Other(_) => ExtensionReadiness::Unknown,
+    }
+}
+
 fn assess_build_identity(
     on_disk: Option<&str>,
     metadata_matches: bool,
@@ -127,10 +194,10 @@ fn assess_build_identity(
             fix: Some("log out of GNOME and log back in to load the installed extension build".into()),
         },
         None => BuildAssessment {
-            state: "logout-required",
+            state: "unknown",
             ready: false,
-            detail: format!("the installed extension is build {bundled}, but its live build identity could not be verified{}", live_error.map(|error| format!(": {error}")).unwrap_or_default()),
-            fix: Some("log out of GNOME and log back in to load and verify the installed extension build".into()),
+            detail: format!("the installed extension is build {bundled}, but GNOME Shell's live build identity could not be verified{}", live_error.map(|error| format!(": {error}")).unwrap_or_default()),
+            fix: Some("run `wayexpand doctor --gnome --json` to inspect session-bus and extension-protocol readiness; log out only if the report confirms an older extension build is loaded".into()),
         },
     }
 }
@@ -148,68 +215,742 @@ pub(crate) fn installed_copy() -> Option<PathBuf> {
         .find(|directory| directory.join("metadata.json").is_file())
 }
 
-/// Write the bundled extension into the user directory, file by file via
-/// temporary files, unless a current copy is already installed.
-fn install_user_copy() -> Result<PathBuf> {
-    if let Some(existing) = installed_copy().filter(|directory| matches_bundled(directory)) {
-        return Ok(existing);
-    }
+/// Install a fully staged user copy unless a current copy is already present.
+fn install_user_copy() -> Result<(PathBuf, Option<ExtensionInstallTransaction>)> {
     let directory = user_extension_dir()
         .context("cannot locate the GNOME Shell extension directory: HOME is not set")?;
-    fs::create_dir_all(&directory)?;
-    fs::set_permissions(&directory, fs::Permissions::from_mode(0o755))?;
-    for (name, contents) in extension_files() {
-        let target = directory.join(name);
-        let temporary = directory.join(format!(".{name}.{}.tmp", std::process::id()));
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary)?;
-        file.write_all(contents.as_bytes())?;
-        file.set_permissions(fs::Permissions::from_mode(0o644))?;
-        drop(file);
-        fs::rename(&temporary, &target)?;
+    recover_user_extension_install(&directory)?;
+    if let Some(existing) = installed_copy().filter(|directory| matches_bundled(directory)) {
+        return Ok((existing, None));
     }
-    Ok(directory)
+    let transaction = install_extension_directory(&directory, &extension_files())?;
+    Ok((directory, Some(transaction)))
+}
+
+fn recover_user_extension_install(directory: &Path) -> Result<()> {
+    let parent = directory
+        .parent()
+        .context("GNOME extension directory has no parent")?;
+    let stem = directory
+        .file_name()
+        .context("GNOME extension directory has no name")?
+        .to_string_lossy();
+    let journal = parent.join(format!(".{stem}.wayexpand-install-transaction"));
+    match fs::symlink_metadata(&journal) {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if !has_install_journal_temps(&journal)? {
+                return Ok(());
+            }
+        }
+        Err(error) => {
+            return Err(error).context("could not inspect GNOME extension install journal")
+        }
+    }
+    let lock_path = parent.join(format!(".{stem}.wayexpand-install-lock"));
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .mode(0o600)
+        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .open(&lock_path)
+        .with_context(|| {
+            format!(
+                "could not open GNOME extension install lock {}",
+                lock_path.display()
+            )
+        })?;
+    let metadata = lock.metadata()?;
+    if !metadata.is_file()
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.permissions().mode() & 0o077 != 0
+    {
+        bail!("GNOME extension install lock is not a private user-owned regular file");
+    }
+    // SAFETY: the open descriptor remains alive through recovery. The kernel
+    // releases the lock if this process exits during the operation.
+    if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) } != 0 {
+        return Err(std::io::Error::last_os_error())
+            .context("could not lock GNOME extension recovery");
+    }
+    cleanup_install_journal_temps(&journal)?;
+    recover_interrupted_extension_install(directory, &journal)
+}
+
+/// Keeps the previous complete directory until GNOME activation has been
+/// verified. Unless committed, dropping the transaction attempts to restore
+/// the prior directory atomically.
+#[derive(Debug)]
+struct ExtensionInstallTransaction {
+    directory: PathBuf,
+    previous: Option<PathBuf>,
+    stage_name: std::ffi::OsString,
+    journal: PathBuf,
+    expected_identity: String,
+    had_previous: bool,
+    _lock: fs::File,
+    committed: bool,
+}
+
+impl ExtensionInstallTransaction {
+    fn commit(&mut self) -> Result<()> {
+        write_install_journal(
+            &self.journal,
+            "committed",
+            &self.stage_name,
+            &self.expected_identity,
+            self.had_previous,
+        )?;
+        self.committed = true;
+        if let Some(previous) = self.previous.as_ref() {
+            if let Err(error) = fs::remove_dir_all(previous) {
+                eprintln!(
+                    "warning: could not remove previous GNOME extension version at {}: {error}",
+                    previous.display()
+                );
+                return Ok(());
+            }
+            self.previous = None;
+        }
+        if let Err(error) = remove_install_journal(&self.journal) {
+            eprintln!("warning: committed GNOME extension recovery journal remains: {error}");
+            return Ok(());
+        }
+        if let Some(parent) = self.directory.parent() {
+            if let Err(error) = fs::File::open(parent).and_then(|parent| parent.sync_all()) {
+                eprintln!("warning: could not confirm GNOME extension cleanup durability: {error}");
+            }
+        }
+        Ok(())
+    }
+
+    fn rollback(&mut self) -> Result<()> {
+        if self.committed {
+            return Ok(());
+        }
+        if let Some(previous) = self.previous.as_ref() {
+            exchange_directories(&self.directory, previous)
+                .context("could not restore the previous GNOME extension directory")?;
+            // The directory path now holds the old version. Mark the rollback
+            // complete before cleaning the failed new version so Drop cannot
+            // accidentally exchange the failed version back into place.
+            self.committed = true;
+            let failed_stage = self.previous.take().expect("previous path was present");
+            fs::remove_dir_all(failed_stage)
+                .context("could not remove the failed GNOME extension stage")?;
+        } else {
+            fs::remove_dir_all(&self.directory)
+                .context("could not remove the failed GNOME extension installation")?;
+            self.committed = true;
+        }
+        remove_install_journal(&self.journal)?;
+        if let Some(parent) = self.directory.parent() {
+            fs::File::open(parent)?.sync_all()?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for ExtensionInstallTransaction {
+    fn drop(&mut self) {
+        if !self.committed {
+            if let Err(error) = self.rollback() {
+                eprintln!(
+                    "error: GNOME extension rollback failed at {}: {error}",
+                    self.directory.display()
+                );
+            }
+        }
+    }
+}
+
+/// Stage and verify a complete extension before switching GNOME's directory.
+/// The old complete directory remains available until live activation has
+/// passed, and can be restored without exposing mixed-build files.
+fn install_extension_directory(
+    directory: &Path,
+    files: &[(&str, &str)],
+) -> Result<ExtensionInstallTransaction> {
+    install_extension_directory_with(directory, files, write_extension_file)
+}
+
+fn write_extension_file(path: &Path, contents: &str) -> Result<()> {
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o644)
+        .open(path)?;
+    file.write_all(contents.as_bytes())?;
+    file.sync_all()?;
+    file.set_permissions(fs::Permissions::from_mode(0o644))?;
+    Ok(())
+}
+
+fn install_extension_directory_with(
+    directory: &Path,
+    files: &[(&str, &str)],
+    mut write_file: impl FnMut(&Path, &str) -> Result<()>,
+) -> Result<ExtensionInstallTransaction> {
+    let parent = directory
+        .parent()
+        .context("GNOME extension directory has no parent")?;
+    fs::create_dir_all(parent)?;
+    let stem = directory
+        .file_name()
+        .context("GNOME extension directory has no name")?
+        .to_string_lossy();
+    let lock_path = parent.join(format!(".{stem}.wayexpand-install-lock"));
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .mode(0o600)
+        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .open(&lock_path)
+        .with_context(|| {
+            format!(
+                "could not open GNOME extension install lock {}",
+                lock_path.display()
+            )
+        })?;
+    let lock_metadata = lock.metadata()?;
+    if !lock_metadata.is_file()
+        || lock_metadata.uid() != unsafe { libc::geteuid() }
+        || lock_metadata.permissions().mode() & 0o077 != 0
+    {
+        bail!("GNOME extension install lock is not a private user-owned regular file");
+    }
+    // SAFETY: `lock` is an open regular file and remains alive for the entire
+    // install transaction. The kernel releases the lock if this process exits.
+    if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) } != 0 {
+        return Err(std::io::Error::last_os_error())
+            .context("could not lock GNOME extension install");
+    }
+    let journal = parent.join(format!(".{stem}.wayexpand-install-transaction"));
+    cleanup_install_journal_temps(&journal)?;
+    recover_interrupted_extension_install(directory, &journal)?;
+    let nonce = format!(
+        "{}.{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
+    let staged = parent.join(format!(".{stem}.{nonce}.staged"));
+    let had_previous = match fs::symlink_metadata(directory) {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => true,
+        Ok(_) => bail!("existing GNOME extension path is not a real directory"),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => {
+            return Err(error).context("could not inspect existing GNOME extension directory")
+        }
+    };
+    let expected_identity = wayexpand_backend_gnome_window::bundled_extension_build_identity();
+    let stage_name = staged
+        .file_name()
+        .context("staging directory has no name")?
+        .to_os_string();
+    write_install_journal(
+        &journal,
+        "prepared",
+        &stage_name,
+        &expected_identity,
+        had_previous,
+    )
+    .context("could not journal GNOME extension directory switch")?;
+    if let Err(error) = fs::create_dir(&staged) {
+        let _ = remove_install_journal(&journal);
+        return Err(error).context("could not create GNOME extension staging directory");
+    }
+    let stage_result = (|| -> Result<()> {
+        fs::set_permissions(&staged, fs::Permissions::from_mode(0o755))?;
+        for (name, contents) in files {
+            let target = staged.join(name);
+            write_file(&target, contents)?;
+        }
+        let identity = wayexpand_backend_gnome_window::bundled_extension_build_identity();
+        if !matches_bundled(&staged)
+            || disk_build_identity(&staged).as_deref() != Some(identity.as_str())
+            || !disk_metadata_matches_build(&staged, &identity)
+        {
+            bail!(
+                "staged GNOME extension files or build identity do not match this WayExpand build"
+            );
+        }
+        fs::File::open(&staged)?.sync_all()?;
+        Ok(())
+    })();
+    if let Err(error) = stage_result {
+        let _ = fs::remove_dir_all(&staged);
+        let _ = remove_install_journal(&journal);
+        return Err(error);
+    }
+    if had_previous {
+        // Linux rename exchange atomically swaps the complete loaded path.
+        // If the kernel/filesystem cannot provide it, fail without touching
+        // the installed version rather than falling back to a visible gap.
+        if let Err(error) = exchange_directories(&staged, directory) {
+            let _ = fs::remove_dir_all(&staged);
+            let _ = remove_install_journal(&journal);
+            return Err(error).context("filesystem cannot atomically switch the GNOME extension");
+        }
+    } else if let Err(error) = fs::rename(&staged, directory) {
+        let _ = fs::remove_dir_all(&staged);
+        let _ = remove_install_journal(&journal);
+        return Err(error).context("could not activate staged GNOME extension");
+    }
+    let mut transaction = ExtensionInstallTransaction {
+        directory: directory.to_path_buf(),
+        previous: had_previous.then_some(staged),
+        stage_name,
+        journal,
+        expected_identity,
+        had_previous,
+        _lock: lock,
+        committed: false,
+    };
+    if let Err(error) = fs::File::open(parent).and_then(|parent| parent.sync_all()) {
+        let rollback = transaction.rollback();
+        return Err(error).context(match rollback {
+            Ok(()) => "directory switch durability check failed; previous extension restored",
+            Err(_) => {
+                "directory switch durability check failed and previous extension rollback failed"
+            }
+        });
+    }
+    Ok(transaction)
+}
+
+fn write_install_journal(
+    journal: &std::path::Path,
+    phase: &str,
+    stage_name: &std::ffi::OsStr,
+    expected_identity: &str,
+    had_previous: bool,
+) -> Result<()> {
+    let stage_name = stage_name
+        .to_str()
+        .context("GNOME extension staging name is not valid UTF-8")?;
+    if !(phase == "prepared" || phase == "committed")
+        || !expected_identity
+            .strip_prefix("sha256:")
+            .is_some_and(|digest| {
+                digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+            })
+        || (stage_name != "-"
+            && (stage_name.contains('/')
+                || stage_name.contains('\\')
+                || !stage_name.ends_with(".staged")))
+    {
+        bail!("invalid GNOME extension transaction journal data");
+    }
+    let parent = journal.parent().unwrap_or_else(|| Path::new("."));
+    let temporary = parent.join(format!(
+        ".{}.{}.{}.tmp",
+        journal
+            .file_name()
+            .and_then(|name| name.to_str())
+            .context("GNOME extension journal name is not valid UTF-8")?,
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .open(&temporary)
+        .with_context(|| {
+            format!(
+                "could not create GNOME extension journal {}",
+                temporary.display()
+            )
+        })?;
+    let result = (|| -> Result<()> {
+        writeln!(
+            file,
+            "wayexpand-extension-install-v1\nphase={phase}\nhad_previous={}\nexpected_identity={expected_identity}\nstage={stage_name}",
+            if had_previous { "true" } else { "false" }
+        )?;
+        file.sync_all()?;
+        fs::rename(&temporary, journal)?;
+        fs::File::open(parent)?.sync_all()?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
+fn remove_install_journal(journal: &std::path::Path) -> Result<()> {
+    match fs::symlink_metadata(journal) {
+        Ok(metadata)
+            if metadata.file_type().is_file()
+                && metadata.uid() == unsafe { libc::geteuid() }
+                && metadata.permissions().mode() & 0o077 == 0 =>
+        {
+            fs::remove_file(journal)?;
+            Ok(())
+        }
+        Ok(_) => {
+            bail!("GNOME extension transaction journal is not a private user-owned regular file")
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).context("could not inspect GNOME extension transaction journal"),
+    }
+}
+
+fn install_journal_temp_paths(journal: &std::path::Path) -> Result<Vec<PathBuf>> {
+    let parent = journal.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = journal
+        .file_name()
+        .and_then(|name| name.to_str())
+        .context("GNOME extension journal name is not valid UTF-8")?;
+    let prefix = format!(".{file_name}.");
+    let entries = match fs::read_dir(parent) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => {
+            return Err(error).context("could not inspect GNOME extension journal directory")
+        }
+    };
+    let mut paths = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with(&prefix) && name.ends_with(".tmp") {
+            paths.push(entry.path());
+        }
+    }
+    Ok(paths)
+}
+
+fn has_install_journal_temps(journal: &std::path::Path) -> Result<bool> {
+    Ok(!install_journal_temp_paths(journal)?.is_empty())
+}
+
+fn cleanup_install_journal_temps(journal: &std::path::Path) -> Result<()> {
+    for path in install_journal_temp_paths(journal)? {
+        let metadata = fs::symlink_metadata(&path)?;
+        if !metadata.file_type().is_file()
+            || metadata.uid() != unsafe { libc::geteuid() }
+            || metadata.permissions().mode() & 0o077 != 0
+        {
+            bail!("GNOME extension journal temporary file is not private and user-owned");
+        }
+        fs::remove_file(path)
+            .context("could not remove interrupted GNOME extension journal write")?;
+    }
+    Ok(())
+}
+
+struct InstallJournal {
+    phase: String,
+    had_previous: bool,
+    expected_identity: String,
+    stage_name: String,
+}
+
+fn read_install_journal(journal: &std::path::Path) -> Result<Option<InstallJournal>> {
+    let metadata = match fs::symlink_metadata(journal) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error).context("could not inspect GNOME extension install journal")
+        }
+    };
+    if !metadata.file_type().is_file()
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.permissions().mode() & 0o077 != 0
+    {
+        bail!("GNOME extension install journal is not a private user-owned regular file");
+    }
+    let contents = fs::read_to_string(journal)?;
+    let mut lines = contents.lines();
+    if lines.next() != Some("wayexpand-extension-install-v1") {
+        bail!("GNOME extension install journal has an unsupported version");
+    }
+    let phase = lines
+        .next()
+        .and_then(|line| line.strip_prefix("phase="))
+        .context("GNOME extension install journal is missing its phase")?
+        .to_owned();
+    let had_previous = match lines
+        .next()
+        .and_then(|line| line.strip_prefix("had_previous="))
+    {
+        Some("true") => true,
+        Some("false") => false,
+        _ => bail!("GNOME extension install journal has an invalid prior-state flag"),
+    };
+    let expected_identity = lines
+        .next()
+        .and_then(|line| line.strip_prefix("expected_identity="))
+        .filter(|value| {
+            value.strip_prefix("sha256:").is_some_and(|digest| {
+                digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+            })
+        })
+        .context("GNOME extension install journal has an invalid build identity")?
+        .to_owned();
+    let stage_name = lines
+        .next()
+        .and_then(|line| line.strip_prefix("stage="))
+        .filter(|value| {
+            *value == "-"
+                || (!value.contains('/') && !value.contains('\\') && value.ends_with(".staged"))
+        })
+        .context("GNOME extension install journal has an invalid stage name")?
+        .to_owned();
+    if lines.next().is_some() || !(phase == "prepared" || phase == "committed") || stage_name == "-"
+    {
+        bail!("GNOME extension install journal is malformed");
+    }
+    Ok(Some(InstallJournal {
+        phase,
+        had_previous,
+        expected_identity,
+        stage_name,
+    }))
+}
+
+/// Recover the last directory switch before starting another install. A
+/// prepared transaction rolls back to the pre-install directory state; a
+/// committed transaction keeps the verified new copy and removes its backup.
+/// The caller holds the per-extension flock, so another installer cannot
+/// race this recovery with a live stage directory.
+fn recover_interrupted_extension_install(
+    directory: &std::path::Path,
+    journal_path: &std::path::Path,
+) -> Result<()> {
+    let Some(journal) = read_install_journal(journal_path)? else {
+        return Ok(());
+    };
+    let parent = directory.parent().unwrap_or_else(|| Path::new("."));
+    let stage = if journal.stage_name == "-" {
+        None
+    } else {
+        let directory_name = directory
+            .file_name()
+            .and_then(|name| name.to_str())
+            .context("GNOME extension directory name is not valid UTF-8")?;
+        if !journal
+            .stage_name
+            .starts_with(&format!(".{directory_name}."))
+        {
+            bail!("GNOME extension journal points outside its staging-name namespace");
+        }
+        Some(parent.join(&journal.stage_name))
+    };
+    let target_matches = disk_build_identity(directory).as_deref()
+        == Some(journal.expected_identity.as_str())
+        && disk_metadata_matches_build(directory, &journal.expected_identity);
+    let stage_matches = stage.as_deref().is_some_and(|path| {
+        disk_build_identity(path).as_deref() == Some(journal.expected_identity.as_str())
+            && disk_metadata_matches_build(path, &journal.expected_identity)
+    });
+
+    if journal.phase == "committed" {
+        if let Some(stage) = stage {
+            remove_stage_directory(&stage)?;
+        }
+    } else if journal.had_previous {
+        if let Some(stage) = stage {
+            let stage_exists = fs::symlink_metadata(&stage).is_ok();
+            let target_exists = fs::symlink_metadata(directory).is_ok();
+            if stage_exists && !target_exists {
+                fs::rename(&stage, directory)
+                    .context("could not restore the previous GNOME extension after interruption")?;
+            } else if stage_exists && target_matches && !stage_matches {
+                exchange_directories(directory, &stage)
+                    .context("could not roll back the interrupted GNOME extension switch")?;
+                remove_stage_directory(&stage)?;
+            } else if stage_exists {
+                // The atomic switch had not happened, or both copies have the
+                // same build identity. Keep the installed target and discard
+                // only the incomplete/new staged copy.
+                remove_stage_directory(&stage)?;
+            }
+        }
+    } else {
+        if let Some(stage) = stage {
+            if fs::symlink_metadata(&stage).is_ok() {
+                remove_stage_directory(&stage)?;
+            } else if target_matches {
+                remove_stage_directory(directory)?;
+            }
+        }
+    }
+
+    remove_install_journal(journal_path)?;
+    fs::File::open(parent)?.sync_all()?;
+    Ok(())
+}
+
+fn remove_stage_directory(path: &std::path::Path) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+            fs::remove_dir_all(path).with_context(|| {
+                format!("could not remove GNOME extension stage {}", path.display())
+            })?;
+            Ok(())
+        }
+        Ok(_) => bail!(
+            "GNOME extension transaction path is not a real directory: {}",
+            path.display()
+        ),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).context("could not inspect GNOME extension transaction directory"),
+    }
+}
+
+fn exchange_directories(left: &Path, right: &Path) -> std::io::Result<()> {
+    let left_c = std::ffi::CString::new(left.as_os_str().as_bytes())
+        .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    let right_c = std::ffi::CString::new(right.as_os_str().as_bytes())
+        .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    // SAFETY: both C strings are NUL-terminated sibling paths under a
+    // user-owned directory and remain alive during the atomic exchange.
+    let exchanged = unsafe {
+        libc::renameat2(
+            libc::AT_FDCWD,
+            left_c.as_ptr(),
+            libc::AT_FDCWD,
+            right_c.as_ptr(),
+            libc::RENAME_EXCHANGE,
+        )
+    };
+    if exchanged == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ExtensionSettings {
+    enabled: Vec<String>,
+    disabled: Vec<String>,
+}
+
+fn write_extension_setting(key: &str, values: &[String]) -> Result<()> {
+    let status = run_setup_command(
+        "gsettings",
+        &["set", "org.gnome.shell", key, &format_string_list(values)],
+    )?;
+    if !status.success() {
+        bail!("gsettings rejected org.gnome.shell {key}");
+    }
+    Ok(())
+}
+
+/// Keep the GNOME enabled/disabled lists recoverable while extension
+/// activation is verified. A failed readiness check restores the exact
+/// pre-setup lists along with the prior extension directory.
+#[derive(Debug)]
+struct ExtensionSettingsTransaction {
+    original: ExtensionSettings,
+    committed: bool,
+    changed_enabled: bool,
+    changed_disabled: bool,
+}
+
+impl ExtensionSettingsTransaction {
+    fn capture() -> Result<Self> {
+        let read = |key: &str| -> Result<Vec<String>> {
+            let output = command_output("gsettings", &["get", "org.gnome.shell", key])
+                .with_context(|| format!("could not read GNOME {key}"))?;
+            parse_string_list(&output).with_context(|| format!("could not parse GNOME {key}"))
+        };
+        Ok(Self {
+            original: ExtensionSettings {
+                enabled: read("enabled-extensions")?,
+                disabled: read("disabled-extensions")?,
+            },
+            committed: false,
+            changed_enabled: false,
+            changed_disabled: false,
+        })
+    }
+
+    fn enable_wayexpand(&mut self) -> Result<()> {
+        let mut enabled = self.original.enabled.clone();
+        let mut disabled = self.original.disabled.clone();
+        if !enabled.iter().any(|uuid| uuid == EXTENSION_UUID) {
+            enabled.push(EXTENSION_UUID.to_owned());
+            self.changed_enabled = true;
+            write_extension_setting("enabled-extensions", &enabled)?;
+        }
+        if disabled.iter().any(|uuid| uuid == EXTENSION_UUID) {
+            disabled.retain(|uuid| uuid != EXTENSION_UUID);
+            self.changed_disabled = true;
+            write_extension_setting("disabled-extensions", &disabled)?;
+        }
+        Ok(())
+    }
+
+    fn commit(&mut self) {
+        self.committed = true;
+    }
+
+    fn rollback(&mut self) -> Result<()> {
+        if self.committed {
+            return Ok(());
+        }
+        let mut errors = Vec::new();
+        if self.changed_enabled {
+            if let Err(error) =
+                write_extension_setting("enabled-extensions", &self.original.enabled)
+            {
+                errors.push(format!("enabled-extensions: {error}"));
+            }
+        }
+        if self.changed_disabled {
+            if let Err(error) =
+                write_extension_setting("disabled-extensions", &self.original.disabled)
+            {
+                errors.push(format!("disabled-extensions: {error}"));
+            }
+        }
+        if !errors.is_empty() {
+            bail!("could not restore {}", errors.join("; "));
+        }
+        self.committed = true;
+        Ok(())
+    }
+}
+
+impl Drop for ExtensionSettingsTransaction {
+    fn drop(&mut self) {
+        if !self.committed {
+            if let Err(error) = self.rollback() {
+                eprintln!("error: could not restore GNOME extension enablement settings: {error}");
+            }
+        }
+    }
 }
 
 /// Add the extension to GNOME's enabled list (it persists across logins)
 /// and take it off the disabled list.
-fn persist_enabled() -> bool {
-    let read = |key: &str| {
-        command_output("gsettings", &["get", "org.gnome.shell", key])
-            .and_then(|output| parse_string_list(&output))
-    };
-    let write = |key: &str, values: &[String]| {
-        run_setup_command(
-            "gsettings",
-            &["set", "org.gnome.shell", key, &format_string_list(values)],
-        )
-        .is_ok_and(|status| status.success())
-    };
-    let Some(mut enabled) = read("enabled-extensions") else {
-        return false;
-    };
-    let mut ok = true;
-    if !enabled.iter().any(|uuid| uuid == EXTENSION_UUID) {
-        enabled.push(EXTENSION_UUID.to_owned());
-        ok &= write("enabled-extensions", &enabled);
-    }
-    if let Some(mut disabled) = read("disabled-extensions") {
-        if disabled.iter().any(|uuid| uuid == EXTENSION_UUID) {
-            disabled.retain(|uuid| uuid != EXTENSION_UUID);
-            ok &= write("disabled-extensions", &disabled);
-        }
-    }
-    ok
+fn persist_enabled() -> Result<ExtensionSettingsTransaction> {
+    let mut transaction = ExtensionSettingsTransaction::capture()?;
+    transaction.enable_wayexpand()?;
+    Ok(transaction)
 }
 
 /// A plain-language line and an optional fix for the extension's state.
 pub(crate) fn describe_state(
     state: &ExtensionState,
-    user_extensions_enabled: bool,
+    user_extensions_enabled: Option<bool>,
 ) -> (bool, String, Option<String>) {
-    if !user_extensions_enabled {
+    if user_extensions_enabled == Some(false) {
         return (
             false,
             "GNOME has user extensions switched off, so the WayExpand window tracker cannot run".into(),
@@ -221,7 +962,7 @@ pub(crate) fn describe_state(
         ExtensionState::Inactive => (false, "the WayExpand GNOME Shell extension is installed but turned off".into(), Some("run `wayexpand setup`, or `gnome-extensions enable wayexpand-window-tracker@cyberducttape.github.io`".into())),
         ExtensionState::Error(error) => (false, format!("GNOME Shell could not load the WayExpand extension: {}", if error.is_empty() { "no error text" } else { error }), Some("reinstall WayExpand and run `wayexpand setup`; see `journalctl --user -b | grep -i wayexpand` for details".into())),
         ExtensionState::OutOfDate => (false, "this GNOME Shell version is not supported by the WayExpand extension (GNOME 45 or newer is required)".into(), None),
-        ExtensionState::Unknown => (false, "GNOME Shell has not loaded the WayExpand extension".into(), Some("run `wayexpand setup`; a newly installed extension starts after you log out and back in once".into())),
+        ExtensionState::Unknown => (false, "GNOME Shell has not reported the WayExpand extension; setup must confirm whether it is a newly installed extension or an unavailable extension state".into(), Some("run `wayexpand doctor --gnome --json` to inspect the Shell session and extension state".into())),
         ExtensionState::Other(number) => (false, format!("the WayExpand GNOME Shell extension is in state {number}"), Some("check again in a moment".into())),
     }
 }
@@ -248,63 +989,182 @@ fn verify_tracker_protocol(
     }
 }
 
-fn probe_if_active(state: &ExtensionState) -> Result<(), String> {
+fn probe_if_active(state: &ExtensionState) -> Result<(), GnomeWindowError> {
     if state == &ExtensionState::Active {
-        GnomeWindowTracker::probe().map_err(|error| error.to_string())
+        GnomeWindowTracker::probe()
     } else {
         Ok(())
     }
 }
 
-/// Setup step on GNOME: install the extension if needed and enable it.
-/// App filters are optional, but IBus setup consumes this readiness result
-/// because its session snapshot depends on the live Shell bridge.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum SetupReadiness {
-    Ready,
-    SessionRestartRequired,
+pub(crate) enum SetupOutcome {
+    Ready(GnomeExtensionTransaction),
+    SessionRestartRequired(GnomeExtensionTransaction),
     Unavailable,
 }
 
-pub(crate) fn setup_gnome_window_tracker() -> SetupReadiness {
+/// Holds extension files and GNOME enablement settings until the outer IBus
+/// setup transaction commits or rolls them back.
+#[derive(Debug)]
+pub(crate) struct GnomeExtensionTransaction {
+    install: Option<ExtensionInstallTransaction>,
+    settings: ExtensionSettingsTransaction,
+}
+
+impl GnomeExtensionTransaction {
+    pub(crate) fn commit(&mut self) -> Result<()> {
+        if let Some(install) = self.install.as_mut() {
+            install.commit()?;
+        }
+        self.settings.commit();
+        Ok(())
+    }
+
+    pub(crate) fn rollback(&mut self) -> Result<()> {
+        let mut errors = Vec::new();
+        if let Err(error) = self.settings.rollback() {
+            errors.push(format!("GNOME extension enablement settings: {error}"));
+        }
+        if let Some(install) = self.install.as_mut() {
+            if let Err(error) = install.rollback() {
+                errors.push(format!("GNOME extension directory: {error}"));
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            bail!("{}", errors.join("; "))
+        }
+    }
+}
+
+fn stop_failed_activation() {
+    match disable_extension() {
+        Ok(true) => println!("  stopped the extension activation attempted during setup"),
+        Ok(false) => println!("  GNOME Shell did not confirm stopping the failed extension activation"),
+        Err(error) => println!("  could not stop the failed extension activation ({error}); review `wayexpand doctor --gnome`"),
+    }
+}
+
+pub(crate) fn setup_gnome_window_tracker() -> SetupOutcome {
     println!("GNOME window tracking (for snippets limited to certain apps):");
-    let directory = match install_user_copy() {
-        Ok(directory) => directory,
+    if let Some(directory) = user_extension_dir() {
+        if let Err(error) = recover_user_extension_install(&directory) {
+            println!("  could not recover an interrupted GNOME extension installation: {error}");
+            println!("  Fix: preserve the extension directory and run `wayexpand doctor --gnome --json` before retrying setup");
+            return SetupOutcome::Unavailable;
+        }
+    }
+    let initial_status = match extension_status() {
+        Ok(status) => status,
+        Err(error) => {
+            let readiness = if session_bus_unavailable(&error) {
+                ExtensionReadiness::SessionBusUnavailable
+            } else {
+                ExtensionReadiness::Unknown
+            };
+            println!("  readiness: {} — {error}", readiness.label());
+            println!("  Fix: run `wayexpand doctor --gnome --json` to inspect the GNOME Shell session bus and extension state; setup did not change extension files or settings");
+            return SetupOutcome::Unavailable;
+        }
+    };
+    let (directory, install_transaction) = match install_user_copy() {
+        Ok(installed) => installed,
         Err(error) => {
             println!("  could not install the WayExpand GNOME Shell extension: {error}");
-            return SetupReadiness::Unavailable;
+            return SetupOutcome::Unavailable;
         }
     };
     println!("  extension: {}", directory.display());
-    let enabled_persisted = persist_enabled();
-    if !enabled_persisted {
-        println!("  could not add it to GNOME's enabled extensions (gsettings); run `gnome-extensions enable {EXTENSION_UUID}` after your next login");
-    }
+    let settings_transaction = match persist_enabled() {
+        Ok(transaction) => transaction,
+        Err(error) => {
+            println!("  could not prepare GNOME extension activation: {error}");
+            return SetupOutcome::Unavailable;
+        }
+    };
     let status = match extension_status() {
         Ok(status) => status,
         Err(error) => {
-            println!("  GNOME Shell readiness could not be queried ({error})");
-            return if enabled_persisted && matches_bundled(&directory) {
-                println!("  prepared extension is not loaded in this session; a logout/login is required before IBus setup can continue");
-                SetupReadiness::SessionRestartRequired
+            let readiness = if session_bus_unavailable(&error) {
+                ExtensionReadiness::SessionBusUnavailable
             } else {
-                println!("  the extension enablement or installed build could not be verified; run `wayexpand doctor --gnome`");
-                SetupReadiness::Unavailable
+                ExtensionReadiness::Unknown
             };
+            println!(
+                "  readiness: {} — {error}; rolling back the extension update",
+                readiness.label()
+            );
+            println!("  Fix: run `wayexpand doctor --gnome --json` for the targeted session-bus and extension-state diagnosis");
+            return SetupOutcome::Unavailable;
         }
     };
-    let status = if status.user_extensions_enabled && status.state != ExtensionState::Active {
+    let mut activation_attempted = false;
+    let status = if status.user_extensions_enabled == Some(true)
+        && status.state != ExtensionState::Active
+    {
         // Shell enables extensions it already knows at once; one installed
         // after this login is refused until the next login.
-        let _ = enable_extension();
-        extension_status().unwrap_or(status)
+        activation_attempted = true;
+        match enable_extension() {
+            Ok(true) => {}
+            Ok(false) => {
+                println!("  readiness: not-loaded-this-session — GNOME Shell did not accept activation of the newly installed extension");
+                println!("  Fix: log out of GNOME and log back in only after confirming the installed extension in `wayexpand doctor --gnome --json`");
+                if initial_status.state != ExtensionState::Active {
+                    stop_failed_activation();
+                }
+                return SetupOutcome::Unavailable;
+            }
+            Err(error) => {
+                let readiness = if session_bus_unavailable(&error) {
+                    ExtensionReadiness::SessionBusUnavailable
+                } else {
+                    ExtensionReadiness::ExtensionFailed
+                };
+                println!("  readiness: {} — GNOME Shell could not activate the extension ({error}); rolling back the update", readiness.label());
+                println!("  Fix: run `wayexpand doctor --gnome --json` to inspect the session bus, extension state, and tracker protocol");
+                if initial_status.state != ExtensionState::Active {
+                    stop_failed_activation();
+                }
+                return SetupOutcome::Unavailable;
+            }
+        }
+        match extension_status() {
+            Ok(status) => status,
+            Err(error) => {
+                let readiness = if session_bus_unavailable(&error) {
+                    ExtensionReadiness::SessionBusUnavailable
+                } else {
+                    ExtensionReadiness::Unknown
+                };
+                println!("  readiness: {} — activation was requested but GNOME Shell state could not be verified ({error}); rolling back the update", readiness.label());
+                println!("  Fix: run `wayexpand doctor --gnome --json` to inspect the GNOME Shell session and extension protocol");
+                if initial_status.state != ExtensionState::Active {
+                    stop_failed_activation();
+                }
+                return SetupOutcome::Unavailable;
+            }
+        }
     } else {
         status
     };
     let readiness = describe_state(&status.state, status.user_extensions_enabled);
     let protocol = probe_if_active(&status.state);
-    let (mut ok, mut message, mut fix) =
-        verify_tracker_protocol(&status.state, readiness, protocol);
+    let protocol_failure = protocol.as_ref().err().map(|error| {
+        if session_bus_unavailable(error) {
+            ExtensionReadiness::SessionBusUnavailable
+        } else {
+            ExtensionReadiness::ExtensionFailed
+        }
+    });
+    let (mut ok, mut message, mut fix) = verify_tracker_protocol(
+        &status.state,
+        readiness,
+        protocol.map_err(|error| error.to_string()),
+    );
+    let mut session_restart_required = false;
+    let mut build_readiness_failure = None;
     let bundled_identity = wayexpand_backend_gnome_window::bundled_extension_build_identity();
     let disk_identity = disk_build_identity(&directory);
     let metadata_matches = disk_identity
@@ -325,9 +1185,23 @@ pub(crate) fn setup_gnome_window_tracker() -> SetupReadiness {
                 .as_deref(),
         );
         if !assessment.ready {
-            ok = false;
             message = assessment.detail.clone();
             fix = assessment.fix.clone();
+            build_readiness_failure = Some(match assessment.state {
+                "unknown" | "unavailable" => ExtensionReadiness::Unknown,
+                _ => ExtensionReadiness::ExtensionFailed,
+            });
+            if assessment.state == "logout-required"
+                && metadata_matches
+                && disk_identity.as_deref() == Some(bundled_identity.as_str())
+            {
+                // The installed package is complete and GNOME is running the
+                // previous build. Keep the new directory for next login,
+                // while refusing to call this session operational yet.
+                session_restart_required = true;
+            } else {
+                ok = false;
+            }
         }
         println!(
             "  extension build: {} (disk {}, live {})",
@@ -336,6 +1210,7 @@ pub(crate) fn setup_gnome_window_tracker() -> SetupReadiness {
             live_identity.unwrap_or("unverified")
         );
     } else if status.state == ExtensionState::Unknown
+        && status.user_extensions_enabled == Some(true)
         && metadata_matches
         && disk_identity.as_deref() == Some(bundled_identity.as_str())
     {
@@ -356,27 +1231,50 @@ pub(crate) fn setup_gnome_window_tracker() -> SetupReadiness {
                 println!("  ✓ GNOME live input-source control: Shell reports {source}");
             }
             Err(error) => println!(
-                "  ! GNOME live input-source control is unavailable ({error}); a newly updated extension may require logging out and back in"
+                "  ! GNOME live input-source control is unavailable ({error}); run `wayexpand doctor --gnome --json` to distinguish a bus failure from an extension-protocol issue"
             ),
         }
     }
-    if status.state == ExtensionState::Unknown && status.user_extensions_enabled {
-        println!("  GNOME Shell on Wayland loads newly installed extensions at login: log out and back in once, and app filters start working (it stays enabled after that).");
+    let not_loaded_this_session = status.state == ExtensionState::Unknown
+        && status.user_extensions_enabled == Some(true)
+        && metadata_matches
+        && disk_identity.as_deref() == Some(bundled_identity.as_str());
+    if not_loaded_this_session {
+        println!("  readiness: not-loaded-this-session — GNOME answered and the installed extension matches this build, but Shell has not loaded it in this session");
+        println!("  Fix: log out of GNOME and log back in once, then rerun `wayexpand doctor --gnome --json`");
     } else if let Some(fix) = fix {
         println!("  Fix: {fix}");
     }
-    if status.state == ExtensionState::Unknown
-        && status.user_extensions_enabled
-        && enabled_persisted
+    if (session_restart_required || not_loaded_this_session)
         && metadata_matches
         && disk_identity.as_deref() == Some(bundled_identity.as_str())
     {
-        return SetupReadiness::SessionRestartRequired;
+        return SetupOutcome::SessionRestartRequired(GnomeExtensionTransaction {
+            install: install_transaction,
+            settings: settings_transaction,
+        });
     }
     if !ok {
-        return SetupReadiness::Unavailable;
+        if activation_attempted && initial_status.state != ExtensionState::Active {
+            stop_failed_activation();
+        }
+        let readiness = build_readiness_failure.unwrap_or_else(|| {
+            extension_readiness(
+                Some(&status),
+                None,
+                disk_identity.as_deref() == Some(bundled_identity.as_str()),
+                metadata_matches,
+                protocol_failure,
+                session_restart_required,
+            )
+        });
+        println!("  readiness: {} — {message}", readiness.label());
+        return SetupOutcome::Unavailable;
     }
-    SetupReadiness::Ready
+    SetupOutcome::Ready(GnomeExtensionTransaction {
+        install: install_transaction,
+        settings: settings_transaction,
+    })
 }
 
 /// Doctor's view of the extension, for human and JSON output. `None` outside
@@ -395,8 +1293,10 @@ pub(crate) fn doctor_report() -> Option<serde_json::Value> {
         .as_deref()
         .zip(disk_identity.as_deref())
         .is_some_and(|(directory, identity)| disk_metadata_matches_build(directory, identity));
-    let (state, user_extensions_enabled) = match extension_status() {
-        Ok(status) => (Some(status.state), status.user_extensions_enabled),
+    let status_result = extension_status();
+    let status_error = status_result.as_ref().err();
+    let (state, user_extensions_enabled) = match &status_result {
+        Ok(status) => (Some(status.state.clone()), status.user_extensions_enabled),
         Err(_) => {
             // Some headless and restarted GNOME sessions temporarily fail
             // the Extensions manager query while the extension's own tracker
@@ -405,30 +1305,41 @@ pub(crate) fn doctor_report() -> Option<serde_json::Value> {
             // that the extension instance is running. The later Ping and
             // build-identity checks still verify its protocol and version.
             if wayexpand_backend_gnome_window::extension_build_identity().is_ok() {
-                (Some(ExtensionState::Active), true)
+                (Some(ExtensionState::Active), Some(true))
             } else {
-                (None, true)
+                (None, None)
             }
         }
     };
-    let (protocol_state, protocol_detail) = match &state {
+    let (protocol_state, protocol_detail, protocol_failure) = match &state {
         Some(ExtensionState::Active) => match probe_if_active(&ExtensionState::Active) {
             Ok(()) => (
                 "pass",
                 "the tracker D-Bus protocol and live build identity responded".to_owned(),
+                None,
             ),
-            Err(error) => (
-                "fail",
-                format!("the tracker D-Bus handshake failed: {error}"),
-            ),
+            Err(error) => {
+                let readiness = if session_bus_unavailable(&error) {
+                    ExtensionReadiness::SessionBusUnavailable
+                } else {
+                    ExtensionReadiness::ExtensionFailed
+                };
+                (
+                    "fail",
+                    format!("the tracker D-Bus handshake failed: {error}"),
+                    Some(readiness),
+                )
+            }
         },
         Some(_) => (
             "unknown",
             "the extension is not loaded, so its D-Bus handshake cannot be tested".to_owned(),
+            None,
         ),
         None => (
             "unknown",
             "GNOME Shell did not answer on the session bus".to_owned(),
+            None,
         ),
     };
     let (mut ok, mut message, mut fix) = match &state {
@@ -443,7 +1354,16 @@ pub(crate) fn doctor_report() -> Option<serde_json::Value> {
         }
         None => (
             false,
-            "GNOME Shell is not answering on the session bus".into(),
+            status_error.map_or_else(
+                || "GNOME Shell extension state is unknown".to_owned(),
+                |error| {
+                    if session_bus_unavailable(error) {
+                        format!("GNOME Shell session bus is unavailable: {error}")
+                    } else {
+                        format!("GNOME Shell extension status query failed; cause is unclassified: {error}")
+                    }
+                },
+            ),
             None,
         ),
     };
@@ -486,6 +1406,35 @@ pub(crate) fn doctor_report() -> Option<serde_json::Value> {
             detail: "GNOME Shell has not confirmed a running extension instance".into(),
             fix: None,
         }
+    };
+    let readiness = if state == Some(ExtensionState::Active)
+        && protocol_failure == Some(ExtensionReadiness::SessionBusUnavailable)
+    {
+        ExtensionReadiness::SessionBusUnavailable
+    } else if state == Some(ExtensionState::Active)
+        && protocol_state == "pass"
+        && build.state == "current"
+    {
+        ExtensionReadiness::Ready
+    } else if state == Some(ExtensionState::Active)
+        && matches!(build.state, "unknown" | "unavailable" | "not-running")
+    {
+        ExtensionReadiness::Unknown
+    } else if state == Some(ExtensionState::Active)
+        && matches!(build.state, "invalid-on-disk" | "update-required")
+    {
+        ExtensionReadiness::ExtensionFailed
+    } else {
+        extension_readiness(
+            status_result.as_ref().ok(),
+            status_error,
+            current,
+            metadata_matches,
+            protocol_failure,
+            build.state == "logout-required"
+                && live_identity.is_some()
+                && live_identity != Some(bundled_identity.as_str()),
+        )
     };
     if state == Some(ExtensionState::Active) && !build.ready {
         ok = false;
@@ -532,6 +1481,7 @@ pub(crate) fn doctor_report() -> Option<serde_json::Value> {
             "fix": build.fix,
         },
         "state": state_label,
+        "readiness": readiness.label(),
         "protocol_handshake": {
             "state": protocol_state,
             "detail": protocol_detail,
@@ -558,22 +1508,22 @@ mod tests {
             ExtensionState::Unknown,
             ExtensionState::Other(6),
         ] {
-            let (ok, message, _) = describe_state(&state, true);
+            let (ok, message, _) = describe_state(&state, Some(true));
             assert_eq!(ok, state == ExtensionState::Active, "{state:?}");
             assert!(!message.is_empty());
         }
-        let (ok, _, fix) = describe_state(&ExtensionState::Active, false);
+        let (ok, _, fix) = describe_state(&ExtensionState::Active, Some(false));
         assert!(!ok);
         assert!(fix.unwrap().contains("disable-user-extensions false"));
-        let (_, _, fix) = describe_state(&ExtensionState::Unknown, true);
-        assert!(fix.unwrap().contains("log out"));
+        let (_, _, fix) = describe_state(&ExtensionState::Unknown, Some(true));
+        assert!(fix.unwrap().contains("doctor --gnome --json"));
     }
 
     #[test]
     fn active_extension_is_not_ready_when_tracker_protocol_probe_fails() {
         let result = verify_tracker_protocol(
             &ExtensionState::Active,
-            describe_state(&ExtensionState::Active, true),
+            describe_state(&ExtensionState::Active, Some(true)),
             Err("protocol version mismatch".into()),
         );
         assert!(!result.0);
@@ -582,7 +1532,7 @@ mod tests {
 
         let ready = verify_tracker_protocol(
             &ExtensionState::Active,
-            describe_state(&ExtensionState::Active, true),
+            describe_state(&ExtensionState::Active, Some(true)),
             Ok(()),
         );
         assert!(ready.0);
@@ -612,7 +1562,8 @@ mod tests {
         let unverified =
             assess_build_identity(Some(expected), true, expected, None, Some("no property"));
         assert!(!unverified.ready);
-        assert_eq!(unverified.state, "logout-required");
+        assert_eq!(unverified.state, "unknown");
+        assert!(unverified.fix.unwrap().contains("doctor --gnome --json"));
 
         let outdated = assess_build_identity(
             Some("sha256:old-disk"),
@@ -623,6 +1574,96 @@ mod tests {
         );
         assert_eq!(outdated.state, "update-required");
         assert!(outdated.fix.unwrap().contains("wayexpand setup"));
+    }
+
+    #[test]
+    fn extension_readiness_keeps_bus_failure_load_failure_and_unknown_distinct() {
+        use wayexpand_backend_gnome_window::ExtensionStatus;
+
+        let status = |state, user_extensions_enabled| ExtensionStatus {
+            state,
+            user_extensions_enabled: Some(user_extensions_enabled),
+        };
+        assert_eq!(
+            extension_readiness(
+                None,
+                Some(&GnomeWindowError::ConnectionTimedOut),
+                false,
+                false,
+                None,
+                false,
+            ),
+            ExtensionReadiness::SessionBusUnavailable
+        );
+        assert_eq!(
+            extension_readiness(
+                None,
+                Some(&GnomeWindowError::ShellNotRunning),
+                true,
+                true,
+                None,
+                false,
+            ),
+            ExtensionReadiness::Unknown
+        );
+        assert_eq!(
+            extension_readiness(
+                Some(&status(ExtensionState::Unknown, true)),
+                None,
+                true,
+                true,
+                None,
+                false,
+            ),
+            ExtensionReadiness::NotLoadedThisSession
+        );
+        assert_eq!(
+            extension_readiness(
+                Some(&ExtensionStatus {
+                    state: ExtensionState::Unknown,
+                    user_extensions_enabled: None,
+                }),
+                None,
+                true,
+                true,
+                None,
+                false,
+            ),
+            ExtensionReadiness::Unknown
+        );
+        assert_eq!(
+            extension_readiness(
+                Some(&status(ExtensionState::Unknown, true)),
+                None,
+                false,
+                false,
+                None,
+                false,
+            ),
+            ExtensionReadiness::Unknown
+        );
+        assert_eq!(
+            extension_readiness(
+                Some(&status(ExtensionState::Error("boom".into()), true)),
+                None,
+                true,
+                true,
+                None,
+                false,
+            ),
+            ExtensionReadiness::ExtensionFailed
+        );
+        assert_eq!(
+            extension_readiness(
+                Some(&status(ExtensionState::Active, true)),
+                None,
+                true,
+                true,
+                Some(ExtensionReadiness::ExtensionFailed),
+                false,
+            ),
+            ExtensionReadiness::ExtensionFailed
+        );
     }
 
     #[test]
@@ -661,6 +1702,298 @@ mod tests {
         assert!(matches_bundled(&directory));
         fs::write(directory.join("extension.js"), "// stale").unwrap();
         assert!(!matches_bundled(&directory));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    fn assert_no_extension_transaction_artifacts(root: &std::path::Path) {
+        let allowed_lock = format!(".{EXTENSION_UUID}.wayexpand-install-lock");
+        let unexpected = fs::read_dir(root)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .filter(|name| {
+                name != EXTENSION_UUID && name.to_string_lossy().as_ref() != allowed_lock
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            unexpected.is_empty(),
+            "extension transaction artifacts remain: {unexpected:?}"
+        );
+    }
+
+    #[test]
+    fn extension_update_stages_a_complete_directory_before_switching() {
+        let root =
+            std::env::temp_dir().join(format!("wayexpand-gnome-ext-atomic-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let directory = root.join(EXTENSION_UUID);
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("old-file"), "old version").unwrap();
+
+        let mut transaction = install_extension_directory(&directory, &extension_files()).unwrap();
+
+        assert!(matches_bundled(&directory));
+        assert!(!directory.join("old-file").exists());
+        transaction.commit().unwrap();
+        assert_no_extension_transaction_artifacts(&root);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn next_install_recovers_a_prepared_directory_switch_after_process_exit() {
+        let root = std::env::temp_dir().join(format!(
+            "wayexpand-gnome-ext-crash-recovery-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let directory = root.join(EXTENSION_UUID);
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("old-file"), "old complete version").unwrap();
+
+        let mut transaction = install_extension_directory(&directory, &extension_files()).unwrap();
+        let journal = transaction.journal.clone();
+        let stage_name = transaction.stage_name.clone();
+        // Model a process exit after the atomic exchange: the new directory is
+        // active, the previous directory is at the staged path, and the
+        // durable journal still says the setup transaction was uncommitted.
+        transaction.committed = true;
+        drop(transaction);
+
+        recover_interrupted_extension_install(&directory, &journal).unwrap();
+        assert_eq!(
+            fs::read_to_string(directory.join("old-file")).unwrap(),
+            "old complete version"
+        );
+        assert!(!matches_bundled(&directory));
+        assert!(!root.join(stage_name).exists());
+        assert!(!journal.exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn next_install_removes_a_partial_stage_left_by_process_exit() {
+        let root = std::env::temp_dir().join(format!(
+            "wayexpand-gnome-ext-partial-stage-recovery-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let directory = root.join(EXTENSION_UUID);
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("old-file"), "old complete version").unwrap();
+        let stage_name = format!(".{EXTENSION_UUID}.123.456.staged");
+        let stage = root.join(&stage_name);
+        fs::create_dir(&stage).unwrap();
+        fs::write(stage.join("extension.js"), "partial extension write").unwrap();
+        let journal = root.join(format!(".{EXTENSION_UUID}.wayexpand-install-transaction"));
+        write_install_journal(
+            &journal,
+            "prepared",
+            std::ffi::OsStr::new(&stage_name),
+            &wayexpand_backend_gnome_window::bundled_extension_build_identity(),
+            true,
+        )
+        .unwrap();
+
+        recover_interrupted_extension_install(&directory, &journal).unwrap();
+        assert_eq!(
+            fs::read_to_string(directory.join("old-file")).unwrap(),
+            "old complete version"
+        );
+        assert!(!stage.exists());
+        assert!(!journal.exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn recovery_keeps_a_committed_extension_and_removes_its_backup() {
+        let root = std::env::temp_dir().join(format!(
+            "wayexpand-gnome-ext-commit-recovery-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let directory = root.join(EXTENSION_UUID);
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("old-file"), "old complete version").unwrap();
+
+        let mut transaction = install_extension_directory(&directory, &extension_files()).unwrap();
+        write_install_journal(
+            &transaction.journal,
+            "committed",
+            &transaction.stage_name,
+            &transaction.expected_identity,
+            true,
+        )
+        .unwrap();
+        let journal = transaction.journal.clone();
+        let stage = transaction.previous.clone().unwrap();
+        // The durable committed marker is written before backup cleanup.
+        transaction.committed = true;
+        drop(transaction);
+
+        recover_interrupted_extension_install(&directory, &journal).unwrap();
+        assert!(matches_bundled(&directory));
+        assert!(!stage.exists());
+        assert!(!journal.exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn recovery_removes_a_partially_written_journal_temp_before_retry() {
+        let root = std::env::temp_dir().join(format!(
+            "wayexpand-gnome-ext-journal-temp-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let directory = root.join(EXTENSION_UUID);
+        let journal = root.join(format!(".{EXTENSION_UUID}.wayexpand-install-transaction"));
+        let temporary = root.join(format!(
+            "..{EXTENSION_UUID}.wayexpand-install-transaction.1.2.tmp"
+        ));
+        fs::write(&temporary, "partial journal").unwrap();
+        fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600)).unwrap();
+
+        assert!(has_install_journal_temps(&journal).unwrap());
+        cleanup_install_journal_temps(&journal).unwrap();
+        recover_interrupted_extension_install(&directory, &journal).unwrap();
+        assert!(!temporary.exists());
+        assert!(!journal.exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn first_install_interrupted_before_commit_returns_to_no_install() {
+        let root = std::env::temp_dir().join(format!(
+            "wayexpand-gnome-ext-first-install-recovery-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let directory = root.join(EXTENSION_UUID);
+
+        let mut transaction = install_extension_directory(&directory, &extension_files()).unwrap();
+        let journal = transaction.journal.clone();
+        transaction.committed = true;
+        drop(transaction);
+
+        recover_interrupted_extension_install(&directory, &journal).unwrap();
+        assert!(!directory.exists());
+        assert!(!journal.exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn stage_failures_leave_the_previous_extension_untouched() {
+        for (label, errno) in [
+            ("interrupted", libc::EINTR),
+            ("full-disk", libc::ENOSPC),
+            ("permission", libc::EACCES),
+        ] {
+            let root = std::env::temp_dir().join(format!(
+                "wayexpand-gnome-ext-stage-failure-{}-{label}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&root);
+            let directory = root.join(EXTENSION_UUID);
+            fs::create_dir_all(&directory).unwrap();
+            fs::write(directory.join("old-file"), "old complete version").unwrap();
+
+            let mut writes = 0;
+            let result = install_extension_directory_with(
+                &directory,
+                &extension_files(),
+                |path, contents| {
+                    writes += 1;
+                    if writes == 2 {
+                        if errno == libc::ENOSPC {
+                            let partial = &contents[..contents.len() / 2];
+                            fs::write(path, partial)?;
+                        }
+                        return Err(std::io::Error::from_raw_os_error(errno).into());
+                    }
+                    write_extension_file(path, contents)
+                },
+            );
+            assert!(result.is_err(), "{label} failure was not propagated");
+            assert_eq!(
+                fs::read_to_string(directory.join("old-file")).unwrap(),
+                "old complete version"
+            );
+            assert_no_extension_transaction_artifacts(&root);
+            fs::remove_dir_all(&root).unwrap();
+        }
+    }
+
+    #[test]
+    fn invalid_staged_build_identity_is_rejected_before_the_directory_switch() {
+        let root = std::env::temp_dir().join(format!(
+            "wayexpand-gnome-ext-invalid-stage-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let directory = root.join(EXTENSION_UUID);
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("old-file"), "old complete version").unwrap();
+
+        let result =
+            install_extension_directory_with(&directory, &extension_files(), |path, contents| {
+                let contents = if path.file_name().is_some_and(|name| name == "extension.js") {
+                    "// content from a different build"
+                } else {
+                    contents
+                };
+                write_extension_file(path, contents)
+            });
+
+        assert!(result.is_err());
+        assert_eq!(
+            fs::read_to_string(directory.join("old-file")).unwrap(),
+            "old complete version"
+        );
+        assert_no_extension_transaction_artifacts(&root);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn activation_failure_rolls_back_the_whole_previous_directory() {
+        let root = std::env::temp_dir().join(format!(
+            "wayexpand-gnome-ext-activation-rollback-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let directory = root.join(EXTENSION_UUID);
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("old-file"), "old complete version").unwrap();
+
+        let mut transaction = install_extension_directory(&directory, &extension_files()).unwrap();
+        assert!(
+            matches_bundled(&directory),
+            "new directory was not activated"
+        );
+        transaction.rollback().unwrap(); // Simulated GNOME activation/probe failure.
+
+        assert_eq!(
+            fs::read_to_string(directory.join("old-file")).unwrap(),
+            "old complete version"
+        );
+        assert!(!matches_bundled(&directory));
+        assert_no_extension_transaction_artifacts(&root);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn failed_first_install_is_removed_on_rollback() {
+        let root = std::env::temp_dir().join(format!(
+            "wayexpand-gnome-ext-first-install-rollback-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let directory = root.join(EXTENSION_UUID);
+
+        let mut transaction = install_extension_directory(&directory, &extension_files()).unwrap();
+        transaction.rollback().unwrap();
+        assert!(!directory.exists());
+        assert_no_extension_transaction_artifacts(&root);
         fs::remove_dir_all(&root).unwrap();
     }
 }

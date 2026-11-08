@@ -4,13 +4,54 @@
 
 ---
 
-Welcome! This guide will help you get up and running based on your desktop environment.
+Welcome! Start with the graphical setup guide. It checks the installed
+integration, explains any choices that need your consent, and distinguishes
+configuration from a verified real-application test.
 
-## Five-Minute Quickstart
+## Graphical first run
 
-This guide separates snippet matching from a real desktop insertion. A
-connected service or successful matcher check does not prove that a target
-application replaced text correctly.
+### 1. Install and open WayExpand
+
+Use a distribution package where one is available, then open **WayExpand**
+from your applications menu. See the [packaging guide](PACKAGING.md) for
+current availability: the Ubuntu daily package is experimental, and a Fedora
+package channel is not currently published. Source installation is intended
+for developers and packagers.
+
+If the application is already installed but has no launcher, run
+`wayexpand-gui`.
+
+### 2. Follow setup and add a snippet
+
+Follow the setup screen's route recommendation. It checks capabilities and
+explains permissions before applying changes; it does not enable raw keyboard
+capture automatically. The GUI status distinguishes **Installed**,
+**Configured**, and **Verified working**.
+
+In the editor, select **Add snippet**, enter a trigger such as `;;hello` and a
+replacement such as `Hello, world!`, then save. You can use any enabled,
+harmless static snippet for verification; setup does not require the example
+trigger to exist.
+
+### 3. Verify in a real application
+
+Choose **Desktop Integration Test** and follow the prompt in a disposable,
+non-sensitive text field. Inspect the result and confirm only if it exactly
+matches the expected replacement. WayExpand never presses Enter or retries an
+insertion whose outcome is uncertain. Until you confirm an exact result, the
+GUI reports **Configured, untested**; afterward it reports **Working in the
+tested application**. That result applies only to the tested app and session.
+
+If no automatic route is available, Quick Picker remains available in
+copy-only mode: choose a snippet, switch to the target application, and paste
+it yourself. It does not enable raw capture or attempt insertion.
+
+## Advanced CLI setup and route diagnostics
+
+Backend readiness and a matcher preview do not prove that desktop typing or
+replacement works in a particular application. Check the
+[support matrix](SUPPORT_MATRIX.md) for evidence about your compositor and
+route.
 
 ### 1. Check the session
 
@@ -30,11 +71,19 @@ step. These are live capability reports, not proof that every application
 handles real typing correctly; `doctor --certify` is an isolated smoke test
 and does not certify your active desktop session.
 
-Two feature limits apply across current backends: active IME/preedit, dead-key,
-and Compose composition is not handled (triggers are matched against committed
-text only), and app-filtered snippets currently have a working window tracker
-only on KWin. See the [support matrix](SUPPORT_MATRIX.md) before adopting
-WayExpand for composition-heavy or app-scoped workflows.
+Active IME/preedit, dead-key, and Compose composition is not handled: triggers
+are matched against committed text. App-filtered snippets depend on the
+specific route's focus tracker and fail closed when app identity is missing,
+stale, or unbound to the active input context. The GNOME Shell extension
+provides authenticated focus updates to subscribing WayExpand services; the
+IBus service binds those updates to its active input context. That integration
+is implemented but has not passed real-session certification. KWin provides a
+separate tracker for supported daemon routes. Sway, Hyprland, and river do not
+currently provide window tracking. See the
+[support matrix](SUPPORT_MATRIX.md) before relying on app-scoped workflows.
+The GNOME focus binding is enabled only for the GNOME IBus route; IBus on other
+desktops does not currently receive application identity and therefore
+suppresses app-filtered snippets.
 
 ### Check insertion compatibility in isolation
 
@@ -59,35 +108,7 @@ behavior, suspend/resume, or your configured desktop session. An overall
 “Partial certification” is expected for this smoke test; use the
 [certification guide](CERTIFICATION.md) for real-session release evidence.
 
-### 2. Open the terminal editor
-
-```sh
-wayexpand-ui
-```
-
-Press `n`, enter a trigger such as `;;hello`, enter `Hello, world!`, and press
-`Enter` to save. Use `/` to search, `e` to edit the selected snippet, `Space`
-to enable/disable it, and `q` to quit. The same file can be edited with the
-graphical editor:
-
-```sh
-wayexpand-gui
-```
-
-The graphical editor opens with the snippet library on the left and the
-editor workspace on the right. **Settings** and the light/dark toggle sit at
-the right of the toolbar; the search field and daemon actions are arranged on
-the row below. Appearance, language, and engine preferences all live in the
-Settings window. A status line along the bottom of the window reports the
-result of the last action and the configuration file being edited.
-
-The default file is `~/.config/wayexpand/expansions.toml` (or the path set by
-`WAYEXPAND_CONFIG`). The GUI validates and saves atomically while preserving
-unrelated TOML comments and formatting. The TUI and CLI use canonical TOML
-serialization, so prefer the GUI or direct TOML editing if preserving comments
-is important.
-
-### 3. Configure and start a route for your session
+### Optional: configure raw evdev
 
 The guided `wayexpand setup` command recommends a detected route and explains
 its limits. Automatic mode intentionally leaves raw evdev disabled, even when
@@ -107,20 +128,35 @@ read its key pass-through and held-key/repeat limitations before enabling its
 service. For any route, read the security tradeoffs in
 [SECURITY.md](../SECURITY.md).
 
-### 4. Test without typing into an application
+### CLI-based verification (optional)
 
 ```sh
 wayexpand test ';;hello'
 ```
 
-This checks matching and rendering only; it does not read keyboard input or
-insert into another application. The GUI's first-run guide follows setup with
-a Desktop Integration Test. Use a disposable plain-text field, type the
-selected harmless trigger once, and confirm the exact result in the test
-review. Only that confirmation marks the GUI setup as working in the tested
-application. Closing or deferring the test leaves onboarding incomplete and
-the result unverified. Other applications and future sessions remain
-untested.
+This is a matcher-only check: it confirms the saved configuration can match
+the trigger and render the replacement. It does not send input to your desktop
+or prove that an application will receive a replacement.
+
+For the desktop check, focus a disposable, non-sensitive text field and run:
+
+```sh
+wayexpand debug --test ';;hello'
+```
+
+If `;;hello` is not in your library, substitute any enabled static trigger
+listed by `wayexpand list`; command-backed and form-driven snippets are not
+used for this harmless insertion check.
+
+Follow its prompt, type the trigger once, inspect the resulting text, and
+confirm only if it exactly matches the expected replacement. WayExpand never
+presses Enter or retries uncertain output. The GUI offers this as **Desktop
+Integration Test** during setup. Until you confirm an exact result, report the
+state as **Configured, untested**; after confirmation, it reports **Working in
+the tested application**. That result applies only to the tested app and
+session. It does not certify other applications or the compositor. If the
+matcher check instead prints `no expansion matched`, inspect the trigger with
+`wayexpand list` and `wayexpand validate` before debugging the backend.
 
 If no automatic route is available, the first-run guide offers Quick Picker in
 copy-only mode. It does not enable raw keyboard capture or attempt insertion;
@@ -158,31 +194,18 @@ the [packaging guide](PACKAGING.md) for the current installation matrix.
 
 ### KDE Plasma Wayland (KWin) — implementation candidate
 
-This is the most complete implementation path, but it still requires live
-session testing and is not certified by the current support matrix. Start
-here only after reviewing the backend tradeoffs:
+Open WayExpand from the applications menu and follow its setup guide. This is
+the most complete implementation path, but it still requires live session
+testing and is not certified by the current support matrix. The KWin window
+tracker is implemented for supported daemon routes; app-restricted snippets
+must still be tested in the intended application. KWin 6.6 has live-session
+observations in the backend notes, but newer releases are not assumed
+compatible based on version alone.
 
-```bash
-# No production package is currently published; build from source for local evaluation.
-git clone https://github.com/cyberducttape/wayexpand.git
-cd wayexpand
-./scripts/install-user.sh
-
-# Start the explicit evdev route (after reviewing its raw-input tradeoff)
-wayexpand-daemon --source=evdev --backend=libei --allow-evdev-sensitive-fields ~/.config/wayexpand/expansions.toml
-
-# Launch the GUI
-wayexpand-gui
-```
-
-**Current status:** Use `wayexpand doctor` to confirm the available path. The
-KWin window tracker is implemented but still awaiting broader independent
-certification; app-restricted snippets should not be treated as universally
-verified. KWin 6.6 has live-session observations in the backend notes, but
-newer KWin releases must still be checked with `doctor` and certification
-evidence instead of assumed compatible from the version number.
-
-**Next:** See [README.md](../README.md) for examples. The GUI walks you through creating your first snippet.
+Use `wayexpand doctor` only if the GUI identifies a setup problem. Raw evdev
+is a separate opt-in compatibility route with global keyboard visibility and
+no password-field signal; do not enable it merely because another route is
+unavailable. See [SECURITY.md](../SECURITY.md) before selecting it.
 
 ---
 
@@ -197,12 +220,11 @@ tracking is not currently shipped.
 - ⏳ Window tracking (app_filter) is not shipped on wlroots; the integration remains future experimental work
 - ⚠️ Password field detection requires input-method-v2
 
-**Getting started:**
-
-```bash
-wayexpand-daemon --source=evdev --backend=libei --allow-evdev-sensitive-fields ~/.config/wayexpand/expansions.toml
-wayexpand doctor  # Shows what your session can use
-```
+**Getting started:** Open the GUI and review the route it recommends. Do not
+start the evdev daemon directly as a general fallback: it is opt-in, has no
+password-field signal, and is not certified on these compositors. Developers
+testing an experimental route should follow
+[INTEGRATION_TESTING.md](INTEGRATION_TESTING.md).
 
 **Known limitations:**
 - Automatic mode leaves evdev disabled even when `/dev/input` is readable
@@ -222,8 +244,9 @@ wayexpand doctor  # Shows what your session can use
 
 ### GNOME Shell Wayland — limited/uncertified
 
-Limited, uncertified support. GNOME has no window-tracking protocol, so
-WayExpand ships a GNOME Shell extension for app-specific snippets.
+Limited, uncertified support. GNOME does not expose the window-tracking
+protocol WayExpand needs, so WayExpand uses its GNOME Shell extension to
+provide focus information to subscribing services.
 
 **Current input routes:**
 - Mutter does not currently advertise `zwp_input_method_manager_v2`, so
@@ -235,65 +258,33 @@ WayExpand ships a GNOME Shell extension for app-specific snippets.
   while trigger deletion is verified against surrounding text but is not
   atomic. This route is experimental and not production-certified.
 
-**Window-specific snippets (app_filter):**
+**Window-specific snippets (`app_filter`):**
 - `wayexpand setup` installs and enables the WayExpand GNOME Shell extension
-  (GNOME 45 or newer, so Ubuntu 24.04 and later). Log out and back in once
-  after the first install; `wayexpand doctor` shows its state as
-  "GNOME window tracker". It is tested in a headless GNOME Shell but has no
-  real-session certification yet.
-- The extension sends the focused app's ID and window title only to
-  processes that subscribe to it; nothing is broadcast or stored.
+  (GNOME 45 or newer, including Ubuntu 24.04 and later). A new extension may
+  require a GNOME logout/login before Shell loads it; `wayexpand doctor --gnome`
+  distinguishes that case from an unavailable Shell query or extension error.
+- The extension sends authenticated focus updates to subscribing WayExpand
+  services. The IBus service binds the focused GNOME window to the active
+  IBus input context and clears app identity on tracker loss or focus change.
+  This integration is implemented but has no real-session certification.
+- The extension exposes app IDs and window titles only to authorized
+  subscribers; it does not broadcast or persist them.
 
 **What doesn't work:**
 - ❌ Atomic replacement and production-certified password-field protection
 
 **Recommendation:**
-- Use **global hotkeys** instead of trigger-based expansion, or test the
-  separate IBus route and its limitations before relying on it
+- Prefer global snippets unless you have verified the IBus app-filtered path
+  in the intended application; both paths remain uncertified
 - See [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) for compatibility status
 
 ---
 
-## Common First Steps
+## Snippet examples
 
-Regardless of your compositor:
-
-### 1. Verify Your Setup
-
-```bash
-wayexpand doctor
-```
-
-This shows you what capture, output, and window-tracking backends are available in your session. **Always run this before troubleshooting.**
-
-### 2. Create Your First Snippet
-
-**Via GUI:**
-```bash
-wayexpand-gui
-```
-Click "Add snippet" and enter:
-- **Trigger:** `;;hello`
-- **Replacement:** `Hello, world!`
-
-Click Save, then type `;;hello` in any text field.
-
-**Via CLI:**
-```bash
-install -m 600 /dev/null ~/.config/wayexpand/expansions.toml
-$EDITOR ~/.config/wayexpand/expansions.toml
-```
-
-Add to the TOML:
-```toml
-[[expansion]]
-trigger = ";;hello"
-replacement = "Hello, world!"
-```
-
-Save, then the daemon reloads automatically.
-
-### 3. Common Patterns
+The graphical editor is the recommended way to create and update snippets.
+For configuration automation, the same library can be managed as TOML and
+checked with the CLI. Common patterns:
 
 **Email signature:**
 ```toml
@@ -354,7 +345,10 @@ See [COMPATIBILITY.md](COMPATIBILITY.md) for the configuration format, and [FOR_
 1. Run `wayexpand doctor` to check backend status
 2. Verify the daemon is running: `systemctl --user status wayexpand-input-method.service`
 3. Check logs: `journalctl --user -u wayexpand-input-method.service -n 20`
-4. Try a simple test: `;;hello` should become `Hello, world!`
+4. Run the matcher check, then complete **Desktop Integration Test** in a
+   disposable text field. Treat the route as working only in the application
+   where you confirmed the exact result; see the support matrix for what has
+   and has not been certified.
 
 **Password field protection not working?**
 - This requires input-method-v2 backend (shows in `wayexpand doctor`)

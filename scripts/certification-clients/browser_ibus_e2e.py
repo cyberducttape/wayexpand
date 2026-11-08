@@ -42,6 +42,18 @@ def wait_for(predicate, description, timeout=TIMEOUT_SECONDS):
     fail(f"timed out waiting for {description}")
 
 
+def find_acceptance_page(targets, expected_url):
+    """Ignore Chromium startup tabs and select only the isolated test page."""
+    for target in targets:
+        if (
+            target.get("type") == "page"
+            and target.get("url") == expected_url
+            and target.get("webSocketDebuggerUrl")
+        ):
+            return target["webSocketDebuggerUrl"]
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--browser", required=True)
@@ -65,7 +77,9 @@ def main():
         "<!doctype html><meta charset=utf-8>"
         f"<title>{TITLE}</title>"
         "<label>WayExpand IBus acceptance "
-        "<textarea id=target autofocus></textarea></label>",
+        "<textarea id=target autofocus></textarea></label>"
+        "<script>window.wxKeydowns=0;"
+        "addEventListener('keydown',()=>window.wxKeydowns++,true)</script>",
         encoding="utf-8",
     )
     profile = Path(args.profile)
@@ -88,6 +102,9 @@ def main():
         [
             args.browser,
             f"--user-data-dir={profile}",
+            # Unprivileged containers cannot start Chromium's sandbox. Only
+            # the disposable CI container sets this, for a local test page.
+            *(["--no-sandbox"] if os.environ.get("E2E_BROWSER_NO_SANDBOX") == "1" else []),
             "--no-first-run",
             "--no-default-browser-check",
             "--disable-background-networking",
@@ -114,6 +131,8 @@ def main():
     try:
         active_port = profile / "DevToolsActivePort"
 
+        expected_page_url = page.resolve().as_uri()
+
         def devtools_url():
             if process.poll() is not None:
                 fail(f"browser exited during startup ({process.returncode}); see {args.log}")
@@ -130,12 +149,9 @@ def main():
                     targets = json.load(response)
             except (OSError, urllib.error.URLError):
                 return None
-            for target in targets:
-                if target.get("type") == "page" and target.get("webSocketDebuggerUrl"):
-                    return target["webSocketDebuggerUrl"]
-            return None
+            return find_acceptance_page(targets, expected_page_url)
 
-        ws_url = wait_for(devtools_url, "Chromium DevTools page")
+        ws_url = wait_for(devtools_url, "Chromium's isolated acceptance page")
         connection = websocket.create_connection(ws_url, timeout=2)
         next_id = 0
 
@@ -244,6 +260,8 @@ def main():
             "Chromium did not insert the expected text or pass the trigger "
             "through unchanged without surrounding-text support; "
             f"value_state={value_state}, "
+            f"page_keydowns={evaluate('window.wxKeydowns')}, "
+            f"page_has_focus={evaluate('document.hasFocus()')}, "
             "test_value_codepoints="
             f"{','.join(f'U+{ord(character):04X}' for character in actual) or 'empty'}, "
             f"focus_ins_delta={int(final_totals.get('focus_ins', 0)) - initial_focus_ins}, "

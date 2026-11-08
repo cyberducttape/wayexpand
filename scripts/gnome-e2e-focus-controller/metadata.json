@@ -2,6 +2,6 @@
   "uuid": "wayexpand-e2e-focus-controller@cyberducttape.github.io",
   "name": "WayExpand E2E focus controller",
   "description": "Test-only helper for deterministic focus changes in headless GNOME tests.",
-  "shell-version": ["45", "46", "47", "48", "49", "50"],
+  "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
   "version": 1
 }

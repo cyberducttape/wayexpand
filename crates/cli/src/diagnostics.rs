@@ -182,6 +182,21 @@ pub(crate) fn collect(trigger: Option<&str>) -> serde_json::Value {
             findings.push(bridge_finding);
         }
     }
+    if let Some(check) = ibus
+        .check("config-generation")
+        .filter(|check| check.state == wayexpand_backend_ibus::chain::IbusCheckState::Fail)
+    {
+        findings.push(finding(
+            "WX-IBUS-RELOAD-001",
+            Severity::Error,
+            Component::Ibus,
+            "IBus contexts are not using the latest configuration generation",
+            [check.detail.clone()],
+            [check.fix.as_deref().unwrap_or(
+                "Restart the WayExpand IBus engine from the desktop input-source controls, then rerun `wayexpand ibus status`.",
+            )],
+        ));
+    }
     if !ibus_readiness.ibus_running {
         if let Some(check) = ibus.check("daemon") {
             if check.state == wayexpand_backend_ibus::chain::IbusCheckState::Fail {

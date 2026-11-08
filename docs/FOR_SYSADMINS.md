@@ -10,21 +10,13 @@ This guide covers deploying, managing, and supporting WayExpand in team and ente
 
 ### Individual User (Self-Service)
 
-**Publication status:** there are no compositor-certified release packages:
-the v1.3.3 release is source only. Uncertified *Experimental build …*
-prereleases on the [releases page](https://github.com/cyberducttape/wayexpand/releases)
-carry x86_64 and aarch64 archives, an amd64 `.deb`, and an x86_64 `.rpm`
-(the latest is `1.3.3-exp.20261014.g06c14359de59`). The Ubuntu PPA also
-publishes an experimental daily package for Ubuntu 26.04 (Resolute), amd64; Launchpad reported build
-`1.3.3-0~202610270213~ubuntu26.04.1` successful on 2026-10-27 ([build
-result](https://launchpad.net/~cyberducttape/+archive/ubuntu/ppa/+build/33875568)).
-That build is not desktop certification and is not a managed-fleet release.
-Check the PPA for current publication state before installing.
-
-Launchpad's later attempt (`33891053`) failed on an older source snapshot that
-selected egui/eframe 0.37, requiring Rust 1.95 on a Rust 1.93.1 builder. The
-current vendored source branch now uses egui/eframe 0.35 and passes the local
-Rust 1.92 package build; a new remote Launchpad result is still pending.
+**Publication status audited 2026-11-07:** the latest GitHub release (`1.3.4`)
+has no downloadable assets. The Ubuntu PPA has current experimental daily
+`1.3.3` packages for Ubuntu 26.04 and 26.10 amd64; Ubuntu 24.04 and 22.04 PPA
+packages are stale at `0.2.0`. No Fedora Copr project is published. These daily
+packages are not desktop certification or managed-fleet releases. See
+[PACKAGING.md](PACKAGING.md) for the audited package matrix and installation
+instructions.
 
 For local evaluation, users can build from source with Rust 1.92+:
 
@@ -40,10 +32,10 @@ cd wayexpand
 ```
 
 **Packaging Status:**
-- 🧪 Ubuntu: experimental daily PPA package published for Resolute amd64; successful build, not compositor-certified
-- 🧪 Debian/Ubuntu: experimental `.deb` on GitHub prereleases; no APT repository besides the PPA
+- 🧪 Ubuntu 26.04: experimental daily PPA package published for amd64; not compositor-certified
+- ⚠️ Ubuntu 24.04: PPA package is stale; package build/install coverage exists in CI, but no current published package
+- ⚠️ Fedora 45: RPM recipe and CI install coverage exist; no published RPM or Copr repository
 - 📦 Arch: PKGBUILD prepared (not yet official AUR submission)
-- 🧪 Fedora: experimental `.rpm` on GitHub prereleases; no Copr repository
 - 🔧 Others: local source builds are available with Rust 1.92+
 
 **Admin overhead:** Minimal. Users manage their own configs.

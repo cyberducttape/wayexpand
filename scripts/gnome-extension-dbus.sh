@@ -8,7 +8,7 @@ gnome_shell_extensions_call() {
     uuid=$2
     response=
     for object_path in /org/gnome/Shell/Extensions /org/gnome/Shell; do
-        if response=$(gdbus call --session --dest org.gnome.Shell --object-path "$object_path" \
+        if response=$(gdbus call --timeout 5 --session --dest org.gnome.Shell --object-path "$object_path" \
             --method "org.gnome.Shell.Extensions.$method" "$uuid" 2>&1); then
             printf '%s\n' "$response"
             return 0

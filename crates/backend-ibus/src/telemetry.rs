@@ -119,6 +119,27 @@ pub struct IbusStatus {
     pub version: String,
     pub started_unix: u64,
     pub updated_unix: u64,
+    /// Whether this engine build publishes generation handoff diagnostics.
+    /// False distinguishes older status files from a real generation zero.
+    #[serde(default)]
+    pub config_generation_diagnostics_available: bool,
+    /// Configuration generation currently published to newly created IBus
+    /// contexts.
+    #[serde(default)]
+    pub config_generation: u64,
+    /// Latest validated on-disk generation that the service attempted to
+    /// publish.
+    #[serde(default)]
+    pub config_generation_requested: u64,
+    /// Count of live contexts that do not have the requested generation installed.
+    #[serde(default)]
+    pub config_generation_mismatches: u64,
+    /// Number of generations that failed to publish to every live context.
+    #[serde(default)]
+    pub config_reload_failures: u64,
+    /// Stable error identifier for the last failed generation handoff.
+    #[serde(default)]
+    pub config_reload_error: Option<String>,
     /// Engine objects IBus currently holds.
     pub engines: u64,
     pub totals: IbusTotals,
@@ -167,6 +188,12 @@ impl IbusTelemetry {
                     version: env!("CARGO_PKG_VERSION").to_owned(),
                     started_unix: now,
                     updated_unix: now,
+                    config_generation_diagnostics_available: false,
+                    config_generation: 0,
+                    config_generation_requested: 0,
+                    config_generation_mismatches: 0,
+                    config_reload_failures: 0,
+                    config_reload_error: None,
                     engines: 0,
                     totals: IbusTotals::default(),
                     recent_fields: Vec::new(),
@@ -206,8 +233,44 @@ impl IbusTelemetry {
         });
     }
 
-    pub fn set_engines(&self, engines: usize) {
-        self.update(|state| state.status.engines = engines as u64);
+    pub fn set_context_diagnostics(&self, generation: u64, engines: usize, mismatches: usize) {
+        self.update(|state| {
+            if state.status.config_generation_requested == generation {
+                state.status.engines = engines as u64;
+                state.status.config_generation_mismatches = mismatches as u64;
+            }
+        });
+    }
+
+    /// Publish the generation visible to new and existing contexts after a
+    /// complete handoff. The mismatch count is content-free and doesn't
+    /// expose context object paths.
+    pub fn config_generation_published(&self, generation: u64, mismatches: usize) {
+        self.update(|state| {
+            state.status.config_generation_diagnostics_available = true;
+            state.status.config_generation = generation;
+            state.status.config_generation_requested = generation;
+            state.status.config_generation_mismatches = mismatches as u64;
+            state.status.config_reload_error = None;
+        });
+    }
+
+    /// Keep the last successful generation visible and expose a stable
+    /// failure when a new generation could not be installed everywhere.
+    pub fn config_generation_failed(
+        &self,
+        requested_generation: u64,
+        error_id: &'static str,
+        mismatches: usize,
+    ) {
+        self.update(|state| {
+            state.status.config_generation_diagnostics_available = true;
+            state.status.config_generation_requested = requested_generation;
+            state.status.config_generation_mismatches = mismatches as u64;
+            state.status.config_reload_failures =
+                state.status.config_reload_failures.saturating_add(1);
+            state.status.config_reload_error = Some(error_id.to_owned());
+        });
     }
 
     /// Start a field record and return its sequence number.

@@ -21,9 +21,7 @@ impl ExpansionEngine {
             .try_send_hotkey(action.clone())
             .map_err(|error| match error {
                 QueueSendError::Full => HotkeyError::QueueFull,
-                QueueSendError::Disconnected | QueueSendError::Unavailable => {
-                    HotkeyError::WorkerUnavailable
-                }
+                QueueSendError::Unavailable => HotkeyError::WorkerUnavailable,
             })
     }
 

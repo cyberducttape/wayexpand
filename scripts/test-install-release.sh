@@ -280,6 +280,7 @@ printf '%s\n' '{"uuid": "wayexpand-window-tracker@cyberducttape.github.io"}' \
     >"$gnome_extension_dir/metadata.json"
 printf '%s\n' '// WayExpand GNOME tracker' >"$gnome_extension_dir/extension.js"
 printf '%s\n' '// WayExpand notification queue' >"$gnome_extension_dir/notification-queue.js"
+printf '%s\n' '// WayExpand keyboard compatibility' >"$gnome_extension_dir/keyboard-compat.js"
 PATH="$stub_bin:$PATH" \
 HOME="$test_root/home" \
 XDG_CONFIG_HOME="$test_root/config" \
@@ -304,6 +305,7 @@ grep -F "sudo $release_dir/scripts/install-evdev-permissions.sh --uninstall" "$t
 [ ! -e "$gnome_extension_dir/metadata.json" ]
 [ ! -e "$gnome_extension_dir/extension.js" ]
 [ ! -e "$gnome_extension_dir/notification-queue.js" ]
+[ ! -e "$gnome_extension_dir/keyboard-compat.js" ]
 [ ! -e "$test_root/custom-data/applications/wayexpand.desktop" ]
 [ ! -e "$test_root/custom-data/metainfo/io.github.cyberducttape.WayExpand.metainfo.xml" ]
 [ ! -e "$test_root/custom-data/man/man1/wayexpand.1" ]

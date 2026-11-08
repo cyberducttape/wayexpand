@@ -146,6 +146,11 @@ pub struct IbusEngineAdapter {
     capability_block: Option<String>,
     pending_output: Option<ExpansionResult>,
     last_expansion_outcome: Option<IbusExpansionOutcome>,
+    /// GNOME window identity observed when this IBus input context received
+    /// focus. App filters are enabled only while the authenticated Shell
+    /// tracker continues to report that same focused window.
+    gnome_focus_binding: Option<String>,
+    ibus_context_identity: Option<String>,
 }
 
 /// An emitted IBus signal sequence is not confirmation that the target
@@ -187,9 +192,15 @@ impl IbusEngineAdapter {
         // for opening a form only when the IBus input-context identity is
         // also available.
         engine.set_form_replacement_guarantee(ReplacementGuarantee::VerifiedSurroundingText);
-        // Keep IBus key handling non-blocking for broker actions. Direct
-        // programs are still rejected by the backend-specific gate below.
-        let _ = engine.enable_async_commands();
+        // Text-only input contexts need no command workers. Keep IBus key
+        // handling non-blocking only for configurations that actually enable
+        // command expansions or hotkeys; direct programs are still rejected
+        // by the backend-specific gate below.
+        if engine.requires_async_workers() && !engine.enable_async_commands() {
+            warn!(
+                "IBus asynchronous workers could not start; command-backed actions are unavailable"
+            );
+        }
         // A new engine has no content type yet: capture stays off until the
         // client reports a known non-sensitive field.
         engine.process(InputEvent::FocusChanged { sensitive: true });
@@ -208,6 +219,8 @@ impl IbusEngineAdapter {
             capability_block,
             pending_output: None,
             last_expansion_outcome: None,
+            gnome_focus_binding: None,
+            ibus_context_identity: None,
         }
     }
 
@@ -398,7 +411,7 @@ impl IbusEngineAdapter {
         let mut engine = ExpansionEngine::new(config)?;
         engine.apply_administrator_policy(&self.policy)?;
         engine.inherit_runtime_state(&self.engine);
-        if self.engine.async_commands_enabled() && !engine.enable_async_commands() {
+        if engine.requires_async_workers() && !engine.enable_async_commands() {
             warn!(
                 "IBus asynchronous workers could not restart after configuration reload; command-backed actions are unavailable"
             );
@@ -414,13 +427,13 @@ impl IbusEngineAdapter {
     pub fn replace_validated_config(&mut self, validated: Arc<ValidatedConfig>) {
         let mut engine = ExpansionEngine::from_validated(validated);
         policy::apply_to_engine(&mut engine, &self.policy);
+        engine.inherit_runtime_state(&self.engine);
         engine.set_form_replacement_guarantee(ReplacementGuarantee::VerifiedSurroundingText);
-        if self.engine.async_commands_enabled() && !engine.enable_async_commands() {
+        if engine.requires_async_workers() && !engine.enable_async_commands() {
             warn!(
                 "IBus asynchronous workers could not restart after configuration reload; command-backed actions are unavailable"
             );
         }
-        engine.inherit_runtime_state(&self.engine);
         self.engine = engine;
     }
 
@@ -457,6 +470,10 @@ impl IbusEngineAdapter {
                 title: None,
                 instance_id: Some(format!("{IBUS_CONTEXT_ID_PREFIX}{identity}")),
             });
+        self.ibus_context_identity = identity
+            .as_ref()
+            .and_then(|window| window.instance_id.clone());
+        self.gnome_focus_binding = None;
         self.engine.process(InputEvent::WindowChanged(identity));
         self.engine
             .process(InputEvent::FocusChanged { sensitive: true });
@@ -467,9 +484,48 @@ impl IbusEngineAdapter {
         self.note(|telemetry, field| telemetry.focus_out(field));
         self.enabled = false;
         self.surrounding = None;
+        self.gnome_focus_binding = None;
+        self.ibus_context_identity = None;
         self.engine.process(InputEvent::WindowChanged(None));
         self.engine
             .process(InputEvent::FocusChanged { sensitive: true });
+    }
+
+    /// Bind this active IBus context to the authenticated GNOME window that
+    /// was focused at FocusIn. `None` deliberately leaves app filtering
+    /// unavailable. The Shell identity is revalidated before each key event.
+    pub(crate) fn bind_gnome_focus(&mut self, window: Option<&WindowContext>) {
+        self.gnome_focus_binding = window
+            .and_then(|window| window.instance_id.clone())
+            .filter(|identity| !identity.is_empty());
+        self.update_gnome_focus(window);
+    }
+
+    /// Refresh GNOME app identity against the window bound at FocusIn. A
+    /// changed window, missing snapshot, or disconnected tracker clears the
+    /// app ID so app-filtered snippets fail closed.
+    pub(crate) fn update_gnome_focus(&mut self, window: Option<&WindowContext>) {
+        let app_id = match (self.gnome_focus_binding.as_deref(), window) {
+            (Some(bound), Some(current)) if current.instance_id.as_deref() == Some(bound) => {
+                current.app_id.clone()
+            }
+            _ => {
+                // Once focus diverges or becomes unobservable, this input
+                // context must receive a new FocusIn before identity can be
+                // trusted again, even if the previous window later returns.
+                self.gnome_focus_binding = None;
+                None
+            }
+        };
+        let context = self
+            .ibus_context_identity
+            .as_ref()
+            .map(|identity| WindowContext {
+                app_id,
+                title: None,
+                instance_id: Some(identity.clone()),
+            });
+        self.engine.process(InputEvent::WindowChanged(context));
     }
 
     /// Apply IBus `Enable` without treating it as proof that focus changed.
@@ -599,6 +655,16 @@ impl IbusEngineAdapter {
 
         if keyval == xkeysym::key::BackSpace {
             self.engine.process(InputEvent::Backspace);
+            return IbusKeyResult::default();
+        }
+
+        // Shift and alternate-level selectors can occur in the middle of a
+        // printable trigger on layouts such as French AZERTY (`2` is
+        // Shift+2). They do not insert text themselves, so preserve the
+        // partial trigger while the following key carries the resolved
+        // keysym. Shortcut modifiers remain handled by the state-mask check
+        // above and still reset matching.
+        if is_character_level_modifier(keyval) {
             return IbusKeyResult::default();
         }
 
@@ -736,6 +802,22 @@ impl IbusEngineAdapter {
     }
 }
 
+fn is_character_level_modifier(keysym: u32) -> bool {
+    matches!(
+        keysym,
+        xkeysym::key::Shift_L
+            | xkeysym::key::Shift_R
+            | xkeysym::key::Shift_Lock
+            | xkeysym::key::ISO_Level2_Latch
+            | xkeysym::key::ISO_Level3_Shift
+            | xkeysym::key::ISO_Level3_Latch
+            | xkeysym::key::ISO_Level3_Lock
+            | xkeysym::key::ISO_Level5_Shift
+            | xkeysym::key::ISO_Level5_Latch
+            | xkeysym::key::ISO_Level5_Lock
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -797,6 +879,54 @@ replacement = "Incident {{field:hostname}}"
         assert!(blurred.checks.iter().any(|check| {
             check.name == "target identity" && check.status == wayexpand_core::CheckStatus::Fail
         }));
+    }
+
+    #[test]
+    fn app_filter_requires_focus_bound_to_the_same_authenticated_gnome_window() {
+        let config = Config::parse(
+            r#"[[expansion]]
+trigger = ";;ticket"
+replacement = "Investigating this now."
+app_filter = ["app_id_exact:org.gnome.TextEditor"]
+"#,
+        )
+        .unwrap();
+        let mut adapter = focused(IbusEngineAdapter::new(
+            ExpansionEngine::new(config).unwrap(),
+        ));
+        adapter.focus_in_for_context(Some("/org/freedesktop/IBus/Engine/WayExpand/7"));
+
+        let editor = WindowContext {
+            app_id: Some("org.gnome.TextEditor".into()),
+            title: None,
+            instance_id: Some("mutter:42".into()),
+        };
+        adapter.bind_gnome_focus(Some(&editor));
+        let allowed = adapter.engine().explain(";;ticket", IBUS_BACKEND_NAME);
+        assert!(allowed.would_expand(), "{}", allowed.render_text());
+
+        let elsewhere = WindowContext {
+            app_id: Some("org.gnome.Terminal".into()),
+            title: None,
+            instance_id: Some("mutter:43".into()),
+        };
+        adapter.update_gnome_focus(Some(&elsewhere));
+        let denied = adapter.engine().explain(";;ticket", IBUS_BACKEND_NAME);
+        assert!(!denied.would_expand(), "{}", denied.render_text());
+
+        adapter.update_gnome_focus(None);
+        let unavailable = adapter.engine().explain(";;ticket", IBUS_BACKEND_NAME);
+        assert!(!unavailable.would_expand(), "{}", unavailable.render_text());
+
+        // Even the right app ID is insufficient if the Shell window identity
+        // changed after IBus FocusIn; a fresh focus lifecycle is required.
+        adapter.update_gnome_focus(Some(&editor));
+        let stale_binding = adapter.engine().explain(";;ticket", IBUS_BACKEND_NAME);
+        assert!(
+            !stale_binding.would_expand(),
+            "{}",
+            stale_binding.render_text()
+        );
     }
 
     #[cfg(unix)]
@@ -911,7 +1041,7 @@ replacement = "Incident {{field:hostname}}"
             let text: String = self.text.iter().collect();
             adapter.set_surrounding_text(&text, self.cursor as u32, self.cursor as u32);
             let result = adapter.process_key_event(keyval, 0, state);
-            if state == 0 && !result.handled {
+            if state & IBUS_RELEASE_MASK == 0 && !result.handled {
                 if keyval == xkeysym::key::BackSpace {
                     if self.cursor > 0 {
                         self.cursor -= 1;
@@ -1226,6 +1356,38 @@ replacement = "signature"
             "IBus must not spawn command-backed expansions"
         );
         let _ = std::fs::remove_file(marker);
+    }
+
+    #[test]
+    fn async_workers_are_lazy_and_follow_the_active_config_generation() {
+        let text_config =
+            Config::parse("[[expansion]]\ntrigger = ':hello'\nreplacement = 'hello'\n").unwrap();
+        let mut adapter = IbusEngineAdapter::new(ExpansionEngine::new(text_config).unwrap());
+        assert!(!adapter.engine().async_commands_enabled());
+        assert_eq!(adapter.engine().command_metrics().command_worker_threads, 0);
+        assert_eq!(adapter.engine().command_metrics().hotkey_worker_threads, 0);
+
+        let command_config = Config::parse(
+            "[[expansion]]\ntrigger = ':cmd'\nreplacement = ''\n\
+             [expansion.command]\nprogram = '/usr/bin/true'\nargs = []\n",
+        )
+        .unwrap();
+        adapter.replace_config(command_config).unwrap();
+        assert!(adapter.engine().async_commands_enabled());
+        let metrics = adapter.engine().command_metrics();
+        assert_eq!(metrics.command_worker_threads, 4);
+        assert_eq!(metrics.hotkey_worker_threads, 1);
+
+        adapter
+            .replace_config(
+                Config::parse("[[expansion]]\ntrigger = ':hello'\nreplacement = 'hello'\n")
+                    .unwrap(),
+            )
+            .unwrap();
+        assert!(!adapter.engine().async_commands_enabled());
+        let metrics = adapter.engine().command_metrics();
+        assert_eq!(metrics.command_worker_threads, 0);
+        assert_eq!(metrics.hotkey_worker_threads, 0);
     }
 
     #[cfg(unix)]
@@ -1836,6 +1998,33 @@ timeout_ms = 1000
         client.key(&mut adapter, 0x07e1, 0); // Greek_alpha
         client.key(&mut adapter, 0x07e2, 0); // Greek_beta
         assert_eq!(client.text(), "alpha beta");
+    }
+
+    #[test]
+    fn shifted_character_inside_trigger_does_not_reset_matching() {
+        const SHIFT_MASK: u32 = 1;
+        let config = Config::parse(
+            "[settings]\ncompatibility_mode = 'tracked-focus'\n\
+             [[expansion]]\ntrigger = ';e2e'\nreplacement = 'expanded'\n",
+        )
+        .unwrap();
+        let mut adapter = focused(IbusEngineAdapter::new(
+            ExpansionEngine::new(config).unwrap(),
+        ));
+        let mut client = Client::default();
+
+        client.key(&mut adapter, ';' as u32, 0);
+        client.key(&mut adapter, 'e' as u32, 0);
+        client.key(&mut adapter, xkeysym::key::Shift_L, 0);
+        client.key(&mut adapter, '2' as u32, SHIFT_MASK);
+        client.key(
+            &mut adapter,
+            xkeysym::key::Shift_L,
+            SHIFT_MASK | IBUS_RELEASE_MASK,
+        );
+        client.key(&mut adapter, 'e' as u32, 0);
+
+        assert_eq!(client.text(), "expanded");
     }
 
     #[test]

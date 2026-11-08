@@ -53,7 +53,7 @@ fi
 
 mkdir -p "$root/bin" "$root/systemd" "$root/desktop" "$root/docs" \
     "$root/scripts" "$root/udev" "$root/ibus/component" \
-    "$root/libexec/wayexpand-certification/bin"
+    "$root/libexec/wayexpand-certification/bin" "$root/polkit"
 for binary in wayexpand wayexpand-daemon wayexpand-action-broker wayexpand-ui wayexpand-gui wayexpand-ibus; do
 install -m 0755 "$target_dir/release/$binary" "$root/bin/"
 done
@@ -74,6 +74,7 @@ install -m 0644 "$project_dir/systemd/wayexpand-input-method.service" \
 install -m 0644 "$project_dir/desktop/wayexpand.desktop" "$root/desktop/"
 install -m 0644 "$project_dir/installer-components.toml" "$root/installer-components.toml"
 install -m 0644 "$project_dir/desktop/wayexpand-ibus.xml" "$root/ibus/component/"
+install -m 0644 "$project_dir/polkit/org.wayexpand.action.policy" "$root/polkit/"
 install -m 0644 "$project_dir/io.github.cyberducttape.WayExpand.metainfo.xml" "$root/"
 for size in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
     mkdir -p "$root/icons/hicolor/$size/apps"

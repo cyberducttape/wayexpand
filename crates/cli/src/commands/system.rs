@@ -4,6 +4,40 @@ use super::Args;
 use crate::args::take_flag;
 use crate::*;
 
+fn setup_plan_actions(
+    backend: &str,
+    is_gnome_wayland: bool,
+    accept_non_atomic_replacement: bool,
+    install_system_integration: bool,
+    terminals_requested: bool,
+) -> Vec<&'static str> {
+    let mut actions = vec!["Create the default configuration only if it is missing"];
+    match backend {
+        "ibus" => {
+            actions.push("Check IBus prerequisites and replacement policy before applying integration changes");
+            if is_gnome_wayland {
+                actions.push("After IBus preflight and explicit replacement consent, prepare GNOME's window tracker and IBus source");
+                actions.push("Keep GNOME extension files and enablement settings in the IBus rollback transaction until verification");
+            }
+            actions.push("Register and activate the IBus engine, then verify the session route");
+        }
+        "input-method" => actions.push("Enable the input-method-v2 user service; portal authorization may be requested when it connects"),
+        "evdev" => actions.push("Configure global keyboard capture only with its separate privacy acknowledgment and device permission"),
+        _ => {}
+    }
+    if backend == "ibus" && !accept_non_atomic_replacement {
+        actions.push("Stop before changing GNOME or IBus if replacement authorization is not already configured");
+    }
+    if install_system_integration {
+        actions
+            .push("Request administrator authorization to install the system-wide IBus component");
+    }
+    if terminals_requested && backend == "ibus" {
+        actions.push("Offer optional terminal coverage only after the core route's insertion test");
+    }
+    actions
+}
+
 pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     let mut requested_backend: Option<String> = None;
     let mut requested_mode: Option<String> = None;
@@ -14,11 +48,13 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     let mut check_only = false;
     let mut apply_requested = false;
     let mut json = false;
+    let mut cancel_resume = false;
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--check" => check_only = true,
             "--apply" => apply_requested = true,
             "--json" => json = true,
+            "--cancel-resume" => cancel_resume = true,
             "--terminals" => terminals = true,
             "--experimental-input-method-v2" => {
                 requested_backend = Some("input-method".into());
@@ -44,10 +80,28 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
             }
             _ => {
                 usage_bail!(
-                    "usage: wayexpand setup [--mode recommended|maximum|experimental | --backend ibus|input-method|evdev] [--terminals] [--yes] [--accept-non-atomic-replacement] [--install-system-integration]"
+                    "usage: wayexpand setup [--mode recommended|maximum|experimental | --backend ibus|input-method|evdev] [--apply] [--terminals] [--yes] [--accept-non-atomic-replacement] [--install-system-integration]"
                 )
             }
         }
+    }
+    if cancel_resume {
+        if check_only
+            || apply_requested
+            || requested_backend.is_some()
+            || requested_mode.is_some()
+            || assume_yes
+            || json
+            || terminals
+            || accept_non_atomic_replacement
+            || install_system_integration
+        {
+            usage_bail!("`wayexpand setup --cancel-resume` cannot be combined with other options");
+        }
+        wayexpand_core::clear_gnome_ibus_setup_resume(&default_config_path())
+            .map_err(|error| anyhow::anyhow!("could not cancel setup continuation: {error}"))?;
+        println!("GNOME setup continuation cancelled. No backend or configuration was changed.");
+        return Ok(());
     }
     if check_only && apply_requested {
         usage_bail!("choose either `wayexpand setup --check` or `wayexpand setup --apply`");
@@ -94,25 +148,17 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
         println!("WayExpand will be added as an IBus source; its engine uses the system keyboard layout.");
     }
     println!();
-    Config::ensure_user_config(default_config_path()).map_err(|error| {
-        config_error(format!(
-            "could not initialize configuration: {}",
-            error.safe_summary()
-        ))
-    })?;
-    // Window tracking is independent of the input route, so set it up even
-    // when no capture route turns out to be available.
-    let gnome_extension_readiness = if is_gnome {
-        let readiness = crate::gnome_extension::setup_gnome_window_tracker();
-        println!();
-        readiness
-    } else {
-        crate::gnome_extension::SetupReadiness::Ready
-    };
     let config_path = default_config_path();
-    let resume_pending = wayexpand_core::gnome_ibus_setup_resume_pending(&config_path);
+    let resume_pending = wayexpand_core::gnome_ibus_setup_resume_pending_for_session(
+        &config_path,
+        is_gnome,
+        is_gnome_wayland,
+    );
+    let resume_marker_exists = wayexpand_core::gnome_ibus_setup_resume_marker_present(&config_path);
     if resume_pending {
         println!("Resuming the GNOME IBus setup prepared before the previous logout.");
+    } else if resume_marker_exists {
+        println!("A GNOME IBus setup continuation is stale, unsupported, or belongs to another session; it will not affect backend selection. Use `wayexpand setup --cancel-resume` to discard it.");
     }
     let capabilities = probe_capabilities();
     let policy = load_policy()?;
@@ -183,10 +229,10 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
         setup_backend_for_mode(&mode, &capabilities, &policy)?
     } else if resume_pending {
         "ibus".to_owned()
-    } else if assume_yes {
+    } else if assume_yes || apply_requested {
         automatic.backend
     } else {
-        let prompt = format!("Configure Recommended mode ({})? [Y/n] ", automatic.label);
+        let prompt = format!("Use Recommended mode ({})? [Y/n] ", automatic.label);
         if prompt_yes_no(&prompt, true)? {
             automatic.backend
         } else {
@@ -209,31 +255,35 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     if install_system_integration && backend != "ibus" {
         usage_bail!("--install-system-integration applies only to the IBus backend");
     }
-    if backend == "ibus"
-        && is_gnome_wayland
-        && gnome_extension_readiness
-            == crate::gnome_extension::SetupReadiness::SessionRestartRequired
-    {
-        wayexpand_core::mark_gnome_ibus_setup_resume(&config_path).map_err(|error| {
-            anyhow::anyhow!("could not save the GNOME setup continuation: {error}")
-        })?;
-        eprintln!("SETUP RESULT: ACTION REQUIRED");
-        eprintln!("WX-GNOME-SESSION-RESTART-001: GNOME must load the WayExpand Shell extension before IBus setup can continue.");
-        eprintln!("The extension and its enabled preference are prepared. No IBus activation or replacement consent has been performed.");
-        eprintln!("Next: log out of GNOME and log back in, then reopen WayExpand or run `wayexpand setup` to resume. Replacement consent and any administrator authorization will still be requested separately.");
-        anyhow::bail!("WX-GNOME-SESSION-RESTART-001: restart the GNOME session to continue setup");
+    println!("\nSelected setup plan (read-only):");
+    println!("  Backend: {backend}");
+    println!(
+        "  Configuration: {}",
+        if default_config_path().exists() {
+            "validate existing configuration"
+        } else {
+            "create default configuration"
+        }
+    );
+    for action in setup_plan_actions(
+        &backend,
+        is_gnome_wayland && backend == "ibus",
+        accept_non_atomic_replacement,
+        install_system_integration,
+        terminals,
+    ) {
+        println!("  - {action}");
     }
-    if backend == "ibus"
-        && is_gnome_wayland
-        && gnome_extension_readiness == crate::gnome_extension::SetupReadiness::Unavailable
-    {
-        eprintln!("SETUP RESULT: ACTION REQUIRED");
-        eprintln!(
-            "WX-GNOME-EXTENSION-001: the GNOME Shell bridge required by IBus setup is unavailable."
-        );
-        eprintln!("Next: run `wayexpand doctor --gnome` and follow its extension repair instructions, then retry `wayexpand setup --backend ibus`.");
-        anyhow::bail!("WX-GNOME-EXTENSION-001: GNOME extension readiness could not be verified");
+    if !assume_yes && !apply_requested && !prompt_yes_no("Apply this setup plan? [Y/n] ", true)? {
+        println!("Setup plan declined. No configuration, GNOME extension, input-source, or service changes were made.");
+        return Ok(());
     }
+    Config::ensure_user_config(default_config_path()).map_err(|error| {
+        config_error(format!(
+            "could not initialize configuration: {}",
+            error.safe_summary()
+        ))
+    })?;
     let terminals_requested = terminals;
     let setup_result = configure_setup_backend(
         &backend,

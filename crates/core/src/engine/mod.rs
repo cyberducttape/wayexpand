@@ -493,13 +493,22 @@ impl ExpansionEngine {
         true
     }
 
-    /// Whether this configuration has enabled command expansions or hotkeys
-    /// that need the asynchronous command runtime.
+    /// Whether this configuration has enabled command expansions, form
+    /// expansions, or hotkeys that need the asynchronous command runtime.
     pub fn requires_async_workers(&self) -> bool {
         self.config
             .expansion
             .iter()
-            .any(|expansion| expansion.enabled && expansion.command.is_some())
+            .enumerate()
+            .any(|(index, expansion)| {
+                expansion.enabled
+                    && (expansion.command.is_some()
+                        || self
+                            .validated
+                            .form_fields
+                            .get(index)
+                            .is_some_and(Option::is_some))
+            })
             || self.config.hotkey.iter().any(|hotkey| hotkey.enabled)
     }
 
@@ -781,9 +790,7 @@ impl ExpansionEngine {
             self.restore_deferred_match(&matched_text);
             return Err(match error {
                 QueueSendError::Full => CommandError::QueueFull,
-                QueueSendError::Disconnected | QueueSendError::Unavailable => {
-                    CommandError::WorkerUnavailable
-                }
+                QueueSendError::Unavailable => CommandError::WorkerUnavailable,
             });
         }
         Ok(PendingExpansionDispatch::Queued)
@@ -847,9 +854,7 @@ impl ExpansionEngine {
             self.restore_deferred_match(&matched_text);
             return Err(match error {
                 QueueSendError::Full => CommandError::QueueFull,
-                QueueSendError::Disconnected | QueueSendError::Unavailable => {
-                    CommandError::WorkerUnavailable
-                }
+                QueueSendError::Unavailable => CommandError::WorkerUnavailable,
             });
         }
         self.form_active = true;
@@ -1134,9 +1139,7 @@ impl ExpansionEngine {
                 if let Err(error) = runtime.try_send_command(job) {
                     self.remember_command_failure(match error {
                         QueueSendError::Full => CommandErrorKind::QueueFull,
-                        QueueSendError::Disconnected | QueueSendError::Unavailable => {
-                            CommandErrorKind::WorkerUnavailable
-                        }
+                        QueueSendError::Unavailable => CommandErrorKind::WorkerUnavailable,
                     });
                     return None;
                 }

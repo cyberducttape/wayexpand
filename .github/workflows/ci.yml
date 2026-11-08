@@ -11,13 +11,18 @@ on:
         description: "Optional ref to check out for release verification"
         required: false
         type: string
+  workflow_dispatch:
+  schedule:
+    - cron: '17 3 * * *'
 
 permissions:
   contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Let active release-blocking integration runs finish when a developer pushes
+  # a follow-up. GitHub retains only the newest pending run for this group.
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -143,8 +148,6 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config
-      - name: Generate vendored dependencies (offline builds)
-        run: mkdir -p .cargo && cargo vendor vendor/ > .cargo/config.toml && echo "vendor/" >> .gitignore
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Run tests (locked, debug)
@@ -154,12 +157,15 @@ jobs:
       - name: Action Broker end-to-end test
         run: bash scripts/test-action-broker-e2e.sh
       - name: Run tests (locked, release)
+        if: github.event_name != 'pull_request'
         run: cargo test --locked --release --workspace
       - name: Clippy (locked, debug)
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - name: Clippy (locked, release)
+        if: github.event_name != 'pull_request'
         run: cargo clippy --locked --release --workspace --all-targets -- -D warnings
       - name: Measure adversarial matcher construction (10k snippets)
+        if: github.event_name != 'pull_request'
         run: |
           cargo bench --locked -p wayexpand-core --bench matcher --no-run
           bench_binary=$(find target/release/deps -maxdepth 1 -type f -perm -111 \
@@ -170,6 +176,7 @@ jobs:
             "$bench_binary" --bench matcher_construction_amplified/10000 \
             --sample-size 10 --warm-up-time 1 --measurement-time 2
       - name: Verify warmed ASCII input allocates nothing
+        if: github.event_name != 'pull_request'
         run: |
           timeout --signal=TERM --kill-after=10s 90s \
             cargo run --locked --release -p wayexpand-core --example input_path_allocations
@@ -179,9 +186,12 @@ jobs:
         run: timeout --signal=TERM --kill-after=30s 2m cargo run --locked -q -p wayexpand-ui -- --help
       - name: GUI help output
         run: timeout --signal=TERM --kill-after=30s 2m cargo run --locked -q -p wayexpand-gui -- --help
+      - name: Verify Rust validation left the source checkout clean
+        run: test -z "$(git status --porcelain=v1 --untracked-files=all)"
 
   rust-concurrency:
     name: Concurrent Rust stress (${{ matrix.package }})
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
@@ -228,6 +238,7 @@ jobs:
 
   concurrency-fault-regressions:
     name: Seeded concurrency and fault regressions
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -245,6 +256,7 @@ jobs:
 
   daemon-soak:
     name: Daemon soak (3 min)
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -277,6 +289,11 @@ jobs:
           name: daemon-soak-${{ github.sha }}
           path: ${{ runner.temp }}/wayexpand-soak
           if-no-files-found: warn
+
+  # A pull-request push must not cancel a running release-blocking desktop
+  # run. The workflow concurrency group retains one active and the newest
+  # pending revision; the long stress lane runs on push, schedule, and manual
+  # dispatch, while all functional GNOME checks remain required on PRs.
 
   msrv:
     name: MSRV (Rust 1.92)
@@ -364,6 +381,12 @@ jobs:
         run: bash scripts/test-gnome-extension-state.sh
       - name: Stress-test bounded GNOME notification delivery
         run: node --test scripts/test-gnome-notification-queue.mjs
+      - name: Verify GNOME keyboard API compatibility boundary
+        run: node scripts/test-gnome-keyboard-compat.mjs
+      - name: Verify bundled GNOME extension build identity
+        run: python3 scripts/gnome-extension-build-id.py
+      - name: Verify GTK IBus acceptance waits for actual widget focus
+        run: python3 scripts/test_gtk_ibus_e2e_focus.py
       - name: Verify GNOME extension D-Bus path compatibility
         run: sh scripts/test-gnome-extension-dbus.sh
       - name: Check Rust dependency hygiene
@@ -440,12 +463,7 @@ jobs:
         run: |
           appstreamcli validate --no-net io.github.cyberducttape.WayExpand.metainfo.xml
           desktop-file-validate desktop/wayexpand.desktop
-      - name: Check markdown links
-        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
-        with:
-          args: --offline --exclude-link-local --exclude 'file:///' '*.md' '**/*.md'
-          fail: true
-      - name: Check local markdown links deterministically
+      - name: Check local markdown links and anchors
         run: python3 scripts/check-markdown-links.py
       - name: Build CLI for executable documentation examples
         run: cargo build --locked -p wayexpand
@@ -473,8 +491,6 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/wayexpand-ansible"
           "$RUNNER_TEMP/wayexpand-ansible/bin/pip" install --disable-pip-version-check ansible-core==2.21.5
           echo "$RUNNER_TEMP/wayexpand-ansible/bin" >> "$GITHUB_PATH"
-      - name: Generate vendored dependencies (offline builds)
-        run: mkdir -p .cargo && cargo vendor vendor/ > .cargo/config.toml && echo "vendor/" >> .gitignore
       - name: Build binaries
         run: cargo build --locked --workspace
       - name: Ansible role syntax and idempotence regression
@@ -607,8 +623,12 @@ jobs:
           retention-days: 14
 
   gnome-e2e:
-    name: GNOME IBus GTK, Browser Safety, Activation, and Upgrade Acceptance (Headless)
-    runs-on: ubuntu-latest
+    name: GNOME IBus Acceptance (${{ matrix.os }}, Headless)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-26.04]
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -619,19 +639,33 @@ jobs:
           toolchain: 1.96.0
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Install GNOME Shell, GTK, IBus, browser protocol, and D-Bus dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gnome-shell xwayland xdotool ibus ibus-gtk3 dconf-service dbus-daemon libglib2.0-bin libgl1-mesa-dri libwayland-dev libxkbcommon-dev pkg-config python3-gi python3-websocket gir1.2-gtk-3.0
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gnome-shell xwayland xdotool x11-utils xterm ibus ibus-gtk3 ibus-gtk4 dconf-service dbus-daemon libglib2.0-bin libgl1-mesa-dri libwayland-dev libxkbcommon-dev pkg-config python3-gi python3-pyqt6 python3-websocket gir1.2-gtk-3.0 gir1.2-gtk-4.0
       - name: Verify the hosted browser test runtime
         run: google-chrome --version
       - name: Record tested revision
         id: tested_revision
         run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Verify required GNOME release and client coverage is declared
+        run: |
+          python3 scripts/check-gnome-acceptance-matrix.py
+          python3 scripts/test-gnome-acceptance-matrix.py
+      - name: Register the test engine through the system IBus component path
+        run: |
+          sudo install -d -m 0755 /usr/share/ibus/component
+          sed "s|<exec>wayexpand-ibus</exec>|<exec>$GITHUB_WORKSPACE/target/debug/wayexpand-ibus</exec>|" \
+            desktop/wayexpand-ibus.xml \
+            | sudo tee /usr/share/ibus/component/wayexpand.xml >/dev/null
+          sudo chmod 0644 /usr/share/ibus/component/wayexpand.xml
+          python3 -c 'import xml.etree.ElementTree as ET; ET.parse("/usr/share/ibus/component/wayexpand.xml")'
       - name: Accept GNOME IBus activation, GTK insertion, browser safety, and Shell restart lifecycle
+        env:
+          E2E_IBUS_COMPONENT_PATH: /usr/share/ibus/component
         run: bash scripts/test-gnome-e2e.sh --keep
       - name: Upload isolated GNOME diagnostics
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: gnome-e2e-diagnostics-${{ steps.tested_revision.outputs.commit }}
+          name: gnome-e2e-diagnostics-${{ matrix.os }}-${{ steps.tested_revision.outputs.commit }}
           path: /tmp/wayexpand-gnome-e2e.*/**
           if-no-files-found: ignore
           retention-days: 14
@@ -679,9 +713,84 @@ jobs:
           WX_GNOME_TRACKER_BIN="$GITHUB_WORKSPACE/target/debug/wx-e2e-gnome-tracker"
           bash scripts/test-gnome51-extension-runtime.sh
 
+  gnome51-ibus-e2e:
+    name: GNOME IBus Acceptance (Fedora 45 / GNOME 51, Headless)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    container:
+      image: fedora:45
+    steps:
+      - name: Install Fedora GNOME, IBus, and client test dependencies
+        run: |
+          dnf install -y chromium dbus-daemon dconf gcc gcc-c++ glib2 gtk3 gtk4 \
+            gnome-shell gsettings-desktop-schemas ibus ibus-gtk3 ibus-gtk4 \
+            libei-devel libinput-devel libudev-devel libxkbcommon-devel \
+            mesa-dri-drivers pkgconf-pkg-config python3 python3-gobject \
+            python3-pyqt6 python3-websocket-client shadow-utils systemd \
+            wayland-devel xdotool xprop xdpyinfo xorg-x11-server-Xwayland xterm
+          useradd --create-home wayexpand-test
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: 1.96.0
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Build GNOME IBus acceptance clients
+        run: >-
+          cargo build --locked -p wayexpand --bin wayexpand
+          -p wayexpand-backend-ibus --bin wayexpand-ibus
+          -p wayexpand-e2e --bin wx-e2e-sink --bin wx-e2e-gnome-tracker
+          --bin wx-e2e-ibus
+      - name: Register the test engine through Fedora's system IBus component path
+        run: |
+          sed "s|<exec>wayexpand-ibus</exec>|<exec>$GITHUB_WORKSPACE/target/debug/wayexpand-ibus</exec>|" \
+            desktop/wayexpand-ibus.xml \
+            > /usr/share/ibus/component/wayexpand.xml
+          python3 -c 'import xml.etree.ElementTree as ET; ET.parse("/usr/share/ibus/component/wayexpand.xml")'
+          chmod 0644 /usr/share/ibus/component/wayexpand.xml
+      - name: Start the isolated system bus required by GNOME Shell
+        run: |
+          mkdir -p /run/dbus
+          dbus-daemon --system --fork --nopidfile
+          mkdir -p /run/systemd/seats /run/systemd/sessions /run/systemd/users
+          # GNOME Shell asks logind for its user at startup; the state machine
+          # that follows fails without one. A linger entry registers the test
+          # user with this standalone logind (no login session exists here).
+          mkdir -p /var/lib/systemd/linger
+          touch /var/lib/systemd/linger/wayexpand-test
+          /usr/lib/systemd/systemd-logind &
+          attempt=0
+          until busctl --system status org.freedesktop.login1 >/dev/null 2>&1; do
+            attempt=$((attempt + 1))
+            if [ "$attempt" -ge 50 ]; then
+              echo "systemd-logind did not acquire org.freedesktop.login1" >&2
+              exit 1
+            fi
+            sleep 0.1
+          done
+      - name: Run GTK, Qt, browser, terminal, layout, privacy, and Shell-restart checks
+        run: |
+          browser=$(command -v chromium || command -v chromium-browser)
+          runuser -u wayexpand-test -- env \
+            E2E_BIN="$GITHUB_WORKSPACE/target/debug" \
+            E2E_SKIP_BUILD=1 E2E_BROWSER_BIN="$browser" E2E_BROWSER_NO_SANDBOX=1 \
+            E2E_IBUS_COMPONENT_PATH=/usr/share/ibus/component \
+            bash scripts/test-gnome-e2e.sh --keep
+      - name: Upload Fedora GNOME acceptance diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gnome-e2e-diagnostics-fedora-45-${{ github.sha }}
+          path: /tmp/wayexpand-gnome-e2e.*/**
+          if-no-files-found: ignore
+          retention-days: 14
+
   packaging:
     name: Debian and RPM Package Artifacts
-    runs-on: ubuntu-latest
+    # Build Linux packages against Ubuntu 24.04's runtime baseline so the
+    # published binaries remain usable on the supported Ubuntu LTS target.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -699,11 +808,16 @@ jobs:
           cargo --version
       - name: Vendor dependencies for offline package builds
         run: |
-          # Never reuse an ignored vendor tree: stale crates can make frozen
-          # RPM builds resolve against a version that is absent from Cargo.lock.
-          rm -rf .cargo vendor
-          mkdir -p .cargo
-          cargo vendor vendor/ > .cargo/config.toml
+          # Keep generated Cargo config and vendor files outside the source
+          # checkout so build identity remains clean and reproducible.
+          cargo_home="$RUNNER_TEMP/wayexpand-cargo-home"
+          mkdir -p "$cargo_home"
+          CARGO_HOME="$cargo_home" cargo vendor --locked "$cargo_home/vendor" > "$cargo_home/config.toml"
+          {
+            echo "CARGO_HOME=$cargo_home"
+            echo "WAYEXPAND_VENDOR_CONFIG=$cargo_home/config.toml"
+            echo "WAYEXPAND_VENDOR_DIR=$cargo_home/vendor"
+          } >> "$GITHUB_ENV"
       - name: Build Debian package
         run: |
           # The pinned rust-toolchain supplies rustc/cargo; -d bypasses the
@@ -743,11 +857,20 @@ jobs:
           source_commit=$(git rev-parse --short=12 HEAD)
           mkdir -p "$source_dir/debian"
           printf '%s\n' "$source_commit" > "$source_dir/debian/wayexpand-build-sha"
-          cp -a .cargo vendor "$source_dir/"
+          mkdir -p "$source_dir/.cargo"
+          # The source archive must remain relocatable; Cargo's generated
+          # config names the external vendor directory with an absolute path.
+          sed "s|directory = \"$CARGO_HOME/vendor\"|directory = \"vendor\"|" \
+            "$CARGO_HOME/config.toml" > "$source_dir/.cargo/config.toml"
+          grep -F 'directory = "vendor"' "$source_dir/.cargo/config.toml"
+          cp -a "$CARGO_HOME/vendor" "$source_dir/vendor"
           tar -C "$top/sources" -czf "$top/rpmbuild/SOURCES/wayexpand-${version}-vendored.tar.gz" \
             "wayexpand-${version}"
           rm -rf "$top/sources"
-          timeout --signal=TERM --kill-after=60s 20m rpmbuild -bb --nodeps \
+          # Debian packaging above already runs the complete Cargo workspace
+          # suite. Keep this job focused on RPM build/install-manifest
+          # validation instead of compiling and running the same tests again.
+          timeout --signal=TERM --kill-after=60s 20m rpmbuild -bb --nocheck --nodeps \
             --define "_topdir $top/rpmbuild" \
             --define "_sourcedir $top/rpmbuild/SOURCES" \
             wayexpand.spec
@@ -802,11 +925,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # The .deb is built on ubuntu-latest and requires its glibc, so it
-          # is smoke-tested on that series (the documented .deb target).
+          # Test the oldest supported Ubuntu LTS baseline and the current LTS.
+          - image: ubuntu:24.04
+            package: deb
           - image: ubuntu:26.04
             package: deb
-          - image: fedora:latest
+          # Pin Fedora rather than following a moving `latest` tag so a CI
+          # result names the distro release it actually validated.
+          - image: fedora:45
             package: rpm
     container: ${{ matrix.image }}
     steps:

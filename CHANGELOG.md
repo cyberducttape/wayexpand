@@ -4,10 +4,208 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Preserve partially typed IBus triggers when Shift or an alternate-level
+  modifier is pressed between characters, so triggers containing characters
+  such as French AZERTY's shifted `2` can still match. Shortcut modifiers still
+  reset matching.
+- Make offline Markdown validation deterministic and independent of a release
+  binary download. Check repository-local links, images, and heading anchors,
+  including reference-style links; restore the Operations Guide target linked
+  by the command-preview security guidance. Use the same `xdotool type` XTEST
+  path for the GTK XKB baseline that the passing X11 terminal baseline uses.
+- Verify XTEST delivery into an IBus-free X11 terminal and then ordinary US
+  XKB-to-GTK key delivery through GtkIMContextSimple with a direct synthetic
+  event before WayExpand-specific IBus insertion. Pin the GTK 3 baseline
+  widget's IM module because a desktop-level setting can override the process
+  environment. Keep that baseline disconnected from the private IBus daemon,
+  validate separate GTK/XIM environment requirements, and record GDK's core
+  device event setting in sanitized GTK failure diagnostics.
+  Refresh XWayland focus once before the GTK baseline event. Count sanitized
+  GDK-to-widget key events and report GTK's effective IM-module, X11 focus,
+  active window, XTEST availability, and
+  content-free IBus focus/key counters on failures. Force and validate a UTF-8
+  locale for xdotool text injection so Unicode passthrough tests exercise the
+  target client rather than failing during multibyte decoding. Exercise the
+  expected Qt/XIM password-field pass-through checkpoint as well as GTK. Wait
+  for Chromium's exact local acceptance page before inspecting its title or
+  focusing the browser, avoiding a race with its startup tab.
+- Verify GNOME IBus activation against the live IBus manager state and
+  confirmed engine name instead of trusting Shell's optimistic current source.
+  Report disconnected or sensitive-field-disabled IBus states explicitly, and
+  keep password-purpose acceptance checks after layout and restart scenarios so
+  they cannot leave the remaining GNOME tests in privacy mode. Register every
+  XKB layout exercised by the acceptance matrix before asking Shell to switch
+  to it. Add a CI check and update helper for the content-bound GNOME extension
+  identity so bundled JS changes cannot leave stale metadata and break installs.
+- Preserve both German and French keyboard sources when the GNOME acceptance
+  test re-registers WayExpand, and assert that every source used by layout
+  switching remains available.
+- Record a content-free GTK key-event count on failed desktop insertion checks,
+  so XTEST/widget delivery failures can be distinguished from IBus engine
+  routing failures without logging key contents.
+- Re-resolve XWayland's current display authorization after the simulated
+  GNOME logout/login before running the final GTK insertion test.
+- Require both an active GTK toplevel and actual focus within the test widget
+  for the full stability interval before sending XTEST input. Cover focus loss,
+  inactive windows, and the timing boundary with focused regression tests.
+  Retry GTK focus requests at a bounded cadence after Mutter activation, while
+  keeping the live readiness marker closed until GTK confirms stable focus.
+  Re-activate the Wayland target after creating Mutter's virtual keyboard so
+  compositor focus and GTK's active state are synchronized before input.
+  Capture the active IBus engine before and after each GTK case alongside the
+  existing content-free engine counters.
+- Register the GNOME acceptance engine through the standard system IBus
+  component directory and validate the generated XML before launching Shell.
+  Exercise activation, layout-switch, and post-restart behavior through actual
+  GTK text fields; keep the zbus-only protocol probe in the dedicated IBus CI
+  job so it cannot perturb GNOME's session-managed engine. Refresh the live
+  GNOME source list during bounded source activation retries after layout
+  switches, and verify GTK insertion again after a Shell restart. Declare and
+  check GNOME 51 compatibility for the test-only focus-controller extension;
+  its missing version had prevented the headless acceptance test from focusing
+  GTK clients on Fedora 45.
+- Bind GNOME Shell tracker authorization to exact resolved executable paths
+  instead of trusted basenames, remove the test helper from production's
+  trusted-client list, and add negative tests for executable-name spoofing.
+  This remains same-UID defense in depth, not isolation from malicious
+  software running as the logged-in user. Serialize KWin availability probes
+  through one bounded worker so a stalled D-Bus call cannot leak a thread per
+  diagnostic timeout. Bound GNOME E2E D-Bus calls so an unresponsive IBus
+  method cannot hold CI until job timeout, and synchronize the certification
+  matrix contract test with current Fedora/Ubuntu, Firefox/Chromium, and
+  lifecycle coverage. Keep generated Cargo vendor state outside CI checkouts,
+  preserve relocatable vendor configuration in source archives, and let active
+  GNOME acceptance runs complete instead of cancelling them on every push.
+- Keep the exact test-client executable paths isolated to the headless GNOME
+  test session, including the CLI and IBus engine binaries needed to exercise
+  source repair and engine activation. Let Debian package builds consume the
+  verified external Cargo vendor tree from `CARGO_HOME`, so package CI no
+  longer needs to materialize generated vendor files in the Git checkout.
+  Refresh the GNOME extension content identity and its metadata contract after
+  changing the authorization helper.
+- Authorize the same-UID `wayexpand-ibus` engine process for the GNOME
+  Shell's existing authenticated input-source and keyboard-layout bridge.
+  GNOME previously rejected the real IBus client while the test helper was
+  allowed, so switching layouts removed WayExpand from the live source list.
+  Add a regression test for the exact installed engine executable identity;
+  retain UID and executable checks for every caller, and refresh the extension
+  build identity so running-version diagnostics detect the authorization fix.
+- Run the GNOME IBus headless client-acceptance suite on Fedora 45/GNOME 51 in
+  addition to Ubuntu 24.04 and 26.04. This covers GTK 3/4 replacement and
+  Unicode, password-field refusal, Qt/terminal safe pass-through, browser
+  fail-safe behavior, keyboard-source switching, and Shell restart. These
+  isolated-session results remain separate from physical desktop certification;
+  Firefox, Electron, package upgrade/uninstall persistence, and physical
+  keyboard scenarios still require dedicated evidence.
+- Make the GNOME IBus acceptance test wait for a focused engine context before
+  sending its harmless key probe, correlated to a new IBus focus sequence so a
+  stale pre-restart context cannot satisfy readiness. Ubuntu 24.04 CI had shown
+  the first key could be consumed during post-Shell-restart engine attachment.
+  Filter the e2e client to D-Bus signals. Extend headless Ubuntu coverage to
+  GTK 3/4 replacement and Unicode, password-purpose refusal, Qt/XIM and xterm
+  exact pass-through, and US/German/French layout switches. Keep Firefox,
+  Electron, and physical-session results uncertified until independently
+  tested.
+- Expand the GNOME IBus acceptance plan to Fedora 45/GNOME 51 and supported
+  Ubuntu 24.04/26.04 releases, with independent GTK 3/4, Qt, Firefox,
+  Chromium, Electron, and terminal cells for US, German, French, AltGr, and
+  active layout switching. Require Unicode, password-field, focus-change,
+  Shell restart, upgrade, and uninstall results. Require per-cell review
+  artifacts and reject evidence from headless sessions.
+  Validate evidence reports without promoting missing or unsupported cells;
+  run the hosted headless GNOME acceptance suite on both Ubuntu releases and
+  keep physical-session certification explicitly separate.
+- Make first-run GNOME setup a guided path: show prerequisite and IBus checks,
+  distinguish a registered source from an active one, and offer source
+  activation/recheck actions directly in onboarding. An IBus connection alone
+  no longer marks GNOME configured. Restart and replacement-authorization
+  states stay in the guide instead of forcing users into advanced Diagnostics;
+  the dedicated real-application test remains the only way to mark the route
+  verified.
+- Recover interrupted GNOME Shell extension installs from a private, fsynced
+  transaction journal. The installer holds a per-extension flock, rolls back
+  an uncommitted directory exchange on the next setup run, retains a committed
+  build while cleaning its backup, and removes partial journal writes. Add
+  regressions for interruption before/after the switch and after commit, plus
+  explicit stale GNOME setup-marker coverage; stale markers remain visible for
+  diagnostics but cannot resume and can be cancelled.
+- Keep IBus async workers absent for text-only configurations and add a
+  regression that verifies worker startup/removal follows configuration reloads.
+  Replace the hotkey worker's timed channel wait with a wakeable bounded queue,
+  avoiding an idle 50 ms shutdown wait during worker teardown. Add an IBus
+  context benchmark for construction, reload, process thread count, RSS/PSS,
+  and p50/p95/p99 key processing; the 16-context baseline shows 80 workers,
+  establishing the need for a shared bounded pool.
+- Rework Getting Started around the GUI-first onboarding flow, and document
+  app-filter availability by route. GNOME focus updates are supplied by the
+  Shell extension and bound to IBus contexts, but remain uncertified in
+  real-session applications.
+- Build release payloads against Ubuntu 24.04 LTS and pin distro package
+  install smoke checks to Ubuntu 24.04/26.04 and Fedora 45. Clarify in
+  packaging docs that CI coverage is not the same as published package
+  channels; refresh publication status from current GitHub and Launchpad
+  inventories.
+- Keep GNOME extension readiness distinct when Shell status queries fail:
+  session-bus failures and unknown state now produce targeted diagnostics,
+  and logout/login is recommended only when the live Shell reports that the
+  installed extension build is not loaded in this session. A missing
+  `UserExtensionsEnabled` property is no longer treated as enabled.
+- Strengthen release-archive validation for the optional PolicyKit action
+  policy: assert the policy action and authentication defaults, regular-file
+  type, and mode 0644. The binary packager includes the policy artifact.
+- Limit first-run desktop verification to the dedicated harmless, global
+  `:wayexpand-test` tutorial expansion. App-filtered snippets are excluded from
+  desktop-test choices, and the dialog presents the exact trigger and expected
+  text before asking the user to type; application type is a simple report
+  choice rather than a technical class string.
+- Treat IBus configuration-generation handoff failures as unhealthy and
+  expose the requested/published generation mismatch in stable GNOME/IBus
+  diagnostics. Keep async workers enabled for form-only libraries so field
+  completion continues to work after skipping workers for text-only configs.
+- Version GNOME setup continuations with their originating GNOME Wayland
+  session and creation time. Resume only in a matching session, ignore expired
+  or unsupported markers for route selection, and provide
+  `wayexpand setup --cancel-resume` to discard abandoned setup state.
+- Bind GNOME IBus engine contexts to the authenticated Shell window observed
+  at IBus focus-in. Revalidate that window on key processing and clear
+  application identity after focus changes or tracker loss, keeping
+  app-filtered snippets fail-closed when the association is uncertain.
+- Exercise the IBus service path with two independent input contexts across
+  GNOME editor/terminal focus changes. Verify that app-filtered replacements
+  are suppressed in the terminal and become available only after the context
+  refocuses the authorized editor.
+- Make the real-application insertion test an explicit onboarding stage and
+  update Getting Started so matcher success is never described as desktop
+  verification. The GUI now labels configured-but-untested routes and maps
+  GNOME session restart and replacement-authorization failures to distinct
+  next steps; only a user-confirmed exact insertion is shown as working.
+
+- Defer GNOME extension setup until after backend selection, policy checks,
+  IBus preflight, and replacement authorization. A rejected route no longer
+  installs or enables the extension, and backend selection failures no longer
+  initialize a configuration file. Interactive setup now presents the
+  selected backend and planned changes for approval before applying them;
+  `--apply` selects the recommended route and approves that plan. GNOME
+  extension files and enablement settings remain in the IBus setup transaction
+  until verification succeeds, and route-verification failures roll them back.
+- Install GNOME Shell extension updates from a staged, fully verified directory
+  and switch the complete payload atomically. Retain the prior directory and
+  GNOME enablement settings until live activation, tracker protocol, and build
+  identity checks pass; restore them on failure. Isolate GNOME's internal
+  keyboard-manager calls behind a feature-detecting compatibility boundary
+  with fail-closed tests.
+- Include the optional Action Broker PolicyKit policy in binary release
+  archives and assert its presence and action identity in release packaging
+  tests.
 - Compile the effective IBus configuration once per generation and share its
   validated snapshot and immutable matcher across engine contexts. Each IBus
   context retains its own mutable typing state. Add a Criterion benchmark for
   10,000-entry libraries with 1, 4, and 16 contexts.
+- Publish IBus configuration reloads as one generation handoff: acquire the
+  factory, instance registry, and every context lock before updating any
+  engine. Poisoned locks retain the previous generation and surface
+  `WX-IBUS-RELOAD-001`, published/requested generations, and stale-context
+  counts through IBus, GNOME, and sanitized support diagnostics.
 - Keep the per-user source installer focused on runtime binaries instead of
   building certification-only executables, and direct ordinary desktop users
   without Cargo to the package and release installation paths. Debian and RPM
@@ -21,12 +219,14 @@ All notable changes to WayExpand are documented here.
   checks do not verify insertion in a desktop application.
 - Make GNOME's first IBus setup resumable across the logout required to load a
   newly installed Shell extension. Setup saves only a fixed, private resume
-  marker, stops before IBus mutation with `WX-GNOME-SESSION-RESTART-001`, and
+  marker, stops before IBus activation with `WX-GNOME-SESSION-RESTART-001`, and
   the GUI offers to resume after login. Consent and administrator authorization
   are requested again through their normal explicit flows. Recommend distro
   packages for ordinary installs because they ship the shared IBus manifest
   and system-owned engine executable together; retain source/archive installs
-  as developer paths.
+  as developer paths. GNOME's live source is snapshotted only after the Shell
+  bridge is verified, and refusal of non-atomic replacement stops before IBus
+  registration or source activation.
 
 - Declare the GNOME Shell tracker compatible with GNOME 51 and run an isolated
   test against Fedora 45's GNOME Shell 51 package. The test verifies extension
@@ -4226,3 +4426,46 @@ This is the first stable release. WayExpand is now recommended for production us
 [1.0.0]: https://github.com/cyberducttape/wayexpand/releases/tag/v1.0.0
 [0.2.0]: https://github.com/cyberducttape/wayexpand/releases/tag/v0.2.0
 [0.1.0]: https://github.com/cyberducttape/wayexpand/releases/tag/v0.1.0
+- Require GTK and Qt acceptance clients to report stable active-field focus
+  before XTEST sends the first key. This prevents window activation from being
+  mistaken for a ready input context and keeps the result check tied to the
+  actual focused text widget.
+- Give each GTK and Qt desktop acceptance window a unique identity so Mutter's
+  focus controller cannot select a stale window from a previous case. Require
+  GTK 4 password-field focus before sending test input and verify exact
+  pass-through text.
+- Run GTK 3/4 acceptance widgets in plain GTK toplevels instead of an
+  application-managed GTK 4 window, leaving focus management to the focused
+  widget and Mutter test controller.
+- Focus the field itself with XTEST after Mutter confirms the uniquely named
+  GTK/Qt test window. This exercises the application text widget instead of
+  relying only on toplevel activation.
+- Exercise GTK 4 password handling with `Gtk.PasswordEntry`, the toolkit's
+  dedicated password widget, while retaining exact focus and text checks.
+- Recognize GTK 4 composite password controls as focused when their internal
+  text child owns focus; exact contents remain the pass criterion.
+- Run Qt XIM's Unicode pass-through case with German-layout characters that
+  the XTEST keyboard driver can generate, while keeping broad Unicode commit
+  coverage in the GTK IBus cases.
+- Pass GNOME's private XWayland display, authorization file, and IBus address
+  into the xterm acceptance client so terminal scenarios run in the isolated
+  desktop session.
+- Teach the pinned Actionlint validator about the Ubuntu 26.04 hosted-runner
+  label used by the GNOME acceptance matrix.
+- Run the terminal Unicode XIM pass-through scenario under the German layout
+  so the synthetic XTEST keyboard uses available keysyms.
+- Avoid reloading GNOME's live input-source manager when the target source is
+  already registered. Reloading during a layout-to-IBus switch cancelled the
+  pending engine activation in the Ubuntu 26.04 headless acceptance run.
+- Run Qt and xterm XIM pass-through cases only after GNOME IBus layout,
+  GTK-replacement, and relogin checks. The first XIM client can restart the
+  session IBus daemon and otherwise invalidate those GNOME scenarios.
+- Wait briefly for GNOME's asynchronously registered IBus source after a
+  source-manager refresh, while retaining a bounded failure when it never
+  appears.
+- Give the explicit GNOME input-source activation call a bounded five-second
+  D-Bus deadline so the extension's asynchronous IBus registration wait can
+  finish without expiring the caller first.
+- Include the currently visible source IDs in an explicit source-activation
+  refusal, making a missing IBus registration distinguishable from delayed
+  GNOME source discovery.

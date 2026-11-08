@@ -37,10 +37,9 @@ pub(super) fn notify_completion(notifier: &std::sync::RwLock<Option<CompletionNo
     }
 }
 
-/// Bounded multi-consumer command queue. A condition variable releases the
-/// queue mutex while workers wait, unlike a mutex-protected std MPSC
-/// receiver's `recv_timeout`, which makes idle workers take turns holding the
-/// receiver lock.
+/// Bounded multi-consumer job queue. A condition variable releases the queue
+/// mutex while workers wait, unlike a mutex-protected std MPSC receiver,
+/// which makes idle workers take turns holding the receiver lock.
 pub(super) struct CommandQueue<T> {
     items: Mutex<VecDeque<T>>,
     wake: Condvar,
@@ -119,7 +118,7 @@ impl<T> CommandQueue<T> {
 
 pub(super) struct AsyncCommandRuntime {
     pub(super) command_sender: Arc<CommandQueue<AsyncCommandJob>>,
-    pub(super) hotkey_sender: mpsc::SyncSender<HotkeyResult>,
+    pub(super) hotkey_sender: Arc<CommandQueue<HotkeyResult>>,
     pub(super) receiver: mpsc::Receiver<AsyncCommandCompletion>,
     pub(super) hotkey_receiver: mpsc::Receiver<AsyncHotkeyCompletion>,
     pub(super) expansion_metrics: Arc<CommandMetricsState>,
@@ -158,6 +157,7 @@ impl Drop for AsyncCommandRuntime {
     fn drop(&mut self) {
         self.shutdown.store(true, Ordering::Release);
         self.command_sender.notify_all();
+        self.hotkey_sender.notify_all();
         for worker in self.command_workers.drain(..) {
             let _ = worker.join();
         }
@@ -175,8 +175,7 @@ impl AsyncCommandRuntime {
         hotkey_metrics: Arc<CommandMetricsState>,
     ) -> Option<Self> {
         let command_sender = Arc::new(CommandQueue::new(super::ASYNC_COMMAND_QUEUE_CAPACITY));
-        let (hotkey_sender, hotkey_receiver) =
-            mpsc::sync_channel::<HotkeyResult>(super::ASYNC_COMMAND_QUEUE_CAPACITY);
+        let hotkey_sender = Arc::new(CommandQueue::new(super::ASYNC_COMMAND_QUEUE_CAPACITY));
         let (completion_sender, completion_receiver) =
             mpsc::sync_channel(super::ASYNC_COMMAND_QUEUE_CAPACITY);
         let (hotkey_completion_sender, hotkey_completion_receiver) =
@@ -398,14 +397,14 @@ impl AsyncCommandRuntime {
         }
         let hotkey_shutdown = Arc::clone(&shutdown);
         let worker_hotkey_metrics = Arc::clone(&hotkey_metrics);
+        let worker_hotkey_sender = Arc::clone(&hotkey_sender);
         let hotkey_worker = thread::Builder::new()
             .name("wayexpand-hotkey-worker".into())
             .spawn(move || {
                 while !hotkey_shutdown.load(Ordering::Acquire) {
-                    let action = match hotkey_receiver.recv_timeout(Duration::from_millis(50)) {
-                        Ok(action) => action,
-                        Err(mpsc::RecvTimeoutError::Timeout) => continue,
-                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    let Some(action) = worker_hotkey_sender.recv_timeout(Duration::from_millis(50))
+                    else {
+                        continue;
                     };
                     if hotkey_shutdown.load(Ordering::Acquire) {
                         worker_hotkey_metrics
@@ -497,27 +496,28 @@ impl AsyncCommandRuntime {
         &self,
         action: HotkeyResult,
     ) -> Result<(), super::QueueSendError> {
-        self.try_send(&self.hotkey_sender, action, &self.hotkey_metrics)
-    }
-
-    fn try_send<T>(
-        &self,
-        sender: &mpsc::SyncSender<T>,
-        job: T,
-        metrics: &CommandMetricsState,
-    ) -> Result<(), super::QueueSendError> {
-        metrics.queue_depth.fetch_add(1, Ordering::Relaxed);
-        match sender.try_send(job) {
+        self.hotkey_metrics
+            .queue_depth
+            .fetch_add(1, Ordering::Relaxed);
+        match self.hotkey_sender.try_send(action) {
             Ok(()) => Ok(()),
-            Err(mpsc::TrySendError::Full(_)) => {
-                metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
-                metrics.queue_rejected_total.fetch_add(1, Ordering::Relaxed);
+            Err(CommandQueueSendError::Full(_)) => {
+                self.hotkey_metrics
+                    .queue_depth
+                    .fetch_sub(1, Ordering::Relaxed);
+                self.hotkey_metrics
+                    .queue_rejected_total
+                    .fetch_add(1, Ordering::Relaxed);
                 Err(super::QueueSendError::Full)
             }
-            Err(mpsc::TrySendError::Disconnected(_)) => {
-                metrics.queue_depth.fetch_sub(1, Ordering::Relaxed);
-                metrics.queue_rejected_total.fetch_add(1, Ordering::Relaxed);
-                Err(super::QueueSendError::Disconnected)
+            Err(CommandQueueSendError::Unavailable(_)) => {
+                self.hotkey_metrics
+                    .queue_depth
+                    .fetch_sub(1, Ordering::Relaxed);
+                self.hotkey_metrics
+                    .queue_rejected_total
+                    .fetch_add(1, Ordering::Relaxed);
+                Err(super::QueueSendError::Unavailable)
             }
         }
     }

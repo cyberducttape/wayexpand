@@ -42,8 +42,8 @@ trigger, so the GUI labels them as observed activity and never treats them as
 proof of insertion by themselves.
 
 Finding IDs such as `WX-CONFIG-001`, `WX-GNOME-IM-001`, `WX-IBUS-002`,
-`WX-INPUT-001`, `WX-OUTPUT-001`, `WX-POLICY-001`, `WX-SERVICE-002`, and
-`WX-VERSION-001` are stable references
+`WX-IBUS-RELOAD-001`, `WX-INPUT-001`, `WX-OUTPUT-001`, `WX-POLICY-001`,
+`WX-SERVICE-002`, and `WX-VERSION-001` are stable references
 for support reports and automation.
 
 ### Browser text fields do not expand
@@ -133,6 +133,15 @@ through GNOME Shell, then independently verify the IBus engine.
 Configuration readiness does not prove that a text field receives input or
 that an application applied a replacement; use `wayexpand debug --test
 ';;hello'` and confirm the visible result.
+
+### GNOME setup continuation
+
+If setup installed the Shell extension and asked for a logout/login, its
+continuation is valid only in a GNOME Wayland session and expires after 14
+days. On another desktop, ordinary `wayexpand setup` uses that desktop's
+normal backend recommendation and leaves the continuation untouched. To
+discard an abandoned or unsupported continuation, run
+`wayexpand setup --cancel-resume`.
 
 ### WX-PORTAL-001
 
@@ -352,6 +361,25 @@ systemctl --user restart wayexpand-evdev.service
    bug report.
 
 ## Compositor-Specific Issues
+
+### GNOME Shell extension readiness
+
+`wayexpand doctor --gnome --json` reports extension readiness independently
+from the extension files on disk:
+
+- `not-loaded-this-session` means GNOME answered the status query, the enabled
+  extension matches the installed build, and Shell has not loaded it this
+  session. Log out and back in, then rerun the doctor.
+- `session-bus-unavailable` means the Shell status query could not establish a
+  usable session-bus connection. Run the doctor from the active GNOME session
+  and inspect the D-Bus/extension evidence; this state alone is not a reason to
+  log out.
+- `extension-failed` means GNOME reported a load error or the tracker protocol
+  failed. Inspect the reported extension error and handshake before reinstalling
+  or restarting anything.
+- `unknown` means there is not enough evidence to choose one of those causes.
+  Follow the targeted command in the report; do not assume a desktop restart is
+  required.
 
 ### KDE Plasma (KWin) — app_filter / window tracking issues
 

@@ -1,10 +1,10 @@
 #!/bin/sh
 # End-to-end test of GNOME source activation, the IBus engine, and window
 # tracking in a private headless GNOME Shell session. It verifies GNOME source
-# registration/activation, an IBus protocol transaction, a live GTK 3 IBus
-# input context, focus tracking, and extension upgrade/reload behavior. GTK's
-# test event is sent to a focused Entry through GTK's actual IBus module; it
-# does not certify compositor keyboard delivery or physical-keyboard behavior.
+# registration/activation, GTK 3/4 input contexts, focus tracking, and
+# extension upgrade/reload behavior. The XKB control uses GTK's simple input
+# context; IBus cases use the actual IBus module. It does not certify physical
+# keyboard behavior.
 #
 # Usage: scripts/test-gnome-e2e.sh [--keep]
 #   E2E_BIN=DIR        use prebuilt wayexpand, wayexpand-ibus, and wx-e2e-* binaries
@@ -23,12 +23,33 @@ for argument in "$@"; do
         *) printf '%s\n' "usage: $0 [--keep]" >&2; exit 2 ;;
     esac
 done
-for tool in gnome-shell dbus-run-session gsettings gdbus xdotool timeout python3; do
+for tool in gnome-shell dbus-run-session gsettings gdbus xdotool xprop xdpyinfo \
+    iconv locale xterm timeout python3; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         printf '%s\n' "error: $tool is required (install GNOME Shell, XWayland, xdotool and the GTK/IBus test dependencies)" >&2
         exit 2
     fi
 done
+utf8_charmap=$(LC_ALL=C.UTF-8 locale charmap 2>/dev/null || true)
+if [ "$utf8_charmap" != UTF-8 ]; then
+    printf '%s\n' "fail gnome-unicode-locale C.UTF-8 locale unavailable (charmap=${utf8_charmap:-unknown})" >&2
+    locale -a >&2 2>&1 || true
+    exit 1
+fi
+shell_version=$(gnome-shell --version | sed -n 's/.* \([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1/p')
+if [ -z "$shell_version" ] || ! python3 - "$project_dir/scripts/gnome-e2e-focus-controller/metadata.json" "$shell_version" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    metadata = json.load(source)
+if sys.argv[2] not in metadata.get("shell-version", []):
+    raise SystemExit(1)
+PY
+then
+    printf '%s\n' "error: the GNOME E2E focus controller does not declare support for GNOME Shell ${shell_version:-unknown}" >&2
+    exit 2
+fi
 browser_bin=${E2E_BROWSER_BIN:-}
 if [ -z "$browser_bin" ]; then
     browser_bin=$(command -v google-chrome-stable || command -v google-chrome || true)
@@ -68,6 +89,7 @@ mkdir -p "$work/home" "$work/config/wayexpand" "$work/cache" "$work/component" \
     "$work/home/.local/share/gnome-shell/extensions/$controller_uuid"
 cp "$project_dir/gnome-extension/$uuid/metadata.json" "$project_dir/gnome-extension/$uuid/extension.js" \
     "$project_dir/gnome-extension/$uuid/notification-queue.js" \
+    "$project_dir/gnome-extension/$uuid/keyboard-compat.js" \
     "$work/home/.local/share/gnome-shell/extensions/$uuid/"
 cp "$project_dir/scripts/gnome-e2e-focus-controller/metadata.json" \
     "$project_dir/scripts/gnome-e2e-focus-controller/extension.js" \
@@ -79,6 +101,10 @@ compatibility_mode = "tracked-focus"
 [[expansion]]
 trigger = ";e2e"
 replacement = "expanded"
+
+[[expansion]]
+trigger = ";unicode"
+replacement = "Grüße 世界 🖥️"
 EOF
 chmod 0700 "$work/config" "$work/config/wayexpand"
 chmod 0600 "$work/config/wayexpand/expansions.toml"
@@ -94,6 +120,39 @@ set -eu
 browser_bin=${E2E_BROWSER_BIN:?E2E_BROWSER_BIN must identify the browser executable}
 display=wayexpand-gnome-e2e
 log() { printf '%s\n' "$*"; }
+diagnose_ibus_session() {
+    diagnostic=$1
+    {
+        printf 'IBUS_COMPONENT_PATH=%s\n' "${IBUS_COMPONENT_PATH:-unset}"
+        printf '%s\n' 'Temporary component entries:'
+        find "$E2E_WORK/component" -maxdepth 1 -type f -ls 2>&1 || true
+        if [ -f "$E2E_WORK/component/wayexpand.xml" ]; then
+            printf '%s\n' 'Temporary component XML:'
+            cat "$E2E_WORK/component/wayexpand.xml"
+        fi
+        printf '%s\n' 'System component entry:'
+        if [ -f /usr/share/ibus/component/wayexpand.xml ]; then
+            ls -l /usr/share/ibus/component/wayexpand.xml
+            cat /usr/share/ibus/component/wayexpand.xml
+        else
+            printf '%s\n' 'not installed'
+        fi
+        printf '%s\n' 'IBus address:'
+        ibus address 2>&1 || true
+        printf '%s\n' 'IBus engine registration:'
+        ibus list-engine --name-only 2>&1 | grep -Fx wayexpand || true
+        printf '%s\n' 'IBus current engine:'
+        ibus engine 2>&1 || true
+        printf '%s\n' 'GNOME input-source settings:'
+        gsettings get org.gnome.desktop.input-sources sources 2>&1 || true
+        printf '%s\n' 'IBus daemon PIDs and component/session environment:'
+        for pid in $(pgrep -x ibus-daemon 2>/dev/null || true); do
+            printf 'pid=%s comm=%s\n' "$pid" "$(cat "/proc/$pid/comm" 2>/dev/null || true)"
+            tr '\0' '\n' <"/proc/$pid/environ" 2>/dev/null \
+                | grep -E '^(IBUS_COMPONENT_PATH|HOME|XDG_RUNTIME_DIR|DBUS_SESSION_BUS_ADDRESS)=' || true
+        done
+    } >"$diagnostic" 2>&1
+}
 if [ "$HOME" != "$E2E_WORK/home" ] \
     || [ "$XDG_CONFIG_HOME" != "$E2E_WORK/config" ] \
     || [ "$XDG_DATA_HOME" != "$HOME/.local/share" ]; then
@@ -106,8 +165,20 @@ if ! command -v wayexpand-ibus >"$E2E_WORK/wayexpand-ibus-path.txt"; then
 fi
 gsettings set org.gnome.shell disable-user-extensions false
 gsettings set org.gnome.shell enabled-extensions "['$E2E_UUID', '$E2E_CONTROLLER_UUID']"
+# Where GNOME Tour is installed (Fedora), a fresh profile opens the modal
+# WelcomeDialog. It holds the stage grab, so no client receives keyboard input.
+gsettings set org.gnome.shell welcome-dialog-last-shown-version 99.0
 gsettings set org.gnome.desktop.input-sources sources \
-    "[('xkb', 'us'), ('xkb', 'de'), ('ibus', 'wayexpand')]"
+    "[('xkb', 'us'), ('xkb', 'de'), ('xkb', 'fr'), ('ibus', 'wayexpand')]"
+# Fedora's xdg-desktop-portal-gnome opens a Remote Desktop dialog in this session
+# that nothing can answer, and XTEST input to X11 clients then goes missing.
+# Mutter's own RemoteDesktop D-Bus API, which the GTK cases use, is unaffected.
+mkdir -p "$XDG_CONFIG_HOME/xdg-desktop-portal"
+cat >"$XDG_CONFIG_HOME/xdg-desktop-portal/gnome-portals.conf" <<'PORTALS'
+[preferred]
+default=gnome;gtk;
+org.freedesktop.impl.portal.RemoteDesktop=none
+PORTALS
 # Let GNOME Shell start and own its normal IBus session. Prestarting an IBus
 # daemon in --single mode makes Shell's normal restart path cancel engine
 # selection, leaving the source selected in settings but unable to deliver
@@ -144,6 +215,8 @@ done
 sinks=
 gtk_pid=
 browser_pid=
+qt_pid=
+terminal_pid=
 finish() {
     for pid in $sinks; do kill "$pid" 2>/dev/null || true; done
     if [ -n "$gtk_pid" ]; then
@@ -153,6 +226,14 @@ finish() {
     if [ -n "$browser_pid" ]; then
         kill "$browser_pid" 2>/dev/null || true
         wait "$browser_pid" 2>/dev/null || true
+    fi
+    if [ -n "$qt_pid" ]; then
+        kill "$qt_pid" 2>/dev/null || true
+        wait "$qt_pid" 2>/dev/null || true
+    fi
+    if [ -n "$terminal_pid" ]; then
+        kill "$terminal_pid" 2>/dev/null || true
+        wait "$terminal_pid" 2>/dev/null || true
     fi
     kill "$shell_pid" 2>/dev/null || true
     wait "$shell_pid" 2>/dev/null || true
@@ -175,7 +256,7 @@ activate_window() {
     tries=100
     activate_error="$E2E_WORK/activate-window.err"
     while :; do
-        if gdbus call --session --dest org.gnome.Shell \
+        if gdbus call --timeout 5 --session --dest org.gnome.Shell \
             --object-path /org/wayexpand/GnomeE2eFocusController \
             --method org.wayexpand.GnomeE2eFocusController.ActivateWindow "$1" \
             >/dev/null 2>"$activate_error"; then
@@ -196,6 +277,126 @@ activate_window() {
         fi
         sleep 0.05
     done
+}
+
+click_test_field() {
+    app_id=$1
+    test_window_id=$(DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+        xdotool search --onlyvisible --name "$app_id" 2>/dev/null | tail -n 1)
+    if [ -z "$test_window_id" ] || ! DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+        xdotool mousemove --window "$test_window_id" 100 40 click 1; then
+        return 1
+    fi
+}
+
+diagnose_x11_input() {
+    case_name=$1
+    report="$E2E_WORK/x11-input-$case_name.txt"
+    {
+        printf 'target_window=%s\n' "${test_window_id:-unknown}"
+        focused_window=$(DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+            xdotool getwindowfocus 2>&1 || true)
+        active_window=$(DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+            xdotool getactivewindow 2>&1 || true)
+        printf 'x11_keyboard_focus=%s\n' "$focused_window"
+        printf 'x11_active_window=%s\n' "$active_window"
+        if [ "$focused_window" = "${test_window_id:-}" ] \
+            || [ "$active_window" = "${test_window_id:-}" ]; then
+            printf '%s\n' 'x11_test_window_has_focus=yes'
+        else
+            printf '%s\n' 'x11_test_window_has_focus=no'
+            if [ -n "${test_window_id:-}" ]; then
+                printf '%s\n' 'attempting targeted windowfocus experiment'
+                DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+                    xdotool windowfocus --sync "$test_window_id" 2>&1 || true
+                printf 'focus_after_windowfocus=%s\n' \
+                    "$(DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" xdotool getwindowfocus 2>&1 || true)"
+            fi
+        fi
+        printf '%s\n' 'focused_window_name:'
+        DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+            xdotool getwindowfocus getwindowname 2>&1 || true
+        printf '%s\n' 'active_window_name:'
+        DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+            xdotool getactivewindow getwindowname 2>&1 || true
+        if [ -n "${test_window_id:-}" ]; then
+            printf '%s\n' 'target_window_properties:'
+            DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+                xprop -id "$test_window_id" WM_CLASS _NET_WM_NAME 2>&1 || true
+        fi
+        printf '%s\n' 'root_active_window:'
+        DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+            xprop -root _NET_ACTIVE_WINDOW 2>&1 || true
+        printf '%s\n' 'XTEST extension:'
+        DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+            xdpyinfo -queryExtensions 2>&1 | awk 'tolower($0) ~ /xtest/ {print; found=1} END {if (!found) print "not advertised"}'
+    } >"$report" 2>&1
+}
+
+type_x11_input() {
+    case_name=$1
+    input_text=$2
+    locale_report="$E2E_WORK/locale-$case_name.txt"
+    {
+        locale
+        locale charmap
+        locale -a
+        printf 'LC_ALL=%s LANG=%s LC_CTYPE=%s\n' \
+            "${LC_ALL:-}" "${LANG:-}" "${LC_CTYPE:-}"
+        printf 'forced_charmap='
+        LC_ALL=C.UTF-8 locale charmap
+    } >"$locale_report" 2>&1
+    if ! printf '%s' "$input_text" | iconv -f UTF-8 -t UTF-8 >/dev/null; then
+        printf '%s\n' 'input is not valid UTF-8' >"$E2E_WORK/xdotool-$case_name.err"
+        return 1
+    fi
+    LC_ALL=C.UTF-8 DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+        xdotool type --clearmodifiers --delay 40 -- "$input_text" \
+        2>"$E2E_WORK/xdotool-$case_name.err"
+}
+
+# Move libwayland's client trace out of a GTK log into its own file and print
+# the events that show whether the client got a keyboard and focus.
+report_browser_input_state() {
+    x11_focus=$(DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+        xdotool getwindowfocus getwindowname 2>&1 | head -n 1 | cut -c1-100) || true
+    log "browser-input-state $1 x11-focus=$x11_focus"
+    gdbus call --session --dest org.gnome.Shell \
+        --object-path /org/wayexpand/GnomeE2eFocusController \
+        --method org.wayexpand.GnomeE2eFocusController.GetShellInputState 2>&1 \
+        | cut -c1-700 | sed "s/^/browser-input-state $1 shell=/" || true
+}
+
+report_wayland_trace() {
+    if [ "$2" != client ]; then
+        return 0
+    fi
+    trace="$1.wayland-trace"
+    grep -E '^\[ *[0-9:]+\.[0-9]+\]' "$1" >"$trace" || true
+    grep -vE '^\[ *[0-9:]+\.[0-9]+\]' "$1" >"$1.tmp" || true
+    mv -f "$1.tmp" "$1"
+    log "wayland-trace lines=$(wc -l <"$trace")"
+    grep -h 'shell-input-state' "$E2E_WORK/mutter-input-$current_trace_case.txt" 2>/dev/null || true
+    grep -E 'wl_seat[@#][0-9]+\.(capabilities|get_keyboard|get_pointer)|wl_keyboard[@#][0-9]+\.(enter|leave|key|keymap)|xdg_toplevel[@#][0-9]+\.configure' \
+        "$trace" | cut -c1-120 | head -n 60 | sed 's/^/wayland-trace: /' || true
+}
+
+type_gnome_remote_input() {
+    case_name=$1
+    input_text=$2
+    app_id=$3
+    focus_marker=$4
+    ready_marker=$5
+    keycode_probe=${6:-false}
+    set --
+    if [ "$keycode_probe" = true ]; then
+        set -- --keycode-probe
+    fi
+    python3 "$E2E_PROJECT_DIR/scripts/certification-clients/gnome_remote_input.py" \
+        --delay-ms 60 --text "$input_text" --app-id "$app_id" \
+        --focus-marker "$focus_marker" --ready-marker "$ready_marker" "$@" \
+        >"$E2E_WORK/mutter-input-$case_name.txt" \
+        2>"$E2E_WORK/mutter-input-$case_name.err"
 }
 
 tries=600
@@ -225,8 +426,10 @@ while :; do
     fi
     tries=$((tries - 1))
     if [ "$tries" -le 0 ] || ! kill -0 "$shell_pid" 2>/dev/null; then
+        diagnose_ibus_session "$E2E_WORK/ibus-registration-diagnostics.txt"
         log "fail ibus-engine-registered GNOME's session IBus registry did not load WayExpand"
         cat "$E2E_WORK/ibus-engines.txt"
+        cat "$E2E_WORK/ibus-registration-diagnostics.txt"
         exit 1
     fi
     sleep 0.1
@@ -240,7 +443,7 @@ assert_tracker_method_denied() {
     method=$2
     shift 2
     output="$E2E_WORK/$label.log"
-    if gdbus call --session --dest org.gnome.Shell \
+    if gdbus call --timeout 5 --session --dest org.gnome.Shell \
         --object-path /org/wayexpand/ShellWindowTracker \
         --method "org.wayexpand.ShellWindowTracker1.$method" "$@" \
         >"$output" 2>&1; then
@@ -260,7 +463,7 @@ assert_tracker_method_denied unauthorized-keyboard-layout-query GetActiveKeyboar
 assert_tracker_method_denied unauthorized-input-source-activation ActivateInputSource xkb de
 
 # Confirm Shell loaded the bundled build before simulating an on-disk update.
-live_build=$(gdbus call --session --dest org.gnome.Shell \
+live_build=$(gdbus call --timeout 5 --session --dest org.gnome.Shell \
     --object-path /org/wayexpand/ShellWindowTracker \
     --method org.freedesktop.DBus.Properties.Get \
     org.wayexpand.ShellWindowTracker1 BuildIdentity)
@@ -281,11 +484,16 @@ esac
 # layouts. Ask the real CLI to activate WayExpand so the session-bus caller
 # authorization and Shell InputSourceManager path are exercised together.
 gsettings set org.gnome.desktop.input-sources sources \
-    "[('xkb', 'us'), ('xkb', 'de'), ('ibus', 'wayexpand')]"
+    "[('xkb', 'us'), ('xkb', 'de'), ('xkb', 'fr'), ('ibus', 'wayexpand')]"
 registered_sources=$(gsettings get org.gnome.desktop.input-sources sources)
 case "$registered_sources" in
-    *"'ibus', 'wayexpand'"*) log "pass gnome-ibus-source-registered $registered_sources" ;;
-    *) log "fail gnome-ibus-source-registered GNOME returned $registered_sources"; exit 1 ;;
+    *"'xkb', 'us'"*"'xkb', 'de'"*"'xkb', 'fr'"*"'ibus', 'wayexpand'"*)
+        log "pass gnome-ibus-source-registered $registered_sources"
+        ;;
+    *)
+        log "fail gnome-ibus-source-registered GNOME did not retain the IBus, German, and French sources: $registered_sources"
+        exit 1
+        ;;
 esac
 # Writing the deprecated `current` key to the WayExpand index must not make
 # readiness pass; only Shell's live InputSourceManager can prove activation.
@@ -368,74 +576,463 @@ while :; do
     fi
     sleep 0.1
 done
-# Exercise the active GNOME-selected engine through the IBus input-context
-# protocol, then through GTK's own IBus module and Gtk.Entry widget hosted on
-# GNOME's private XWayland server. xdotool sends the harmless test trigger
-# through XTEST after Mutter confirms the target window is focused. This does
-# not certify native Wayland compositor or physical-keyboard event delivery.
-IBUS_ADDRESS=$(ibus address) "$E2E_BIN_DIR/wx-e2e-ibus" \
-    "$XDG_RUNTIME_DIR/wayexpand-ibus-status.json" --expect-active --single-expansion
-log "pass gnome-ibus-input-context the active GNOME-selected engine replaced a verified trigger"
-x11_display=$(sed -n 's/.*Using public X11 display \([^,]*\),.*/\1/p' \
-    "$E2E_WORK/gnome-shell.log" | head -n 1)
-if [ -z "$x11_display" ]; then
-    log "fail gnome-gtk-insertion GNOME did not start its private XWayland server"
+# Real GTK text-field checks below are the authoritative GNOME route test.
+# The standalone zbus protocol probe is covered by the dedicated real-IBus CI
+# job; running it here can perturb older GNOME-managed IBus sessions.
+resolve_xwayland_connection() {
+    shell_log=$1
+    x11_display=$(sed -n 's/.*Using public X11 display \([^,]*\),.*/\1/p' \
+        "$shell_log" | head -n 1)
+    [ -n "$x11_display" ] || return 1
+
+    # GNOME Shell restarts XWayland during the simulated logout/login. The
+    # display number may be reused while its authorization file changes, so
+    # resolve a readable auth file for the current XWayland process each time.
+    xwayland_auth=
+    xwayland_tries=100
+    while [ "$xwayland_tries" -gt 0 ]; do
+        for process_cmdline in /proc/[0-9]*/cmdline; do
+            [ -r "$process_cmdline" ] || continue
+            process_args=$(tr '\000' '\n' <"$process_cmdline" 2>/dev/null || true)
+            process_display=$(printf '%s\n' "$process_args" | awk '/^:[0-9]+$/ { print; exit }')
+            if [ "$process_display" = "$x11_display" ]; then
+                candidate_auth=$(printf '%s\n' "$process_args" | awk 'previous == "-auth" { print; exit } { previous = $0 }')
+                if [ -n "$candidate_auth" ] && [ -r "$candidate_auth" ]; then
+                    xwayland_auth=$candidate_auth
+                    return 0
+                fi
+            fi
+        done
+        xwayland_tries=$((xwayland_tries - 1))
+        sleep 0.1
+    done
+    return 1
+}
+
+if ! resolve_xwayland_connection "$E2E_WORK/gnome-shell.log"; then
+    log "fail gnome-gtk-insertion GNOME's private XWayland display or authorization file could not be resolved"
     exit 1
 fi
-xwayland_auth=
-for process_cmdline in /proc/[0-9]*/cmdline; do
-    [ -r "$process_cmdline" ] || continue
-    process_args=$(tr '\000' '\n' <"$process_cmdline" 2>/dev/null || true)
-    process_display=$(printf '%s\n' "$process_args" | awk '/^:[0-9]+$/ { print; exit }')
-    if [ "$process_display" = "$x11_display" ]; then
-        candidate_auth=$(printf '%s\n' "$process_args" | awk 'previous == "-auth" { print; exit } { previous = $0 }')
-        if [ -n "$candidate_auth" ] && [ -r "$candidate_auth" ]; then
-            xwayland_auth=$candidate_auth
-            break
-        fi
+run_gtk_ibus_case() {
+    case_name=$1
+    trigger=$2
+    expected=$3
+    password=$4
+    gtk_version=${5:-3}
+    im_mode=${6:-ibus}
+    app_id="org.wayexpand.GnomeGtkIbus.$case_name"
+    marker="$E2E_WORK/gtk-window-focused-$case_name"
+    ready_marker="$E2E_WORK/gtk-input-ready-$case_name"
+    test_log="$E2E_WORK/gtk-ibus-e2e-$case_name.log"
+    # Trace the ordinary-input control and the first IBus case (fixed test
+    # keys only): whether Mutter delivers keys decides everything after them.
+    wayland_debug=0
+    current_trace_case=$case_name
+    case "$case_name" in
+        wayland-baseline | insertion) wayland_debug=client ;;
+    esac
+    engine_log="$E2E_WORK/ibus-engine-$case_name.txt"
+    status_file="$XDG_RUNTIME_DIR/wayexpand-ibus-status.json"
+    printf 'before_gtk=' >"$engine_log"
+    ibus engine >>"$engine_log" 2>&1 || true
+    set --
+    if [ "$password" = true ]; then
+        set -- --password
     fi
+    if [ "$im_mode" = simple ]; then
+        # Force GTK's built-in simple context so this XKB control cannot
+        # attach to IBus. The following cases test the IBus module explicitly.
+        timeout 20s env -u DISPLAY -u XAUTHORITY -u XMODIFIERS -u IBUS_ADDRESS \
+            GTK_IM_MODULE=gtk-im-context-simple \
+            WAYLAND_DEBUG="$wayland_debug" \
+            GDK_BACKEND=wayland \
+            GTK_E2E_FOCUS_MARKER="$marker" \
+            GTK_E2E_READY_MARKER="$ready_marker" \
+            GTK_E2E_APP_ID="$app_id" \
+            python3 "$E2E_PROJECT_DIR/scripts/certification-clients/gtk_ibus_e2e.py" \
+            --gtk-version "$gtk_version" --im-mode simple --expected "$expected" "$@" >"$test_log" 2>&1 &
+    else
+        timeout 20s env -u DISPLAY -u XAUTHORITY \
+            GTK_IM_MODULE=ibus \
+            WAYLAND_DEBUG="$wayland_debug" \
+            GDK_BACKEND=wayland \
+            IBUS_ADDRESS="$(ibus address)" \
+            GTK_E2E_FOCUS_MARKER="$marker" \
+            GTK_E2E_READY_MARKER="$ready_marker" \
+            GTK_E2E_APP_ID="$app_id" \
+            python3 "$E2E_PROJECT_DIR/scripts/certification-clients/gtk_ibus_e2e.py" \
+            --gtk-version "$gtk_version" --im-mode ibus --expected "$expected" "$@" >"$test_log" 2>&1 &
+    fi
+    gtk_pid=$!
+    if [ -f "$status_file" ]; then
+        cp "$status_file" "$E2E_WORK/ibus-context-before-$case_name.json"
+    fi
+    input_status=0
+    keycode_probe=false
+    if [ "$case_name" = wayland-baseline ]; then
+        keycode_probe=true
+    fi
+    type_gnome_remote_input "$case_name" "$trigger" "$app_id" \
+        "$marker" "$ready_marker" "$keycode_probe" || input_status=$?
+    if [ "$input_status" -ne 0 ]; then
+        if [ -f "$status_file" ]; then
+            cp "$status_file" "$E2E_WORK/ibus-context-after-$case_name.json"
+        fi
+        kill "$gtk_pid" 2>/dev/null || true
+        wait "$gtk_pid" 2>/dev/null || true
+        gtk_pid=
+        report_wayland_trace "$test_log" "$wayland_debug"
+        if grep -F 'GTK did not confirm stable active input focus' \
+            "$E2E_WORK/mutter-input-$case_name.err" >/dev/null; then
+            log "fail gnome-gtk-$case_name GTK never acquired active keyboard focus; no test input was sent"
+            cat "$test_log" "$E2E_WORK/mutter-input-$case_name.err"
+        elif [ "$case_name" = wayland-baseline ]; then
+            log "fail gnome-gtk-$case_name Mutter RemoteDesktop could not send a key to the focused GTK window"
+            cat "$test_log" "$E2E_WORK/mutter-input-$case_name.txt" \
+                "$E2E_WORK/mutter-input-$case_name.err"
+        else
+            log "fail gnome-gtk-$case_name Mutter RemoteDesktop could not type into the focused GTK window"
+            cat "$test_log" "$E2E_WORK/mutter-input-$case_name.txt" \
+                "$E2E_WORK/mutter-input-$case_name.err"
+        fi
+        exit 1
+    fi
+    if [ -f "$status_file" ]; then
+        cp "$status_file" "$E2E_WORK/ibus-context-after-$case_name.json"
+    fi
+    gtk_status=0
+    wait "$gtk_pid" || gtk_status=$?
+    gtk_pid=
+    report_wayland_trace "$test_log" "$wayland_debug"
+    printf 'after_gtk=' >>"$engine_log"
+    ibus engine >>"$engine_log" 2>&1 || true
+    if [ "$gtk_status" -ne 0 ]; then
+        cp "$status_file" "$E2E_WORK/ibus-status-$case_name.json" 2>/dev/null || true
+        if [ "$im_mode" = simple ]; then
+            log "fail gnome-gtk-$case_name GNOME_INPUT_NOT_DELIVERED: ordinary XKB input did not reach the GTK field"
+        else
+            log "fail gnome-gtk-$case_name GTK's IBus input context produced an incorrect result"
+        fi
+        cat "$test_log"
+        cat "$engine_log"
+        cat "$E2E_WORK/mutter-input-$case_name.txt" \
+            "$E2E_WORK/mutter-input-$case_name.err" 2>/dev/null || true
+        python3 - "$E2E_WORK/ibus-context-before-$case_name.json" \
+            "$E2E_WORK/ibus-context-after-$case_name.json" <<'PY'
+import json
+import pathlib
+import sys
+
+for filename in sys.argv[1:]:
+    path = pathlib.Path(filename)
+    if not path.is_file():
+        continue
+    status = json.loads(path.read_text(encoding="utf-8"))
+    print(path.name, json.dumps({
+        "totals": status.get("totals"),
+        "recent_fields": [
+            {key: field.get(key) for key in
+             ("sequence", "focused", "keys", "expansions", "content_type")}
+            for field in status.get("recent_fields", [])
+        ],
+    }, sort_keys=True))
+PY
+        if [ -s "$E2E_WORK/ibus-status-$case_name.json" ]; then
+            python3 - "$E2E_WORK/ibus-status-$case_name.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as status_file:
+    status = json.load(status_file)
+print("content-free IBus counters:", json.dumps({
+    "totals": status.get("totals"),
+    "recent_fields": status.get("recent_fields"),
+}, sort_keys=True))
+PY
+        fi
+        exit 1
+    fi
+    log "pass gnome-gtk-$case_name $(cat "$test_log")"
+}
+
+run_terminal_x11_baseline() {
+    case_name=x11-baseline
+    input=a
+    app_id=org.wayexpand.GnomeTerminalX11Baseline
+    ready_marker="$E2E_WORK/terminal-ready-$case_name"
+    test_log="$E2E_WORK/terminal-ibus-e2e-$case_name.log"
+    timeout 20s env -u GTK_IM_MODULE -u XMODIFIERS -u IBUS_ADDRESS \
+        DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+        xterm -title "WayExpand terminal acceptance $app_id" \
+        -geometry 80x3+0+0 -e python3 \
+        "$E2E_PROJECT_DIR/scripts/certification-clients/terminal_ibus_e2e.py" \
+        --expected "$input" --ready-marker "$ready_marker" \
+        >"$test_log" 2>&1 &
+    terminal_pid=$!
+    if ! activate_window "$app_id" || ! click_test_field "$app_id"; then
+        kill "$terminal_pid" 2>/dev/null || true
+        wait "$terminal_pid" 2>/dev/null || true
+        terminal_pid=
+        log "fail gnome-x11-terminal-baseline could not focus the basic X11 terminal reader"
+        cat "$test_log"
+        exit 1
+    fi
+    ready_tries=100
+    while [ ! -s "$ready_marker" ]; do
+        if ! kill -0 "$terminal_pid" 2>/dev/null; then
+            wait "$terminal_pid" || true
+            terminal_pid=
+            log "fail gnome-x11-terminal-baseline basic X11 terminal reader exited before readiness"
+            cat "$test_log"
+            exit 1
+        fi
+        ready_tries=$((ready_tries - 1))
+        if [ "$ready_tries" -le 0 ]; then
+            kill "$terminal_pid" 2>/dev/null || true
+            wait "$terminal_pid" 2>/dev/null || true
+            terminal_pid=
+            log "fail gnome-x11-terminal-baseline basic X11 terminal reader did not become ready"
+            cat "$test_log"
+            exit 1
+        fi
+        sleep 0.05
+    done
+    diagnose_x11_input "$case_name"
+    if ! type_x11_input "$case_name" "$input"; then
+        kill "$terminal_pid" 2>/dev/null || true
+        wait "$terminal_pid" 2>/dev/null || true
+        terminal_pid=
+        log "fail gnome-x11-terminal-baseline XTEST could not send the ordinary test key"
+        cat "$test_log" "$E2E_WORK/x11-input-$case_name.txt" \
+            "$E2E_WORK/locale-$case_name.txt" "$E2E_WORK/xdotool-$case_name.err"
+        exit 1
+    fi
+    terminal_status=0
+    wait "$terminal_pid" || terminal_status=$?
+    terminal_pid=
+    if [ "$terminal_status" -ne 0 ]; then
+        log "fail gnome-x11-terminal-baseline XTEST_INPUT_NOT_DELIVERED: key did not reach a basic X11 application"
+        cat "$test_log" "$E2E_WORK/x11-input-$case_name.txt" \
+            "$E2E_WORK/locale-$case_name.txt" "$E2E_WORK/xdotool-$case_name.err"
+        exit 1
+    fi
+    log "pass gnome-x11-terminal-baseline $(cat "$test_log")"
+}
+
+# Test GTK's native Wayland input path separately from WayExpand's IBus engine.
+# The baseline uses the US XKB source and GtkIMContextSimple; terminal X11/XTEST
+# input is exercised independently above.
+if ! "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --activate-source xkb us \
+    >"$E2E_WORK/layout-us-baseline-activation.log" 2>&1; then
+    log "fail gnome-gtk-wayland-baseline GNOME could not activate the ordinary US XKB source"
+    cat "$E2E_WORK/layout-us-baseline-activation.log"
+    exit 1
+fi
+if ! "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --active-layout \
+    >"$E2E_WORK/layout-us-baseline-active.log" 2>&1 \
+    || ! grep -F 'active-layout xkb us ' "$E2E_WORK/layout-us-baseline-active.log" >/dev/null; then
+    log "fail gnome-gtk-wayland-baseline the ordinary US XKB source is not active"
+    cat "$E2E_WORK/layout-us-baseline-activation.log" "$E2E_WORK/layout-us-baseline-active.log"
+    exit 1
+fi
+run_terminal_x11_baseline
+run_gtk_ibus_case wayland-baseline a a false 3 simple
+if ! "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --activate-source ibus wayexpand \
+    >"$E2E_WORK/ibus-source-after-x11-baseline.log" 2>&1; then
+    log "fail ibus-engine-active GNOME could not restore WayExpand after the XKB baseline"
+    cat "$E2E_WORK/ibus-source-after-x11-baseline.log"
+    exit 1
+fi
+tries=100
+while :; do
+    active_engine=$(ibus engine 2>/dev/null || true)
+    case "$active_engine" in
+        *wayexpand*)
+            log "pass ibus-engine-active WayExpand restored after XKB baseline"
+            break
+            ;;
+    esac
+    tries=$((tries - 1))
+    if [ "$tries" -le 0 ]; then
+        log "fail ibus-engine-active WayExpand did not resume after XKB baseline: $active_engine"
+        exit 1
+    fi
+    sleep 0.1
 done
-if [ -z "$xwayland_auth" ]; then
-    log "fail gnome-gtk-insertion GNOME's private XWayland authorization file could not be resolved"
-    exit 1
-fi
-timeout 20s env \
-    GTK_IM_MODULE=ibus \
-    GDK_BACKEND=x11 \
+
+run_gtk_ibus_case insertion ';e2e' expanded false
+run_gtk_ibus_case unicode ';unicode' 'Grüße 世界 🖥️' false
+run_gtk_ibus_case gtk4-insertion ';e2e' expanded false 4
+run_gtk_ibus_case gtk4-unicode ';unicode' 'Grüße 世界 🖥️' false 4
+run_qt_xim_case() {
+    case_name=$1
+    input=$2
+    expected=$3
+    password=$4
+    app_id="org.wayexpand.GnomeQtIbus.$case_name"
+    marker="$E2E_WORK/qt-window-focused-$case_name"
+    ready_marker="$E2E_WORK/qt-input-ready-$case_name"
+    test_log="$E2E_WORK/qt-ibus-e2e-$case_name.log"
+    set --
+    if [ "$password" = true ]; then
+        set -- --password
+    fi
+    timeout 20s env \
+        QT_QPA_PLATFORM=xcb \
+        QT_IM_MODULE=xim \
+        XMODIFIERS='@im=ibus' \
+        DISPLAY="$x11_display" \
+        XAUTHORITY="$xwayland_auth" \
+        IBUS_ADDRESS="$(ibus address)" \
+        QT_E2E_FOCUS_MARKER="$marker" \
+        QT_E2E_READY_MARKER="$ready_marker" \
+        QT_E2E_APP_ID="$app_id" \
+        python3 "$E2E_PROJECT_DIR/scripts/certification-clients/qt_ibus_e2e.py" \
+        --expected "$expected" "$@" >"$test_log" 2>&1 &
+    qt_pid=$!
+    if ! activate_window "$app_id"; then
+        kill "$qt_pid" 2>/dev/null || true
+        wait "$qt_pid" 2>/dev/null || true
+        log "fail gnome-qt-$case_name Mutter could not focus the Qt XIM acceptance window"
+        cat "$test_log"
+        exit 1
+    fi
+    if ! click_test_field "$app_id"; then
+        kill "$qt_pid" 2>/dev/null || true
+        wait "$qt_pid" 2>/dev/null || true
+        qt_pid=
+        log "fail gnome-qt-$case_name XTEST could not focus the target field"
+        cat "$test_log"
+        exit 1
+    fi
+    : >"$marker"
+    ready_tries=100
+    while [ ! -s "$ready_marker" ]; do
+        if ! kill -0 "$qt_pid" 2>/dev/null; then
+            wait "$qt_pid" || true
+            qt_pid=
+            log "fail gnome-qt-$case_name Qt input context exited before readiness"
+            cat "$test_log"
+            exit 1
+        fi
+        ready_tries=$((ready_tries - 1))
+        if [ "$ready_tries" -le 0 ]; then
+            kill "$qt_pid" 2>/dev/null || true
+            wait "$qt_pid" 2>/dev/null || true
+            qt_pid=
+            log "fail gnome-qt-$case_name Qt field did not report stable active focus"
+            cat "$test_log"
+            exit 1
+        fi
+        sleep 0.05
+    done
+    diagnose_x11_input "$case_name"
+    if ! type_x11_input "$case_name" "$input"; then
+        kill "$qt_pid" 2>/dev/null || true
+        wait "$qt_pid" 2>/dev/null || true
+        log "fail gnome-qt-$case_name XTEST could not type into the Qt field"
+        cat "$test_log" "$E2E_WORK/x11-input-$case_name.txt" \
+            "$E2E_WORK/locale-$case_name.txt" "$E2E_WORK/xdotool-$case_name.err"
+        exit 1
+    fi
+    qt_status=0
+    wait "$qt_pid" || qt_status=$?
+    qt_pid=
+    if [ "$qt_status" -ne 0 ]; then
+        log "fail gnome-qt-$case_name Qt XIM changed or lost input"
+        cat "$test_log"
+        exit 1
+    fi
+    log "pass gnome-qt-$case_name $(cat "$test_log")"
+}
+run_terminal_xim_case() {
+    case_name=$1
+    input=$2
+    ready_marker="$E2E_WORK/terminal-ready-$case_name"
+    test_log="$E2E_WORK/terminal-ibus-e2e-$case_name.log"
     DISPLAY="$x11_display" \
-    XAUTHORITY="$xwayland_auth" \
-    IBUS_ADDRESS="$(ibus address)" \
-    GTK_E2E_FOCUS_MARKER="$E2E_WORK/gtk-window-focused" \
-    python3 "$E2E_PROJECT_DIR/scripts/certification-clients/gtk_ibus_e2e.py" \
-    >"$E2E_WORK/gtk-ibus-e2e.log" 2>&1 &
-gtk_pid=$!
-if ! activate_window org.wayexpand.GnomeGtkIbus; then
-    kill "$gtk_pid" 2>/dev/null || true
-    wait "$gtk_pid" 2>/dev/null || true
-    gtk_pid=
-    log "fail gnome-gtk-insertion Mutter could not focus the GTK IBus acceptance window"
-    cat "$E2E_WORK/gtk-ibus-e2e.log"
-    exit 1
-fi
-: >"$E2E_WORK/gtk-window-focused"
-if ! DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
-    xdotool type --clearmodifiers --delay 40 -- ';e2e'; then
-    kill "$gtk_pid" 2>/dev/null || true
-    wait "$gtk_pid" 2>/dev/null || true
-    gtk_pid=
-    log "fail gnome-gtk-insertion XTEST could not type into the focused GTK window"
-    cat "$E2E_WORK/gtk-ibus-e2e.log"
-    exit 1
-fi
-gtk_status=0
-wait "$gtk_pid" || gtk_status=$?
-gtk_pid=
-if [ "$gtk_status" -ne 0 ]; then
-    log "fail gnome-gtk-insertion GTK's focused Entry did not receive the WayExpand replacement"
-    cat "$E2E_WORK/gtk-ibus-e2e.log"
-    exit 1
-fi
-log "pass gnome-gtk-insertion GTK's IBus input context replaced the trigger in Gtk.Entry"
+        XAUTHORITY="$xwayland_auth" \
+        IBUS_ADDRESS="$(ibus address)" \
+        XMODIFIERS='@im=ibus' \
+        xterm -title "WayExpand terminal acceptance org.wayexpand.GnomeTerminalIbus" \
+        -geometry 80x3+0+0 -e python3 \
+        "$E2E_PROJECT_DIR/scripts/certification-clients/terminal_ibus_e2e.py" \
+        --expected "$input" --ready-marker "$ready_marker" \
+        >"$test_log" 2>&1 &
+    terminal_pid=$!
+    ready_tries=100
+    while [ ! -s "$ready_marker" ]; do
+        if ! kill -0 "$terminal_pid" 2>/dev/null; then
+            wait "$terminal_pid" || true
+            terminal_pid=
+            log "fail gnome-terminal-$case_name terminal input reader exited before readiness"
+            cat "$test_log"
+            exit 1
+        fi
+        ready_tries=$((ready_tries - 1))
+        if [ "$ready_tries" -le 0 ]; then
+            kill "$terminal_pid" 2>/dev/null || true
+            wait "$terminal_pid" 2>/dev/null || true
+            terminal_pid=
+            log "fail gnome-terminal-$case_name terminal input reader did not become ready"
+            cat "$test_log"
+            exit 1
+        fi
+        sleep 0.05
+    done
+    if ! activate_window org.wayexpand.GnomeTerminalIbus; then
+        kill "$terminal_pid" 2>/dev/null || true
+        wait "$terminal_pid" 2>/dev/null || true
+        terminal_pid=
+        log "fail gnome-terminal-$case_name Mutter could not focus the terminal acceptance window"
+        cat "$test_log"
+        exit 1
+    fi
+    if ! type_x11_input "$case_name" "$input"; then
+        kill "$terminal_pid" 2>/dev/null || true
+        wait "$terminal_pid" 2>/dev/null || true
+        terminal_pid=
+        log "fail gnome-terminal-$case_name XTEST could not type into the terminal"
+        cat "$test_log" "$E2E_WORK/locale-$case_name.txt" \
+            "$E2E_WORK/xdotool-$case_name.err"
+        exit 1
+    fi
+    terminal_status=0
+    wait "$terminal_pid" || terminal_status=$?
+    terminal_pid=
+    if [ "$terminal_status" -ne 0 ]; then
+        log "fail gnome-terminal-$case_name terminal XIM changed or lost input"
+        cat "$test_log"
+        exit 1
+    fi
+    log "pass gnome-terminal-$case_name $(cat "$test_log")"
+}
+for layout in de fr; do
+    "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --activate-source xkb "$layout" \
+        >"$E2E_WORK/layout-$layout-activation.log"
+    if ! "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --active-layout \
+        >"$E2E_WORK/layout-$layout-active.log" \
+        || ! grep -F "active-layout xkb $layout " "$E2E_WORK/layout-$layout-active.log" >/dev/null; then
+        log "fail gnome-layout-$layout GNOME did not report the selected keyboard layout"
+        cat "$E2E_WORK/layout-$layout-activation.log" "$E2E_WORK/layout-$layout-active.log"
+        exit 1
+    fi
+    activation_tries=50
+    while ! "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --activate-source ibus wayexpand \
+        >"$E2E_WORK/layout-$layout-ibus-activation.log" 2>&1; do
+        activation_tries=$((activation_tries - 1))
+        if [ "$activation_tries" -le 0 ]; then
+            diagnostic="$E2E_WORK/layout-$layout-ibus-state.txt"
+            diagnose_ibus_session "$diagnostic"
+            log "fail gnome-layout-$layout GNOME did not restore WayExpand after a layout switch"
+            cat "$E2E_WORK/layout-$layout-ibus-activation.log" "$diagnostic"
+            exit 1
+        fi
+        sleep 0.1
+    done
+    run_gtk_ibus_case "layout-$layout" ';e2e' expanded false
+    log "pass gnome-layout-$layout expansion remained correct after switching layouts"
+done
 # Exercise the same active engine in a real browser renderer. The isolated
 # Chromium profile uses a local page, XTEST sends only the harmless `;e2e`
 # trigger, and DevTools reads only that test textarea's final value.
@@ -505,6 +1102,7 @@ while [ ! -e "$E2E_WORK/browser-window-armed" ]; do
     fi
     sleep 0.1
 done
+report_browser_input_state before-typing
 if ! DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
     xdotool type --clearmodifiers --delay 40 -- ';e2e'; then
     kill "$browser_pid" 2>/dev/null || true
@@ -514,6 +1112,7 @@ if ! DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
     cat "$E2E_WORK/browser-ibus-e2e.log" "$E2E_WORK/browser-ibus-e2e-chrome.log"
     exit 1
 fi
+report_browser_input_state after-typing
 browser_status=0
 wait "$browser_pid" || browser_status=$?
 browser_pid=
@@ -674,6 +1273,7 @@ fi
 cp "$E2E_PROJECT_DIR/gnome-extension/$E2E_UUID/metadata.json" \
     "$E2E_PROJECT_DIR/gnome-extension/$E2E_UUID/extension.js" \
     "$E2E_PROJECT_DIR/gnome-extension/$E2E_UUID/notification-queue.js" \
+    "$E2E_PROJECT_DIR/gnome-extension/$E2E_UUID/keyboard-compat.js" \
     "$E2E_WORK/home/.local/share/gnome-shell/extensions/$E2E_UUID/"
 
 # Restarting Shell in this isolated session models the logout/login needed
@@ -716,7 +1316,7 @@ if [ "$tries" -gt 0 ]; then
     live_build=
     build_tries=100
     while [ "$build_tries" -gt 0 ]; do
-        live_build=$(gdbus call --session --dest org.gnome.Shell \
+        live_build=$(gdbus call --timeout 5 --session --dest org.gnome.Shell \
             --object-path /org/wayexpand/ShellWindowTracker \
             --method org.freedesktop.DBus.Properties.Get \
             org.wayexpand.ShellWindowTracker1 BuildIdentity 2>/dev/null || true)
@@ -806,14 +1406,45 @@ PY
     fi
 
     if [ "$login_source_ok" -eq 1 ]; then
-        IBUS_ADDRESS=$(ibus address) "$E2E_BIN_DIR/wx-e2e-ibus" \
-            "$XDG_RUNTIME_DIR/wayexpand-ibus-status.json" --expect-active --single-expansion \
-            || status=1
-        if [ "$status" -eq 0 ]; then
-            log "pass gnome-ibus-input-context-after-login the reloaded session replaced a verified trigger"
+        if ! resolve_xwayland_connection "$E2E_WORK/gnome-shell-after-login.log"; then
+            log "fail gnome-x11-after-login the reloaded session's XWayland display or authorization file could not be resolved"
+            status=1
+        else
+            run_gtk_ibus_case after-login ';e2e' expanded false 3
+            log "pass gnome-gtk-after-login the reloaded session replaced a verified trigger in GTK"
         fi
     fi
 fi
+
+# Qt and xterm use IBus XIM. On Ubuntu, the first XIM client can cause the
+# session to start/restart ibus-daemon with --xim. Keep those clients after
+# GNOME source switching, GTK replacement, and logout/relogin assertions so
+# their compatibility setup cannot invalidate the GNOME-managed engine under
+# test. These checks assert exact pass-through, never replacement support.
+"$E2E_BIN_DIR/wx-e2e-gnome-tracker" --activate-source xkb de \
+    >"$E2E_WORK/layout-de-xim-activation.log"
+if ! "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --active-layout \
+    >"$E2E_WORK/layout-de-xim-active.log" \
+    || ! grep -F 'active-layout xkb de ' "$E2E_WORK/layout-de-xim-active.log" >/dev/null; then
+    log "fail gnome-layout-de-xim German layout was not active for Unicode XIM input"
+    cat "$E2E_WORK/layout-de-xim-activation.log" "$E2E_WORK/layout-de-xim-active.log"
+    exit 1
+fi
+run_qt_xim_case safe-passthrough ';e2e' ';e2e' false
+run_terminal_xim_case safe-passthrough ';e2e'
+# XTEST can only type symbols present in the active XKB keymap. GTK's IBus
+# commit cases above cover broader CJK and emoji output.
+run_qt_xim_case unicode-passthrough 'Grüße' 'Grüße' false
+run_terminal_xim_case unicode-passthrough 'Grüße'
+
+# Password-purpose IBus contexts intentionally tell GNOME to disable IBus for
+# sensitive fields. Run these checks after every scenario that requires the
+# IBus source, because closing a password field does not itself report a new
+# normal-purpose context to GNOME. This preserves the privacy check without
+# leaving the remainder of the suite in GNOME's temporary IBus-disabled mode.
+run_qt_xim_case password ';e2e' ';e2e' true
+run_gtk_ibus_case password ';e2e' ';e2e' true
+run_gtk_ibus_case gtk4-password ';e2e' ';e2e' true 4
 
 if ! gnome_shell_extensions_call DisableExtension "$E2E_UUID" >/dev/null; then
     log "fail extension-disabled could not disable the extension through GNOME Shell D-Bus"
@@ -849,15 +1480,17 @@ env -i \
     XDG_DATA_DIRS="${XDG_DATA_DIRS:-/usr/local/share:/usr/share}" \
     XDG_RUNTIME_DIR="$runtime" \
     WAYLAND_DISPLAY=wayexpand-gnome-e2e \
-    IBUS_COMPONENT_PATH="$work/component:/usr/share/ibus/component" \
+    IBUS_COMPONENT_PATH="${E2E_IBUS_COMPONENT_PATH:-$work/component:/usr/share/ibus/component}" \
     GTK_IM_MODULE=ibus \
     GDK_BACKEND=wayland \
     XDG_CURRENT_DESKTOP=GNOME \
     XDG_SESSION_TYPE=wayland \
     WAYEXPAND_GNOME_AUTH_DIAGNOSTICS=1 \
+    WAYEXPAND_GNOME_TEST_CLIENTS="$bin_dir/wayexpand:$bin_dir/wayexpand-ibus:$bin_dir/wx-e2e-gnome-tracker" \
     E2E_WORK="$work" \
     E2E_BIN_DIR="$bin_dir" \
     E2E_BROWSER_BIN="$browser_bin" \
+    E2E_BROWSER_NO_SANDBOX="${E2E_BROWSER_NO_SANDBOX:-0}" \
     E2E_PROJECT_DIR="$project_dir" \
     E2E_UUID="$uuid" \
     E2E_CONTROLLER_UUID="$controller_uuid" \
@@ -866,7 +1499,7 @@ env -i \
     dbus-run-session -- "$work/session.sh" >"$work/results.txt" 2>"$work/session.log" || status=$?
 
 cat "$work/results.txt"
-expected_checks='extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-ibus-input-context gnome-gtk-insertion extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-ibus-input-context-after-login'
+expected_checks='extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-x11-terminal-baseline gnome-gtk-wayland-baseline gnome-gtk-insertion gnome-gtk-unicode gnome-gtk-password gnome-gtk-gtk4-insertion gnome-gtk-gtk4-unicode gnome-gtk-gtk4-password gnome-qt-safe-passthrough gnome-qt-unicode-passthrough gnome-qt-password gnome-terminal-safe-passthrough gnome-terminal-unicode-passthrough gnome-layout-de gnome-layout-fr extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-gtk-after-login'
 missing_check=
 for check in $expected_checks; do
     if ! grep -F "pass $check" "$work/results.txt" >/dev/null; then
@@ -890,9 +1523,11 @@ if [ "$status" -ne 0 ] || grep -q '^fail' "$work/results.txt" \
     failure=$(printf '%s' "$failure" | sed 's/%/%25/g; s/\r/%0D/g; s/\n/%0A/g')
     printf '::error title=GNOME window tracking E2E::%s\n' "$failure" >&2
     for log in session.log gnome-shell.log gnome-shell-after-login.log ibus-daemon.log ibus-engines.txt \
+        ibus-registration-diagnostics.txt \
         ibus-before-live-activation.json ibus-before-live-activation.err \
         ibus-after-input-context.json ibus-after-input-context.err \
-        ibus-source-activation-after-login.log \
+        ibus-source-activation-after-login.log layout-de-ibus-state.txt \
+        layout-fr-ibus-state.txt \
         browser-ibus-e2e.log browser-ibus-e2e-chrome.log \
         unauthorized-tracker-subscription.log \
         doctor-after-extension-upgrade.json \
@@ -907,4 +1542,4 @@ if [ "$status" -ne 0 ] || grep -q '^fail' "$work/results.txt" \
     done
     exit 1
 fi
-printf '%s\n' "Headless GNOME input activation, GTK3 IBus insertion, Chromium IBus pass-through safety, engine health, and extension upgrade/logout tests passed; physical desktop certification remains unverified"
+printf '%s\n' "Headless GNOME input activation, GTK3/GTK4 replacement/Unicode/password-field behavior, Qt and terminal safe pass-through, Chromium IBus fail-safe behavior, engine health, layout switching, and extension upgrade/logout tests passed; Firefox, Electron, package upgrade/uninstall persistence, and physical desktop certification remain unverified"

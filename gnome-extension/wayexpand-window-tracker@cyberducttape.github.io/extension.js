@@ -21,9 +21,14 @@ import Shell from 'gi://Shell';
 import * as Keyboard from 'resource:///org/gnome/shell/ui/status/keyboard.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import {
+    activeSource,
+    activateSource,
+    inputSourceManager,
+    keyboardLayoutSettings,
+} from './keyboard-compat.js';
+import {
     isAuthorizedTrackerClient,
     LatestOnlyDelivery,
-    activeXkbSettings,
     setTitleAccess,
     SubscriptionReservations,
     subscriberSnapshot,
@@ -175,7 +180,7 @@ export default class WayExpandWindowTracker extends Extension {
     }
 
     _getActiveInputSource(invocation) {
-        const source = Keyboard.getInputSourceManager().currentSource;
+        const source = activeSource(Keyboard);
         if (!source) {
             invocation.return_dbus_error(
                 'org.wayexpand.ShellWindowTracker1.Error.NoActiveInputSource',
@@ -191,8 +196,8 @@ export default class WayExpandWindowTracker extends Extension {
     }
 
     _getActiveKeyboardLayout(invocation) {
-        const manager = Keyboard.getInputSourceManager();
-        const source = manager.currentSource;
+        const manager = inputSourceManager(Keyboard);
+        const source = manager?.currentSource;
         if (!source) {
             invocation.return_dbus_error(
                 'org.wayexpand.ShellWindowTracker1.Error.NoActiveInputSource',
@@ -207,7 +212,7 @@ export default class WayExpandWindowTracker extends Extension {
         // It may be the per-user GSettings source or systemd-localed, depending
         // on the desktop configuration. Reading gsettings directly here would
         // pair the live source with options/model that Mutter may not apply.
-        const xkbSettings = activeXkbSettings(manager._settings);
+        const xkbSettings = keyboardLayoutSettings(manager);
         if (typeof source.xkbId !== 'string' || source.xkbId.length === 0) {
             invocation.return_dbus_error(
                 'org.wayexpand.ShellWindowTracker1.Error.InputSourceUnavailable',
@@ -238,35 +243,52 @@ export default class WayExpandWindowTracker extends Extension {
             return;
         }
 
-        const manager = Keyboard.getInputSourceManager();
-        // GNOME Shell may have loaded the source list before a newly
-        // registered IBus engine appeared. Reload the configured list before
-        // looking up the source so activation uses Shell's live objects.
-        manager.reload();
-        const source = Object.values(manager.inputSources).find(candidate =>
-            candidate.type === kind && candidate.id === id);
-        if (!source) {
+        // Use Shell's live source manager, never the deprecated gsettings
+        // `current` value. Reload can update the XKB sources synchronously but
+        // receive IBus source registrations asynchronously, so wait briefly
+        // for the requested source rather than reporting a false unavailable.
+        let attempts = 0;
+        const finish = result => {
+            if (!result.error) {
+                const active = result.source;
+                invocation.return_value(new GLib.Variant('(ss)', [active.type, active.id]));
+                return;
+            }
+            const sourceDetails = result.error === 'source-pending'
+                ? `; available sources: ${(result.availableSources ?? []).join(', ') || 'none'}`
+                : '';
+            const engineDetails = result.error === 'ibus-not-ready'
+                ? '; GNOME has no ready IBus connection'
+                : result.error === 'engine-pending'
+                    ? '; GNOME has not confirmed the requested IBus engine'
+                    : result.error === 'ibus-disabled-by-content-purpose'
+                        ? '; GNOME disabled IBus for the focused sensitive field'
+                        : '';
             invocation.return_dbus_error(
-                'org.wayexpand.ShellWindowTracker1.Error.InputSourceUnavailable',
-                `GNOME input source ${kind}:${id} is unavailable`,
+                ['source-pending', 'ibus-not-ready', 'engine-pending'].includes(result.error)
+                    ? 'org.wayexpand.ShellWindowTracker1.Error.InputSourceUnavailable'
+                    : 'org.wayexpand.ShellWindowTracker1.Error.ActivationFailed',
+                `GNOME Shell input-source activation failed (${result.error})${sourceDetails}${engineDetails}`,
             );
-            return;
-        }
-
-        // Use GNOME Shell's own source activation path. In particular this
-        // updates the live InputSourceManager and its MRU persistence; writing
-        // the deprecated gsettings "current" key does neither reliably.
-        source.activate(true);
-
-        const active = manager.currentSource;
-        if (!active || active.type !== kind || active.id !== id) {
-            invocation.return_dbus_error(
-                'org.wayexpand.ShellWindowTracker1.Error.ActivationFailed',
-                'GNOME Shell did not activate the requested input source',
-            );
-            return;
-        }
-        invocation.return_value(new GLib.Variant('(ss)', [active.type, active.id]));
+        };
+        const activate = () => {
+            const refreshIfMissing = attempts % 5 === 0;
+            const result = activateSource(Keyboard, kind, id, refreshIfMissing);
+            const pending = result.error === 'source-pending'
+                || result.error === 'activation-unverified'
+                || result.error === 'ibus-not-ready'
+                || result.error === 'engine-pending';
+            if (!pending || attempts >= 80) {
+                finish(result);
+                return;
+            }
+            attempts++;
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
+                activate();
+                return GLib.SOURCE_REMOVE;
+            });
+        };
+        activate();
     }
 
     SubscribeAsync(_parameters, invocation) {
@@ -421,7 +443,10 @@ export default class WayExpandWindowTracker extends Extension {
                                         (ownConnection, ownResult) => {
                                             try {
                                                 const [ownUid] = ownConnection.call_finish(ownResult).deep_unpack();
-                                                const authorized = isAuthorizedTrackerClient(uid, ownUid, executable);
+                                                const authorized = isAuthorizedTrackerClient(
+                                                    uid, ownUid, executable, GLib.get_home_dir(),
+                                                    GLib.getenv('WAYEXPAND_GNOME_TEST_CLIENTS'),
+                                                );
                                                 this._logAuthorizationDiagnostic(
                                                     `peer uid=${uid} shell uid=${ownUid} executable=${executable.split('/').pop()} authorized=${authorized}`,
                                                 );
