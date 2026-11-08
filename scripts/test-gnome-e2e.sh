@@ -23,8 +23,8 @@ for argument in "$@"; do
         *) printf '%s\n' "usage: $0 [--keep]" >&2; exit 2 ;;
     esac
 done
-for tool in gnome-shell dbus-run-session gsettings gdbus xdotool xinput xte \
-    xprop xdpyinfo iconv locale xterm timeout python3; do
+for tool in gnome-shell dbus-run-session gsettings gdbus xdotool xprop xdpyinfo \
+    iconv locale xterm timeout python3; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         printf '%s\n' "error: $tool is required (install GNOME Shell, XWayland, xdotool and the GTK/IBus test dependencies)" >&2
         exit 2
@@ -343,35 +343,6 @@ type_x11_input() {
         2>"$E2E_WORK/xdotool-$case_name.err"
 }
 
-type_xinput_test_device() {
-    case_name=$1
-    input_text=$2
-    device_report="$E2E_WORK/xinput-device-$case_name.txt"
-    device_error="$E2E_WORK/xinput-device-$case_name.err"
-    : >"$device_report"
-    : >"$device_error"
-    : >"$E2E_WORK/xte-$case_name.err"
-    device_id=$(DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
-        xinput list --id-only "Virtual core XTEST keyboard" \
-        2>"$device_error" || true)
-    case "$device_id" in
-        ''|*[!0-9]*)
-            printf 'could not resolve the XInput test keyboard id: %s\n' \
-                "${device_id:-empty}" >"$device_report"
-            return 1
-            ;;
-    esac
-    printf 'device_name=Virtual core XTEST keyboard\ndevice_id=%s\n' \
-        "$device_id" >"$device_report"
-    if ! printf '%s' "$input_text" | LC_ALL=C.UTF-8 iconv -f UTF-8 -t UTF-8 >/dev/null; then
-        printf '%s\n' 'input is not valid UTF-8' >"$E2E_WORK/xte-$case_name.err"
-        return 1
-    fi
-    LC_ALL=C.UTF-8 DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
-        xte -i "$device_id" "str $input_text" \
-        2>"$E2E_WORK/xte-$case_name.err"
-}
-
 tries=600
 until gnome_extension_state_active "$(extension_state)"; do
     tries=$((tries - 1))
@@ -687,13 +658,13 @@ run_gtk_ibus_case() {
         sleep 0.1
         diagnose_x11_input "$case_name"
         input_status=0
-        # Use the XTEST virtual keyboard device so GTK receives a
-        # device-targeted test key; core XTEST events reached xterm but not
-        # GDK on Fedora GNOME 51.
-        type_xinput_test_device "$case_name" a || input_status=$?
+        # Use the same XTEST text-input path already proven by the xterm
+        # baseline. `xdotool key` exercises a different keysym path and was
+        # returning success without delivering any GDK event in Fedora GNOME.
+        type_x11_input "$case_name" a || input_status=$?
     else
         input_status=0
-        type_xinput_test_device "$case_name" "$trigger" || input_status=$?
+        type_x11_input "$case_name" "$trigger" || input_status=$?
     fi
     if [ "$input_status" -ne 0 ]; then
         if [ -f "$status_file" ]; then
@@ -705,16 +676,11 @@ run_gtk_ibus_case() {
         if [ "$case_name" = x11-baseline ]; then
             log "fail gnome-gtk-$case_name XTEST could not send a key to the focused GTK window"
             cat "$test_log" "$E2E_WORK/x11-input-$case_name.txt" \
-                "$E2E_WORK/xinput-device-$case_name.txt" \
-                "$E2E_WORK/xinput-device-$case_name.err" \
-                "$E2E_WORK/xte-$case_name.err"
+                "$E2E_WORK/xdotool-$case_name.err"
         else
             log "fail gnome-gtk-$case_name XTEST could not type into the focused GTK window"
             cat "$test_log" "$E2E_WORK/x11-input-$case_name.txt" \
-                "$E2E_WORK/locale-$case_name.txt" \
-                "$E2E_WORK/xinput-device-$case_name.txt" \
-                "$E2E_WORK/xinput-device-$case_name.err" \
-                "$E2E_WORK/xte-$case_name.err"
+                "$E2E_WORK/locale-$case_name.txt" "$E2E_WORK/xdotool-$case_name.err"
         fi
         exit 1
     fi
@@ -737,9 +703,7 @@ run_gtk_ibus_case() {
         cat "$engine_log"
         cat "$E2E_WORK/x11-input-$case_name.txt" \
             "$E2E_WORK/locale-$case_name.txt" \
-            "$E2E_WORK/xinput-device-$case_name.txt" \
-            "$E2E_WORK/xinput-device-$case_name.err" \
-            "$E2E_WORK/xte-$case_name.err" 2>/dev/null || true
+            "$E2E_WORK/xdotool-$case_name.err" 2>/dev/null || true
         python3 - "$E2E_WORK/ibus-context-before-$case_name.json" \
             "$E2E_WORK/ibus-context-after-$case_name.json" <<'PY'
 import json
