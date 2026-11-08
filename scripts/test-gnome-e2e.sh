@@ -23,7 +23,7 @@ for argument in "$@"; do
         *) printf '%s\n' "usage: $0 [--keep]" >&2; exit 2 ;;
     esac
 done
-for tool in gnome-shell dbus-run-session gsettings gdbus xdotool xterm timeout python3; do
+for tool in gnome-shell dbus-run-session gsettings gdbus xdotool xinput stdbuf xterm timeout python3; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         printf '%s\n' "error: $tool is required (install GNOME Shell, XWayland, xdotool and the GTK/IBus test dependencies)" >&2
         exit 2
