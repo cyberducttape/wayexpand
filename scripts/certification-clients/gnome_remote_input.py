@@ -115,6 +115,17 @@ def click_test_field(bus, path, window_rect):
     pointer_x, pointer_y = get_pointer_position(bus)
     pointer_motion(bus, path, target_x - pointer_x, target_y - pointer_y)
     time.sleep(0.1)
+    actual_x, actual_y = get_pointer_position(bus)
+    if abs(actual_x - target_x) > 2 or abs(actual_y - target_y) > 2:
+        raise RuntimeError(
+            "Mutter pointer did not reach GTK target: "
+            f"target=({target_x}, {target_y}) actual=({actual_x}, {actual_y})"
+        )
+    print(
+        "Mutter pointer verified at GTK target: "
+        f"({actual_x}, {actual_y})",
+        flush=True,
+    )
     try:
         pointer_button(bus, path, True)
         time.sleep(0.05)
@@ -268,10 +279,7 @@ def main():
         prime_keyboard_device(bus, session_path)
         activate_test_window(bus, args.app_id)
         window_rect = get_test_window_rect(bus, args.app_id)
-        print(
-            "Mutter test target geometry: "
-            f"window={window_rect!r} pointer={get_pointer_position(bus)!r}"
-        )
+        print(f"Mutter test target geometry: window={window_rect!r}", flush=True)
         click_test_field(bus, session_path, window_rect)
         publish_focus_confirmation(args.focus_marker)
         if not wait_for_gtk_input_ready(args.ready_marker, 13.0):
