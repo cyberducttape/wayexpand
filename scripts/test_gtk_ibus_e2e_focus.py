@@ -106,6 +106,49 @@ class InputModeEnvironmentTests(unittest.TestCase):
         )
 
 
+class DisplayBackendEnvironmentTests(unittest.TestCase):
+    def test_native_wayland_requires_its_socket_and_rejects_x11_fallback(self):
+        self.assertEqual(
+            GTK_E2E.display_backend_environment_error({"GDK_BACKEND": "wayland"}),
+            "WAYLAND_DISPLAY must identify GNOME's private Wayland compositor",
+        )
+        self.assertEqual(
+            GTK_E2E.display_backend_environment_error(
+                {
+                    "GDK_BACKEND": "wayland",
+                    "WAYLAND_DISPLAY": "wayexpand-gnome-e2e",
+                    "DISPLAY": ":99",
+                }
+            ),
+            "X11 display variables must be unset for the native Wayland test",
+        )
+        self.assertIsNone(
+            GTK_E2E.display_backend_environment_error(
+                {
+                    "GDK_BACKEND": "wayland",
+                    "WAYLAND_DISPLAY": "wayexpand-gnome-e2e",
+                }
+            )
+        )
+
+    def test_x11_fixture_requires_private_display(self):
+        self.assertEqual(
+            GTK_E2E.display_backend_environment_error({"GDK_BACKEND": "x11"}),
+            "DISPLAY must identify GNOME's private XWayland server",
+        )
+        self.assertIsNone(
+            GTK_E2E.display_backend_environment_error(
+                {"GDK_BACKEND": "x11", "DISPLAY": ":99"}
+            )
+        )
+
+    def test_display_backend_must_be_explicit(self):
+        self.assertEqual(
+            GTK_E2E.display_backend_environment_error({}),
+            "GDK_BACKEND must explicitly select wayland or x11",
+        )
+
+
 class WidgetInputModuleTests(unittest.TestCase):
     class FakeWidget:
         def __init__(self):

@@ -43,6 +43,22 @@ def input_mode_environment_error(im_mode, environ):
     return None
 
 
+def display_backend_environment_error(environ):
+    """Require the display variables for the backend the fixture claims to test."""
+    backend = environ.get("GDK_BACKEND")
+    if backend == "wayland":
+        if not environ.get("WAYLAND_DISPLAY"):
+            return "WAYLAND_DISPLAY must identify GNOME's private Wayland compositor"
+        if environ.get("DISPLAY") or environ.get("XAUTHORITY"):
+            return "X11 display variables must be unset for the native Wayland test"
+        return None
+    if backend == "x11":
+        if not environ.get("DISPLAY"):
+            return "DISPLAY must identify GNOME's private XWayland server"
+        return None
+    return "GDK_BACKEND must explicitly select wayland or x11"
+
+
 def configure_widget_im_module(widget, gtk_version, im_mode):
     """Pin the GTK 3 XKB control to its requested module on the widget."""
     if gtk_version != "3":
@@ -65,8 +81,9 @@ def main():
     environment_error = input_mode_environment_error(args.im_mode, os.environ)
     if environment_error:
         raise SystemExit(environment_error)
-    if not os.environ.get("DISPLAY"):
-        raise SystemExit("DISPLAY must identify GNOME's private XWayland server")
+    backend_error = display_backend_environment_error(os.environ)
+    if backend_error:
+        raise SystemExit(backend_error)
     focus_marker = os.environ.get("GTK_E2E_FOCUS_MARKER")
     if not focus_marker:
         raise SystemExit("GTK_E2E_FOCUS_MARKER must be set by the Mutter focus test")

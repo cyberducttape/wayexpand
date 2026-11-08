@@ -100,21 +100,22 @@ and window tracking. Its GTK 3 `Gtk.Entry` and GTK 4 `Gtk.TextView` check exact
 trigger replacement and Unicode output; password-purpose `Gtk.Entry` fields
 must preserve the trigger. The test verifies a live switch to German and
 French keyboard sources and checks expansion after returning to WayExpand. It also opens
-the field with `GTK_IM_MODULE=ibus`
-on GNOME's private XWayland server, activates the window through Mutter, and
-types fixed ASCII test input through Mutter's private RemoteDesktop D-Bus
-keyboard interface. This avoids XTEST paths that failed to deliver keys to GTK
-on Fedora 45/GNOME 51. The interface is version-specific and is used only by
-the isolated acceptance fixture; it is not a WayExpand production backend.
-This remains headless compositor-path evidence, not physical-keyboard
-certification. The test verifies the resulting widget text.
+the field as a native Wayland client with `GTK_IM_MODULE=ibus`, activates the
+window through Mutter, and types fixed ASCII test input through Mutter's
+private RemoteDesktop D-Bus keyboard interface. The simple-input baseline uses
+the same native Wayland path, independently of IBus. The interface is
+version-specific and used only by the isolated acceptance fixture; it is not a
+WayExpand production backend. This remains headless compositor-path evidence,
+not physical-keyboard certification. The test verifies the resulting widget
+text.
 The Qt 6 `QLineEdit` fixture uses the IBus XIM bridge and verifies exact
 trigger/Unicode pass-through plus password-field preservation; it does not
 claim Qt replacement support without a verified surrounding-text contract.
 An xterm fixture reads test bytes in raw mode, verifies trigger and Unicode
 pass-through, and exits without submitting a command. These XIM checks are
 limited to the hosted XWayland session and do not certify native Wayland
-terminal clients or physical keyboards.
+terminal clients or physical keyboards. The xterm baseline separately checks
+XTEST delivery in an XWayland client.
 The same test opens an isolated Google Chrome profile on a local page, focuses
 its textarea through Mutter, types the same harmless trigger through XTEST, and
 checks the textarea value using Chrome DevTools. The tested Chrome XWayland/IBus
@@ -128,8 +129,9 @@ The GTK portion exercises GTK's actual IBus module and target widget; the
 custom protocol client separately checks trigger deletion and replacement
 commit. The test checks password-field refusal and content-free telemetry, then
 simulates an extension upgrade with an old Shell instance and a Shell restart.
-XTEST on XWayland does not certify native Wayland compositor keyboard routing
-or physical keyboard delivery.
+The GTK fixture exercises Mutter's native Wayland keyboard path with synthetic
+test input; it does not certify physical keyboard delivery. XTEST checks are
+limited to the listed XWayland fixtures.
 `test-ibus-e2e.sh` additionally exercises IBus engine focus, content-type and
 telemetry cases. These headless tests do not prove physical keyboard routing,
 compositor-delivered key events, persistence across an actual user logout, or

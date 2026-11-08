@@ -588,22 +588,18 @@ run_gtk_ibus_case() {
     if [ "$im_mode" = simple ]; then
         # Force GTK's built-in simple context so this XKB control cannot
         # attach to IBus. The following cases test the IBus module explicitly.
-        timeout 20s env -u XMODIFIERS -u IBUS_ADDRESS \
+        timeout 20s env -u DISPLAY -u XAUTHORITY -u XMODIFIERS -u IBUS_ADDRESS \
             GTK_IM_MODULE=gtk-im-context-simple \
-            GDK_BACKEND=x11 \
-            DISPLAY="$x11_display" \
-            XAUTHORITY="$xwayland_auth" \
+            GDK_BACKEND=wayland \
             GTK_E2E_FOCUS_MARKER="$marker" \
             GTK_E2E_READY_MARKER="$ready_marker" \
             GTK_E2E_APP_ID="$app_id" \
             python3 "$E2E_PROJECT_DIR/scripts/certification-clients/gtk_ibus_e2e.py" \
             --gtk-version "$gtk_version" --im-mode simple --expected "$expected" "$@" >"$test_log" 2>&1 &
     else
-        timeout 20s env \
+        timeout 20s env -u DISPLAY -u XAUTHORITY \
             GTK_IM_MODULE=ibus \
-            GDK_BACKEND=x11 \
-            DISPLAY="$x11_display" \
-            XAUTHORITY="$xwayland_auth" \
+            GDK_BACKEND=wayland \
             IBUS_ADDRESS="$(ibus address)" \
             GTK_E2E_FOCUS_MARKER="$marker" \
             GTK_E2E_READY_MARKER="$ready_marker" \
@@ -620,14 +616,9 @@ run_gtk_ibus_case() {
         cat "$test_log"
         exit 1
     fi
-    if ! click_test_field "$app_id"; then
-        kill "$gtk_pid" 2>/dev/null || true
-        wait "$gtk_pid" 2>/dev/null || true
-        gtk_pid=
-        log "fail gnome-gtk-$case_name XTEST could not focus the target field"
-        cat "$test_log"
-        exit 1
-    fi
+    # GTK is a native Wayland client. It grabs child focus itself, and its
+    # readiness marker requires stable Mutter activation and widget focus.
+    # XTEST cannot target native Wayland surfaces.
     : >"$marker"
     ready_tries=100
     while [ ! -s "$ready_marker" ]; do
@@ -649,31 +640,11 @@ run_gtk_ibus_case() {
         fi
         sleep 0.05
     done
-    diagnose_x11_input "$case_name"
     if [ -f "$status_file" ]; then
         cp "$status_file" "$E2E_WORK/ibus-context-before-$case_name.json"
     fi
-    if [ "$case_name" = x11-baseline ]; then
-        cp "$E2E_WORK/x11-input-$case_name.txt" \
-            "$E2E_WORK/x11-input-$case_name-before-refresh.txt"
-        focus_refresh_log="$E2E_WORK/x11-focus-refresh-$case_name.txt"
-        if DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
-            xdotool windowfocus --sync "$test_window_id" \
-            >"$focus_refresh_log" 2>&1; then
-            printf '%s\n' 'explicit X11 focus refresh succeeded' >>"$focus_refresh_log"
-        else
-            printf '%s\n' 'explicit X11 focus refresh failed' >>"$focus_refresh_log"
-        fi
-        sleep 0.1
-        diagnose_x11_input "$case_name"
-        input_status=0
-        # Route a virtual key through Mutter's RemoteDesktop interface. XTEST
-        # reached xterm and Ubuntu GTK but failed to reach GTK on Fedora 45.
-        type_gnome_remote_input "$case_name" a || input_status=$?
-    else
-        input_status=0
-        type_gnome_remote_input "$case_name" "$trigger" || input_status=$?
-    fi
+    input_status=0
+    type_gnome_remote_input "$case_name" "$trigger" || input_status=$?
     if [ "$input_status" -ne 0 ]; then
         if [ -f "$status_file" ]; then
             cp "$status_file" "$E2E_WORK/ibus-context-after-$case_name.json"
@@ -681,15 +652,13 @@ run_gtk_ibus_case() {
         kill "$gtk_pid" 2>/dev/null || true
         wait "$gtk_pid" 2>/dev/null || true
         gtk_pid=
-        if [ "$case_name" = x11-baseline ]; then
+        if [ "$case_name" = wayland-baseline ]; then
             log "fail gnome-gtk-$case_name Mutter RemoteDesktop could not send a key to the focused GTK window"
-            cat "$test_log" "$E2E_WORK/x11-input-$case_name.txt" \
-                "$E2E_WORK/mutter-input-$case_name.txt" \
+            cat "$test_log" "$E2E_WORK/mutter-input-$case_name.txt" \
                 "$E2E_WORK/mutter-input-$case_name.err"
         else
             log "fail gnome-gtk-$case_name Mutter RemoteDesktop could not type into the focused GTK window"
-            cat "$test_log" "$E2E_WORK/x11-input-$case_name.txt" \
-                "$E2E_WORK/mutter-input-$case_name.txt" \
+            cat "$test_log" "$E2E_WORK/mutter-input-$case_name.txt" \
                 "$E2E_WORK/mutter-input-$case_name.err"
         fi
         exit 1
@@ -711,8 +680,7 @@ run_gtk_ibus_case() {
         fi
         cat "$test_log"
         cat "$engine_log"
-        cat "$E2E_WORK/x11-input-$case_name.txt" \
-            "$E2E_WORK/mutter-input-$case_name.txt" \
+        cat "$E2E_WORK/mutter-input-$case_name.txt" \
             "$E2E_WORK/mutter-input-$case_name.err" 2>/dev/null || true
         python3 - "$E2E_WORK/ibus-context-before-$case_name.json" \
             "$E2E_WORK/ibus-context-after-$case_name.json" <<'PY'
@@ -816,23 +784,24 @@ run_terminal_x11_baseline() {
     log "pass gnome-x11-terminal-baseline $(cat "$test_log")"
 }
 
-# Prove XTEST, X11 focus, and ordinary GTK input separately from WayExpand's
-# IBus engine. The baseline uses the US XKB source and GtkIMContextSimple.
+# Test GTK's native Wayland input path separately from WayExpand's IBus engine.
+# The baseline uses the US XKB source and GtkIMContextSimple; terminal X11/XTEST
+# input is exercised independently above.
 if ! "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --activate-source xkb us \
     >"$E2E_WORK/layout-us-baseline-activation.log" 2>&1; then
-    log "fail gnome-gtk-x11-baseline GNOME could not activate the ordinary US XKB source"
+    log "fail gnome-gtk-wayland-baseline GNOME could not activate the ordinary US XKB source"
     cat "$E2E_WORK/layout-us-baseline-activation.log"
     exit 1
 fi
 if ! "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --active-layout \
     >"$E2E_WORK/layout-us-baseline-active.log" 2>&1 \
     || ! grep -F 'active-layout xkb us ' "$E2E_WORK/layout-us-baseline-active.log" >/dev/null; then
-    log "fail gnome-gtk-x11-baseline the ordinary US XKB source is not active"
+    log "fail gnome-gtk-wayland-baseline the ordinary US XKB source is not active"
     cat "$E2E_WORK/layout-us-baseline-activation.log" "$E2E_WORK/layout-us-baseline-active.log"
     exit 1
 fi
 run_terminal_x11_baseline
-run_gtk_ibus_case x11-baseline a a false 3 simple
+run_gtk_ibus_case wayland-baseline a a false 3 simple
 if ! "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --activate-source ibus wayexpand \
     >"$E2E_WORK/ibus-source-after-x11-baseline.log" 2>&1; then
     log "fail ibus-engine-active GNOME could not restore WayExpand after the XKB baseline"
@@ -1400,7 +1369,7 @@ PY
 
     if [ "$login_source_ok" -eq 1 ]; then
         if ! resolve_xwayland_connection "$E2E_WORK/gnome-shell-after-login.log"; then
-            log "fail gnome-gtk-after-login the reloaded session's XWayland display or authorization file could not be resolved"
+            log "fail gnome-x11-after-login the reloaded session's XWayland display or authorization file could not be resolved"
             status=1
         else
             run_gtk_ibus_case after-login ';e2e' expanded false 3
@@ -1491,7 +1460,7 @@ env -i \
     dbus-run-session -- "$work/session.sh" >"$work/results.txt" 2>"$work/session.log" || status=$?
 
 cat "$work/results.txt"
-expected_checks='extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-x11-terminal-baseline gnome-gtk-x11-baseline gnome-gtk-insertion gnome-gtk-unicode gnome-gtk-password gnome-gtk-gtk4-insertion gnome-gtk-gtk4-unicode gnome-gtk-gtk4-password gnome-qt-safe-passthrough gnome-qt-unicode-passthrough gnome-qt-password gnome-terminal-safe-passthrough gnome-terminal-unicode-passthrough gnome-layout-de gnome-layout-fr extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-gtk-after-login'
+expected_checks='extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-x11-terminal-baseline gnome-gtk-wayland-baseline gnome-gtk-insertion gnome-gtk-unicode gnome-gtk-password gnome-gtk-gtk4-insertion gnome-gtk-gtk4-unicode gnome-gtk-gtk4-password gnome-qt-safe-passthrough gnome-qt-unicode-passthrough gnome-qt-password gnome-terminal-safe-passthrough gnome-terminal-unicode-passthrough gnome-layout-de gnome-layout-fr extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-gtk-after-login'
 missing_check=
 for check in $expected_checks; do
     if ! grep -F "pass $check" "$work/results.txt" >/dev/null; then
