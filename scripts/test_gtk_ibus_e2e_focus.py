@@ -50,6 +50,17 @@ class GnomeAcceptanceShellContractTests(unittest.TestCase):
         self.assertLess(keyboard_setup, activations[1])
         self.assertLess(activations[1], marker)
 
+    def test_focus_controller_reports_live_pointer_coordinates(self):
+        source = FOCUS_CONTROLLER_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('GetPointerPositionAsync(_args, invocation)', source)
+        self.assertIn('const [x, y] = global.get_pointer();', source)
+
+    def test_pointer_click_converts_absolute_target_to_relative_delta(self):
+        source = REMOTE_INPUT_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('def get_pointer_position(bus):', source)
+        self.assertIn('target_x - pointer_x, target_y - pointer_y', source)
+        self.assertNotIn('pointer_motion(bus, path, -2000.0, -2000.0)', source)
+
     def test_x11_clients_have_a_window_activation_helper(self):
         source = GNOME_ACCEPTANCE_SCRIPT.read_text(encoding="utf-8")
         self.assertRegex(source, r"(?m)^activate_window\(\) \{")
@@ -329,11 +340,18 @@ class MutterRemoteInputTests(unittest.TestCase):
             self.fail_first = fail_first
 
         def call_sync(self, _bus, _path, _interface, method, parameters, *_args):
-            values = parameters.unpack()
+            values = parameters.unpack() if parameters is not None else ()
             self.calls.append((method, values))
             if self.fail_first:
                 self.fail_first = False
                 raise RuntimeError("simulated lost method reply")
+            if method == "GetPointerPosition":
+                class Result:
+                    @staticmethod
+                    def unpack():
+                        return (100, 50)
+
+                return Result()
 
     def test_window_activation_retries_only_while_window_is_unmapped(self):
         class FakeDbusError(Exception):
@@ -455,8 +473,8 @@ class MutterRemoteInputTests(unittest.TestCase):
         self.assertEqual(
             bus.calls,
             [
-                ("NotifyPointerMotionRelative", (-2000.0, -2000.0)),
-                ("NotifyPointerMotionRelative", (640.0, 400.0)),
+                ("GetPointerPosition", ()),
+                ("NotifyPointerMotionRelative", (540, 350)),
                 ("NotifyPointerButton", (REMOTE_INPUT.BTN_LEFT, True)),
                 ("NotifyPointerButton", (REMOTE_INPUT.BTN_LEFT, False)),
             ],

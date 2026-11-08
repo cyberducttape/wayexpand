@@ -300,6 +300,8 @@ def main():
                 f"widget_focused={focus_widget.has_focus()} "
                 f"focus_within_widget={widget_has_keyboard_focus} "
                 f"focused_widget_type={type(window.get_focus()).__name__ if window.get_focus() else 'none'} "
+                f"GTK_pointer_presses={gtk_pointer_events} "
+                f"GDK_pointer_presses={gtk_gdk_pointer_events} "
                 f"GDK_BACKEND={os.environ.get('GDK_BACKEND')!r} "
                 f"WAYLAND_DISPLAY={os.environ.get('WAYLAND_DISPLAY')!r}",
                 file=sys.stderr,

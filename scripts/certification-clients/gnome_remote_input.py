@@ -88,18 +88,32 @@ def get_test_window_rect(bus, app_id):
     return result.unpack()
 
 
+def get_pointer_position(bus):
+    result = bus.call_sync(
+        "org.gnome.Shell",
+        FOCUS_CONTROLLER_PATH,
+        FOCUS_CONTROLLER_INTERFACE,
+        "GetPointerPosition",
+        None,
+        GLib.VariantType.new("(ii)"),
+        Gio.DBusCallFlags.NONE,
+        5000,
+        None,
+    )
+    return result.unpack()
+
+
 def click_test_field(bus, path, window_rect):
     """Click the mapped fixture's center to establish real surface focus."""
     x, y, width, height = window_rect
     target_x = x + width / 2
     target_y = y + height / 2
-    # The fixture has no decorations and fills its 500x80 content area. Read
-    # its compositor frame rectangle instead of guessing window placement.
-    # Relative input first clamps the pointer to the top-left edge, then moves
-    # it to the widget center before clicking.
-    pointer_motion(bus, path, -2000.0, -2000.0)
-    time.sleep(0.05)
-    pointer_motion(bus, path, target_x, target_y)
+    # RemoteDesktop relative motion accepts deltas, while GetWindowRect reports
+    # absolute compositor coordinates. Convert using the live pointer location
+    # instead of assuming an edge-clamped starting position or a zero-origin
+    # monitor. Both values come from Mutter's global coordinate space.
+    pointer_x, pointer_y = get_pointer_position(bus)
+    pointer_motion(bus, path, target_x - pointer_x, target_y - pointer_y)
     time.sleep(0.1)
     try:
         pointer_button(bus, path, True)
@@ -254,6 +268,10 @@ def main():
         prime_keyboard_device(bus, session_path)
         activate_test_window(bus, args.app_id)
         window_rect = get_test_window_rect(bus, args.app_id)
+        print(
+            "Mutter test target geometry: "
+            f"window={window_rect!r} pointer={get_pointer_position(bus)!r}"
+        )
         click_test_field(bus, session_path, window_rect)
         publish_focus_confirmation(args.focus_marker)
         if not wait_for_gtk_input_ready(args.ready_marker, 13.0):

@@ -21,6 +21,10 @@ const INTERFACE = `
       <arg type="i" direction="out" name="width"/>
       <arg type="i" direction="out" name="height"/>
     </method>
+    <method name="GetPointerPosition">
+      <arg type="i" direction="out" name="x"/>
+      <arg type="i" direction="out" name="y"/>
+    </method>
   </interface>
 </node>`;
 
@@ -62,6 +66,11 @@ export default class GnomeE2eFocusController extends Extension {
         invocation.return_value(new GLib.Variant(
             '(iiii)', [rect.x, rect.y, rect.width, rect.height],
         ));
+    }
+
+    GetPointerPositionAsync(_args, invocation) {
+        const [x, y] = global.get_pointer();
+        invocation.return_value(new GLib.Variant('(ii)', [x, y]));
     }
 
     ActivateWindowAsync([appId], invocation) {
