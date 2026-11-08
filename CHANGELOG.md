@@ -4344,3 +4344,6 @@ This is the first stable release. WayExpand is now recommended for production us
 - Run GTK 3/4 acceptance widgets in plain GTK toplevels instead of an
   application-managed GTK 4 window, leaving focus management to the focused
   widget and Mutter test controller.
+- Focus the field itself with XTEST after Mutter confirms the uniquely named
+  GTK/Qt test window. This exercises the application text widget instead of
+  relying only on toplevel activation.

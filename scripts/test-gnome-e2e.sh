@@ -213,6 +213,16 @@ activate_window() {
     done
 }
 
+click_test_field() {
+    app_id=$1
+    window_id=$(DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+        xdotool search --onlyvisible --name "$app_id" 2>/dev/null | tail -n 1)
+    if [ -z "$window_id" ] || ! DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+        xdotool mousemove --window "$window_id" 100 40 click 1; then
+        return 1
+    fi
+}
+
 tries=600
 until gnome_extension_state_active "$(extension_state)"; do
     tries=$((tries - 1))
@@ -449,6 +459,14 @@ run_gtk_ibus_case() {
         cat "$test_log"
         exit 1
     fi
+    if ! click_test_field "$app_id"; then
+        kill "$gtk_pid" 2>/dev/null || true
+        wait "$gtk_pid" 2>/dev/null || true
+        gtk_pid=
+        log "fail gnome-gtk-$case_name XTEST could not focus the target field"
+        cat "$test_log"
+        exit 1
+    fi
     : >"$marker"
     ready_tries=100
     while [ ! -s "$ready_marker" ]; do
@@ -539,6 +557,14 @@ run_qt_xim_case() {
         kill "$qt_pid" 2>/dev/null || true
         wait "$qt_pid" 2>/dev/null || true
         log "fail gnome-qt-$case_name Mutter could not focus the Qt XIM acceptance window"
+        cat "$test_log"
+        exit 1
+    fi
+    if ! click_test_field "$app_id"; then
+        kill "$qt_pid" 2>/dev/null || true
+        wait "$qt_pid" 2>/dev/null || true
+        qt_pid=
+        log "fail gnome-qt-$case_name XTEST could not focus the target field"
         cat "$test_log"
         exit 1
     fi
