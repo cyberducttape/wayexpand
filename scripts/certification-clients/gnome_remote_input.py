@@ -345,6 +345,48 @@ def wait_for_gtk_input_ready(
     return False
 
 
+def wait_for_gtk_input_ready_with_pointer_fallback(
+    bus,
+    session_path,
+    app_id,
+    window_rect,
+    ready_marker,
+    timeout_seconds,
+    ibus_status_path=None,
+    ibus_sequence_baseline=0,
+):
+    """Wait for actual GTK focus, clicking once only if activation stalls."""
+    initial_wait = min(2.0, timeout_seconds)
+    ready = wait_for_gtk_input_ready(
+        bus,
+        app_id,
+        ready_marker,
+        initial_wait,
+        ibus_status_path,
+        ibus_sequence_baseline,
+    )
+    if ready:
+        return ready
+
+    click_test_field(bus, session_path, window_rect)
+    # Require a fresh focus lease after the fallback click before sending any
+    # test keys. The GTK client recreates this marker only after focus is
+    # stable again.
+    try:
+        os.unlink(ready_marker)
+    except FileNotFoundError:
+        pass
+    remaining = max(0.0, timeout_seconds - initial_wait)
+    return wait_for_gtk_input_ready(
+        bus,
+        app_id,
+        ready_marker,
+        remaining,
+        ibus_status_path,
+        ibus_sequence_baseline,
+    )
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--delay-ms", type=int, default=60)
@@ -404,15 +446,16 @@ def main():
         window_rect = get_test_window_rect(bus, args.app_id)
         print(f"Mutter test target geometry: window={window_rect!r}", flush=True)
         # Start GTK's bounded present()/grab_focus() retries as soon as Mutter
-        # confirms its window focus. Waiting until after the click deadlocks on
-        # Mutter versions where a click on the not-yet-active Wayland surface
-        # is not delivered to GTK; the client would not request focus until
-        # that same click had succeeded.
+        # confirms its window focus. Give the client a short chance to report
+        # real active-toplevel and widget focus before clicking. A click sent
+        # while Mutter has only updated MetaWindow focus can be dropped by a
+        # native Wayland surface. Use one click only as a bounded fallback.
         publish_focus_confirmation(args.focus_marker)
-        click_test_field(bus, session_path, window_rect)
-        ready = wait_for_gtk_input_ready(
+        ready = wait_for_gtk_input_ready_with_pointer_fallback(
             bus,
+            session_path,
             args.app_id,
+            window_rect,
             args.ready_marker,
             13.0,
             args.ibus_status_path,

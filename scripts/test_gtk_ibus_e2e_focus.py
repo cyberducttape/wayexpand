@@ -68,6 +68,57 @@ class GnomeAcceptanceShellContractTests(unittest.TestCase):
         self.assertIn('delta if axis == "y" else 0.0', source)
         self.assertNotIn('pointer_motion(bus, path, -2000.0, -2000.0)', source)
 
+    def test_client_focus_is_confirmed_before_pointer_fallback(self):
+        with mock.patch.object(
+            REMOTE_INPUT, "wait_for_gtk_input_ready", return_value=12
+        ) as wait_ready, mock.patch.object(
+            REMOTE_INPUT, "click_test_field"
+        ) as click:
+            result = REMOTE_INPUT.wait_for_gtk_input_ready_with_pointer_fallback(
+                object(), "/session", "org.example.Test", (0, 0, 10, 10),
+                "/tmp/ready", 13.0, "/tmp/ibus-status", 4
+            )
+        self.assertEqual(result, 12)
+        wait_ready.assert_called_once_with(
+            mock.ANY, "org.example.Test", "/tmp/ready", 2.0,
+            "/tmp/ibus-status", 4
+        )
+        click.assert_not_called()
+
+    def test_pointer_fallback_invalidates_readiness_before_rechecking(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ready = Path(directory) / "ready"
+            wait_calls = 0
+
+            def wait_side_effect(*_args):
+                nonlocal wait_calls
+                wait_calls += 1
+                if wait_calls == 1:
+                    return False
+                self.assertFalse(ready.exists())
+                return 9
+
+            with mock.patch.object(
+                REMOTE_INPUT,
+                "wait_for_gtk_input_ready",
+                side_effect=wait_side_effect,
+            ) as wait_ready, mock.patch.object(
+                REMOTE_INPUT, "click_test_field"
+            ) as click:
+                # Simulate a marker from a focus interval that ended during
+                # the fallback click; it must be removed before rechecking.
+                ready.write_text("1", encoding="ascii")
+                result = REMOTE_INPUT.wait_for_gtk_input_ready_with_pointer_fallback(
+                    object(), "/session", "org.example.Test", (0, 0, 10, 10),
+                    str(ready), 13.0
+                )
+            self.assertEqual(result, 9)
+            self.assertFalse(ready.exists())
+            click.assert_called_once_with(
+                mock.ANY, "/session", (0, 0, 10, 10)
+            )
+            self.assertEqual(wait_ready.call_count, 2)
+
     def test_x11_clients_have_a_window_activation_helper(self):
         source = GNOME_ACCEPTANCE_SCRIPT.read_text(encoding="utf-8")
         self.assertRegex(source, r"(?m)^activate_window\(\) \{")
@@ -555,11 +606,16 @@ class MutterRemoteInputTests(unittest.TestCase):
 
     def test_gtk_focus_retries_start_before_pointer_click(self):
         source = REMOTE_INPUT_SCRIPT.read_text(encoding="utf-8")
-        click = source.index("click_test_field(bus, session_path, window_rect)")
         publish = source.index("publish_focus_confirmation(args.focus_marker)")
-        wait = source.index("ready = wait_for_gtk_input_ready(")
-        self.assertLess(publish, click)
-        self.assertLess(click, wait)
+        helper_call = source.index("ready = wait_for_gtk_input_ready_with_pointer_fallback(")
+        helper_start = source.index("def wait_for_gtk_input_ready_with_pointer_fallback(")
+        initial_wait = source.index("ready = wait_for_gtk_input_ready(", helper_start)
+        click = source.index("click_test_field(bus, session_path, window_rect)", helper_start)
+        retry_wait = source.index("return wait_for_gtk_input_ready(", click)
+        self.assertLess(publish, helper_call)
+        self.assertLess(helper_start, initial_wait)
+        self.assertLess(initial_wait, click)
+        self.assertLess(click, retry_wait)
 
     def test_ibus_test_captures_sequence_baseline_before_launch_and_passes_status(self):
         source = GNOME_ACCEPTANCE_SCRIPT.read_text(encoding="utf-8")
