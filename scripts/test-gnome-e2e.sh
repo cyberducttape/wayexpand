@@ -428,21 +428,9 @@ while :; do
     fi
     sleep 0.1
 done
-# Exercise the active GNOME-selected engine through the IBus input-context
-# protocol, then through GTK's own IBus module and Gtk.Entry widget hosted on
-# GNOME's private XWayland server. xdotool sends the harmless test trigger
-# through XTEST after Mutter confirms the target window is focused. This does
-# not certify native Wayland compositor or physical-keyboard event delivery.
-if IBUS_ADDRESS=$(ibus address) "$E2E_BIN_DIR/wx-e2e-ibus" \
-    "$XDG_RUNTIME_DIR/wayexpand-ibus-status.json" --expect-active --single-expansion; then
-    log "pass gnome-ibus-input-context the active GNOME-selected engine replaced a verified trigger"
-else
-    # The protocol-only probe uses zbus as an IBus client and can be rejected
-    # by older IBus/D-Bus stacks before the focused engine context is attached.
-    # Keep this distinct from application acceptance: GTK insertion below is
-    # mandatory and remains the authoritative test of the GNOME text route.
-    log "warn gnome-ibus-input-context protocol probe unavailable; GTK field acceptance remains mandatory"
-fi
+# Real GTK text-field checks below are the authoritative GNOME route test.
+# The standalone zbus protocol probe is covered by the dedicated real-IBus CI
+# job; running it here can perturb older GNOME-managed IBus sessions.
 x11_display=$(sed -n 's/.*Using public X11 display \([^,]*\),.*/\1/p' \
     "$E2E_WORK/gnome-shell.log" | head -n 1)
 if [ -z "$x11_display" ]; then
@@ -1108,12 +1096,8 @@ PY
     fi
 
     if [ "$login_source_ok" -eq 1 ]; then
-        IBUS_ADDRESS=$(ibus address) "$E2E_BIN_DIR/wx-e2e-ibus" \
-            "$XDG_RUNTIME_DIR/wayexpand-ibus-status.json" --expect-active --single-expansion \
-            || status=1
-        if [ "$status" -eq 0 ]; then
-            log "pass gnome-ibus-input-context-after-login the reloaded session replaced a verified trigger"
-        fi
+        run_gtk_ibus_case after-login ';e2e' expanded false 3
+        log "pass gnome-gtk-after-login the reloaded session replaced a verified trigger in GTK"
     fi
 fi
 
@@ -1192,7 +1176,7 @@ env -i \
     dbus-run-session -- "$work/session.sh" >"$work/results.txt" 2>"$work/session.log" || status=$?
 
 cat "$work/results.txt"
-expected_checks='extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-gtk-insertion gnome-gtk-unicode gnome-gtk-password gnome-gtk-gtk4-insertion gnome-gtk-gtk4-unicode gnome-gtk-gtk4-password gnome-qt-safe-passthrough gnome-qt-unicode-passthrough gnome-qt-password gnome-terminal-safe-passthrough gnome-terminal-unicode-passthrough gnome-layout-de gnome-layout-fr extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-ibus-input-context-after-login'
+expected_checks='extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-gtk-insertion gnome-gtk-unicode gnome-gtk-password gnome-gtk-gtk4-insertion gnome-gtk-gtk4-unicode gnome-gtk-gtk4-password gnome-qt-safe-passthrough gnome-qt-unicode-passthrough gnome-qt-password gnome-terminal-safe-passthrough gnome-terminal-unicode-passthrough gnome-layout-de gnome-layout-fr extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-gtk-after-login'
 missing_check=
 for check in $expected_checks; do
     if ! grep -F "pass $check" "$work/results.txt" >/dev/null; then
