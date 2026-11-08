@@ -19,9 +19,9 @@ TIMEOUT_MS = 15000
 FOCUS_STABLE_FOR_US = 250_000
 
 
-def update_focus_stability(window_active, widget_focused, focused_since, now):
-    """Track uninterrupted toplevel and child-widget focus stability."""
-    if not (window_active and widget_focused):
+def update_focus_stability(mutter_focus_confirmed, widget_focused, focused_since, now):
+    """Track child focus while Mutter has confirmed the target window active."""
+    if not (mutter_focus_confirmed and widget_focused):
         return None, False
     if focused_since is None:
         return now, False
@@ -77,7 +77,7 @@ def main():
     args = parser.parse_args()
     gi.require_version("Gdk", "4.0" if args.gtk_version == "4" else "3.0")
     gi.require_version("Gtk", "4.0" if args.gtk_version == "4" else "3.0")
-    from gi.repository import Gdk, GLib, Gtk
+    from gi.repository import Gdk, Gio, GLib, Gtk
     environment_error = input_mode_environment_error(args.im_mode, os.environ)
     if environment_error:
         raise SystemExit(environment_error)
@@ -106,7 +106,13 @@ def main():
             except (TypeError, ValueError):
                 gtk_im_module_setting = "unavailable"
     application_id = os.environ.get("GTK_E2E_APP_ID", DEFAULT_APP_ID)
-    window = Gtk.Window(title=f"WayExpand GTK IBus acceptance {application_id}")
+    application = Gtk.Application(
+        application_id=application_id,
+        flags=Gio.ApplicationFlags.NON_UNIQUE,
+    )
+    application.register(None)
+    window = Gtk.ApplicationWindow(application=application)
+    window.set_title(f"WayExpand GTK IBus acceptance {application_id}")
     window.set_default_size(500, 80)
     widget_im_module = None
     if args.gtk_version == "4" and args.password:
@@ -203,18 +209,19 @@ def main():
                 quit_loop()
                 return False
             return True
-        # Mutter focus confirmation only proves that the toplevel was raised.
-        # Wait for GTK's actual child focus to remain stable before the test
-        # sends its first key; otherwise a fast XTEST event can race IBus
-        # InputContext creation and lose the first character.
+        # The marker is written only after the Shell-side controller confirms
+        # global.display.get_focus_window() is this window. GTK's
+        # Gtk.Window.is_active() can remain false in the headless Mutter
+        # acceptance session even after that compositor confirmation. Require
+        # GTK's actual child focus to remain stable before sending input.
         # GTK 4 controls such as PasswordEntry can delegate focus to an
         # internal child, so accept any focused descendant of the test widget.
         # GTK 3 must pass the same check; treating the version as proof of focus
-        # can send XTEST input before the entry owns keyboard focus.
+        # can send synthetic input before the entry owns keyboard focus.
         child_focused = focus_is_within_test_widget()
         window_active = window.is_active()
         focused_since, child_focus_stable = update_focus_stability(
-            window_active, child_focused, focused_since, GLib.get_monotonic_time()
+            True, child_focused, focused_since, GLib.get_monotonic_time()
         )
         if (
             not child_focus_stable
@@ -225,6 +232,7 @@ def main():
             # Emit one content-free snapshot early enough to survive teardown.
             print(
                 "GTK focus readiness diagnostic: "
+                "mutter_focus_confirmed=True "
                 f"active={window_active} "
                 f"widget_focused={focus_widget.has_focus()} "
                 f"focus_within_widget={child_focused} "
@@ -266,7 +274,8 @@ def main():
                 file=sys.stderr,
             )
             print(
-                f"GTK focus diagnostic: active={window.is_active()} "
+                f"GTK focus diagnostic: mutter_focus_confirmed=True "
+                f"active={window.is_active()} "
                 f"widget_focused={focus_widget.has_focus()} "
                 f"focus_within_widget={focus_is_within_test_widget()} "
                 f"focused_widget_type={type(window.get_focus()).__name__ if window.get_focus() else 'none'}",
@@ -288,6 +297,7 @@ def main():
                 f"widget_im_module={widget_im_module!r} "
                 f"GTK_IM_MODULE={os.environ.get('GTK_IM_MODULE')!r} "
                 f"XMODIFIERS={os.environ.get('XMODIFIERS')!r} "
+                f"GTK_APPLICATION_ID={application.get_application_id()!r} "
                 f"GDK_CORE_DEVICE_EVENTS={os.environ.get('GDK_CORE_DEVICE_EVENTS')!r} "
                 f"GDK_BACKEND={os.environ.get('GDK_BACKEND')!r}",
                 file=sys.stderr,
