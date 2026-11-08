@@ -14,9 +14,8 @@ All notable changes to WayExpand are documented here.
   event before WayExpand-specific IBus insertion. Pin the GTK 3 baseline
   widget's IM module because a desktop-level setting can override the process
   environment. Keep that baseline disconnected from the private IBus daemon,
-  configure GTK 3 to consume XTEST's core key events, and validate separate
-  GTK/XIM environment requirements. This test-only core-event path does not
-  certify GTK's default XI2 path or physical keyboard delivery.
+  validate separate GTK/XIM environment requirements, and record GDK's core
+  device event setting in sanitized GTK failure diagnostics.
   Refresh XWayland focus once before the GTK baseline event. Count sanitized
   GDK-to-widget key events and report GTK's effective IM-module, X11 focus,
   active window, XTEST availability, and

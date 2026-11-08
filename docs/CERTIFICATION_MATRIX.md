@@ -103,11 +103,6 @@ French keyboard sources and checks expansion after returning to WayExpand. It al
 the field with `GTK_IM_MODULE=ibus`
 on GNOME's private XWayland server, activates the window through Mutter, types
 a fixed test trigger through XTEST, and verifies the resulting widget text.
-For the GTK 3 XKB control only, the harness sets
-`GDK_CORE_DEVICE_EVENTS=1`: XTEST injects core key events, while GTK's default
-X11 path may consume XI2 events. This makes the control exercise the event path
-XTEST can deliver and does not certify GTK's default XI2 path or physical
-keyboard delivery.
 The Qt 6 `QLineEdit` fixture uses the IBus XIM bridge and verifies exact
 trigger/Unicode pass-through plus password-field preservation; it does not
 claim Qt replacement support without a verified surrounding-text contract.
