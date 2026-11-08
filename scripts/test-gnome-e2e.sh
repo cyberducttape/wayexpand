@@ -712,6 +712,70 @@ PY
     log "pass gnome-gtk-$case_name $(cat "$test_log")"
 }
 
+run_terminal_x11_baseline() {
+    case_name=x11-baseline
+    input=a
+    app_id=org.wayexpand.GnomeTerminalX11Baseline
+    ready_marker="$E2E_WORK/terminal-ready-$case_name"
+    test_log="$E2E_WORK/terminal-ibus-e2e-$case_name.log"
+    timeout 20s env -u GTK_IM_MODULE -u XMODIFIERS -u IBUS_ADDRESS \
+        DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+        xterm -title "WayExpand terminal acceptance $app_id" \
+        -geometry 80x3+0+0 -e python3 \
+        "$E2E_PROJECT_DIR/scripts/certification-clients/terminal_ibus_e2e.py" \
+        --expected "$input" --ready-marker "$ready_marker" \
+        >"$test_log" 2>&1 &
+    terminal_pid=$!
+    if ! activate_window "$app_id" || ! click_test_field "$app_id"; then
+        kill "$terminal_pid" 2>/dev/null || true
+        wait "$terminal_pid" 2>/dev/null || true
+        terminal_pid=
+        log "fail gnome-x11-terminal-baseline could not focus the basic X11 terminal reader"
+        cat "$test_log"
+        exit 1
+    fi
+    ready_tries=100
+    while [ ! -s "$ready_marker" ]; do
+        if ! kill -0 "$terminal_pid" 2>/dev/null; then
+            wait "$terminal_pid" || true
+            terminal_pid=
+            log "fail gnome-x11-terminal-baseline basic X11 terminal reader exited before readiness"
+            cat "$test_log"
+            exit 1
+        fi
+        ready_tries=$((ready_tries - 1))
+        if [ "$ready_tries" -le 0 ]; then
+            kill "$terminal_pid" 2>/dev/null || true
+            wait "$terminal_pid" 2>/dev/null || true
+            terminal_pid=
+            log "fail gnome-x11-terminal-baseline basic X11 terminal reader did not become ready"
+            cat "$test_log"
+            exit 1
+        fi
+        sleep 0.05
+    done
+    diagnose_x11_input "$case_name"
+    if ! type_x11_input "$case_name" "$input"; then
+        kill "$terminal_pid" 2>/dev/null || true
+        wait "$terminal_pid" 2>/dev/null || true
+        terminal_pid=
+        log "fail gnome-x11-terminal-baseline XTEST could not send the ordinary test key"
+        cat "$test_log" "$E2E_WORK/x11-input-$case_name.txt" \
+            "$E2E_WORK/locale-$case_name.txt" "$E2E_WORK/xdotool-$case_name.err"
+        exit 1
+    fi
+    terminal_status=0
+    wait "$terminal_pid" || terminal_status=$?
+    terminal_pid=
+    if [ "$terminal_status" -ne 0 ]; then
+        log "fail gnome-x11-terminal-baseline XTEST_INPUT_NOT_DELIVERED: key did not reach a basic X11 application"
+        cat "$test_log" "$E2E_WORK/x11-input-$case_name.txt" \
+            "$E2E_WORK/locale-$case_name.txt" "$E2E_WORK/xdotool-$case_name.err"
+        exit 1
+    fi
+    log "pass gnome-x11-terminal-baseline $(cat "$test_log")"
+}
+
 # Prove XTEST, X11 focus, and ordinary GTK input separately from WayExpand's
 # IBus engine. The baseline uses the US XKB source and GTK's default IM path.
 if ! "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --activate-source xkb us \
@@ -727,6 +791,7 @@ if ! "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --active-layout \
     cat "$E2E_WORK/layout-us-baseline-activation.log" "$E2E_WORK/layout-us-baseline-active.log"
     exit 1
 fi
+run_terminal_x11_baseline
 run_gtk_ibus_case x11-baseline a a false 3 default
 if ! "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --activate-source ibus wayexpand \
     >"$E2E_WORK/ibus-source-after-x11-baseline.log" 2>&1; then
@@ -1330,6 +1395,7 @@ run_terminal_xim_case unicode-passthrough 'Grüße'
 # IBus source, because closing a password field does not itself report a new
 # normal-purpose context to GNOME. This preserves the privacy check without
 # leaving the remainder of the suite in GNOME's temporary IBus-disabled mode.
+run_qt_xim_case password ';e2e' ';e2e' true
 run_gtk_ibus_case password ';e2e' ';e2e' true
 run_gtk_ibus_case gtk4-password ';e2e' ';e2e' true 4
 
@@ -1385,7 +1451,7 @@ env -i \
     dbus-run-session -- "$work/session.sh" >"$work/results.txt" 2>"$work/session.log" || status=$?
 
 cat "$work/results.txt"
-expected_checks='extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-gtk-x11-baseline gnome-gtk-insertion gnome-gtk-unicode gnome-gtk-password gnome-gtk-gtk4-insertion gnome-gtk-gtk4-unicode gnome-gtk-gtk4-password gnome-qt-safe-passthrough gnome-qt-unicode-passthrough gnome-qt-password gnome-terminal-safe-passthrough gnome-terminal-unicode-passthrough gnome-layout-de gnome-layout-fr extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-gtk-after-login'
+expected_checks='extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered deprecated-current-no-activation gnome-ibus-source-active gnome-x11-terminal-baseline gnome-gtk-x11-baseline gnome-gtk-insertion gnome-gtk-unicode gnome-gtk-password gnome-gtk-gtk4-insertion gnome-gtk-gtk4-unicode gnome-gtk-gtk4-password gnome-qt-safe-passthrough gnome-qt-unicode-passthrough gnome-qt-password gnome-terminal-safe-passthrough gnome-terminal-unicode-passthrough gnome-layout-de gnome-layout-fr extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-gtk-after-login'
 missing_check=
 for check in $expected_checks; do
     if ! grep -F "pass $check" "$work/results.txt" >/dev/null; then
