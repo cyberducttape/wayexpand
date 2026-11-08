@@ -1187,4 +1187,4 @@ if [ "$status" -ne 0 ] || grep -q '^fail' "$work/results.txt" \
     done
     exit 1
 fi
-printf '%s\n' "Headless GNOME input activation, GTK3/GTK4 replacement/Unicode/password-field behavior, Chromium IBus pass-through safety, engine health, and extension upgrade/logout tests passed; Qt, Firefox, Electron, terminal, and physical desktop certification remain unverified"
+printf '%s\n' "Headless GNOME input activation, GTK3/GTK4 replacement/Unicode/password-field behavior, Qt and terminal safe pass-through, Chromium IBus fail-safe behavior, engine health, layout switching, and extension upgrade/logout tests passed; Firefox, Electron, package upgrade/uninstall persistence, and physical desktop certification remain unverified"

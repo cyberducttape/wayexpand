@@ -11,6 +11,13 @@ All notable changes to WayExpand are documented here.
   Add a regression test for the exact installed engine executable identity;
   retain UID and executable checks for every caller, and refresh the extension
   build identity so running-version diagnostics detect the authorization fix.
+- Run the GNOME IBus headless client-acceptance suite on Fedora 45/GNOME 51 in
+  addition to Ubuntu 24.04 and 26.04. This covers GTK 3/4 replacement and
+  Unicode, password-field refusal, Qt/terminal safe pass-through, browser
+  fail-safe behavior, keyboard-source switching, and Shell restart. These
+  isolated-session results remain separate from physical desktop certification;
+  Firefox, Electron, package upgrade/uninstall persistence, and physical
+  keyboard scenarios still require dedicated evidence.
 - Make the GNOME IBus acceptance test wait for a focused engine context before
   sending its harmless key probe, correlated to a new IBus focus sequence so a
   stale pre-restart context cannot satisfy readiness. Ubuntu 24.04 CI had shown
