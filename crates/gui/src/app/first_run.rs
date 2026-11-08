@@ -14,6 +14,12 @@ fn gnome_ibus_is_configured(
         && source_active == wayexpand_backend_ibus::chain::IbusCheckState::Pass
 }
 
+/// Whether first-run should judge this desktop by its GNOME IBus route. A
+/// companion daemon runs beside the engine, so it never decides this.
+fn uses_gnome_ibus_route(is_gnome: bool, ibus_active: bool, recommends_ibus: bool) -> bool {
+    is_gnome && (ibus_active || recommends_ibus)
+}
+
 fn onboarding_snippet(config: &Config) -> Option<&ExpansionConfig> {
     config.expansion.iter().find(|expansion| {
         expansion.enabled
@@ -126,6 +132,26 @@ impl GuiApp {
     /// Keep the first-run guide available after saving the tutorial snippet.
     /// The preview below checks matching locally; the user separately confirms
     /// whether a real application received the replacement.
+    /// Readiness of the GNOME IBus route: a live engine plus a registered and
+    /// selected source. `wayexpand-control.service` may run beside the engine
+    /// and is deliberately not an input here, in either direction.
+    pub(crate) fn gnome_ibus_route_ready(&self) -> bool {
+        let check_state = |id: &str| {
+            self.ibus_route
+                .as_ref()
+                .and_then(|report| report.check(id))
+                .map_or(
+                    wayexpand_backend_ibus::chain::IbusCheckState::Unknown,
+                    |check| check.state,
+                )
+        };
+        gnome_ibus_is_configured(
+            self.ibus_active,
+            check_state("gnome-source-registered"),
+            check_state("gnome-source-active"),
+        )
+    }
+
     pub(crate) fn render_first_run(&mut self, ui: &mut egui::Ui, palette: &Palette) {
         let desktop = env::var("XDG_CURRENT_DESKTOP")
             .or_else(|_| env::var("XDG_SESSION_DESKTOP"))
@@ -148,12 +174,13 @@ impl GuiApp {
             && !self.paused
             && self.route_state == Some(runtime::RouteState::Connected);
         let daemon_build = daemon_running.then(|| runtime::daemon_build_state(&self.daemon_status));
-        let gnome_ibus = wayexpand_backend_selection::Compositor::detect()
-            == wayexpand_backend_selection::Compositor::Gnome
-            && (ibus_only
-                || self
-                    .recommended_route
-                    .is_some_and(|route| route.setup_backend() == "ibus"));
+        let gnome_ibus = uses_gnome_ibus_route(
+            wayexpand_backend_selection::Compositor::detect()
+                == wayexpand_backend_selection::Compositor::Gnome,
+            self.ibus_active,
+            self.recommended_route
+                .is_some_and(|route| route.setup_backend() == "ibus"),
+        );
         let source_registered = self.ibus_route.as_ref().is_some_and(|report| {
             report
                 .check("gnome-source-registered")
@@ -170,23 +197,7 @@ impl GuiApp {
         // has registered and actually selected the source. A connection by
         // itself must never look like a working desktop integration.
         let route_ready = if gnome_ibus {
-            gnome_ibus_is_configured(
-                ibus_only,
-                self.ibus_route
-                    .as_ref()
-                    .and_then(|report| report.check("gnome-source-registered"))
-                    .map_or(
-                        wayexpand_backend_ibus::chain::IbusCheckState::Unknown,
-                        |check| check.state,
-                    ),
-                self.ibus_route
-                    .as_ref()
-                    .and_then(|report| report.check("gnome-source-active"))
-                    .map_or(
-                        wayexpand_backend_ibus::chain::IbusCheckState::Unknown,
-                        |check| check.state,
-                    ),
-            )
+            self.gnome_ibus_route_ready()
         } else {
             ibus_only || route_connected && daemon_build == Some(runtime::DaemonBuildState::Current)
         };
@@ -228,7 +239,8 @@ impl GuiApp {
         let active_route = format!("{source} → {injection}");
         let detail = |key: &str| self.strings.onboarding_route_detail(key).to_owned();
         let route_state_detail = match self.route_state {
-            _ if ibus_only => detail("ibus"),
+            // A companion's own route state says nothing about the IBus route.
+            _ if ibus_only || gnome_ibus && route_ready => detail("ibus"),
             Some(runtime::RouteState::PermissionRequired) => detail("permission_required"),
             Some(runtime::RouteState::PortalRevoked) => detail("portal_revoked"),
             Some(runtime::RouteState::Unsupported) => detail("unsupported"),
@@ -684,8 +696,16 @@ impl GuiApp {
 
 #[cfg(test)]
 mod guided_setup_tests {
-    use super::gnome_ibus_is_configured;
+    use super::{gnome_ibus_is_configured, uses_gnome_ibus_route};
     use wayexpand_backend_ibus::chain::IbusCheckState;
+
+    #[test]
+    fn a_live_engine_selects_the_gnome_route_without_a_recommendation() {
+        assert!(uses_gnome_ibus_route(true, true, false));
+        assert!(uses_gnome_ibus_route(true, false, true));
+        assert!(!uses_gnome_ibus_route(true, false, false));
+        assert!(!uses_gnome_ibus_route(false, true, true));
+    }
 
     #[test]
     fn gnome_ibus_requires_a_live_engine_and_registered_active_source() {

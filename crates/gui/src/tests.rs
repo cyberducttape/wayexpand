@@ -3226,6 +3226,44 @@ fn header_reports_a_live_ibus_engine_instead_of_a_stopped_service() {
 }
 
 #[test]
+fn gnome_route_readiness_follows_the_engine_not_the_companion_daemon() {
+    use wayexpand_backend_ibus::chain::{IbusChainReport, IbusCheck, IbusCheckState, IbusDesktop};
+
+    let check = |id| IbusCheck {
+        id,
+        title: "",
+        state: IbusCheckState::Pass,
+        problem_id: None,
+        detail: String::new(),
+        fix: None,
+    };
+    let mut app = header_test_app("gnome-route-ready");
+    app.ibus_route = Some(IbusChainReport {
+        desktop: IbusDesktop::Gnome,
+        checks: vec![
+            check("gnome-source-registered"),
+            check("gnome-source-active"),
+        ],
+        activity: None,
+    });
+
+    for (ibus_active, daemon_reachable, expected) in [
+        (true, Some(true), true),
+        (true, Some(false), true),
+        (false, Some(true), false),
+        (false, Some(false), false),
+    ] {
+        app.ibus_active = ibus_active;
+        app.daemon_reachable = daemon_reachable;
+        assert_eq!(
+            app.gnome_ibus_route_ready(),
+            expected,
+            "ibus_active={ibus_active} daemon_reachable={daemon_reachable:?}"
+        );
+    }
+}
+
+#[test]
 fn arrow_keys_move_the_selection_through_the_snippet_list() {
     let mut app = header_test_app("arrow-nav");
     let ctx = egui::Context::default();
