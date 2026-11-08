@@ -158,6 +158,25 @@ def activate_test_window(bus, app_id):
             time.sleep(0.05)
 
 
+def report_shell_input_state(bus, moment):
+    """Print Shell's grab state; diagnostic only, so it can never fail a test."""
+    try:
+        state = bus.call_sync(
+            "org.gnome.Shell",
+            FOCUS_CONTROLLER_PATH,
+            FOCUS_CONTROLLER_INTERFACE,
+            "GetShellInputState",
+            None,
+            GLib.VariantType.new("(s)"),
+            Gio.DBusCallFlags.NONE,
+            5000,
+            None,
+        ).unpack()[0]
+        print(f"shell-input-state {moment}: {state}", flush=True)
+    except GLib.Error as error:
+        print(f"shell-input-state {moment}: unavailable: {error}", flush=True)
+
+
 def publish_focus_confirmation(path):
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
@@ -241,6 +260,7 @@ def main():
             raise RuntimeError(
                 "GTK did not confirm stable active input focus; test text was not sent"
             )
+        report_shell_input_state(bus, "before-input")
         send_text(
             bus,
             session_path,
@@ -249,6 +269,7 @@ def main():
             args.ready_marker,
             keycode_probe=args.keycode_probe,
         )
+        report_shell_input_state(bus, "after-input")
     except (GLib.Error, OSError, RuntimeError, ValueError) as error:
         print(f"Mutter RemoteDesktop keyboard input failed: {error}", file=sys.stderr)
         return 1

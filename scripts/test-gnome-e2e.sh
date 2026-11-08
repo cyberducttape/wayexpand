@@ -354,6 +354,7 @@ report_wayland_trace() {
     grep -vE '^\[ *[0-9:]+\.[0-9]+\]' "$1" >"$1.tmp" || true
     mv -f "$1.tmp" "$1"
     log "wayland-trace lines=$(wc -l <"$trace")"
+    grep -h 'shell-input-state' "$E2E_WORK/mutter-input-$current_trace_case.txt" 2>/dev/null || true
     grep -E 'wl_seat[@#][0-9]+\.(capabilities|get_keyboard|get_pointer)|wl_keyboard[@#][0-9]+\.(enter|leave|key|keymap)|xdg_toplevel[@#][0-9]+\.configure' \
         "$trace" | cut -c1-120 | head -n 60 | sed 's/^/wayland-trace: /' || true
 }
@@ -601,12 +602,13 @@ run_gtk_ibus_case() {
     marker="$E2E_WORK/gtk-window-focused-$case_name"
     ready_marker="$E2E_WORK/gtk-input-ready-$case_name"
     test_log="$E2E_WORK/gtk-ibus-e2e-$case_name.log"
-    # Trace only the first ordinary-input control (one fixed test key):
-    # whether Mutter gives GTK a keyboard and focus decides everything after it.
+    # Trace the ordinary-input control and the first IBus case (fixed test
+    # keys only): whether Mutter delivers keys decides everything after them.
     wayland_debug=0
-    if [ "$case_name" = wayland-baseline ]; then
-        wayland_debug=client
-    fi
+    current_trace_case=$case_name
+    case "$case_name" in
+        wayland-baseline | insertion) wayland_debug=client ;;
+    esac
     engine_log="$E2E_WORK/ibus-engine-$case_name.txt"
     status_file="$XDG_RUNTIME_DIR/wayexpand-ibus-status.json"
     printf 'before_gtk=' >"$engine_log"
@@ -630,6 +632,7 @@ run_gtk_ibus_case() {
     else
         timeout 20s env -u DISPLAY -u XAUTHORITY \
             GTK_IM_MODULE=ibus \
+            WAYLAND_DEBUG="$wayland_debug" \
             GDK_BACKEND=wayland \
             IBUS_ADDRESS="$(ibus address)" \
             GTK_E2E_FOCUS_MARKER="$marker" \

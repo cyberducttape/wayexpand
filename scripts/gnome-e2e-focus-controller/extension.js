@@ -11,6 +11,9 @@ const OBJECT_PATH = '/org/wayexpand/GnomeE2eFocusController';
 const INTERFACE = `
 <node>
   <interface name="org.wayexpand.GnomeE2eFocusController">
+    <method name="GetShellInputState">
+      <arg type="s" direction="out" name="state"/>
+    </method>
     <method name="ActivateWindow">
       <arg type="s" direction="in" name="app_id"/>
     </method>
@@ -26,6 +29,22 @@ export default class GnomeE2eFocusController extends Extension {
     disable() {
         this._exported?.unexport();
         this._exported = null;
+    }
+
+    GetShellInputStateAsync(_args, invocation) {
+        // Why input might not reach a focused client: a Shell grab or modal
+        // (overview, startup) takes key and pointer events first.
+        const grab = global.stage.get_grab_actor?.();
+        const focus = global.display.get_focus_window();
+        invocation.return_value(new GLib.Variant('(s)', [JSON.stringify({
+            modalCount: Main.modalCount ?? null,
+            overviewVisible: Main.overview.visible,
+            overviewAnimating: Main.overview.animationInProgress ?? null,
+            startingUp: Main.layoutManager._startingUp ?? null,
+            stageGrab: grab ? grab.constructor.name : null,
+            stageKeyFocus: global.stage.key_focus?.constructor.name ?? null,
+            focusWindow: focus ? focus.get_wm_class() : null,
+        })]));
     }
 
     ActivateWindowAsync([appId], invocation) {
