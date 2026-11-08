@@ -4333,3 +4333,7 @@ This is the first stable release. WayExpand is now recommended for production us
 [1.0.0]: https://github.com/cyberducttape/wayexpand/releases/tag/v1.0.0
 [0.2.0]: https://github.com/cyberducttape/wayexpand/releases/tag/v0.2.0
 [0.1.0]: https://github.com/cyberducttape/wayexpand/releases/tag/v0.1.0
+- Require GTK and Qt acceptance clients to report stable active-field focus
+  before XTEST sends the first key. This prevents window activation from being
+  mistaken for a ready input context and keeps the result check tied to the
+  actual focused text widget.

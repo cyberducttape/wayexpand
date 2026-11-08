@@ -514,6 +514,7 @@ run_qt_xim_case() {
     expected=$3
     password=$4
     marker="$E2E_WORK/qt-window-focused-$case_name"
+    ready_marker="$E2E_WORK/qt-input-ready-$case_name"
     test_log="$E2E_WORK/qt-ibus-e2e-$case_name.log"
     set --
     if [ "$password" = true ]; then
@@ -526,6 +527,7 @@ run_qt_xim_case() {
         XAUTHORITY="$xwayland_auth" \
         IBUS_ADDRESS="$(ibus address)" \
         QT_E2E_FOCUS_MARKER="$marker" \
+        QT_E2E_READY_MARKER="$ready_marker" \
         python3 "$E2E_PROJECT_DIR/scripts/certification-clients/qt_ibus_e2e.py" \
         --expected "$expected" "$@" >"$test_log" 2>&1 &
     qt_pid=$!
@@ -537,6 +539,26 @@ run_qt_xim_case() {
         exit 1
     fi
     : >"$marker"
+    ready_tries=100
+    while [ ! -s "$ready_marker" ]; do
+        if ! kill -0 "$qt_pid" 2>/dev/null; then
+            wait "$qt_pid" || true
+            qt_pid=
+            log "fail gnome-qt-$case_name Qt input context exited before readiness"
+            cat "$test_log"
+            exit 1
+        fi
+        ready_tries=$((ready_tries - 1))
+        if [ "$ready_tries" -le 0 ]; then
+            kill "$qt_pid" 2>/dev/null || true
+            wait "$qt_pid" 2>/dev/null || true
+            qt_pid=
+            log "fail gnome-qt-$case_name Qt field did not report stable active focus"
+            cat "$test_log"
+            exit 1
+        fi
+        sleep 0.05
+    done
     if ! DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
         xdotool type --clearmodifiers --delay 40 -- "$input"; then
         kill "$qt_pid" 2>/dev/null || true

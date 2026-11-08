@@ -4,6 +4,7 @@
 import os
 import sys
 import argparse
+import time
 
 from PyQt6.QtCore import QElapsedTimer, QTimer
 from PyQt6.QtWidgets import QApplication, QLineEdit, QVBoxLayout, QWidget
@@ -21,6 +22,9 @@ def main():
     marker = os.environ.get("QT_E2E_FOCUS_MARKER")
     if not marker:
         raise SystemExit("QT_E2E_FOCUS_MARKER must be set by the focus controller")
+    ready_marker = os.environ.get("QT_E2E_READY_MARKER")
+    if not ready_marker:
+        raise SystemExit("QT_E2E_READY_MARKER must be set by the focus controller")
 
     app = QApplication(sys.argv)
     window = QWidget()
@@ -37,10 +41,28 @@ def main():
 
     failed = False
     elapsed = QElapsedTimer()
+    ready_since = None
 
     def check_result():
-        nonlocal failed
+        nonlocal failed, ready_since
         if not os.path.exists(marker):
+            return True
+        # A mapped Qt window is not necessarily ready to receive XIM input.
+        # Require stable activation and child focus before the caller types.
+        active = QApplication.activeWindow() is window and field.hasFocus()
+        if active:
+            if ready_since is None:
+                ready_since = time.monotonic()
+            elif time.monotonic() - ready_since >= 0.25:
+                try:
+                    fd = os.open(ready_marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                except FileExistsError:
+                    pass
+                else:
+                    os.close(fd)
+        else:
+            ready_since = None
+        if not os.path.exists(ready_marker):
             return True
         field.setFocus()
         if field.text() == args.expected:
