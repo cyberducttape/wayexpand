@@ -47,6 +47,26 @@ assert.deepEqual(activateSource(refreshableKeyboard, 'ibus', 'wayexpand', false)
     source: refreshableSources.ibus,
 });
 assert.equal(reloads, 1, 'reload only to discover a source missing from the live manager');
+const intermittentSources = {};
+let intermittentReloads = 0;
+const intermittent = {
+    currentSource: active,
+    reload() {
+        intermittentReloads++;
+        if (intermittentReloads === 2) {
+            intermittentSources.ibus = {
+                type: 'ibus', id: 'wayexpand', activate() { intermittent.currentSource = this; },
+            };
+        }
+    },
+    inputSources: intermittentSources,
+};
+const intermittentKeyboard = {getInputSourceManager: () => intermittent};
+assert.equal(activateSource(intermittentKeyboard, 'ibus', 'wayexpand', true).error, 'source-pending');
+assert.deepEqual(activateSource(intermittentKeyboard, 'ibus', 'wayexpand', true), {
+    source: intermittentSources.ibus,
+});
+assert.equal(intermittentReloads, 2, 'refresh can discover a source registered after a layout change');
 assert.equal(activateSource(keyboard, 'xkb', 'missing').error, 'source-pending');
 
 const unsupported = {getInputSourceManager: () => ({currentSource: active})};

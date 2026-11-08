@@ -2,9 +2,17 @@
   "uuid": "wayexpand-window-tracker@cyberducttape.github.io",
   "name": "WayExpand window tracker",
   "description": "Tells the WayExpand text expander which application has keyboard focus, so snippets limited to certain apps work on GNOME. Window details are sent only to processes that subscribe; nothing is stored.",
-  "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
+  "shell-version": [
+    "45",
+    "46",
+    "47",
+    "48",
+    "49",
+    "50",
+    "51"
+  ],
   "version": 10305,
   "url": "https://github.com/cyberducttape/wayexpand",
   "version-name": "1.3.3",
-  "x-wayexpand-build-id": "sha256:edd0f34f1d9f23a4271b365268be9b3b75e91de3023fa698510393102309d8e4"
+  "x-wayexpand-build-id": "sha256:0140628b09f80bb93d5cc4d9f89fd6d0a8e0b07bfae7aa2a32e43a57d54cc7d9"
 }

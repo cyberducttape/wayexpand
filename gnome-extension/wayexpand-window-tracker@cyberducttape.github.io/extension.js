@@ -265,13 +265,16 @@ export default class WayExpandWindowTracker extends Extension {
             );
         };
         const activate = () => {
-            const result = activateSource(Keyboard, kind, id, attempts === 0);
-            if (result.error !== 'source-pending' || attempts >= 40) {
+            const refreshIfMissing = attempts % 5 === 0;
+            const result = activateSource(Keyboard, kind, id, refreshIfMissing);
+            const pending = result.error === 'source-pending'
+                || result.error === 'activation-unverified';
+            if (!pending || attempts >= 80) {
                 finish(result);
                 return;
             }
             attempts++;
-            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, () => {
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
                 activate();
                 return GLib.SOURCE_REMOVE;
             });
