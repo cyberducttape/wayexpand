@@ -29,7 +29,6 @@ FOCUS_CONTROLLER_NOT_FOUND = (
 )
 SHIFT_L_KEYSYM = 0xFFE1
 BTN_LEFT = 0x110
-TEST_SCREEN_CENTER = (640.0, 400.0)
 
 
 def key_event(bus, path, key, pressed, *, keycode=False):
@@ -74,14 +73,33 @@ def pointer_button(bus, path, pressed):
     )
 
 
-def click_test_field(bus, path):
-    """Click the known center of the GTK fixture to establish real focus."""
-    # The fixture is fullscreen on a 1280x800 virtual monitor. Relative input
-    # first clamps the pointer to the top-left edge, then moves it to the
-    # centered widget. This makes GTK's own active/focus state authoritative.
+def get_test_window_rect(bus, app_id):
+    result = bus.call_sync(
+        "org.gnome.Shell",
+        FOCUS_CONTROLLER_PATH,
+        FOCUS_CONTROLLER_INTERFACE,
+        "GetWindowRect",
+        GLib.Variant("(s)", (app_id,)),
+        GLib.VariantType.new("(iiii)"),
+        Gio.DBusCallFlags.NONE,
+        5000,
+        None,
+    )
+    return result.unpack()
+
+
+def click_test_field(bus, path, window_rect):
+    """Click the mapped fixture's center to establish real surface focus."""
+    x, y, width, height = window_rect
+    target_x = x + width / 2
+    target_y = y + height / 2
+    # The fixture has no decorations and fills its 500x80 content area. Read
+    # its compositor frame rectangle instead of guessing window placement.
+    # Relative input first clamps the pointer to the top-left edge, then moves
+    # it to the widget center before clicking.
     pointer_motion(bus, path, -2000.0, -2000.0)
     time.sleep(0.05)
-    pointer_motion(bus, path, *TEST_SCREEN_CENTER)
+    pointer_motion(bus, path, target_x, target_y)
     time.sleep(0.1)
     try:
         pointer_button(bus, path, True)
@@ -235,7 +253,8 @@ def main():
         activate_test_window(bus, args.app_id)
         prime_keyboard_device(bus, session_path)
         activate_test_window(bus, args.app_id)
-        click_test_field(bus, session_path)
+        window_rect = get_test_window_rect(bus, args.app_id)
+        click_test_field(bus, session_path, window_rect)
         publish_focus_confirmation(args.focus_marker)
         if not wait_for_gtk_input_ready(args.ready_marker, 13.0):
             raise RuntimeError(
@@ -269,9 +288,15 @@ def main():
             except GLib.Error:
                 pass
     if args.keycode_probe:
-        print("Mutter accepted the fixed KEY_A evdev probe; GTK verifies delivery")
+        print(
+            "Mutter accepted the fixed KEY_A evdev probe; "
+            f"GTK verifies delivery (window={window_rect!r})"
+        )
     else:
-        print("Mutter accepted the fixed ASCII keysym input; GTK verifies delivery")
+        print(
+            "Mutter accepted the fixed ASCII keysym input; "
+            f"GTK verifies delivery (window={window_rect!r})"
+        )
     return 0
 
 

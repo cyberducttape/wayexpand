@@ -81,12 +81,19 @@ class GnomeAcceptanceShellContractTests(unittest.TestCase):
         self.assertIn('keycode_probe=true', source)
         self.assertIn('--keycode-probe', source)
 
-    def test_native_gtk_fixture_uses_fullscreen_centered_input_target(self):
+    def test_native_gtk_fixture_uses_undecorated_window_with_known_input_size(self):
         source = SCRIPT.read_text(encoding="utf-8")
-        self.assertIn("window.set_default_size(1280, 800)", source)
-        self.assertIn("test_container.set_halign(Gtk.Align.CENTER)", source)
-        self.assertIn("test_container.set_valign(Gtk.Align.CENTER)", source)
-        self.assertIn("window.fullscreen()", source)
+        self.assertIn("window.set_default_size(500, 80)", source)
+        self.assertIn("window.set_decorated(False)", source)
+        self.assertIn("focus_widget.set_hexpand(True)", source)
+        self.assertIn("focus_widget.set_vexpand(True)", source)
+
+    def test_gtk_fixture_reports_pointer_delivery_without_retaining_input_data(self):
+        source = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("gtk_pointer_events += 1", source)
+        self.assertIn("gtk_gdk_pointer_events += 1", source)
+        self.assertIn("GTK pointer press events observed at target widget", source)
+        self.assertIn("GDK pointer press events received by GTK process", source)
 
 
 class FocusReadinessTests(unittest.TestCase):
@@ -443,7 +450,7 @@ class MutterRemoteInputTests(unittest.TestCase):
     def test_click_test_field_uses_mutter_pointer_before_keyboard_input(self):
         bus = self.FakeBus()
         with mock.patch.object(REMOTE_INPUT.time, "sleep"):
-            REMOTE_INPUT.click_test_field(bus, "/session")
+            REMOTE_INPUT.click_test_field(bus, "/session", (390, 360, 500, 80))
 
         self.assertEqual(
             bus.calls,
@@ -455,13 +462,53 @@ class MutterRemoteInputTests(unittest.TestCase):
             ],
         )
 
+    def test_test_window_rect_comes_from_shell_for_the_requested_app(self):
+        class RectBus:
+            def __init__(self):
+                self.calls = []
+
+            def call_sync(self, bus_name, path, interface, method, parameters, *_args):
+                self.calls.append(
+                    (bus_name, path, interface, method, parameters.unpack())
+                )
+
+                class Result:
+                    @staticmethod
+                    def unpack():
+                        return (390, 360, 500, 80)
+
+                return Result()
+
+        bus = RectBus()
+        rect = REMOTE_INPUT.get_test_window_rect(bus, "org.example.Test")
+
+        self.assertEqual(rect, (390, 360, 500, 80))
+        self.assertEqual(
+            bus.calls,
+            [
+                (
+                    "org.gnome.Shell",
+                    REMOTE_INPUT.FOCUS_CONTROLLER_PATH,
+                    REMOTE_INPUT.FOCUS_CONTROLLER_INTERFACE,
+                    "GetWindowRect",
+                    ("org.example.Test",),
+                )
+            ],
+        )
+
     def test_gtk_target_is_clicked_before_focus_is_reported_to_mutter(self):
         source = REMOTE_INPUT_SCRIPT.read_text(encoding="utf-8")
-        click = source.index("click_test_field(bus, session_path)")
+        click = source.index("click_test_field(bus, session_path, window_rect)")
         publish = source.index("publish_focus_confirmation(args.focus_marker)")
         wait = source.index("wait_for_gtk_input_ready(args.ready_marker, 13.0)")
         self.assertLess(click, publish)
         self.assertLess(publish, wait)
+
+    def test_shell_focus_controller_reports_mapped_window_geometry(self):
+        source = FOCUS_CONTROLLER_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('<method name="GetWindowRect">', source)
+        self.assertIn("GetWindowRectAsync([appId], invocation)", source)
+        self.assertIn("window.get_frame_rect()", source)
 
     def test_evdev_keycode_probe_rejects_text_beyond_its_fixed_baseline(self):
         bus = self.FakeBus()
