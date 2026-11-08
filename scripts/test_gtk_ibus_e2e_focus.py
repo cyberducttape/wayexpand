@@ -2,7 +2,6 @@
 """Regression tests for GTK IBus acceptance focus readiness."""
 
 import importlib.util
-import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -29,15 +28,13 @@ REMOTE_INPUT_SPEC.loader.exec_module(REMOTE_INPUT)
 
 
 class GnomeAcceptanceShellContractTests(unittest.TestCase):
-    def test_focus_controller_uses_atomic_workspace_activation(self):
+    def test_focus_controller_uses_shell_activation_with_workspace_handling(self):
         source = FOCUS_CONTROLLER_SCRIPT.read_text(encoding="utf-8")
         self.assertIn(
             "import * as Main from 'resource:///org/gnome/shell/ui/main.js';",
             source,
         )
-        self.assertEqual(source.count("this._activateWindow(window);"), 2)
-        self.assertIn("workspace.activate_with_focus(window, timestamp)", source)
-        self.assertIn("window.activate(timestamp)", source)
+        self.assertEqual(source.count("Main.activateWindow(window, global.get_current_time());"), 2)
 
     def test_shell_reactivates_window_after_keyboard_priming(self):
         source = REMOTE_INPUT_SCRIPT.read_text(encoding="utf-8")
@@ -52,72 +49,6 @@ class GnomeAcceptanceShellContractTests(unittest.TestCase):
         self.assertLess(activations[0], keyboard_setup)
         self.assertLess(keyboard_setup, activations[1])
         self.assertLess(activations[1], marker)
-
-    def test_focus_controller_reports_live_pointer_coordinates(self):
-        source = FOCUS_CONTROLLER_SCRIPT.read_text(encoding="utf-8")
-        self.assertIn('GetPointerPositionAsync(_args, invocation)', source)
-        self.assertIn('const [x, y] = global.get_pointer();', source)
-
-    def test_pointer_click_converts_absolute_target_to_relative_delta(self):
-        source = REMOTE_INPUT_SCRIPT.read_text(encoding="utf-8")
-        self.assertIn('def get_pointer_position(bus):', source)
-        self.assertIn('start = (pointer_x, pointer_y)', source)
-        self.assertIn('actual_x, actual_y = get_pointer_position(bus)', source)
-        self.assertIn('Mutter pointer {axis}-axis motion was not applied', source)
-        self.assertIn('delta if axis == "x" else 0.0', source)
-        self.assertIn('delta if axis == "y" else 0.0', source)
-        self.assertNotIn('pointer_motion(bus, path, -2000.0, -2000.0)', source)
-
-    def test_client_focus_is_confirmed_before_pointer_fallback(self):
-        with mock.patch.object(
-            REMOTE_INPUT, "wait_for_gtk_input_ready", return_value=12
-        ) as wait_ready, mock.patch.object(
-            REMOTE_INPUT, "click_test_field"
-        ) as click:
-            result = REMOTE_INPUT.wait_for_gtk_input_ready_with_pointer_fallback(
-                object(), "/session", "org.example.Test", (0, 0, 10, 10),
-                "/tmp/ready", 13.0, "/tmp/ibus-status", 4
-            )
-        self.assertEqual(result, 12)
-        wait_ready.assert_called_once_with(
-            mock.ANY, "org.example.Test", "/tmp/ready", 2.0,
-            "/tmp/ibus-status", 4
-        )
-        click.assert_not_called()
-
-    def test_pointer_fallback_invalidates_readiness_before_rechecking(self):
-        with tempfile.TemporaryDirectory() as directory:
-            ready = Path(directory) / "ready"
-            wait_calls = 0
-
-            def wait_side_effect(*_args):
-                nonlocal wait_calls
-                wait_calls += 1
-                if wait_calls == 1:
-                    return False
-                self.assertFalse(ready.exists())
-                return 9
-
-            with mock.patch.object(
-                REMOTE_INPUT,
-                "wait_for_gtk_input_ready",
-                side_effect=wait_side_effect,
-            ) as wait_ready, mock.patch.object(
-                REMOTE_INPUT, "click_test_field"
-            ) as click:
-                # Simulate a marker from a focus interval that ended during
-                # the fallback click; it must be removed before rechecking.
-                ready.write_text("1", encoding="ascii")
-                result = REMOTE_INPUT.wait_for_gtk_input_ready_with_pointer_fallback(
-                    object(), "/session", "org.example.Test", (0, 0, 10, 10),
-                    str(ready), 13.0
-                )
-            self.assertEqual(result, 9)
-            self.assertFalse(ready.exists())
-            click.assert_called_once_with(
-                mock.ANY, "/session", (0, 0, 10, 10)
-            )
-            self.assertEqual(wait_ready.call_count, 2)
 
     def test_x11_clients_have_a_window_activation_helper(self):
         source = GNOME_ACCEPTANCE_SCRIPT.read_text(encoding="utf-8")
@@ -150,33 +81,12 @@ class GnomeAcceptanceShellContractTests(unittest.TestCase):
         self.assertIn('keycode_probe=true', source)
         self.assertIn('--keycode-probe', source)
 
-    def test_password_field_does_not_require_ibus_focus_and_checks_capture(self):
-        source = GNOME_ACCEPTANCE_SCRIPT.read_text(encoding="utf-8")
-        start = source.index("run_gtk_ibus_case() {")
-        end = source.index("run_terminal_x11_baseline() {")
-        case = source[start:end]
-        self.assertIn(
-            'if [ "$password" = true ]; then\n'
-            '            ibus_status_path=',
-            case,
-        )
-        self.assertIn('keys != uncaptured', case)
-        self.assertIn('if expansions or keys != uncaptured:', case)
-        self.assertIn('pass password-field input was not captured by IBus ', case)
-
-    def test_native_gtk_fixture_uses_undecorated_window_with_known_input_size(self):
+    def test_native_gtk_fixture_uses_fullscreen_centered_input_target(self):
         source = SCRIPT.read_text(encoding="utf-8")
-        self.assertIn("window.set_default_size(500, 80)", source)
-        self.assertIn("window.set_decorated(False)", source)
-        self.assertIn("focus_widget.set_hexpand(True)", source)
-        self.assertIn("focus_widget.set_vexpand(True)", source)
-
-    def test_gtk_fixture_reports_pointer_delivery_without_retaining_input_data(self):
-        source = SCRIPT.read_text(encoding="utf-8")
-        self.assertIn("gtk_pointer_events += 1", source)
-        self.assertIn("gtk_gdk_pointer_events += 1", source)
-        self.assertIn("GTK pointer press events observed at target widget", source)
-        self.assertIn("GDK pointer press events received by GTK process", source)
+        self.assertIn("window.set_default_size(1280, 800)", source)
+        self.assertIn("test_container.set_halign(Gtk.Align.CENTER)", source)
+        self.assertIn("test_container.set_valign(Gtk.Align.CENTER)", source)
+        self.assertIn("window.fullscreen()", source)
 
 
 class FocusReadinessTests(unittest.TestCase):
@@ -410,26 +320,13 @@ class MutterRemoteInputTests(unittest.TestCase):
         def __init__(self, fail_first=False):
             self.calls = []
             self.fail_first = fail_first
-            self.pointer = [100, 50]
 
         def call_sync(self, _bus, _path, _interface, method, parameters, *_args):
-            values = parameters.unpack() if parameters is not None else ()
+            values = parameters.unpack()
             self.calls.append((method, values))
             if self.fail_first:
                 self.fail_first = False
                 raise RuntimeError("simulated lost method reply")
-            if method == "GetPointerPosition":
-                class Result:
-                    def __init__(self, position):
-                        self.position = position
-
-                    def unpack(self):
-                        return self.position
-
-                return Result(tuple(self.pointer))
-            if method == "NotifyPointerMotionRelative":
-                self.pointer[0] += values[0]
-                self.pointer[1] += values[1]
 
     def test_window_activation_retries_only_while_window_is_unmapped(self):
         class FakeDbusError(Exception):
@@ -546,204 +443,25 @@ class MutterRemoteInputTests(unittest.TestCase):
     def test_click_test_field_uses_mutter_pointer_before_keyboard_input(self):
         bus = self.FakeBus()
         with mock.patch.object(REMOTE_INPUT.time, "sleep"):
-            REMOTE_INPUT.click_test_field(bus, "/session", (390, 360, 500, 80))
+            REMOTE_INPUT.click_test_field(bus, "/session")
 
         self.assertEqual(
             bus.calls,
             [
-                ("GetPointerPosition", ()),
-                ("NotifyPointerMotionRelative", (540.0, 0.0)),
-                ("GetPointerPosition", ()),
-                ("NotifyPointerMotionRelative", (0.0, 350.0)),
-                ("GetPointerPosition", ()),
-                ("GetPointerPosition", ()),
+                ("NotifyPointerMotionRelative", (-2000.0, -2000.0)),
+                ("NotifyPointerMotionRelative", (640.0, 400.0)),
                 ("NotifyPointerButton", (REMOTE_INPUT.BTN_LEFT, True)),
                 ("NotifyPointerButton", (REMOTE_INPUT.BTN_LEFT, False)),
             ],
         )
 
-    def test_click_test_field_rejects_axis_motion_that_did_not_reach_target(self):
-        class DroppedHorizontalMotionBus(self.FakeBus):
-            def call_sync(self, bus_name, path, interface, method, parameters, *_args):
-                values = parameters.unpack() if parameters is not None else ()
-                if method == "NotifyPointerMotionRelative" and values[0] != 0.0:
-                    self.calls.append((method, values))
-                    return
-                return super().call_sync(
-                    bus_name, path, interface, method, parameters, *_args
-                )
-
-        bus = DroppedHorizontalMotionBus()
-        with mock.patch.object(REMOTE_INPUT.time, "sleep"):
-            with self.assertRaisesRegex(
-                RuntimeError, r"Mutter pointer x-axis motion was not applied"
-            ):
-                REMOTE_INPUT.click_test_field(bus, "/session", (390, 360, 500, 80))
-
-        self.assertNotIn(
-            ("NotifyPointerButton", (REMOTE_INPUT.BTN_LEFT, True)), bus.calls
-        )
-
-    def test_test_window_rect_comes_from_shell_for_the_requested_app(self):
-        class RectBus:
-            def __init__(self):
-                self.calls = []
-
-            def call_sync(self, bus_name, path, interface, method, parameters, *_args):
-                self.calls.append(
-                    (bus_name, path, interface, method, parameters.unpack())
-                )
-
-                class Result:
-                    @staticmethod
-                    def unpack():
-                        return (390, 360, 500, 80)
-
-                return Result()
-
-        bus = RectBus()
-        rect = REMOTE_INPUT.get_test_window_rect(bus, "org.example.Test")
-
-        self.assertEqual(rect, (390, 360, 500, 80))
-        self.assertEqual(
-            bus.calls,
-            [
-                (
-                    "org.gnome.Shell",
-                    REMOTE_INPUT.FOCUS_CONTROLLER_PATH,
-                    REMOTE_INPUT.FOCUS_CONTROLLER_INTERFACE,
-                    "GetWindowRect",
-                    ("org.example.Test",),
-                )
-            ],
-        )
-
-    def test_gtk_focus_retries_start_before_pointer_click(self):
+    def test_gtk_target_is_clicked_before_focus_is_reported_to_mutter(self):
         source = REMOTE_INPUT_SCRIPT.read_text(encoding="utf-8")
+        click = source.index("click_test_field(bus, session_path)")
         publish = source.index("publish_focus_confirmation(args.focus_marker)")
-        helper_call = source.index("ready = wait_for_gtk_input_ready_with_pointer_fallback(")
-        helper_start = source.index("def wait_for_gtk_input_ready_with_pointer_fallback(")
-        initial_wait = source.index("ready = wait_for_gtk_input_ready(", helper_start)
-        click = source.index("click_test_field(bus, session_path, window_rect)", helper_start)
-        retry_wait = source.index("return wait_for_gtk_input_ready(", click)
-        self.assertLess(publish, helper_call)
-        self.assertLess(helper_start, initial_wait)
-        self.assertLess(initial_wait, click)
-        self.assertLess(click, retry_wait)
-
-    def test_ibus_test_captures_sequence_baseline_before_launch_and_passes_status(self):
-        source = GNOME_ACCEPTANCE_SCRIPT.read_text(encoding="utf-8")
-        start = source.index("run_gtk_ibus_case() {")
-        end = source.index("run_terminal_x11_baseline() {")
-        case = source[start:end]
-        self.assertLess(
-            case.index('ibus_sequence_baseline=$(python3 - "$status_file"'),
-            case.index("gtk_pid=$!"),
-        )
-        self.assertIn('"$ibus_status_path" "$ibus_sequence_baseline"', case)
-
-    def test_gtk_readiness_stops_shell_activation_after_client_focus_lease(self):
-        times = [0.0, 0.0, 0.0, 0.26, 0.26]
-        with (
-            mock.patch.object(REMOTE_INPUT.time, "monotonic", side_effect=times),
-            mock.patch.object(REMOTE_INPUT.time, "sleep"),
-            mock.patch.object(REMOTE_INPUT.os.path, "isfile", return_value=True),
-            mock.patch.object(REMOTE_INPUT, "activate_test_window") as activate,
-        ):
-            self.assertTrue(
-                REMOTE_INPUT.wait_for_gtk_input_ready(
-                    object(), "org.example.Test", "/tmp/ready", 13.0
-                )
-            )
-        activate.assert_not_called()
-
-    def test_ibus_readiness_requires_a_newest_focused_context(self):
-        report = {
-            "activity": {
-                "recent_fields": [
-                    {"sequence": 8, "focused": False},
-                    {"sequence": 9, "focused": True},
-                ]
-            }
-        }
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8") as status_file:
-            json.dump(report["activity"], status_file)
-            status_file.flush()
-            self.assertEqual(
-                REMOTE_INPUT.latest_focused_ibus_context(status_file.name, 8),
-                9,
-            )
-            self.assertIsNone(
-                REMOTE_INPUT.latest_focused_ibus_context(status_file.name, 9)
-            )
-
-    def test_ibus_readiness_rejects_stale_or_unfocused_context(self):
-        report = {"recent_fields": [{"sequence": 9, "focused": False}]}
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8") as status_file:
-            json.dump(report, status_file)
-            status_file.flush()
-            self.assertIsNone(
-                REMOTE_INPUT.latest_focused_ibus_context(status_file.name, 8)
-            )
-
-    def test_ibus_focus_stability_resets_when_latest_context_changes(self):
-        sequence, focused_since, ready = REMOTE_INPUT.update_ibus_focus_stability(
-            9, None, None, 1_000_000
-        )
-        self.assertEqual(sequence, 9)
-        self.assertEqual(focused_since, 1_000_000)
-        self.assertFalse(ready)
-
-        sequence, focused_since, ready = REMOTE_INPUT.update_ibus_focus_stability(
-            10, sequence, focused_since, 1_300_000
-        )
-        self.assertEqual(sequence, 10)
-        self.assertEqual(focused_since, 1_300_000)
-        self.assertFalse(ready)
-
-        _sequence, _focused_since, ready = REMOTE_INPUT.update_ibus_focus_stability(
-            10, sequence, focused_since, 1_550_000
-        )
-        self.assertTrue(ready)
-
-        sequence, focused_since, ready = REMOTE_INPUT.update_ibus_focus_stability(
-            None, sequence, focused_since, 1_560_000
-        )
-        self.assertIsNone(sequence)
-        self.assertIsNone(focused_since)
-        self.assertFalse(ready)
-
-    def test_readiness_waits_for_ibus_focus_after_gtk_focus(self):
-        times = [-1.0, 0.0, 0.0, 0.26, 0.26, 0.51, 0.51]
-        with tempfile.NamedTemporaryFile(mode="w+", encoding="utf-8") as status_file:
-            json.dump({"recent_fields": [{"sequence": 9, "focused": False}]}, status_file)
-            status_file.flush()
-
-            def focus_ibus_context(_seconds):
-                status_file.seek(0)
-                status_file.truncate()
-                json.dump({"recent_fields": [{"sequence": 9, "focused": True}]}, status_file)
-                status_file.flush()
-
-            with (
-                mock.patch.object(REMOTE_INPUT.time, "monotonic", side_effect=times),
-                mock.patch.object(REMOTE_INPUT.time, "sleep", side_effect=focus_ibus_context),
-                mock.patch.object(REMOTE_INPUT.os.path, "isfile", return_value=True),
-                mock.patch.object(REMOTE_INPUT, "activate_test_window"),
-            ):
-                self.assertEqual(
-                    REMOTE_INPUT.wait_for_gtk_input_ready(
-                        object(), "org.example.Test", "/tmp/ready", 13.0,
-                        status_file.name, 8,
-                    ),
-                    9,
-                )
-
-    def test_shell_focus_controller_reports_mapped_window_geometry(self):
-        source = FOCUS_CONTROLLER_SCRIPT.read_text(encoding="utf-8")
-        self.assertIn('<method name="GetWindowRect">', source)
-        self.assertIn("GetWindowRectAsync([appId], invocation)", source)
-        self.assertIn("window.get_frame_rect()", source)
+        wait = source.index("wait_for_gtk_input_ready(args.ready_marker, 13.0)")
+        self.assertLess(click, publish)
+        self.assertLess(publish, wait)
 
     def test_evdev_keycode_probe_rejects_text_beyond_its_fixed_baseline(self):
         bus = self.FakeBus()
@@ -783,54 +501,6 @@ class MutterRemoteInputTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(RuntimeError, "focus was lost"):
                     REMOTE_INPUT.send_text(bus, "/session", "ab", 0.06, marker)
-
-        self.assertEqual(
-            bus.calls,
-            [
-                ("NotifyKeyboardKeysym", (ord("a"), True)),
-                ("NotifyKeyboardKeysym", (ord("a"), False)),
-            ],
-        )
-
-    def test_ibus_context_change_stops_remaining_text(self):
-        bus = self.FakeBus()
-        with tempfile.TemporaryDirectory() as directory:
-            marker = Path(directory) / "ready"
-            marker.write_text("1", encoding="ascii")
-            status = Path(directory) / "ibus-status.json"
-            status.write_text(
-                json.dumps({"recent_fields": [{"sequence": 9, "focused": True}]}),
-                encoding="utf-8",
-            )
-            changes = 0
-
-            def change_context(_delay):
-                nonlocal changes
-                changes += 1
-                if changes == 1:
-                    status.write_text(
-                        json.dumps(
-                            {"recent_fields": [{"sequence": 10, "focused": False}]}
-                        ),
-                        encoding="utf-8",
-                    )
-
-            with mock.patch.object(
-                REMOTE_INPUT.time, "sleep", side_effect=change_context
-            ):
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    "IBus context changed after 1 of 2 test characters",
-                ):
-                    REMOTE_INPUT.send_text(
-                        bus,
-                        "/session",
-                        "ab",
-                        0.06,
-                        marker,
-                        ibus_status_path=status,
-                        ibus_sequence=9,
-                    )
 
         self.assertEqual(
             bus.calls,

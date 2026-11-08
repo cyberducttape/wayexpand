@@ -14,17 +14,6 @@ const INTERFACE = `
     <method name="ActivateWindow">
       <arg type="s" direction="in" name="app_id"/>
     </method>
-    <method name="GetWindowRect">
-      <arg type="s" direction="in" name="app_id"/>
-      <arg type="i" direction="out" name="x"/>
-      <arg type="i" direction="out" name="y"/>
-      <arg type="i" direction="out" name="width"/>
-      <arg type="i" direction="out" name="height"/>
-    </method>
-    <method name="GetPointerPosition">
-      <arg type="i" direction="out" name="x"/>
-      <arg type="i" direction="out" name="y"/>
-    </method>
   </interface>
 </node>`;
 
@@ -39,59 +28,19 @@ export default class GnomeE2eFocusController extends Extension {
         this._exported = null;
     }
 
-    _findWindow(appId) {
-        return global.get_window_actors()
+    ActivateWindowAsync([appId], invocation) {
+        const window = global.get_window_actors()
             .map(actor => actor.meta_window)
             .find(candidate => candidate && (
                 candidate.get_gtk_application_id() === appId ||
                 candidate.get_wm_class() === appId ||
                 candidate.get_title()?.includes(appId)
             ));
-    }
-
-    _returnNotFound(invocation, appId) {
-        invocation.return_dbus_error(
-            'org.wayexpand.GnomeE2eFocusController.Error.NotFound',
-            `no mapped test window for ${appId}`,
-        );
-    }
-
-    _activateWindow(window) {
-        const timestamp = global.get_current_time();
-        const workspace = window.get_workspace();
-        if (workspace && typeof workspace.activate_with_focus === 'function') {
-            // Activate the workspace and its target together. Shell's
-            // Main.activateWindow can report MetaWindow focus before the
-            // Wayland client receives the corresponding activation state in
-            // headless Mutter sessions.
-            workspace.activate_with_focus(window, timestamp);
-        } else {
-            window.activate(timestamp);
-        }
-        Main.overview.hide();
-    }
-
-    GetWindowRectAsync([appId], invocation) {
-        const window = this._findWindow(appId);
         if (!window) {
-            this._returnNotFound(invocation, appId);
-            return;
-        }
-        const rect = window.get_frame_rect();
-        invocation.return_value(new GLib.Variant(
-            '(iiii)', [rect.x, rect.y, rect.width, rect.height],
-        ));
-    }
-
-    GetPointerPositionAsync(_args, invocation) {
-        const [x, y] = global.get_pointer();
-        invocation.return_value(new GLib.Variant('(ii)', [x, y]));
-    }
-
-    ActivateWindowAsync([appId], invocation) {
-        const window = this._findWindow(appId);
-        if (!window) {
-            this._returnNotFound(invocation, appId);
+            invocation.return_dbus_error(
+                'org.wayexpand.GnomeE2eFocusController.Error.NotFound',
+                `no mapped test window for ${appId}`,
+            );
             return;
         }
         // Mutter may accept activate() before the focus transition has
@@ -115,11 +64,11 @@ export default class GnomeE2eFocusController extends Extension {
                 return GLib.SOURCE_REMOVE;
             }
 
-            this._activateWindow(window);
+            Main.activateWindow(window, global.get_current_time());
             return GLib.SOURCE_CONTINUE;
         };
 
-        this._activateWindow(window);
+        Main.activateWindow(window, global.get_current_time());
         GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, confirmFocus);
     }
 }

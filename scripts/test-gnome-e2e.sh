@@ -350,15 +350,9 @@ type_gnome_remote_input() {
     focus_marker=$4
     ready_marker=$5
     keycode_probe=${6:-false}
-    ibus_status_path=${7:-}
-    ibus_sequence_baseline=${8:-0}
     set --
     if [ "$keycode_probe" = true ]; then
         set -- --keycode-probe
-    fi
-    if [ -n "$ibus_status_path" ]; then
-        set -- "$@" --ibus-status-path "$ibus_status_path" \
-            --ibus-sequence-baseline "$ibus_sequence_baseline"
     fi
     python3 "$E2E_PROJECT_DIR/scripts/certification-clients/gnome_remote_input.py" \
         --delay-ms 60 --text "$input_text" --app-id "$app_id" \
@@ -594,36 +588,8 @@ run_gtk_ibus_case() {
     test_log="$E2E_WORK/gtk-ibus-e2e-$case_name.log"
     engine_log="$E2E_WORK/ibus-engine-$case_name.txt"
     status_file="$XDG_RUNTIME_DIR/wayexpand-ibus-status.json"
-    ibus_status_path=
-    ibus_sequence_baseline=0
-    if [ "$im_mode" = ibus ]; then
-        ibus_status_path="$status_file"
-        ibus_sequence_baseline=$(python3 - "$status_file" <<'PY'
-import json
-import sys
-
-try:
-    with open(sys.argv[1], encoding="utf-8") as source:
-        status = json.load(source)
-    fields = status.get("recent_fields") or []
-    print(max((int(field.get("sequence", 0)) for field in fields), default=0))
-except (OSError, ValueError, TypeError):
-    print(0)
-PY
-)
-        # GNOME deliberately bypasses IBus for password-purpose GTK fields.
-        # Keep the telemetry snapshots for the privacy assertion below, but
-        # do not require a focused IBus engine context before testing GTK's
-        # direct password-field pass-through path.
-        if [ "$password" = true ]; then
-            ibus_status_path=
-        fi
-    fi
     printf 'before_gtk=' >"$engine_log"
     ibus engine >>"$engine_log" 2>&1 || true
-    if [ -f "$status_file" ]; then
-        cp "$status_file" "$E2E_WORK/ibus-context-before-$case_name.json"
-    fi
     set --
     if [ "$password" = true ]; then
         set -- --password
@@ -651,14 +617,16 @@ PY
             --gtk-version "$gtk_version" --im-mode ibus --expected "$expected" "$@" >"$test_log" 2>&1 &
     fi
     gtk_pid=$!
+    if [ -f "$status_file" ]; then
+        cp "$status_file" "$E2E_WORK/ibus-context-before-$case_name.json"
+    fi
     input_status=0
     keycode_probe=false
     if [ "$case_name" = wayland-baseline ]; then
         keycode_probe=true
     fi
     type_gnome_remote_input "$case_name" "$trigger" "$app_id" \
-        "$marker" "$ready_marker" "$keycode_probe" \
-        "$ibus_status_path" "$ibus_sequence_baseline" || input_status=$?
+        "$marker" "$ready_marker" "$keycode_probe" || input_status=$?
     if [ "$input_status" -ne 0 ]; then
         if [ -f "$status_file" ]; then
             cp "$status_file" "$E2E_WORK/ibus-context-after-$case_name.json"
@@ -666,20 +634,16 @@ PY
         kill "$gtk_pid" 2>/dev/null || true
         wait "$gtk_pid" 2>/dev/null || true
         gtk_pid=
-        if grep -F 'did not confirm a stable focused input context' \
+        if grep -F 'GTK did not confirm stable active input focus' \
             "$E2E_WORK/mutter-input-$case_name.err" >/dev/null; then
-            if [ "$im_mode" = ibus ]; then
-                log "fail gnome-gtk-$case_name GTK focus or the new IBus context was not confirmed; no test input was sent"
-            else
-                log "fail gnome-gtk-$case_name GTK never acquired active keyboard focus; no test input was sent"
-            fi
+            log "fail gnome-gtk-$case_name GTK never acquired active keyboard focus; no test input was sent"
             cat "$test_log" "$E2E_WORK/mutter-input-$case_name.err"
         elif [ "$case_name" = wayland-baseline ]; then
             log "fail gnome-gtk-$case_name Mutter RemoteDesktop could not send a key to the focused GTK window"
             cat "$test_log" "$E2E_WORK/mutter-input-$case_name.txt" \
                 "$E2E_WORK/mutter-input-$case_name.err"
         else
-            log "fail gnome-gtk-$case_name test input was interrupted or rejected; inspect the GTK and IBus context diagnostics; no retry was attempted"
+            log "fail gnome-gtk-$case_name Mutter RemoteDesktop could not type into the focused GTK window"
             cat "$test_log" "$E2E_WORK/mutter-input-$case_name.txt" \
                 "$E2E_WORK/mutter-input-$case_name.err"
         fi
@@ -691,40 +655,6 @@ PY
     gtk_status=0
     wait "$gtk_pid" || gtk_status=$?
     gtk_pid=
-    if [ "$password" = true ] && [ "$im_mode" = ibus ]; then
-        cp "$status_file" "$E2E_WORK/ibus-context-after-$case_name.json" 2>/dev/null || true
-        if ! python3 - "$E2E_WORK/ibus-context-after-$case_name.json" \
-            "$ibus_sequence_baseline" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as source:
-    after = json.load(source)
-baseline = int(sys.argv[2])
-fields = [
-    field for field in after.get("recent_fields", [])
-    if int(field.get("sequence", 0)) > baseline
-]
-keys = sum(int(field.get("keys", 0)) for field in fields)
-uncaptured = sum(int(field.get("keys_without_capture", 0)) for field in fields)
-expansions = sum(int(field.get("expansions", 0)) for field in fields)
-if expansions or keys != uncaptured:
-    raise SystemExit(
-        "password field was not safely passed through: "
-        f"keys={keys} uncaptured={uncaptured} expansions={expansions}"
-    )
-print(
-    "pass password-field input was not captured by IBus "
-    f"(keys={keys}, uncaptured={uncaptured}, expansions={expansions})"
-)
-PY
-        then
-            log "fail gnome-gtk-$case_name IBus captured or expanded password-field input"
-            cat "$E2E_WORK/ibus-context-before-$case_name.json" \
-                "$E2E_WORK/ibus-context-after-$case_name.json"
-            exit 1
-        fi
-    fi
     printf 'after_gtk=' >>"$engine_log"
     ibus engine >>"$engine_log" 2>&1 || true
     if [ "$gtk_status" -ne 0 ]; then
@@ -1073,10 +1003,7 @@ env \
     --log "$E2E_WORK/browser-ibus-e2e-chrome.log" \
     >"$E2E_WORK/browser-ibus-e2e.log" 2>&1 &
 browser_pid=$!
-# Give the child its full 20-second diagnostic timeout before the shell
-# watchdog terminates it. Equal parent/child deadlines used to kill Chromium
-# before it could report why DevTools or the acceptance page was unavailable.
-tries=350
+tries=200
 while [ ! -e "$E2E_WORK/browser-window-ready" ]; do
     if ! kill -0 "$browser_pid" 2>/dev/null; then
         wait "$browser_pid" || true

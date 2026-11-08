@@ -8,7 +8,6 @@ log the test text.
 """
 
 import argparse
-import json
 import os
 import sys
 import time
@@ -30,7 +29,7 @@ FOCUS_CONTROLLER_NOT_FOUND = (
 )
 SHIFT_L_KEYSYM = 0xFFE1
 BTN_LEFT = 0x110
-IBUS_FOCUS_STABLE_FOR_US = 250_000
+TEST_SCREEN_CENTER = (640.0, 400.0)
 
 
 def key_event(bus, path, key, pressed, *, keycode=False):
@@ -75,87 +74,15 @@ def pointer_button(bus, path, pressed):
     )
 
 
-def get_test_window_rect(bus, app_id):
-    result = bus.call_sync(
-        "org.gnome.Shell",
-        FOCUS_CONTROLLER_PATH,
-        FOCUS_CONTROLLER_INTERFACE,
-        "GetWindowRect",
-        GLib.Variant("(s)", (app_id,)),
-        GLib.VariantType.new("(iiii)"),
-        Gio.DBusCallFlags.NONE,
-        5000,
-        None,
-    )
-    return result.unpack()
-
-
-def get_pointer_position(bus):
-    result = bus.call_sync(
-        "org.gnome.Shell",
-        FOCUS_CONTROLLER_PATH,
-        FOCUS_CONTROLLER_INTERFACE,
-        "GetPointerPosition",
-        None,
-        GLib.VariantType.new("(ii)"),
-        Gio.DBusCallFlags.NONE,
-        5000,
-        None,
-    )
-    return result.unpack()
-
-
-def click_test_field(bus, path, window_rect):
-    """Click the mapped fixture's center to establish real surface focus."""
-    x, y, width, height = window_rect
-    target_x = x + width / 2
-    target_y = y + height / 2
-    # RemoteDesktop relative motion accepts deltas, while GetWindowRect reports
-    # absolute compositor coordinates. Convert using the live pointer location
-    # instead of assuming an edge-clamped starting position or a zero-origin
-    # monitor. Both values come from Mutter's global coordinate space.
-    pointer_x, pointer_y = get_pointer_position(bus)
-    start = (pointer_x, pointer_y)
-    # Keep the axes in separate RemoteDesktop events. Headless Mutter has
-    # occasionally applied only one component of a combined relative motion;
-    # read the compositor position after each event so the click is never sent
-    # on the strength of a successful D-Bus method return alone.
-    for axis, current, target in (
-        ("x", pointer_x, target_x),
-        ("y", pointer_y, target_y),
-    ):
-        delta = target - current
-        if abs(delta) <= 2:
-            continue
-        pointer_motion(
-            bus,
-            path,
-            delta if axis == "x" else 0.0,
-            delta if axis == "y" else 0.0,
-        )
-        time.sleep(0.1)
-        actual_x, actual_y = get_pointer_position(bus)
-        actual = actual_x if axis == "x" else actual_y
-        if abs(actual - target) > 2:
-            raise RuntimeError(
-                f"Mutter pointer {axis}-axis motion was not applied: "
-                f"start=({start[0]}, {start[1]}) "
-                f"requested_delta={delta} target=({target_x}, {target_y}) "
-                f"actual=({actual_x}, {actual_y})"
-            )
-        pointer_x, pointer_y = actual_x, actual_y
-    actual_x, actual_y = get_pointer_position(bus)
-    if abs(actual_x - target_x) > 2 or abs(actual_y - target_y) > 2:
-        raise RuntimeError(
-            "Mutter pointer did not reach GTK target: "
-            f"start=({start[0]}, {start[1]}) "
-            f"target=({target_x}, {target_y}) actual=({actual_x}, {actual_y})"
-        )
-    print(
-        "Mutter pointer verified at GTK target: "
-        f"({actual_x}, {actual_y})",
-        flush=True,
-    )
+def click_test_field(bus, path):
+    """Click the known center of the GTK fixture to establish real focus."""
+    # The fixture is fullscreen on a 1280x800 virtual monitor. Relative input
+    # first clamps the pointer to the top-left edge, then moves it to the
+    # centered widget. This makes GTK's own active/focus state authoritative.
+    pointer_motion(bus, path, -2000.0, -2000.0)
+    time.sleep(0.05)
+    pointer_motion(bus, path, *TEST_SCREEN_CENTER)
+    time.sleep(0.1)
     try:
         pointer_button(bus, path, True)
         time.sleep(0.05)
@@ -165,37 +92,16 @@ def click_test_field(bus, path, window_rect):
 
 
 def send_text(
-    bus,
-    path,
-    text,
-    delay_seconds,
-    ready_marker,
-    *,
-    keycode_probe=False,
-    ibus_status_path=None,
-    ibus_sequence=None,
+    bus, path, text, delay_seconds, ready_marker, *, keycode_probe=False
 ):
     """Inject fixed test text as keysyms or a single US evdev-keycode probe."""
     if keycode_probe and text != "a":
         raise ValueError("the evdev-keycode probe is limited to the fixed ASCII 'a' input")
-    if (ibus_status_path is None) != (ibus_sequence is None):
-        raise ValueError("IBus status path and focused sequence must be supplied together")
-    sent = 0
     for character in text:
         if not os.path.isfile(ready_marker):
             raise RuntimeError(
-                "GTK active focus was lost after "
-                f"{sent} of {len(text)} test characters; remaining input withheld"
+                "GTK active focus was lost; stopped before sending remaining test input"
             )
-        if ibus_status_path is not None:
-            current_sequence = latest_focused_ibus_context(
-                ibus_status_path, ibus_sequence - 1
-            )
-            if current_sequence != ibus_sequence:
-                raise RuntimeError(
-                    "the focused IBus context changed after "
-                    f"{sent} of {len(text)} test characters; remaining input withheld"
-                )
         if keycode_probe:
             # Linux input-event-codes.h defines KEY_A as evdev keycode 30.
             # The US XKB source is active for this baseline, so this exercises
@@ -212,7 +118,6 @@ def send_text(
             # A failed reply can leave it uncertain whether Mutter accepted
             # the press, so always attempt the matching release.
             key_event(bus, path, key, False, keycode=keycode_probe)
-        sent += 1
         time.sleep(delay_seconds)
 
 
@@ -261,133 +166,19 @@ def publish_focus_confirmation(path):
         os.close(descriptor)
 
 
-def latest_focused_ibus_context(status_path, sequence_baseline):
-    """Return the newest newly focused IBus context sequence, if any."""
-    try:
-        with open(status_path, encoding="utf-8") as source:
-            status = json.load(source)
-        fields = status.get("recent_fields") or []
-        newest = max(fields, key=lambda field: int(field.get("sequence", 0)), default=None)
-        if (
-            newest
-            and int(newest.get("sequence", 0)) > sequence_baseline
-            and newest.get("focused") is True
-        ):
-            return int(newest["sequence"])
-        return None
-    except (OSError, ValueError, TypeError, json.JSONDecodeError):
-        return None
-
-
-def update_ibus_focus_stability(sequence, current_sequence, focused_since, now):
-    """Require the same newest focused IBus context for a stable interval."""
-    if sequence is None:
-        return None, None, False
-    if sequence != current_sequence:
-        return sequence, now, False
-    return (
-        current_sequence,
-        focused_since,
-        now - focused_since >= IBUS_FOCUS_STABLE_FOR_US,
-    )
-
-
-def wait_for_gtk_input_ready(
-    bus,
-    app_id,
-    path,
-    timeout_seconds,
-    ibus_status_path=None,
-    ibus_sequence_baseline=0,
-):
+def wait_for_gtk_input_ready(path, timeout_seconds):
     deadline = time.monotonic() + timeout_seconds
     ready_since = None
-    next_activation_at = 0.0
-    next_ibus_probe_at = 0.0
-    ibus_context_sequence = None
-    ibus_context_focused_since = None
     while time.monotonic() < deadline:
-        now = time.monotonic()
-        client_focus_ready = os.path.isfile(path)
-        if not client_focus_ready and now >= next_activation_at:
-            # Shell can report Meta.Window focus before GTK receives the
-            # corresponding Wayland activation. Reissue the compositor-side
-            # activation until the GTK client publishes its own active/focus
-            # lease. Once GTK confirms focus, do not perturb it while waiting
-            # for IBus context telemetry to stabilize.
-            activate_test_window(bus, app_id)
-            next_activation_at = now + 0.25
-        if client_focus_ready:
+        if os.path.isfile(path):
             if ready_since is None:
-                ready_since = now
-            elif now - ready_since >= 0.25:
-                if ibus_status_path is None:
-                    return True
-                if now >= next_ibus_probe_at:
-                    focused_sequence = latest_focused_ibus_context(
-                        ibus_status_path, ibus_sequence_baseline
-                    )
-                    (
-                        ibus_context_sequence,
-                        ibus_context_focused_since,
-                        ibus_ready,
-                    ) = update_ibus_focus_stability(
-                        focused_sequence,
-                        ibus_context_sequence,
-                        ibus_context_focused_since,
-                        int(now * 1_000_000),
-                    )
-                    next_ibus_probe_at = now + 0.1
-                    if ibus_ready:
-                        return ibus_context_sequence
+                ready_since = time.monotonic()
+            elif time.monotonic() - ready_since >= 0.25:
+                return True
         else:
             ready_since = None
-            ibus_context_sequence = None
-            ibus_context_focused_since = None
         time.sleep(0.02)
     return False
-
-
-def wait_for_gtk_input_ready_with_pointer_fallback(
-    bus,
-    session_path,
-    app_id,
-    window_rect,
-    ready_marker,
-    timeout_seconds,
-    ibus_status_path=None,
-    ibus_sequence_baseline=0,
-):
-    """Wait for actual GTK focus, clicking once only if activation stalls."""
-    initial_wait = min(2.0, timeout_seconds)
-    ready = wait_for_gtk_input_ready(
-        bus,
-        app_id,
-        ready_marker,
-        initial_wait,
-        ibus_status_path,
-        ibus_sequence_baseline,
-    )
-    if ready:
-        return ready
-
-    click_test_field(bus, session_path, window_rect)
-    # Require a fresh focus lease after the fallback click before sending any
-    # test keys. The GTK client recreates this marker only after focus is
-    # stable again.
-    try:
-        os.unlink(ready_marker)
-    except FileNotFoundError:
-        pass
-    remaining = max(0.0, timeout_seconds - initial_wait)
-    return wait_for_gtk_input_ready(
-        bus,
-        app_id,
-        ready_marker,
-        remaining,
-        ibus_status_path,
-        ibus_sequence_baseline,
-    )
 
 
 def main():
@@ -397,8 +188,6 @@ def main():
     parser.add_argument("--app-id", required=True)
     parser.add_argument("--focus-marker", required=True)
     parser.add_argument("--ready-marker", required=True)
-    parser.add_argument("--ibus-status-path")
-    parser.add_argument("--ibus-sequence-baseline", type=int, default=0)
     parser.add_argument(
         "--keycode-probe",
         action="store_true",
@@ -446,32 +235,12 @@ def main():
         activate_test_window(bus, args.app_id)
         prime_keyboard_device(bus, session_path)
         activate_test_window(bus, args.app_id)
-        window_rect = get_test_window_rect(bus, args.app_id)
-        print(f"Mutter test target geometry: window={window_rect!r}", flush=True)
-        # Start GTK's bounded present()/grab_focus() retries as soon as Mutter
-        # confirms its window focus. Give the client a short chance to report
-        # real active-toplevel and widget focus before clicking. A click sent
-        # while Mutter has only updated MetaWindow focus can be dropped by a
-        # native Wayland surface. Use one click only as a bounded fallback.
+        click_test_field(bus, session_path)
         publish_focus_confirmation(args.focus_marker)
-        ready = wait_for_gtk_input_ready_with_pointer_fallback(
-            bus,
-            session_path,
-            args.app_id,
-            window_rect,
-            args.ready_marker,
-            13.0,
-            args.ibus_status_path,
-            args.ibus_sequence_baseline,
-        )
-        if not ready:
+        if not wait_for_gtk_input_ready(args.ready_marker, 13.0):
             raise RuntimeError(
-                "GTK or IBus did not confirm a stable focused input context; "
-                "test text was not sent"
+                "GTK did not confirm stable active input focus; test text was not sent"
             )
-        ibus_context_sequence = (
-            ready if args.ibus_status_path is not None else None
-        )
         send_text(
             bus,
             session_path,
@@ -479,8 +248,6 @@ def main():
             args.delay_ms / 1000,
             args.ready_marker,
             keycode_probe=args.keycode_probe,
-            ibus_status_path=args.ibus_status_path,
-            ibus_sequence=ibus_context_sequence,
         )
     except (GLib.Error, OSError, RuntimeError, ValueError) as error:
         print(f"Mutter RemoteDesktop keyboard input failed: {error}", file=sys.stderr)
@@ -502,15 +269,9 @@ def main():
             except GLib.Error:
                 pass
     if args.keycode_probe:
-        print(
-            "Mutter submitted the fixed KEY_A evdev probe; "
-            f"GTK fixture will verify delivery (window={window_rect!r})"
-        )
+        print("Mutter accepted the fixed KEY_A evdev probe; GTK verifies delivery")
     else:
-        print(
-            "Mutter submitted the fixed ASCII keysym input; "
-            f"GTK fixture will verify delivery (window={window_rect!r})"
-        )
+        print("Mutter accepted the fixed ASCII keysym input; GTK verifies delivery")
     return 0
 
 

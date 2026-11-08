@@ -146,8 +146,7 @@ def main():
     application.register(None)
     window = Gtk.ApplicationWindow(application=application)
     window.set_title(f"WayExpand GTK IBus acceptance {application_id}")
-    window.set_default_size(500, 80)
-    window.set_decorated(False)
+    window.set_default_size(1280, 800)
     widget_im_module = None
     if args.gtk_version == "4" and args.password:
         focus_widget = Gtk.PasswordEntry()
@@ -176,13 +175,22 @@ def main():
     if args.password and args.gtk_version == "3":
         focus_widget.set_visibility(False)
         focus_widget.set_input_purpose(Gtk.InputPurpose.PASSWORD)
-    focus_widget.set_hexpand(True)
-    focus_widget.set_vexpand(True)
+    # Keep the input target at a deterministic logical screen coordinate. The
+    # Mutter acceptance driver clicks the center of this isolated fullscreen
+    # window before sending test keys, so Shell focus alone is not mistaken
+    # for an activated Wayland surface.
+    focus_widget.set_size_request(400, 80)
+    test_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+    test_container.set_halign(Gtk.Align.CENTER)
+    test_container.set_valign(Gtk.Align.CENTER)
     if args.gtk_version == "4":
-        window.set_child(focus_widget)
+        test_container.append(focus_widget)
+        window.set_child(test_container)
     else:
-        window.add(focus_widget)
+        test_container.pack_start(focus_widget, False, False, 0)
+        window.add(test_container)
         window.show_all()
+    window.fullscreen()
     window.present()
     focus_widget.grab_focus()
 
@@ -191,8 +199,6 @@ def main():
     focused_since = None
     gtk_key_events = 0
     gtk_gdk_key_events = 0
-    gtk_pointer_events = 0
-    gtk_gdk_pointer_events = 0
     focus_diagnostic_reported = False
     next_focus_request_at = None
 
@@ -201,11 +207,9 @@ def main():
         # to the focused widget. This distinguishes an X11/GDK delivery loss
         # from a GTK focus/dispatch issue without retaining key values.
         def dispatch_gdk_event(event, _data):
-            nonlocal gtk_gdk_key_events, gtk_gdk_pointer_events
+            nonlocal gtk_gdk_key_events
             if event.type == Gdk.EventType.KEY_PRESS:
                 gtk_gdk_key_events += 1
-            elif event.type == Gdk.EventType.BUTTON_PRESS:
-                gtk_gdk_pointer_events += 1
             Gtk.main_do_event(event)
 
         Gdk.event_handler_set(dispatch_gdk_event, None)
@@ -217,26 +221,15 @@ def main():
         gtk_key_events += 1
         return False
 
-    def count_pointer_event(*_event):
-        # Count only. Never retain coordinates, button state, or other input.
-        nonlocal gtk_pointer_events
-        gtk_pointer_events += 1
-        return False
-
     if args.gtk_version == "4":
         key_controller = Gtk.EventControllerKey.new()
         key_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         key_controller.connect("key-pressed", count_key_event)
         focus_widget.add_controller(key_controller)
-        click_controller = Gtk.GestureClick.new()
-        click_controller.connect("pressed", count_pointer_event)
-        focus_widget.add_controller(click_controller)
     else:
         # Connect before GtkEntry's default handler so this observes the
         # widget delivery boundary even when IBus consumes the key event.
         focus_widget.connect("key-press-event", count_key_event)
-        focus_widget.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
-        focus_widget.connect("button-press-event", count_pointer_event)
 
     def focused_widget_has_keyboard_focus():
         focused = window.get_focus()
@@ -300,8 +293,6 @@ def main():
                 f"widget_focused={focus_widget.has_focus()} "
                 f"focus_within_widget={widget_has_keyboard_focus} "
                 f"focused_widget_type={type(window.get_focus()).__name__ if window.get_focus() else 'none'} "
-                f"GTK_pointer_presses={gtk_pointer_events} "
-                f"GDK_pointer_presses={gtk_gdk_pointer_events} "
                 f"GDK_BACKEND={os.environ.get('GDK_BACKEND')!r} "
                 f"WAYLAND_DISPLAY={os.environ.get('WAYLAND_DISPLAY')!r}",
                 file=sys.stderr,
@@ -353,14 +344,6 @@ def main():
             )
             print(
                 f"GDK key events received by GTK process: {gtk_gdk_key_events}",
-                file=sys.stderr,
-            )
-            print(
-                f"GTK pointer press events observed at target widget: {gtk_pointer_events}",
-                file=sys.stderr,
-            )
-            print(
-                f"GDK pointer press events received by GTK process: {gtk_gdk_pointer_events}",
                 file=sys.stderr,
             )
             print(
