@@ -36,13 +36,19 @@ class GnomeAcceptanceShellContractTests(unittest.TestCase):
         )
         self.assertEqual(source.count("Main.activateWindow(window, global.get_current_time());"), 2)
 
-    def test_remote_keyboard_is_created_after_shell_assigns_window_focus(self):
+    def test_shell_reactivates_window_after_keyboard_priming(self):
         source = REMOTE_INPUT_SCRIPT.read_text(encoding="utf-8")
-        activation = source.index("activate_test_window(bus, args.app_id)")
+        activations = [
+            index
+            for index in range(len(source))
+            if source.startswith("activate_test_window(bus, args.app_id)", index)
+        ]
         keyboard_setup = source.index("prime_keyboard_device(bus, session_path)")
         marker = source.index("publish_focus_confirmation(args.focus_marker)")
-        self.assertLess(activation, keyboard_setup)
-        self.assertLess(keyboard_setup, marker)
+        self.assertEqual(len(activations), 2)
+        self.assertLess(activations[0], keyboard_setup)
+        self.assertLess(keyboard_setup, activations[1])
+        self.assertLess(activations[1], marker)
 
     def test_x11_clients_have_a_window_activation_helper(self):
         source = GNOME_ACCEPTANCE_SCRIPT.read_text(encoding="utf-8")

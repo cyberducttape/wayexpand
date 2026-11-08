@@ -46,6 +46,8 @@ All notable changes to WayExpand are documented here.
   inactive windows, and the timing boundary with focused regression tests.
   Retry GTK focus requests at a bounded cadence after Mutter activation, while
   keeping the live readiness marker closed until GTK confirms stable focus.
+  Re-activate the Wayland target after creating Mutter's virtual keyboard so
+  compositor focus and GTK's active state are synchronized before input.
   Capture the active IBus engine before and after each GTK case alongside the
   existing content-free engine counters.
 - Register the GNOME acceptance engine through the standard system IBus
