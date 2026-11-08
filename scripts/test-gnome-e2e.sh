@@ -343,14 +343,6 @@ type_x11_input() {
         2>"$E2E_WORK/xdotool-$case_name.err"
 }
 
-press_x11_key() {
-    case_name=$1
-    key_name=$2
-    LC_ALL=C.UTF-8 DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
-        xdotool key --clearmodifiers --delay 40 "$key_name" \
-        2>"$E2E_WORK/xdotool-$case_name.err"
-}
-
 tries=600
 until gnome_extension_state_active "$(extension_state)"; do
     tries=$((tries - 1))
@@ -666,7 +658,10 @@ run_gtk_ibus_case() {
         sleep 0.1
         diagnose_x11_input "$case_name"
         input_status=0
-        press_x11_key "$case_name" a || input_status=$?
+        # Use the same XTEST text-input path already proven by the xterm
+        # baseline. `xdotool key` exercises a different keysym path and was
+        # returning success without delivering any GDK event in Fedora GNOME.
+        type_x11_input "$case_name" a || input_status=$?
     else
         input_status=0
         type_x11_input "$case_name" "$trigger" || input_status=$?
