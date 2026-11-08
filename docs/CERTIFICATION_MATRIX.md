@@ -107,7 +107,9 @@ the same native Wayland path, independently of IBus. The interface is
 version-specific and used only by the isolated acceptance fixture; it is not a
 WayExpand production backend. This remains headless compositor-path evidence,
 not physical-keyboard certification. The test verifies the resulting widget
-text.
+text. Its RemoteDesktop helper injects keysyms, so the German/French cases
+verify expansion after input-source changes; they do not certify physical
+key-to-character mapping for those layouts.
 The Qt 6 `QLineEdit` fixture uses the IBus XIM bridge and verifies exact
 trigger/Unicode pass-through plus password-field preservation; it does not
 claim Qt replacement support without a verified surrounding-text contract.

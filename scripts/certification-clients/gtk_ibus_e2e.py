@@ -149,6 +149,7 @@ def main():
     focused_since = None
     gtk_key_events = 0
     gtk_gdk_key_events = 0
+    focus_diagnostic_reported = False
 
     if args.gtk_version == "3" and args.im_mode == "simple":
         # Count key events as GDK first receives them, before GTK routes them
@@ -194,7 +195,7 @@ def main():
             Gtk.main_quit()
 
     def wait_for_expansion():
-        nonlocal failed, focused_since
+        nonlocal failed, focused_since, focus_diagnostic_reported
         if not os.path.exists(focus_marker):
             if GLib.get_monotonic_time() - started_at >= TIMEOUT_MS * 1000:
                 print("Mutter did not activate the GTK acceptance window", file=sys.stderr)
@@ -215,6 +216,24 @@ def main():
         focused_since, child_focus_stable = update_focus_stability(
             window_active, child_focused, focused_since, GLib.get_monotonic_time()
         )
+        if (
+            not child_focus_stable
+            and not focus_diagnostic_reported
+            and GLib.get_monotonic_time() - started_at >= 1_000_000
+        ):
+            # The shell harness may stop a client that never becomes ready.
+            # Emit one content-free snapshot early enough to survive teardown.
+            print(
+                "GTK focus readiness diagnostic: "
+                f"active={window_active} "
+                f"widget_focused={focus_widget.has_focus()} "
+                f"focus_within_widget={child_focused} "
+                f"focused_widget_type={type(window.get_focus()).__name__ if window.get_focus() else 'none'} "
+                f"GDK_BACKEND={os.environ.get('GDK_BACKEND')!r} "
+                f"WAYLAND_DISPLAY={os.environ.get('WAYLAND_DISPLAY')!r}",
+                file=sys.stderr,
+            )
+            focus_diagnostic_reported = True
         if child_focus_stable:
             try:
                 fd = os.open(ready_marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)

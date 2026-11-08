@@ -620,7 +620,9 @@ run_gtk_ibus_case() {
     # readiness marker requires stable Mutter activation and widget focus.
     # XTEST cannot target native Wayland surfaces.
     : >"$marker"
-    ready_tries=100
+    # Let the GTK fixture reach its own 15-second timeout and report a
+    # content-free focus snapshot before the parent tears it down.
+    ready_tries=350
     while [ ! -s "$ready_marker" ]; do
         if ! kill -0 "$gtk_pid" 2>/dev/null; then
             wait "$gtk_pid" || true
