@@ -4364,3 +4364,6 @@ This is the first stable release. WayExpand is now recommended for production us
 - Avoid reloading GNOME's live input-source manager when the target source is
   already registered. Reloading during a layout-to-IBus switch cancelled the
   pending engine activation in the Ubuntu 26.04 headless acceptance run.
+- Run Qt and xterm XIM pass-through cases only after GNOME IBus layout,
+  GTK-replacement, and relogin checks. The first XIM client can restart the
+  session IBus daemon and otherwise invalidate those GNOME scenarios.

@@ -607,8 +607,6 @@ run_qt_xim_case() {
     fi
     log "pass gnome-qt-$case_name $(cat "$test_log")"
 }
-run_qt_xim_case safe-passthrough ';e2e' ';e2e' false
-run_qt_xim_case password ';e2e' ';e2e' true
 run_terminal_xim_case() {
     case_name=$1
     input=$2
@@ -671,7 +669,6 @@ run_terminal_xim_case() {
     fi
     log "pass gnome-terminal-$case_name $(cat "$test_log")"
 }
-run_terminal_xim_case safe-passthrough ';e2e'
 for layout in de fr; do
     "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --activate-source xkb "$layout" \
         >"$E2E_WORK/layout-$layout-activation.log"
@@ -693,13 +690,6 @@ for layout in de fr; do
         fi
         sleep 0.1
     done
-    if [ "$layout" = de ]; then
-        # XTEST can only type symbols present in the active XKB keymap. Exercise
-        # non-ASCII input using characters available on the German layout;
-        # GTK's IBus commit tests cover broader CJK and emoji output.
-        run_qt_xim_case unicode-passthrough 'Grüße' 'Grüße' false
-        run_terminal_xim_case unicode-passthrough 'Grüße'
-    fi
     run_gtk_ibus_case "layout-$layout" ';e2e' expanded false
     log "pass gnome-layout-$layout expansion remained correct after switching layouts"
 done
@@ -1082,6 +1072,28 @@ PY
         fi
     fi
 fi
+
+# Qt and xterm use IBus XIM. On Ubuntu, the first XIM client can cause the
+# session to start/restart ibus-daemon with --xim. Keep those clients after
+# GNOME source switching, GTK replacement, and logout/relogin assertions so
+# their compatibility setup cannot invalidate the GNOME-managed engine under
+# test. These checks assert exact pass-through, never replacement support.
+"$E2E_BIN_DIR/wx-e2e-gnome-tracker" --activate-source xkb de \
+    >"$E2E_WORK/layout-de-xim-activation.log"
+if ! "$E2E_BIN_DIR/wx-e2e-gnome-tracker" --active-layout \
+    >"$E2E_WORK/layout-de-xim-active.log" \
+    || ! grep -F 'active-layout xkb de ' "$E2E_WORK/layout-de-xim-active.log" >/dev/null; then
+    log "fail gnome-layout-de-xim German layout was not active for Unicode XIM input"
+    cat "$E2E_WORK/layout-de-xim-activation.log" "$E2E_WORK/layout-de-xim-active.log"
+    exit 1
+fi
+run_qt_xim_case safe-passthrough ';e2e' ';e2e' false
+run_qt_xim_case password ';e2e' ';e2e' true
+run_terminal_xim_case safe-passthrough ';e2e'
+# XTEST can only type symbols present in the active XKB keymap. GTK's IBus
+# commit cases above cover broader CJK and emoji output.
+run_qt_xim_case unicode-passthrough 'Grüße' 'Grüße' false
+run_terminal_xim_case unicode-passthrough 'Grüße'
 
 if ! gnome_shell_extensions_call DisableExtension "$E2E_UUID" >/dev/null; then
     log "fail extension-disabled could not disable the extension through GNOME Shell D-Bus"
