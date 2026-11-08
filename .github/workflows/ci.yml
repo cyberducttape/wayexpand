@@ -383,6 +383,8 @@ jobs:
         run: node --test scripts/test-gnome-notification-queue.mjs
       - name: Verify GNOME keyboard API compatibility boundary
         run: node scripts/test-gnome-keyboard-compat.mjs
+      - name: Verify bundled GNOME extension build identity
+        run: python3 scripts/gnome-extension-build-id.py
       - name: Verify GTK IBus acceptance waits for actual widget focus
         run: python3 scripts/test_gtk_ibus_e2e_focus.py
       - name: Verify GNOME extension D-Bus path compatibility

@@ -10,7 +10,8 @@ All notable changes to WayExpand are documented here.
   keep password-purpose acceptance checks after layout and restart scenarios so
   they cannot leave the remaining GNOME tests in privacy mode. Register every
   XKB layout exercised by the acceptance matrix before asking Shell to switch
-  to it.
+  to it. Add a CI check and update helper for the content-bound GNOME extension
+  identity so bundled JS changes cannot leave stale metadata and break installs.
 - Require both an active GTK toplevel and actual focus within the test widget
   for the full stability interval before sending XTEST input. Cover focus loss,
   inactive windows, and the timing boundary with focused regression tests.
