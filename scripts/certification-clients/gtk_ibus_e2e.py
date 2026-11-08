@@ -57,6 +57,18 @@ def main():
         Gtk.init()
     else:
         Gtk.init(sys.argv)
+    gtk_im_module_setting = None
+    if args.im_mode == "default":
+        # GTK can obtain this setting from the desktop's XSettings even when
+        # GTK_IM_MODULE is absent from the process environment. Record the
+        # effective value so an XKB baseline does not mistake an IBus/XIM
+        # module-selection problem for missing GTK key delivery.
+        settings = Gtk.Settings.get_default()
+        if settings is not None:
+            try:
+                gtk_im_module_setting = settings.get_property("gtk-im-module")
+            except (TypeError, ValueError):
+                gtk_im_module_setting = "unavailable"
     application_id = os.environ.get("GTK_E2E_APP_ID", DEFAULT_APP_ID)
     window = Gtk.Window(title=f"WayExpand GTK IBus acceptance {application_id}")
     window.set_default_size(500, 80)
@@ -187,6 +199,16 @@ def main():
             )
             print(
                 f"GTK key events observed at target widget: {gtk_key_events}",
+                file=sys.stderr,
+            )
+            print(
+                "GTK input diagnostics: "
+                f"version={args.gtk_version} "
+                f"im_mode={args.im_mode} "
+                f"gtk_im_module_setting={gtk_im_module_setting!r} "
+                f"GTK_IM_MODULE={os.environ.get('GTK_IM_MODULE')!r} "
+                f"XMODIFIERS={os.environ.get('XMODIFIERS')!r} "
+                f"GDK_BACKEND={os.environ.get('GDK_BACKEND')!r}",
                 file=sys.stderr,
             )
             failed = True
