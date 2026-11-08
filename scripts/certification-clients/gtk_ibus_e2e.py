@@ -254,6 +254,7 @@ def main():
                 f"widget_im_module={widget_im_module!r} "
                 f"GTK_IM_MODULE={os.environ.get('GTK_IM_MODULE')!r} "
                 f"XMODIFIERS={os.environ.get('XMODIFIERS')!r} "
+                f"GDK_CORE_DEVICE_EVENTS={os.environ.get('GDK_CORE_DEVICE_EVENTS')!r} "
                 f"GDK_BACKEND={os.environ.get('GDK_BACKEND')!r}",
                 file=sys.stderr,
             )
