@@ -15,6 +15,16 @@ import gi
 
 DEFAULT_APP_ID = "org.wayexpand.GnomeGtkIbus"
 TIMEOUT_MS = 15000
+FOCUS_STABLE_FOR_US = 250_000
+
+
+def update_focus_stability(window_active, widget_focused, focused_since, now):
+    """Track uninterrupted toplevel and child-widget focus stability."""
+    if not (window_active and widget_focused):
+        return None, False
+    if focused_since is None:
+        return now, False
+    return focused_since, now - focused_since >= FOCUS_STABLE_FOR_US
 
 
 def main():
@@ -106,23 +116,24 @@ def main():
         # Wait for GTK's actual child focus to remain stable before the test
         # sends its first key; otherwise a fast XTEST event can race IBus
         # InputContext creation and lose the first character.
-        # Some GTK 4 controls, notably PasswordEntry, delegate keyboard focus
-        # to an internal child. Accept focus anywhere inside the test widget.
-        child_focused = args.gtk_version == "3" or focus_is_within_test_widget()
-        if child_focused:
-            if focused_since is None:
-                focused_since = GLib.get_monotonic_time()
-            elif GLib.get_monotonic_time() - focused_since >= 250_000:
-                try:
-                    fd = os.open(ready_marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                except FileExistsError:
-                    pass
-                else:
-                    os.write(fd, b"1")
-                    os.close(fd)
-        else:
-            focused_since = None
-        if not focus_is_within_test_widget():
+        # GTK 4 controls such as PasswordEntry can delegate focus to an
+        # internal child, so accept any focused descendant of the test widget.
+        # GTK 3 must pass the same check; treating the version as proof of focus
+        # can send XTEST input before the entry owns keyboard focus.
+        child_focused = focus_is_within_test_widget()
+        window_active = window.is_active()
+        focused_since, child_focus_stable = update_focus_stability(
+            window_active, child_focused, focused_since, GLib.get_monotonic_time()
+        )
+        if child_focus_stable:
+            try:
+                fd = os.open(ready_marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            except FileExistsError:
+                pass
+            else:
+                os.write(fd, b"1")
+                os.close(fd)
+        if not child_focused:
             # In GTK 4, grabbing focus before Mutter activates the toplevel
             # may be ignored. Retry only after the Shell focus controller has
             # confirmed this acceptance window is active.

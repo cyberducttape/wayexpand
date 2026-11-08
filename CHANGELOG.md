@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Require both an active GTK toplevel and actual focus within the test widget
+  for the full stability interval before sending XTEST input. Cover focus loss,
+  inactive windows, and the timing boundary with focused regression tests.
+  Capture the active IBus engine before and after each GTK case alongside the
+  existing content-free engine counters.
 - Register the GNOME acceptance engine through the standard system IBus
   component directory and validate the generated XML before launching Shell.
   Exercise activation, layout-switch, and post-restart behavior through actual

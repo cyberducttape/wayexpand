@@ -478,7 +478,10 @@ run_gtk_ibus_case() {
     marker="$E2E_WORK/gtk-window-focused-$case_name"
     ready_marker="$E2E_WORK/gtk-input-ready-$case_name"
     test_log="$E2E_WORK/gtk-ibus-e2e-$case_name.log"
+    engine_log="$E2E_WORK/ibus-engine-$case_name.txt"
     status_file="$XDG_RUNTIME_DIR/wayexpand-ibus-status.json"
+    printf 'before_gtk=' >"$engine_log"
+    ibus engine >>"$engine_log" 2>&1 || true
     set --
     if [ "$password" = true ]; then
         set -- --password
@@ -544,10 +547,13 @@ run_gtk_ibus_case() {
     gtk_status=0
     wait "$gtk_pid" || gtk_status=$?
     gtk_pid=
+    printf 'after_gtk=' >>"$engine_log"
+    ibus engine >>"$engine_log" 2>&1 || true
     if [ "$gtk_status" -ne 0 ]; then
         cp "$status_file" "$E2E_WORK/ibus-status-$case_name.json" 2>/dev/null || true
         log "fail gnome-gtk-$case_name GTK's IBus input context produced an incorrect result"
         cat "$test_log"
+        cat "$engine_log"
         if [ -s "$E2E_WORK/ibus-status-$case_name.json" ]; then
             python3 - "$E2E_WORK/ibus-status-$case_name.json" <<'PY'
 import json
@@ -1176,7 +1182,6 @@ env -i \
     GDK_BACKEND=wayland \
     XDG_CURRENT_DESKTOP=GNOME \
     XDG_SESSION_TYPE=wayland \
-    RUST_BACKTRACE=1 \
     WAYEXPAND_GNOME_AUTH_DIAGNOSTICS=1 \
     WAYEXPAND_GNOME_TEST_CLIENTS="$bin_dir/wayexpand:$bin_dir/wayexpand-ibus:$bin_dir/wx-e2e-gnome-tracker" \
     E2E_WORK="$work" \
