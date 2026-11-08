@@ -4,6 +4,11 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Make offline Markdown validation deterministic and independent of a release
+  binary download. Check repository-local links, images, and heading anchors,
+  including reference-style links; restore the Operations Guide target linked
+  by the command-preview security guidance. Use the same `xdotool type` XTEST
+  path for the GTK XKB baseline that the passing X11 terminal baseline uses.
 - Verify XTEST delivery into an IBus-free X11 terminal and then ordinary US
   XKB-to-GTK key delivery through GtkIMContextSimple with a direct synthetic
   event before WayExpand-specific IBus insertion. Keep that baseline

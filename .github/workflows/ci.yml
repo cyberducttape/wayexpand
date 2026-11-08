@@ -463,12 +463,7 @@ jobs:
         run: |
           appstreamcli validate --no-net io.github.cyberducttape.WayExpand.metainfo.xml
           desktop-file-validate desktop/wayexpand.desktop
-      - name: Check markdown links
-        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
-        with:
-          args: --offline --exclude-link-local --exclude 'file:///' '*.md' '**/*.md'
-          fail: true
-      - name: Check local markdown links deterministically
+      - name: Check local markdown links and anchors
         run: python3 scripts/check-markdown-links.py
       - name: Build CLI for executable documentation examples
         run: cargo build --locked -p wayexpand

@@ -188,6 +188,8 @@ Available values are `{{date}}`, `{{time}}`, `{{datetime}}` (UTC),
 variables make validation fail before a configuration reload is activated.
 Template values are rendered only when an expansion matches.
 
+### Command-backed snippets
+
 For trusted, local system information, an expansion may run one program
 without a shell:
 
