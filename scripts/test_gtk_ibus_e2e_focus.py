@@ -3,12 +3,18 @@
 
 import importlib.util
 from pathlib import Path
+import tempfile
 import unittest
 from unittest import mock
 
 
 SCRIPT = Path(__file__).parent / "certification-clients" / "gtk_ibus_e2e.py"
 GNOME_ACCEPTANCE_SCRIPT = Path(__file__).parent / "test-gnome-e2e.sh"
+FOCUS_CONTROLLER_SCRIPT = (
+    Path(__file__).parent
+    / "gnome-e2e-focus-controller"
+    / "extension.js"
+)
 SPEC = importlib.util.spec_from_file_location("gtk_ibus_e2e", SCRIPT)
 GTK_E2E = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(GTK_E2E)
@@ -22,6 +28,14 @@ REMOTE_INPUT_SPEC.loader.exec_module(REMOTE_INPUT)
 
 
 class GnomeAcceptanceShellContractTests(unittest.TestCase):
+    def test_focus_controller_uses_shell_activation_with_workspace_handling(self):
+        source = FOCUS_CONTROLLER_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn(
+            "import * as Main from 'resource:///org/gnome/shell/ui/main.js';",
+            source,
+        )
+        self.assertEqual(source.count("Main.activateWindow(window, global.get_current_time());"), 2)
+
     def test_remote_keyboard_is_created_after_shell_assigns_window_focus(self):
         source = REMOTE_INPUT_SCRIPT.read_text(encoding="utf-8")
         activation = source.index("activate_test_window(bus, args.app_id)")
@@ -57,6 +71,22 @@ class GnomeAcceptanceShellContractTests(unittest.TestCase):
 
 
 class FocusReadinessTests(unittest.TestCase):
+    def test_readiness_marker_is_removed_when_focus_is_lost(self):
+        with tempfile.TemporaryDirectory() as directory:
+            marker = Path(directory) / "ready"
+            GTK_E2E.update_readiness_marker(marker, True)
+            self.assertTrue(marker.is_file())
+            GTK_E2E.update_readiness_marker(marker, False)
+            self.assertFalse(marker.exists())
+
+    def test_readiness_marker_can_be_republished_after_focus_returns(self):
+        with tempfile.TemporaryDirectory() as directory:
+            marker = Path(directory) / "ready"
+            GTK_E2E.update_readiness_marker(marker, True)
+            GTK_E2E.update_readiness_marker(marker, False)
+            GTK_E2E.update_readiness_marker(marker, True)
+            self.assertEqual(marker.read_bytes(), b"1")
+
     def test_unfocused_widget_never_becomes_ready_after_mutter_activation(self):
         since, ready = GTK_E2E.update_focus_stability(
             True, True, False, None, 1_000_000
@@ -337,8 +367,11 @@ class MutterRemoteInputTests(unittest.TestCase):
 
     def test_fixed_text_uses_layout_independent_keysyms_and_releases_them(self):
         bus = self.FakeBus()
-        with mock.patch.object(REMOTE_INPUT.time, "sleep"):
-            REMOTE_INPUT.send_text(bus, "/session", ";e2e", 0.06)
+        with tempfile.TemporaryDirectory() as directory:
+            marker = Path(directory) / "ready"
+            marker.write_text("1", encoding="ascii")
+            with mock.patch.object(REMOTE_INPUT.time, "sleep"):
+                REMOTE_INPUT.send_text(bus, "/session", ";e2e", 0.06, marker)
 
         expected = [
             ("NotifyKeyboardKeysym", (ord(character), pressed))
@@ -348,7 +381,7 @@ class MutterRemoteInputTests(unittest.TestCase):
         self.assertEqual(bus.calls, expected)
         self.assertTrue(all(method != "NotifyKeyboardKeycode" for method, _ in bus.calls))
 
-    def test_keyboard_is_created_before_window_activation_without_text_input(self):
+    def test_keyboard_priming_uses_only_a_modifier_pair(self):
         bus = self.FakeBus()
         REMOTE_INPUT.prime_keyboard_device(bus, "/session")
 
@@ -360,11 +393,45 @@ class MutterRemoteInputTests(unittest.TestCase):
             ],
         )
 
+    def test_focus_loss_stops_remaining_text_before_another_key_is_pressed(self):
+        bus = self.FakeBus()
+        with tempfile.TemporaryDirectory() as directory:
+            marker = Path(directory) / "ready"
+            marker.write_text("1", encoding="ascii")
+
+            def lose_focus(_delay):
+                marker.unlink(missing_ok=True)
+
+            with mock.patch.object(
+                REMOTE_INPUT.time, "sleep", side_effect=lose_focus
+            ):
+                with self.assertRaisesRegex(RuntimeError, "focus was lost"):
+                    REMOTE_INPUT.send_text(bus, "/session", "ab", 0.06, marker)
+
+        self.assertEqual(
+            bus.calls,
+            [
+                ("NotifyKeyboardKeysym", (ord("a"), True)),
+                ("NotifyKeyboardKeysym", (ord("a"), False)),
+            ],
+        )
+
+    def test_input_is_not_started_without_a_current_focus_lease(self):
+        bus = self.FakeBus()
+        with tempfile.TemporaryDirectory() as directory:
+            marker = Path(directory) / "ready"
+            with self.assertRaisesRegex(RuntimeError, "focus was lost"):
+                REMOTE_INPUT.send_text(bus, "/session", "a", 0.06, marker)
+        self.assertEqual(bus.calls, [])
+
     def test_failed_press_reply_still_attempts_key_release(self):
         bus = self.FakeBus(fail_first=True)
-        with mock.patch.object(REMOTE_INPUT.time, "sleep"):
-            with self.assertRaisesRegex(RuntimeError, "simulated lost method reply"):
-                REMOTE_INPUT.send_text(bus, "/session", "a", 0.06)
+        with tempfile.TemporaryDirectory() as directory:
+            marker = Path(directory) / "ready"
+            marker.write_text("1", encoding="ascii")
+            with mock.patch.object(REMOTE_INPUT.time, "sleep"):
+                with self.assertRaisesRegex(RuntimeError, "simulated lost method reply"):
+                    REMOTE_INPUT.send_text(bus, "/session", "a", 0.06, marker)
 
         self.assertEqual(
             bus.calls,

@@ -44,9 +44,13 @@ def key_event(bus, path, keysym, pressed):
     )
 
 
-def send_text(bus, path, text, delay_seconds):
+def send_text(bus, path, text, delay_seconds, ready_marker):
     """Inject keysyms so test text remains stable across XKB layout switches."""
     for character in text:
+        if not os.path.isfile(ready_marker):
+            raise RuntimeError(
+                "GTK active focus was lost; stopped before sending remaining test input"
+            )
         keysym = ord(character)
         if not 0x20 <= keysym <= 0x7E:
             raise ValueError("test input must use printable ASCII keysyms")
@@ -107,11 +111,17 @@ def publish_focus_confirmation(path):
 
 def wait_for_gtk_input_ready(path, timeout_seconds):
     deadline = time.monotonic() + timeout_seconds
+    ready_since = None
     while time.monotonic() < deadline:
         if os.path.isfile(path):
-            return True
+            if ready_since is None:
+                ready_since = time.monotonic()
+            elif time.monotonic() - ready_since >= 0.25:
+                return True
+        else:
+            ready_since = None
         time.sleep(0.02)
-    return os.path.isfile(path)
+    return False
 
 
 def main():
@@ -167,7 +177,13 @@ def main():
             raise RuntimeError(
                 "GTK did not confirm stable active input focus; test text was not sent"
             )
-        send_text(bus, session_path, args.text, args.delay_ms / 1000)
+        send_text(
+            bus,
+            session_path,
+            args.text,
+            args.delay_ms / 1000,
+            args.ready_marker,
+        )
     except (GLib.Error, OSError, RuntimeError, ValueError) as error:
         print(f"Mutter RemoteDesktop keyboard input failed: {error}", file=sys.stderr)
         return 1

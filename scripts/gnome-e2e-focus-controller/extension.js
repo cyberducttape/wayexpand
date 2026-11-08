@@ -4,6 +4,7 @@
 
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 const OBJECT_PATH = '/org/wayexpand/GnomeE2eFocusController';
@@ -63,11 +64,11 @@ export default class GnomeE2eFocusController extends Extension {
                 return GLib.SOURCE_REMOVE;
             }
 
-            window.activate(global.get_current_time());
+            Main.activateWindow(window, global.get_current_time());
             return GLib.SOURCE_CONTINUE;
         };
 
-        window.activate(global.get_current_time());
+        Main.activateWindow(window, global.get_current_time());
         GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, confirmFocus);
     }
 }

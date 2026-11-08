@@ -30,6 +30,24 @@ def update_focus_stability(
     return focused_since, now - focused_since >= FOCUS_STABLE_FOR_US
 
 
+def update_readiness_marker(path, ready):
+    """Publish current focus readiness, removing stale readiness on focus loss."""
+    if ready:
+        try:
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            return
+        try:
+            os.write(descriptor, b"1")
+        finally:
+            os.close(descriptor)
+    else:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+
+
 def input_mode_environment_error(im_mode, environ):
     """Check only the environment contract required by the selected IM mode."""
     if im_mode == "ibus" and environ.get("GTK_IM_MODULE") != "ibus":
@@ -92,6 +110,9 @@ def main():
     ready_marker = os.environ.get("GTK_E2E_READY_MARKER")
     if not ready_marker:
         raise SystemExit("GTK_E2E_READY_MARKER must be set by the Mutter focus test")
+    # A readiness marker is a live focus lease. Do not inherit one left by a
+    # stale test process, even when the caller reuses a work directory.
+    update_readiness_marker(ready_marker, False)
 
     if args.gtk_version == "4":
         Gtk.init()
@@ -256,14 +277,7 @@ def main():
                 file=sys.stderr,
             )
             focus_diagnostic_reported = True
-        if child_focus_stable:
-            try:
-                fd = os.open(ready_marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            except FileExistsError:
-                pass
-            else:
-                os.write(fd, b"1")
-                os.close(fd)
+        update_readiness_marker(ready_marker, child_focus_stable)
         if not widget_has_keyboard_focus and not focus_requested_after_activation:
             # GTK may remember the designated focus child even though the
             # early grab_focus() happened before Mutter activated the window.
