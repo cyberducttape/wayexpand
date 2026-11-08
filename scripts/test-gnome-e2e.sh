@@ -240,6 +240,33 @@ extension_state() {
     gnome_shell_extensions_call GetExtensionInfo "$E2E_UUID" || true
 }
 
+activate_window() {
+    tries=100
+    activate_error="$E2E_WORK/activate-window.err"
+    while :; do
+        if gdbus call --timeout 5 --session --dest org.gnome.Shell \
+            --object-path /org/wayexpand/GnomeE2eFocusController \
+            --method org.wayexpand.GnomeE2eFocusController.ActivateWindow "$1" \
+            >/dev/null 2>"$activate_error"; then
+            return 0
+        fi
+        # The controller already spent up to five seconds asking Mutter to
+        # focus a mapped window. Retrying a focus timeout multiplies that
+        # bound by 100 and hides the actual failure; only retry transient
+        # lookup/session startup errors.
+        if grep -Eq 'FocusTimeout|did not focus' "$activate_error"; then
+            cat "$activate_error" >&2
+            return 1
+        fi
+        tries=$((tries - 1))
+        if [ "$tries" -le 0 ]; then
+            cat "$activate_error" >&2
+            return 1
+        fi
+        sleep 0.05
+    done
+}
+
 click_test_field() {
     app_id=$1
     test_window_id=$(DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \

@@ -8,6 +8,7 @@ from unittest import mock
 
 
 SCRIPT = Path(__file__).parent / "certification-clients" / "gtk_ibus_e2e.py"
+GNOME_ACCEPTANCE_SCRIPT = Path(__file__).parent / "test-gnome-e2e.sh"
 SPEC = importlib.util.spec_from_file_location("gtk_ibus_e2e", SCRIPT)
 GTK_E2E = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(GTK_E2E)
@@ -18,6 +19,16 @@ REMOTE_INPUT_SPEC = importlib.util.spec_from_file_location(
 )
 REMOTE_INPUT = importlib.util.module_from_spec(REMOTE_INPUT_SPEC)
 REMOTE_INPUT_SPEC.loader.exec_module(REMOTE_INPUT)
+
+
+class GnomeAcceptanceShellContractTests(unittest.TestCase):
+    def test_x11_clients_have_a_window_activation_helper(self):
+        source = GNOME_ACCEPTANCE_SCRIPT.read_text(encoding="utf-8")
+        self.assertRegex(source, r"(?m)^activate_window\(\) \{")
+        self.assertIn(
+            "org.wayexpand.GnomeE2eFocusController.ActivateWindow",
+            source,
+        )
 
 
 class FocusReadinessTests(unittest.TestCase):
