@@ -555,14 +555,11 @@ class MutterRemoteInputTests(unittest.TestCase):
 
     def test_gtk_focus_retries_start_before_pointer_click(self):
         source = REMOTE_INPUT_SCRIPT.read_text(encoding="utf-8")
+        click = source.index("click_test_field(bus, session_path, window_rect)")
         publish = source.index("publish_focus_confirmation(args.focus_marker)")
         wait = source.index("ready = wait_for_gtk_input_ready(")
-        readiness = source[
-            source.index("def wait_for_gtk_input_ready(") : source.index("def main():")
-        ]
-        self.assertLess(publish, wait)
-        self.assertIn("click_test_field(bus, path, window_rect)", readiness)
-        self.assertIn("next_click_at = now + 0.5", readiness)
+        self.assertLess(publish, click)
+        self.assertLess(click, wait)
 
     def test_ibus_test_captures_sequence_baseline_before_launch_and_passes_status(self):
         source = GNOME_ACCEPTANCE_SCRIPT.read_text(encoding="utf-8")

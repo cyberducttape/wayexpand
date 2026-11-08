@@ -299,12 +299,10 @@ def wait_for_gtk_input_ready(
     timeout_seconds,
     ibus_status_path=None,
     ibus_sequence_baseline=0,
-    window_rect=None,
 ):
     deadline = time.monotonic() + timeout_seconds
     ready_since = None
     next_activation_at = 0.0
-    next_click_at = 0.0
     next_ibus_probe_at = 0.0
     ibus_context_sequence = None
     ibus_context_focused_since = None
@@ -316,13 +314,6 @@ def wait_for_gtk_input_ready(
             # activation while GTK is confirming its own active/focus state.
             activate_test_window(bus, app_id)
             next_activation_at = now + 0.25
-        if window_rect is not None and now >= next_click_at:
-            # Some headless Mutter versions acknowledge window activation
-            # before forwarding pointer focus to the Wayland client. Retry a
-            # click only at the verified test widget while readiness is still
-            # closed; never send trigger text until GTK and IBus both settle.
-            click_test_field(bus, path, window_rect)
-            next_click_at = now + 0.5
         if os.path.isfile(path):
             if ready_since is None:
                 ready_since = now
@@ -413,9 +404,12 @@ def main():
         window_rect = get_test_window_rect(bus, args.app_id)
         print(f"Mutter test target geometry: window={window_rect!r}", flush=True)
         # Start GTK's bounded present()/grab_focus() retries as soon as Mutter
-        # confirms its window focus. The readiness loop then retries the click
-        # only at the verified test widget until GTK and IBus confirm focus.
+        # confirms its window focus. Waiting until after the click deadlocks on
+        # Mutter versions where a click on the not-yet-active Wayland surface
+        # is not delivered to GTK; the client would not request focus until
+        # that same click had succeeded.
         publish_focus_confirmation(args.focus_marker)
+        click_test_field(bus, session_path, window_rect)
         ready = wait_for_gtk_input_ready(
             bus,
             args.app_id,
@@ -423,7 +417,6 @@ def main():
             13.0,
             args.ibus_status_path,
             args.ibus_sequence_baseline,
-            window_rect,
         )
         if not ready:
             raise RuntimeError(
