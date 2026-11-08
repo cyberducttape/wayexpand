@@ -346,7 +346,7 @@ type_x11_input() {
 type_gnome_remote_input() {
     case_name=$1
     input_text=$2
-    python3 "$project_dir/scripts/certification-clients/gnome_remote_input.py" \
+    python3 "$E2E_PROJECT_DIR/scripts/certification-clients/gnome_remote_input.py" \
         --delay-ms 60 --text "$input_text" \
         >"$E2E_WORK/mutter-input-$case_name.txt" \
         2>"$E2E_WORK/mutter-input-$case_name.err"

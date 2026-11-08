@@ -70,11 +70,17 @@ def send_text(bus, path, text, delay_seconds):
             raise ValueError("test input contains a character not supported by the US keymap")
         if shifted:
             key_event(bus, path, SHIFT, True)
-        key_event(bus, path, code, True)
-        time.sleep(delay_seconds)
-        key_event(bus, path, code, False)
-        if shifted:
-            key_event(bus, path, SHIFT, False)
+        try:
+            key_event(bus, path, code, True)
+            time.sleep(delay_seconds)
+        finally:
+            # A failed reply can leave it uncertain whether Mutter accepted
+            # the press, so always attempt the matching release.
+            try:
+                key_event(bus, path, code, False)
+            finally:
+                if shifted:
+                    key_event(bus, path, SHIFT, False)
         time.sleep(delay_seconds)
 
 
