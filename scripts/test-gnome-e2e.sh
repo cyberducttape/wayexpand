@@ -1171,6 +1171,7 @@ env -i \
     GDK_BACKEND=wayland \
     XDG_CURRENT_DESKTOP=GNOME \
     XDG_SESSION_TYPE=wayland \
+    RUST_BACKTRACE=1 \
     WAYEXPAND_GNOME_AUTH_DIAGNOSTICS=1 \
     WAYEXPAND_GNOME_TEST_CLIENTS="$bin_dir/wayexpand:$bin_dir/wayexpand-ibus:$bin_dir/wx-e2e-gnome-tracker" \
     E2E_WORK="$work" \
