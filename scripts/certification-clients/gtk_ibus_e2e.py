@@ -87,7 +87,24 @@ def main():
     failed = False
     started_at = GLib.get_monotonic_time()
     focused_since = None
+    gtk_key_events = 0
     loop = GLib.MainLoop() if args.gtk_version == "4" else None
+
+    def count_key_event(*_event):
+        # Count only. Never retain or print keyvals, text, or modifier state.
+        nonlocal gtk_key_events
+        gtk_key_events += 1
+        return False
+
+    if args.gtk_version == "4":
+        key_controller = Gtk.EventControllerKey.new()
+        key_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        key_controller.connect("key-pressed", count_key_event)
+        focus_widget.add_controller(key_controller)
+    else:
+        # Connect before GtkEntry's default handler so this observes the
+        # widget delivery boundary even when IBus consumes the key event.
+        focus_widget.connect("key-press-event", count_key_event)
 
     def focus_is_within_test_widget():
         focused = window.get_focus()
@@ -156,6 +173,10 @@ def main():
                 f"widget_focused={focus_widget.has_focus()} "
                 f"focus_within_widget={focus_is_within_test_widget()} "
                 f"focused_widget_type={type(window.get_focus()).__name__ if window.get_focus() else 'none'}",
+                file=sys.stderr,
+            )
+            print(
+                f"GTK key events observed at target widget: {gtk_key_events}",
                 file=sys.stderr,
             )
             failed = True
