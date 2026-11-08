@@ -9,7 +9,8 @@ All notable changes to WayExpand are documented here.
   GNOME previously rejected the real IBus client while the test helper was
   allowed, so switching layouts removed WayExpand from the live source list.
   Add a regression test for the exact installed engine executable identity;
-  retain UID and executable checks for every caller.
+  retain UID and executable checks for every caller, and refresh the extension
+  build identity so running-version diagnostics detect the authorization fix.
 - Make the GNOME IBus acceptance test wait for a focused engine context before
   sending its harmless key probe, correlated to a new IBus focus sequence so a
   stale pre-restart context cannot satisfy readiness. Ubuntu 24.04 CI had shown
