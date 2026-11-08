@@ -878,6 +878,7 @@ run_qt_xim_case() {
         set -- --password
     fi
     timeout 20s env \
+        QT_QPA_PLATFORM=xcb \
         QT_IM_MODULE=xim \
         XMODIFIERS='@im=ibus' \
         DISPLAY="$x11_display" \
