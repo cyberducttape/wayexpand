@@ -343,6 +343,21 @@ type_x11_input() {
         2>"$E2E_WORK/xdotool-$case_name.err"
 }
 
+# Move libwayland's client trace out of a GTK log into its own file and print
+# the events that show whether the client got a keyboard and focus.
+report_wayland_trace() {
+    if [ "$2" != client ]; then
+        return 0
+    fi
+    trace="$1.wayland-trace"
+    grep -E '^\[ *[0-9]+\.[0-9]+\]' "$1" >"$trace" || true
+    grep -vE '^\[ *[0-9]+\.[0-9]+\]' "$1" >"$1.tmp" || true
+    mv -f "$1.tmp" "$1"
+    log "wayland-trace lines=$(wc -l <"$trace")"
+    grep -E 'wl_seat[@#][0-9]+\.(capabilities|get_keyboard|get_pointer)|wl_keyboard[@#][0-9]+\.(enter|leave|key|keymap)|xdg_toplevel[@#][0-9]+\.configure' \
+        "$trace" | cut -c1-120 | head -n 60 | sed 's/^/wayland-trace: /' || true
+}
+
 type_gnome_remote_input() {
     case_name=$1
     input_text=$2
@@ -586,6 +601,12 @@ run_gtk_ibus_case() {
     marker="$E2E_WORK/gtk-window-focused-$case_name"
     ready_marker="$E2E_WORK/gtk-input-ready-$case_name"
     test_log="$E2E_WORK/gtk-ibus-e2e-$case_name.log"
+    # Trace only the first ordinary-input control (one fixed test key):
+    # whether Mutter gives GTK a keyboard and focus decides everything after it.
+    wayland_debug=0
+    if [ "$case_name" = wayland-baseline ]; then
+        wayland_debug=client
+    fi
     engine_log="$E2E_WORK/ibus-engine-$case_name.txt"
     status_file="$XDG_RUNTIME_DIR/wayexpand-ibus-status.json"
     printf 'before_gtk=' >"$engine_log"
@@ -599,6 +620,7 @@ run_gtk_ibus_case() {
         # attach to IBus. The following cases test the IBus module explicitly.
         timeout 20s env -u DISPLAY -u XAUTHORITY -u XMODIFIERS -u IBUS_ADDRESS \
             GTK_IM_MODULE=gtk-im-context-simple \
+            WAYLAND_DEBUG="$wayland_debug" \
             GDK_BACKEND=wayland \
             GTK_E2E_FOCUS_MARKER="$marker" \
             GTK_E2E_READY_MARKER="$ready_marker" \
@@ -634,6 +656,7 @@ run_gtk_ibus_case() {
         kill "$gtk_pid" 2>/dev/null || true
         wait "$gtk_pid" 2>/dev/null || true
         gtk_pid=
+        report_wayland_trace "$test_log" "$wayland_debug"
         if grep -F 'GTK did not confirm stable active input focus' \
             "$E2E_WORK/mutter-input-$case_name.err" >/dev/null; then
             log "fail gnome-gtk-$case_name GTK never acquired active keyboard focus; no test input was sent"
@@ -655,6 +678,7 @@ run_gtk_ibus_case() {
     gtk_status=0
     wait "$gtk_pid" || gtk_status=$?
     gtk_pid=
+    report_wayland_trace "$test_log" "$wayland_debug"
     printf 'after_gtk=' >>"$engine_log"
     ibus engine >>"$engine_log" 2>&1 || true
     if [ "$gtk_status" -ne 0 ]; then
