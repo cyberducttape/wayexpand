@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Preserve partially typed IBus triggers when Shift or an alternate-level
+  modifier is pressed between characters, so triggers containing characters
+  such as French AZERTY's shifted `2` can still match. Shortcut modifiers still
+  reset matching.
 - Make offline Markdown validation deterministic and independent of a release
   binary download. Check repository-local links, images, and heading anchors,
   including reference-style links; restore the Operations Guide target linked

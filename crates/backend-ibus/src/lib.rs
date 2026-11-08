@@ -658,6 +658,16 @@ impl IbusEngineAdapter {
             return IbusKeyResult::default();
         }
 
+        // Shift and alternate-level selectors can occur in the middle of a
+        // printable trigger on layouts such as French AZERTY (`2` is
+        // Shift+2). They do not insert text themselves, so preserve the
+        // partial trigger while the following key carries the resolved
+        // keysym. Shortcut modifiers remain handled by the state-mask check
+        // above and still reset matching.
+        if is_character_level_modifier(keyval) {
+            return IbusKeyResult::default();
+        }
+
         let Some(character) = keysym_to_char(keyval) else {
             self.engine.process(InputEvent::Reset);
             return IbusKeyResult::default();
@@ -790,6 +800,22 @@ impl IbusEngineAdapter {
             actions,
         }
     }
+}
+
+fn is_character_level_modifier(keysym: u32) -> bool {
+    matches!(
+        keysym,
+        xkeysym::key::Shift_L
+            | xkeysym::key::Shift_R
+            | xkeysym::key::Shift_Lock
+            | xkeysym::key::ISO_Level2_Latch
+            | xkeysym::key::ISO_Level3_Shift
+            | xkeysym::key::ISO_Level3_Latch
+            | xkeysym::key::ISO_Level3_Lock
+            | xkeysym::key::ISO_Level5_Shift
+            | xkeysym::key::ISO_Level5_Latch
+            | xkeysym::key::ISO_Level5_Lock
+    )
 }
 
 #[cfg(test)]
@@ -1015,7 +1041,7 @@ replacement = "Incident {{field:hostname}}"
             let text: String = self.text.iter().collect();
             adapter.set_surrounding_text(&text, self.cursor as u32, self.cursor as u32);
             let result = adapter.process_key_event(keyval, 0, state);
-            if state == 0 && !result.handled {
+            if state & IBUS_RELEASE_MASK == 0 && !result.handled {
                 if keyval == xkeysym::key::BackSpace {
                     if self.cursor > 0 {
                         self.cursor -= 1;
@@ -1972,6 +1998,33 @@ timeout_ms = 1000
         client.key(&mut adapter, 0x07e1, 0); // Greek_alpha
         client.key(&mut adapter, 0x07e2, 0); // Greek_beta
         assert_eq!(client.text(), "alpha beta");
+    }
+
+    #[test]
+    fn shifted_character_inside_trigger_does_not_reset_matching() {
+        const SHIFT_MASK: u32 = 1;
+        let config = Config::parse(
+            "[settings]\ncompatibility_mode = 'tracked-focus'\n\
+             [[expansion]]\ntrigger = ';e2e'\nreplacement = 'expanded'\n",
+        )
+        .unwrap();
+        let mut adapter = focused(IbusEngineAdapter::new(
+            ExpansionEngine::new(config).unwrap(),
+        ));
+        let mut client = Client::default();
+
+        client.key(&mut adapter, ';' as u32, 0);
+        client.key(&mut adapter, 'e' as u32, 0);
+        client.key(&mut adapter, xkeysym::key::Shift_L, 0);
+        client.key(&mut adapter, '2' as u32, SHIFT_MASK);
+        client.key(
+            &mut adapter,
+            xkeysym::key::Shift_L,
+            SHIFT_MASK | IBUS_RELEASE_MASK,
+        );
+        client.key(&mut adapter, 'e' as u32, 0);
+
+        assert_eq!(client.text(), "expanded");
     }
 
     #[test]
