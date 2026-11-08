@@ -23,7 +23,7 @@ use std::{
     os::unix::{ffi::OsStrExt, fs::MetadataExt, fs::PermissionsExt},
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::mpsc,
+    sync::{mpsc, OnceLock},
     thread,
     time::Duration,
 };
@@ -563,25 +563,40 @@ fn parse_kwin_input_method(text: &str) -> Option<String> {
 /// Ask KWin whether its virtual-keyboard (input method) slot is running.
 /// `None` when KWin does not answer within a second.
 pub fn kwin_input_method_available() -> Option<bool> {
+    // Dropping a timed-out receiver cannot cancel a blocking D-Bus call.
+    // Route every probe through one shared worker with a one-item queue so a
+    // stalled KWin service cannot accumulate one detached thread per probe.
+    static PROBES: OnceLock<mpsc::SyncSender<mpsc::Sender<Option<bool>>>> = OnceLock::new();
+    let worker = PROBES.get_or_init(|| {
+        let (sender, requests) = mpsc::sync_channel::<mpsc::Sender<Option<bool>>>(1);
+        if let Err(error) = thread::Builder::new()
+            .name("wayexpand-kwin-im-probe".into())
+            .spawn(move || {
+                while let Ok(reply_to) = requests.recv() {
+                    let answer = (|| -> zbus::Result<bool> {
+                        let connection = zbus::blocking::Connection::session()?;
+                        let reply = connection.call_method(
+                            Some("org.kde.KWin"),
+                            "/VirtualKeyboard",
+                            Some("org.freedesktop.DBus.Properties"),
+                            "Get",
+                            &("org.kde.kwin.VirtualKeyboard", "available"),
+                        )?;
+                        let value: zbus::zvariant::OwnedValue = reply.body().deserialize()?;
+                        bool::try_from(value).map_err(zbus::Error::from)
+                    })();
+                    let _ = reply_to.send(answer.ok());
+                }
+            })
+        {
+            tracing::warn!("could not start bounded KWin probe worker: {error}");
+        }
+        sender
+    });
     let (sender, receiver) = mpsc::channel();
-    thread::Builder::new()
-        .name("wayexpand-kwin-im-probe".into())
-        .spawn(move || {
-            let answer = (|| -> zbus::Result<bool> {
-                let connection = zbus::blocking::Connection::session()?;
-                let reply = connection.call_method(
-                    Some("org.kde.KWin"),
-                    "/VirtualKeyboard",
-                    Some("org.freedesktop.DBus.Properties"),
-                    "Get",
-                    &("org.kde.kwin.VirtualKeyboard", "available"),
-                )?;
-                let value: zbus::zvariant::OwnedValue = reply.body().deserialize()?;
-                bool::try_from(value).map_err(zbus::Error::from)
-            })();
-            let _ = sender.send(answer.ok());
-        })
-        .ok()?;
+    if worker.try_send(sender).is_err() {
+        return None;
+    }
     receiver.recv_timeout(Duration::from_secs(1)).ok().flatten()
 }
 

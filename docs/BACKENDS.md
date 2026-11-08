@@ -281,7 +281,10 @@ intended input method before choosing a route. See
 [KDE's Virtual Keyboard settings](https://docs.kde.org/stable_kf6/en/kwin/kcontrol/kwinvirtualkeyboard/).
 
 On GNOME, the WayExpand Shell extension authorizes tracker subscriptions by
-session UID and executable identity. The default D-Bus `Subscribe()` reply
+session UID and the resolved executable's exact installation path (system
+package locations or the versioned user payload directory), not by basename.
+The isolated headless acceptance test can add its exact temporary client path
+through a test-only environment variable. The default D-Bus `Subscribe()` reply
 contains the app ID and opaque window instance ID, but no title. WayExpand
 explicitly requests titles only to support configured `title_contains` filters.
 This is a privacy reduction for unrelated session-bus clients, not isolation

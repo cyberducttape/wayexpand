@@ -431,7 +431,10 @@ export default class WayExpandWindowTracker extends Extension {
                                         (ownConnection, ownResult) => {
                                             try {
                                                 const [ownUid] = ownConnection.call_finish(ownResult).deep_unpack();
-                                                const authorized = isAuthorizedTrackerClient(uid, ownUid, executable);
+                                                const authorized = isAuthorizedTrackerClient(
+                                                    uid, ownUid, executable, GLib.get_home_dir(),
+                                                    GLib.getenv('WAYEXPAND_GNOME_TEST_CLIENT'),
+                                                );
                                                 this._logAuthorizationDiagnostic(
                                                     `peer uid=${uid} shell uid=${ownUid} executable=${executable.split('/').pop()} authorized=${authorized}`,
                                                 );

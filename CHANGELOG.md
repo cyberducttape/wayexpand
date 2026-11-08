@@ -4,6 +4,18 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Bind GNOME Shell tracker authorization to exact resolved executable paths
+  instead of trusted basenames, remove the test helper from production's
+  trusted-client list, and add negative tests for executable-name spoofing.
+  This remains same-UID defense in depth, not isolation from malicious
+  software running as the logged-in user. Serialize KWin availability probes
+  through one bounded worker so a stalled D-Bus call cannot leak a thread per
+  diagnostic timeout. Bound GNOME E2E D-Bus calls so an unresponsive IBus
+  method cannot hold CI until job timeout, and synchronize the certification
+  matrix contract test with current Fedora/Ubuntu, Firefox/Chromium, and
+  lifecycle coverage. Keep generated Cargo vendor state outside CI checkouts,
+  preserve relocatable vendor configuration in source archives, and let active
+  GNOME acceptance runs complete instead of cancelling them on every push.
 - Authorize the same-UID `wayexpand-ibus` engine process for the GNOME
   Shell's existing authenticated input-source and keyboard-layout bridge.
   GNOME previously rejected the real IBus client while the test helper was

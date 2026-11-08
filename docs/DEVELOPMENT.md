@@ -363,16 +363,23 @@ impl InputSource for MyBackend {
 
 ## Continuous Integration
 
-CI runs on every PR:
+Every PR runs the required fast and functional checks:
 - **Formatting:** `cargo fmt --all -- --check`
-- **Tests:** `cargo test --locked --workspace`
-- **Linting:** `cargo clippy --locked --workspace --all-targets -- -D warnings` (both debug and release)
+- **Tests:** `cargo test --locked --workspace` in debug mode
+- **Linting:** `cargo clippy --locked --workspace --all-targets -- -D warnings`
 - **Shell scripts:** `shellcheck scripts/*.sh`
-- **Integration tests:** `scripts/smoke-daemon.sh`, `scripts/test-doctor.sh`, etc.
+- **Integration tests:** daemon, IBus, GNOME, backend, and CLI contracts
 - **Installer tests:** Verify installers work on clean systems
 - **Systemd validation:** `systemd-analyze verify` on all units
 
-**All checks must pass before merging.**
+Long repeated concurrency stress, fault regressions, daemon soak, release-mode
+workspace tests, and performance measurements run on pushes to protected
+branches, nightly schedules, or manual dispatch. The GNOME headless acceptance
+jobs remain required on pull requests because they cover a release-blocking
+desktop integration. An active run is allowed to finish when a newer commit is
+pushed; GitHub keeps the newest pending run for the same branch.
+
+**All required pull-request checks must pass before merging.**
 
 ## Resources
 

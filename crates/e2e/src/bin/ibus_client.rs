@@ -345,7 +345,12 @@ fn main() -> Result<()> {
         }
     }
     let address = env::var("IBUS_ADDRESS").context("IBUS_ADDRESS is not set")?;
-    let connection = zbus::blocking::connection::Builder::address(address.as_str())?.build()?;
+    // A broken or wedged session IBus daemon must fail this acceptance probe
+    // promptly. Without a method deadline, calls such as SetGlobalEngine can
+    // block until the entire CI job is cancelled, hiding the failed stage.
+    let connection = zbus::blocking::connection::Builder::address(address.as_str())?
+        .method_timeout(Duration::from_secs(5))
+        .build()?;
     let (sender, events) = mpsc::channel();
     // Subscribe only to D-Bus signals. IBus may rewrite the engine interface
     // while forwarding signals to an input context, so matching that interface

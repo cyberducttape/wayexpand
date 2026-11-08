@@ -14,14 +14,30 @@ const extensionSource = readFileSync(
     new URL('../gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/extension.js', import.meta.url),
     'utf8',
 );
+const authorizationSource = readFileSync(
+    new URL('../gnome-extension/wayexpand-window-tracker@cyberducttape.github.io/notification-queue.js', import.meta.url),
+    'utf8',
+);
 
-test('subscription is limited to the current user and WayExpand executables', () => {
+test('subscription requires the current user and an installed executable path', () => {
     assert.equal(isAuthorizedTrackerClient(1000, 1000, '/usr/bin/wayexpand-daemon'), true);
-    assert.equal(isAuthorizedTrackerClient(1000, 1000, '/usr/libexec/wayexpand-ibus'), true);
+    assert.equal(isAuthorizedTrackerClient(1000, 1000, '/usr/libexec/wayexpand/wayexpand-ibus'), true);
     // GJS exposes get_user_id() as a string; D-Bus uint32 unpacks as number.
     assert.equal(isAuthorizedTrackerClient(1000, '1000', '/usr/bin/wayexpand-daemon'), true);
     assert.equal(isAuthorizedTrackerClient('1000', 1000, '/usr/bin/wayexpand-daemon'), true);
-    assert.equal(isAuthorizedTrackerClient(1000, 1000, '/opt/wayexpand/wayexpand'), true);
+    assert.equal(isAuthorizedTrackerClient(1000, 1000,
+        '/home/alice/.local/lib/wayexpand/1.2.3-abc123/bin/wayexpand', '/home/alice'), true);
+    assert.equal(isAuthorizedTrackerClient(1000, 1000, '/tmp/wayexpand'), false);
+    assert.equal(isAuthorizedTrackerClient(1000, 1000, '/tmp/wx-e2e-gnome-tracker'), false);
+    assert.doesNotMatch(authorizationSource, /wx-e2e-gnome-tracker/);
+    assert.equal(isAuthorizedTrackerClient(1000, 1000, '/opt/wayexpand/wayexpand'), false);
+    assert.equal(isAuthorizedTrackerClient(1000, 1000,
+        '/home/alice/.local/bin/wayexpand', '/home/alice'), false);
+    assert.equal(isAuthorizedTrackerClient(1000, 1000,
+        '/home/alice/.local/lib/wayexpand/../other/bin/wayexpand', '/home/alice'), false);
+    const testClient = '/tmp/wx-e2e-gnome-tracker';
+    assert.equal(isAuthorizedTrackerClient(1000, 1000, testClient, null, testClient), true);
+    assert.equal(isAuthorizedTrackerClient(1000, 1000, '/tmp/other', null, testClient), false);
     assert.equal(isAuthorizedTrackerClient(1001, 1000, '/usr/bin/wayexpand'), false);
     assert.equal(isAuthorizedTrackerClient('01000', 1000, '/usr/bin/wayexpand-daemon'), false);
     assert.equal(isAuthorizedTrackerClient('unknown', 1000, '/usr/bin/wayexpand-daemon'), false);

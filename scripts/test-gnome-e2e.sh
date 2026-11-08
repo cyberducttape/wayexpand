@@ -99,6 +99,39 @@ set -eu
 browser_bin=${E2E_BROWSER_BIN:?E2E_BROWSER_BIN must identify the browser executable}
 display=wayexpand-gnome-e2e
 log() { printf '%s\n' "$*"; }
+diagnose_ibus_session() {
+    diagnostic=$1
+    {
+        printf 'IBUS_COMPONENT_PATH=%s\n' "${IBUS_COMPONENT_PATH:-unset}"
+        printf '%s\n' 'Temporary component entries:'
+        find "$E2E_WORK/component" -maxdepth 1 -type f -ls 2>&1 || true
+        if [ -f "$E2E_WORK/component/wayexpand.xml" ]; then
+            printf '%s\n' 'Temporary component XML:'
+            cat "$E2E_WORK/component/wayexpand.xml"
+        fi
+        printf '%s\n' 'System component entry:'
+        if [ -f /usr/share/ibus/component/wayexpand.xml ]; then
+            ls -l /usr/share/ibus/component/wayexpand.xml
+            cat /usr/share/ibus/component/wayexpand.xml
+        else
+            printf '%s\n' 'not installed'
+        fi
+        printf '%s\n' 'IBus address:'
+        ibus address 2>&1 || true
+        printf '%s\n' 'IBus engine registration:'
+        ibus list-engine --name-only 2>&1 | grep -Fx wayexpand || true
+        printf '%s\n' 'IBus current engine:'
+        ibus engine 2>&1 || true
+        printf '%s\n' 'GNOME input-source settings:'
+        gsettings get org.gnome.desktop.input-sources sources 2>&1 || true
+        printf '%s\n' 'IBus daemon PIDs and component/session environment:'
+        for pid in $(pgrep -x ibus-daemon 2>/dev/null || true); do
+            printf 'pid=%s comm=%s\n' "$pid" "$(cat "/proc/$pid/comm" 2>/dev/null || true)"
+            tr '\0' '\n' <"/proc/$pid/environ" 2>/dev/null \
+                | grep -E '^(IBUS_COMPONENT_PATH|HOME|XDG_RUNTIME_DIR|DBUS_SESSION_BUS_ADDRESS)=' || true
+        done
+    } >"$diagnostic" 2>&1
+}
 if [ "$HOME" != "$E2E_WORK/home" ] \
     || [ "$XDG_CONFIG_HOME" != "$E2E_WORK/config" ] \
     || [ "$XDG_DATA_HOME" != "$HOME/.local/share" ]; then
@@ -190,7 +223,7 @@ activate_window() {
     tries=100
     activate_error="$E2E_WORK/activate-window.err"
     while :; do
-        if gdbus call --session --dest org.gnome.Shell \
+        if gdbus call --timeout 5 --session --dest org.gnome.Shell \
             --object-path /org/wayexpand/GnomeE2eFocusController \
             --method org.wayexpand.GnomeE2eFocusController.ActivateWindow "$1" \
             >/dev/null 2>"$activate_error"; then
@@ -250,8 +283,10 @@ while :; do
     fi
     tries=$((tries - 1))
     if [ "$tries" -le 0 ] || ! kill -0 "$shell_pid" 2>/dev/null; then
+        diagnose_ibus_session "$E2E_WORK/ibus-registration-diagnostics.txt"
         log "fail ibus-engine-registered GNOME's session IBus registry did not load WayExpand"
         cat "$E2E_WORK/ibus-engines.txt"
+        cat "$E2E_WORK/ibus-registration-diagnostics.txt"
         exit 1
     fi
     sleep 0.1
@@ -265,7 +300,7 @@ assert_tracker_method_denied() {
     method=$2
     shift 2
     output="$E2E_WORK/$label.log"
-    if gdbus call --session --dest org.gnome.Shell \
+    if gdbus call --timeout 5 --session --dest org.gnome.Shell \
         --object-path /org/wayexpand/ShellWindowTracker \
         --method "org.wayexpand.ShellWindowTracker1.$method" "$@" \
         >"$output" 2>&1; then
@@ -285,7 +320,7 @@ assert_tracker_method_denied unauthorized-keyboard-layout-query GetActiveKeyboar
 assert_tracker_method_denied unauthorized-input-source-activation ActivateInputSource xkb de
 
 # Confirm Shell loaded the bundled build before simulating an on-disk update.
-live_build=$(gdbus call --session --dest org.gnome.Shell \
+live_build=$(gdbus call --timeout 5 --session --dest org.gnome.Shell \
     --object-path /org/wayexpand/ShellWindowTracker \
     --method org.freedesktop.DBus.Properties.Get \
     org.wayexpand.ShellWindowTracker1 BuildIdentity)
@@ -684,8 +719,10 @@ for layout in de fr; do
         >"$E2E_WORK/layout-$layout-ibus-activation.log" 2>&1; do
         activation_tries=$((activation_tries - 1))
         if [ "$activation_tries" -le 0 ]; then
+            diagnostic="$E2E_WORK/layout-$layout-ibus-state.txt"
+            diagnose_ibus_session "$diagnostic"
             log "fail gnome-layout-$layout GNOME did not restore WayExpand after a layout switch"
-            cat "$E2E_WORK/layout-$layout-ibus-activation.log"
+            cat "$E2E_WORK/layout-$layout-ibus-activation.log" "$diagnostic"
             exit 1
         fi
         sleep 0.1
@@ -974,7 +1011,7 @@ if [ "$tries" -gt 0 ]; then
     live_build=
     build_tries=100
     while [ "$build_tries" -gt 0 ]; do
-        live_build=$(gdbus call --session --dest org.gnome.Shell \
+        live_build=$(gdbus call --timeout 5 --session --dest org.gnome.Shell \
             --object-path /org/wayexpand/ShellWindowTracker \
             --method org.freedesktop.DBus.Properties.Get \
             org.wayexpand.ShellWindowTracker1 BuildIdentity 2>/dev/null || true)
@@ -1135,6 +1172,7 @@ env -i \
     XDG_CURRENT_DESKTOP=GNOME \
     XDG_SESSION_TYPE=wayland \
     WAYEXPAND_GNOME_AUTH_DIAGNOSTICS=1 \
+    WAYEXPAND_GNOME_TEST_CLIENT="$bin_dir/wx-e2e-gnome-tracker" \
     E2E_WORK="$work" \
     E2E_BIN_DIR="$bin_dir" \
     E2E_BROWSER_BIN="$browser_bin" \
@@ -1170,9 +1208,11 @@ if [ "$status" -ne 0 ] || grep -q '^fail' "$work/results.txt" \
     failure=$(printf '%s' "$failure" | sed 's/%/%25/g; s/\r/%0D/g; s/\n/%0A/g')
     printf '::error title=GNOME window tracking E2E::%s\n' "$failure" >&2
     for log in session.log gnome-shell.log gnome-shell-after-login.log ibus-daemon.log ibus-engines.txt \
+        ibus-registration-diagnostics.txt \
         ibus-before-live-activation.json ibus-before-live-activation.err \
         ibus-after-input-context.json ibus-after-input-context.err \
-        ibus-source-activation-after-login.log \
+        ibus-source-activation-after-login.log layout-de-ibus-state.txt \
+        layout-fr-ibus-state.txt \
         browser-ibus-e2e.log browser-ibus-e2e-chrome.log \
         unauthorized-tracker-subscription.log \
         doctor-after-extension-upgrade.json \

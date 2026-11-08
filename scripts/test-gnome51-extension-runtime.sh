@@ -122,7 +122,7 @@ assert "51" in metadata["shell-version"], "metadata omits GNOME 51"
 print(metadata["x-wayexpand-build-id"])
 PY
 )
-    live=$(gdbus call --session --dest org.gnome.Shell \
+    live=$(gdbus call --timeout 5 --session --dest org.gnome.Shell \
         --object-path /org/wayexpand/ShellWindowTracker \
         --method org.freedesktop.DBus.Properties.Get \
         org.wayexpand.ShellWindowTracker1 BuildIdentity)
@@ -167,5 +167,6 @@ PY
     esac
 EOF
 chmod 0600 "$work/session.sh"
+export WAYEXPAND_GNOME_TEST_CLIENT="$tracker_bin"
 dbus-run-session -- sh "$work/session.sh" "$uuid" "$work" \
     "$WAYLAND_DISPLAY" "$project_dir" "$tracker_bin"

@@ -11,13 +11,18 @@ on:
         description: "Optional ref to check out for release verification"
         required: false
         type: string
+  workflow_dispatch:
+  schedule:
+    - cron: '17 3 * * *'
 
 permissions:
   contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Let active release-blocking integration runs finish when a developer pushes
+  # a follow-up. GitHub retains only the newest pending run for this group.
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -143,8 +148,6 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config
-      - name: Generate vendored dependencies (offline builds)
-        run: mkdir -p .cargo && cargo vendor vendor/ > .cargo/config.toml && echo "vendor/" >> .gitignore
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Run tests (locked, debug)
@@ -154,12 +157,15 @@ jobs:
       - name: Action Broker end-to-end test
         run: bash scripts/test-action-broker-e2e.sh
       - name: Run tests (locked, release)
+        if: github.event_name != 'pull_request'
         run: cargo test --locked --release --workspace
       - name: Clippy (locked, debug)
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - name: Clippy (locked, release)
+        if: github.event_name != 'pull_request'
         run: cargo clippy --locked --release --workspace --all-targets -- -D warnings
       - name: Measure adversarial matcher construction (10k snippets)
+        if: github.event_name != 'pull_request'
         run: |
           cargo bench --locked -p wayexpand-core --bench matcher --no-run
           bench_binary=$(find target/release/deps -maxdepth 1 -type f -perm -111 \
@@ -170,6 +176,7 @@ jobs:
             "$bench_binary" --bench matcher_construction_amplified/10000 \
             --sample-size 10 --warm-up-time 1 --measurement-time 2
       - name: Verify warmed ASCII input allocates nothing
+        if: github.event_name != 'pull_request'
         run: |
           timeout --signal=TERM --kill-after=10s 90s \
             cargo run --locked --release -p wayexpand-core --example input_path_allocations
@@ -179,9 +186,12 @@ jobs:
         run: timeout --signal=TERM --kill-after=30s 2m cargo run --locked -q -p wayexpand-ui -- --help
       - name: GUI help output
         run: timeout --signal=TERM --kill-after=30s 2m cargo run --locked -q -p wayexpand-gui -- --help
+      - name: Verify Rust validation left the source checkout clean
+        run: test -z "$(git status --porcelain=v1 --untracked-files=all)"
 
   rust-concurrency:
     name: Concurrent Rust stress (${{ matrix.package }})
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
@@ -228,6 +238,7 @@ jobs:
 
   concurrency-fault-regressions:
     name: Seeded concurrency and fault regressions
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -245,6 +256,7 @@ jobs:
 
   daemon-soak:
     name: Daemon soak (3 min)
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -277,6 +289,11 @@ jobs:
           name: daemon-soak-${{ github.sha }}
           path: ${{ runner.temp }}/wayexpand-soak
           if-no-files-found: warn
+
+  # A pull-request push must not cancel a running release-blocking desktop
+  # run. The workflow concurrency group retains one active and the newest
+  # pending revision; the long stress lane runs on push, schedule, and manual
+  # dispatch, while all functional GNOME checks remain required on PRs.
 
   msrv:
     name: MSRV (Rust 1.92)
@@ -475,8 +492,6 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/wayexpand-ansible"
           "$RUNNER_TEMP/wayexpand-ansible/bin/pip" install --disable-pip-version-check ansible-core==2.21.5
           echo "$RUNNER_TEMP/wayexpand-ansible/bin" >> "$GITHUB_PATH"
-      - name: Generate vendored dependencies (offline builds)
-        run: mkdir -p .cargo && cargo vendor vendor/ > .cargo/config.toml && echo "vendor/" >> .gitignore
       - name: Build binaries
         run: cargo build --locked --workspace
       - name: Ansible role syntax and idempotence regression
@@ -778,11 +793,12 @@ jobs:
           cargo --version
       - name: Vendor dependencies for offline package builds
         run: |
-          # Never reuse an ignored vendor tree: stale crates can make frozen
-          # RPM builds resolve against a version that is absent from Cargo.lock.
-          rm -rf .cargo vendor
-          mkdir -p .cargo
-          cargo vendor vendor/ > .cargo/config.toml
+          # Keep generated Cargo config and vendor files outside the source
+          # checkout so build identity remains clean and reproducible.
+          cargo_home="$RUNNER_TEMP/wayexpand-cargo-home"
+          mkdir -p "$cargo_home"
+          CARGO_HOME="$cargo_home" cargo vendor --locked "$cargo_home/vendor" > "$cargo_home/config.toml"
+          echo "CARGO_HOME=$cargo_home" >> "$GITHUB_ENV"
       - name: Build Debian package
         run: |
           # The pinned rust-toolchain supplies rustc/cargo; -d bypasses the
@@ -822,7 +838,13 @@ jobs:
           source_commit=$(git rev-parse --short=12 HEAD)
           mkdir -p "$source_dir/debian"
           printf '%s\n' "$source_commit" > "$source_dir/debian/wayexpand-build-sha"
-          cp -a .cargo vendor "$source_dir/"
+          mkdir -p "$source_dir/.cargo"
+          # The source archive must remain relocatable; Cargo's generated
+          # config names the external vendor directory with an absolute path.
+          sed "s|directory = \"$CARGO_HOME/vendor\"|directory = \"vendor\"|" \
+            "$CARGO_HOME/config.toml" > "$source_dir/.cargo/config.toml"
+          grep -F 'directory = "vendor"' "$source_dir/.cargo/config.toml"
+          cp -a "$CARGO_HOME/vendor" "$source_dir/vendor"
           tar -C "$top/sources" -czf "$top/rpmbuild/SOURCES/wayexpand-${version}-vendored.tar.gz" \
             "wayexpand-${version}"
           rm -rf "$top/sources"

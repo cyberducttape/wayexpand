@@ -1,17 +1,22 @@
 // Bounded latest-only delivery for window tracker notifications. Kept free of
 // GNOME imports so the queue behavior can be stress-tested with Node.js.
-const WAYEXPAND_CLIENTS = new Set([
-    'wayexpand',
-    'wayexpand-daemon',
-    // IBus owns a separate engine process that needs authenticated GNOME
-    // input-source and keyboard-layout state for its focused input context.
-    'wayexpand-ibus',
-    // This binary is built only for the isolated headless GNOME E2E test.
-    'wx-e2e-gnome-tracker',
+const SYSTEM_WAYEXPAND_CLIENTS = new Set([
+    '/usr/bin/wayexpand', '/usr/bin/wayexpand-daemon', '/usr/bin/wayexpand-ibus',
+    '/usr/local/bin/wayexpand', '/usr/local/bin/wayexpand-daemon',
+    '/usr/local/bin/wayexpand-ibus',
+    '/usr/libexec/wayexpand/wayexpand-ibus',
+    '/usr/local/libexec/wayexpand/wayexpand-ibus',
 ]);
 
-/** Session-bus peer check; same-UID processes are still one trust domain. */
-export function isAuthorizedTrackerClient(peerUid, currentUid, executablePath) {
+/**
+ * Session-bus peer check; same-UID processes remain one trust domain. Match
+ * the resolved executable path, not its basename: a program named `wayexpand`
+ * in /tmp is not an installed WayExpand client. User installs are accepted
+ * only from the installer's versioned payload directory. This narrows the
+ * accepted identity but does not isolate malicious processes of the same UID.
+ */
+export function isAuthorizedTrackerClient(peerUid, currentUid, executablePath, homeDirectory = null,
+    isolatedTestClientPath = null) {
     // GetConnectionUnixUser() supplies both peer and Shell UIDs. Compare
     // canonical numeric identities; never fall back to username, process
     // arguments, or executable basename without the UID check.
@@ -25,9 +30,18 @@ export function isAuthorizedTrackerClient(peerUid, currentUid, executablePath) {
     const peer = normalizeUid(peerUid);
     if (peer === null || peer !== normalizeUid(currentUid) || typeof executablePath !== 'string')
         return false;
-    const executable = executablePath.slice(executablePath.lastIndexOf('/') + 1)
-        .replace(/ \(deleted\)$/, '');
-    return WAYEXPAND_CLIENTS.has(executable);
+    const executable = executablePath.replace(/ \(deleted\)$/, '');
+    if (SYSTEM_WAYEXPAND_CLIENTS.has(executable))
+        return true;
+    if (typeof homeDirectory === 'string' && homeDirectory.startsWith('/')
+        && executable.startsWith(`${homeDirectory}/.local/lib/wayexpand/`)) {
+        const relative = executable.slice(`${homeDirectory}/.local/lib/wayexpand/`.length);
+        return /^[^/]+\/bin\/(wayexpand|wayexpand-daemon|wayexpand-ibus)$/.test(relative);
+    }
+    // Only the isolated CI session sets this exact-path exception. No test
+    // executable name or basename is trusted by normal desktop sessions.
+    return typeof isolatedTestClientPath === 'string'
+        && isolatedTestClientPath.startsWith('/') && executable === isolatedTestClientPath;
 }
 
 /** Keep title access scoped to the caller's current request and clear any
