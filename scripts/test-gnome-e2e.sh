@@ -350,9 +350,15 @@ type_gnome_remote_input() {
     focus_marker=$4
     ready_marker=$5
     keycode_probe=${6:-false}
+    ibus_status_path=${7:-}
+    ibus_sequence_baseline=${8:-0}
     set --
     if [ "$keycode_probe" = true ]; then
         set -- --keycode-probe
+    fi
+    if [ -n "$ibus_status_path" ]; then
+        set -- "$@" --ibus-status-path "$ibus_status_path" \
+            --ibus-sequence-baseline "$ibus_sequence_baseline"
     fi
     python3 "$E2E_PROJECT_DIR/scripts/certification-clients/gnome_remote_input.py" \
         --delay-ms 60 --text "$input_text" --app-id "$app_id" \
@@ -588,8 +594,29 @@ run_gtk_ibus_case() {
     test_log="$E2E_WORK/gtk-ibus-e2e-$case_name.log"
     engine_log="$E2E_WORK/ibus-engine-$case_name.txt"
     status_file="$XDG_RUNTIME_DIR/wayexpand-ibus-status.json"
+    ibus_status_path=
+    ibus_sequence_baseline=0
+    if [ "$im_mode" = ibus ]; then
+        ibus_status_path="$status_file"
+        ibus_sequence_baseline=$(python3 - "$status_file" <<'PY'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as source:
+        status = json.load(source)
+    fields = status.get("recent_fields") or []
+    print(max((int(field.get("sequence", 0)) for field in fields), default=0))
+except (OSError, ValueError, TypeError):
+    print(0)
+PY
+)
+    fi
     printf 'before_gtk=' >"$engine_log"
     ibus engine >>"$engine_log" 2>&1 || true
+    if [ -f "$status_file" ]; then
+        cp "$status_file" "$E2E_WORK/ibus-context-before-$case_name.json"
+    fi
     set --
     if [ "$password" = true ]; then
         set -- --password
@@ -617,16 +644,14 @@ run_gtk_ibus_case() {
             --gtk-version "$gtk_version" --im-mode ibus --expected "$expected" "$@" >"$test_log" 2>&1 &
     fi
     gtk_pid=$!
-    if [ -f "$status_file" ]; then
-        cp "$status_file" "$E2E_WORK/ibus-context-before-$case_name.json"
-    fi
     input_status=0
     keycode_probe=false
     if [ "$case_name" = wayland-baseline ]; then
         keycode_probe=true
     fi
     type_gnome_remote_input "$case_name" "$trigger" "$app_id" \
-        "$marker" "$ready_marker" "$keycode_probe" || input_status=$?
+        "$marker" "$ready_marker" "$keycode_probe" \
+        "$ibus_status_path" "$ibus_sequence_baseline" || input_status=$?
     if [ "$input_status" -ne 0 ]; then
         if [ -f "$status_file" ]; then
             cp "$status_file" "$E2E_WORK/ibus-context-after-$case_name.json"
@@ -634,9 +659,13 @@ run_gtk_ibus_case() {
         kill "$gtk_pid" 2>/dev/null || true
         wait "$gtk_pid" 2>/dev/null || true
         gtk_pid=
-        if grep -F 'GTK did not confirm stable active input focus' \
+        if grep -F 'did not confirm a stable focused input context' \
             "$E2E_WORK/mutter-input-$case_name.err" >/dev/null; then
-            log "fail gnome-gtk-$case_name GTK never acquired active keyboard focus; no test input was sent"
+            if [ "$im_mode" = ibus ]; then
+                log "fail gnome-gtk-$case_name GTK focus or the new IBus context was not confirmed; no test input was sent"
+            else
+                log "fail gnome-gtk-$case_name GTK never acquired active keyboard focus; no test input was sent"
+            fi
             cat "$test_log" "$E2E_WORK/mutter-input-$case_name.err"
         elif [ "$case_name" = wayland-baseline ]; then
             log "fail gnome-gtk-$case_name Mutter RemoteDesktop could not send a key to the focused GTK window"

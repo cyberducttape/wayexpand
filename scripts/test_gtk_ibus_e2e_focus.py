@@ -2,6 +2,7 @@
 """Regression tests for GTK IBus acceptance focus readiness."""
 
 import importlib.util
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -558,6 +559,17 @@ class MutterRemoteInputTests(unittest.TestCase):
         self.assertLess(publish, click)
         self.assertLess(click, wait)
 
+    def test_ibus_test_captures_sequence_baseline_before_launch_and_passes_status(self):
+        source = GNOME_ACCEPTANCE_SCRIPT.read_text(encoding="utf-8")
+        start = source.index("run_gtk_ibus_case() {")
+        end = source.index("run_terminal_x11_baseline() {")
+        case = source[start:end]
+        self.assertLess(
+            case.index('ibus_sequence_baseline=$(python3 - "$status_file"'),
+            case.index("gtk_pid=$!"),
+        )
+        self.assertIn('"$ibus_status_path" "$ibus_sequence_baseline"', case)
+
     def test_gtk_readiness_reissues_shell_activation_until_stable(self):
         times = [0.0, 0.0, 0.0, 0.26, 0.26]
         with (
@@ -572,6 +584,59 @@ class MutterRemoteInputTests(unittest.TestCase):
                 )
             )
         self.assertEqual(activate.call_count, 2)
+
+    def test_ibus_readiness_requires_a_newest_focused_context(self):
+        report = {
+            "activity": {
+                "recent_fields": [
+                    {"sequence": 8, "focused": False},
+                    {"sequence": 9, "focused": True},
+                ]
+            }
+        }
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8") as status_file:
+            json.dump(report["activity"], status_file)
+            status_file.flush()
+            self.assertTrue(
+                REMOTE_INPUT.latest_focused_ibus_context(status_file.name, 8)
+            )
+            self.assertFalse(
+                REMOTE_INPUT.latest_focused_ibus_context(status_file.name, 9)
+            )
+
+    def test_ibus_readiness_rejects_stale_or_unfocused_context(self):
+        report = {"recent_fields": [{"sequence": 9, "focused": False}]}
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8") as status_file:
+            json.dump(report, status_file)
+            status_file.flush()
+            self.assertFalse(
+                REMOTE_INPUT.latest_focused_ibus_context(status_file.name, 8)
+            )
+
+    def test_readiness_waits_for_ibus_focus_after_gtk_focus(self):
+        times = [0.0, 0.0, 0.0, 0.26, 0.26, 0.28, 0.28]
+        with tempfile.NamedTemporaryFile(mode="w+", encoding="utf-8") as status_file:
+            json.dump({"recent_fields": [{"sequence": 9, "focused": False}]}, status_file)
+            status_file.flush()
+
+            def focus_ibus_context(_seconds):
+                status_file.seek(0)
+                status_file.truncate()
+                json.dump({"recent_fields": [{"sequence": 9, "focused": True}]}, status_file)
+                status_file.flush()
+
+            with (
+                mock.patch.object(REMOTE_INPUT.time, "monotonic", side_effect=times),
+                mock.patch.object(REMOTE_INPUT.time, "sleep", side_effect=focus_ibus_context),
+                mock.patch.object(REMOTE_INPUT.os.path, "isfile", return_value=True),
+                mock.patch.object(REMOTE_INPUT, "activate_test_window"),
+            ):
+                self.assertTrue(
+                    REMOTE_INPUT.wait_for_gtk_input_ready(
+                        object(), "org.example.Test", "/tmp/ready", 13.0,
+                        status_file.name, 8,
+                    )
+                )
 
     def test_shell_focus_controller_reports_mapped_window_geometry(self):
         source = FOCUS_CONTROLLER_SCRIPT.read_text(encoding="utf-8")

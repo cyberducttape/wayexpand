@@ -8,6 +8,7 @@ log the test text.
 """
 
 import argparse
+import json
 import os
 import sys
 import time
@@ -237,10 +238,35 @@ def publish_focus_confirmation(path):
         os.close(descriptor)
 
 
-def wait_for_gtk_input_ready(bus, app_id, path, timeout_seconds):
+def latest_focused_ibus_context(status_path, sequence_baseline):
+    """Require a newly focused IBus context before input is sent."""
+    try:
+        with open(status_path, encoding="utf-8") as source:
+            status = json.load(source)
+        fields = status.get("recent_fields") or []
+        newest = max(fields, key=lambda field: int(field.get("sequence", 0)), default=None)
+        return bool(
+            newest
+            and int(newest.get("sequence", 0)) > sequence_baseline
+            and newest.get("focused") is True
+        )
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return False
+
+
+def wait_for_gtk_input_ready(
+    bus,
+    app_id,
+    path,
+    timeout_seconds,
+    ibus_status_path=None,
+    ibus_sequence_baseline=0,
+):
     deadline = time.monotonic() + timeout_seconds
     ready_since = None
     next_activation_at = 0.0
+    next_ibus_probe_at = 0.0
+    ibus_context_ready = ibus_status_path is None
     while time.monotonic() < deadline:
         now = time.monotonic()
         if now >= next_activation_at:
@@ -253,7 +279,13 @@ def wait_for_gtk_input_ready(bus, app_id, path, timeout_seconds):
             if ready_since is None:
                 ready_since = now
             elif now - ready_since >= 0.25:
-                return True
+                if ibus_context_ready:
+                    return True
+                if now >= next_ibus_probe_at:
+                    ibus_context_ready = latest_focused_ibus_context(
+                        ibus_status_path, ibus_sequence_baseline
+                    )
+                    next_ibus_probe_at = now + 0.1
         else:
             ready_since = None
         time.sleep(0.02)
@@ -267,6 +299,8 @@ def main():
     parser.add_argument("--app-id", required=True)
     parser.add_argument("--focus-marker", required=True)
     parser.add_argument("--ready-marker", required=True)
+    parser.add_argument("--ibus-status-path")
+    parser.add_argument("--ibus-sequence-baseline", type=int, default=0)
     parser.add_argument(
         "--keycode-probe",
         action="store_true",
@@ -324,10 +358,16 @@ def main():
         publish_focus_confirmation(args.focus_marker)
         click_test_field(bus, session_path, window_rect)
         if not wait_for_gtk_input_ready(
-            bus, args.app_id, args.ready_marker, 13.0
+            bus,
+            args.app_id,
+            args.ready_marker,
+            13.0,
+            args.ibus_status_path,
+            args.ibus_sequence_baseline,
         ):
             raise RuntimeError(
-                "GTK did not confirm stable active input focus; test text was not sent"
+                "GTK or IBus did not confirm a stable focused input context; "
+                "test text was not sent"
             )
         send_text(
             bus,
