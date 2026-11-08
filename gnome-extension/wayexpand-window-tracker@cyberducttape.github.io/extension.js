@@ -27,6 +27,8 @@ import {
     keyboardLayoutSettings,
 } from './keyboard-compat.js';
 import {
+    CancellableSources,
+    clearTitleWatch,
     isAuthorizedTrackerClient,
     LatestOnlyDelivery,
     setTitleAccess,
@@ -119,6 +121,10 @@ export default class WayExpandWindowTracker extends Extension {
         this._focused = null;
         this._notifySource = 0;
         this._latestNotification = null;
+        this._titleWindow = null;
+        this._titleChangedId = 0;
+        this._activationSources = new CancellableSources(sourceId => GLib.source_remove(sourceId));
+        this._activationCalls = new Set();
         this._exported = Gio.DBusExportedObject.wrapJSObject(TRACKER_IFACE, this);
         this._exported.export(Gio.DBus.session, TRACKER_PATH);
         this._focusChangedId = global.display.connect('notify::focus-window',
@@ -127,6 +133,15 @@ export default class WayExpandWindowTracker extends Extension {
     }
 
     disable() {
+        this._activationSources.cancelAll();
+        for (const invocation of this._activationCalls) {
+            invocation.return_dbus_error(
+                'org.wayexpand.ShellWindowTracker1.Error.Unavailable',
+                'the GNOME window tracker was disabled during input-source activation',
+            );
+        }
+        this._activationCalls.clear();
+        this._clearTitleWatch();
         global.display.disconnect(this._focusChangedId);
         this._focusChangedId = 0;
         if (this._notifySource) {
@@ -248,7 +263,12 @@ export default class WayExpandWindowTracker extends Extension {
         // receive IBus source registrations asynchronously, so wait briefly
         // for the requested source rather than reporting a false unavailable.
         let attempts = 0;
+        const sources = this._activationSources;
+        const generation = sources.generation;
+        this._activationCalls.add(invocation);
         const finish = result => {
+            if (!this._activationCalls.delete(invocation))
+                return;
             if (!result.error) {
                 const active = result.source;
                 invocation.return_value(new GLib.Variant('(ss)', [active.type, active.id]));
@@ -272,6 +292,8 @@ export default class WayExpandWindowTracker extends Extension {
             );
         };
         const activate = () => {
+            if (!sources.isCurrent(generation))
+                return;
             const refreshIfMissing = attempts % 5 === 0;
             const result = activateSource(Keyboard, kind, id, refreshIfMissing);
             const pending = result.error === 'source-pending'
@@ -283,10 +305,15 @@ export default class WayExpandWindowTracker extends Extension {
                 return;
             }
             attempts++;
-            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
+            let sourceId = 0;
+            sourceId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
+                sources.forget(sourceId);
+                if (!sources.isCurrent(generation))
+                    return GLib.SOURCE_REMOVE;
                 activate();
                 return GLib.SOURCE_REMOVE;
             });
+            sources.add(sourceId);
         };
         activate();
     }
@@ -521,17 +548,17 @@ export default class WayExpandWindowTracker extends Extension {
         const target = shouldWatch ? window : null;
         if (this._titleWindow === target && (!target || this._titleChangedId))
             return;
-        if (this._titleWindow && this._titleChangedId) {
-            try {
-                this._titleWindow.disconnect(this._titleChangedId);
-            } catch {
-                // The window was already destroyed with its handlers.
-            }
-        }
+        this._clearTitleWatch();
         this._titleWindow = target;
         this._titleChangedId = target
             ? target.connect('notify::title', () => this._notify())
             : 0;
+    }
+
+    _clearTitleWatch() {
+        const cleared = clearTitleWatch(this._titleWindow, this._titleChangedId);
+        this._titleWindow = cleared.window;
+        this._titleChangedId = cleared.signalId;
     }
 
     _notify() {

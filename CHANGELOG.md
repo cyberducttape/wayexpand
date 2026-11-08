@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Disconnect GNOME window-title notifications when the extension is disabled.
+  Track input-source activation retry sources and cancel pending calls during
+  teardown so stale retries cannot reactivate an input source.
 - Preserve partially typed IBus triggers when Shift or an alternate-level
   modifier is pressed between characters, so triggers containing characters
   such as French AZERTY's shifted `2` can still match. Shortcut modifiers still
