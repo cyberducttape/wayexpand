@@ -4357,3 +4357,5 @@ This is the first stable release. WayExpand is now recommended for production us
 - Pass GNOME's private XWayland display, authorization file, and IBus address
   into the xterm acceptance client so terminal scenarios run in the isolated
   desktop session.
+- Teach the pinned Actionlint validator about the Ubuntu 26.04 hosted-runner
+  label used by the GNOME acceptance matrix.
