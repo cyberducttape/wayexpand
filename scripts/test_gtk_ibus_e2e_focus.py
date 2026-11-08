@@ -106,5 +106,33 @@ class InputModeEnvironmentTests(unittest.TestCase):
         )
 
 
+class WidgetInputModuleTests(unittest.TestCase):
+    class FakeWidget:
+        def __init__(self):
+            self.properties = {"im-module": None}
+
+        def set_property(self, name, value):
+            self.properties[name] = value
+
+        def get_property(self, name):
+            return self.properties[name]
+
+    def test_simple_gtk3_control_pins_the_widget_module(self):
+        widget = self.FakeWidget()
+        selected = GTK_E2E.configure_widget_im_module(widget, "3", "simple")
+        self.assertEqual(selected, "gtk-im-context-simple")
+        self.assertEqual(widget.get_property("im-module"), "gtk-im-context-simple")
+
+    def test_ibus_context_keeps_the_desktop_default(self):
+        widget = self.FakeWidget()
+        selected = GTK_E2E.configure_widget_im_module(widget, "3", "ibus")
+        self.assertIsNone(selected)
+        self.assertIsNone(widget.get_property("im-module"))
+
+    def test_gtk4_does_not_read_gtk3_only_widget_property(self):
+        widget = object()
+        self.assertIsNone(GTK_E2E.configure_widget_im_module(widget, "4", "simple"))
+
+
 if __name__ == "__main__":
     unittest.main()

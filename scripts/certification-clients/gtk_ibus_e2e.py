@@ -43,6 +43,15 @@ def input_mode_environment_error(im_mode, environ):
     return None
 
 
+def configure_widget_im_module(widget, gtk_version, im_mode):
+    """Pin the GTK 3 XKB control to its requested module on the widget."""
+    if gtk_version != "3":
+        return None
+    if im_mode == "simple":
+        widget.set_property("im-module", "gtk-im-context-simple")
+    return widget.get_property("im-module")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--expected", required=True)
@@ -82,6 +91,7 @@ def main():
     application_id = os.environ.get("GTK_E2E_APP_ID", DEFAULT_APP_ID)
     window = Gtk.Window(title=f"WayExpand GTK IBus acceptance {application_id}")
     window.set_default_size(500, 80)
+    widget_im_module = None
     if args.gtk_version == "4" and args.password:
         focus_widget = Gtk.PasswordEntry()
 
@@ -96,6 +106,12 @@ def main():
             return text_buffer.get_text(start, end, True)
     else:
         focus_widget = Gtk.Entry()
+        # GtkSettings can carry an input-module choice from the desktop and
+        # override the process environment. Pin the XKB control at the widget
+        # boundary so it cannot attach to IBus through that setting.
+        widget_im_module = configure_widget_im_module(
+            focus_widget, args.gtk_version, args.im_mode
+        )
 
         def current_text():
             return focus_widget.get_text()
@@ -233,6 +249,7 @@ def main():
                 f"version={args.gtk_version} "
                 f"im_mode={args.im_mode} "
                 f"gtk_im_module_setting={gtk_im_module_setting!r} "
+                f"widget_im_module={widget_im_module!r} "
                 f"GTK_IM_MODULE={os.environ.get('GTK_IM_MODULE')!r} "
                 f"XMODIFIERS={os.environ.get('XMODIFIERS')!r} "
                 f"GDK_BACKEND={os.environ.get('GDK_BACKEND')!r}",

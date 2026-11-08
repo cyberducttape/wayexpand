@@ -11,9 +11,10 @@ All notable changes to WayExpand are documented here.
   path for the GTK XKB baseline that the passing X11 terminal baseline uses.
 - Verify XTEST delivery into an IBus-free X11 terminal and then ordinary US
   XKB-to-GTK key delivery through GtkIMContextSimple with a direct synthetic
-  event before WayExpand-specific IBus insertion. Keep that baseline
-  disconnected from the private IBus daemon, and validate separate GTK/XIM
-  environment requirements.
+  event before WayExpand-specific IBus insertion. Pin the GTK 3 baseline
+  widget's IM module because a desktop-level setting can override the process
+  environment. Keep that baseline disconnected from the private IBus daemon,
+  and validate separate GTK/XIM environment requirements.
   Refresh XWayland focus once before the GTK baseline event. Count sanitized
   GDK-to-widget key events and report GTK's effective IM-module, X11 focus,
   active window, XTEST availability, and
