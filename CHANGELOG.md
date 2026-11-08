@@ -4347,3 +4347,5 @@ This is the first stable release. WayExpand is now recommended for production us
 - Focus the field itself with XTEST after Mutter confirms the uniquely named
   GTK/Qt test window. This exercises the application text widget instead of
   relying only on toplevel activation.
+- Exercise GTK 4 password handling with `Gtk.PasswordEntry`, the toolkit's
+  dedicated password widget, while retaining exact focus and text checks.

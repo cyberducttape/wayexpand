@@ -45,7 +45,12 @@ def main():
     application_id = os.environ.get("GTK_E2E_APP_ID", DEFAULT_APP_ID)
     window = Gtk.Window(title=f"WayExpand GTK IBus acceptance {application_id}")
     window.set_default_size(500, 80)
-    if args.gtk_version == "4" and not args.password:
+    if args.gtk_version == "4" and args.password:
+        focus_widget = Gtk.PasswordEntry()
+
+        def current_text():
+            return focus_widget.get_text()
+    elif args.gtk_version == "4":
         focus_widget = Gtk.TextView()
         text_buffer = focus_widget.get_buffer()
 
@@ -58,7 +63,7 @@ def main():
         def current_text():
             return focus_widget.get_text()
 
-    if args.password:
+    if args.password and args.gtk_version == "3":
         focus_widget.set_visibility(False)
         focus_widget.set_input_purpose(Gtk.InputPurpose.PASSWORD)
     if args.gtk_version == "4":
