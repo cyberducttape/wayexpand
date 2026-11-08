@@ -38,6 +38,7 @@ const INPUT_SOURCE_CONTROL_VERSION: u32 = 1;
 const KEYBOARD_LAYOUT_VERSION: u32 = 2;
 const DBUS_CONNECTION_TIMEOUT: Duration = Duration::from_secs(3);
 const DBUS_METHOD_TIMEOUT: Duration = Duration::from_secs(1);
+const DBUS_INPUT_SOURCE_METHOD_TIMEOUT: Duration = Duration::from_secs(5);
 const TRACKER_HEALTH_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 /// GNOME Shell answers D-Bus on its main thread, which can stall under load;
 /// tolerate unanswered checks this long before treating the tracker as lost.
@@ -188,8 +189,14 @@ fn bounded_session_connection(
 }
 
 fn plain_connection() -> Result<Connection, GnomeWindowError> {
+    plain_connection_with_method_timeout(DBUS_METHOD_TIMEOUT)
+}
+
+fn plain_connection_with_method_timeout(
+    method_timeout: Duration,
+) -> Result<Connection, GnomeWindowError> {
     bounded_session_connection(
-        zbus::connection::Builder::session()?.method_timeout(DBUS_METHOD_TIMEOUT),
+        zbus::connection::Builder::session()?.method_timeout(method_timeout),
         DBUS_CONNECTION_TIMEOUT,
     )
 }
@@ -393,7 +400,10 @@ pub fn activate_input_source(kind: &str, id: &str) -> Result<(String, String), G
     if !matches!(kind, "ibus" | "xkb") || id.is_empty() || id.len() > 256 {
         return Err(GnomeWindowError::InputSourceActivationFailed);
     }
-    let connection = plain_connection()?;
+    // GNOME may need to refresh its asynchronous IBus source registry before
+    // acknowledging activation. Give this single user-requested operation a
+    // longer bounded method deadline than ordinary diagnostic calls.
+    let connection = plain_connection_with_method_timeout(DBUS_INPUT_SOURCE_METHOD_TIMEOUT)?;
     let owner = shell_owner(&connection)?;
     input_source_control_version(&connection, &owner)?;
     let reply = connection.call_method(
@@ -902,6 +912,7 @@ mod tests {
     #[test]
     fn bundled_extension_matches_this_tracker() {
         let [(_, metadata), (_, script), (_, queue), (_, keyboard)] = extension_files();
+        let tracker_source = include_str!("lib.rs");
         assert!(metadata.contains(EXTENSION_UUID));
         assert!(script.contains(TRACKER_PATH));
         assert!(script.contains(TRACKER_IFACE));
@@ -922,6 +933,13 @@ mod tests {
         assert!(script.contains("GetActiveInputSourceAsync(_parameters, invocation) {\n        this._withAuthorizedClient(invocation"));
         assert!(script.contains("GetActiveKeyboardLayoutAsync(_parameters, invocation) {\n        this._withAuthorizedClient(invocation"));
         assert!(script.contains("ActivateInputSourceAsync([kind, id], invocation) {\n        this._withAuthorizedClient(invocation"));
+        assert!(script.contains("attempts >= 40"));
+        assert!(script.contains("GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50"));
+        assert!(tracker_source.contains(
+            "const DBUS_INPUT_SOURCE_METHOD_TIMEOUT: Duration = Duration::from_secs(5);"
+        ));
+        assert!(tracker_source
+            .contains("plain_connection_with_method_timeout(DBUS_INPUT_SOURCE_METHOD_TIMEOUT)?"));
         assert!(script.contains(
             "invocation.return_error_literal(Gio.DBusError, Gio.DBusError.ACCESS_DENIED"
         ));

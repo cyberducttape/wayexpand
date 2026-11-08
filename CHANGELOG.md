@@ -4370,3 +4370,6 @@ This is the first stable release. WayExpand is now recommended for production us
 - Wait briefly for GNOME's asynchronously registered IBus source after a
   source-manager refresh, while retaining a bounded failure when it never
   appears.
+- Give the explicit GNOME input-source activation call a bounded five-second
+  D-Bus deadline so the extension's asynchronous IBus registration wait can
+  finish without expiring the caller first.
