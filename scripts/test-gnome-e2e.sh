@@ -651,6 +651,18 @@ run_gtk_ibus_case() {
         cp "$status_file" "$E2E_WORK/ibus-context-before-$case_name.json"
     fi
     if [ "$case_name" = x11-baseline ]; then
+        cp "$E2E_WORK/x11-input-$case_name.txt" \
+            "$E2E_WORK/x11-input-$case_name-before-refresh.txt"
+        focus_refresh_log="$E2E_WORK/x11-focus-refresh-$case_name.txt"
+        if DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \
+            xdotool windowfocus --sync "$test_window_id" \
+            >"$focus_refresh_log" 2>&1; then
+            printf '%s\n' 'explicit X11 focus refresh succeeded' >>"$focus_refresh_log"
+        else
+            printf '%s\n' 'explicit X11 focus refresh failed' >>"$focus_refresh_log"
+        fi
+        sleep 0.1
+        diagnose_x11_input "$case_name"
         input_status=0
         press_x11_key "$case_name" a || input_status=$?
     else
