@@ -17,6 +17,7 @@ import gi
 DEFAULT_APP_ID = "org.wayexpand.GnomeGtkIbus"
 TIMEOUT_MS = 15000
 FOCUS_STABLE_FOR_US = 250_000
+FOCUS_RETRY_INTERVAL_US = 250_000
 
 
 def update_focus_stability(
@@ -46,6 +47,15 @@ def update_readiness_marker(path, ready):
             os.unlink(path)
         except FileNotFoundError:
             pass
+
+
+def focus_request_due(window_active, widget_has_keyboard_focus, now, next_request_at):
+    """Throttle focus requests until GTK and Mutter agree on the target."""
+    if window_active and widget_has_keyboard_focus:
+        return False, next_request_at
+    if next_request_at is None or now >= next_request_at:
+        return True, now + FOCUS_RETRY_INTERVAL_US
+    return False, next_request_at
 
 
 def input_mode_environment_error(im_mode, environ):
@@ -179,7 +189,7 @@ def main():
     gtk_key_events = 0
     gtk_gdk_key_events = 0
     focus_diagnostic_reported = False
-    focus_requested_after_activation = False
+    next_focus_request_at = None
 
     if args.gtk_version == "3" and args.im_mode == "simple":
         # Count key events as GDK first receives them, before GTK routes them
@@ -231,7 +241,7 @@ def main():
 
     def wait_for_expansion():
         nonlocal failed, focused_since, focus_diagnostic_reported
-        nonlocal focus_requested_after_activation
+        nonlocal next_focus_request_at
         if not os.path.exists(focus_marker):
             if GLib.get_monotonic_time() - started_at >= TIMEOUT_MS * 1000:
                 print("Mutter did not activate the GTK acceptance window", file=sys.stderr)
@@ -278,17 +288,22 @@ def main():
             )
             focus_diagnostic_reported = True
         update_readiness_marker(ready_marker, child_focus_stable)
-        if not widget_has_keyboard_focus and not focus_requested_after_activation:
-            # GTK may remember the designated focus child even though the
-            # early grab_focus() happened before Mutter activated the window.
-            # Retry once after compositor confirmation, then wait for GTK's
-            # active and actual-focus state before sending any keys.
+        request_focus, next_focus_request_at = focus_request_due(
+            window_active,
+            widget_has_keyboard_focus,
+            GLib.get_monotonic_time(),
+            next_focus_request_at,
+        )
+        if request_focus:
+            # The compositor can confirm its target before GTK has processed
+            # the corresponding activation. Keep requesting focus at a
+            # bounded cadence while the focus lease is active; the readiness
+            # marker remains closed until GTK confirms stable active focus.
             window.present()
             if args.gtk_version == "4":
                 window.set_focus(focus_widget)
             else:
                 focus_widget.grab_focus()
-            focus_requested_after_activation = True
         actual = current_text()
         if actual == args.expected:
             quit_loop()

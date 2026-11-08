@@ -94,6 +94,28 @@ class FocusReadinessTests(unittest.TestCase):
         self.assertIsNone(since)
         self.assertFalse(ready)
 
+    def test_focus_requests_retry_until_window_and_widget_are_active(self):
+        due, next_request = GTK_E2E.focus_request_due(False, False, 1_000_000, None)
+        self.assertTrue(due)
+        self.assertEqual(next_request, 1_000_000 + GTK_E2E.FOCUS_RETRY_INTERVAL_US)
+
+        due, unchanged = GTK_E2E.focus_request_due(
+            False, False, next_request - 1, next_request
+        )
+        self.assertFalse(due)
+        self.assertEqual(unchanged, next_request)
+
+        due, next_request = GTK_E2E.focus_request_due(
+            False, False, next_request, next_request
+        )
+        self.assertTrue(due)
+        self.assertEqual(next_request, 1_000_000 + 2 * GTK_E2E.FOCUS_RETRY_INTERVAL_US)
+
+    def test_focus_requests_stop_when_window_and_widget_are_active(self):
+        due, next_request = GTK_E2E.focus_request_due(True, True, 2_000_000, None)
+        self.assertFalse(due)
+        self.assertIsNone(next_request)
+
     def test_inactive_toplevel_never_becomes_ready(self):
         since, ready = GTK_E2E.update_focus_stability(
             True, False, True, None, 1_000_000
