@@ -30,6 +30,23 @@ class GnomeAcceptanceShellContractTests(unittest.TestCase):
             source,
         )
 
+    def test_x11_unicode_input_is_validated_and_sent_under_utf8_locale(self):
+        source = GNOME_ACCEPTANCE_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn(
+            'utf8_charmap=$(LC_ALL=C.UTF-8 locale charmap 2>/dev/null || true)',
+            source,
+        )
+        self.assertIn('printf \'%s\' "$input_text" | iconv -f UTF-8 -t UTF-8', source)
+        self.assertIn(
+            'LC_ALL=C.UTF-8 DISPLAY="$x11_display" XAUTHORITY="$xwayland_auth" \\\n'
+            '        xdotool type --clearmodifiers --delay 40 -- "$input_text"',
+            source,
+        )
+        self.assertIn(
+            "run_qt_xim_case unicode-passthrough 'Grüße' 'Grüße' false",
+            source,
+        )
+
 
 class FocusReadinessTests(unittest.TestCase):
     def test_unfocused_widget_never_becomes_ready_after_mutter_activation(self):
