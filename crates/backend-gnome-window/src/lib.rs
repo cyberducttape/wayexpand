@@ -38,7 +38,7 @@ const INPUT_SOURCE_CONTROL_VERSION: u32 = 1;
 const KEYBOARD_LAYOUT_VERSION: u32 = 2;
 const DBUS_CONNECTION_TIMEOUT: Duration = Duration::from_secs(3);
 const DBUS_METHOD_TIMEOUT: Duration = Duration::from_secs(1);
-const DBUS_INPUT_SOURCE_METHOD_TIMEOUT: Duration = Duration::from_secs(5);
+const DBUS_INPUT_SOURCE_METHOD_TIMEOUT: Duration = Duration::from_secs(12);
 const TRACKER_HEALTH_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 /// GNOME Shell answers D-Bus on its main thread, which can stall under load;
 /// tolerate unanswered checks this long before treating the tracker as lost.
@@ -940,7 +940,7 @@ mod tests {
         assert!(script.contains("available sources:"));
         assert!(keyboard.contains("availableSources"));
         assert!(tracker_source.contains(
-            "const DBUS_INPUT_SOURCE_METHOD_TIMEOUT: Duration = Duration::from_secs(5);"
+            "const DBUS_INPUT_SOURCE_METHOD_TIMEOUT: Duration = Duration::from_secs(12);"
         ));
         assert!(tracker_source
             .contains("plain_connection_with_method_timeout(DBUS_INPUT_SOURCE_METHOD_TIMEOUT)?"));
