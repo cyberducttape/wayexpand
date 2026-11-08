@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Register the GNOME acceptance engine through the standard system IBus
+  component directory and validate the generated XML before launching Shell.
+  Keep the zbus-only engine probe supplemental on older IBus stacks; GTK 3/4
+  insertion checks remain mandatory acceptance gates.
 - Bind GNOME Shell tracker authorization to exact resolved executable paths
   instead of trusted basenames, remove the test helper from production's
   trusted-client list, and add negative tests for executable-name spoofing.
