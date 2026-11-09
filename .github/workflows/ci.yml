@@ -39,6 +39,28 @@ env:
   RUST_TEST_THREADS: 1
 
 jobs:
+  change-scope:
+    name: Classify pull request validation scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      integration: ${{ steps.classify.outputs.integration }}
+      kwin: ${{ steps.classify.outputs.kwin }}
+      sway: ${{ steps.classify.outputs.sway }}
+      ibus: ${{ steps.classify.outputs.ibus }}
+      gnome_extension: ${{ steps.classify.outputs.gnome_extension }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
+          fetch-depth: 0
+      - name: Classify changed paths
+        id: classify
+        env:
+          WAYEXPAND_EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+        run: python3 scripts/classify-ci-changes.py "$BASE_SHA"
+
   versions:
     name: Version Consistency Check
     runs-on: ubuntu-latest
@@ -78,6 +100,8 @@ jobs:
 
   aarch64-build:
     name: Native aarch64 build
+    needs: change-scope
+    if: needs.change-scope.outputs.integration == 'true'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     steps:
@@ -109,6 +133,8 @@ jobs:
               rhysd/actionlint@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9 \
               "$workflow_file"
           done < <(find .github/workflows -type f \( -name '*.yml' -o -name '*.yaml' \) -print)
+      - name: Test pull request validation-scope classifier
+        run: python3 scripts/test-ci-change-scope.py
       - name: Validate Launchpad synchronization safety
         run: bash scripts/test-launchpad-sync-workflow.sh
 
@@ -472,6 +498,8 @@ jobs:
 
   integration:
     name: Integration & System Tests
+    needs: change-scope
+    if: needs.change-scope.outputs.integration == 'true'
     runs-on: ubuntu-latest
     # The user-installer test performs a full release build (~8-10 min on a
     # hosted runner); 15 minutes left no headroom and cancelled CI runs.
@@ -538,6 +566,8 @@ jobs:
 
   kwin-e2e:
     name: Headless KWin Output and Focus E2E
+    needs: change-scope
+    if: needs.change-scope.outputs.kwin == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -568,6 +598,8 @@ jobs:
 
   sway-e2e:
     name: Headless Sway Output E2E
+    needs: change-scope
+    if: needs.change-scope.outputs.sway == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -596,6 +628,8 @@ jobs:
 
   ibus-e2e:
     name: Real ibus-daemon Engine E2E
+    needs: change-scope
+    if: needs.change-scope.outputs.ibus == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -624,6 +658,8 @@ jobs:
 
   gnome-e2e:
     name: GNOME IBus Acceptance (${{ matrix.os }}, Headless)
+    needs: change-scope
+    if: needs.change-scope.outputs.ibus == 'true' || needs.change-scope.outputs.gnome_extension == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -672,6 +708,8 @@ jobs:
 
   gnome51-extension-runtime:
     name: GNOME Shell 51 Extension Runtime Compatibility
+    needs: change-scope
+    if: needs.change-scope.outputs.gnome_extension == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     container:
@@ -715,6 +753,8 @@ jobs:
 
   gnome51-ibus-e2e:
     name: GNOME IBus Acceptance (Fedora 45 / GNOME 51, Headless)
+    needs: change-scope
+    if: needs.change-scope.outputs.ibus == 'true' || needs.change-scope.outputs.gnome_extension == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     container:
@@ -788,6 +828,8 @@ jobs:
 
   packaging:
     name: Debian and RPM Package Artifacts
+    needs: change-scope
+    if: needs.change-scope.outputs.integration == 'true'
     # Build Linux packages against Ubuntu 24.04's runtime baseline so the
     # published binaries remain usable on the supported Ubuntu LTS target.
     runs-on: ubuntu-24.04
@@ -918,7 +960,8 @@ jobs:
 
   package-smoke:
     name: Package Install Smoke (${{ matrix.image }})
-    needs: packaging
+    needs: [change-scope, packaging]
+    if: needs.change-scope.outputs.integration == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -962,6 +1005,8 @@ jobs:
 
   systemd:
     name: Systemd Unit Validation
+    needs: change-scope
+    if: needs.change-scope.outputs.integration == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -1014,6 +1059,8 @@ jobs:
 
   udev:
     name: udev Rules Validation
+    needs: change-scope
+    if: needs.change-scope.outputs.integration == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
