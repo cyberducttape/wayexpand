@@ -2075,7 +2075,10 @@ impl GuiApp {
                         .small()
                         .color(palette.warning),
                     );
-                    if ui.small_button("Open Quick Picker (copy and paste)").clicked() {
+                    if ui
+                        .small_button("Open Quick Picker (copy and paste)")
+                        .clicked()
+                    {
                         self.open_copy_only_picker();
                     }
                 }
