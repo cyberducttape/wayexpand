@@ -133,12 +133,12 @@ Run the Unicode document-update benchmark with:
 cargo bench --locked -p wayexpand-backend-ibus --bench surrounding-text
 ```
 
-Each iteration applies one IBus-style cursor update to an adapter using a
-multilingual text buffer. The adapter retains only the 129 Unicode scalars
-before the cursor: the maximum 128-scalar trigger plus a boundary character.
-This bounds the per-context model without changing the IBus scalar-offset
-contract. Unit coverage includes Unicode cursor offsets, selections, invalid
-positions, and local delete/commit updates.
+The harness applies an IBus-style cursor update and processes the next key on
+an adapter using a multilingual text buffer. The adapter retains only the 129
+Unicode scalars before the cursor: the maximum 128-scalar trigger plus a
+boundary character. This bounds the per-context model without changing the
+IBus scalar-offset contract. Unit coverage includes Unicode cursor offsets,
+selections, invalid positions, and local delete/commit updates.
 
 On AMD Ryzen 7 7735U / Linux 7.0.0-42-generic / Rust 1.96.0, one 30-sample
 run before the bounded window and one after measured:
@@ -153,6 +153,31 @@ These are short, machine-specific estimates. Large documents still require a
 scan to translate IBus's scalar cursor offset; the bounded model primarily
 reduces retained and allocated text. This benchmark does not measure D-Bus
 delivery, application response, or event-to-expansion latency.
+
+### Full update and next-key probe: 2026-11-08
+
+The command now runs a focused harness with mixed ASCII and multibyte Unicode
+documents at approximately 128 B, 100 KiB, and 2 MiB. Each sample times
+`SetSurroundingText` model construction plus the next adapter key event and
+reset. It reports p50/p95 across 2,000 samples and allocator-requested bytes
+per update/key pair (including realloc request sizes; this is not peak memory
+or RSS).
+
+On an AMD Ryzen 7 7735U / Ubuntu 26.04.1 / Linux 7.0.0-42-generic / Rust
+1.96.0 run:
+
+| Document | p50 | p95 | Allocated bytes/update + key |
+| ---: | ---: | ---: | ---: |
+| 128 B (small field) | 6.15 µs | 7.61 µs | 1,053 B |
+| 100 KiB | 97.78 µs | 154.70 µs | 645 B |
+| 2 MiB | 1.57 ms | 2.19 ms | 645 B |
+
+Allocation remains bounded for large documents, while latency scales with the
+document because locating the IBus scalar cursor still scans from the start.
+These are local microbenchmark observations, not end-to-end typing latency.
+They exclude D-Bus transport, compositor scheduling, target application
+rendering, and GUI stalls; the harness runs synchronously on its benchmark
+thread.
 
 ### Baseline: 2026-11-07
 
