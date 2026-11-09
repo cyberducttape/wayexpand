@@ -172,20 +172,24 @@ keystrokes saved, and can be collapsed.
 
 ### Quick-insert picker
 
-`wayexpand-gui --picker` opens a small search window. Type to filter your
-enabled snippets (triggers rank above descriptions, and scattered letters
-still match), move with the arrow keys, and press Enter. The window closes and
-the running daemon types the snippet once focus returns to the window that was
-active when the picker opened, under the same pause, password-field, and
-app-filter rules as a typed trigger. If focus does not return within two
-seconds, or returns to a different window, nothing is typed. Command-backed
-snippets are not listed.
+`wayexpand-gui --picker` opens a small search window. Type to filter enabled,
+static snippets that apply globally (triggers rank above descriptions, and
+scattered letters still match), move with the arrow keys, and press Enter.
+App-filtered snippets are available only when the daemon has an atomic route
+and verified target; the daemon applies their filters before insertion. They
+are omitted from copy-only mode because manual paste cannot verify the
+destination application. The window closes and the running daemon types a
+selected snippet once focus returns to the window that was active when the
+picker opened, under the same pause and password-field rules as a typed
+trigger. If focus does not return within two seconds, or returns to a different
+window, nothing is typed. Command-backed snippets are not listed.
 
 Typing requires the daemon to identify the focused window, which currently
 means the KWin window tracker on KDE Plasma. If no daemon is running or the
-window cannot be identified, Enter copies the rendered snippet to the
+window cannot be identified, Enter copies an eligible global snippet to the
 clipboard instead and the window stays open so the clipboard remains
-available; press Esc when done.
+available; press Esc when done. This clipboard path is blocked by an enforced
+organization policy requiring a verified insertion target.
 
 Bind the picker to a desktop shortcut: the `.desktop` entry provides a *Quick
 Insert Snippet* action that KDE Plasma's and GNOME's shortcut settings can use
