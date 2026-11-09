@@ -1,7 +1,7 @@
 //! End-to-end cost of receiving a large IBus surrounding-text update and
-//! processing the next key. Run with `cargo bench -p wayexpand-backend-ibus
-//! --bench surrounding-text`; output contains p50/p95 latency and allocated
-//! bytes per update/key pair.
+//! processing the next key. The harness covers ASCII and multilingual buffers.
+//! Run with `cargo bench -p wayexpand-backend-ibus --bench surrounding-text`;
+//! output contains p50/p95/p99 latency and allocated bytes per update/key pair.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::hint::black_box;
