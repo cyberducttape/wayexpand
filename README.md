@@ -194,8 +194,10 @@ written as `{{{{ … }}}}`. See [Templates](docs/TEMPLATES.md).
   tracking has headless integration coverage but is not yet production-
   certified in a real desktop session. Other desktops fail closed when a
   trustworthy tracker is unavailable.
-- **No compositor is certified yet** by automated end-to-end tests. Run
-  `wayexpand doctor` on your own session before relying on a backend.
+- **No compositor has accepted physical-session production certification.**
+  Headless CI and protocol tests do not establish physical-keyboard or
+  real-session behavior. Run `wayexpand doctor` for local readiness, and
+  consult the support and certification matrices before relying on a backend.
 - **evdev is a last resort.** It observes every keyboard event, including
   password fields, so setup never grants keyboard-device access and
   keystroke routes keep typed expansions off until you allow them with

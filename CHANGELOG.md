@@ -13,6 +13,9 @@ All notable changes to WayExpand are documented here.
   clipboard paste cannot preserve verified application identity. Honor
   enforced policy that requires a verified insert target across clipboard
   fallback paths.
+- State explicitly that no compositor has accepted physical-session
+  production certification; headless CI results are compatibility evidence,
+  not a certified desktop route.
 - Clarify Quick Picker's copy-only flow when verified insertion is unavailable:
   switch to the target app and paste while the picker remains open to serve the
   clipboard. Avoid suggesting that Escape be sent to the target application.
