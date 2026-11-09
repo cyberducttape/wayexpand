@@ -1,7 +1,8 @@
 use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
 use wayexpand_core::{
-    render_template, Config, FormFieldKind, FormFieldValidation, FormValues, TemplateContext,
+    render_template, Config, FormFieldKind, FormFieldValidation, FormValues, SessionContextReport,
+    TemplateContext,
 };
 
 #[test]
@@ -187,6 +188,12 @@ fn curated_operations_packs_validate_command_arguments() {
             ";;kube-pods",
             "field:namespace",
             FormFieldValidation::DnsLabel,
+        ),
+        (
+            &kubernetes,
+            ";;kube-logs",
+            "field:context",
+            FormFieldValidation::SingleLine,
         ),
         (
             &kubernetes,
@@ -423,6 +430,106 @@ fn curated_operations_packs_validate_command_arguments() {
     )
     .expect("validated relative time should render");
     assert!(rendered.contains("--since '1 hour ago'"));
+}
+
+#[test]
+fn kubernetes_logs_use_a_shell_quoted_context_not_an_unvalidated_form() {
+    let config = Config::parse(include_str!(
+        "../../../packs/kubernetes/snippets/kubectl.toml"
+    ))
+    .expect("Kubernetes operations pack should validate");
+    for trigger in [";;kube-pods", ";klogs", ";;kube-events", ";;kube-rollout"] {
+        let command = config
+            .expansion
+            .iter()
+            .find(|expansion| expansion.answers_to(trigger))
+            .unwrap_or_else(|| panic!("missing Kubernetes operation {trigger}"));
+        assert!(
+            command.replacement.starts_with(
+                "kubectl --context {{shellq:context|required|max=256|validate=single-line}} "
+            ),
+            "{trigger} must pin the reported context"
+        );
+    }
+    let expansion = config
+        .expansion
+        .iter()
+        .find(|expansion| expansion.trigger == ";klogs")
+        .expect("the guided Kubernetes logs expansion should exist");
+    let fields = wayexpand_core::form_fields(&expansion.replacement)
+        .expect("Kubernetes logs form should parse");
+    assert_eq!(
+        fields.len(),
+        6,
+        "context plus namespace, pod, container, age, and line count"
+    );
+    let context_field = fields
+        .iter()
+        .find(|field| field.key == "field:context")
+        .expect("Kubernetes context should be an explicit form field");
+    for invalid in ["", "   ", "staging\tprod", "staging\nprod", "staging\u{1b}"] {
+        assert!(
+            context_field.validate_value(invalid).is_err(),
+            "{invalid:?}"
+        );
+    }
+    assert!(context_field.validate_value("staging-west").is_ok());
+
+    let values = fields.iter().map(|field| {
+        let value = match &field.kind {
+            FormFieldKind::Text { default } | FormFieldKind::Date { default } => default.clone(),
+            FormFieldKind::Choice { default, options } => {
+                default.clone().unwrap_or_else(|| options[0].clone())
+            }
+        };
+        let value = if field.key == "field:context" {
+            "staging-west".to_owned()
+        } else {
+            value
+        };
+        (field.key.clone(), value)
+    });
+    let mut template_context = config.template_context(None);
+    template_context.fields = std::sync::Arc::new(values.collect::<FormValues>());
+    template_context.session_context = Some(SessionContextReport {
+        terminal_id: "tty-test".into(),
+        session_id: "0123456789abcdef0123456789abcdef".into(),
+        shell: Some("bash".into()),
+        ..SessionContextReport::default()
+    });
+    let rendered = render_template(&expansion.replacement, &template_context)
+        .expect("a reported Kubernetes context should render");
+    assert!(rendered.starts_with("kubectl --context 'staging-west' logs "));
+    assert!(rendered.contains("--namespace 'default'"));
+
+    let missing_context = TemplateContext {
+        session_context: Some(SessionContextReport {
+            terminal_id: "tty-test".into(),
+            session_id: "0123456789abcdef0123456789abcdef".into(),
+            shell: Some("bash".into()),
+            ..SessionContextReport::default()
+        }),
+        ..config.template_context(None)
+    };
+    assert!(render_template(&expansion.replacement, &missing_context).is_err());
+}
+
+#[test]
+fn developer_git_review_covers_staged_and_unstaged_changes_without_mutation() {
+    let config = Config::parse(include_str!(
+        "../../../packs/developer/snippets/developer.toml"
+    ))
+    .expect("developer workflows pack should validate");
+    let review = config
+        .expansion
+        .iter()
+        .find(|expansion| expansion.trigger == ";;git-review")
+        .expect("developer Git review shortcut should exist");
+    assert!(review.command.is_none());
+    assert_eq!(
+        review.replacement,
+        "git status --short --branch && git diff --check && git diff --cached --check && git diff --stat && git diff --cached --stat"
+    );
 }
 
 #[test]

@@ -27,6 +27,16 @@ All notable changes to WayExpand are documented here.
   that browser and embedded-editor support depends on the client's text
   capability, without weakening replacement checks or attempting synthetic
   typing.
+- Reject conflicting Kubernetes context selections and visibly mark rendered
+  cluster targets as unverified; validate explicit context names and ignore
+  inactive terminal-session reports.
+- Require a validated explicit cluster context in Kubernetes operations-pack
+  commands instead of inheriting `kubectl`'s ambient default. Prefill that
+  field from the opt-in shell report in CLI previews, show the selected target,
+  and support an explicit `--kubernetes-context` override for offline review.
+- Expand the developer pack's `;;git-review` shortcut to inspect branch state,
+  staged and unstaged diff summaries, and whitespace errors without modifying
+  the worktree.
 - Wait for the private IBus daemon to answer registry requests and register
   WayExpand before starting engine-selection checks, avoiding a startup race
   that could report the daemon as unavailable.

@@ -212,13 +212,30 @@ names, `validate=kubernetes-name` for pod names, and
 (for example `15m` or `1h30m`). These checks run in the form and again when
 the daemon renders submitted values.
 
-The Kubernetes `;klogs` form reads the current local `kubectl` context using
-the read-only `kubectl config current-context` command, pre-fills it for
-review, and pins that context in the previewed `kubectl logs` command. If it
-cannot read a context, the context field stays empty and must be filled before
-insertion. The generated command remains text; WayExpand does not execute it.
-Infrastructure-changing operations need a separately authorized action and
-explicit confirmation.
+Kubernetes inspection snippets require an explicit, validated context, so they
+cannot silently inherit a different `kubectl` default. The `;klogs` workflow
+asks for context, namespace, pod, container, duration, and line count. Its CLI
+preview pre-fills the context from the opt-in shell integration when available;
+the context remains editable and visible. For an explicit preview that does not
+need shell integration, supply the context directly:
+
+```sh
+wayexpand context render ';;kube-logs' --shell bash \
+  --kubernetes-context staging-west \
+  --set 'field:namespace=payments' \
+  --set 'field:pod=api-7f8c9d6b4f-2kq' \
+  --set 'field:container=api' \
+  --set 'field:since=15m' \
+  --set 'field:lines=200'
+```
+
+The command prints the exact shell-quoted command and context selected. It
+never invokes `kubectl`; review the target before manually running or pasting
+the command. In ordinary desktop expansion, the form always asks the operator
+to choose the context. The preview labels the target as unverified: a context
+name is not proof that it exists in kubeconfig or points to the intended
+cluster, and WayExpand does not contact Kubernetes. Infrastructure-changing
+operations need a separately authorized action and explicit confirmation.
 
 ```toml
 [[expansion]]
