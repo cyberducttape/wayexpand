@@ -3,7 +3,7 @@
 use super::Args;
 use crate::*;
 
-const SCHEMA_VERSION: u32 = 2;
+const SCHEMA_VERSION: u32 = 3;
 
 fn environment_value(key: &str) -> Option<String> {
     let contents = fs::read_to_string("/etc/os-release").ok()?;
@@ -47,7 +47,7 @@ fn ibus_activation_check(
             ),
             Some("evdev") if terminal_apps_only == Some(true) => check(
                 "pass",
-                "IBus is selected for ordinary IBus clients; the supplemental evdev daemon route is restricted to configured terminal applications",
+                "IBus is selected for ordinary IBus clients; the supplemental evdev matcher expands only in configured terminals, but evdev still observes global keyboard input and has no sensitive-field signal",
             ),
             Some(source) => check(
                 "not_active_route",
@@ -102,13 +102,17 @@ fn active_route_report(daemon: Option<&serde_json::Value>) -> serde_json::Value 
         "state": state,
         "route_available": route_available,
         "terminal_apps_only": terminal_apps_only,
-        "scope": match (source.as_ref().and_then(|value| value.as_str()), terminal_apps_only) {
-            (Some("input-method"), _) => "input_method",
-            (Some("evdev"), Some(true)) => "configured_terminal_apps",
-            (Some("evdev"), Some(false)) => "unrestricted_applications",
-            (Some("evdev"), None) => "unknown",
-            (Some("stdin"), _) => "test_or_control_source",
-            _ => "unknown",
+        "capture_scope": match source.as_ref().and_then(|value| value.as_str()) {
+            Some("evdev") => "global_keyboard_devices",
+            Some("input-method") => "ibus_input_contexts",
+            Some("stdin") => "simulated_stdin_input",
+            Some(_) => "backend_defined",
+            None => "unknown",
+        },
+        "expansion_scope": match terminal_apps_only {
+            Some(true) => "configured_terminal_applications",
+            Some(false) => "not_limited_to_terminal_applications",
+            None => "unknown",
         },
         "matching_available": matching_available,
         "matching_unavailable_reason": field("matching_unavailable_reason"),
@@ -235,8 +239,14 @@ pub(crate) fn compatibility_report(args: Args) -> Result<()> {
             active_route["route_id"].as_str().unwrap_or("unknown")
         );
         println!(
-            "  Scope: {}",
-            active_route["scope"].as_str().unwrap_or("unknown")
+            "  Capture scope: {}",
+            active_route["capture_scope"].as_str().unwrap_or("unknown")
+        );
+        println!(
+            "  Expansion scope: {}",
+            active_route["expansion_scope"]
+                .as_str()
+                .unwrap_or("unknown")
         );
         println!(
             "  Matching: {}",
@@ -279,7 +289,7 @@ pub(crate) fn compatibility_report(args: Args) -> Result<()> {
                 .unwrap_or("unknown")
                 .replace('_', " ")
         );
-        println!("IBus and daemon capture scopes are reported separately.");
+        println!("Capture and expansion scopes are distinct; evdev reads global keyboard input.");
         println!("Full desktop certification incomplete");
     }
     Ok(())
@@ -312,7 +322,11 @@ mod tests {
         assert!(result["evidence"]
             .as_str()
             .unwrap()
-            .contains("restricted to configured terminal applications"));
+            .contains("evdev still observes global keyboard input"));
+        assert!(result["evidence"]
+            .as_str()
+            .unwrap()
+            .contains("has no sensitive-field signal"));
     }
 
     #[test]
@@ -343,7 +357,11 @@ mod tests {
         });
         let report = active_route_report(Some(&daemon));
         assert_eq!(report["operational_status"], "connected_and_matching");
-        assert_eq!(report["scope"], "configured_terminal_apps");
+        assert_eq!(report["capture_scope"], "global_keyboard_devices");
+        assert_eq!(
+            report["expansion_scope"],
+            "configured_terminal_applications"
+        );
         assert_eq!(report["input_privacy"], "no_sensitive_field_signal");
         assert_eq!(report["insertion_atomicity"], "non_atomic");
         assert!(report["operational_evidence_scope"]
