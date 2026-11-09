@@ -6,6 +6,8 @@ All notable changes to WayExpand are documented here.
 
 - Pin CI and compositor-certification checkouts to the immutable workflow SHA
   by default, so queued jobs cannot silently validate a newer PR merge ref.
+- Report which invariant fails when the private KWin timeout contract test
+  breaks, and assert that scenario output existed before the simulated timeout.
 - Pass relative Debian archive paths to APT as local files during package
   smoke tests, rather than letting APT parse them as package release selectors.
 - Use HTTPS Ubuntu archive URLs and bounded APT retries in disposable package
