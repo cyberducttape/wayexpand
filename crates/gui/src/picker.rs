@@ -1119,6 +1119,19 @@ mod tests {
     }
 
     #[test]
+    fn copy_only_mode_respects_enforced_external_verified_target_policy() {
+        let mut config = Config::parse("[organization]\nsafe_mode = false\n").unwrap();
+        let enforced_policy = wayexpand_core::OrganizationPolicy {
+            safe_mode: true,
+            require_verified_insert_target: true,
+            ..wayexpand_core::OrganizationPolicy::default()
+        };
+        config.apply_administrator_policy(&enforced_policy).unwrap();
+
+        assert!(!clipboard_fallback_allowed_by_policy(&config.organization));
+    }
+
+    #[test]
     fn form_snippets_are_hidden_until_picker_form_submission_exists() {
         let expansion = ExpansionConfig {
             id: ExpansionConfig::new_id(),
