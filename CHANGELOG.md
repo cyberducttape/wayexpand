@@ -13,6 +13,8 @@ All notable changes to WayExpand are documented here.
 - Use HTTPS Ubuntu archive URLs and bounded APT retries in disposable package
   and Ansible integration tests, avoiding runner environments that block
   outbound HTTP mirror traffic.
+- Keep the certification workflow contract test aligned with immutable
+  workflow-SHA checkouts.
 - Pin the long-running GNOME Shell 51 extension runtime job to the immutable
   pull request head SHA so an auto-merge cannot remove its checkout ref while
   Fedora dependencies are installing.
