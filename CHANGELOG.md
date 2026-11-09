@@ -9,7 +9,6 @@ All notable changes to WayExpand are documented here.
   for copy-only operation, secret-bearing templates, empty libraries, and
   clipboard handoff without a daemon. Keep the picker alive after copying so
   its Wayland clipboard ownership remains available for manual paste.
-
 - Clarify Quick Picker's copy-only flow when verified insertion is unavailable:
   switch to the target app and paste while the picker remains open to serve the
   clipboard. Avoid suggesting that Escape be sent to the target application.
@@ -19,6 +18,9 @@ All notable changes to WayExpand are documented here.
   that browser and embedded-editor support depends on the client's text
   capability, without weakening replacement checks or attempting synthetic
   typing.
+- Wait for the private IBus daemon to answer registry requests and register
+  WayExpand before starting engine-selection checks, avoiding a startup race
+  that could report the daemon as unavailable.
 - Disconnect GNOME window-title notifications when the extension is disabled.
   Track input-source activation retry sources and cancel pending calls during
   teardown so stale retries cannot reactivate an input source.
