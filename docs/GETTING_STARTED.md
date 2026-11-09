@@ -46,6 +46,14 @@ If no automatic route is available, Quick Picker remains available in
 copy-only mode: choose a snippet, switch to the target application, and paste
 it yourself. It does not enable raw capture or attempt insertion.
 
+Some clients, including browser text fields that do not report surrounding
+text to IBus, cannot safely support automatic trigger replacement. In that
+case WayExpand passes typing through unchanged and reports that input arrived
+but replacement was unavailable; it does not guess, delete the trigger, or
+fall back to synthetic typing. Open **Quick Picker (copy and paste)** from
+Diagnostics to use snippets in that field. Browser and embedded-editor support
+must be verified per client; success in one GTK field does not establish it.
+
 ## Advanced CLI setup and route diagnostics
 
 Backend readiness and a matcher preview do not prove that desktop typing or
