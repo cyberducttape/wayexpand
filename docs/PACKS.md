@@ -57,7 +57,7 @@ uploading snippet content to a service.
 | --- | --- |
 | `linux-administration` | Bash, SSH, systemd, and journalctl templates |
 | `docker` | Docker, Podman, and Compose inspection templates |
-| `kubernetes` | Parameterized, read-only `kubectl` inspection commands |
+| `kubernetes` | Explicit-context, parameterized, read-only `kubectl` inspection commands |
 | `ansible` | Playbook, inventory, and role starters with syntax checks |
 | `nginx` | Configuration checks, request probes, and server-block starters |
 | `git` | Review-first Git commands and collaborative workflow templates |

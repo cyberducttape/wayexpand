@@ -102,6 +102,29 @@ wayexpand context render ';;ssh-health' \
   --set 'field:port=8080'
 ```
 
+The Kubernetes operations pack uses the same fresh context report to pin
+`kubectl` commands. If the shell integration is not installed, an operator can
+select a context explicitly for a text-only preview:
+
+```sh
+wayexpand context render ';;kube-logs' --shell bash \
+  --kubernetes-context staging-cluster \
+  --set 'field:namespace=payments' \
+  --set 'field:pod=api-7f8c9d6b4f-2kq' \
+  --set 'field:container=api' \
+  --set 'field:since=15m' \
+  --set 'field:lines=200'
+```
+
+The preview labels the selected Kubernetes context and prints the exact
+shell-quoted command. WayExpand does not invoke `kubectl` or run the command.
+Every Kubernetes operations-pack command includes a validated context field;
+the shell report can prefill it in a CLI preview. Ordinary desktop forms ask
+the operator to choose the context. These commands never inherit the
+workstation's `kubectl` default implicitly. The CLI marks the selected target
+unverified: WayExpand does not check that the name exists in kubeconfig or
+identify the cluster behind it, and does not contact Kubernetes.
+
 The command prints the completed text to stdout and labels the selected shell,
 environment, and SSH destination. It refuses command-backed snippets. It does
 not insert text into a terminal buffer, run a command, or press Enter. Review

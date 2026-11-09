@@ -284,7 +284,7 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "Report and inspect fresh terminal, remote, project, and runtime context",
             ),
             (
-                "context render <trigger> [--set NAME=VALUE]... [--json]",
+                "context render <trigger> [--remote-host HOST] [--environment NAME] [--kubernetes-context NAME] [--set NAME=VALUE]... [--json]",
                 "Render text for the current shell and SSH context; never execute it",
             ),
         ],

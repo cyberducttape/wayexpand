@@ -1,6 +1,6 @@
 format_version = 1
 id = "wayexpand.developer-workflows"
-version = "1.1.0"
+version = "1.2.0"
 name = "Developer Workflows"
 publisher = "WayExpand project"
 maintainer = "WayExpand Developer Pack Maintainers"
