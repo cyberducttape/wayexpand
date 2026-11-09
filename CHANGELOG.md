@@ -7,6 +7,17 @@ All notable changes to WayExpand are documented here.
 - Publish the IBus factory connection before acquiring its well-known bus name,
   so IBus cannot request an engine during a startup window where the factory
   reports its connection unavailable.
+- Pin CI and compositor-certification checkouts to the immutable workflow SHA
+  by default, so queued jobs cannot silently validate a newer PR merge ref.
+- Report which invariant fails when the private KWin timeout contract test
+  breaks, and assert that scenario output existed before the simulated timeout.
+- Pass relative Debian archive paths to APT as local files during package
+  smoke tests, rather than letting APT parse them as package release selectors.
+- Use HTTPS Ubuntu archive URLs and bounded APT retries in disposable package
+  and Ansible integration tests, avoiding runner environments that block
+  outbound HTTP mirror traffic.
+- Keep the certification workflow contract test aligned with immutable
+  workflow-SHA checkouts.
 - Pin the long-running GNOME Shell 51 extension runtime job to the immutable
   pull request head SHA so an auto-merge cannot remove its checkout ref while
   Fedora dependencies are installing.
