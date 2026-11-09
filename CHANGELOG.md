@@ -16,6 +16,8 @@ All notable changes to WayExpand are documented here.
 - State explicitly that no compositor has accepted physical-session
   production certification; headless CI results are compatibility evidence,
   not a certified desktop route.
+- Correct GNOME troubleshooting guidance to distinguish implemented IBus
+  focus tracking from still-uncertified physical-session behavior.
 - Clarify Quick Picker's copy-only flow when verified insertion is unavailable:
   switch to the target app and paste while the picker remains open to serve the
   clipboard. Avoid suggesting that Escape be sent to the target application.

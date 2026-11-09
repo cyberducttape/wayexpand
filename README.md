@@ -49,7 +49,7 @@ local, offline, no account, no telemetry.
 | Configuration, CLI, and JSON contracts | Stable and regression-tested |
 | Linux architectures | x86_64 and aarch64 build paths |
 | Desktop integration | Wayland backends available; compositor support varies |
-| Production certification | Run `wayexpand doctor`; see the [support matrix](docs/SUPPORT_MATRIX.md) |
+| Production certification | No compositor has accepted physical-session certification; see the [certification matrix](docs/CERTIFICATION_MATRIX.md) |
 | Distribution packages | Ubuntu 26.04 amd64 daily PPA package; no published GitHub release and no published Fedora Copr repository; certification pending |
 
 ## Install
