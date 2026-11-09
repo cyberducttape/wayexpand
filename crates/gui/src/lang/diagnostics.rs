@@ -276,6 +276,22 @@ impl Strings {
         }
     }
 
+    pub fn terminal_only_route_notice(&self) -> &'static str {
+        match self.lang {
+            Language::English => "This route only expands in configured terminal applications. Browser, editor, and other desktop fields are not covered.",
+            Language::Indonesian => "Rute ini hanya mengembangkan teks di aplikasi terminal yang dikonfigurasi. Kolom browser, editor, dan aplikasi desktop lain tidak didukung.",
+            Language::German => "Diese Route erweitert Text nur in konfigurierten Terminalanwendungen. Browser-, Editor- und andere Desktop-Felder werden nicht abgedeckt.",
+        }
+    }
+
+    pub fn next_step_terminal_only_route(&self) -> &'static str {
+        match self.lang {
+            Language::English => "For browser or editor fields, open Quick Picker and copy/paste, or configure an input-method route that supports that application. This route will not capture those fields.",
+            Language::Indonesian => "Untuk kolom browser atau editor, buka Quick Picker untuk menyalin dan menempel, atau atur rute metode input yang mendukung aplikasi tersebut. Rute ini tidak menangkap kolom itu.",
+            Language::German => "Öffnen Sie für Browser- oder Editorfelder den Quick Picker zum Kopieren und Einfügen oder richten Sie eine Eingabemethoden-Route ein, die diese Anwendung unterstützt. Diese Route erfasst solche Felder nicht.",
+        }
+    }
+
     pub fn capture_availability_label(&self) -> &'static str {
         match self.lang {
             Language::English => "Capture availability",
