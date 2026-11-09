@@ -125,6 +125,35 @@ platforms print `n/a` for those values. Worker counts reported by the adapter
 are included alongside actual process threads to make per-context scaling
 visible.
 
+## IBus surrounding-text updates
+
+Run the Unicode document-update benchmark with:
+
+```sh
+cargo bench --locked -p wayexpand-backend-ibus --bench surrounding-text
+```
+
+Each iteration applies one IBus-style cursor update to an adapter using a
+multilingual text buffer. The adapter retains only the 129 Unicode scalars
+before the cursor: the maximum 128-scalar trigger plus a boundary character.
+This bounds the per-context model without changing the IBus scalar-offset
+contract. Unit coverage includes Unicode cursor offsets, selections, invalid
+positions, and local delete/commit updates.
+
+On AMD Ryzen 7 7735U / Linux 7.0.0-42-generic / Rust 1.96.0, one 30-sample
+run before the bounded window and one after measured:
+
+| Document scalars | Previous update estimate | Bounded-window estimate |
+| ---: | ---: | ---: |
+| 126 | 664 ns | 379 ns |
+| 4,095 | 13.49 µs | 8.34 µs |
+| 65,535 | 130.96 µs | 129.47 µs |
+
+These are short, machine-specific estimates. Large documents still require a
+scan to translate IBus's scalar cursor offset; the bounded model primarily
+reduces retained and allocated text. This benchmark does not measure D-Bus
+delivery, application response, or event-to-expansion latency.
+
 ### Baseline: 2026-11-07
 
 Captured on AMD Ryzen 7 7735U (16 logical CPUs), Linux 7.0.0-42-generic,

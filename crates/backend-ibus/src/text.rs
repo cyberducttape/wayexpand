@@ -1,5 +1,6 @@
 //! Pure text and replacement helpers for the protocol-neutral IBus adapter.
 
+use wayexpand_core::limits::MAX_TRIGGER_CHARS;
 use wayexpand_core::{ExpansionResult, SensitiveText};
 
 use super::IbusAction;
@@ -14,13 +15,57 @@ pub(super) struct SurroundingText {
     anchor: usize,
 }
 
+// The longest possible delivered text is a 128-scalar trigger plus one
+// boundary character. Keeping this tail is sufficient for every replacement
+// precondition and local edit while bounding memory per IBus context.
+const SURROUNDING_WINDOW_CHARS: usize = MAX_TRIGGER_CHARS + 1;
+
 impl SurroundingText {
-    pub(super) fn new(text: Vec<char>, cursor: usize, anchor: usize) -> Self {
-        Self {
-            text,
-            cursor,
-            anchor,
+    pub(super) fn new(text: &str, cursor: usize, anchor: usize) -> Option<Self> {
+        if anchor != cursor {
+            // A selection is never a valid replacement target. Do not retain
+            // document text just to remember that it must be refused.
+            return Some(Self {
+                text: Vec::new(),
+                cursor: 0,
+                anchor: 1,
+            });
         }
+        // IBus positions count Unicode scalar values, while Rust strings use
+        // UTF-8 byte offsets. Small contexts use one simple pass; large ones
+        // locate the cursor byte and collect only the bounded Unicode tail.
+        let mut preceding: Vec<char>;
+        if cursor <= SURROUNDING_WINDOW_CHARS {
+            preceding = text.chars().take(cursor).collect();
+            if preceding.len() != cursor {
+                return None;
+            }
+        } else {
+            let mut scalar_cursor = 0;
+            let mut byte_cursor = text.len();
+            for (byte, _) in text.char_indices() {
+                if scalar_cursor == cursor {
+                    byte_cursor = byte;
+                    break;
+                }
+                scalar_cursor += 1;
+            }
+            if scalar_cursor != cursor {
+                return None;
+            }
+            preceding = text[..byte_cursor]
+                .chars()
+                .rev()
+                .take(SURROUNDING_WINDOW_CHARS)
+                .collect();
+            preceding.reverse();
+        }
+        let cursor = preceding.len();
+        Some(Self {
+            text: preceding,
+            cursor,
+            anchor: cursor,
+        })
     }
 
     /// Whether `expected` is exactly the text before a collapsed cursor.
@@ -48,10 +93,15 @@ impl SurroundingText {
                 self.cursor = start;
             }
             IbusAction::CommitText(text) => {
-                let inserted: Vec<char> = text.chars().collect();
-                let count = inserted.len();
-                self.text.splice(self.cursor..self.cursor, inserted);
-                self.cursor += count;
+                let mut inserted: Vec<char> =
+                    text.chars().rev().take(SURROUNDING_WINDOW_CHARS).collect();
+                inserted.reverse();
+                let keep = SURROUNDING_WINDOW_CHARS.saturating_sub(inserted.len());
+                let discard = self.cursor.saturating_sub(keep);
+                self.text.truncate(self.cursor);
+                self.text.drain(..discard);
+                self.text.extend(inserted);
+                self.cursor = self.text.len();
             }
         }
         self.anchor = self.cursor;
@@ -108,5 +158,41 @@ pub(super) fn keysym_to_char(keysym: u32) -> Option<char> {
         _ => xkeysym::Keysym::new(keysym)
             .key_char()
             .filter(|character| !character.is_control()),
+    }
+}
+
+#[cfg(test)]
+mod surrounding_text_tests {
+    use super::{SurroundingText, SURROUNDING_WINDOW_CHARS};
+    use crate::IbusAction;
+    use wayexpand_core::SensitiveText;
+
+    #[test]
+    fn cursor_offsets_remain_unicode_scalar_based() {
+        let text = SurroundingText::new("🌍a漢b", 3, 3).unwrap();
+        assert!(text.ends_with_at_cursor("a漢"));
+        assert!(!text.ends_with_at_cursor("漢b"));
+    }
+
+    #[test]
+    fn selection_and_out_of_range_cursor_fail_closed() {
+        let selected = SurroundingText::new("sample", 4, 2).unwrap();
+        assert!(!selected.ends_with_at_cursor("samp"));
+        assert!(SurroundingText::new("sample", 7, 7).is_none());
+    }
+
+    #[test]
+    fn large_documents_retain_only_a_unicode_safe_trigger_window() {
+        let document = "漢🙂é".repeat(20_000);
+        let cursor = document.chars().count();
+        let mut surrounding = SurroundingText::new(&document, cursor, cursor).unwrap();
+        assert_eq!(surrounding.text.len(), SURROUNDING_WINDOW_CHARS);
+        assert!(surrounding.ends_with_at_cursor("漢🙂é"));
+        assert!(!surrounding.ends_with_at_cursor(&"x".repeat(SURROUNDING_WINDOW_CHARS + 1)));
+
+        assert!(surrounding.apply(&IbusAction::DeleteSurroundingText { nchars: 3 }));
+        assert!(surrounding.apply(&IbusAction::CommitText(SensitiveText::from("🐈"))));
+        assert!(surrounding.ends_with_at_cursor("🐈"));
+        assert!(surrounding.text.len() <= SURROUNDING_WINDOW_CHARS);
     }
 }
