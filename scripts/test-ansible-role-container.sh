@@ -11,6 +11,7 @@ temporary_root=$(mktemp -d "${TMPDIR:-/tmp}/wayexpand-ansible-role.XXXXXX")
 trap 'rm -rf "$temporary_root"' EXIT
 project="$temporary_root/project"
 role_directory="$project/roles/wayexpand-container-test"
+script_directory=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 mkdir -p "$project/roles"
 
 "$cli" new ansible-role \
@@ -38,10 +39,12 @@ EOF
 
 docker run --rm \
     --volume "$project:/project" \
+    --volume "$script_directory/use-https-ubuntu-mirrors.sh:/tmp/use-https-ubuntu-mirrors.sh:ro" \
     --workdir /project \
     ubuntu:24.04 \
     bash -euc '
         export DEBIAN_FRONTEND=noninteractive
+        sh /tmp/use-https-ubuntu-mirrors.sh
         apt-get update
         apt-get install -y --no-install-recommends ansible-core
         ansible-playbook --syntax-check -i localhost, site.yml

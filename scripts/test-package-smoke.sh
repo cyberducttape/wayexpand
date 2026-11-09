@@ -48,6 +48,8 @@ done
 case "$package" in
     *.deb)
         export DEBIAN_FRONTEND=noninteractive
+        script_directory=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+        sh "$script_directory/use-https-ubuntu-mirrors.sh"
         apt-get update -qq
         install_package() { apt-get install -y -q "$package"; }
         reinstall_package() { apt-get install -y -q --reinstall "$package"; }

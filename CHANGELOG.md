@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Use HTTPS Ubuntu archive URLs and bounded APT retries in disposable package
+  and Ansible integration tests, avoiding runner environments that block
+  outbound HTTP mirror traffic.
 - Classify pull request changes so system integration and compositor acceptance
   jobs run when their code paths are affected, while push, scheduled, and
   release runs continue to execute the full matrix. Keep shared core and daemon

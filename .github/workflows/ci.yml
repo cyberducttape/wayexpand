@@ -403,6 +403,8 @@ jobs:
         run: sh scripts/test-production-certification-gate.sh
       - name: Verify package smoke tests refuse host execution
         run: bash scripts/test-package-smoke-guard.sh
+      - name: Verify Ubuntu test mirrors use HTTPS
+        run: sh scripts/test-https-ubuntu-mirrors.sh
       - name: Verify GNOME extension state parsing
         run: bash scripts/test-gnome-extension-state.sh
       - name: Stress-test bounded GNOME notification delivery
