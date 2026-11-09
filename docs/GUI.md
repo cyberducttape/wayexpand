@@ -266,6 +266,12 @@ refused/stopped. An acknowledgement does not prove that the target application
 displayed the text; unmatched typing and typed or inserted content are never
 recorded. Use the editor's Matcher preview to explain a test input.
 
+If the active route is restricted to configured terminal applications, the
+Diagnostics window calls that out explicitly: browser, editor, and other
+desktop fields are not covered by that route. Use Quick Picker to copy and
+paste there, or configure an input-method route that supports the application;
+the GUI does not silently broaden keyboard capture.
+
 `Import Espanso` accepts a YAML match file or an Espanso root/match directory,
 validates it, and previews fully migrated snippets, semantic warnings, and
 unsupported matches. It converts supported date, echo, choice, random, nested
