@@ -50,6 +50,25 @@ EOF
 chmod 0755 "$fake_bin/timeout" "$fake_bin/kwin_wayland"
 
 output="$test_root/output.log"
+kept_work=
+
+fail_test() {
+    printf 'KWin timeout contract test failed: %s\n' "$1" >&2
+    if [ -f "$output" ]; then
+        printf '%s\n' '--- test output ---' >&2
+        cat "$output" >&2
+    fi
+    if [ -n "$kept_work" ]; then
+        for file in "$kept_work/results.txt" "$kept_work/kwin.log"; do
+            if [ -f "$file" ]; then
+                printf '%s\n' "--- $file ---" >&2
+                cat "$file" >&2
+            fi
+        done
+    fi
+    exit 1
+}
+
 mkdir -m 700 "$test_root/runtime" "$test_root/cache"
 chmod 0775 "$test_root/cache"
 if PATH="$fake_bin:$PATH" \
@@ -60,14 +79,29 @@ if PATH="$fake_bin:$PATH" \
     "$project_dir/scripts/test-kwin-e2e.sh" --keep expansion-replaces-trigger \
     >"$output" 2>&1
 then
-    printf '%s\n' 'KWin session timeout was incorrectly accepted after passing scenario output' >&2
-    exit 1
+    fail_test 'the session timeout was accepted after passing scenario output'
+else
+    session_status=$?
+fi
+if [ "${session_status:-0}" -ne 2 ]; then
+    fail_test "unexpected harness exit status ${session_status:-unset}; expected 2 for an unverified timeout"
 fi
 
-grep -F 'private KWin session exceeded its 900s timeout' "$output" >/dev/null
-grep -F 'synthetic KWin timeout after scenario output' "$output" >/dev/null
+if ! grep -Fq 'private KWin session exceeded its 900s timeout' "$output"; then
+    fail_test 'the harness did not report its bounded KWin session timeout'
+fi
+if ! grep -Fq 'synthetic KWin timeout after scenario output' "$output"; then
+    fail_test 'the synthetic session did not produce its timeout marker'
+fi
 kept_work=$(sed -n 's/^Kept //p' "$output")
-[ -n "$kept_work" ]
-grep -F 'synthetic KWin timeout after scenario output' "$kept_work/kwin.log" >/dev/null
+if [ -z "$kept_work" ]; then
+    fail_test 'the --keep cleanup did not report its evidence directory'
+fi
+if ! grep -Fq 'pass expansion-replaces-trigger synthetic result' "$kept_work/results.txt"; then
+    fail_test 'the fake session did not record a scenario result before timing out'
+fi
+if ! grep -Fq 'synthetic KWin timeout after scenario output' "$kept_work/kwin.log"; then
+    fail_test 'the retained compositor log does not contain the synthetic timeout marker'
+fi
 
 printf '%s\n' 'KWin E2E timeout contract test passed'
