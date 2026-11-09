@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Apply the effective organization policy from both configuration and system
+  policy before allowing Quick Picker clipboard fallback; embedded verified-
+  target requirements now block manual-copy delivery too.
 - Describe missing IBus surrounding-text support as a recent observation rather
   than a diagnosis of the currently focused field. Expand Quick Picker coverage
   for copy-only operation, secret-bearing templates, empty libraries, and

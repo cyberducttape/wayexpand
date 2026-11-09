@@ -618,10 +618,18 @@ fn focus_returned_to_target(target: &FocusTarget, current: &FocusTarget) -> bool
 pub(crate) fn run(path: PathBuf, copy_only: bool) -> anyhow::Result<()> {
     let policy = wayexpand_core::load_organization_policy()
         .map_err(|error| anyhow::anyhow!("could not load organization policy: {error}"))?;
-    let clipboard_fallback_allowed = clipboard_fallback_allowed_by_policy(&policy);
     let loaded = Config::load_versioned(&path)
         .map_err(|error| anyhow::anyhow!("configuration invalid: {}", error.safe_summary()))?;
-    let config = loaded.config;
+    let mut config = loaded.config;
+    config
+        .apply_administrator_policy(&policy)
+        .map_err(|error| {
+            anyhow::anyhow!("configuration policy invalid: {}", error.safe_summary())
+        })?;
+    // The default external policy preserves user-embedded policy. Evaluate the
+    // merged config so copy-only delivery observes the same effective policy
+    // as automatic matching and insertion.
+    let clipboard_fallback_allowed = clipboard_fallback_allowed_by_policy(&config.organization);
     let config_revision = loaded.revision;
     let prefs = crate::settings::load_gui_prefs();
     let focus_info = if !picker_needs_daemon_focus(copy_only) {
@@ -786,7 +794,7 @@ mod tests {
             assert_eq!(top_ranked(ranked.clone(), limit), want, "limit {limit}");
         }
     }
-    use wayexpand_core::{ExpansionConfig, MatchMode};
+    use wayexpand_core::{Config, ExpansionConfig, MatchMode};
 
     #[test]
     fn trigger_matches_outrank_description_and_subsequence_matches() {
@@ -1008,6 +1016,19 @@ mod tests {
             ..wayexpand_core::OrganizationPolicy::default()
         };
         assert!(clipboard_fallback_allowed_by_policy(&audit_only));
+    }
+
+    #[test]
+    fn copy_only_mode_respects_embedded_verified_target_policy() {
+        let mut config = Config::parse(
+            "[organization]\nsafe_mode = true\nrequire_verified_insert_target = true\n",
+        )
+        .unwrap();
+        config
+            .apply_administrator_policy(&wayexpand_core::OrganizationPolicy::default())
+            .unwrap();
+
+        assert!(!clipboard_fallback_allowed_by_policy(&config.organization));
     }
 
     #[test]
