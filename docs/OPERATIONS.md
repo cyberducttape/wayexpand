@@ -400,6 +400,25 @@ bash scripts/test-doctor.sh
 bash scripts/test-install-user.sh
 ```
 
+`wayexpand compatibility-report --json` uses `schema_version: 3`. Its
+`active_route` object describes the daemon capture route's source/backend,
+capture scope, expansion scope, matching availability, sensitive-field signal,
+and insertion atomicity. An evdev daemon route can restrict where the matcher
+expands to configured terminals while still observing keyboard input globally;
+the report shows these scopes separately. In a dual IBus/evdev setup, IBus can
+handle ordinary input-method clients while evdev remains a global raw-input
+observer without sensitive-field awareness. These are
+daemon-level capabilities, not proof that a target application received or
+displayed text. IBus registration and engine activity are reported separately
+from the active capture route because an installed or selected IBus engine can
+coexist with another daemon route. The report never calls an engine activity
+counter a verified insertion: `overall` remains
+`not_yet_verified_end_to_end`. A separate, reviewed test of the target
+application is required before claiming a working insertion scenario. The
+IBus activation check can be `not_active_route` when IBus is running but another
+capture source is selected; `not_tested` means route identity or engine state
+is unknown.
+
 `doctor` reports implementation state, configuration ownership/mode and parse
 status, validates the control-socket parent and existing path permissions, and
 performs non-invasive availability checks where possible, including a
