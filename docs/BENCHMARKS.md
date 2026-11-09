@@ -133,12 +133,12 @@ Run the Unicode document-update benchmark with:
 cargo bench --locked -p wayexpand-backend-ibus --bench surrounding-text
 ```
 
-Each iteration applies one IBus-style cursor update to an adapter using a
-multilingual text buffer. The adapter retains only the 129 Unicode scalars
-before the cursor: the maximum 128-scalar trigger plus a boundary character.
-This bounds the per-context model without changing the IBus scalar-offset
-contract. Unit coverage includes Unicode cursor offsets, selections, invalid
-positions, and local delete/commit updates.
+The harness applies an IBus-style cursor update and processes the next key on
+an adapter using a multilingual text buffer. The adapter retains only the 129
+Unicode scalars before the cursor: the maximum 128-scalar trigger plus a
+boundary character. This bounds the per-context model without changing the
+IBus scalar-offset contract. Unit coverage includes Unicode cursor offsets,
+selections, invalid positions, and local delete/commit updates.
 
 On AMD Ryzen 7 7735U / Linux 7.0.0-42-generic / Rust 1.96.0, one 30-sample
 run before the bounded window and one after measured:
@@ -153,6 +153,32 @@ These are short, machine-specific estimates. Large documents still require a
 scan to translate IBus's scalar cursor offset; the bounded model primarily
 reduces retained and allocated text. This benchmark does not measure D-Bus
 delivery, application response, or event-to-expansion latency.
+
+### Full update and next-key probe: 2026-11-08
+
+The focused harness runs ASCII-only and mixed ASCII/multibyte Unicode
+documents at approximately 128 B, 100 KiB, and 2 MiB. Each sample times
+`SetSurroundingText` model construction plus the next adapter key event and
+reset. It reports p50/p95/p99 across 2,000 samples and allocator-requested
+bytes per update/key pair (including realloc request sizes; this is not peak
+memory or RSS).
+
+On an AMD Ryzen 7 7735U / Linux 7.0.0-42-generic / Rust 1.96.0 run:
+
+| Input document | p50 | p95 | p99 | Allocated bytes/update + key |
+| --- | ---: | ---: | ---: | ---: |
+| ASCII / 128 B | 5.73 µs | 8.17 µs | 9.08 µs | 1,053 B |
+| ASCII / 100 KiB | 129.98 µs | 154.49 µs | 290.26 µs | 645 B |
+| ASCII / 2 MiB | 2.42 ms | 2.50 ms | 2.96 ms | 645 B |
+| Mixed UTF-8 / 128 B | 5.73 µs | 6.29 µs | 7.19 µs | 1,053 B |
+| Mixed UTF-8 / 100 KiB | 120.34 µs | 131.58 µs | 137.03 µs | 645 B |
+| Mixed UTF-8 / 2 MiB | 2.22 ms | 2.27 ms | 2.36 ms | 645 B |
+Allocation remains bounded for large documents, while latency scales with the
+document because locating the IBus scalar cursor still scans from the start.
+These are local microbenchmark observations, not end-to-end typing latency.
+They exclude D-Bus transport, compositor scheduling, target application
+rendering, and GUI stalls; the harness runs synchronously on its benchmark
+thread.
 
 ### Baseline: 2026-11-07
 
