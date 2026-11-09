@@ -1035,6 +1035,14 @@ impl Strings {
         }
     }
 
+    pub fn input_method_progress_title(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Input method: configured, running, verified",
+            Language::Indonesian => "Metode input: dikonfigurasi, berjalan, terverifikasi",
+            Language::German => "Eingabemethode: konfiguriert, aktiv, verifiziert",
+        }
+    }
+
     pub fn ibus_route_ready(&self) -> &'static str {
         match self.lang {
             Language::English => "Ready: IBus can expand in apps that report their text.",
@@ -1157,6 +1165,18 @@ impl Strings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn input_method_progress_label_is_desktop_neutral_and_localized() {
+        let english = Strings::new(Language::English).input_method_progress_title();
+        let indonesian = Strings::new(Language::Indonesian).input_method_progress_title();
+        let german = Strings::new(Language::German).input_method_progress_title();
+
+        assert!(english.starts_with("Input method:"));
+        assert!(!english.contains("GNOME"));
+        assert!(indonesian.starts_with("Metode input:"));
+        assert!(german.starts_with("Eingabemethode:"));
+    }
 
     #[test]
     fn expansion_failure_reasons_are_translated() {
