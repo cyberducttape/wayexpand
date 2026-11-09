@@ -1,12 +1,13 @@
-//! Quick-insert picker: `wayexpand-gui --picker`.
+//! Quick Picker: `wayexpand-gui --picker`.
 //!
-//! Bind it to a desktop shortcut, type a few letters, press Enter, and the
-//! snippet is typed into the application you were using. The picker never
-//! injects text itself: when the window closes, focus returns to that
-//! application and the running daemon -- which already holds the approved
-//! injection backend -- types the snippet (`insert <trigger>` on the control
-//! socket), under the same pause, password-field, and app-filter rules as a
-//! typed trigger. Without a daemon, Enter copies the snippet instead.
+//! Search and choose a saved text snippet. The picker delegates insertion to
+//! the daemon only when it can verify the original target and the route
+//! supports atomic replacement; the daemon applies its normal policy and
+//! sensitive-field checks. Otherwise, the picker offers copy-and-paste when
+//! organization policy permits it. In that mode app-restricted snippets are
+//! hidden because the destination application cannot be verified, and the
+//! picker stays open to retain Wayland clipboard ownership until the user
+//! pastes and closes it.
 
 use std::{
     collections::HashMap,

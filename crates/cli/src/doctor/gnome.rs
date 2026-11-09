@@ -107,7 +107,7 @@ pub(crate) fn run(json_output: bool) -> Result<()> {
         )))
         .collect::<Vec<_>>();
     let window_status = crate::doctor::status::read_daemon_status().ok();
-    let insertion = ["consent", "target-insertion"]
+    let insertion = ["consent", "surrounding-text", "target-insertion"]
         .iter()
         .filter_map(|id| report.check(id))
         .map(|check| {
@@ -293,6 +293,7 @@ fn default_remediation_command(id: &str) -> Option<String> {
             }
             "config-generation" => "wayexpand ibus status --json",
             "field-input" | "target-insertion" => "wayexpand debug --gnome --interactive",
+            "surrounding-text" => "wayexpand ibus status --json",
             "output-backend" => "wayexpand backend list",
             "daemon-version" => "wayexpand upgrade --apply",
             "window-extension-installed" => "wayexpand setup",
@@ -360,7 +361,7 @@ fn layout_provider_check(status: Option<&str>) -> DoctorCheck {
 
 fn retest_instructions(id: &str) -> &'static str {
     match id {
-        "field-input" | "engine" | "target-insertion" => {
+        "field-input" | "surrounding-text" | "engine" | "target-insertion" => {
             "Run `wayexpand debug --gnome --interactive` in a normal, disposable text field and confirm the exact result."
         }
         "config-generation" => {
@@ -775,6 +776,9 @@ fn problem_for(check: &IbusCheck) -> Option<&'static str> {
     if matches!(check.state, IbusCheckState::Pass | IbusCheckState::Skip) {
         return None;
     }
+    if check.id == "surrounding-text" && check.state != IbusCheckState::Fail {
+        return check.problem_id;
+    }
     Some(match check.id {
         "gnome-session" => "WX-GNOME-SESSION-001",
         "daemon" => "WX-GNOME-IBUS-001",
@@ -785,6 +789,7 @@ fn problem_for(check: &IbusCheck) -> Option<&'static str> {
         "config-generation" => "WX-IBUS-RELOAD-001",
         "consent" => "WX-POLICY-001",
         "field-input" | "engine" => "WX-GNOME-IM-003",
+        "surrounding-text" => "WX-IBUS-008",
         "target-insertion" => "WX-GNOME-IM-004",
         _ => check.problem_id.unwrap_or("WX-GNOME-IM-001"),
     })
