@@ -9,6 +9,9 @@ All notable changes to WayExpand are documented here.
   for copy-only operation, secret-bearing templates, empty libraries, and
   clipboard handoff without a daemon. Keep the picker alive after copying so
   its Wayland clipboard ownership remains available for manual paste.
+- Hide app-filtered snippets from Quick Picker because manual clipboard paste
+  cannot preserve verified application identity. Honor enforced policy that
+  requires a verified insert target across clipboard fallback paths.
 - Clarify Quick Picker's copy-only flow when verified insertion is unavailable:
   switch to the target app and paste while the picker remains open to serve the
   clipboard. Avoid suggesting that Escape be sent to the target application.
