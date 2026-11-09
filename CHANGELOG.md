@@ -9,6 +9,10 @@ All notable changes to WayExpand are documented here.
   Test this against a Unix socket that accepts a real IBus client but never
   answers its D-Bus request.
 
+- Classify pull request changes so system integration and compositor acceptance
+  jobs run when their code paths are affected, while push, scheduled, and
+  release runs continue to execute the full matrix. Keep shared core and daemon
+  changes connected to every relevant desktop regression suite.
 - Reject conflicting Kubernetes context selections and visibly mark rendered
   cluster targets as unverified; validate explicit context names and ignore
   inactive terminal-session reports.
