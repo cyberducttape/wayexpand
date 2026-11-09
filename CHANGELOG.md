@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Pin CI and compositor-certification checkouts to the immutable workflow SHA
+  by default, so queued jobs cannot silently validate a newer PR merge ref.
 - Pass relative Debian archive paths to APT as local files during package
   smoke tests, rather than letting APT parse them as package release selectors.
 - Use HTTPS Ubuntu archive URLs and bounded APT retries in disposable package
