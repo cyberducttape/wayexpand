@@ -769,6 +769,16 @@ pub(crate) fn install_check(args: Args) -> Result<()> {
     }
     Ok(())
 }
+
+fn setup_preflight_fields(ready_for_setup: bool) -> (bool, &'static str) {
+    let state = if ready_for_setup {
+        "ready_to_configure"
+    } else {
+        "prerequisites_incomplete"
+    };
+    (ready_for_setup, state)
+}
+
 pub(crate) fn setup_check(json: bool) -> Result<()> {
     let rows = checks();
     let caps = wayexpand_backend_selection::probe_capabilities();
@@ -805,11 +815,17 @@ pub(crate) fn setup_check(json: bool) -> Result<()> {
         .and_then(|value| value.as_str())
         == Some("pass");
     let ready = installed && route_ready && (!terminal_match_required || terminal_match_ok);
+    let (ready_for_setup, preflight_state) = setup_preflight_fields(ready);
     if json {
         println!(
             "{}",
             serde_json::json!({
-            "schema":2, "title":"WayExpand setup readiness", "ready":ready,
+            "schema":2, "title":"WayExpand setup readiness",
+                // Keep `ready` as a compatibility alias. It means only that
+                // setup can be attempted; it has never verified a real-app
+                // insertion. The explicit fields prevent JSON consumers from
+                // treating preflight readiness as operational success.
+                "ready":ready, "ready_for_setup":ready_for_setup, "setup_preflight_state":preflight_state,
                 "readiness_levels":{
                     "installed":{"status":if installed {"pass"} else {"fail"},"checks":rows.iter().map(|row| serde_json::json!({"component":row.component,"status":row.status,"path":row.path,"detail":row.detail})).collect::<Vec<_>>()},
                     "integrated":{"status":integrated_readiness_status(&integration),"checks":integration},
@@ -1164,6 +1180,15 @@ pub(crate) fn repair(args: Args) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn setup_preflight_fields_distinguish_ready_from_incomplete_prerequisites() {
+        assert_eq!(setup_preflight_fields(true), (true, "ready_to_configure"));
+        assert_eq!(
+            setup_preflight_fields(false),
+            (false, "prerequisites_incomplete")
+        );
+    }
 
     #[test]
     fn integrated_readiness_does_not_promote_warnings_or_unknowns_to_pass() {

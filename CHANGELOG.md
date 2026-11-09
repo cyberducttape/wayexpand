@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Label `setup --check --json` readiness as `ready_for_setup` so automation
+  cannot mistake a successful preflight for verified application insertion.
 - Publish the IBus factory connection before acquiring its well-known bus name,
   so IBus cannot request an engine during a startup window where the factory
   reports its connection unavailable.

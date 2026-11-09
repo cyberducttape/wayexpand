@@ -28,6 +28,18 @@ access or portal authorization. The desktop-test instructions distinguish
 one-shot evdev/libei checks from an end-to-end test of the currently selected
 route; an operator must still verify output in the target application.
 
+`wayexpand setup --check --json` reports preflight readiness separately from
+integration, runtime, and real-target insertion. In schema 2,
+`ready_for_setup` and `setup_preflight_state` say only whether setup can be
+attempted; the older `ready` field remains an alias for `ready_for_setup`.
+Neither field means that the input route is configured, receiving text, or
+working in an application. Use `readiness_levels.integrated` and
+`readiness_levels.operational` for those stages. The read-only preflight always
+reports `readiness_levels.target_insertion.verified: false`; an operator must
+run and confirm a real-application test before treating insertion as verified.
+Use `wayexpand health --json` for live operational health and
+`wayexpand debug --test TRIGGER` for the interactive insertion test.
+
 For the first-run path, use `wayexpand setup --check` to inspect the detected
 desktop, installation identity, PATH resolution, and setup recommendation.
 Then run `wayexpand setup --apply`. Interactive setup offers a real-app test
