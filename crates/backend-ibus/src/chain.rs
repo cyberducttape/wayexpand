@@ -2243,6 +2243,33 @@ mod tests {
     }
 
     #[test]
+    fn surrounding_text_check_distinguishes_delivered_input_from_replacement_support() {
+        let telemetry = crate::telemetry::IbusTelemetry::new();
+        let field = telemetry.focus_in(None);
+        telemetry.content_type(Some(field), false);
+        telemetry.capabilities(Some(field), false);
+        telemetry.key(Some(field), true);
+        let reading = IbusStatusReading {
+            status: telemetry.snapshot(),
+            live: true,
+        };
+
+        let unsupported = surrounding_text_check(Some(&reading));
+        assert_eq!(unsupported.state, IbusCheckState::Fail);
+        assert_eq!(unsupported.problem_id, Some("WX-IBUS-008"));
+        assert!(unsupported.detail.contains("received keys"));
+        assert!(unsupported.fix.unwrap().contains("Quick Picker"));
+
+        let no_field_activity = IbusStatusReading {
+            status: crate::telemetry::IbusTelemetry::new().snapshot(),
+            live: true,
+        };
+        let unknown = surrounding_text_check(Some(&no_field_activity));
+        assert_eq!(unknown.state, IbusCheckState::Unknown);
+        assert_eq!(unknown.problem_id, None);
+    }
+
+    #[test]
     fn kde_wayland_rejects_legacy_toolkit_overrides() {
         let clean = plasma_toolkit_environment_check(Some("XMODIFIERS=@im=ibus\n"));
         assert_eq!(clean.state, IbusCheckState::Pass);
