@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Publish the IBus factory connection before acquiring its well-known bus name,
+  so IBus cannot request an engine during a startup window where the factory
+  reports its connection unavailable.
 - Pin the long-running GNOME Shell 51 extension runtime job to the immutable
   pull request head SHA so an auto-merge cannot remove its checkout ref while
   Fedora dependencies are installing.
