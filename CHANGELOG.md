@@ -13,6 +13,9 @@ All notable changes to WayExpand are documented here.
 - Use HTTPS Ubuntu archive URLs and bounded APT retries in disposable package
   and Ansible integration tests, avoiding runner environments that block
   outbound HTTP mirror traffic.
+- Pin the long-running GNOME Shell 51 extension runtime job to the immutable
+  pull request head SHA so an auto-merge cannot remove its checkout ref while
+  Fedora dependencies are installing.
 - Show the configured application scope on Quick Picker rows for app-filtered
   snippets, explaining that automatic insertion is limited to any matching
   application while copy-only mode continues to hide those snippets.
