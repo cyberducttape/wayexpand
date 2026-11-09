@@ -1319,7 +1319,7 @@ mod tests {
 
         let input_without_surrounding = wayexpand_backend_ibus::chain::IbusReadiness {
             text_received: true,
-            ..readiness.clone()
+            ..readiness
         };
         let input_checks = operational_checks(&input_without_surrounding, None);
         let replacement_context = input_checks
