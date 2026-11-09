@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Wait for the private IBus daemon to answer registry requests and register
+  WayExpand before starting engine-selection checks, avoiding a startup race
+  that could report the daemon as unavailable.
 - Disconnect GNOME window-title notifications when the extension is disabled.
   Track input-source activation retry sources and cancel pending calls during
   teardown so stale retries cannot reactivate an input source.
