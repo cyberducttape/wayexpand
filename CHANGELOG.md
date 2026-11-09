@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Bound each private IBus engine-registry probe and use a monotonic deadline,
+  so one stalled D-Bus request cannot defeat the startup readiness timeout.
+
 - Wait for the private IBus daemon to answer registry requests and register
   WayExpand before starting engine-selection checks, avoiding a startup race
   that could report the daemon as unavailable.
