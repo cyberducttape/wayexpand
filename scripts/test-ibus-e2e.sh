@@ -23,12 +23,16 @@ for argument in "$@"; do
     esac
 done
 
-for tool in ibus ibus-daemon dbus-run-session; do
+for tool in ibus ibus-daemon dbus-run-session timeout date; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         printf '%s\n' "error: $tool is required (install ibus and dbus-daemon)" >&2
         exit 2
     fi
 done
+
+# Exercise the registry-call deadline independently of the private daemon
+# startup test using a socket that accepts but never answers D-Bus requests.
+sh "$project_dir/scripts/test-ibus-registry-probe-timeout.sh"
 
 bin_dir=${E2E_BIN:-"$project_dir/target/debug"}
 if [ "${E2E_SKIP_BUILD:-0}" != 1 ]; then
@@ -95,10 +99,17 @@ export IBUS_ADDRESS="unix:path=$socket"
 # daemon to answer a registry request and load the WayExpand component before
 # asking it to select the engine; otherwise SetGlobalEngine can race startup
 # and fail with "IBus connection unavailable".
-tries=150
+deadline_ns=$(($(date +%s%N) + 15000000000))
+probe_timeouts=0
 registered=0
-while [ "$tries" -gt 0 ]; do
-    if registry=$(ibus list-engine --name-only 2>/dev/null) &&
+while [ "$(date +%s%N)" -lt "$deadline_ns" ]; do
+    probe_status=0
+    registry=$(timeout --signal=TERM --kill-after=0.2s 0.5s \
+        ibus list-engine --name-only 2>/dev/null) || probe_status=$?
+    if [ "$probe_status" -eq 124 ] || [ "$probe_status" -eq 137 ]; then
+        probe_timeouts=$((probe_timeouts + 1))
+    fi
+    if [ "$probe_status" -eq 0 ] &&
         printf '%s\n' "$registry" | grep -Fxq wayexpand; then
         registered=1
         break
@@ -109,11 +120,11 @@ while [ "$tries" -gt 0 ]; do
         exit 1
     fi
     sleep 0.1
-    tries=$((tries - 1))
 done
 if [ "$registered" -ne 1 ]; then
-    printf '%s\n' "fail daemon IBus did not register wayexpand before the test client started"
-    ibus list-engine --name-only >&2 2>&1 || true
+    printf 'fail daemon IBus did not register wayexpand within 15 seconds (%s registry probes timed out)\n' "$probe_timeouts"
+    timeout --signal=TERM --kill-after=0.2s 0.5s \
+        ibus list-engine --name-only >&2 2>&1 || true
     tail -n 40 "$E2E_WORK/ibus-daemon.log" >&2 2>/dev/null || true
     exit 1
 fi
