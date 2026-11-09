@@ -1,6 +1,5 @@
 # WayExpand
 
-[![Release](https://img.shields.io/github/v/release/cyberducttape/wayexpand?label=release)](https://github.com/cyberducttape/wayexpand/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **Text-Expansion für Wayland.**
@@ -42,13 +41,15 @@ produktiven Einsatz `wayexpand doctor` und die
 
 ### Experimentelle Pakete
 
-Unzertifizierte Builds erscheinen als GitHub-Vorabversionen *Experimental
-build …* auf der
-[Release-Seite](https://github.com/cyberducttape/wayexpand/releases). Sie
-bestehen die vollständige CI, aber keine Zertifizierung auf einem echten
-Desktop. Jede enthält Archive für x86_64 und aarch64, ein `.deb` und ein
-`.rpm` (jeweils mit `.sha256`-Prüfsumme und Build-Provenienz) und benötigt
-keine Rust-Toolchain:
+Derzeit ist keine GitHub-Version veröffentlicht; der einzige aktuell
+veröffentlichte Paketkanal ist das unten beschriebene PPA.
+
+Unzertifizierte Builds können als GitHub-Vorabversionen *Experimental build …*
+auf der [Release-Seite](https://github.com/cyberducttape/wayexpand/releases)
+erscheinen. Sie bestehen die vollständige CI, aber keine Zertifizierung auf
+einem echten Desktop. Jede enthält Archive für x86_64 und aarch64, ein `.deb`
+und ein `.rpm` (jeweils mit `.sha256`-Prüfsumme und Build-Provenienz) und
+benötigt keine Rust-Toolchain. Sobald eine solche Vorabversion vorliegt:
 
 ```bash
 sha256sum --check wayexpand-*-linux-x86_64.tar.gz.sha256
