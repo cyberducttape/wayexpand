@@ -53,9 +53,13 @@ fn adapter() -> IbusEngineAdapter {
     adapter
 }
 
-fn mixed_document(target_bytes: usize) -> (String, u32) {
+fn document(target_bytes: usize, mixed_unicode: bool) -> (String, u32) {
     let mut text = String::with_capacity(target_bytes);
-    let mut characters = "systemctl status café🙂; ".chars().cycle();
+    let mut characters = if mixed_unicode {
+        "systemctl status café🙂; ".chars().cycle()
+    } else {
+        "systemctl status service-123; ".chars().cycle()
+    };
     while text.len() < target_bytes {
         let character = characters.next().expect("the sample text is non-empty");
         if text.len() + character.len_utf8() > target_bytes {
@@ -73,11 +77,11 @@ fn percentile(samples: &mut [Duration], percentile: usize) -> Duration {
     samples[(samples.len() - 1) * percentile / 100]
 }
 
-fn run_case(label: &str, target_bytes: usize) {
+fn run_case(label: &str, target_bytes: usize, mixed_unicode: bool) {
     const WARMUP: usize = 100;
     const SAMPLES: usize = 2_000;
 
-    let (text, cursor) = mixed_document(target_bytes);
+    let (text, cursor) = document(target_bytes, mixed_unicode);
     let mut adapter = adapter();
     for _ in 0..WARMUP {
         adapter.set_surrounding_text(black_box(&text), cursor, cursor);
@@ -99,19 +103,23 @@ fn run_case(label: &str, target_bytes: usize) {
     let allocated = ALLOCATED_BYTES.load(Ordering::Relaxed) - before;
     let p50 = percentile(&mut samples, 50);
     let p95 = percentile(&mut samples, 95);
+    let p99 = percentile(&mut samples, 99);
     println!(
-        "{label:>12}: input={:>8} bytes, p50={:>8.2?}, p95={:>8.2?}, allocated/update+key={:>6} bytes",
+        "{label:>18}: input={:>8} bytes, p50={:>8.2?}, p95={:>8.2?}, p99={:>8.2?}, allocated/update+key={:>6} bytes",
         text.len(),
         p50,
         p95,
+        p99,
         allocated / SAMPLES as u64,
     );
 }
 
 fn main() {
-    println!("IBus surrounding-text update + next-key processing (mixed UTF-8)");
+    println!("IBus surrounding-text update + next-key processing");
     println!("2,000 samples after 100 warm-up iterations; allocations are requested bytes, not peak RSS.");
-    run_case("small", 128);
-    run_case("100 KiB", 100 * 1024);
-    run_case("2 MiB", 2 * 1024 * 1024);
+    for (kind, mixed_unicode) in [("ASCII", false), ("mixed UTF-8", true)] {
+        run_case(&format!("{kind} / 128 B"), 128, mixed_unicode);
+        run_case(&format!("{kind} / 100 KiB"), 100 * 1024, mixed_unicode);
+        run_case(&format!("{kind} / 2 MiB"), 2 * 1024 * 1024, mixed_unicode);
+    }
 }
