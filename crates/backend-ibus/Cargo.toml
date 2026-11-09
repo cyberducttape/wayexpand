@@ -38,3 +38,7 @@ harness = false
 [[bench]]
 name = "runtime-profile"
 harness = false
+
+[[bench]]
+name = "surrounding-text"
+harness = false

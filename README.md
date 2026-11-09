@@ -189,8 +189,11 @@ written as `{{{{ … }}}}`. See [Templates](docs/TEMPLATES.md).
 - **Committed text only.** WayExpand does not see IME preedit/composition;
   finish CJK, dead-key, and Compose sequences before expecting a trigger to
   match.
-- **App-specific snippets** need focused-window tracking, currently available
-  only on KDE Plasma (KWin). Elsewhere they fail closed and never expand.
+- **App-specific snippets** need focused-window tracking. It is implemented
+  for KDE Plasma (KWin) and GNOME through the WayExpand Shell extension; GNOME
+  tracking has headless integration coverage but is not yet production-
+  certified in a real desktop session. Other desktops fail closed when a
+  trustworthy tracker is unavailable.
 - **No compositor is certified yet** by automated end-to-end tests. Run
   `wayexpand doctor` on your own session before relying on a backend.
 - **evdev is a last resort.** It observes every keyboard event, including

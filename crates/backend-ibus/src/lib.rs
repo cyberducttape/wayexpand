@@ -301,12 +301,12 @@ impl IbusEngineAdapter {
     pub fn set_surrounding_text(&mut self, text: &str, cursor: u32, anchor: u32) {
         self.field_text_seen |= !text.is_empty();
         self.note(|telemetry, field| telemetry.surrounding_text(field, !text.is_empty()));
-        let text: Vec<char> = text.chars().collect();
         let (cursor, anchor) = (cursor as usize, anchor as usize);
-        self.surrounding = (self.client_capabilities & IBUS_CAP_SURROUNDING_TEXT != 0
-            && cursor <= text.len()
-            && anchor <= text.len())
-        .then_some(SurroundingText::new(text, cursor, anchor));
+        self.surrounding = if self.client_capabilities & IBUS_CAP_SURROUNDING_TEXT != 0 {
+            SurroundingText::new(text, cursor, anchor)
+        } else {
+            None
+        };
     }
 
     /// Forget the surrounding-text model; replacements are refused until the
