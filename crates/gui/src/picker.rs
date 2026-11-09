@@ -87,6 +87,7 @@ fn score_normalized(query: &str, trigger: &str, description: &str) -> Option<i64
 struct SearchEntry {
     trigger: String,
     description: String,
+    app_scope: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -118,6 +119,7 @@ pub(crate) struct PickerApp {
     query: String,
     selected: usize,
     safe_direct_insert: bool,
+    clipboard_fallback_allowed: bool,
     copied: Option<String>,
     focus_requested: bool,
     target_focus: Option<FocusTarget>,
@@ -149,6 +151,7 @@ impl PickerApp {
         colorpack: ColorPack,
         dark: bool,
         safe_direct_insert: bool,
+        clipboard_fallback_allowed: bool,
         target_focus: Option<FocusTarget>,
     ) -> Self {
         Self {
@@ -158,6 +161,7 @@ impl PickerApp {
                 .map(|expansion| SearchEntry {
                     trigger: crate::library::trigger_search_text(expansion),
                     description: expansion.description.to_lowercase(),
+                    app_scope: format_app_scope(&expansion.app_filter),
                 })
                 .collect(),
             template_context: config.template_context(None),
@@ -173,6 +177,7 @@ impl PickerApp {
             query: String::new(),
             selected: 0,
             safe_direct_insert,
+            clipboard_fallback_allowed,
             copied: None,
             focus_requested: false,
             target_focus,
@@ -272,8 +277,7 @@ impl PickerApp {
         // No daemon to type for us: offer the text on the clipboard. The
         // window stays open because a Wayland clipboard is served by the
         // process that set it.
-        ctx.copy_text(text);
-        self.copied = Some(expansion.trigger.clone());
+        self.copied = Some(copy_snippet(ctx, text, &expansion.trigger));
     }
 
     fn preview_for(&mut self, expansion: &ExpansionConfig) -> String {
@@ -403,6 +407,17 @@ impl eframe::App for PickerApp {
                     self.focus_requested = true;
                 }
                 ui.add_space(10.0);
+                                if !self.safe_direct_insert
+                                    && self.config.expansion.iter().any(|expansion| {
+                                        expansion.enabled && !expansion.app_filter.is_empty()
+                                    })
+                {
+                    ui.label(
+                                        RichText::new("App-restricted snippets are hidden in copy-only mode because manual paste cannot verify the destination application.")
+                            .small()
+                            .color(palette.muted),
+                    );
+                }
 
                 match &self.insert_state {
                     InsertState::Waiting { trigger, .. } => {
@@ -429,12 +444,11 @@ impl eframe::App for PickerApp {
                             );
                             ui.label(error);
                             ui.horizontal(|ui| {
-                                if !text.is_empty()
+                                if self.clipboard_fallback_allowed
+                                    && !text.is_empty()
                                     && ui.button(self.strings.picker_copy_instead()).clicked()
                                 {
-                                    ctx.copy_text(text.clone());
-                                    self.copied = Some(trigger.clone());
-                                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                                    self.copied = Some(copy_snippet(&ctx, text.clone(), trigger));
                                 }
                                 if ui.button(self.strings.picker_cancel()).clicked() {
                                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -464,7 +478,15 @@ impl eframe::App for PickerApp {
                             let expansion = self.config.expansion[expansion_index].clone();
                             let preview = self.preview_for(&expansion);
                             let selected = index == self.selected;
-                            let response = picker_row(ui, &palette, &preview, &expansion, selected);
+                            let response = picker_row(
+                                ui,
+                                &palette,
+                                &preview,
+                                &self.search_index[expansion_index].app_scope,
+                                &self.strings,
+                                &expansion,
+                                selected,
+                            );
                             if selected && (up || down) {
                                 response.scroll_to_me(None);
                             }
@@ -506,6 +528,8 @@ fn picker_row(
     ui: &mut egui::Ui,
     palette: &Palette,
     preview: &str,
+    app_scope: &str,
+    strings: &Strings,
     expansion: &ExpansionConfig,
     selected: bool,
 ) -> egui::Response {
@@ -551,6 +575,13 @@ fn picker_row(
             ui.add(
                 egui::Label::new(RichText::new(first_line).small().color(palette.muted)).truncate(),
             );
+            if !app_scope.is_empty() {
+                ui.label(
+                    RichText::new(strings.picker_app_scope(app_scope))
+                        .small()
+                        .color(palette.warning),
+                );
+            }
         });
     let response = ui.interact(
         frame.response.rect,
@@ -566,6 +597,25 @@ fn picker_row(
         )
     });
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+fn format_app_scope(filters: &[String]) -> String {
+    filters
+        .iter()
+        .map(|filter| match wayexpand_core::AppFilter::parse(filter) {
+            Some(wayexpand_core::AppFilter::AppIdExact(value)) => {
+                format!("app ID {value}")
+            }
+            Some(wayexpand_core::AppFilter::AppIdGlob(value)) => {
+                format!("app ID matching {value}")
+            }
+            Some(wayexpand_core::AppFilter::TitleContains(value)) => {
+                format!("window title containing {value:?}")
+            }
+            None => format!("configured filter {filter:?}"),
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 fn wait_for_focus_and_insert(target_focus: FocusTarget, trigger: &str) -> Result<(), String> {
@@ -604,12 +654,23 @@ fn focus_returned_to_target(target: &FocusTarget, current: &FocusTarget) -> bool
 /// Run the picker. Insertion remains inside the picker until the guarded
 /// focus handoff succeeds, so a safe failure remains visible to the user.
 pub(crate) fn run(path: PathBuf, copy_only: bool) -> anyhow::Result<()> {
+    let policy = wayexpand_core::load_organization_policy()
+        .map_err(|error| anyhow::anyhow!("could not load organization policy: {error}"))?;
     let loaded = Config::load_versioned(&path)
         .map_err(|error| anyhow::anyhow!("configuration invalid: {}", error.safe_summary()))?;
-    let config = loaded.config;
+    let mut config = loaded.config;
+    config
+        .apply_administrator_policy(&policy)
+        .map_err(|error| {
+            anyhow::anyhow!("configuration policy invalid: {}", error.safe_summary())
+        })?;
+    // The default external policy preserves user-embedded policy. Evaluate the
+    // merged config so copy-only delivery observes the same effective policy
+    // as automatic matching and insertion.
+    let clipboard_fallback_allowed = clipboard_fallback_allowed_by_policy(&config.organization);
     let config_revision = loaded.revision;
     let prefs = crate::settings::load_gui_prefs();
-    let focus_info = if copy_only {
+    let focus_info = if !picker_needs_daemon_focus(copy_only) {
         None
     } else {
         crate::runtime::control_command(wayexpand_core::DaemonOperation::Focus)
@@ -617,6 +678,11 @@ pub(crate) fn run(path: PathBuf, copy_only: bool) -> anyhow::Result<()> {
             .and_then(|response| focus_target_from_response(&response))
     };
     let (target_focus, safe_direct_insert) = picker_focus_state(focus_info, copy_only);
+    if !safe_direct_insert && !clipboard_fallback_allowed {
+        anyhow::bail!(
+            "Quick Picker cannot copy snippets under organization policy requiring a verified insertion target"
+        );
+    }
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("WayExpand — Insert snippet")
@@ -651,6 +717,7 @@ pub(crate) fn run(path: PathBuf, copy_only: bool) -> anyhow::Result<()> {
                 prefs.colorpack,
                 dark,
                 safe_direct_insert,
+                clipboard_fallback_allowed,
                 target_focus,
             );
             app.screenshot = crate::screenshot::ScreenshotCapture::from_env();
@@ -683,12 +750,32 @@ fn picker_focus_state(
         .unwrap_or((None, false))
 }
 
+fn picker_needs_daemon_focus(copy_only: bool) -> bool {
+    !copy_only
+}
+
+fn copy_snippet(ctx: &egui::Context, text: String, trigger: &str) -> String {
+    // Keep the picker alive after this command: Wayland clipboard ownership
+    // belongs to this process, so closing it here can invalidate the paste.
+    ctx.copy_text(text);
+    trigger.to_owned()
+}
+
+fn clipboard_fallback_allowed_by_policy(policy: &wayexpand_core::OrganizationPolicy) -> bool {
+    !policy
+        .effective_enforcement_policy()
+        .require_verified_insert_target
+}
+
 fn picker_expansion_is_eligible(expansion: &ExpansionConfig, safe_direct_insert: bool) -> bool {
     expansion.enabled
         && expansion.command.is_none()
         && form_fields(&expansion.replacement).is_ok_and(|fields| fields.is_empty())
+        && (safe_direct_insert || expansion.app_filter.is_empty())
         && (safe_direct_insert
-            || !template_variables(&expansion.replacement).contains(&"clipboard"))
+            || !template_variables(&expansion.replacement)
+                .iter()
+                .any(|variable| matches!(*variable, "clipboard" | "secret")))
 }
 
 fn focus_target_from_response(response: &str) -> Option<FocusInfo> {
@@ -723,8 +810,10 @@ fn top_ranked(mut ranked: Vec<(i64, usize)>, limit: usize) -> Vec<usize> {
 #[cfg(test)]
 mod tests {
     use super::{
-        focus_returned_to_target, focus_target_from_response, picker_expansion_is_eligible,
-        picker_focus_state, score, top_ranked, FocusInfo, FocusTarget,
+        clipboard_fallback_allowed_by_policy, copy_snippet, focus_returned_to_target,
+        focus_target_from_response, format_app_scope, picker_expansion_is_eligible,
+        picker_focus_state, picker_needs_daemon_focus, score, top_ranked, FocusInfo, FocusTarget,
+        MAX_RESULTS,
     };
 
     #[test]
@@ -744,7 +833,7 @@ mod tests {
             assert_eq!(top_ranked(ranked.clone(), limit), want, "limit {limit}");
         }
     }
-    use wayexpand_core::{ExpansionConfig, MatchMode};
+    use wayexpand_core::{Config, ExpansionConfig, MatchMode};
 
     #[test]
     fn trigger_matches_outrank_description_and_subsequence_matches() {
@@ -880,6 +969,120 @@ mod tests {
         );
         assert!(target.is_none());
         assert!(!direct_insert);
+    }
+
+    #[test]
+    fn copy_only_picker_does_not_require_a_running_daemon() {
+        assert!(!picker_needs_daemon_focus(true));
+        assert!(picker_needs_daemon_focus(false));
+        assert_eq!(picker_focus_state(None, true), (None, false));
+    }
+
+    #[test]
+    fn copy_action_transfers_the_rendered_text_to_the_clipboard_and_keeps_trigger_state() {
+        let context = eframe::egui::Context::default();
+        let output = context.run_ui(Default::default(), |ui| {
+            assert_eq!(
+                copy_snippet(ui.ctx(), "safe command".into(), ":check"),
+                ":check"
+            );
+        });
+        assert!(output.platform_output.commands.iter().any(|command| {
+            matches!(command, eframe::egui::OutputCommand::CopyText(text) if text == "safe command")
+        }));
+    }
+
+    #[test]
+    fn empty_library_produces_an_empty_search_result() {
+        assert!(top_ranked(Vec::new(), MAX_RESULTS).is_empty());
+    }
+
+    #[test]
+    fn copy_only_mode_hides_clipboard_and_secret_templates() {
+        for variable in ["clipboard", "secret"] {
+            let expansion = ExpansionConfig {
+                id: ExpansionConfig::new_id(),
+                trigger: format!(":{variable}"),
+                replacement: format!("{{{{{variable}}}}}"),
+                description: String::new(),
+                tags: Vec::new(),
+                category: String::new(),
+                app_filter: Vec::new(),
+                match_mode: MatchMode::Immediate,
+                command: None,
+                enabled: true,
+                propagate_case: false,
+                aliases: Vec::new(),
+                output_file: None,
+            };
+            assert!(!picker_expansion_is_eligible(&expansion, false));
+        }
+    }
+
+    #[test]
+    fn picker_hides_app_scoped_snippets_from_manual_copy_paths() {
+        let expansion = ExpansionConfig {
+            id: ExpansionConfig::new_id(),
+            trigger: ":production".into(),
+            replacement: "restricted operational text".into(),
+            description: String::new(),
+            tags: Vec::new(),
+            category: String::new(),
+            app_filter: vec!["app_id_exact:org.example.Terminal".into()],
+            match_mode: MatchMode::Immediate,
+            command: None,
+            enabled: true,
+            propagate_case: false,
+            aliases: Vec::new(),
+            output_file: None,
+        };
+        assert!(!picker_expansion_is_eligible(&expansion, false));
+        assert!(picker_expansion_is_eligible(&expansion, true));
+    }
+
+    #[test]
+    fn app_scope_explains_each_supported_filter_kind() {
+        let scope = format_app_scope(&[
+            "app_id_exact:org.example.Editor".into(),
+            "app_id_glob:org.example.*".into(),
+            "title_contains:production".into(),
+            "unrecognized:value".into(),
+        ]);
+
+        assert_eq!(
+            scope,
+            "app ID org.example.editor; app ID matching org.example.*; window title containing \"production\"; configured filter \"unrecognized:value\""
+        );
+    }
+
+    #[test]
+    fn copy_only_mode_respects_verified_target_organization_policy() {
+        let enforcing = wayexpand_core::OrganizationPolicy {
+            safe_mode: true,
+            require_verified_insert_target: true,
+            ..wayexpand_core::OrganizationPolicy::default()
+        };
+        assert!(!clipboard_fallback_allowed_by_policy(&enforcing));
+
+        let audit_only = wayexpand_core::OrganizationPolicy {
+            safe_mode: false,
+            require_verified_insert_target: true,
+            ..wayexpand_core::OrganizationPolicy::default()
+        };
+        assert!(clipboard_fallback_allowed_by_policy(&audit_only));
+    }
+
+    #[test]
+    fn copy_only_mode_respects_embedded_verified_target_policy() {
+        let mut config = Config::parse(
+            "[organization]\nsafe_mode = true\nrequire_verified_insert_target = true\n",
+        )
+        .unwrap();
+        config
+            .apply_administrator_policy(&wayexpand_core::OrganizationPolicy::default())
+            .unwrap();
+
+        assert!(!clipboard_fallback_allowed_by_policy(&config.organization));
     }
 
     #[test]

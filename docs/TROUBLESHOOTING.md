@@ -778,8 +778,10 @@ Test the unfiltered snippet first. Then check the current support boundary:
   best-effort and awaiting broader independent certification.
 - Sway, Hyprland, and river: window tracking is not shipped; filters fail
   closed and therefore do not match.
-- GNOME/Mutter: no supported window tracker is available; use a global
-  expansion or hotkey.
+- GNOME/Mutter: the WayExpand Shell extension provides focus tracking to the
+  IBus service, but this path has no accepted physical-session certification.
+  If tracking is unavailable or disconnected, app-filtered snippets fail
+  closed; use a global expansion or hotkey until the target path is verified.
 
 An unavailable tracker should produce no expansion, not an expansion in the
 wrong application. See [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) before relying

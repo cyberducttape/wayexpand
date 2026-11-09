@@ -7,6 +7,35 @@ All notable changes to WayExpand are documented here.
 - Pin the long-running GNOME Shell 51 extension runtime job to the immutable
   pull request head SHA so an auto-merge cannot remove its checkout ref while
   Fedora dependencies are installing.
+- Show the configured application scope on Quick Picker rows for app-filtered
+  snippets, explaining that automatic insertion is limited to any matching
+  application while copy-only mode continues to hide those snippets.
+- Apply the effective organization policy from both configuration and system
+  policy before allowing Quick Picker clipboard fallback; embedded verified-
+  target requirements now block manual-copy delivery too.
+- Describe missing IBus surrounding-text support as a recent observation rather
+  than a diagnosis of the currently focused field. Expand Quick Picker coverage
+  for copy-only operation, secret-bearing templates, empty libraries, and
+  clipboard handoff without a daemon. Keep the picker alive after copying so
+  its Wayland clipboard ownership remains available for manual paste.
+- Hide app-filtered snippets in copy-only Quick Picker mode because manual
+  clipboard paste cannot preserve verified application identity. Honor
+  enforced policy that requires a verified insert target across clipboard
+  fallback paths.
+- State explicitly that no compositor has accepted physical-session
+  production certification; headless CI results are compatibility evidence,
+  not a certified desktop route.
+- Correct GNOME troubleshooting guidance to distinguish implemented IBus
+  focus tracking from still-uncertified physical-session behavior.
+- Clarify Quick Picker's copy-only flow when verified insertion is unavailable:
+  switch to the target app and paste while the picker remains open to serve the
+  clipboard. Avoid suggesting that Escape be sent to the target application.
+- In Diagnostics, show when IBus received input but safely declined automatic
+  replacement because the target did not provide verifiable surrounding text;
+  offer Quick Picker's copy-and-paste path directly from that finding. Explain
+  that browser and embedded-editor support depends on the client's text
+  capability, without weakening replacement checks or attempting synthetic
+  typing.
 - Bound each private IBus engine-registry probe and use a monotonic deadline,
   so one stalled D-Bus request cannot defeat the startup readiness timeout.
   Test this against a Unix socket that accepts a real IBus client but never
