@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Describe missing IBus surrounding-text support as a recent observation rather
+  than a diagnosis of the currently focused field. Expand Quick Picker coverage
+  for copy-only operation, secret-bearing templates, empty libraries, and
+  clipboard handoff without a daemon. Keep the picker alive after copying so
+  its Wayland clipboard ownership remains available for manual paste.
+
 - Clarify Quick Picker's copy-only flow when verified insertion is unavailable:
   switch to the target app and paste while the picker remains open to serve the
   clipboard. Avoid suggesting that Escape be sent to the target application.

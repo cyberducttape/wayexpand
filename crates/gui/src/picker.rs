@@ -272,8 +272,7 @@ impl PickerApp {
         // No daemon to type for us: offer the text on the clipboard. The
         // window stays open because a Wayland clipboard is served by the
         // process that set it.
-        ctx.copy_text(text);
-        self.copied = Some(expansion.trigger.clone());
+        self.copied = Some(copy_snippet(ctx, text, &expansion.trigger));
     }
 
     fn preview_for(&mut self, expansion: &ExpansionConfig) -> String {
@@ -432,9 +431,7 @@ impl eframe::App for PickerApp {
                                 if !text.is_empty()
                                     && ui.button(self.strings.picker_copy_instead()).clicked()
                                 {
-                                    ctx.copy_text(text.clone());
-                                    self.copied = Some(trigger.clone());
-                                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                                    self.copied = Some(copy_snippet(&ctx, text.clone(), trigger));
                                 }
                                 if ui.button(self.strings.picker_cancel()).clicked() {
                                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -609,7 +606,7 @@ pub(crate) fn run(path: PathBuf, copy_only: bool) -> anyhow::Result<()> {
     let config = loaded.config;
     let config_revision = loaded.revision;
     let prefs = crate::settings::load_gui_prefs();
-    let focus_info = if copy_only {
+    let focus_info = if !picker_needs_daemon_focus(copy_only) {
         None
     } else {
         crate::runtime::control_command(wayexpand_core::DaemonOperation::Focus)
@@ -683,12 +680,25 @@ fn picker_focus_state(
         .unwrap_or((None, false))
 }
 
+fn picker_needs_daemon_focus(copy_only: bool) -> bool {
+    !copy_only
+}
+
+fn copy_snippet(ctx: &egui::Context, text: String, trigger: &str) -> String {
+    // Keep the picker alive after this command: Wayland clipboard ownership
+    // belongs to this process, so closing it here can invalidate the paste.
+    ctx.copy_text(text);
+    trigger.to_owned()
+}
+
 fn picker_expansion_is_eligible(expansion: &ExpansionConfig, safe_direct_insert: bool) -> bool {
     expansion.enabled
         && expansion.command.is_none()
         && form_fields(&expansion.replacement).is_ok_and(|fields| fields.is_empty())
         && (safe_direct_insert
-            || !template_variables(&expansion.replacement).contains(&"clipboard"))
+            || !template_variables(&expansion.replacement)
+                .iter()
+                .any(|variable| matches!(*variable, "clipboard" | "secret")))
 }
 
 fn focus_target_from_response(response: &str) -> Option<FocusInfo> {
@@ -723,8 +733,9 @@ fn top_ranked(mut ranked: Vec<(i64, usize)>, limit: usize) -> Vec<usize> {
 #[cfg(test)]
 mod tests {
     use super::{
-        focus_returned_to_target, focus_target_from_response, picker_expansion_is_eligible,
-        picker_focus_state, score, top_ranked, FocusInfo, FocusTarget,
+        copy_snippet, focus_returned_to_target, focus_target_from_response,
+        picker_expansion_is_eligible, picker_focus_state, picker_needs_daemon_focus, score,
+        top_ranked, FocusInfo, FocusTarget, MAX_RESULTS,
     };
 
     #[test]
@@ -880,6 +891,54 @@ mod tests {
         );
         assert!(target.is_none());
         assert!(!direct_insert);
+    }
+
+    #[test]
+    fn copy_only_picker_does_not_require_a_running_daemon() {
+        assert!(!picker_needs_daemon_focus(true));
+        assert!(picker_needs_daemon_focus(false));
+        assert_eq!(picker_focus_state(None, true), (None, false));
+    }
+
+    #[test]
+    fn copy_action_transfers_the_rendered_text_to_the_clipboard_and_keeps_trigger_state() {
+        let context = eframe::egui::Context::default();
+        let output = context.run_ui(Default::default(), |ui| {
+            assert_eq!(
+                copy_snippet(ui.ctx(), "safe command".into(), ":check"),
+                ":check"
+            );
+        });
+        assert!(output.platform_output.commands.iter().any(|command| {
+            matches!(command, eframe::egui::OutputCommand::CopyText(text) if text == "safe command")
+        }));
+    }
+
+    #[test]
+    fn empty_library_produces_an_empty_search_result() {
+        assert!(top_ranked(Vec::new(), MAX_RESULTS).is_empty());
+    }
+
+    #[test]
+    fn copy_only_mode_hides_clipboard_and_secret_templates() {
+        for variable in ["clipboard", "secret"] {
+            let expansion = ExpansionConfig {
+                id: ExpansionConfig::new_id(),
+                trigger: format!(":{variable}"),
+                replacement: format!("{{{{{variable}}}}}"),
+                description: String::new(),
+                tags: Vec::new(),
+                category: String::new(),
+                app_filter: Vec::new(),
+                match_mode: MatchMode::Immediate,
+                command: None,
+                enabled: true,
+                propagate_case: false,
+                aliases: Vec::new(),
+                output_file: None,
+            };
+            assert!(!picker_expansion_is_eligible(&expansion, false));
+        }
     }
 
     #[test]
