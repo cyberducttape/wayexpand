@@ -405,14 +405,13 @@ impl eframe::App for PickerApp {
                     self.focus_requested = true;
                 }
                 ui.add_space(10.0);
-                if self
-                    .config
-                    .expansion
-                    .iter()
-                    .any(|expansion| expansion.enabled && !expansion.app_filter.is_empty())
+                                if !self.safe_direct_insert
+                                    && self.config.expansion.iter().any(|expansion| {
+                                        expansion.enabled && !expansion.app_filter.is_empty()
+                                    })
                 {
                     ui.label(
-                        RichText::new("App-restricted snippets are hidden because Quick Picker cannot retain verified application identity through clipboard and manual paste.")
+                                        RichText::new("App-restricted snippets are hidden in copy-only mode because manual paste cannot verify the destination application.")
                             .small()
                             .color(palette.muted),
                     );
@@ -726,7 +725,7 @@ fn picker_expansion_is_eligible(expansion: &ExpansionConfig, safe_direct_insert:
     expansion.enabled
         && expansion.command.is_none()
         && form_fields(&expansion.replacement).is_ok_and(|fields| fields.is_empty())
-        && expansion.app_filter.is_empty()
+        && (safe_direct_insert || expansion.app_filter.is_empty())
         && (safe_direct_insert
             || !template_variables(&expansion.replacement)
                 .iter()
@@ -991,7 +990,7 @@ mod tests {
             output_file: None,
         };
         assert!(!picker_expansion_is_eligible(&expansion, false));
-        assert!(!picker_expansion_is_eligible(&expansion, true));
+        assert!(picker_expansion_is_eligible(&expansion, true));
     }
 
     #[test]

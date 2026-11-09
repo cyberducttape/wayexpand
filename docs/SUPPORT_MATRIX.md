@@ -118,8 +118,9 @@ by default until they pass the real-session target-integrity gate.
 triggers; it does not affect Quick Picker's safe clipboard fallback, which
 copies globally applicable snippets for manual paste unless the daemon reports
 an atomic route and exact target identity. App-filtered snippets are hidden
-from Quick Picker because that manual path cannot retain verified application
-identity. Enforced `require_verified_insert_target` policy blocks clipboard
+from copy-only Quick Picker because manual paste cannot retain verified
+application identity; on the atomic direct-insert path, the daemon applies the
+app filter. Enforced `require_verified_insert_target` policy blocks clipboard
 fallback as well. With `compatibility_mode=off`, an unverified route refuses
 before erasing and leaves the trigger available for recovery.
 `unverified` is the baseline for keystroke routes. When

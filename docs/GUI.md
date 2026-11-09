@@ -175,13 +175,14 @@ keystrokes saved, and can be collapsed.
 `wayexpand-gui --picker` opens a small search window. Type to filter enabled,
 static snippets that apply globally (triggers rank above descriptions, and
 scattered letters still match), move with the arrow keys, and press Enter.
-App-filtered snippets are omitted because the picker cannot preserve verified
-application identity through clipboard fallback and manual paste. The window
-closes and the running daemon types a selected global snippet once focus
-returns to the window that was active when the picker opened, under the same
-pause and password-field rules as a typed trigger. If focus does not return
-within two seconds, or returns to a different window, nothing is typed.
-Command-backed snippets are not listed.
+App-filtered snippets are available only when the daemon has an atomic route
+and verified target; the daemon applies their filters before insertion. They
+are omitted from copy-only mode because manual paste cannot verify the
+destination application. The window closes and the running daemon types a
+selected snippet once focus returns to the window that was active when the
+picker opened, under the same pause and password-field rules as a typed
+trigger. If focus does not return within two seconds, or returns to a different
+window, nothing is typed. Command-backed snippets are not listed.
 
 Typing requires the daemon to identify the focused window, which currently
 means the KWin window tracker on KDE Plasma. If no daemon is running or the
