@@ -34,6 +34,38 @@ fn check(status: &'static str, evidence: impl Into<String>) -> serde_json::Value
     serde_json::json!({"status": status, "evidence": evidence.into()})
 }
 
+fn ibus_activation_check(
+    readiness: wayexpand_backend_ibus::chain::IbusReadiness,
+    active_source: Option<&str>,
+) -> serde_json::Value {
+    if readiness.selected && readiness.engine_running {
+        match active_source {
+            Some("input-method") => check(
+                "pass",
+                "IBus is the daemon's active capture route, and its engine is selected and reporting activity",
+            ),
+            Some(source) => check(
+                "not_active_route",
+                format!("the IBus engine is selected and reporting activity, but the daemon reports {source} as its active capture route"),
+            ),
+            None => check(
+                "not_tested",
+                "the IBus engine is selected and reporting activity, but the active daemon route is unknown",
+            ),
+        }
+    } else if readiness.registered {
+        check(
+            "not_tested",
+            "selection and live engine activity have not both been observed",
+        )
+    } else {
+        check(
+            "not_applicable",
+            "the WayExpand IBus engine is not registered",
+        )
+    }
+}
+
 fn active_route_report(daemon: Option<&serde_json::Value>) -> serde_json::Value {
     let field = |name: &str| daemon.and_then(|value| value.get(name)).cloned();
     let optional_bool = |name: &str| field(name).and_then(|value| value.as_bool());
@@ -108,11 +140,10 @@ fn report() -> serde_json::Value {
     let active_source = active_route
         .get("source")
         .and_then(serde_json::Value::as_str);
-    let ibus_is_active_route = active_source == Some("input-method");
 
     let rows = serde_json::json!({
         "ibus_registration": check(if readiness.registered {"pass"} else if readiness.component_installed {"fail"} else {"not_applicable"}, if readiness.registered {"IBus registry reports the WayExpand engine"} else {"IBus engine is not registered"}),
-        "ibus_activation": check(if readiness.selected && readiness.engine_running {"pass"} else if readiness.registered {"not_tested"} else {"not_applicable"}, if readiness.selected && readiness.engine_running && ibus_is_active_route {"IBus is the daemon's active capture route, and its engine is selected and reporting activity"} else if readiness.selected && readiness.engine_running {"The IBus engine is selected and reporting activity, but the daemon reports a different or unknown active capture route"} else {"Selection and live engine activity have not both been observed"}),
+        "ibus_activation": ibus_activation_check(readiness, active_source),
         "active_route": check(
             if daemon.is_none() {"not_tested"} else if active_route["operational_status"] == "connected_and_matching" {"pass"} else {"fail"},
             if daemon.is_none() {"daemon status is unavailable"} else if active_route["operational_status"] == "connected_and_matching" {"the reported active route is connected and matching is available; target-application insertion remains untested"} else {"the daemon does not report a connected route with matching available"},
@@ -228,4 +259,59 @@ pub(crate) fn compatibility_report(args: Args) -> Result<()> {
         println!("Full desktop certification incomplete");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn selected_running_ibus() -> wayexpand_backend_ibus::chain::IbusReadiness {
+        wayexpand_backend_ibus::chain::IbusReadiness {
+            selected: true,
+            engine_running: true,
+            registered: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn ibus_activation_is_not_mislabeled_as_active_when_evdev_is_selected() {
+        let result = ibus_activation_check(selected_running_ibus(), Some("evdev"));
+        assert_eq!(result["status"], "not_active_route");
+        assert!(result["evidence"].as_str().unwrap().contains("evdev"));
+    }
+
+    #[test]
+    fn ibus_activation_passes_only_when_ibus_is_the_reported_route() {
+        let result = ibus_activation_check(selected_running_ibus(), Some("input-method"));
+        assert_eq!(result["status"], "pass");
+    }
+
+    #[test]
+    fn ibus_activation_is_unknown_when_active_route_is_missing() {
+        let result = ibus_activation_check(selected_running_ibus(), None);
+        assert_eq!(result["status"], "not_tested");
+    }
+
+    #[test]
+    fn route_report_exposes_capture_privacy_and_insertion_atomicity() {
+        let daemon = serde_json::json!({
+            "source": "evdev",
+            "backend": "libei",
+            "route_id": "kde-evdev-libei",
+            "state": "connected",
+            "route_available": true,
+            "matching_available": true,
+            "capture_sensitive_focus": false,
+            "inject_atomic_replace": false
+        });
+        let report = active_route_report(Some(&daemon));
+        assert_eq!(report["operational_status"], "connected_and_matching");
+        assert_eq!(report["input_privacy"], "no_sensitive_field_signal");
+        assert_eq!(report["insertion_atomicity"], "non_atomic");
+        assert!(report["operational_evidence_scope"]
+            .as_str()
+            .unwrap()
+            .contains("does not verify text delivery"));
+    }
 }

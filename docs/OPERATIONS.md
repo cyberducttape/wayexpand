@@ -409,7 +409,10 @@ from the active capture route because an installed or selected IBus engine can
 coexist with another daemon route. The report never calls an engine activity
 counter a verified insertion: `overall` remains
 `not_yet_verified_end_to_end`. A separate, reviewed test of the target
-application is required before claiming a working insertion scenario.
+application is required before claiming a working insertion scenario. The
+IBus activation check can be `not_active_route` when IBus is running but another
+capture source is selected; `not_tested` means route identity or engine state
+is unknown.
 
 `doctor` reports implementation state, configuration ownership/mode and parse
 status, validates the control-socket parent and existing path permissions, and
