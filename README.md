@@ -1,7 +1,6 @@
 # WayExpand
 
 [![CI](https://github.com/cyberducttape/wayexpand/actions/workflows/ci.yml/badge.svg)](https://github.com/cyberducttape/wayexpand/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/cyberducttape/wayexpand?label=release)](https://github.com/cyberducttape/wayexpand/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.92%2B-orange.svg)](https://www.rust-lang.org/)
 
@@ -51,15 +50,15 @@ local, offline, no account, no telemetry.
 | Linux architectures | x86_64 and aarch64 build paths |
 | Desktop integration | Wayland backends available; compositor support varies |
 | Production certification | Run `wayexpand doctor`; see the [support matrix](docs/SUPPORT_MATRIX.md) |
-| Distribution packages | Ubuntu 26.04 amd64 daily PPA package; no assets on the latest GitHub release and no published Fedora Copr repository; certification pending |
+| Distribution packages | Ubuntu 26.04 amd64 daily PPA package; no published GitHub release and no published Fedora Copr repository; certification pending |
 
 ## Install
 
 ### Distribution packages
 
 The currently published package channel is an experimental daily PPA build
-for Ubuntu 26.04 amd64. The latest GitHub release currently has no downloadable
-assets, and no Fedora Copr repository is published. Package recipes and CI
+for Ubuntu 26.04 amd64. No GitHub release is currently published, and no
+Fedora Copr repository is published. Package recipes and CI
 install tests exist for Ubuntu 24.04/26.04 and Fedora 45, but that does not
 mean installable release packages are available for those distributions.
 The Ubuntu daily package is not compositor-certified.
