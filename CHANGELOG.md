@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Cache Quick Picker snippet eligibility when it opens so each search edit
+  avoids reparsing form fields and template variables across the library.
 - Pin the long-running GNOME Shell 51 extension runtime job to the immutable
   pull request head SHA so an auto-merge cannot remove its checkout ref while
   Fedora dependencies are installing.
