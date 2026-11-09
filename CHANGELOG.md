@@ -8,6 +8,9 @@ All notable changes to WayExpand are documented here.
   commands instead of inheriting `kubectl`'s ambient default. Prefill that
   field from the opt-in shell report in CLI previews, show the selected target,
   and support an explicit `--kubernetes-context` override for offline review.
+- Expand the developer pack's `;;git-review` shortcut to inspect branch state,
+  staged and unstaged diff summaries, and whitespace errors without modifying
+  the worktree.
 - Disconnect GNOME window-title notifications when the extension is disabled.
   Track input-source activation retry sources and cancel pending calls during
   teardown so stale retries cannot reactivate an input source.

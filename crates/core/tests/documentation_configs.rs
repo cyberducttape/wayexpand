@@ -504,6 +504,24 @@ fn kubernetes_logs_use_a_shell_quoted_context_not_an_unvalidated_form() {
 }
 
 #[test]
+fn developer_git_review_covers_staged_and_unstaged_changes_without_mutation() {
+    let config = Config::parse(include_str!(
+        "../../../packs/developer/snippets/developer.toml"
+    ))
+    .expect("developer workflows pack should validate");
+    let review = config
+        .expansion
+        .iter()
+        .find(|expansion| expansion.trigger == ";;git-review")
+        .expect("developer Git review shortcut should exist");
+    assert!(review.command.is_none());
+    assert_eq!(
+        review.replacement,
+        "git status --short --branch && git diff --check && git diff --cached --check && git diff --stat && git diff --cached --stat"
+    );
+}
+
+#[test]
 fn ensure_user_config_creates_a_private_config_on_first_run() {
     let root = std::env::temp_dir().join(format!(
         "wayexpand-first-run-{}-{}",

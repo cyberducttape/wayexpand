@@ -1,9 +1,9 @@
 [[expansion]]
 trigger = ";;git-review"
-description = "Review repository state without changing the worktree"
+description = "Review branch, staged and unstaged changes, and whitespace errors without modifying the worktree"
 category = "Developer"
 tags = ["git", "review"]
-replacement = "git status --short --branch && git diff --stat"
+replacement = "git status --short --branch && git diff --check && git diff --cached --check && git diff --stat && git diff --cached --stat"
 
 [[expansion]]
 trigger = ";;git-log"
