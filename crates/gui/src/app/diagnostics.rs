@@ -486,6 +486,9 @@ impl GuiApp {
         if capabilities.and_then(|caps| caps.capture_sensitive_focus) != Some(true) {
             next_steps.push(self.strings.next_step_sensitive_fields());
         }
+        if terminal_only_route(&self.daemon_status) {
+            next_steps.push(self.strings.next_step_terminal_only_route());
+        }
         if active_route_certified != Some(true) {
             next_steps.push(self.strings.next_step_certification());
         }
@@ -2149,6 +2152,12 @@ impl GuiApp {
                     .strong(),
                 );
             });
+            if terminal_only_route(&self.daemon_status) {
+                ui.colored_label(
+                    palette.warning,
+                    RichText::new(self.strings.terminal_only_route_notice()).strong(),
+                );
+            }
             ui.label(
                 RichText::new(self.strings.session_evidence_note())
                     .small()
@@ -2338,6 +2347,10 @@ fn compact_status_value<'a>(status: &'a str, key: &str) -> Option<&'a str> {
     })
 }
 
+fn terminal_only_route(status: &str) -> bool {
+    compact_status_value(status, "terminal_apps_only") == Some("true")
+}
+
 fn render_assessment_row(
     ui: &mut egui::Ui,
     palette: &Palette,
@@ -2488,5 +2501,21 @@ app_filter = ["app_id_exact:org.example.Editor"]
         assert!(guidance.contains("A recent input was refused"));
         assert!(guidance.contains("may not describe the currently focused"));
         assert!(!guidance.contains("this field does not provide"));
+    }
+}
+
+#[cfg(test)]
+mod route_scope_tests {
+    use super::terminal_only_route;
+
+    #[test]
+    fn terminal_only_scope_requires_an_explicit_true_status() {
+        assert!(terminal_only_route(
+            "state=connected · source=evdev · terminal_apps_only=true"
+        ));
+        assert!(!terminal_only_route(
+            "state=connected · source=ibus · terminal_apps_only=false"
+        ));
+        assert!(!terminal_only_route("state=connected · source=ibus"));
     }
 }
