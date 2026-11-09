@@ -7,6 +7,10 @@ All notable changes to WayExpand are documented here.
 - Pin the long-running GNOME Shell 51 extension runtime job to the immutable
   pull request head SHA so an auto-merge cannot remove its checkout ref while
   Fedora dependencies are installing.
+- Bound each private IBus engine-registry probe and use a monotonic deadline,
+  so one stalled D-Bus request cannot defeat the startup readiness timeout.
+  Test this against a Unix socket that accepts a real IBus client but never
+  answers its D-Bus request.
 - Declare the packaged GNOME Shell extension and distinguish package-owned IBus registration from source-install setup. `install-check` now verifies that a distribution package contains the exact bundled extension payload, and package smoke checks cover the extension for default and custom XDG users. The GUI continues through its resumable GNOME setup flow, including explicit authorization and session-restart guidance; setup commands now use the same active configuration path as the open GUI so custom-path installations resume correctly.
 - Classify pull request changes so system integration and compositor acceptance
   jobs run when their code paths are affected, while push, scheduled, and
