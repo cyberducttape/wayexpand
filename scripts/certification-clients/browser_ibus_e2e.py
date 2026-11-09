@@ -54,6 +54,46 @@ def find_acceptance_page(targets, expected_url):
     return None
 
 
+def browser_startup_diagnostics(process, profile, active_port, log_path):
+    """Return content-free process state when Chromium startup stalls."""
+    proc_dir = Path("/proc") / str(process.pid)
+    fields = {}
+    try:
+        for line in (proc_dir / "status").read_text(encoding="ascii").splitlines():
+            key, separator, value = line.partition(":")
+            if separator and key in {"State", "Threads", "VmRSS"}:
+                fields[key.lower()] = value.strip().replace("\t", " ")
+    except OSError:
+        pass
+    try:
+        fields["wait_channel"] = (proc_dir / "wchan").read_text(encoding="ascii").strip()
+    except OSError:
+        fields["wait_channel"] = "unavailable"
+    try:
+        fields["child_count"] = len((proc_dir / "task" / str(process.pid) / "children").read_text().split())
+    except OSError:
+        fields["child_count"] = "unavailable"
+    try:
+        profile_entries = sorted(path.name for path in profile.iterdir())[:12]
+    except OSError:
+        profile_entries = []
+    try:
+        log_bytes = Path(log_path).stat().st_size
+    except OSError:
+        log_bytes = "unavailable"
+    return (
+        f"browser_pid={process.pid}, exit_code={process.poll()}, "
+        f"proc_state={fields.get('state', 'unavailable')}, "
+        f"threads={fields.get('threads', 'unavailable')}, "
+        f"rss={fields.get('vmrss', 'unavailable')}, "
+        f"wait_channel={fields['wait_channel']}, "
+        f"child_count={fields['child_count']}, "
+        f"devtools_port_file={active_port.is_file()}, "
+        f"browser_log_bytes={log_bytes}, "
+        f"profile_entries={','.join(profile_entries) or 'none'}"
+    )
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--browser", required=True)
@@ -151,7 +191,13 @@ def main():
                 return None
             return find_acceptance_page(targets, expected_page_url)
 
-        ws_url = wait_for(devtools_url, "Chromium's isolated acceptance page")
+        try:
+            ws_url = wait_for(devtools_url, "Chromium's isolated acceptance page")
+        except SystemExit as error:
+            fail(
+                f"{error}; "
+                f"{browser_startup_diagnostics(process, profile, active_port, args.log)}"
+            )
         connection = websocket.create_connection(ws_url, timeout=2)
         next_id = 0
 
