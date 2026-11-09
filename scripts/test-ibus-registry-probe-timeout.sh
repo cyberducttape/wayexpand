@@ -20,7 +20,9 @@ cleanup() {
     fi
     rm -rf -- "$work"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # This accepts the connection but never sends the D-Bus authentication
 # greeting or a method reply. The real IBus client therefore blocks in the
