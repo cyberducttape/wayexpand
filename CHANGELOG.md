@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Reject conflicting Kubernetes context selections and visibly mark rendered
+  cluster targets as unverified; validate explicit context names and ignore
+  inactive terminal-session reports.
+
 - Require a validated explicit cluster context in Kubernetes operations-pack
   commands instead of inheriting `kubectl`'s ambient default. Prefill that
   field from the opt-in shell report in CLI previews, show the selected target,

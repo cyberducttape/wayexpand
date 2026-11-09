@@ -232,8 +232,10 @@ wayexpand context render ';;kube-logs' --shell bash \
 The command prints the exact shell-quoted command and context selected. It
 never invokes `kubectl`; review the target before manually running or pasting
 the command. In ordinary desktop expansion, the form always asks the operator
-to choose the context. Infrastructure-changing operations need a separately
-authorized action and explicit confirmation.
+to choose the context. The preview labels the target as unverified: a context
+name is not proof that it exists in kubeconfig or points to the intended
+cluster, and WayExpand does not contact Kubernetes. Infrastructure-changing
+operations need a separately authorized action and explicit confirmation.
 
 ```toml
 [[expansion]]

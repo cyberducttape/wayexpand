@@ -150,6 +150,14 @@ fn render_context(args: Vec<String>) -> Result<()> {
         index += 1;
     }
 
+    validate_context_selection(
+        kubernetes_context_override.as_deref(),
+        supplied.get("field:context").map(String::as_str),
+    )?;
+    if let Some(context) = kubernetes_context_override.as_deref() {
+        validate_kubernetes_context(context)?;
+    }
+
     let config =
         Config::load(&config_path).map_err(|error| config_load_error(&config_path, error))?;
     let expansion = config
@@ -240,6 +248,9 @@ fn render_context(args: Vec<String>) -> Result<()> {
     if let Some(context) = values.get("field:context") {
         session.kubernetes_context = Some(context.clone());
     }
+    if let Some(context) = session.kubernetes_context.as_deref() {
+        validate_kubernetes_context(context)?;
+    }
     let mut context = config.template_context(None);
     context.fields = Arc::new(values);
     context.session_context = Some(session.clone());
@@ -263,13 +274,14 @@ fn render_context(args: Vec<String>) -> Result<()> {
                 "remote_host": session.remote_host,
                 "environment": session.environment,
                 "kubernetes_context": session.kubernetes_context,
+                "target_verification": "unverified",
                 "delivery": "manual-review-and-paste",
                 "execution": "never",
             })
         );
     } else {
         eprintln!(
-            "Preview only · shell={shell} · target={} · environment={} · Kubernetes context={} · review before pasting; WayExpand will not execute this text",
+            "Preview only · shell={shell} · target={} · environment={} · Kubernetes target (unverified)={} · review before pasting; WayExpand will not execute this text",
             session.remote_host.as_deref().unwrap_or("local"),
             session.environment.as_deref().unwrap_or("unspecified"),
             session.kubernetes_context.as_deref().unwrap_or("unspecified"),
@@ -298,6 +310,32 @@ fn context_form_prefill(
         .flatten()
 }
 
+fn validate_context_selection(
+    option_context: Option<&str>,
+    field_context: Option<&str>,
+) -> Result<()> {
+    if let (Some(option), Some(field)) = (option_context, field_context) {
+        if option != field {
+            bail!(
+                "conflicting Kubernetes contexts: --kubernetes-context and --set field:context must match"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn validate_kubernetes_context(context: &str) -> Result<()> {
+    if context.trim().is_empty()
+        || context.chars().any(char::is_whitespace)
+        || context.chars().any(char::is_control)
+    {
+        bail!(
+            "Kubernetes context must be non-empty and contain no whitespace or control characters"
+        );
+    }
+    Ok(())
+}
+
 fn context_report_needed(
     template: &str,
     shell_supplied: bool,
@@ -321,71 +359,6 @@ fn context_report_needed(
             })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{context_form_prefill, context_report_needed, context_variable_name};
-
-    #[test]
-    fn detects_context_dependencies_with_or_without_shell_quoting() {
-        assert_eq!(
-            context_variable_name("context:remote_host"),
-            Some("remote_host")
-        );
-        assert_eq!(
-            context_variable_name("shellq:context:kubernetes_context"),
-            Some("kubernetes_context")
-        );
-        assert_eq!(
-            context_variable_name("shellq:field:namespace=default"),
-            None
-        );
-        assert_eq!(context_variable_name("clipboard"), None);
-    }
-
-    #[test]
-    fn explicit_kubernetes_preview_does_not_depend_on_daemon_context() {
-        let template = "kubectl --context {{shellq:context:kubernetes_context}} logs";
-        assert!(!context_report_needed(
-            template, true, false, false, true, false
-        ));
-        assert!(context_report_needed(
-            template, true, false, false, false, false
-        ));
-        assert!(context_report_needed(
-            template, false, false, false, true, false
-        ));
-        assert!(context_report_needed(
-            "{{shellq:context|required}}",
-            true,
-            false,
-            false,
-            false,
-            true
-        ));
-        assert!(!context_report_needed(
-            "{{shellq:context|required}}",
-            true,
-            false,
-            false,
-            true,
-            false
-        ));
-    }
-
-    #[test]
-    fn fresh_kubernetes_context_prefills_only_the_context_form() {
-        let session = wayexpand_core::SessionContextReport {
-            kubernetes_context: Some("staging-west".into()),
-            ..wayexpand_core::SessionContextReport::default()
-        };
-        assert_eq!(
-            context_form_prefill("field:context", &session),
-            Some("staging-west".into())
-        );
-        assert_eq!(context_form_prefill("field:namespace", &session), None);
-    }
-}
-
 fn reported_context_if_available(
     should_query: bool,
 ) -> Result<Option<wayexpand_core::SessionContextReport>> {
@@ -403,7 +376,20 @@ fn reported_context_if_available(
     })?;
     let status: serde_json::Value = serde_json::from_str(&response)
         .map_err(|_| daemon_error("daemon returned an unreadable context response"))?;
+    context_from_status(&status)
+}
+
+fn context_from_status(
+    status: &serde_json::Value,
+) -> Result<Option<wayexpand_core::SessionContextReport>> {
     if status.get("active").and_then(serde_json::Value::as_bool) != Some(true) {
+        return Ok(None);
+    }
+    if status
+        .get("expires_in_seconds")
+        .and_then(serde_json::Value::as_u64)
+        .is_none_or(|seconds| seconds == 0)
+    {
         return Ok(None);
     }
     let report: wayexpand_core::SessionContextReport = serde_json::from_value(
@@ -609,4 +595,128 @@ fn terminal_id() -> Result<String> {
 
 fn nonempty(value: String) -> Option<String> {
     (!value.is_empty()).then_some(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        context_form_prefill, context_from_status, context_report_needed, context_variable_name,
+        validate_context_selection, validate_kubernetes_context,
+    };
+
+    #[test]
+    fn detects_context_dependencies_with_or_without_shell_quoting() {
+        assert_eq!(
+            context_variable_name("context:remote_host"),
+            Some("remote_host")
+        );
+        assert_eq!(
+            context_variable_name("shellq:context:kubernetes_context"),
+            Some("kubernetes_context")
+        );
+        assert_eq!(
+            context_variable_name("shellq:field:namespace=default"),
+            None
+        );
+        assert_eq!(context_variable_name("clipboard"), None);
+    }
+
+    #[test]
+    fn explicit_kubernetes_preview_does_not_depend_on_daemon_context() {
+        let template = "kubectl --context {{shellq:context:kubernetes_context}} logs";
+        assert!(!context_report_needed(
+            template, true, false, false, true, false
+        ));
+        assert!(context_report_needed(
+            template, true, false, false, false, false
+        ));
+        assert!(context_report_needed(
+            template, false, false, false, true, false
+        ));
+        assert!(context_report_needed(
+            "{{shellq:context|required}}",
+            true,
+            false,
+            false,
+            false,
+            true
+        ));
+        assert!(!context_report_needed(
+            "{{shellq:context|required}}",
+            true,
+            false,
+            false,
+            true,
+            false
+        ));
+    }
+
+    #[test]
+    fn fresh_kubernetes_context_prefills_only_the_context_form() {
+        let session = wayexpand_core::SessionContextReport {
+            kubernetes_context: Some("staging-west".into()),
+            ..wayexpand_core::SessionContextReport::default()
+        };
+        assert_eq!(
+            context_form_prefill("field:context", &session),
+            Some("staging-west".into())
+        );
+        assert_eq!(context_form_prefill("field:namespace", &session), None);
+    }
+
+    #[test]
+    fn explicit_and_form_contexts_must_not_conflict() {
+        assert!(validate_context_selection(Some("staging"), Some("staging")).is_ok());
+        assert!(validate_context_selection(Some("staging"), Some("production")).is_err());
+        assert!(validate_context_selection(Some("staging"), None).is_ok());
+    }
+
+    #[test]
+    fn kubernetes_context_rejects_empty_whitespace_and_controls() {
+        for invalid in [
+            "",
+            "   ",
+            "staging production",
+            "staging\tproduction",
+            "staging\nproduction",
+            "staging\u{1b}[31m",
+        ] {
+            assert!(validate_kubernetes_context(invalid).is_err(), "{invalid:?}");
+        }
+        assert!(validate_kubernetes_context("staging-west").is_ok());
+    }
+
+    #[test]
+    fn expired_or_inactive_session_context_never_prefills_a_cluster() {
+        let inactive = serde_json::json!({
+            "active": false,
+            "expires_in_seconds": 0,
+        });
+        assert!(context_from_status(&inactive).unwrap().is_none());
+        let expired = serde_json::json!({
+            "active": true,
+            "expires_in_seconds": 0,
+            "context": { "kubernetes_context": "production" },
+        });
+        assert!(context_from_status(&expired).unwrap().is_none());
+        let valid = serde_json::json!({
+            "active": true,
+            "expires_in_seconds": 10,
+            "context": serde_json::to_value(wayexpand_core::SessionContextReport {
+                terminal_id: "tty-1-2".into(),
+                session_id: "0123456789abcdef0123456789abcdef".into(),
+                kubernetes_context: Some("staging".into()),
+                ..wayexpand_core::SessionContextReport::default()
+            })
+            .unwrap(),
+        });
+        assert_eq!(
+            context_from_status(&valid)
+                .unwrap()
+                .and_then(|session| session.kubernetes_context),
+            Some("staging".into())
+        );
+        let placeholder = wayexpand_core::SessionContextReport::default();
+        assert_eq!(context_form_prefill("field:context", &placeholder), None);
+    }
 }

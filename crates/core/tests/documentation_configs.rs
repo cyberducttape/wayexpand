@@ -463,6 +463,17 @@ fn kubernetes_logs_use_a_shell_quoted_context_not_an_unvalidated_form() {
         6,
         "context plus namespace, pod, container, age, and line count"
     );
+    let context_field = fields
+        .iter()
+        .find(|field| field.key == "field:context")
+        .expect("Kubernetes context should be an explicit form field");
+    for invalid in ["", "   ", "staging\tprod", "staging\nprod", "staging\u{1b}"] {
+        assert!(
+            context_field.validate_value(invalid).is_err(),
+            "{invalid:?}"
+        );
+    }
+    assert!(context_field.validate_value("staging-west").is_ok());
 
     let values = fields.iter().map(|field| {
         let value = match &field.kind {
