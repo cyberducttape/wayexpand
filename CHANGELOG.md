@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Show the configured application scope on Quick Picker rows for app-filtered
+  snippets, explaining that automatic insertion is limited to any matching
+  application while copy-only mode continues to hide those snippets.
 - Apply the effective organization policy from both configuration and system
   policy before allowing Quick Picker clipboard fallback; embedded verified-
   target requirements now block manual-copy delivery too.

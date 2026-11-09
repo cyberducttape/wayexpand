@@ -1167,6 +1167,14 @@ impl Strings {
         }
     }
 
+    pub fn picker_app_scope(&self, scope: &str) -> String {
+        match self.lang {
+            Language::English => format!("Automatic insertion only in any of: {scope}"),
+            Language::Indonesian => format!("Penyisipan otomatis hanya di salah satu: {scope}"),
+            Language::German => format!("Automatisches Einfügen nur in einer dieser Apps: {scope}"),
+        }
+    }
+
     pub fn cancel(&self) -> &'static str {
         match self.lang {
             Language::English => "Cancel",

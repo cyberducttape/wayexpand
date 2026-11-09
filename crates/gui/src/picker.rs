@@ -87,6 +87,7 @@ fn score_normalized(query: &str, trigger: &str, description: &str) -> Option<i64
 struct SearchEntry {
     trigger: String,
     description: String,
+    app_scope: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -160,6 +161,7 @@ impl PickerApp {
                 .map(|expansion| SearchEntry {
                     trigger: crate::library::trigger_search_text(expansion),
                     description: expansion.description.to_lowercase(),
+                    app_scope: format_app_scope(&expansion.app_filter),
                 })
                 .collect(),
             template_context: config.template_context(None),
@@ -476,7 +478,15 @@ impl eframe::App for PickerApp {
                             let expansion = self.config.expansion[expansion_index].clone();
                             let preview = self.preview_for(&expansion);
                             let selected = index == self.selected;
-                            let response = picker_row(ui, &palette, &preview, &expansion, selected);
+                            let response = picker_row(
+                                ui,
+                                &palette,
+                                &preview,
+                                &self.search_index[expansion_index].app_scope,
+                                &self.strings,
+                                &expansion,
+                                selected,
+                            );
                             if selected && (up || down) {
                                 response.scroll_to_me(None);
                             }
@@ -518,6 +528,8 @@ fn picker_row(
     ui: &mut egui::Ui,
     palette: &Palette,
     preview: &str,
+    app_scope: &str,
+    strings: &Strings,
     expansion: &ExpansionConfig,
     selected: bool,
 ) -> egui::Response {
@@ -563,6 +575,13 @@ fn picker_row(
             ui.add(
                 egui::Label::new(RichText::new(first_line).small().color(palette.muted)).truncate(),
             );
+            if !app_scope.is_empty() {
+                ui.label(
+                    RichText::new(strings.picker_app_scope(app_scope))
+                        .small()
+                        .color(palette.warning),
+                );
+            }
         });
     let response = ui.interact(
         frame.response.rect,
@@ -578,6 +597,25 @@ fn picker_row(
         )
     });
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+fn format_app_scope(filters: &[String]) -> String {
+    filters
+        .iter()
+        .map(|filter| match wayexpand_core::AppFilter::parse(filter) {
+            Some(wayexpand_core::AppFilter::AppIdExact(value)) => {
+                format!("app ID {value}")
+            }
+            Some(wayexpand_core::AppFilter::AppIdGlob(value)) => {
+                format!("app ID matching {value}")
+            }
+            Some(wayexpand_core::AppFilter::TitleContains(value)) => {
+                format!("window title containing {value:?}")
+            }
+            None => format!("configured filter {filter:?}"),
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 fn wait_for_focus_and_insert(target_focus: FocusTarget, trigger: &str) -> Result<(), String> {
@@ -773,8 +811,9 @@ fn top_ranked(mut ranked: Vec<(i64, usize)>, limit: usize) -> Vec<usize> {
 mod tests {
     use super::{
         clipboard_fallback_allowed_by_policy, copy_snippet, focus_returned_to_target,
-        focus_target_from_response, picker_expansion_is_eligible, picker_focus_state,
-        picker_needs_daemon_focus, score, top_ranked, FocusInfo, FocusTarget, MAX_RESULTS,
+        focus_target_from_response, format_app_scope, picker_expansion_is_eligible,
+        picker_focus_state, picker_needs_daemon_focus, score, top_ranked, FocusInfo, FocusTarget,
+        MAX_RESULTS,
     };
 
     #[test]
@@ -999,6 +1038,21 @@ mod tests {
         };
         assert!(!picker_expansion_is_eligible(&expansion, false));
         assert!(picker_expansion_is_eligible(&expansion, true));
+    }
+
+    #[test]
+    fn app_scope_explains_each_supported_filter_kind() {
+        let scope = format_app_scope(&[
+            "app_id_exact:org.example.Editor".into(),
+            "app_id_glob:org.example.*".into(),
+            "title_contains:production".into(),
+            "unrecognized:value".into(),
+        ]);
+
+        assert_eq!(
+            scope,
+            "app ID org.example.editor; app ID matching org.example.*; window title containing \"production\"; configured filter \"unrecognized:value\""
+        );
     }
 
     #[test]
