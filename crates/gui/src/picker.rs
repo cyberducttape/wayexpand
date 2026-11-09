@@ -129,6 +129,7 @@ pub(crate) struct PickerApp {
     cached_revision: Option<ConfigRevision>,
     preview_cache: HashMap<String, String>,
     last_preview_context_refresh: Instant,
+    ranked_scratch: Vec<(i64, usize)>,
     result_indices: Vec<usize>,
     strings: Strings,
     palette: Palette,
@@ -183,6 +184,7 @@ impl PickerApp {
             cached_revision: None,
             preview_cache: HashMap::new(),
             last_preview_context_refresh: Instant::now(),
+            ranked_scratch: Vec::new(),
             result_indices: Vec::new(),
             strings: Strings::new(language),
             palette: Palette::for_pack(colorpack, dark),
@@ -210,17 +212,20 @@ impl PickerApp {
         if self.cached_revision.as_ref() != Some(&self.config_revision) {
             self.preview_cache.clear();
         }
-        let ranked: Vec<(i64, usize)> = self
-            .search_index
-            .iter()
-            .enumerate()
-            .filter(|(_, entry)| entry.eligible)
-            .filter_map(|(index, entry)| {
-                score_normalized(&query, &entry.trigger, &entry.description)
-                    .map(|score| (score, index))
-            })
-            .collect();
-        self.result_indices = top_ranked(ranked, MAX_RESULTS);
+        self.ranked_scratch.clear();
+        for (index, entry) in self.search_index.iter().enumerate() {
+            if !entry.eligible {
+                continue;
+            }
+            if let Some(score) = score_normalized(&query, &entry.trigger, &entry.description) {
+                self.ranked_scratch.push((score, index));
+            }
+        }
+        top_ranked_into(
+            &mut self.ranked_scratch,
+            MAX_RESULTS,
+            &mut self.result_indices,
+        );
         self.cached_query = Some(query);
         self.cached_revision = Some(self.config_revision.clone());
     }
@@ -799,17 +804,31 @@ fn focus_target_from_response(response: &str) -> Option<FocusInfo> {
 /// Indices of the `limit` best `(score, index)` pairs: best score first,
 /// then library order. Only the kept results are fully sorted, so a large
 /// library pays O(n) per query change instead of O(n log n).
+#[cfg(test)]
 fn top_ranked(mut ranked: Vec<(i64, usize)>, limit: usize) -> Vec<usize> {
+    let mut result = Vec::new();
+    top_ranked_into(&mut ranked, limit, &mut result);
+    result
+}
+
+/// Keep the ranking allocation reusable across query edits. Large libraries
+/// can produce many matches, while the picker only displays a small prefix;
+/// clearing this scratch vector retains its high-water capacity for the next
+/// keystroke.
+fn top_ranked_into(ranked: &mut Vec<(i64, usize)>, limit: usize, result: &mut Vec<usize>) {
+    result.clear();
     let order = |a: &(i64, usize), b: &(i64, usize)| b.0.cmp(&a.0).then(a.1.cmp(&b.1));
     if limit == 0 {
-        return Vec::new();
+        ranked.clear();
+        return;
     }
     if ranked.len() > limit {
         ranked.select_nth_unstable_by(limit - 1, order);
         ranked.truncate(limit);
     }
     ranked.sort_unstable_by(order);
-    ranked.into_iter().map(|(_, index)| index).collect()
+    result.extend(ranked.iter().map(|(_, index)| *index));
+    ranked.clear();
 }
 
 #[cfg(test)]
@@ -817,8 +836,8 @@ mod tests {
     use super::{
         clipboard_fallback_allowed_by_policy, copy_snippet, focus_returned_to_target,
         focus_target_from_response, format_app_scope, picker_expansion_is_eligible,
-        picker_focus_state, picker_needs_daemon_focus, score, top_ranked, FocusInfo, FocusTarget,
-        SearchEntry, MAX_RESULTS,
+        picker_focus_state, picker_needs_daemon_focus, score, top_ranked, top_ranked_into,
+        FocusInfo, FocusTarget, SearchEntry, MAX_RESULTS,
     };
 
     #[test]
@@ -838,6 +857,28 @@ mod tests {
             assert_eq!(top_ranked(ranked.clone(), limit), want, "limit {limit}");
         }
     }
+
+    #[test]
+    fn top_ranked_reuses_scratch_capacity_between_queries() {
+        let mut ranked: Vec<(i64, usize)> = (0..10_000)
+            .map(|index| ((index % 31) as i64, index))
+            .collect();
+        let mut result = Vec::with_capacity(MAX_RESULTS);
+        let expected = top_ranked(ranked.clone(), MAX_RESULTS);
+
+        top_ranked_into(&mut ranked, MAX_RESULTS, &mut result);
+
+        assert_eq!(result, expected);
+        let retained_capacity = ranked.capacity();
+        assert!(retained_capacity >= 10_000);
+        assert!(ranked.is_empty());
+
+        ranked.extend((0..10_000).map(|index| ((index % 17) as i64, index)));
+        top_ranked_into(&mut ranked, MAX_RESULTS, &mut result);
+        assert_eq!(result.len(), MAX_RESULTS);
+        assert_eq!(ranked.capacity(), retained_capacity);
+    }
+
     use wayexpand_core::{Config, ExpansionConfig, MatchMode};
 
     #[test]
