@@ -13,6 +13,9 @@ All notable changes to WayExpand are documented here.
   that browser and embedded-editor support depends on the client's text
   capability, without weakening replacement checks or attempting synthetic
   typing.
+- Disconnect GNOME window-title notifications when the extension is disabled.
+  Track input-source activation retry sources and cancel pending calls during
+  teardown so stale retries cannot reactivate an input source.
 - Preserve partially typed IBus triggers when Shift or an alternate-level
   modifier is pressed between characters, so triggers containing characters
   such as French AZERTY's shifted `2` can still match. Shortcut modifiers still

@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import test from 'node:test';
 import {
+    CancellableSources,
+    clearTitleWatch,
     activeXkbSettings,
     isAuthorizedTrackerClient,
     LatestOnlyDelivery,
@@ -163,6 +165,68 @@ test('slow subscribers retain only the latest update and one in-flight call', ()
     assert.deepEqual(sent, ['initial']);
     complete(null);
     assert.deepEqual(sent, ['initial', 'title-99999']);
+});
+
+test('disabling a title-bearing subscription disconnects its window signal', () => {
+    const handlers = new Map();
+    let nextId = 1;
+    let notifications = 0;
+    const window = {
+        connect(signal, callback) {
+            assert.equal(signal, 'notify::title');
+            const id = nextId++;
+            handlers.set(id, callback);
+            return id;
+        },
+        disconnect(id) {
+            handlers.delete(id);
+        },
+    };
+    const signalId = window.connect('notify::title', () => notifications++);
+    assert.equal(handlers.size, 1, 'title opt-in established a live signal');
+
+    const cleared = clearTitleWatch(window, signalId);
+    assert.equal(cleared.window, null);
+    assert.equal(cleared.signalId, 0);
+    assert.equal(handlers.size, 0, 'disable disconnects the title signal');
+    for (const callback of handlers.values())
+        callback();
+    assert.equal(notifications, 0);
+
+    const disable = extensionSource.slice(
+        extensionSource.indexOf('    disable() {'),
+        extensionSource.indexOf('    get Version()'),
+    );
+    assert.match(disable, /this\._clearTitleWatch\(\)/,
+        'extension disable must clear the subscribed title window');
+    assert.match(extensionSource, /_clearTitleWatch\(\)\s*\{\s*const cleared = clearTitleWatch/);
+});
+
+test('disabling cancels pending input-source activation retries and invalidates callbacks', () => {
+    const removed = [];
+    const sources = new CancellableSources(id => removed.push(id));
+    const generation = sources.generation;
+    sources.add(12);
+    sources.add(13);
+    assert.equal(sources.isCurrent(generation), true);
+
+    sources.cancelAll();
+    assert.deepEqual(removed, [12, 13]);
+    assert.equal(sources.isCurrent(generation), false);
+
+    const disable = extensionSource.slice(
+        extensionSource.indexOf('    disable() {'),
+        extensionSource.indexOf('    get Version()'),
+    );
+    assert.match(disable, /this\._activationSources\.cancelAll\(\)/);
+    assert.match(disable, /this\._activationCalls\.clear\(\)/);
+    const activation = extensionSource.slice(
+        extensionSource.indexOf('    _activateInputSource('),
+        extensionSource.indexOf('    SubscribeAsync('),
+    );
+    assert.match(activation, /sources\.isCurrent\(generation\)/);
+    assert.match(activation, /sources\.forget\(sourceId\)/);
+    assert.match(activation, /sources\.add\(sourceId\)/);
 });
 
 test('a stalled subscriber cannot grow the outstanding queue', () => {
