@@ -22,6 +22,10 @@ fn desktop_test_review_instruction(review: &DesktopTestReview) -> String {
     )
 }
 
+fn no_surrounding_text_guidance() -> &'static str {
+    "A recent input was refused because its field did not provide verifiable surrounding text. This observation may not describe the currently focused application or field. Automatic replacement remains disabled when surrounding text cannot be verified. Use Quick Picker to copy a snippet and paste it yourself."
+}
+
 impl GuiApp {
     pub(crate) fn refresh_diagnostics(&mut self, announce: bool) {
         if self.diagnostics_running {
@@ -2067,6 +2071,19 @@ impl GuiApp {
                         .small()
                         .color(palette.muted),
                 );
+                if verdict == wayexpand_backend_ibus::IbusFieldVerdict::NoSurroundingText {
+                    ui.label(
+                        RichText::new(no_surrounding_text_guidance())
+                            .small()
+                            .color(palette.warning),
+                    );
+                    if ui
+                        .small_button("Open Quick Picker (copy and paste)")
+                        .clicked()
+                    {
+                        self.open_copy_only_picker();
+                    }
+                }
             }
         }
         ui.label(
@@ -2463,5 +2480,13 @@ app_filter = ["app_id_exact:org.example.Editor"]
         let instruction = desktop_test_review_instruction(&review);
         assert!(instruction.contains("inspect the field where you attempted to type"));
         assert!(instruction.contains("Do not type the trigger again"));
+    }
+
+    #[test]
+    fn stale_field_limitation_is_not_presented_as_current_focus_diagnosis() {
+        let guidance = no_surrounding_text_guidance();
+        assert!(guidance.contains("A recent input was refused"));
+        assert!(guidance.contains("may not describe the currently focused"));
+        assert!(!guidance.contains("this field does not provide"));
     }
 }

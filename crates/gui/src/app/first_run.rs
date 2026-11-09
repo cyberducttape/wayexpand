@@ -74,7 +74,7 @@ impl GuiApp {
         );
     }
 
-    fn open_copy_only_picker(&mut self) {
+    pub(crate) fn open_copy_only_picker(&mut self) {
         let executable = match env::current_exe() {
             Ok(executable) => executable,
             Err(error) => {
