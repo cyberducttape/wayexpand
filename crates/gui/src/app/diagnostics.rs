@@ -1911,7 +1911,7 @@ impl GuiApp {
             "Not verified in an application".to_owned()
         };
         ui.group(|ui| {
-            ui.label(RichText::new("GNOME input method: configured, running, verified").strong());
+            ui.label(RichText::new(self.strings.input_method_progress_title()).strong());
             ui.horizontal_wrapped(|ui| {
                 ui.colored_label(
                     if readiness.configuration == wayexpand_backend_ibus::chain::IbusCheckState::Pass { palette.success } else { palette.warning },
