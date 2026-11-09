@@ -331,7 +331,8 @@ verified rather than merely free of hard failures.
   `unknown`.
 - `checks` (array): in order, objects with a stable `id` (`tools`, `daemon`,
   `desktop`, `component`, `manifest`, `registered`, `selected`, `consent`,
-  `engine`, GNOME session/source checks, `field-input`, and `target-insertion`),
+  `engine`, GNOME session/source checks, `field-input`, `surrounding-text`,
+  and `target-insertion`),
   `title`, `state` (`pass`, `warn`, `fail`, `unknown`, or `skip`), `detail`,
   `problem_id` (stable diagnostic ID or null), and `fix` (string or null).
   Component registration failures use `WX-IBUS-001`, an unselected engine
@@ -342,7 +343,8 @@ verified rather than merely free of hard failures.
   `WX-GNOME-IM-002`. The component checks read the running
   ibus-daemon's own `IBUS_COMPONENT_PATH`, not the caller's.
   Runtime input and insertion checks use `WX-IBUS-003` when no normal-field
-  input was observed, `WX-IBUS-005` for a recorded output failure,
+  input was observed, `WX-IBUS-008` when keys reached IBus but the field did
+  not provide usable surrounding text for safe replacement, `WX-IBUS-005` for a recorded output failure,
   `WX-IBUS-006` for replacement actions whose target effect is unverified,
   and `WX-IBUS-007` when no insertion was observed in the current engine
   session. These distinctions are evidence states, not claims that a specific
@@ -353,8 +355,9 @@ verified rather than merely free of hard failures.
 - `first_failure` (string or null): the `id` of the first failed check.
 - `readiness` (object): booleans for each separate condition —
   `component_installed`, `registered`, `ibus_running`, `selected`,
-  `engine_running`, `text_received` (a normal field sent keys and at least one
-  surrounding-text report), and `expanded` (at least one expansion since the
+  `engine_running`, `text_received` (a normal field sent keys),
+  `replacement_context_received` (a normal field supplied nonempty
+  surrounding text), and `expanded` (at least one expansion since the
   engine started). This input evidence is independent of the client's
   advertised surrounding-text capability and does not imply that replacement
   succeeded. It is aggregate across recent fields: IBus telemetry does not

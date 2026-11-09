@@ -246,6 +246,18 @@ pub(crate) fn collect(trigger: Option<&str>) -> serde_json::Value {
             [format!("engine running: {}; text observed: {}", ibus_readiness.engine_running, ibus_readiness.text_received)],
             ["Focus a supported text editor and type harmless text, then run `wayexpand debug --live`."],
         ));
+    } else if !ibus_readiness.replacement_context_received
+        && !plasma_environment_blocked
+        && !ibus_input_path_blocked
+    {
+        findings.push(finding(
+            "WX-IBUS-008",
+            Severity::Warning,
+            Component::Ibus,
+            "IBus received normal-field input but no usable surrounding text",
+            ["The client cannot confirm which text would be replaced; automatic trigger replacement remains disabled for this field."],
+            ["Use a text field that reports surrounding text, or open Quick Picker and copy a plain-text snippet for manual paste. Run `wayexpand ibus status --json` to retest."],
+        ));
     }
     if let Some(daemon) = &daemon {
         let route_state = daemon.get("state").and_then(serde_json::Value::as_str);

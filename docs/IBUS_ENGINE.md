@@ -224,7 +224,11 @@ wayexpand ibus watch    # switch to an app and type: explains each field
 ```
 
 The JSON checks expose stable problem IDs for runtime evidence too:
-`WX-IBUS-003` means no normal-field input was observed, `WX-IBUS-005` means
+`WX-IBUS-003` means no normal-field input was observed, while `WX-IBUS-008`
+means keys reached IBus in a normal field but that field did not provide
+usable surrounding text for safe replacement. In that case, use a compatible
+field for automatic replacement or use Quick Picker to copy and paste a
+plain-text snippet manually. `WX-IBUS-005` means
 the engine recorded an output failure (the target may contain partial text),
 `WX-IBUS-006` means replacement actions were emitted but the resulting text
 cannot be verified by IBus, and `WX-IBUS-007` means no replacement was

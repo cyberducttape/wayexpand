@@ -437,6 +437,27 @@ fn operational_checks(
         serde_json::json!({"text_received":ibus.text_received}),
     ));
     checks.push(readiness_check(
+        "ibus_replacement_context",
+        if ibus.replacement_context_received {
+            "pass"
+        } else if ibus.text_received {
+            "unavailable"
+        } else {
+            "not_tested"
+        },
+        if ibus.replacement_context_received {
+            "a recent normal IBus field supplied nonempty surrounding text"
+        } else if ibus.text_received {
+            "IBus received keys in a normal field, but the field has not supplied surrounding text needed for safe automatic replacement"
+        } else {
+            "no normal-field surrounding text has been observed; safe automatic replacement is unverified"
+        },
+        serde_json::json!({
+            "replacement_context_received": ibus.replacement_context_received,
+            "target_application_verified": false,
+        }),
+    ));
+    checks.push(readiness_check(
         "ibus_expansion",
         if ibus.expanded { "pass" } else { "not_tested" },
         if ibus.expanded {
@@ -1289,6 +1310,24 @@ mod tests {
             .unwrap();
         assert_eq!(field.status, "not_tested");
         assert!(field.detail.contains("no normal text-field input"));
+        let replacement_context = checks
+            .iter()
+            .find(|check| check.component == "ibus_replacement_context")
+            .unwrap();
+        assert_eq!(replacement_context.status, "not_tested");
+        assert!(replacement_context.detail.contains("surrounding text"));
+
+        let input_without_surrounding = wayexpand_backend_ibus::chain::IbusReadiness {
+            text_received: true,
+            ..readiness
+        };
+        let input_checks = operational_checks(&input_without_surrounding, None);
+        let replacement_context = input_checks
+            .iter()
+            .find(|check| check.component == "ibus_replacement_context")
+            .unwrap();
+        assert_eq!(replacement_context.status, "unavailable");
+        assert!(replacement_context.detail.contains("IBus received keys"));
         assert_eq!(
             checks
                 .iter()

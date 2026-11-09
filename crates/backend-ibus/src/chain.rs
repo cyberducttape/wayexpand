@@ -156,16 +156,20 @@ pub struct IbusReadiness {
     pub selected: bool,
     /// The engine process is running and publishing activity.
     pub engine_running: bool,
-    /// At least one recent field sent keys and reported text. IBus telemetry
-    /// does not identify the application, so this is not target-specific proof.
+    /// At least one recent normal field delivered key events to the engine.
+    /// IBus telemetry does not identify the application.
     pub text_received: bool,
+    /// At least one recent normal field supplied nonempty surrounding text.
+    /// This is the precondition for verified trigger replacement, not proof
+    /// that an expansion was displayed by the application.
+    pub replacement_context_received: bool,
     /// At least one expansion was committed since the engine started.
     pub expanded: bool,
 }
 
 impl IbusReadiness {
     /// Stable names, in order, for display.
-    pub fn stages(&self) -> [(&'static str, bool); 7] {
+    pub fn stages(&self) -> [(&'static str, bool); 8] {
         [
             ("component_installed", self.component_installed),
             ("registered", self.registered),
@@ -173,6 +177,7 @@ impl IbusReadiness {
             ("selected", self.selected),
             ("engine_running", self.engine_running),
             ("text_received", self.text_received),
+            ("replacement_context", self.replacement_context_received),
             ("expanded", self.expanded),
         ]
     }
@@ -196,6 +201,7 @@ impl IbusChainReport {
             selected: passed("selected"),
             engine_running: live.is_some(),
             text_received: passed("field-input"),
+            replacement_context_received: passed("surrounding-text"),
             expanded: live.is_some_and(|reading| reading.status.totals.expansions > 0),
         }
     }
@@ -228,6 +234,7 @@ impl IbusChainReport {
             "config-generation",
             "gnome-source-active",
             "field-input",
+            "surrounding-text",
             "target-insertion",
         ];
         // GNOME is verified by explicit session/source and field-input
@@ -666,6 +673,9 @@ fn check(
             .or_else(|| {
                 (state != IbusCheckState::Pass && id == "field-input").then_some("WX-IBUS-003")
             })
+            .or_else(|| {
+                (state == IbusCheckState::Fail && id == "surrounding-text").then_some("WX-IBUS-008")
+            })
             .or(match (id, state) {
                 ("target-insertion", IbusCheckState::Fail) => Some("WX-IBUS-005"),
                 ("target-insertion", IbusCheckState::Warn) => Some("WX-IBUS-006"),
@@ -983,6 +993,7 @@ pub fn diagnose() -> IbusChainReport {
     });
 
     checks.push(field_input_check(activity.as_ref()));
+    checks.push(surrounding_text_check(activity.as_ref()));
     checks.push(config_generation_check(activity.as_ref()));
     checks.push(target_insertion_check(activity.as_ref()));
 
@@ -1683,32 +1694,101 @@ fn bounded_command_output(program: &str, arguments: &[&str], timeout: Duration) 
 }
 
 fn field_input_check(activity: Option<&IbusStatusReading>) -> IbusCheck {
-    let safe_field_seen = activity
-        .filter(|reading| reading.live)
-        .is_some_and(|reading| {
-            reading.status.recent_fields.iter().any(|field| {
-                field.keys > 0
-                    && field.content_type == crate::telemetry::IbusContentTypeState::Normal
-                    && field.surrounding_reports > 0
-            })
-        });
-    if safe_field_seen {
+    let Some(reading) = activity.filter(|reading| reading.live) else {
+        return check(
+            "field-input",
+            "Normal-field input observed",
+            IbusCheckState::Unknown,
+            "no live IBus engine activity is available",
+            Some("focus the target field, run `wayexpand ibus watch --seconds 30`, and type harmless text; only counters are recorded".into()),
+        );
+    };
+    let normal_field_input = reading.status.recent_fields.iter().any(|field| {
+        field.keys > 0 && field.content_type == crate::telemetry::IbusContentTypeState::Normal
+    });
+    if normal_field_input {
         check(
             "field-input",
             "Normal-field input observed",
             IbusCheckState::Pass,
-            "at least one recent IBus field sent key events and surrounding text; contents and application identity are not recorded, so this does not verify input from a particular browser",
+            "at least one recent normal IBus field delivered key events to the engine; contents and application identity are not recorded, so this does not identify a particular browser",
             None,
         )
     } else {
+        let detail = if reading.status.totals.keys > 0 {
+            format!(
+                "the engine has counted {} key event(s), but none of the retained recent fields establishes keyboard input in a normal field",
+                reading.status.totals.keys
+            )
+        } else {
+            "no key events have been observed in the retained recent fields".to_owned()
+        };
         check(
             "field-input",
             "Normal-field input observed",
             IbusCheckState::Unknown,
-            "no recent normal field has provided verifiable input telemetry; the check cannot identify an application",
-            Some("focus the browser field, run `wayexpand ibus watch --seconds 30`, and type harmless text; increased counters confirm activity only, not replacement".into()),
+            detail,
+            Some("focus the target field, run `wayexpand ibus watch --seconds 30`, and type harmless text; increased key counters confirm input delivery only, not safe replacement".into()),
         )
     }
+}
+
+fn surrounding_text_check(activity: Option<&IbusStatusReading>) -> IbusCheck {
+    let Some(reading) = activity.filter(|reading| reading.live) else {
+        return check(
+            "surrounding-text",
+            "Replacement context observed",
+            IbusCheckState::Unknown,
+            "no live IBus engine activity is available to establish whether a normal field supplies surrounding text",
+            Some("focus a normal text field, run `wayexpand ibus watch --seconds 30`, type harmless text, then rerun `wayexpand ibus status`".into()),
+        );
+    };
+    let normal_fields = reading
+        .status
+        .recent_fields
+        .iter()
+        .filter(|field| field.content_type == crate::telemetry::IbusContentTypeState::Normal)
+        .collect::<Vec<_>>();
+    if normal_fields
+        .iter()
+        .any(|field| field.keys > 0 && field.surrounding_reports > 0 && field.surrounding_nonempty)
+    {
+        return check(
+            "surrounding-text",
+            "Replacement context observed",
+            IbusCheckState::Pass,
+            "a recent normal IBus field supplied nonempty surrounding text; this does not certify replacement in another application",
+            None,
+        );
+    }
+    if normal_fields.iter().any(|field| field.keys > 0) {
+        let detail = if normal_fields
+            .iter()
+            .any(|field| field.keys > 0 && !field.surrounding_capability)
+        {
+            "IBus received keys in a normal field, but the client did not advertise surrounding-text support; automatic replacement is refused for this field"
+        } else if normal_fields.iter().any(|field| {
+            field.keys > 0 && field.surrounding_reports > 0 && !field.surrounding_nonempty
+        }) {
+            "IBus received keys in a normal field, but the client reported only empty surrounding text; automatic replacement is refused for this field"
+        } else {
+            "IBus received keys in a normal field, but the client has not supplied usable surrounding text; automatic replacement remains unverified"
+        };
+        return check(
+            "surrounding-text",
+            "Replacement context observed",
+            IbusCheckState::Fail,
+            detail,
+            Some("use a text field that exposes surrounding text for automatic replacement; otherwise open Quick Picker and copy a plain-text snippet for manual paste".into()),
+        );
+    }
+    check(
+        "surrounding-text",
+        "Replacement context observed",
+        IbusCheckState::Unknown,
+        "no recent normal field has supplied nonempty surrounding text; input delivery and replacement context are separate checks",
+        Some("focus a normal text field, run `wayexpand ibus watch --seconds 30`, type harmless text, then rerun `wayexpand ibus status`".into()),
+    )
 }
 
 fn target_insertion_check(activity: Option<&IbusStatusReading>) -> IbusCheck {
@@ -1957,7 +2037,8 @@ mod tests {
         assert!(readiness.component_installed && readiness.registered && readiness.ibus_running);
         assert!(!readiness.selected);
         assert!(!readiness.engine_running && !readiness.text_received && !readiness.expanded);
-        assert_eq!(readiness.stages().len(), 7);
+        assert!(!readiness.replacement_context_received);
+        assert_eq!(readiness.stages().len(), 8);
     }
 
     #[test]
@@ -1977,6 +2058,13 @@ mod tests {
                 pass("engine"),
                 pass("gnome-source-active"),
                 pass("field-input"),
+                check(
+                    "surrounding-text",
+                    "",
+                    IbusCheckState::Unknown,
+                    "replacement context has not been observed",
+                    None,
+                ),
                 check(
                     "target-insertion",
                     "",
@@ -2007,6 +2095,26 @@ mod tests {
         };
         assert_eq!(report.operational_readiness(), IbusCheckState::Unknown);
         assert!(!report.ready());
+    }
+
+    #[test]
+    fn missing_surrounding_text_is_not_a_failure_without_field_evidence() {
+        let unknown = check(
+            "surrounding-text",
+            "Replacement context observed",
+            IbusCheckState::Unknown,
+            "no field input has been observed",
+            None,
+        );
+        let unsupported = check(
+            "surrounding-text",
+            "Replacement context observed",
+            IbusCheckState::Fail,
+            "input arrived without replacement context",
+            None,
+        );
+        assert_eq!(unknown.problem_id, None);
+        assert_eq!(unsupported.problem_id, Some("WX-IBUS-008"));
     }
 
     #[test]
@@ -2109,12 +2217,12 @@ mod tests {
 
         let missing = field_input_check(None);
         assert_eq!(missing.state, IbusCheckState::Unknown);
-        assert!(missing.detail.contains("cannot identify an application"));
+        assert!(missing.detail.contains("no live IBus engine activity"));
         let fix = missing
             .fix
             .expect("missing field activity has safe guidance");
         assert!(fix.contains("wayexpand ibus watch --seconds 30"));
-        assert!(fix.contains("activity only, not replacement"));
+        assert!(fix.contains("only counters are recorded"));
     }
 
     #[test]
@@ -2132,6 +2240,59 @@ mod tests {
             field_input_check(Some(&reading)).state,
             IbusCheckState::Pass
         );
+    }
+
+    #[test]
+    fn surrounding_text_check_distinguishes_delivered_input_from_replacement_support() {
+        let telemetry = crate::telemetry::IbusTelemetry::new();
+        let field = telemetry.focus_in(None);
+        telemetry.content_type(Some(field), false);
+        telemetry.capabilities(Some(field), false);
+        telemetry.key(Some(field), true);
+        let reading = IbusStatusReading {
+            status: telemetry.snapshot(),
+            live: true,
+        };
+
+        let unsupported = surrounding_text_check(Some(&reading));
+        assert_eq!(unsupported.state, IbusCheckState::Fail);
+        assert_eq!(unsupported.problem_id, Some("WX-IBUS-008"));
+        assert!(unsupported.detail.contains("received keys"));
+        assert!(unsupported.fix.unwrap().contains("Quick Picker"));
+
+        let no_field_activity = IbusStatusReading {
+            status: crate::telemetry::IbusTelemetry::new().snapshot(),
+            live: true,
+        };
+        let unknown = surrounding_text_check(Some(&no_field_activity));
+        assert_eq!(unknown.state, IbusCheckState::Unknown);
+        assert_eq!(unknown.problem_id, None);
+    }
+
+    #[test]
+    fn surrounding_text_from_a_different_field_cannot_prove_replacement_support() {
+        let telemetry = crate::telemetry::IbusTelemetry::new();
+        let context_only_field = telemetry.focus_in(None);
+        telemetry.content_type(Some(context_only_field), false);
+        telemetry.surrounding_text(Some(context_only_field), true);
+
+        let input_field = telemetry.focus_in(Some(context_only_field));
+        telemetry.content_type(Some(input_field), false);
+        telemetry.capabilities(Some(input_field), true);
+        telemetry.key(Some(input_field), true);
+        let reading = IbusStatusReading {
+            status: telemetry.snapshot(),
+            live: true,
+        };
+
+        assert_eq!(
+            field_input_check(Some(&reading)).state,
+            IbusCheckState::Pass
+        );
+        let replacement = surrounding_text_check(Some(&reading));
+        assert_eq!(replacement.state, IbusCheckState::Fail);
+        assert_eq!(replacement.problem_id, Some("WX-IBUS-008"));
+        assert!(replacement.detail.contains("received keys"));
     }
 
     #[test]

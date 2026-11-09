@@ -83,6 +83,7 @@ fn gnome_support_section(doctor: &serde_json::Value) -> serde_json::Value {
         "gnome-source-active",
         "consent",
         "field-input",
+        "surrounding-text",
         "target-insertion",
     ];
     let source_setting = crate::setup_ibus::command_output(
@@ -229,6 +230,9 @@ fn gnome_problem_for(check: &wayexpand_backend_ibus::chain::IbusCheck) -> Option
     if matches!(check.state, IbusCheckState::Pass | IbusCheckState::Skip) {
         return None;
     }
+    if check.id == "surrounding-text" && check.state != IbusCheckState::Fail {
+        return check.problem_id;
+    }
     Some(match check.id {
         "gnome-session" => "WX-GNOME-SESSION-001",
         "daemon" => "WX-GNOME-IBUS-001",
@@ -238,6 +242,7 @@ fn gnome_problem_for(check: &wayexpand_backend_ibus::chain::IbusCheck) -> Option
         "gnome-source-active" => "WX-GNOME-IM-002",
         "consent" => "WX-POLICY-001",
         "field-input" => "WX-GNOME-IM-003",
+        "surrounding-text" => "WX-IBUS-008",
         "target-insertion" => "WX-GNOME-IM-004",
         _ => check.problem_id.unwrap_or("WX-GNOME-IM-001"),
     })
