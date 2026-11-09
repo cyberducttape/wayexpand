@@ -37,12 +37,17 @@ fn check(status: &'static str, evidence: impl Into<String>) -> serde_json::Value
 fn ibus_activation_check(
     readiness: wayexpand_backend_ibus::chain::IbusReadiness,
     active_source: Option<&str>,
+    terminal_apps_only: Option<bool>,
 ) -> serde_json::Value {
     if readiness.selected && readiness.engine_running {
         match active_source {
             Some("input-method") => check(
                 "pass",
-                "IBus is the daemon's active capture route, and its engine is selected and reporting activity",
+                "IBus is the daemon's input-method route, and its engine is selected and reporting activity",
+            ),
+            Some("evdev") if terminal_apps_only == Some(true) => check(
+                "pass",
+                "IBus is selected for ordinary IBus clients; the supplemental evdev daemon route is restricted to configured terminal applications",
             ),
             Some(source) => check(
                 "not_active_route",
@@ -75,6 +80,7 @@ fn active_route_report(daemon: Option<&serde_json::Value>) -> serde_json::Value 
     let state = field("state");
     let route_available = optional_bool("route_available");
     let matching_available = optional_bool("matching_available");
+    let terminal_apps_only = optional_bool("terminal_apps_only");
     let connected = state.as_ref().and_then(|value| value.as_str()) == Some("connected");
     let matching_ready = matching_available == Some(true);
     let input_privacy = match optional_bool("capture_sensitive_focus") {
@@ -95,6 +101,15 @@ fn active_route_report(daemon: Option<&serde_json::Value>) -> serde_json::Value 
         "backend_mode": field("backend_mode"),
         "state": state,
         "route_available": route_available,
+        "terminal_apps_only": terminal_apps_only,
+        "scope": match (source.as_ref().and_then(|value| value.as_str()), terminal_apps_only) {
+            (Some("input-method"), _) => "input_method",
+            (Some("evdev"), Some(true)) => "configured_terminal_apps",
+            (Some("evdev"), Some(false)) => "unrestricted_applications",
+            (Some("evdev"), None) => "unknown",
+            (Some("stdin"), _) => "test_or_control_source",
+            _ => "unknown",
+        },
         "matching_available": matching_available,
         "matching_unavailable_reason": field("matching_unavailable_reason"),
         "input_privacy": input_privacy,
@@ -141,10 +156,13 @@ fn report() -> serde_json::Value {
     let active_source = active_route
         .get("source")
         .and_then(serde_json::Value::as_str);
+    let terminal_apps_only = active_route
+        .get("terminal_apps_only")
+        .and_then(serde_json::Value::as_bool);
 
     let rows = serde_json::json!({
         "ibus_registration": check(if readiness.registered {"pass"} else if readiness.component_installed {"fail"} else {"not_applicable"}, if readiness.registered {"IBus registry reports the WayExpand engine"} else {"IBus engine is not registered"}),
-        "ibus_activation": ibus_activation_check(readiness, active_source),
+        "ibus_activation": ibus_activation_check(readiness, active_source, terminal_apps_only),
         "active_route": check(
             if daemon.is_none() {"not_tested"} else if active_route["operational_status"] == "connected_and_matching" {"pass"} else {"fail"},
             if daemon.is_none() {"daemon status is unavailable"} else if active_route["operational_status"] == "connected_and_matching" {"the reported active route is connected and matching is available; target-application insertion remains untested"} else {"the daemon does not report a connected route with matching available"},
@@ -203,7 +221,7 @@ pub(crate) fn compatibility_report(args: Args) -> Result<()> {
             report["installation"].as_str().unwrap_or("unknown")
         );
         let active_route = &report["active_route"];
-        println!("ACTIVE ROUTE");
+        println!("DAEMON CAPTURE ROUTE");
         println!(
             "  Source: {}",
             active_route["source"].as_str().unwrap_or("unknown")
@@ -215,6 +233,10 @@ pub(crate) fn compatibility_report(args: Args) -> Result<()> {
         println!(
             "  Route ID: {}",
             active_route["route_id"].as_str().unwrap_or("unknown")
+        );
+        println!(
+            "  Scope: {}",
+            active_route["scope"].as_str().unwrap_or("unknown")
         );
         println!(
             "  Matching: {}",
@@ -257,6 +279,7 @@ pub(crate) fn compatibility_report(args: Args) -> Result<()> {
                 .unwrap_or("unknown")
                 .replace('_', " ")
         );
+        println!("IBus and daemon capture scopes are reported separately.");
         println!("Full desktop certification incomplete");
     }
     Ok(())
@@ -277,20 +300,31 @@ mod tests {
 
     #[test]
     fn ibus_activation_is_not_mislabeled_as_active_when_evdev_is_selected() {
-        let result = ibus_activation_check(selected_running_ibus(), Some("evdev"));
+        let result = ibus_activation_check(selected_running_ibus(), Some("evdev"), Some(false));
         assert_eq!(result["status"], "not_active_route");
         assert!(result["evidence"].as_str().unwrap().contains("evdev"));
     }
 
     #[test]
+    fn ibus_activation_is_primary_when_evdev_is_terminal_scoped() {
+        let result = ibus_activation_check(selected_running_ibus(), Some("evdev"), Some(true));
+        assert_eq!(result["status"], "pass");
+        assert!(result["evidence"]
+            .as_str()
+            .unwrap()
+            .contains("restricted to configured terminal applications"));
+    }
+
+    #[test]
     fn ibus_activation_passes_only_when_ibus_is_the_reported_route() {
-        let result = ibus_activation_check(selected_running_ibus(), Some("input-method"));
+        let result =
+            ibus_activation_check(selected_running_ibus(), Some("input-method"), Some(false));
         assert_eq!(result["status"], "pass");
     }
 
     #[test]
     fn ibus_activation_is_unknown_when_active_route_is_missing() {
-        let result = ibus_activation_check(selected_running_ibus(), None);
+        let result = ibus_activation_check(selected_running_ibus(), None, None);
         assert_eq!(result["status"], "not_tested");
     }
 
@@ -300,6 +334,7 @@ mod tests {
             "source": "evdev",
             "backend": "libei",
             "route_id": "kde-evdev-libei",
+            "terminal_apps_only": true,
             "state": "connected",
             "route_available": true,
             "matching_available": true,
@@ -308,6 +343,7 @@ mod tests {
         });
         let report = active_route_report(Some(&daemon));
         assert_eq!(report["operational_status"], "connected_and_matching");
+        assert_eq!(report["scope"], "configured_terminal_apps");
         assert_eq!(report["input_privacy"], "no_sensitive_field_signal");
         assert_eq!(report["insertion_atomicity"], "non_atomic");
         assert!(report["operational_evidence_scope"]

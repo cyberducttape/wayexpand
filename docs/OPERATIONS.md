@@ -401,8 +401,11 @@ bash scripts/test-install-user.sh
 ```
 
 `wayexpand compatibility-report --json` uses `schema_version: 2`. Its
-`active_route` object describes the daemon's selected source/backend, matching
-availability, sensitive-field signal, and insertion atomicity. These are
+`active_route` object describes the daemon capture route's source/backend,
+application scope, matching availability, sensitive-field signal, and
+insertion atomicity. An evdev daemon route can be restricted to configured
+terminals while IBus handles ordinary input-method clients, so the report
+shows those route roles separately. These are
 daemon-level capabilities, not proof that a target application received or
 displayed text. IBus registration and engine activity are reported separately
 from the active capture route because an installed or selected IBus engine can
