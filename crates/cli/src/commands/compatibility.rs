@@ -73,6 +73,7 @@ fn active_route_report(daemon: Option<&serde_json::Value>) -> serde_json::Value 
     let backend = field("backend");
     let route_id = field("route_id");
     let state = field("state");
+    let route_available = optional_bool("route_available");
     let matching_available = optional_bool("matching_available");
     let connected = state.as_ref().and_then(|value| value.as_str()) == Some("connected");
     let matching_ready = matching_available == Some(true);
@@ -93,7 +94,7 @@ fn active_route_report(daemon: Option<&serde_json::Value>) -> serde_json::Value 
         "route_id": route_id,
         "backend_mode": field("backend_mode"),
         "state": state,
-        "route_available": field("route_available"),
+        "route_available": route_available,
         "matching_available": matching_available,
         "matching_unavailable_reason": field("matching_unavailable_reason"),
         "input_privacy": input_privacy,
@@ -101,7 +102,7 @@ fn active_route_report(daemon: Option<&serde_json::Value>) -> serde_json::Value 
         "target_identity_exact": field("window_identity_exact"),
         "operational_status": if daemon.is_none() {
             "not_observed"
-        } else if connected && matching_ready {
+        } else if connected && route_available == Some(true) && matching_ready {
             "connected_and_matching"
         } else {
             "unavailable_or_degraded"
@@ -313,5 +314,17 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("does not verify text delivery"));
+    }
+
+    #[test]
+    fn route_report_does_not_pass_when_route_is_explicitly_unavailable() {
+        let daemon = serde_json::json!({
+            "source": "evdev",
+            "state": "connected",
+            "route_available": false,
+            "matching_available": true
+        });
+        let report = active_route_report(Some(&daemon));
+        assert_eq!(report["operational_status"], "unavailable_or_degraded");
     }
 }
