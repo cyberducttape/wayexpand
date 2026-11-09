@@ -1751,7 +1751,7 @@ fn surrounding_text_check(activity: Option<&IbusStatusReading>) -> IbusCheck {
         .collect::<Vec<_>>();
     if normal_fields
         .iter()
-        .any(|field| field.surrounding_reports > 0 && field.surrounding_nonempty)
+        .any(|field| field.keys > 0 && field.surrounding_reports > 0 && field.surrounding_nonempty)
     {
         return check(
             "surrounding-text",
@@ -2267,6 +2267,32 @@ mod tests {
         let unknown = surrounding_text_check(Some(&no_field_activity));
         assert_eq!(unknown.state, IbusCheckState::Unknown);
         assert_eq!(unknown.problem_id, None);
+    }
+
+    #[test]
+    fn surrounding_text_from_a_different_field_cannot_prove_replacement_support() {
+        let telemetry = crate::telemetry::IbusTelemetry::new();
+        let context_only_field = telemetry.focus_in(None);
+        telemetry.content_type(Some(context_only_field), false);
+        telemetry.surrounding_text(Some(context_only_field), true);
+
+        let input_field = telemetry.focus_in(Some(context_only_field));
+        telemetry.content_type(Some(input_field), false);
+        telemetry.capabilities(Some(input_field), true);
+        telemetry.key(Some(input_field), true);
+        let reading = IbusStatusReading {
+            status: telemetry.snapshot(),
+            live: true,
+        };
+
+        assert_eq!(
+            field_input_check(Some(&reading)).state,
+            IbusCheckState::Pass
+        );
+        let replacement = surrounding_text_check(Some(&reading));
+        assert_eq!(replacement.state, IbusCheckState::Fail);
+        assert_eq!(replacement.problem_id, Some("WX-IBUS-008"));
+        assert!(replacement.detail.contains("received keys"));
     }
 
     #[test]
