@@ -2,7 +2,7 @@
 
 ## Optional sysadmin and developer libraries
 
-The maintained catalog contains 17 optional packs. Each has a named maintainer,
+The maintained catalog contains 20 optional packs. Each has a named maintainer,
 semantic version, supported shells/platforms/tools, a risk classification, a
 review record, an example output, and an automated generated-output fixture.
 The fixtures are exercised by `wayexpand pack test`, run alongside
@@ -71,6 +71,13 @@ uploading snippet content to a service.
 | `terraform` | Formatting, validation, and plan review without apply or destroy commands |
 | `ci-cd` | GitHub Actions and GitLab pipeline status inspection |
 | `incident-response` | UTC incident timelines, bounded host evidence, journal review, and incident notes |
+| `spanish-support` | Editable Spanish support acknowledgements, incident updates, and resolution notes |
+| `arabic-support` | Editable Modern Standard Arabic support acknowledgements, incident updates, and resolution notes |
+| `russian-support` | Editable Russian support acknowledgements, incident updates, and resolution notes |
+
+The Spanish, Arabic, and Russian phrase packs are best-effort drafts reviewed
+for schema, privacy, and non-execution behavior. Their wording should receive
+native-speaker review before use in customer-facing communications.
 
 Inspect the pack's maintainer, compatibility declarations, risk classification,
 review record, and example fixture with:

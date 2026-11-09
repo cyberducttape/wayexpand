@@ -1,0 +1,20 @@
+[[expansion]]
+trigger = ";;es-soporte-recibido"
+description = "Acknowledge a support request in professional Spanish"
+category = "Soporte en español"
+tags = ["spanish", "support", "acknowledgement"]
+replacement = "Hola {{field:destinatario=equipo}},\n\nHemos recibido su solicitud sobre {{field:tema=el problema}} y la estamos revisando.\n\nPróxima actualización: {{field:hora=fecha, hora y zona horaria}}.\n"
+
+[[expansion]]
+trigger = ";;es-estado-incidente"
+description = "Share a factual incident update in professional Spanish"
+category = "Soporte en español"
+tags = ["spanish", "incident", "status"]
+replacement = "Estado actual: {{choice:estado=Investigando|Mitigando|En observación|Resuelto}}.\nResumen confirmado: {{field:resumen|required|min=5|max=600}}\nPróximo paso: {{field:proximo_paso|required|max=500}}\nPróxima actualización: {{field:proxima_actualizacion=hora y zona horaria}}\n"
+
+[[expansion]]
+trigger = ";;es-resolucion"
+description = "Document a verified support resolution in professional Spanish"
+category = "Soporte en español"
+tags = ["spanish", "support", "resolution"]
+replacement = "Hola {{field:destinatario=equipo}},\n\nEl estado de la incidencia «{{field:tema|required|max=256}}» es: {{choice:resultado=Resuelta|Mitigada|Causa identificada}}.\n\nResolución aplicada: {{field:resolucion|required|min=5|max=1000}}\nVerificación realizada: {{field:verificacion|required|max=600}}\nAcción necesaria por su parte: {{field:accion=ninguna|required|max=400}}\nReferencia: {{field:referencia=ID del ticket o cambio|max=128}}\n"

@@ -1,0 +1,8 @@
+Hola equipo,
+
+El estado de la incidencia «inicio de sesión» es: Resuelta.
+
+Resolución aplicada: Se renovó el certificado del proveedor de identidad.
+Verificación realizada: Se completó un inicio de sesión de prueba.
+Acción necesaria por su parte: ninguna
+Referencia: INC-2048

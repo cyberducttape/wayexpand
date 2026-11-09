@@ -1,0 +1,16 @@
+format_version = 1
+
+[[case]]
+trigger = ";;es-soporte-recibido"
+expected_output = "examples/acknowledgement.txt"
+values = { "field:destinatario" = "María", "field:tema" = "el acceso al portal", "field:hora" = "10:00 CET" }
+
+[[case]]
+trigger = ";;es-estado-incidente"
+expected_output = "examples/incident-update.txt"
+values = { "choice:estado" = "Mitigando", "field:resumen" = "El servicio responde con normalidad en dos de tres zonas.", "field:proximo_paso" = "Revisar los errores de la zona restante.", "field:proxima_actualizacion" = "10:30 CET" }
+
+[[case]]
+trigger = ";;es-resolucion"
+expected_output = "examples/resolution.txt"
+values = { "field:destinatario" = "equipo", "field:tema" = "inicio de sesión", "choice:resultado" = "Resuelta", "field:resolucion" = "Se renovó el certificado del proveedor de identidad.", "field:verificacion" = "Se completó un inicio de sesión de prueba.", "field:accion" = "ninguna", "field:referencia" = "INC-2048" }

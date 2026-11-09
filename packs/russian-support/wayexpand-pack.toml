@@ -1,0 +1,25 @@
+format_version = 1
+id = "wayexpand.russian-support"
+version = "1.0.0"
+name = "Russian Support Phrases (Русский)"
+publisher = "WayExpand project"
+maintainer = "WayExpand Language Pack Maintainers"
+description = "Editable Russian support acknowledgements, incident updates, and resolution notes."
+capabilities = ["forms"]
+
+[compatibility]
+shells = ["any"]
+platforms = ["any"]
+tools = []
+
+[risk]
+level = "low"
+summary = "Produces editable text only; it does not run commands or send messages. Review names, times, and claims before sending."
+
+[review]
+reviewed_by = "WayExpand project review"
+reviewed_at = "2026-11-09"
+summary = "Reviewed for schema, privacy, and non-execution behavior. Russian wording is a best-effort draft and should receive native-speaker review before customer-facing publication."
+
+[verification]
+test_cases = "tests/cases.toml"

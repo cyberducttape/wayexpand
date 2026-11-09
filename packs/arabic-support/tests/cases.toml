@@ -1,0 +1,16 @@
+format_version = 1
+
+[[case]]
+trigger = ";;ar-support-ack"
+expected_output = "examples/acknowledgement.txt"
+values = { "field:recipient" = "الفريق التقني", "field:subject" = "تعذر تسجيل الدخول", "field:time" = "10:00 UTC" }
+
+[[case]]
+trigger = ";;ar-incident-update"
+expected_output = "examples/incident-update.txt"
+values = { "choice:status" = "تجري المعالجة", "field:summary" = "عادت الخدمة إلى العمل في منطقتين من أصل ثلاث.", "field:next_step" = "مراجعة الأخطاء في المنطقة المتبقية.", "field:next_update" = "10:30 UTC" }
+
+[[case]]
+trigger = ";;ar-resolution"
+expected_output = "examples/resolution.txt"
+values = { "field:recipient" = "الفريق", "choice:outcome" = "حلّ", "field:subject" = "تعذر تسجيل الدخول", "field:resolution" = "تم تجديد شهادة موفر الهوية.", "field:verification" = "اكتمل اختبار تسجيل الدخول بنجاح.", "field:customer_action" = "لا يوجد", "field:reference" = "INC-2048" }

@@ -1,0 +1,20 @@
+[[expansion]]
+trigger = ";;ru-support-ack"
+description = "Acknowledge a support request in professional Russian"
+category = "Поддержка на русском"
+tags = ["russian", "support", "acknowledgement"]
+replacement = "Здравствуйте, {{field:recipient=коллеги}}!\n\nМы получили ваш запрос по теме «{{field:subject=проблема}}» и проверяем его.\n\nСледующее обновление: {{field:time=дата, время и часовой пояс}}.\n"
+
+[[expansion]]
+trigger = ";;ru-incident-update"
+description = "Share a factual incident update in professional Russian"
+category = "Поддержка на русском"
+tags = ["russian", "incident", "status"]
+replacement = "Текущий статус: {{choice:status=Расследуем|Устраняем последствия|Наблюдаем|Решено}}.\nПодтверждённая информация: {{field:summary|required|min=5|max=600}}\nСледующий шаг: {{field:next_step|required|max=500}}\nСледующее обновление: {{field:next_update=время и часовой пояс}}\n"
+
+[[expansion]]
+trigger = ";;ru-resolution"
+description = "Document a verified support resolution in professional Russian"
+category = "Поддержка на русском"
+tags = ["russian", "support", "resolution"]
+replacement = "Здравствуйте, {{field:recipient=коллеги}}!\n\nПроблема «{{field:subject|required|max=256}}» {{choice:outcome=решена|временно устранена|причина выявлена}}.\n\nВыполненное действие: {{field:resolution|required|min=5|max=1000}}\nПроверка результата: {{field:verification|required|max=600}}\nЧто требуется от вас: {{field:customer_action=ничего|required|max=400}}\nСсылка или номер: {{field:reference=номер обращения или изменения|max=128}}\n"
