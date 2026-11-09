@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Pass relative Debian archive paths to APT as local files during package
+  smoke tests, rather than letting APT parse them as package release selectors.
 - Use HTTPS Ubuntu archive URLs and bounded APT retries in disposable package
   and Ansible integration tests, avoiding runner environments that block
   outbound HTTP mirror traffic.

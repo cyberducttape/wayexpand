@@ -51,8 +51,15 @@ case "$package" in
         script_directory=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
         sh "$script_directory/use-https-ubuntu-mirrors.sh"
         apt-get update -qq
-        install_package() { apt-get install -y -q "$package"; }
-        reinstall_package() { apt-get install -y -q --reinstall "$package"; }
+        # APT treats `dist/package.deb` as a package selector with a release
+        # qualifier. Prefix relative archive paths with `./` so it recognizes
+        # them as local files; absolute paths are already unambiguous.
+        case "$package" in
+            /*) package_path=$package ;;
+            *) package_path=./$package ;;
+        esac
+        install_package() { apt-get install -y -q "$package_path"; }
+        reinstall_package() { apt-get install -y -q --reinstall "$package_path"; }
         remove_package() { apt-get remove -y -qq wayexpand; }
         ;;
     *.rpm)
