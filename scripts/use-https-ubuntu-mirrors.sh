@@ -27,3 +27,13 @@ Acquire::Retries "3";
 Acquire::http::Timeout "20";
 Acquire::https::Timeout "20";
 EOF
+
+if [ -n "${WAYEXPAND_APT_CA_FILE:-}" ]; then
+    if [ ! -r "$WAYEXPAND_APT_CA_FILE" ]; then
+        printf 'error: configured APT CA bundle is not readable: %s\n' \
+            "$WAYEXPAND_APT_CA_FILE" >&2
+        exit 2
+    fi
+    printf 'Acquire::https::CAInfo "%s";\n' "$WAYEXPAND_APT_CA_FILE" \
+        >> "$apt_root/apt.conf.d/99wayexpand-ci-network"
+fi

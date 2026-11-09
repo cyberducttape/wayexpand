@@ -40,6 +40,8 @@ EOF
 docker run --rm \
     --volume "$project:/project" \
     --volume "$script_directory/use-https-ubuntu-mirrors.sh:/tmp/use-https-ubuntu-mirrors.sh:ro" \
+    --volume /etc/ssl/certs/ca-certificates.crt:/tmp/wayexpand-runner-ca.pem:ro \
+    --env WAYEXPAND_APT_CA_FILE=/tmp/wayexpand-runner-ca.pem \
     --workdir /project \
     ubuntu:24.04 \
     bash -euc '

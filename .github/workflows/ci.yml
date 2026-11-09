@@ -979,7 +979,6 @@ jobs:
           # result names the distro release it actually validated.
           - image: fedora:45
             package: rpm
-    container: ${{ matrix.image }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -988,22 +987,30 @@ jobs:
         with:
           name: ci-packages
           path: dist
-      - name: Install smoke-test tools
-        run: |
-          if command -v dnf >/dev/null; then
-            dnf install -y -q glibc-common shadow-utils util-linux python3
-          else
-            apt-get update -qq
-            apt-get install -y -qq passwd util-linux python3
-          fi
       - name: Install, reinstall, and remove the package
         env:
           WAYEXPAND_PACKAGE_SMOKE_DISPOSABLE: "1"
         run: |
-          version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)
-          package=$(find dist -type f -name "*.${{ matrix.package }}" -print -quit)
-          test -n "$package"
-          sh scripts/test-package-smoke.sh "$PWD/$package" "$version"
+          docker run --rm \
+            --volume "$GITHUB_WORKSPACE:/workspace:ro" \
+            --volume /etc/ssl/certs/ca-certificates.crt:/tmp/wayexpand-runner-ca.pem:ro \
+            --env WAYEXPAND_APT_CA_FILE=/tmp/wayexpand-runner-ca.pem \
+            --env WAYEXPAND_PACKAGE_SMOKE_DISPOSABLE=1 \
+            --workdir /workspace \
+            "${{ matrix.image }}" \
+            sh -euc '
+              if command -v dnf >/dev/null; then
+                dnf install -y -q glibc-common shadow-utils util-linux python3
+              else
+                sh scripts/use-https-ubuntu-mirrors.sh
+                apt-get update -qq
+                apt-get install -y -qq passwd util-linux python3
+              fi
+              version=$(sed -n '\''s/^version = "\([^"]*\)"/\1/p'\'' Cargo.toml | head -n1)
+              package=$(find dist -type f -name "*.${{ matrix.package }}" -print -quit)
+              test -n "$package"
+              sh scripts/test-package-smoke.sh "$package" "$version"
+            '
 
   systemd:
     name: Systemd Unit Validation
