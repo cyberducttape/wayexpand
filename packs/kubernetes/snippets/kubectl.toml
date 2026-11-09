@@ -3,29 +3,29 @@ trigger = ";;kube-pods"
 description = "List pods in a namespace"
 category = "Kubernetes"
 tags = ["kubectl", "pods"]
-replacement = "kubectl get pods --namespace {{shellq:namespace=default|required|max=63|validate=dns-label}} --output wide"
+replacement = "kubectl --context {{shellq:context|required|max=256|validate=single-line}} get pods --namespace {{shellq:namespace=default|required|max=63|validate=dns-label}} --output wide"
 
 [[expansion]]
 trigger = ";klogs"
 aliases = [";;kube-logs"]
-description = "Preview recent logs for a selected Kubernetes context, namespace, pod, and container"
+description = "Preview recent logs in the explicitly reported Kubernetes context, namespace, pod, and container"
 category = "Kubernetes"
 tags = ["kubectl", "logs"]
-replacement = "kubectl --context {{shellq:context|required|max=253|validate=single-line}} logs --namespace {{shellq:namespace=default|required|max=63|validate=dns-label}} {{shellq:pod=pod-name|required|max=253|validate=kubernetes-name}} --container {{shellq:container=app|required|max=63|validate=dns-label}} --since={{shellq:since=15m|required|max=32|validate=kubernetes-duration}} --tail={{shellq:lines=200|required|max=10|validate=positive-integer}}"
+replacement = "kubectl --context {{shellq:context|required|max=256|validate=single-line}} logs --namespace {{shellq:namespace=default|required|max=63|validate=dns-label}} {{shellq:pod=pod-name|required|max=253|validate=kubernetes-name}} --container {{shellq:container=app|required|max=63|validate=dns-label}} --since={{shellq:since=15m|required|max=32|validate=kubernetes-duration}} --tail={{shellq:lines=200|required|max=10|validate=positive-integer}}"
 
 [[expansion]]
 trigger = ";;kube-events"
 description = "Inspect recent namespace events"
 category = "Kubernetes"
 tags = ["kubectl", "events"]
-replacement = "kubectl get events --namespace {{shellq:namespace=default|required|max=63|validate=dns-label}} --sort-by=.metadata.creationTimestamp"
+replacement = "kubectl --context {{shellq:context|required|max=256|validate=single-line}} get events --namespace {{shellq:namespace=default|required|max=63|validate=dns-label}} --sort-by=.metadata.creationTimestamp"
 
 [[expansion]]
 trigger = ";;kube-rollout"
 description = "Check rollout status for a deployment"
 category = "Kubernetes"
 tags = ["kubectl", "deployment"]
-replacement = "kubectl rollout status deployment/{{shellq:deployment=deployment-name|required|max=253|validate=dns-subdomain}} --namespace {{shellq:namespace=default|required|max=63|validate=dns-label}} --timeout={{shellq:timeout=120s|required|max=32|validate=duration}}"
+replacement = "kubectl --context {{shellq:context|required|max=256|validate=single-line}} rollout status deployment/{{shellq:deployment=deployment-name|required|max=253|validate=dns-subdomain}} --namespace {{shellq:namespace=default|required|max=63|validate=dns-label}} --timeout={{shellq:timeout=120s|required|max=32|validate=duration}}"
 
 [[expansion]]
 trigger = ";;kube-context"

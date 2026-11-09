@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Require a validated explicit cluster context in Kubernetes operations-pack
+  commands instead of inheriting `kubectl`'s ambient default. Prefill that
+  field from the opt-in shell report in CLI previews, show the selected target,
+  and support an explicit `--kubernetes-context` override for offline review.
 - Disconnect GNOME window-title notifications when the extension is disabled.
   Track input-source activation retry sources and cancel pending calls during
   teardown so stale retries cannot reactivate an input source.
