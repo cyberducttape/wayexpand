@@ -102,6 +102,56 @@ export class SubscriptionReservations {
     }
 }
 
+/** Own GLib source IDs for work that must not outlive an extension instance. */
+export class CancellableSources {
+    constructor(removeSource) {
+        this._removeSource = removeSource;
+        this._sources = new Set();
+        this._generation = 0;
+    }
+
+    get generation() {
+        return this._generation;
+    }
+
+    isCurrent(generation) {
+        return generation === this._generation;
+    }
+
+    add(sourceId) {
+        if (Number.isInteger(sourceId) && sourceId > 0)
+            this._sources.add(sourceId);
+    }
+
+    forget(sourceId) {
+        this._sources.delete(sourceId);
+    }
+
+    cancelAll() {
+        this._generation++;
+        for (const sourceId of this._sources) {
+            try {
+                this._removeSource(sourceId);
+            } catch {
+                // The source may already have expired.
+            }
+        }
+        this._sources.clear();
+    }
+}
+
+/** Disconnect a focused-window title signal and forget its owner. */
+export function clearTitleWatch(window, signalId) {
+    if (window && signalId) {
+        try {
+            window.disconnect(signalId);
+        } catch {
+            // The window may already have been destroyed with its handlers.
+        }
+    }
+    return {window: null, signalId: 0};
+}
+
 export class LatestOnlyDelivery {
     constructor(send, onFailure) {
         this._send = send;
