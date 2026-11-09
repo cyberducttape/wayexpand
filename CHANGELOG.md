@@ -4,6 +4,7 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Declare the packaged GNOME Shell extension and distinguish package-owned IBus registration from source-install setup. `install-check` now verifies that a distribution package contains the exact bundled extension payload, and package smoke checks cover the extension for default and custom XDG users. The GUI continues through its resumable GNOME setup flow, including explicit authorization and session-restart guidance; setup commands now use the same active configuration path as the open GUI so custom-path installations resume correctly.
 - Classify pull request changes so system integration and compositor acceptance
   jobs run when their code paths are affected, while push, scheduled, and
   release runs continue to execute the full matrix. Keep shared core and daemon

@@ -17,13 +17,21 @@ required = true
 path = "ibus/wayexpand.xml"
 package_path = "/usr/share/ibus/component/wayexpand-ibus.xml"
 required = true
-registration = "system-wide component directory selected by the running ibus-daemon; install with wayexpand setup --backend ibus"
+registration = "system-wide component directory selected by the running ibus-daemon; distribution packages install at package_path, source/archive installs use setup --backend ibus when registration is missing"
+package_registration = "installed by the package manager; setup refreshes the running IBus registry only when needed"
 user_registration = false
 user_install_exec = "/usr/local/libexec/wayexpand/wayexpand-ibus"
 user_install_exec_owner = "root"
 package_install_exec = "wayexpand-ibus"
 package_install_exec_path = "/usr/bin/wayexpand-ibus"
 package_install_exec_owner = "package-manager"
+
+[components.gnome_extension]
+path = "gnome-extension/wayexpand-window-tracker@cyberducttape.github.io"
+package_path = "/usr/share/gnome-shell/extensions/wayexpand-window-tracker@cyberducttape.github.io"
+required = false
+provisioning = "included in distribution packages; setup stages and enables a verified per-user copy"
+activation = "per-user GNOME setting; a logout/login may be required for GNOME Shell to load a new extension"
 
 [components.desktop]
 path = "desktop/wayexpand.desktop"

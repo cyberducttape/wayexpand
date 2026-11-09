@@ -141,7 +141,7 @@ report = json.load(sys.stdin)
 checks = {check["component"]: check for check in report["checks"]}
 assert report["ready"] is True, checks
 for component in ("cli", "gui", "daemon", "desktop", "ibus", "ibus_engine_executable",
-                  "installer_contract", "default_config_template", "control_service",
+                  "gnome_extension", "installer_contract", "default_config_template", "control_service",
                   "input_method_service", "active_configuration", "xdg_config_home", "xdg_data_home"):
     assert checks[component]["status"] == "pass", (component, checks.get(component))
 '
@@ -159,7 +159,7 @@ import json, sys
 report = json.load(sys.stdin)
 checks = {check["component"]: check for check in report["checks"]}
 assert report["ready"] is True, checks
-for component in ("ibus", "ibus_engine_executable", "installer_contract",
+for component in ("ibus", "ibus_engine_executable", "gnome_extension", "installer_contract",
                   "default_config_template", "active_configuration", "xdg_config_home",
                   "xdg_data_home"):
     assert checks[component]["status"] == "pass", (component, checks.get(component))

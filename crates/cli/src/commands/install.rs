@@ -505,6 +505,25 @@ fn operational_checks(
     ));
     checks
 }
+fn gnome_extension_install_check(path: Option<&Path>, package_install: bool) -> Check {
+    let matching = path.is_some_and(crate::gnome_extension::matches_bundled);
+    Check {
+        component: "gnome_extension",
+        status: if matching {
+            "pass"
+        } else if package_install {
+            "fail"
+        } else {
+            "optional"
+        },
+        path: path.map_or_else(
+            || "GNOME Shell extension".into(),
+            |path| path.display().to_string(),
+        ),
+        detail: "package payload must match the bundled extension; GUI setup stages and enables the per-user copy and reports any required logout/login",
+    }
+}
+
 pub(crate) fn checks() -> Vec<Check> {
     let mut out = Vec::new();
     out.push(Check {
@@ -565,6 +584,13 @@ pub(crate) fn checks() -> Vec<Check> {
         fs::metadata(path)
             .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
     });
+    let gnome_extension_path = component_contract_path("gnome_extension", "package_path");
+    let executable = env::current_exe().ok();
+    let package_install = installation_method(executable.as_deref()) == "distribution-package";
+    out.push(gnome_extension_install_check(
+        gnome_extension_path.as_deref(),
+        package_install,
+    ));
     out.push(Check {
         component: "ibus_engine_executable",
         status: if engine.is_some() { "pass" } else { "fail" },
@@ -1425,15 +1451,46 @@ mod tests {
     }
 
     #[test]
+    fn packaged_gnome_extension_check_requires_the_bundled_payload() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-install-gnome-extension-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir(&directory).unwrap();
+
+        assert_eq!(
+            gnome_extension_install_check(Some(&directory), true).status,
+            "fail"
+        );
+        assert_eq!(
+            gnome_extension_install_check(None, false).status,
+            "optional"
+        );
+
+        for (name, contents) in wayexpand_backend_gnome_window::extension_files() {
+            std::fs::write(directory.join(name), contents).unwrap();
+        }
+        assert_eq!(
+            gnome_extension_install_check(Some(&directory), true).status,
+            "pass"
+        );
+        std::fs::write(directory.join("extension.js"), "stale package payload").unwrap();
+        assert_eq!(
+            gnome_extension_install_check(Some(&directory), true).status,
+            "fail"
+        );
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn ibus_contract_and_install_check_exclude_per_user_registration() {
         let contract: toml::Value =
             toml::from_str(include_str!("../../../../installer-components.toml")).unwrap();
         let ibus = &contract["components"]["ibus"];
         assert_eq!(ibus["user_registration"].as_bool(), Some(false));
-        assert!(ibus["registration"]
-            .as_str()
-            .unwrap()
-            .contains("system-wide"));
         assert_eq!(ibus["path"].as_str(), Some("ibus/wayexpand.xml"));
         assert_eq!(
             ibus["package_path"].as_str(),
@@ -1447,6 +1504,20 @@ mod tests {
             ibus["package_install_exec_path"].as_str(),
             Some("/usr/bin/wayexpand-ibus")
         );
+        assert!(ibus["registration"]
+            .as_str()
+            .unwrap()
+            .contains("distribution packages install"));
+        let extension = &contract["components"]["gnome_extension"];
+        assert_eq!(extension["required"].as_bool(), Some(false));
+        assert_eq!(
+            extension["package_path"].as_str(),
+            Some("/usr/share/gnome-shell/extensions/wayexpand-window-tracker@cyberducttape.github.io")
+        );
+        assert!(extension["activation"]
+            .as_str()
+            .unwrap()
+            .contains("logout/login"));
         assert!(ibus_engine_candidates().contains(&PathBuf::from("/usr/bin/wayexpand-ibus")));
         let candidates = ibus_component_candidates();
         assert!(!candidates.contains(&data_home().join("ibus/component/wayexpand.xml")));
