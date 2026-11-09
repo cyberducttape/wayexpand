@@ -1,0 +1,16 @@
+format_version = 1
+
+[[case]]
+trigger = ";;ru-support-ack"
+expected_output = "examples/acknowledgement.txt"
+values = { "field:recipient" = "коллеги", "field:subject" = "вход в систему", "field:time" = "10:00 MSK" }
+
+[[case]]
+trigger = ";;ru-incident-update"
+expected_output = "examples/incident-update.txt"
+values = { "choice:status" = "Устраняем последствия", "field:summary" = "Сервис восстановлен в двух из трёх регионов.", "field:next_step" = "Проверить ошибки в оставшемся регионе.", "field:next_update" = "10:30 MSK" }
+
+[[case]]
+trigger = ";;ru-resolution"
+expected_output = "examples/resolution.txt"
+values = { "field:recipient" = "коллеги", "field:subject" = "вход в систему", "choice:outcome" = "решена", "field:resolution" = "Обновлён сертификат поставщика аутентификации.", "field:verification" = "Проверочный вход выполнен успешно.", "field:customer_action" = "ничего", "field:reference" = "INC-2048" }

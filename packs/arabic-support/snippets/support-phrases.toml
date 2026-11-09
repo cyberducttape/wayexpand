@@ -1,0 +1,20 @@
+[[expansion]]
+trigger = ";;ar-support-ack"
+description = "Acknowledge a support request in formal Arabic"
+category = "دعم باللغة العربية"
+tags = ["arabic", "support", "acknowledgement"]
+replacement = "مرحبًا {{field:recipient=الفريق}}،\n\nاستلمنا طلبكم بشأن {{field:subject=المشكلة}} ونعمل على مراجعته.\n\nموعد التحديث القادم: {{field:time=التاريخ والوقت والمنطقة الزمنية}}.\n"
+
+[[expansion]]
+trigger = ";;ar-incident-update"
+description = "Share a factual incident update in formal Arabic"
+category = "دعم باللغة العربية"
+tags = ["arabic", "incident", "status"]
+replacement = "الحالة الحالية: {{choice:status=قيد التحقيق|تجري المعالجة|قيد المراقبة|تم الحل}}.\nملخص مؤكد: {{field:summary|required|min=5|max=600}}\nالخطوة التالية: {{field:next_step|required|max=500}}\nموعد التحديث القادم: {{field:next_update=الوقت والمنطقة الزمنية}}\n"
+
+[[expansion]]
+trigger = ";;ar-resolution"
+description = "Document a verified support resolution in formal Arabic"
+category = "دعم باللغة العربية"
+tags = ["arabic", "support", "resolution"]
+replacement = "السادة {{field:recipient=فريق الدعم}} المحترمون،\n\nتم {{choice:outcome=حلّ|تخفيف أثر|تحديد سبب}} مشكلة «{{field:subject|required|max=256}}».\n\nالإجراء الذي نُفذ: {{field:resolution|required|min=5|max=1000}}\nالتحقق الذي أُجري: {{field:verification|required|max=600}}\nالإجراء المطلوب منكم: {{field:customer_action=لا يوجد|required|max=400}}\nالمرجع: {{field:reference=رقم التذكرة أو التغيير|max=128}}\n"
