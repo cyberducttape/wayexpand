@@ -35,7 +35,7 @@ pub(crate) fn user_extension_dir() -> Option<PathBuf> {
 }
 
 /// Whether `directory` holds exactly the bundled extension files.
-fn matches_bundled(directory: &Path) -> bool {
+pub(crate) fn matches_bundled(directory: &Path) -> bool {
     extension_files().iter().all(|(name, contents)| {
         fs::read_to_string(directory.join(name)).is_ok_and(|on_disk| on_disk == *contents)
     })
