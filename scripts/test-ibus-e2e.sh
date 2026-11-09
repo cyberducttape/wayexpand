@@ -30,6 +30,10 @@ for tool in ibus ibus-daemon dbus-run-session timeout date; do
     fi
 done
 
+# Exercise the registry-call deadline independently of the private daemon
+# startup test using a socket that accepts but never answers D-Bus requests.
+sh "$project_dir/scripts/test-ibus-registry-probe-timeout.sh"
+
 bin_dir=${E2E_BIN:-"$project_dir/target/debug"}
 if [ "${E2E_SKIP_BUILD:-0}" != 1 ]; then
     cargo build --locked --quiet \

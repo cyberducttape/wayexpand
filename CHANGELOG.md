@@ -6,6 +6,8 @@ All notable changes to WayExpand are documented here.
 
 - Bound each private IBus engine-registry probe and use a monotonic deadline,
   so one stalled D-Bus request cannot defeat the startup readiness timeout.
+  Test this against a Unix socket that accepts a real IBus client but never
+  answers its D-Bus request.
 
 - Reject conflicting Kubernetes context selections and visibly mark rendered
   cluster targets as unverified; validate explicit context names and ignore
