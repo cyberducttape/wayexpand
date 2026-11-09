@@ -88,6 +88,21 @@ struct SearchEntry {
     trigger: String,
     description: String,
     app_scope: String,
+    eligible: bool,
+}
+
+impl SearchEntry {
+    fn from_expansion(expansion: &ExpansionConfig, safe_direct_insert: bool) -> Self {
+        Self {
+            trigger: crate::library::trigger_search_text(expansion),
+            description: expansion.description.to_lowercase(),
+            app_scope: format_app_scope(&expansion.app_filter),
+            // Eligibility does not change while the picker is open. Parse
+            // forms and template variables once here instead of repeating
+            // that work for every search edit.
+            eligible: picker_expansion_is_eligible(expansion, safe_direct_insert),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -158,11 +173,7 @@ impl PickerApp {
             search_index: config
                 .expansion
                 .iter()
-                .map(|expansion| SearchEntry {
-                    trigger: crate::library::trigger_search_text(expansion),
-                    description: expansion.description.to_lowercase(),
-                    app_scope: format_app_scope(&expansion.app_filter),
-                })
+                .map(|expansion| SearchEntry::from_expansion(expansion, safe_direct_insert))
                 .collect(),
             template_context: config.template_context(None),
             config,
@@ -199,20 +210,13 @@ impl PickerApp {
             self.preview_cache.clear();
         }
         let ranked: Vec<(i64, usize)> = self
-            .config
-            .expansion
+            .search_index
             .iter()
             .enumerate()
-            .filter(|(_, expansion)| {
-                picker_expansion_is_eligible(expansion, self.safe_direct_insert)
-            })
-            .filter_map(|(index, _)| {
-                score_normalized(
-                    &query,
-                    &self.search_index[index].trigger,
-                    &self.search_index[index].description,
-                )
-                .map(|score| (score, index))
+            .filter(|(_, entry)| entry.eligible)
+            .filter_map(|(index, entry)| {
+                score_normalized(&query, &entry.trigger, &entry.description)
+                    .map(|score| (score, index))
             })
             .collect();
         self.result_indices = top_ranked(ranked, MAX_RESULTS);
@@ -813,7 +817,7 @@ mod tests {
         clipboard_fallback_allowed_by_policy, copy_snippet, focus_returned_to_target,
         focus_target_from_response, format_app_scope, picker_expansion_is_eligible,
         picker_focus_state, picker_needs_daemon_focus, score, top_ranked, FocusInfo, FocusTarget,
-        MAX_RESULTS,
+        SearchEntry, MAX_RESULTS,
     };
 
     #[test]
@@ -1038,6 +1042,34 @@ mod tests {
         };
         assert!(!picker_expansion_is_eligible(&expansion, false));
         assert!(picker_expansion_is_eligible(&expansion, true));
+    }
+
+    #[test]
+    fn search_entry_caches_delivery_eligibility() {
+        let expansion = ExpansionConfig {
+            id: ExpansionConfig::new_id(),
+            trigger: ":host".into(),
+            replacement: "admin@host".into(),
+            description: "SSH prompt".into(),
+            tags: Vec::new(),
+            category: String::new(),
+            app_filter: Vec::new(),
+            match_mode: MatchMode::Immediate,
+            command: None,
+            enabled: true,
+            propagate_case: false,
+            aliases: Vec::new(),
+            output_file: None,
+        };
+
+        assert!(SearchEntry::from_expansion(&expansion, false).eligible);
+
+        let mut app_scoped = expansion;
+        app_scoped
+            .app_filter
+            .push("app_id_exact:org.example.Terminal".into());
+        assert!(!SearchEntry::from_expansion(&app_scoped, false).eligible);
+        assert!(SearchEntry::from_expansion(&app_scoped, true).eligible);
     }
 
     #[test]

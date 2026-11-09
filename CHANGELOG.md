@@ -7,6 +7,8 @@ All notable changes to WayExpand are documented here.
 - Publish the IBus factory connection before acquiring its well-known bus name,
   so IBus cannot request an engine during a startup window where the factory
   reports its connection unavailable.
+- Cache Quick Picker snippet eligibility when it opens so each search edit
+  avoids reparsing form fields and template variables across the library.
 - Pin CI and compositor-certification checkouts to the immutable workflow SHA
   by default, so queued jobs cannot silently validate a newer PR merge ref.
 - Report which invariant fails when the private KWin timeout contract test
