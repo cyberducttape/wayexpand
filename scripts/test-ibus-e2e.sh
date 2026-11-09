@@ -23,7 +23,7 @@ for argument in "$@"; do
     esac
 done
 
-for tool in ibus-daemon dbus-run-session; do
+for tool in ibus ibus-daemon dbus-run-session; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         printf '%s\n' "error: $tool is required (install ibus and dbus-daemon)" >&2
         exit 2
@@ -91,6 +91,32 @@ if [ ! -S "$socket" ]; then
     exit 1
 fi
 export IBUS_ADDRESS="unix:path=$socket"
+# Socket creation precedes IBus service readiness. Wait for the private
+# daemon to answer a registry request and load the WayExpand component before
+# asking it to select the engine; otherwise SetGlobalEngine can race startup
+# and fail with "IBus connection unavailable".
+tries=150
+registered=0
+while [ "$tries" -gt 0 ]; do
+    if registry=$(ibus list-engine --name-only 2>/dev/null) &&
+        printf '%s\n' "$registry" | grep -Fxq wayexpand; then
+        registered=1
+        break
+    fi
+    if ! kill -0 "$daemon_pid" 2>/dev/null; then
+        printf '%s\n' "fail daemon ibus-daemon exited before registering wayexpand"
+        tail -n 40 "$E2E_WORK/ibus-daemon.log" >&2 2>/dev/null || true
+        exit 1
+    fi
+    sleep 0.1
+    tries=$((tries - 1))
+done
+if [ "$registered" -ne 1 ]; then
+    printf '%s\n' "fail daemon IBus did not register wayexpand before the test client started"
+    ibus list-engine --name-only >&2 2>&1 || true
+    tail -n 40 "$E2E_WORK/ibus-daemon.log" >&2 2>/dev/null || true
+    exit 1
+fi
 status=0
 "$E2E_BIN_DIR/wx-e2e-ibus" "$XDG_RUNTIME_DIR/wayexpand-ibus-status.json" || status=$?
 if [ "$status" -eq 0 ]; then

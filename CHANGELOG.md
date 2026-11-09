@@ -7,7 +7,6 @@ All notable changes to WayExpand are documented here.
 - Reject conflicting Kubernetes context selections and visibly mark rendered
   cluster targets as unverified; validate explicit context names and ignore
   inactive terminal-session reports.
-
 - Require a validated explicit cluster context in Kubernetes operations-pack
   commands instead of inheriting `kubectl`'s ambient default. Prefill that
   field from the opt-in shell report in CLI previews, show the selected target,
@@ -15,9 +14,18 @@ All notable changes to WayExpand are documented here.
 - Expand the developer pack's `;;git-review` shortcut to inspect branch state,
   staged and unstaged diff summaries, and whitespace errors without modifying
   the worktree.
+- Wait for the private IBus daemon to answer registry requests and register
+  WayExpand before starting engine-selection checks, avoiding a startup race
+  that could report the daemon as unavailable.
 - Disconnect GNOME window-title notifications when the extension is disabled.
   Track input-source activation retry sources and cancel pending calls during
   teardown so stale retries cannot reactivate an input source.
+- Correct README compatibility guidance: focused-window tracking is
+  implemented on GNOME as well as KWin, while GNOME still lacks real-session
+  production certification.
+- Add a Criterion workload for repeated IBus surrounding-text updates using
+  large multilingual documents, so text-window changes can be evaluated with
+  representative Unicode input rather than allocation assumptions alone.
 - Preserve partially typed IBus triggers when Shift or an alternate-level
   modifier is pressed between characters, so triggers containing characters
   such as French AZERTY's shifted `2` can still match. Shortcut modifiers still
