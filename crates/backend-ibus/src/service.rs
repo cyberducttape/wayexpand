@@ -779,13 +779,16 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
         Ok(address) => Builder::address(address.as_str())?,
         Err(_) => Builder::ibus()?,
     };
-    let connection = builder
-        .name(BUS_NAME)?
-        .serve_at(FACTORY_PATH, factory)?
-        .build()?;
+    // Publish the factory connection before acquiring the well-known name.
+    // IBus treats name ownership as the readiness signal and can call
+    // CreateEngine immediately afterward. Acquiring the name in Builder::build
+    // exposed a small window where CreateEngine ran while this slot was still
+    // None, returning "IBus connection unavailable" and failing activation.
+    let connection = builder.serve_at(FACTORY_PATH, factory)?.build()?;
     *connection_slot
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(connection);
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(connection.clone());
+    connection.request_name(BUS_NAME)?;
     loop {
         std::thread::park();
     }
