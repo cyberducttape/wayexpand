@@ -1,0 +1,4 @@
+Estado actual: Mitigando.
+Resumen confirmado: El servicio responde con normalidad en dos de tres zonas.
+Próximo paso: Revisar los errores de la zona restante.
+Próxima actualización: 10:30 CET
