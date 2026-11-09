@@ -4,7 +4,7 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
-- Declare the packaged GNOME Shell extension and distinguish package-owned IBus registration from source-install setup. `install-check` now verifies that a distribution package contains the exact bundled extension payload, and package smoke checks cover the extension for default and custom XDG users. The GUI continues through its resumable GNOME setup flow, including explicit authorization and session-restart guidance.
+- Declare the packaged GNOME Shell extension and distinguish package-owned IBus registration from source-install setup. `install-check` now verifies that a distribution package contains the exact bundled extension payload, and package smoke checks cover the extension for default and custom XDG users. The GUI continues through its resumable GNOME setup flow, including explicit authorization and session-restart guidance; setup commands now use the same active configuration path as the open GUI so custom-path installations resume correctly.
 - Reject conflicting Kubernetes context selections and visibly mark rendered
   cluster targets as unverified; validate explicit context names and ignore
   inactive terminal-session reports.

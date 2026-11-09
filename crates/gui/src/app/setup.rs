@@ -29,6 +29,13 @@ fn ibus_registration_needed(report: &serde_json::Value) -> Option<bool> {
     Some(!(component_valid && manifest_valid && manifest_scope_valid))
 }
 
+fn configure_cli_task_command(command: &mut std::process::Command, config_path: &std::path::Path) {
+    // Setup's restart marker and every preflight must refer to the same config
+    // the GUI opened. Otherwise a custom CONFIG launch can prepare a marker in
+    // the default config directory that this GUI never sees after login.
+    command.env("WAYEXPAND_CONFIG", config_path);
+}
+
 fn set_nonblocking<R: AsRawFd>(stream: &R) -> Result<(), String> {
     let fd = stream.as_raw_fd();
     let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
@@ -343,6 +350,7 @@ impl GuiApp {
         let worker_cancel = Arc::clone(&cancel);
         let worker_is_setup = is_setup;
         let worker_is_setup_preflight = is_setup_preflight;
+        let worker_config_path = self.path.clone();
         // Prefer the CLI installed beside this binary (release archives and
         // development builds), else whatever `wayexpand` is on PATH.
         let cli = env::current_exe()
@@ -355,6 +363,7 @@ impl GuiApp {
             .spawn(move || {
                 let result = (|| {
                     let mut command = std::process::Command::new(&cli);
+                    configure_cli_task_command(&mut command, &worker_config_path);
                     configure_process_group(&mut command);
                     let mut child = command
                         .args(&arguments)
@@ -1173,6 +1182,16 @@ pub(crate) fn onboarding_step(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gui_cli_tasks_use_the_active_config_for_restart_resume() {
+        let config_path = std::path::Path::new("/tmp/wayexpand-custom/expansions.toml");
+        let mut command = std::process::Command::new("wayexpand");
+        configure_cli_task_command(&mut command, config_path);
+        assert!(command.get_envs().any(|(name, value)| {
+            name == "WAYEXPAND_CONFIG" && value == Some(config_path.as_os_str())
+        }));
+    }
 
     #[test]
     fn system_registration_consent_requires_a_multiuser_safe_component() {
