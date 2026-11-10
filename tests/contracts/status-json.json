@@ -1,11 +1,13 @@
 {
-  "schema_version": 16,
-  "daemon_control_schema": 31,
+  "schema_version": 17,
+  "daemon_control_schema": 32,
   "fields": {
     "response": "string",
     "source": "string",
     "backend": "string",
     "route_id": "string",
+    "raw_capture_app_count": "integer",
+    "raw_capture_fallback_enabled": "boolean",
     "backend_mode": "string",
     "backend_shutdown_workers_active": "integer",
     "backend_shutdown_workers_started_total": "integer",

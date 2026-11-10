@@ -4,7 +4,7 @@ use super::Args;
 use crate::errors::{classified_error, CliErrorKind};
 use crate::*;
 
-pub(crate) const HEALTH_SCHEMA: u32 = 2;
+pub(crate) const HEALTH_SCHEMA: u32 = 3;
 
 fn classify_health(
     config_valid: bool,
@@ -77,6 +77,12 @@ fn classify_health(
 }
 
 fn application_coverage(snapshot: Option<&serde_json::Value>) -> serde_json::Value {
+    let raw_capture_fallback_enabled = snapshot
+        .and_then(|status| status.get("raw_capture_fallback_enabled"))
+        .and_then(serde_json::Value::as_bool);
+    let raw_capture_app_count = snapshot
+        .and_then(|status| status.get("raw_capture_app_count"))
+        .and_then(serde_json::Value::as_u64);
     let app_scope_only = snapshot
         .and_then(|status| status.get("terminal_apps_only"))
         .and_then(serde_json::Value::as_bool)
@@ -84,6 +90,8 @@ fn application_coverage(snapshot: Option<&serde_json::Value>) -> serde_json::Val
     if app_scope_only {
         serde_json::json!({
             "scope":"daemon_route_configured_applications_only",
+            "raw_capture_fallback_enabled":raw_capture_fallback_enabled,
+            "raw_capture_app_count":raw_capture_app_count,
             "terminal_only":null,
             "configured_app_scope_only":true,
             "desktop_wide":null,
@@ -97,10 +105,13 @@ fn application_coverage(snapshot: Option<&serde_json::Value>) -> serde_json::Val
     } else {
         serde_json::json!({
             "scope":"active_route",
+            "raw_capture_fallback_enabled":raw_capture_fallback_enabled,
+            "raw_capture_app_count":raw_capture_app_count,
             "terminal_only":false,
             "configured_app_scope_only":false,
             "desktop_wide":null,
             "browser_fields_covered":null,
+            "daemon_route":null,
             "detail":"health describes the active daemon route; it does not certify input delivery in every application"
         })
     }
@@ -311,6 +322,8 @@ fn health_report(
             "source": snapshot.get("source"),
             "backend": snapshot.get("backend"),
             "terminal_apps_only": snapshot.get("terminal_apps_only"),
+            "raw_capture_fallback_enabled": snapshot.get("raw_capture_fallback_enabled"),
+            "raw_capture_app_count": snapshot.get("raw_capture_app_count"),
             "enabled_expansions": snapshot.get("config_enabled_expansions"),
             "disabled_expansions": snapshot.get("config_disabled_expansions"),
             "generate_only_expansions": snapshot.get("config_generate_only_expansions"),
@@ -453,6 +466,10 @@ mod tests {
         };
 
         assert_eq!(keys(&report), expected("health"));
+        assert_eq!(
+            keys(&report["application_coverage"]),
+            expected("health_application_coverage")
+        );
         assert_eq!(keys(&report["daemon"]), expected("health_daemon"));
         assert_eq!(
             report["schema_version"].as_u64(),
@@ -481,7 +498,9 @@ mod tests {
     fn app_scoped_daemon_route_does_not_claim_terminal_only_or_browser_coverage() {
         let snapshot = serde_json::json!({
             "source":"evdev",
-            "terminal_apps_only":true
+            "terminal_apps_only":true,
+            "raw_capture_fallback_enabled":true,
+            "raw_capture_app_count":14
         });
         let coverage = application_coverage(Some(&snapshot));
         assert_eq!(
@@ -489,6 +508,8 @@ mod tests {
             "daemon_route_configured_applications_only"
         );
         assert!(coverage["desktop_wide"].is_null());
+        assert_eq!(coverage["raw_capture_fallback_enabled"], true);
+        assert_eq!(coverage["raw_capture_app_count"], 14);
         assert!(coverage["browser_fields_covered"].is_null());
         assert!(coverage["terminal_only"].is_null());
         assert_eq!(coverage["daemon_route"]["desktop_wide"], false);
@@ -500,6 +521,8 @@ mod tests {
     fn older_or_missing_status_does_not_invent_application_coverage() {
         let coverage = application_coverage(None);
         assert_eq!(coverage["scope"], "active_route");
+        assert!(coverage["raw_capture_fallback_enabled"].is_null());
+        assert!(coverage["raw_capture_app_count"].is_null());
         assert!(coverage["desktop_wide"].is_null());
         assert!(coverage["browser_fields_covered"].is_null());
     }

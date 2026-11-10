@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Expose whether app-scoped raw-capture fallback is enabled and its configured
+  application count in daemon status and `wayexpand health --json`. These
+  content-free fields help distinguish an inactive fallback from absent input
+  activity without disclosing application IDs or typed text.
 - Add a Generate only delivery mode for reusable scripts and configuration
   artifacts. These entries do not participate in keyboard matching and can
   be rendered to a protected file or stdout with `wayexpand new`; WayExpand

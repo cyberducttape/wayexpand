@@ -58,6 +58,8 @@
     "source",
     "backend",
     "terminal_apps_only",
+    "raw_capture_fallback_enabled",
+    "raw_capture_app_count",
     "enabled_expansions",
     "disabled_expansions",
     "generate_only_expansions",
@@ -67,7 +69,18 @@
     "matching_unavailable_reason",
     "production_certified"
   ],
-  "health_schema": 2,
+  "health_application_coverage": [
+    "scope",
+    "raw_capture_fallback_enabled",
+    "raw_capture_app_count",
+    "terminal_only",
+    "configured_app_scope_only",
+    "desktop_wide",
+    "browser_fields_covered",
+    "daemon_route",
+    "detail"
+  ],
+  "health_schema": 3,
   "health_readiness": [
     "operational",
     "route_safety"
