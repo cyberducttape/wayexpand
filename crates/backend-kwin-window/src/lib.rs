@@ -304,6 +304,18 @@ impl KwinWindowTracker {
                     .and_then(|reply| reply.body().deserialize())
                     .ok()
             },
+            |old_plugin| {
+                connection
+                    .call_method(
+                        Some("org.kde.KWin"),
+                        "/Scripting",
+                        Some("org.kde.kwin.Scripting"),
+                        "unloadScript",
+                        &(old_plugin,),
+                    )
+                    .and_then(|reply| reply.body().deserialize())
+                    .unwrap_or(false)
+            },
         );
 
         Ok(Self {
@@ -378,13 +390,14 @@ impl KwinWindowTracker {
 
 /// Remove temporary files left by WayExpand tracker processes that exited
 /// without running `Drop` (for example, after SIGKILL or a process crash).
-/// This deliberately does not unload scripts or touch files owned by another
-/// process: it removes only an exact generated file for a dead PID after KWin
-/// confirms that the corresponding script is not loaded.
+/// It unloads only an exact generated script whose owner PID is dead and whose
+/// private file still matches the generated contents, then removes that file
+/// only after KWin confirms the script is no longer loaded.
 fn cleanup_orphan_tracker_scripts(
     directory: &Path,
     mut process_is_alive: impl FnMut(u32) -> bool,
     mut script_is_loaded: impl FnMut(&str) -> Option<bool>,
+    mut unload_script: impl FnMut(&str) -> bool,
 ) {
     let Ok(entries) = fs::read_dir(directory) else {
         return;
@@ -445,7 +458,15 @@ fn cleanup_orphan_tracker_scripts(
         }
 
         let plugin_name = format!("wayexpand-window-tracker-{pid}-{tracker_id}");
-        if script_is_loaded(&plugin_name) == Some(false) {
+        let unloaded = match script_is_loaded(&plugin_name) {
+            Some(false) => true,
+            // KWin's unloadScript return value acknowledges whether the
+            // requested script was successfully unloaded. Do not add another
+            // synchronous round trip to verify the same operation.
+            Some(true) => unload_script(&plugin_name),
+            None => false,
+        };
+        if unloaded {
             // Remove only if the directory entry still names the inode that
             // was inspected. This avoids unlinking a replacement file after
             // the descriptor check above.
@@ -741,6 +762,7 @@ mod tests {
                     Some(false)
                 }
             },
+            |_| false,
         );
 
         assert!(!stale.exists(), "a confirmed orphan should be removed");
@@ -754,6 +776,42 @@ mod tests {
         assert_eq!(
             fs::read_to_string(target).unwrap(),
             "leave target unchanged"
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn orphan_tracker_cleanup_unloads_exact_script_for_a_dead_process() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-kwin-orphan-unload-{}-{suffix}",
+            process::id()
+        ));
+        fs::create_dir(&directory).unwrap();
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let stale = write_tracker_file(&directory, 410_006, "aabbccddeeff0066");
+        let loaded = std::cell::Cell::new(true);
+        let unload_calls = std::cell::Cell::new(0);
+
+        cleanup_orphan_tracker_scripts(
+            &directory,
+            |_| false,
+            |_| Some(loaded.get()),
+            |_| {
+                unload_calls.set(unload_calls.get() + 1);
+                loaded.set(false);
+                true
+            },
+        );
+
+        assert_eq!(unload_calls.get(), 1);
+        assert!(!loaded.get());
+        assert!(
+            !stale.exists(),
+            "confirmed unloaded orphan should be removed"
         );
         fs::remove_dir_all(directory).unwrap();
     }
@@ -809,6 +867,7 @@ mod tests {
                 checks.set(checks.get() + 1);
                 Some(false)
             },
+            |_| false,
         );
 
         assert_eq!(checks.get(), ORPHAN_CHECK_LIMIT);

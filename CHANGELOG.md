@@ -7,6 +7,8 @@ All notable changes to WayExpand are documented here.
 - Report when terminal-only evdev matching is blocked because the compositor
   has not supplied a focused application ID, separately from the synthetic
   terminal matcher self-test.
+- Unload stale KWin focus-tracker scripts only after confirming their daemon
+  process is gone and their generated script file is intact.
 - Recognize Ubuntu's `chromium-browser` desktop ID in the opt-in
   browser-scoped evdev fallback. Upgrade only the exact previous built-in
   browser allowlist; preserve custom app scopes.
