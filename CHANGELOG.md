@@ -19,6 +19,9 @@ All notable changes to WayExpand are documented here.
 - Extend `wayexpand debug --live` to report app-scope changes and content-free
   matcher/output counters, so browser capture, allowlist, matching, and output
   failures can be distinguished without logging app IDs or typed text.
+- Let the KWin focus tracker fall back to the owning desktop-file ID when a
+  Wayland window has no resource class; app-scoped evdev matching can then
+  identify native Wayland applications without weakening its allowlist.
 - Expose whether app-scoped raw-capture fallback is enabled and its configured
   application count in daemon status and `wayexpand health --json`. These
   content-free fields help distinguish an inactive fallback from absent input

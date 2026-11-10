@@ -5,7 +5,23 @@
 // interface, reached over the session D-Bus, is the same mechanism tools
 // like kdotool use.
 function report(window) {
-    var appId = window ? window.resourceClass : "";
+    var appId = "";
+    if (window) {
+        appId = window.resourceClass || "";
+        // Native Wayland windows may not expose an X11 resource class. KWin
+        // provides the owning desktop-file identity separately; use it only
+        // when resourceClass is absent so existing X11 IDs remain stable.
+        if (!appId) {
+            appId = window.desktopFileName || "";
+            var slash = appId.lastIndexOf("/");
+            if (slash >= 0) {
+                appId = appId.substring(slash + 1);
+            }
+            if (appId.toLowerCase().slice(-8) === ".desktop") {
+                appId = appId.slice(0, -8);
+            }
+        }
+    }
     var title = window ? window.caption : "";
     // internalId is a compositor-issued identity for this exact KWin window.
     // It is intentionally kept separate from appId/title, which are not unique.
