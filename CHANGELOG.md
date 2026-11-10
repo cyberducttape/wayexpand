@@ -10,6 +10,9 @@ All notable changes to WayExpand are documented here.
 - Do not describe an app-scoped raw-capture route as terminal-only when daemon
   status reports configured fallback applications; preserve terminal-only
   guidance for terminal-scoped routes and older status snapshots.
+- Show the configured raw-capture application count in GUI diagnostics and
+  explain that app-scoped matching does not limit evdev's global observation,
+  detect password fields, or verify browser insertion.
 - Expose whether app-scoped raw-capture fallback is enabled and its configured
   application count in daemon status and `wayexpand health --json`. These
   content-free fields help distinguish an inactive fallback from absent input

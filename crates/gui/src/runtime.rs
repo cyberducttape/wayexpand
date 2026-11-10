@@ -111,6 +111,8 @@ pub(crate) type RouteState = wayexpand_core::DaemonRouteState;
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct DaemonCapabilities {
     pub capture_source: Option<String>,
+    pub raw_capture_fallback_enabled: Option<bool>,
+    pub raw_capture_app_count: Option<usize>,
     pub injection_mode: Option<&'static str>,
     pub injection_max_text_chars: Option<usize>,
     pub injection_throughput_chars_per_sec: Option<u32>,
@@ -319,6 +321,14 @@ impl DaemonCapabilities {
                 });
         capabilities.capture_source = status.field("source").map(str::to_owned);
         found |= capabilities.capture_source.is_some();
+        if let Some(value) = status.bool_field("raw_capture_fallback_enabled") {
+            capabilities.raw_capture_fallback_enabled = Some(value);
+            found = true;
+        }
+        if let Some(value) = status.u64_field("raw_capture_app_count") {
+            capabilities.raw_capture_app_count = usize::try_from(value).ok();
+            found |= capabilities.raw_capture_app_count.is_some();
+        }
         capabilities.window_tracker_state = status
             .field("window_tracker_state")
             .filter(|value| {
@@ -836,7 +846,7 @@ mod tests {
     #[test]
     fn daemon_capability_parser_preserves_unknowns_and_separates_io_guarantees() {
         let capabilities = super::DaemonCapabilities::parse(
-            "status_schema=32\nsource=evdev\ncapture_sensitive_focus=false\ncapture_exclusive=true\ncapture_composition_aware=false\ncapture_local_compose_aware=true\nwindow_tracker_connected=true\nwindow_tracker_state=reconnecting\nwindow_tracker_reconnect_attempts_total=3\nwindow_tracker_disconnects_total=2\nwindow_tracker_last_failure_reason=tracker_disconnected\nwindow_tracker_last_connected_unix=1794268800\nwindow_tracker_reconnect_backoff_ms=1000\ninject_atomic_replace=false\ninject_full_unicode=true\ninject_insertion_mode=libei keysym fallback\ninject_max_text_chars=250\ninject_expected_throughput_chars_per_sec=83\n",
+            "status_schema=32\nsource=evdev\nraw_capture_fallback_enabled=true\nraw_capture_app_count=14\ncapture_sensitive_focus=false\ncapture_exclusive=true\ncapture_composition_aware=false\ncapture_local_compose_aware=true\nwindow_tracker_connected=true\nwindow_tracker_state=reconnecting\nwindow_tracker_reconnect_attempts_total=3\nwindow_tracker_disconnects_total=2\nwindow_tracker_last_failure_reason=tracker_disconnected\nwindow_tracker_last_connected_unix=1794268800\nwindow_tracker_reconnect_backoff_ms=1000\ninject_atomic_replace=false\ninject_full_unicode=true\ninject_insertion_mode=libei keysym fallback\ninject_max_text_chars=250\ninject_expected_throughput_chars_per_sec=83\n",
         )
         .unwrap();
         assert_eq!(capabilities.injection_mode, Some("libei keysym fallback"));
@@ -844,6 +854,8 @@ mod tests {
         assert_eq!(capabilities.injection_throughput_chars_per_sec, Some(83));
         assert_eq!(capabilities.capture_sensitive_focus, Some(false));
         assert_eq!(capabilities.capture_source.as_deref(), Some("evdev"));
+        assert_eq!(capabilities.raw_capture_fallback_enabled, Some(true));
+        assert_eq!(capabilities.raw_capture_app_count, Some(14));
         assert_eq!(capabilities.capture_exclusive, Some(true));
         assert_eq!(capabilities.capture_composition_aware, Some(false));
         assert_eq!(capabilities.capture_local_compose_aware, Some(true));

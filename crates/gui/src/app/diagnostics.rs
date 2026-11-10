@@ -697,6 +697,22 @@ impl GuiApp {
                     ui.colored_label(palette.danger, self.strings.sensitive_field_warning());
                     if capabilities.capture_source.as_deref() == Some("evdev") {
                         ui.colored_label(palette.danger, self.strings.evdev_privacy_limitation());
+                        if capabilities.raw_capture_fallback_enabled == Some(true) {
+                            if let Some(count) = capabilities
+                                .raw_capture_app_count
+                                .filter(|count| *count > 0)
+                            {
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(
+                                            self.strings.raw_capture_app_scope_notice(count),
+                                        )
+                                        .color(palette.warning),
+                                    )
+                                    .wrap(),
+                                );
+                            }
+                        }
                     }
                 });
             }

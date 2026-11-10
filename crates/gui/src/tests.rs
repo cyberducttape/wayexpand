@@ -2111,6 +2111,8 @@ fn every_panel_and_dialog_renders_for_supported_languages_and_settings_tabs() {
     app.daemon_reachable = Some(true);
     app.daemon_capabilities = Some(runtime::DaemonCapabilities {
         capture_source: Some("evdev".into()),
+        raw_capture_fallback_enabled: Some(true),
+        raw_capture_app_count: Some(14),
         injection_mode: Some("ei_text"),
         injection_max_text_chars: None,
         injection_throughput_chars_per_sec: None,

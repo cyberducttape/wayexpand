@@ -284,6 +284,20 @@ impl Strings {
         }
     }
 
+    pub fn raw_capture_app_scope_notice(&self, count: usize) -> String {
+        match self.lang {
+            Language::English => format!(
+                "Raw-input matching is assigned to {count} configured applications. This limits where WayExpand matches, not where evdev observes keys; password fields cannot be detected, and browser-field insertion is not verified."
+            ),
+            Language::Indonesian => format!(
+                "Pencocokan input mentah ditetapkan untuk {count} aplikasi. Ini membatasi lokasi WayExpand mencocokkan teks, bukan lokasi evdev mengamati tombol; kolom kata sandi tidak dapat dideteksi dan penyisipan di kolom browser belum diverifikasi."
+            ),
+            Language::German => format!(
+                "Die Raw-Input-Suche ist {count} konfigurierten Anwendungen zugewiesen. Das begrenzt, wo WayExpand vergleicht, nicht wo evdev Tasten beobachtet; Passwortfelder werden nicht erkannt und das Einfügen in Browserfelder ist nicht verifiziert."
+            ),
+        }
+    }
+
     pub fn next_step_terminal_only_route(&self) -> &'static str {
         match self.lang {
             Language::English => "For browser or editor fields, open Quick Picker and copy/paste, or configure an input-method route that supports that application. This route will not capture those fields.",
@@ -1301,6 +1315,23 @@ impl Strings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn raw_capture_scope_notice_explains_app_matching_and_global_observation() {
+        let english = Strings::new(Language::English).raw_capture_app_scope_notice(14);
+        assert!(english.contains("14 configured applications"));
+        assert!(english.contains("not where evdev observes keys"));
+        assert!(english.contains("password fields cannot be detected"));
+        assert!(english.contains("browser-field insertion is not verified"));
+        assert!(!english.contains("firefox"));
+
+        assert!(Strings::new(Language::Indonesian)
+            .raw_capture_app_scope_notice(2)
+            .contains("2 aplikasi"));
+        assert!(Strings::new(Language::German)
+            .raw_capture_app_scope_notice(3)
+            .contains("3 konfigurierten Anwendungen"));
+    }
 
     #[test]
     fn focus_tracker_lifecycle_detail_humanizes_stable_codes() {
