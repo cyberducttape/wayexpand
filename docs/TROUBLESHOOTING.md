@@ -28,6 +28,14 @@ application IDs, triggers, replacement text, or clipboard contents. An
 `unknown` scope means the compositor focus tracker did not provide an app ID,
 so matching remains disabled for that focus until identity is available.
 
+When scope is `outside_allowlist`, focus the affected terminal and run
+`wayexpand debug --focused-app-id`. This explicit diagnostic prints only the
+bounded application ID (never the window title or typed text), which you can
+compare with `settings.terminal_apps` and `settings.raw_capture_apps`. It
+reports `unavailable` if the tracker has no safe application ID or policy
+withholds focus identity. If the running daemon reports an unsupported
+command, update and restart it before retrying.
+
 Live output reports route-state changes, aggregate input-event counts, IBus
 activity counters, and output transaction IDs/states. It never records key
 values, triggers, replacement text, or clipboard contents. JSON live output is
