@@ -23,6 +23,7 @@ use std::{
     time::{Duration, Instant},
 };
 use thiserror::Error;
+use tracing::{debug, info};
 use wayexpand_core::{
     window_update_channel, WindowContext, WindowTracker, WindowTrackerError, WindowUpdateReceiver,
     WindowUpdateSender,
@@ -34,6 +35,10 @@ const SCRIPT_TEMPLATE: &str = include_str!("window-tracker.js");
 const LOAD_RETRY_ATTEMPTS: u32 = 15;
 const LOAD_RETRY_DELAY: Duration = Duration::from_millis(150);
 const TRACKER_SETUP_TIMEOUT: Duration = Duration::from_secs(12);
+/// Give KWin a short opportunity to publish its initial focus state. Missing
+/// this snapshot must not tear down the script: it remains subscribed and can
+/// report the next focus change while app-scoped matching stays fail-closed.
+const INITIAL_SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(4);
 const DBUS_CONNECTION_TIMEOUT: Duration = Duration::from_secs(3);
 const TRACKER_HEALTH_CHECK_INTERVAL: Duration = Duration::from_millis(500);
 /// How long health checks may keep failing to get an answer before the
@@ -61,6 +66,12 @@ pub enum KwinWindowError {
     ScriptWrite(#[source] std::io::Error),
     #[error("KWin did not finish registering the loaded script in time")]
     ScriptNotReady,
+    #[error(
+        "KWin loaded the tracker script but did not publish an initial focus snapshot in time"
+    )]
+    InitialSnapshotTimedOut,
+    #[error("KWin failed before publishing its initial focus snapshot: {0}")]
+    InitialSnapshotFailed(String),
     #[error("KWin tracker setup exceeded its time limit")]
     SetupTimedOut,
     #[error("session D-Bus connection setup exceeded its time limit")]
@@ -71,6 +82,8 @@ pub enum KwinWindowError {
     NotAvailable,
     #[error("could not generate a unique KWin tracker ID: {0}")]
     TrackerId(String),
+    #[error("XDG_RUNTIME_DIR is missing or is not a private directory owned by this user")]
+    InvalidRuntimeDirectory,
 }
 
 struct WindowTrackerService {
@@ -109,13 +122,28 @@ impl WindowTrackerService {
         instance_id: String,
         #[zbus(header)] header: zbus::message::Header<'_>,
     ) {
-        if !is_kwin_sender(
+        let sender_is_kwin = is_kwin_sender(
             header.sender().map(|sender| sender.as_str()),
             &self.kwin_owner,
-        ) {
+        );
+        if !sender_is_kwin {
+            debug!("ignored a window-tracker callback from a non-KWin D-Bus owner");
             return;
         }
         let context = window_context_from_signal(app_id, title, instance_id);
+        info!(
+            has_context = context.is_some(),
+            has_app_id = context
+                .as_ref()
+                .is_some_and(|window| window.app_id.is_some()),
+            has_title = context
+                .as_ref()
+                .is_some_and(|window| window.title.is_some()),
+            has_instance_id = context
+                .as_ref()
+                .is_some_and(|window| window.instance_id.is_some()),
+            "accepted a KWin focus update"
+        );
         // The receiver may already be gone if the tracker was dropped
         // between the script firing and this call landing; that is not an
         // error, there is simply nothing left to notify. A poisoned mutex
@@ -143,6 +171,7 @@ pub struct KwinWindowTracker {
     service_name: String,
     plugin_name: String,
     script_path: std::path::PathBuf,
+    initial_snapshot: Option<WindowContext>,
     next_health_check: Instant,
     /// When KWin last answered a health check.
     last_healthy: Instant,
@@ -199,6 +228,12 @@ impl KwinWindowTracker {
         if cancelled.is_some_and(|flag| flag.load(Ordering::Acquire)) {
             return Err(KwinWindowError::ScriptNotReady);
         }
+        // KWin itself must be able to read this script. On systems that
+        // enforce PrivateTmp=yes, a file under std::env::temp_dir() is
+        // invisible to the compositor even though loadScript() can create a
+        // script object for the path. XDG_RUNTIME_DIR is shared with the
+        // compositor and remains private to this user.
+        let script_directory = tracker_script_directory()?;
         let pid = process::id();
         // Reconnects may overlap cleanup of a failed tracker. Give each
         // attempt distinct D-Bus and KWin script identities so a delayed
@@ -246,14 +281,14 @@ impl KwinWindowTracker {
 
         let plugin_name = format!("wayexpand-window-tracker-{pid}-{tracker_id:x}");
         // The path is otherwise predictable (PID plus a fixed prefix, under
-        // world-writable /tmp), so a local attacker who guesses this
+        // the user runtime directory), so another local process that guesses this
         // process's upcoming PID could pre-place a symlink here pointing at
         // a file this user owns elsewhere; `fs::write` follows symlinks and
         // would overwrite that target. A cryptographically random suffix makes
         // the exact path unguessable, and `create_new` (O_CREAT|O_EXCL) refuses
         // to open through anything already there -- symlink or not -- as defense
         // in depth against symlink attacks.
-        let script_path = std::env::temp_dir().join(format!("{plugin_name}-{tracker_id:x}.js"));
+        let script_path = script_directory.join(format!("{plugin_name}-{tracker_id:x}.js"));
         let script_contents = SCRIPT_TEMPLATE.replace("__WAYEXPAND_BUS_NAME__", &bus_name);
         let mut file = fs::OpenOptions::new()
             .write(true)
@@ -290,7 +325,7 @@ impl KwinWindowTracker {
         }
 
         cleanup_orphan_tracker_scripts(
-            &std::env::temp_dir(),
+            &script_directory,
             |old_pid| Path::new("/proc").join(old_pid.to_string()).exists(),
             |old_plugin| {
                 connection
@@ -318,16 +353,26 @@ impl KwinWindowTracker {
             },
         );
 
-        Ok(Self {
+        let mut tracker = Self {
             connection,
             receiver,
             #[cfg(test)]
             service_name: bus_name,
             plugin_name,
             script_path,
+            initial_snapshot: None,
             next_health_check: Instant::now() + TRACKER_HEALTH_CHECK_INTERVAL,
             last_healthy: Instant::now(),
-        })
+        };
+        // `loadScript()` and `run()` only prove that KWin accepted the script.
+        // Preserve a usable initial context when available, but keep the
+        // subscription alive if KWin has no snapshot yet: unloading it on a
+        // timeout can miss the next focus transition and create repeated
+        // gaps. The daemon still fails closed while focus is unknown.
+        tracker.initial_snapshot = wait_for_initial_window(INITIAL_SNAPSHOT_TIMEOUT, |timeout| {
+            tracker.next_window_timeout(timeout)
+        })?;
+        Ok(tracker)
     }
 
     /// `loadScript` returns before the resulting `/Scripting/ScriptN`
@@ -386,6 +431,29 @@ impl KwinWindowTracker {
         }
         Err(KwinWindowError::ScriptNotReady)
     }
+}
+
+fn tracker_script_directory() -> Result<std::path::PathBuf, KwinWindowError> {
+    let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(std::path::PathBuf::from)
+        .ok_or(KwinWindowError::InvalidRuntimeDirectory)?;
+    validate_tracker_script_directory(&runtime_dir)?;
+    Ok(runtime_dir)
+}
+
+fn validate_tracker_script_directory(path: &Path) -> Result<(), KwinWindowError> {
+    let metadata =
+        fs::symlink_metadata(path).map_err(|_| KwinWindowError::InvalidRuntimeDirectory)?;
+    if !path.is_absolute()
+        || metadata.file_type().is_symlink()
+        || !metadata.is_dir()
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.mode() & 0o077 != 0
+        || metadata.mode() & 0o700 != 0o700
+    {
+        return Err(KwinWindowError::InvalidRuntimeDirectory);
+    }
+    Ok(())
 }
 
 /// Remove temporary files left by WayExpand tracker processes that exited
@@ -526,6 +594,31 @@ fn health_outcome(
     }
 }
 
+/// Wait for a usable focused-window context. KWin may first report an empty
+/// focus transition while its startup state is settling; accepting that as
+/// readiness leaves app-scoped matching unavailable even though the tracker
+/// claims to be connected. Keep waiting within the same bounded startup
+/// deadline until a real window context arrives.
+fn wait_for_initial_window(
+    timeout: Duration,
+    mut next: impl FnMut(Duration) -> Result<Option<Option<WindowContext>>, WindowTrackerError>,
+) -> Result<Option<WindowContext>, KwinWindowError> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Ok(None);
+        }
+        match next(remaining)
+            .map_err(|error| KwinWindowError::InitialSnapshotFailed(error.to_string()))?
+        {
+            Some(Some(window)) => return Ok(Some(window)),
+            Some(None) => continue,
+            None => return Ok(None),
+        }
+    }
+}
+
 /// Build the session-bus connection without allowing authentication or socket
 /// setup to strand the tracker supervisor/UI worker indefinitely. `race`
 /// drops the unfinished connection future when the deadline wins.
@@ -569,6 +662,9 @@ impl WindowTracker for KwinWindowTracker {
         &mut self,
         timeout: Duration,
     ) -> Result<Option<Option<WindowContext>>, WindowTrackerError> {
+        if let Some(initial_snapshot) = self.initial_snapshot.take() {
+            return Ok(Some(Some(initial_snapshot)));
+        }
         let deadline = Instant::now() + timeout;
         loop {
             let now = Instant::now();
@@ -644,8 +740,9 @@ impl WindowTracker for KwinWindowTracker {
 mod tests {
     use super::{
         bounded_session_connection, cleanup_orphan_tracker_scripts, is_kwin_sender,
-        parse_tracker_script_filename, window_context_from_signal, KwinWindowError,
-        KwinWindowTracker, ORPHAN_CHECK_LIMIT, SCRIPT_TEMPLATE, TRACKER_HEALTH_CHECK_INTERVAL,
+        parse_tracker_script_filename, validate_tracker_script_directory, wait_for_initial_window,
+        window_context_from_signal, KwinWindowError, KwinWindowTracker, ORPHAN_CHECK_LIMIT,
+        SCRIPT_TEMPLATE, TRACKER_HEALTH_CHECK_INTERVAL,
     };
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
     use std::{
@@ -656,7 +753,31 @@ mod tests {
         process, thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     };
-    use wayexpand_core::WindowTracker;
+    use wayexpand_core::{WindowContext, WindowTracker};
+
+    #[test]
+    fn initial_empty_focus_report_does_not_mark_tracker_ready() {
+        let expected = WindowContext {
+            app_id: Some("org.kde.konsole".into()),
+            title: Some("Terminal".into()),
+            instance_id: Some("window-1".into()),
+        };
+        let mut reports = [Some(None), Some(Some(expected.clone()))].into_iter();
+
+        let actual = wait_for_initial_window(Duration::from_secs(1), |_| {
+            Ok(reports.next().expect("the initial focus report sequence"))
+        })
+        .unwrap();
+
+        assert_eq!(actual, Some(expected));
+    }
+
+    #[test]
+    fn missing_initial_focus_does_not_fail_the_tracker_connection() {
+        let result = wait_for_initial_window(Duration::from_secs(1), |_| Ok(Some(None)));
+
+        assert_eq!(result.unwrap(), None);
+    }
 
     #[test]
     fn unanswered_health_checks_are_tolerated_for_the_grace_period() {
@@ -724,6 +845,43 @@ mod tests {
         assert!(is_kwin_sender(Some(kwin_owner), kwin_owner));
         assert!(!is_kwin_sender(Some(":1.43"), kwin_owner));
         assert!(!is_kwin_sender(None, kwin_owner));
+    }
+
+    #[test]
+    fn tracker_script_directory_must_be_private_and_user_owned() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-kwin-runtime-dir-{}-{suffix}",
+            process::id()
+        ));
+        fs::create_dir(&directory).unwrap();
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(validate_tracker_script_directory(&directory).is_ok());
+
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(matches!(
+            validate_tracker_script_directory(&directory),
+            Err(KwinWindowError::InvalidRuntimeDirectory)
+        ));
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+
+        let file = directory.join("not-a-directory");
+        fs::write(&file, "x").unwrap();
+        assert!(matches!(
+            validate_tracker_script_directory(&file),
+            Err(KwinWindowError::InvalidRuntimeDirectory)
+        ));
+
+        let symlink = directory.join("directory-link");
+        std::os::unix::fs::symlink(&directory, &symlink).unwrap();
+        assert!(matches!(
+            validate_tracker_script_directory(&symlink),
+            Err(KwinWindowError::InvalidRuntimeDirectory)
+        ));
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

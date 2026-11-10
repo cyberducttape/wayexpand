@@ -4,6 +4,13 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Keep the KWin focus subscription alive when startup has no usable focus
+  snapshot; retain fail-closed app matching while waiting for the next
+  compositor focus event instead of repeatedly unloading and reconnecting.
+- Place KWin focus-tracker scripts in the validated user runtime directory so
+  the compositor can read them when systemd isolates a daemon's `/tmp`.
+- Report sanitized evdev key and unavailable-layout activity in live debugging,
+  including counters encoded as decimal strings.
 - Recover the initial KWin focus snapshot from the uniquely active window in
   the compositor's stacking list when `workspace.activeWindow` is temporarily
   null; keep app-scoped matching unavailable if active-window state is
@@ -18,6 +25,9 @@ All notable changes to WayExpand are documented here.
   sanitized focused application ID when terminal-only capture reports an
   allowlist mismatch; never include titles or typed content, and withhold the
   ID when control-socket privacy restrictions are active.
+- Include the daemon's app-scope decision in `wayexpand debug
+  --focused-app-id`, so terminal-only users can see directly when focus is
+  outside the configured allowlist.
 - Include Konsole's `konsole` WM_CLASS alongside its desktop-file ID in the
   terminal evdev allowlist, so KWin identity variants retain terminal
   matching without widening capture to other applications.

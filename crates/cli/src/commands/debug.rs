@@ -9,6 +9,17 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+fn focused_app_scope_from_status(status_response: Option<&str>) -> (Option<String>, Option<bool>) {
+    let Some(status_response) = status_response else {
+        return (None, None);
+    };
+    let status = wayexpand_core::DaemonStatus::parse(status_response);
+    (
+        status.field("capture_app_scope_state").map(str::to_owned),
+        status.bool_field("terminal_apps_only"),
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DesktopTestResult {
     Verified,
@@ -128,15 +139,36 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
             .lines()
             .find_map(|line| line.strip_prefix("focused_app_id="))
             .ok_or_else(|| anyhow::anyhow!("daemon returned an invalid focused app ID response"))?;
+        // Read the scope decision beside the identity. This turns the command
+        // into a useful diagnosis for terminal-scoped evdev routes instead of
+        // making users compare the ID against configuration by hand. Older
+        // daemons may not publish these fields, so keep them optional.
+        let status_response =
+            crate::control_operation(wayexpand_core::DaemonOperation::Status).ok();
+        let (scope_state, terminal_apps_only) =
+            focused_app_scope_from_status(status_response.as_deref());
         if json {
             println!(
                 "{}",
-                serde_json::json!({"focused_app_id": if app_id == "unavailable" { None } else { Some(app_id) }})
+                serde_json::json!({
+                    "focused_app_id": if app_id == "unavailable" { None } else { Some(app_id) },
+                    "capture_app_scope_state": scope_state,
+                    "terminal_apps_only": terminal_apps_only,
+                })
             );
         } else if app_id == "unavailable" {
             println!("Focused application ID: unavailable");
+            if let Some(scope_state) = scope_state {
+                println!("Capture app scope: {scope_state}");
+            }
         } else {
             println!("Focused application ID: {app_id}");
+            if let Some(scope_state) = scope_state {
+                println!("Capture app scope: {scope_state}");
+                if terminal_apps_only == Some(true) && scope_state == "outside_allowlist" {
+                    println!("Expansion matching is suppressed for this focused application.");
+                }
+            }
         }
         return Ok(());
     }
@@ -524,6 +556,32 @@ mod desktop_test_option_tests {
     }
 }
 
+#[cfg(test)]
+mod focused_app_scope_tests {
+    use super::focused_app_scope_from_status;
+
+    #[test]
+    fn reports_terminal_scope_and_fail_closed_allowlist_mismatch() {
+        assert_eq!(
+            focused_app_scope_from_status(Some(
+                "running\nterminal_apps_only=true\ncapture_app_scope_state=outside_allowlist\n",
+            )),
+            (Some("outside_allowlist".into()), Some(true))
+        );
+    }
+
+    #[test]
+    fn old_or_ambiguous_status_keeps_scope_unavailable() {
+        assert_eq!(focused_app_scope_from_status(None), (None, None));
+        assert_eq!(
+            focused_app_scope_from_status(Some(
+                "running\nterminal_apps_only=true\ncapture_app_scope_state=allowed\ncapture_app_scope_state=outside_allowlist\n",
+            )),
+            (None, Some(true))
+        );
+    }
+}
+
 fn now_seconds() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -579,7 +637,11 @@ fn emit(json: bool, started: Instant, event: &str, detail: &str) {
 fn status_counter(status: Option<&serde_json::Value>, key: &str) -> u64 {
     status
         .and_then(|snapshot| snapshot.get(key))
-        .and_then(serde_json::Value::as_u64)
+        .and_then(|value| {
+            value
+                .as_u64()
+                .or_else(|| value.as_str().and_then(|value| value.parse().ok()))
+        })
         .unwrap_or(0)
 }
 
@@ -630,6 +692,12 @@ fn run_live(seconds: u64, json: bool) -> Result<()> {
     let mut last_applied = status_counter(initial_daemon.as_ref(), "expansions_applied_total");
     let mut last_refused = status_counter(initial_daemon.as_ref(), "output_refused_total");
     let mut last_partial = status_counter(initial_daemon.as_ref(), "partial_write_total");
+    let mut last_evdev_raw_keys =
+        status_counter(initial_daemon.as_ref(), "evdev_raw_key_events_total");
+    let mut last_evdev_layout_unavailable = status_counter(
+        initial_daemon.as_ref(),
+        "evdev_layout_unavailable_key_events_total",
+    );
     emit(
         json,
         started,
@@ -679,6 +747,43 @@ fn run_live(seconds: u64, json: bool) -> Result<()> {
             );
             last_input_events = input_events;
         }
+        let evdev_raw_keys = status_counter(daemon.as_ref(), "evdev_raw_key_events_total");
+        if evdev_raw_keys < last_evdev_raw_keys {
+            emit(
+                json,
+                started,
+                "evdev_capture",
+                "raw key counter reset; new daemon input session observed",
+            );
+            last_evdev_raw_keys = 0;
+            last_evdev_layout_unavailable = 0;
+        }
+        if evdev_raw_keys > last_evdev_raw_keys {
+            emit(
+                json,
+                started,
+                "evdev_capture",
+                &format!(
+                    "{} raw evdev key event(s) observed; key values omitted",
+                    evdev_raw_keys - last_evdev_raw_keys
+                ),
+            );
+            last_evdev_raw_keys = evdev_raw_keys;
+        }
+        let layout_unavailable =
+            status_counter(daemon.as_ref(), "evdev_layout_unavailable_key_events_total");
+        if layout_unavailable > last_evdev_layout_unavailable {
+            emit(
+                json,
+                started,
+                "capture_layout",
+                &format!(
+                    "{} raw key event(s) were ignored because the active keyboard layout was unavailable",
+                    layout_unavailable - last_evdev_layout_unavailable
+                ),
+            );
+        }
+        last_evdev_layout_unavailable = layout_unavailable;
         if keys < last_keys {
             emit(
                 json,
@@ -815,5 +920,26 @@ mod tests {
         assert!(first.starts_with("desktop-"));
         assert_ne!(first, second);
         assert!(!first.contains("trigger"));
+    }
+}
+
+#[cfg(test)]
+mod status_counter_tests {
+    use super::status_counter;
+    use serde_json::json;
+
+    #[test]
+    fn reads_numeric_and_decimal_string_status_counters() {
+        let status = json!({"numeric": 12, "string": "34"});
+        assert_eq!(status_counter(Some(&status), "numeric"), 12);
+        assert_eq!(status_counter(Some(&status), "string"), 34);
+    }
+
+    #[test]
+    fn invalid_or_signed_status_counters_fail_closed_to_zero() {
+        let status = json!({"negative": "-1", "invalid": "not-a-counter"});
+        assert_eq!(status_counter(Some(&status), "negative"), 0);
+        assert_eq!(status_counter(Some(&status), "invalid"), 0);
+        assert_eq!(status_counter(None, "missing"), 0);
     }
 }
