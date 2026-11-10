@@ -130,6 +130,18 @@ pub(crate) fn drain_pending_window_events(
         focus_state.generation = focus_state.generation.wrapping_add(1);
         publish_focus_snapshot(control, focus_state);
     }
+    let focus_known = window_tracker
+        .as_ref()
+        .is_some_and(backend_lifecycle::WindowTrackerHandle::is_connected)
+        && engine
+            .current_window()
+            .and_then(|window| window.app_id.as_deref())
+            .is_some();
+    crate::status::set_capture_app_scope_state(
+        engine.terminal_apps_only(),
+        focus_known,
+        !engine.terminal_apps_only() || engine.focused_app_is_terminal(),
+    );
     Ok(())
 }
 

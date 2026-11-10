@@ -4,7 +4,7 @@ use super::Args;
 use crate::errors::{classified_error, CliErrorKind};
 use crate::*;
 
-pub(crate) const HEALTH_SCHEMA: u32 = 3;
+pub(crate) const HEALTH_SCHEMA: u32 = 4;
 
 fn classify_health(
     config_valid: bool,
@@ -87,11 +87,15 @@ fn application_coverage(snapshot: Option<&serde_json::Value>) -> serde_json::Val
         .and_then(|status| status.get("terminal_apps_only"))
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
+    let capture_app_scope_state = snapshot
+        .and_then(|status| status.get("capture_app_scope_state"))
+        .and_then(serde_json::Value::as_str);
     if app_scope_only {
         serde_json::json!({
             "scope":"daemon_route_configured_applications_only",
             "raw_capture_fallback_enabled":raw_capture_fallback_enabled,
             "raw_capture_app_count":raw_capture_app_count,
+            "focused_app_scope_state":capture_app_scope_state,
             "terminal_only":null,
             "configured_app_scope_only":true,
             "desktop_wide":null,
@@ -107,6 +111,7 @@ fn application_coverage(snapshot: Option<&serde_json::Value>) -> serde_json::Val
             "scope":"active_route",
             "raw_capture_fallback_enabled":raw_capture_fallback_enabled,
             "raw_capture_app_count":raw_capture_app_count,
+            "focused_app_scope_state":capture_app_scope_state,
             "terminal_only":false,
             "configured_app_scope_only":false,
             "desktop_wide":null,
@@ -324,6 +329,7 @@ fn health_report(
             "terminal_apps_only": snapshot.get("terminal_apps_only"),
             "raw_capture_fallback_enabled": snapshot.get("raw_capture_fallback_enabled"),
             "raw_capture_app_count": snapshot.get("raw_capture_app_count"),
+            "capture_app_scope_state": snapshot.get("capture_app_scope_state"),
             "enabled_expansions": snapshot.get("config_enabled_expansions"),
             "disabled_expansions": snapshot.get("config_disabled_expansions"),
             "generate_only_expansions": snapshot.get("config_generate_only_expansions"),
@@ -500,7 +506,8 @@ mod tests {
             "source":"evdev",
             "terminal_apps_only":true,
             "raw_capture_fallback_enabled":true,
-            "raw_capture_app_count":14
+            "raw_capture_app_count":14,
+            "capture_app_scope_state":"allowed"
         });
         let coverage = application_coverage(Some(&snapshot));
         assert_eq!(
@@ -510,6 +517,7 @@ mod tests {
         assert!(coverage["desktop_wide"].is_null());
         assert_eq!(coverage["raw_capture_fallback_enabled"], true);
         assert_eq!(coverage["raw_capture_app_count"], 14);
+        assert_eq!(coverage["focused_app_scope_state"], "allowed");
         assert!(coverage["browser_fields_covered"].is_null());
         assert!(coverage["terminal_only"].is_null());
         assert_eq!(coverage["daemon_route"]["desktop_wide"], false);
@@ -523,6 +531,7 @@ mod tests {
         assert_eq!(coverage["scope"], "active_route");
         assert!(coverage["raw_capture_fallback_enabled"].is_null());
         assert!(coverage["raw_capture_app_count"].is_null());
+        assert!(coverage["focused_app_scope_state"].is_null());
         assert!(coverage["desktop_wide"].is_null());
         assert!(coverage["browser_fields_covered"].is_null());
     }

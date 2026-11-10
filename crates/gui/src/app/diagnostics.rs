@@ -712,6 +712,18 @@ impl GuiApp {
                                     .wrap(),
                                 );
                             }
+                            if let Some(scope_state) =
+                                capabilities.capture_app_scope_state.as_deref()
+                            {
+                                ui.colored_label(
+                                    if scope_state == "allowed" {
+                                        palette.success
+                                    } else {
+                                        palette.warning
+                                    },
+                                    self.strings.capture_app_scope_state(scope_state),
+                                );
+                            }
                         }
                     }
                 });

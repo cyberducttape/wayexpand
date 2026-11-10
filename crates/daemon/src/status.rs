@@ -170,7 +170,46 @@ static TERMINAL_APPS_ONLY: std::sync::atomic::AtomicBool =
 const RAW_CAPTURE_ENABLED_BIT: usize = 1usize << (usize::BITS - 1);
 const RAW_CAPTURE_COUNT_MASK: usize = !RAW_CAPTURE_ENABLED_BIT;
 static RAW_CAPTURE_SCOPE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static CAPTURE_APP_SCOPE_STATE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 static INPUT_EVENTS_TOTAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn capture_app_scope_state(restricted: bool, focus_known: bool, allowed: bool) -> &'static str {
+    if !restricted {
+        "unrestricted"
+    } else if !focus_known {
+        "unknown"
+    } else if allowed {
+        "allowed"
+    } else {
+        "outside_allowlist"
+    }
+}
+
+fn capture_app_scope_state_code(state: &str) -> u8 {
+    match state {
+        "unrestricted" => 1,
+        "allowed" => 2,
+        "outside_allowlist" => 3,
+        _ => 0,
+    }
+}
+
+fn capture_app_scope_state_name(code: u8) -> &'static str {
+    match code {
+        1 => "unrestricted",
+        2 => "allowed",
+        3 => "outside_allowlist",
+        _ => "unknown",
+    }
+}
+
+pub(crate) fn set_capture_app_scope_state(restricted: bool, focus_known: bool, allowed: bool) {
+    let state = capture_app_scope_state(restricted, focus_known, allowed);
+    CAPTURE_APP_SCOPE_STATE.store(
+        capture_app_scope_state_code(state),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
 
 pub(crate) fn record_input_event() {
     INPUT_EVENTS_TOTAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -182,6 +221,7 @@ pub(crate) fn input_events_total() -> u64 {
 
 pub(crate) fn set_terminal_apps_only(enabled: bool) {
     TERMINAL_APPS_ONLY.store(enabled, std::sync::atomic::Ordering::Relaxed);
+    set_capture_app_scope_state(enabled, false, false);
 }
 
 pub(crate) fn set_raw_capture_fallback(enabled: bool, app_count: usize) {
@@ -245,6 +285,9 @@ pub fn daemon_status_body_with_runtime_capabilities_and_config_state(
     let raw_capture_scope = RAW_CAPTURE_SCOPE.load(std::sync::atomic::Ordering::Relaxed);
     let raw_capture_fallback_enabled = raw_capture_scope & RAW_CAPTURE_ENABLED_BIT != 0;
     let raw_capture_app_count = raw_capture_scope & RAW_CAPTURE_COUNT_MASK;
+    let capture_app_scope_state = capture_app_scope_state_name(
+        CAPTURE_APP_SCOPE_STATE.load(std::sync::atomic::Ordering::Relaxed),
+    );
     let config_diagnostics = crate::reload::diagnostics_snapshot();
     let diagnostic_totals = crate::failure_trace::totals();
     let queue_latency = crate::latency::queue_snapshot();
@@ -279,7 +322,7 @@ pub fn daemon_status_body_with_runtime_capabilities_and_config_state(
     );
     let matching_available = matching_unavailable_reason == "none";
     StatusBody(format!(
-        "source={source}\nbackend={backend}\nroute_id={route_id}\nbackend_mode={backend_mode}\nstatus_schema={CONTROL_STATUS_SCHEMA}\ndaemon_commit={}\ndaemon_version={}\nstate={state}\nroute_available={route_available}\nmatching_available={matching_available}\nmatching_unavailable_reason={matching_unavailable_reason}\npaused={}\nconfig={}\nconfig_active_path={}\nconfig_state={}\nconfig_generation={}\nconfig_loaded_at_unix={}\nconfig_last_successful_reload_unix={}\nconfig_enabled_expansions={}\nconfig_disabled_expansions={}\nconfig_generate_only_expansions={}\nconfig_last_reload_failure={}\nconfig_validation_error_count={}\nconfig_validation_errors={}\ncapture_sensitive_focus={}\ncapture_exclusive={}\ncapture_reliable_key_state={}\ncapture_key_passthrough={}\ncapture_composition_aware={}\ncapture_local_compose_aware={}\ncapture_layout_aware={}\ncapture_layout_state={capture_layout_state}\nwindow_tracker_connected={}\nwindow_tracker_state={}\nwindow_tracker_reconnect_attempts_total={}\nwindow_tracker_disconnects_total={}\nwindow_tracker_last_failure_reason={}\nwindow_tracker_last_connected_unix={}\nwindow_tracker_reconnect_backoff_ms={}\nwindow_identity_exact={}\ninject_atomic_replace={}\ninject_full_unicode={}\ninject_cursor_reposition={}\ninject_key_passthrough={}\ninject_insertion_mode={}\ninject_max_text_chars={}\ninject_expected_throughput_chars_per_sec={}\ncommand_worker_threads={}\nhotkey_worker_threads={}\ncommand_queue_depth={}\ncommand_in_flight={}\nexpansion_command_queue_depth={}\nexpansion_command_in_flight={}\nhotkey_queue_depth={}\nhotkey_in_flight={}\ncommand_queue_rejected_total={}\ncommand_timeout_total={}\ncommand_failure_total={}\ninjection_latency_sample_count={}\ninjection_latency_window_count={}\ninjection_latency_mean_us={}\ninjection_latency_p50_us={}\ninjection_latency_p95_us={}\ninjection_latency_p99_us={}\ninjection_latency_dropped_total={}\ninjection_latency_profile_dropped_total={}\ninjection_latency_profiles={}\nmatcher_latency_sample_count={}\nmatcher_latency_window_count={}\nmatcher_latency_dropped_total={}\nmatcher_latency_p50_us={}\nmatcher_latency_p95_us={}\nmatcher_latency_p99_us={}\nusage_flush_max_duration_us={}\nusage_flush_failures_total={}\nusage_worker_failures_total={}\nusage_queue_rejected_total={}\nusage_events_recorded_total={}\nusage_events_persisted_total={}\nusage_events_dropped_total={}\nclipboard_worker_threads={}\nclipboard_reads_in_flight={}\nclipboard_reads_total={}\nclipboard_read_failures_total={}\nclipboard_deadline_misses_total={}\nclipboard_read_max_duration_us={}\noutput_health={}\noutput_uncertain_total={}\noutput_partial_total={}\npartial_write_total={}\noutput_retiring_workers={}\noutput_stalled_ms={}\nbackend_shutdown_workers_active={}\nbackend_shutdown_workers_started_total={}\nbackend_shutdown_workers_acknowledged_total={}\nbackend_shutdown_workers_timed_out_total={}\nbackend_shutdown_workers_failed_total={}\ninsertion_assurance={}\nreplacement_assurance={}\ncompatibility_mode={}\nfocus_assurance={}\noutput_refused_total={}\noutput_last_refusal={}\noutput_unsupported_total={}\noutput_last_unsupported={}\nrecent_expansion_failures={}\nrecent_expansion_outcomes={}\nsuppressed_expansions_total={}\noutput_reconnect_total={}\ninput_reconnect_total={}\ninput_connection_failures_total={}\noutput_connection_failures_total={}\ninput_overflow_total={}\nevdev_quarantined_events_total={}\ncontrol_rejected_total={}\nmemory_rss_kib={}\nmemory_high_water_kib={}\ncommand_containment={}\ncommand_containment_mode={}\ncommand_containment_self_test={}\ncommand_cleanup_pending_jobs={}\ncommand_cleanup_failed_attempts={}\ncommand_cleanup_degraded={}\nconnect_workers_active={}\nconnect_workers_started_total={}\nconnect_workers_completed_total={}\nconnect_workers_cancelled_total={}\nconnect_workers_rejected_total={}\nsandbox_security={sandbox_security}\nterminal_apps_only={terminal_apps_only}\nraw_capture_fallback_enabled={raw_capture_fallback_enabled}\nraw_capture_app_count={raw_capture_app_count}\ninput_events_total={}\nmatcher_evaluations_total={}\nmatches_found_total={}\nexpansion_attempts_total={}\nexpansions_applied_total={}\nexpansions_rejected_total={}\ndiagnostic_events_dropped_total={}\ninput_connection_state={}\noutput_connection_state={}\ninput_last_connected_unix={}\noutput_last_connected_unix={}\ninput_last_disconnect_reason={}\noutput_last_disconnect_reason={}\ninput_reconnect_attempts={}\noutput_reconnect_attempts={}\ninput_reconnect_backoff_ms={}\noutput_reconnect_backoff_ms={}\nlast_successful_insertion_unix={}\noutput_queue_latency_sample_count={}\noutput_queue_latency_window_count={}\noutput_queue_latency_p50_us={}\noutput_queue_latency_p95_us={}\noutput_queue_latency_p99_us={}\noutput_queue_latency_dropped_total={}",
+                "source={source}\nbackend={backend}\nroute_id={route_id}\nbackend_mode={backend_mode}\nstatus_schema={CONTROL_STATUS_SCHEMA}\ndaemon_commit={}\ndaemon_version={}\nstate={state}\nroute_available={route_available}\nmatching_available={matching_available}\nmatching_unavailable_reason={matching_unavailable_reason}\npaused={}\nconfig={}\nconfig_active_path={}\nconfig_state={}\nconfig_generation={}\nconfig_loaded_at_unix={}\nconfig_last_successful_reload_unix={}\nconfig_enabled_expansions={}\nconfig_disabled_expansions={}\nconfig_generate_only_expansions={}\nconfig_last_reload_failure={}\nconfig_validation_error_count={}\nconfig_validation_errors={}\ncapture_sensitive_focus={}\ncapture_exclusive={}\ncapture_reliable_key_state={}\ncapture_key_passthrough={}\ncapture_composition_aware={}\ncapture_local_compose_aware={}\ncapture_layout_aware={}\ncapture_layout_state={capture_layout_state}\nwindow_tracker_connected={}\nwindow_tracker_state={}\nwindow_tracker_reconnect_attempts_total={}\nwindow_tracker_disconnects_total={}\nwindow_tracker_last_failure_reason={}\nwindow_tracker_last_connected_unix={}\nwindow_tracker_reconnect_backoff_ms={}\nwindow_identity_exact={}\ninject_atomic_replace={}\ninject_full_unicode={}\ninject_cursor_reposition={}\ninject_key_passthrough={}\ninject_insertion_mode={}\ninject_max_text_chars={}\ninject_expected_throughput_chars_per_sec={}\ncommand_worker_threads={}\nhotkey_worker_threads={}\ncommand_queue_depth={}\ncommand_in_flight={}\nexpansion_command_queue_depth={}\nexpansion_command_in_flight={}\nhotkey_queue_depth={}\nhotkey_in_flight={}\ncommand_queue_rejected_total={}\ncommand_timeout_total={}\ncommand_failure_total={}\ninjection_latency_sample_count={}\ninjection_latency_window_count={}\ninjection_latency_mean_us={}\ninjection_latency_p50_us={}\ninjection_latency_p95_us={}\ninjection_latency_p99_us={}\ninjection_latency_dropped_total={}\ninjection_latency_profile_dropped_total={}\ninjection_latency_profiles={}\nmatcher_latency_sample_count={}\nmatcher_latency_window_count={}\nmatcher_latency_dropped_total={}\nmatcher_latency_p50_us={}\nmatcher_latency_p95_us={}\nmatcher_latency_p99_us={}\nusage_flush_max_duration_us={}\nusage_flush_failures_total={}\nusage_worker_failures_total={}\nusage_queue_rejected_total={}\nusage_events_recorded_total={}\nusage_events_persisted_total={}\nusage_events_dropped_total={}\nclipboard_worker_threads={}\nclipboard_reads_in_flight={}\nclipboard_reads_total={}\nclipboard_read_failures_total={}\nclipboard_deadline_misses_total={}\nclipboard_read_max_duration_us={}\noutput_health={}\noutput_uncertain_total={}\noutput_partial_total={}\npartial_write_total={}\noutput_retiring_workers={}\noutput_stalled_ms={}\nbackend_shutdown_workers_active={}\nbackend_shutdown_workers_started_total={}\nbackend_shutdown_workers_acknowledged_total={}\nbackend_shutdown_workers_timed_out_total={}\nbackend_shutdown_workers_failed_total={}\ninsertion_assurance={}\nreplacement_assurance={}\ncompatibility_mode={}\nfocus_assurance={}\noutput_refused_total={}\noutput_last_refusal={}\noutput_unsupported_total={}\noutput_last_unsupported={}\nrecent_expansion_failures={}\nrecent_expansion_outcomes={}\nsuppressed_expansions_total={}\noutput_reconnect_total={}\ninput_reconnect_total={}\ninput_connection_failures_total={}\noutput_connection_failures_total={}\ninput_overflow_total={}\nevdev_quarantined_events_total={}\ncontrol_rejected_total={}\nmemory_rss_kib={}\nmemory_high_water_kib={}\ncommand_containment={}\ncommand_containment_mode={}\ncommand_containment_self_test={}\ncommand_cleanup_pending_jobs={}\ncommand_cleanup_failed_attempts={}\ncommand_cleanup_degraded={}\nconnect_workers_active={}\nconnect_workers_started_total={}\nconnect_workers_completed_total={}\nconnect_workers_cancelled_total={}\nconnect_workers_rejected_total={}\nsandbox_security={sandbox_security}\nterminal_apps_only={terminal_apps_only}\ncapture_app_scope_state={capture_app_scope_state}\nraw_capture_fallback_enabled={raw_capture_fallback_enabled}\nraw_capture_app_count={raw_capture_app_count}\ninput_events_total={}\nmatcher_evaluations_total={}\nmatches_found_total={}\nexpansion_attempts_total={}\nexpansions_applied_total={}\nexpansions_rejected_total={}\ndiagnostic_events_dropped_total={}\ninput_connection_state={}\noutput_connection_state={}\ninput_last_connected_unix={}\noutput_last_connected_unix={}\ninput_last_disconnect_reason={}\noutput_last_disconnect_reason={}\ninput_reconnect_attempts={}\noutput_reconnect_attempts={}\ninput_reconnect_backoff_ms={}\noutput_reconnect_backoff_ms={}\nlast_successful_insertion_unix={}\noutput_queue_latency_sample_count={}\noutput_queue_latency_window_count={}\noutput_queue_latency_p50_us={}\noutput_queue_latency_p95_us={}\noutput_queue_latency_p99_us={}\noutput_queue_latency_dropped_total={}",
         build_info::COMMIT,
         build_info::VERSION,
         paused,
@@ -494,7 +537,7 @@ pub fn set_daemon_status_direct(
 
 #[cfg(test)]
 mod matching_reason_tests {
-    use super::{matching_unavailable_reason, replacement_is_admitted};
+    use super::{capture_app_scope_state, matching_unavailable_reason, replacement_is_admitted};
     use wayexpand_core::{
         CompatibilityMode, FocusCheck, InjectorCapabilities, ReplacementAdmission,
         ReplacementGuarantee,
@@ -587,6 +630,17 @@ mod matching_reason_tests {
                 "reload-rejected"
             ),
             "configuration_unhealthy"
+        );
+    }
+
+    #[test]
+    fn capture_app_scope_state_does_not_expose_identity_and_fails_closed() {
+        assert_eq!(capture_app_scope_state(false, false, false), "unrestricted");
+        assert_eq!(capture_app_scope_state(true, false, true), "unknown");
+        assert_eq!(capture_app_scope_state(true, true, true), "allowed");
+        assert_eq!(
+            capture_app_scope_state(true, true, false),
+            "outside_allowlist"
         );
     }
 }

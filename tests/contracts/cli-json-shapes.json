@@ -60,6 +60,7 @@
     "terminal_apps_only",
     "raw_capture_fallback_enabled",
     "raw_capture_app_count",
+    "capture_app_scope_state",
     "enabled_expansions",
     "disabled_expansions",
     "generate_only_expansions",
@@ -73,6 +74,7 @@
     "scope",
     "raw_capture_fallback_enabled",
     "raw_capture_app_count",
+    "focused_app_scope_state",
     "terminal_only",
     "configured_app_scope_only",
     "desktop_wide",
@@ -80,7 +82,7 @@
     "daemon_route",
     "detail"
   ],
-  "health_schema": 3,
+  "health_schema": 4,
   "health_readiness": [
     "operational",
     "route_safety"
@@ -144,6 +146,7 @@
     "backend_shutdown_workers_timed_out_total",
     "backend_shutdown_workers_failed_total",
     "state",
+    "capture_app_scope_state",
     "paused",
     "config",
     "config_state",

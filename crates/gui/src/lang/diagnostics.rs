@@ -298,6 +298,31 @@ impl Strings {
         }
     }
 
+    pub fn capture_app_scope_state(&self, state: &str) -> &'static str {
+        match (self.lang, state) {
+            (_, "allowed") => match self.lang {
+                Language::English => "Focused application matches the configured capture scope.",
+                Language::Indonesian => "Aplikasi yang difokuskan cocok dengan cakupan tangkapan yang dikonfigurasi.",
+                Language::German => "Die fokussierte Anwendung entspricht dem konfigurierten Erfassungsbereich.",
+            },
+            (_, "outside_allowlist") => match self.lang {
+                Language::English => "Focused application is outside the capture allowlist; expansions are suppressed.",
+                Language::Indonesian => "Aplikasi yang difokuskan tidak termasuk dalam daftar izin tangkapan; ekspansi ditekan.",
+                Language::German => "Die fokussierte Anwendung steht nicht auf der Erfassungsliste; Expansionen werden unterdrückt.",
+            },
+            (_, "unrestricted") => match self.lang {
+                Language::English => "This daemon route has no focused-application allowlist.",
+                Language::Indonesian => "Rute daemon ini tidak memiliki daftar izin aplikasi yang difokuskan.",
+                Language::German => "Diese Daemon-Route hat keine Allowlist für fokussierte Anwendungen.",
+            },
+            _ => match self.lang {
+                Language::English => "Focused application is unknown; scoped expansion fails closed.",
+                Language::Indonesian => "Aplikasi yang difokuskan tidak diketahui; ekspansi dengan cakupan diblokir secara aman.",
+                Language::German => "Die fokussierte Anwendung ist unbekannt; begrenzte Expansionen werden sicher blockiert.",
+            },
+        }
+    }
+
     pub fn next_step_terminal_only_route(&self) -> &'static str {
         match self.lang {
             Language::English => "For browser or editor fields, open Quick Picker and copy/paste, or configure an input-method route that supports that application. This route will not capture those fields.",
@@ -1331,6 +1356,13 @@ mod tests {
         assert!(Strings::new(Language::German)
             .raw_capture_app_scope_notice(3)
             .contains("3 konfigurierten Anwendungen"));
+
+        assert!(Strings::new(Language::English)
+            .capture_app_scope_state("unknown")
+            .contains("fails closed"));
+        assert!(Strings::new(Language::German)
+            .capture_app_scope_state("outside_allowlist")
+            .contains("nicht auf der Erfassungsliste"));
     }
 
     #[test]

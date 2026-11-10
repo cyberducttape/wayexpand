@@ -7,7 +7,9 @@
 `wayexpand health` reports whether the local configuration and live daemon can
 currently match expansions and whether the output worker is healthy. Its
 versioned JSON contract is available with `wayexpand health --json`
-(`schema_version: 2`). Exit codes are stable for monitoring: 0 operationally
+(`schema_version: 4`). Its `application_coverage.focused_app_scope_state`
+reports `allowed`, `outside_allowlist`, `unknown`, or `unrestricted` without
+exposing the focused application's identity. Exit codes are stable for monitoring: 0 operationally
 ready, 1 degraded, 2 daemon unavailable, 3 invalid configuration, 4
 authorization required, and 5 internal error. “Ready” reports negotiated
 runtime operation only; it does not mean that a compositor/client combination

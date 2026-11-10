@@ -1,12 +1,13 @@
 {
   "schema_version": 17,
-  "daemon_control_schema": 32,
+  "daemon_control_schema": 33,
   "fields": {
     "response": "string",
     "source": "string",
     "backend": "string",
     "route_id": "string",
     "raw_capture_app_count": "integer",
+    "capture_app_scope_state": "string",
     "raw_capture_fallback_enabled": "boolean",
     "backend_mode": "string",
     "backend_shutdown_workers_active": "integer",
