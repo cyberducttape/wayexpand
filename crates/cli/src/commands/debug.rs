@@ -539,6 +539,22 @@ fn emit(json: bool, started: Instant, event: &str, detail: &str) {
     }
 }
 
+fn status_counter(status: Option<&serde_json::Value>, key: &str) -> u64 {
+    status
+        .and_then(|snapshot| snapshot.get(key))
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0)
+}
+
+fn app_scope_detail(state: &str) -> &'static str {
+    match state {
+        "unrestricted" => "application scope is unrestricted by this daemon route",
+        "allowed" => "focused application is in the configured capture allowlist",
+        "outside_allowlist" => "focused application is outside the configured capture allowlist; matching is suppressed",
+        _ => "focused application identity is unavailable; app-scoped matching fails closed",
+    }
+}
+
 fn run_live(seconds: u64, json: bool) -> Result<()> {
     let started = Instant::now();
     if json {
@@ -564,12 +580,26 @@ fn run_live(seconds: u64, json: bool) -> Result<()> {
         .unwrap_or("unavailable")
         .to_owned();
     let mut last_ibus_selected = initial_ibus.selected;
+    let initial_scope = initial_daemon
+        .as_ref()
+        .and_then(|status| status.get("capture_app_scope_state"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown");
+    let mut last_scope = initial_scope.to_owned();
+    let mut last_matcher_evaluations =
+        status_counter(initial_daemon.as_ref(), "matcher_evaluations_total");
+    let mut last_matches = status_counter(initial_daemon.as_ref(), "matches_found_total");
+    let mut last_attempts = status_counter(initial_daemon.as_ref(), "expansion_attempts_total");
+    let mut last_applied = status_counter(initial_daemon.as_ref(), "expansions_applied_total");
+    let mut last_refused = status_counter(initial_daemon.as_ref(), "output_refused_total");
+    let mut last_partial = status_counter(initial_daemon.as_ref(), "partial_write_total");
     emit(
         json,
         started,
         "session",
         &format!("initial state {last_state}"),
     );
+    emit(json, started, "app_scope", app_scope_detail(&last_scope));
     if initial_ibus.selected {
         emit(json, started, "ibus", "WayExpand input method selected");
     }
@@ -586,6 +616,15 @@ fn run_live(seconds: u64, json: bool) -> Result<()> {
         if state != last_state {
             emit(json, started, "route_state", state);
             last_state = state.to_owned();
+        }
+        let scope = daemon
+            .as_ref()
+            .and_then(|status| status.get("capture_app_scope_state"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("unknown");
+        if scope != last_scope {
+            emit(json, started, "app_scope", app_scope_detail(scope));
+            last_scope = scope.to_owned();
         }
         if ibus.selected && !last_ibus_selected {
             emit(json, started, "input_context", "WayExpand engine selected");
@@ -637,6 +676,48 @@ fn run_live(seconds: u64, json: bool) -> Result<()> {
             );
             last_expansions = expansions;
         }
+        let matcher_evaluations = status_counter(daemon.as_ref(), "matcher_evaluations_total");
+        let matches = status_counter(daemon.as_ref(), "matches_found_total");
+        let attempts = status_counter(daemon.as_ref(), "expansion_attempts_total");
+        let applied = status_counter(daemon.as_ref(), "expansions_applied_total");
+        if matcher_evaluations > last_matcher_evaluations
+            || matches > last_matches
+            || attempts > last_attempts
+            || applied > last_applied
+        {
+            emit(
+                json,
+                started,
+                "matcher",
+                &format!(
+                    "{} evaluation(s), {} match(es), {} insertion attempt(s), {} applied; content omitted",
+                    matcher_evaluations.saturating_sub(last_matcher_evaluations),
+                    matches.saturating_sub(last_matches),
+                    attempts.saturating_sub(last_attempts),
+                    applied.saturating_sub(last_applied),
+                ),
+            );
+        }
+        last_matcher_evaluations = matcher_evaluations;
+        last_matches = matches;
+        last_attempts = attempts;
+        last_applied = applied;
+        let refused = status_counter(daemon.as_ref(), "output_refused_total");
+        let partial = status_counter(daemon.as_ref(), "partial_write_total");
+        if refused > last_refused || partial > last_partial {
+            emit(
+                json,
+                started,
+                "output_health",
+                &format!(
+                    "{} output refusal(s), {} partial write(s); no automatic retry",
+                    refused.saturating_sub(last_refused),
+                    partial.saturating_sub(last_partial),
+                ),
+            );
+        }
+        last_refused = refused;
+        last_partial = partial;
         if ibus_transaction.is_some() && ibus_transaction != last_ibus_transaction {
             if let Some(id) = &ibus_transaction {
                 emit(json, started, "output_transaction", &format!("IBus transaction {id} emitted; target application confirmation is separate"));

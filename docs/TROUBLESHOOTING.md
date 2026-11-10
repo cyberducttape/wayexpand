@@ -21,6 +21,13 @@ wayexpand debug --live
 wayexpand debug --live --seconds 120
 ```
 
+For app-scoped evdev routes, the live trace reports whether the focused
+application is allowed, outside the allowlist, or unknown. It also reports
+sanitized input, matcher, and output counter changes; it never prints
+application IDs, triggers, replacement text, or clipboard contents. An
+`unknown` scope means the compositor focus tracker did not provide an app ID,
+so matching remains disabled for that focus until identity is available.
+
 Live output reports route-state changes, aggregate input-event counts, IBus
 activity counters, and output transaction IDs/states. It never records key
 values, triggers, replacement text, or clipboard contents. JSON live output is
