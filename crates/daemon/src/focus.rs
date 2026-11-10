@@ -112,6 +112,7 @@ pub(crate) fn drain_pending_window_events(
 ) -> Result<()> {
     let receiver = window_tracker.as_ref().map(|tracker| &tracker.receiver);
     if let Some((window_opt, stamp)) = backend_lifecycle::drain_pending_window_events(receiver) {
+        crate::status::record_window_tracker_update(window_opt.as_ref());
         // The engine now reflects this snapshot; keystroke output compares
         // the live focus identity against it before typing.
         crate::assurance::GuardState::global().set_stamp(stamp);

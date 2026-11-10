@@ -172,6 +172,40 @@ const RAW_CAPTURE_COUNT_MASK: usize = !RAW_CAPTURE_ENABLED_BIT;
 static RAW_CAPTURE_SCOPE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 static CAPTURE_APP_SCOPE_STATE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 static INPUT_EVENTS_TOTAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static WINDOW_TRACKER_UPDATES_TOTAL: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+const WINDOW_CONTEXT_AVAILABLE_BIT: u8 = 1;
+const WINDOW_APP_ID_AVAILABLE_BIT: u8 = 2;
+static WINDOW_CONTEXT_STATE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+pub(crate) fn record_window_tracker_update(window: Option<&wayexpand_core::WindowContext>) {
+    WINDOW_TRACKER_UPDATES_TOTAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    WINDOW_CONTEXT_STATE.store(
+        window_context_state_code(window),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
+fn window_context_state_code(window: Option<&wayexpand_core::WindowContext>) -> u8 {
+    u8::from(window.is_some()) * WINDOW_CONTEXT_AVAILABLE_BIT
+        | u8::from(
+            window
+                .and_then(|context| context.app_id.as_deref())
+                .is_some(),
+        ) * WINDOW_APP_ID_AVAILABLE_BIT
+}
+
+fn window_tracker_updates_total() -> u64 {
+    WINDOW_TRACKER_UPDATES_TOTAL.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+fn window_context_state() -> (bool, bool) {
+    let state = WINDOW_CONTEXT_STATE.load(std::sync::atomic::Ordering::Relaxed);
+    (
+        state & WINDOW_CONTEXT_AVAILABLE_BIT != 0,
+        state & WINDOW_APP_ID_AVAILABLE_BIT != 0,
+    )
+}
 
 fn capture_app_scope_state(restricted: bool, focus_known: bool, allowed: bool) -> &'static str {
     if !restricted {
@@ -321,7 +355,8 @@ pub fn daemon_status_body_with_runtime_capabilities_and_config_state(
         config_state,
     );
     let matching_available = matching_unavailable_reason == "none";
-    StatusBody(format!(
+    let (window_context_available, window_app_id_available) = window_context_state();
+    let mut body = format!(
                 "source={source}\nbackend={backend}\nroute_id={route_id}\nbackend_mode={backend_mode}\nstatus_schema={CONTROL_STATUS_SCHEMA}\ndaemon_commit={}\ndaemon_version={}\nstate={state}\nroute_available={route_available}\nmatching_available={matching_available}\nmatching_unavailable_reason={matching_unavailable_reason}\npaused={}\nconfig={}\nconfig_active_path={}\nconfig_state={}\nconfig_generation={}\nconfig_loaded_at_unix={}\nconfig_last_successful_reload_unix={}\nconfig_enabled_expansions={}\nconfig_disabled_expansions={}\nconfig_generate_only_expansions={}\nconfig_last_reload_failure={}\nconfig_validation_error_count={}\nconfig_validation_errors={}\ncapture_sensitive_focus={}\ncapture_exclusive={}\ncapture_reliable_key_state={}\ncapture_key_passthrough={}\ncapture_composition_aware={}\ncapture_local_compose_aware={}\ncapture_layout_aware={}\ncapture_layout_state={capture_layout_state}\nwindow_tracker_connected={}\nwindow_tracker_state={}\nwindow_tracker_reconnect_attempts_total={}\nwindow_tracker_disconnects_total={}\nwindow_tracker_last_failure_reason={}\nwindow_tracker_last_connected_unix={}\nwindow_tracker_reconnect_backoff_ms={}\nwindow_identity_exact={}\ninject_atomic_replace={}\ninject_full_unicode={}\ninject_cursor_reposition={}\ninject_key_passthrough={}\ninject_insertion_mode={}\ninject_max_text_chars={}\ninject_expected_throughput_chars_per_sec={}\ncommand_worker_threads={}\nhotkey_worker_threads={}\ncommand_queue_depth={}\ncommand_in_flight={}\nexpansion_command_queue_depth={}\nexpansion_command_in_flight={}\nhotkey_queue_depth={}\nhotkey_in_flight={}\ncommand_queue_rejected_total={}\ncommand_timeout_total={}\ncommand_failure_total={}\ninjection_latency_sample_count={}\ninjection_latency_window_count={}\ninjection_latency_mean_us={}\ninjection_latency_p50_us={}\ninjection_latency_p95_us={}\ninjection_latency_p99_us={}\ninjection_latency_dropped_total={}\ninjection_latency_profile_dropped_total={}\ninjection_latency_profiles={}\nmatcher_latency_sample_count={}\nmatcher_latency_window_count={}\nmatcher_latency_dropped_total={}\nmatcher_latency_p50_us={}\nmatcher_latency_p95_us={}\nmatcher_latency_p99_us={}\nusage_flush_max_duration_us={}\nusage_flush_failures_total={}\nusage_worker_failures_total={}\nusage_queue_rejected_total={}\nusage_events_recorded_total={}\nusage_events_persisted_total={}\nusage_events_dropped_total={}\nclipboard_worker_threads={}\nclipboard_reads_in_flight={}\nclipboard_reads_total={}\nclipboard_read_failures_total={}\nclipboard_deadline_misses_total={}\nclipboard_read_max_duration_us={}\noutput_health={}\noutput_uncertain_total={}\noutput_partial_total={}\npartial_write_total={}\noutput_retiring_workers={}\noutput_stalled_ms={}\nbackend_shutdown_workers_active={}\nbackend_shutdown_workers_started_total={}\nbackend_shutdown_workers_acknowledged_total={}\nbackend_shutdown_workers_timed_out_total={}\nbackend_shutdown_workers_failed_total={}\ninsertion_assurance={}\nreplacement_assurance={}\ncompatibility_mode={}\nfocus_assurance={}\noutput_refused_total={}\noutput_last_refusal={}\noutput_unsupported_total={}\noutput_last_unsupported={}\nrecent_expansion_failures={}\nrecent_expansion_outcomes={}\nsuppressed_expansions_total={}\noutput_reconnect_total={}\ninput_reconnect_total={}\ninput_connection_failures_total={}\noutput_connection_failures_total={}\ninput_overflow_total={}\nevdev_quarantined_events_total={}\ncontrol_rejected_total={}\nmemory_rss_kib={}\nmemory_high_water_kib={}\ncommand_containment={}\ncommand_containment_mode={}\ncommand_containment_self_test={}\ncommand_cleanup_pending_jobs={}\ncommand_cleanup_failed_attempts={}\ncommand_cleanup_degraded={}\nconnect_workers_active={}\nconnect_workers_started_total={}\nconnect_workers_completed_total={}\nconnect_workers_cancelled_total={}\nconnect_workers_rejected_total={}\nsandbox_security={sandbox_security}\nterminal_apps_only={terminal_apps_only}\ncapture_app_scope_state={capture_app_scope_state}\nraw_capture_fallback_enabled={raw_capture_fallback_enabled}\nraw_capture_app_count={raw_capture_app_count}\ninput_events_total={}\nmatcher_evaluations_total={}\nmatches_found_total={}\nexpansion_attempts_total={}\nexpansions_applied_total={}\nexpansions_rejected_total={}\ndiagnostic_events_dropped_total={}\ninput_connection_state={}\noutput_connection_state={}\ninput_last_connected_unix={}\noutput_last_connected_unix={}\ninput_last_disconnect_reason={}\noutput_last_disconnect_reason={}\ninput_reconnect_attempts={}\noutput_reconnect_attempts={}\ninput_reconnect_backoff_ms={}\noutput_reconnect_backoff_ms={}\nlast_successful_insertion_unix={}\noutput_queue_latency_sample_count={}\noutput_queue_latency_window_count={}\noutput_queue_latency_p50_us={}\noutput_queue_latency_p95_us={}\noutput_queue_latency_p99_us={}\noutput_queue_latency_dropped_total={}",
         build_info::COMMIT,
         build_info::VERSION,
@@ -467,7 +502,14 @@ pub fn daemon_status_body_with_runtime_capabilities_and_config_state(
         queue_latency.p95_us,
         queue_latency.p99_us,
         crate::latency::queue_dropped_samples(),
-    ))
+    );
+    body.push_str(&format!(
+        "\nwindow_tracker_updates_total={}\nwindow_context_available={}\nwindow_app_id_available={}\n",
+        window_tracker_updates_total(),
+        window_context_available,
+        window_app_id_available,
+    ));
+    StatusBody(body)
 }
 
 pub fn set_daemon_status(
@@ -537,7 +579,10 @@ pub fn set_daemon_status_direct(
 
 #[cfg(test)]
 mod matching_reason_tests {
-    use super::{capture_app_scope_state, matching_unavailable_reason, replacement_is_admitted};
+    use super::{
+        capture_app_scope_state, matching_unavailable_reason, replacement_is_admitted,
+        window_context_state_code, WINDOW_APP_ID_AVAILABLE_BIT, WINDOW_CONTEXT_AVAILABLE_BIT,
+    };
     use wayexpand_core::{
         CompatibilityMode, FocusCheck, InjectorCapabilities, ReplacementAdmission,
         ReplacementGuarantee,
@@ -631,6 +676,28 @@ mod matching_reason_tests {
             ),
             "configuration_unhealthy"
         );
+    }
+
+    #[test]
+    fn focus_diagnostics_distinguish_missing_context_from_missing_app_id() {
+        assert_eq!(window_context_state_code(None), 0);
+
+        let title_only = wayexpand_core::WindowContext {
+            app_id: None,
+            title: Some("private title".into()),
+            instance_id: Some("window-1".into()),
+        };
+        let title_only_state = window_context_state_code(Some(&title_only));
+        assert_ne!(title_only_state & WINDOW_CONTEXT_AVAILABLE_BIT, 0);
+        assert_eq!(title_only_state & WINDOW_APP_ID_AVAILABLE_BIT, 0);
+
+        let app_identified = wayexpand_core::WindowContext {
+            app_id: Some("org.example.App".into()),
+            ..title_only
+        };
+        let app_identified_state = window_context_state_code(Some(&app_identified));
+        assert_ne!(app_identified_state & WINDOW_CONTEXT_AVAILABLE_BIT, 0);
+        assert_ne!(app_identified_state & WINDOW_APP_ID_AVAILABLE_BIT, 0);
     }
 
     #[test]

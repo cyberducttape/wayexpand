@@ -595,6 +595,10 @@ build identity or a status protocol mismatch is reported as unverifiable.
 The optional `sandbox_security` object contains direct `/proc` and syscall
 probes from the daemon process for `wayexpand doctor --security`; older daemons
 omit it, and this optional additive field does not change the status schema.
+The content-free `window_tracker_updates_total`, `window_context_available`,
+and `window_app_id_available` fields distinguish a tracker that has delivered
+no focus report from one that reported a window without an application ID. They
+never expose the ID or window title.
 
 `daemon_commit` identifies the source revision, and `daemon_version` identifies
 the exact source-tree build. Dirty development builds include a short digest of
@@ -641,6 +645,9 @@ legacy same-commit daemon as verified. Builds without Git metadata report
   "capture_layout_aware": true,
   "window_tracker_connected": true,
   "window_tracker_state": "connected",
+  "window_tracker_updates_total": 12,
+  "window_context_available": true,
+  "window_app_id_available": true,
   "window_tracker_reconnect_attempts_total": 0,
   "window_tracker_disconnects_total": 0,
   "window_tracker_last_failure_reason": "none",
@@ -758,6 +765,8 @@ legacy same-commit daemon as verified. Builds without Git metadata report
 - `capture_layout_state` (string): `tracked`, `unavailable`, or `not-applicable`; KDE evdev reports `tracked` while KWin's active group and layout/variant list agree with `kxkbrc`, or with systemd-localed keyboard properties when `kxkbrc` is absent. The provider fails closed on missing or inconsistent state. Other evdev compositors currently report `unavailable`.
 - `window_tracker_connected` (bool): Whether the supervised compositor-specific window tracker is currently connected. This is reported separately from keyboard capture because application identity is provided by a distinct subsystem.
 - `window_tracker_state` (string): `unavailable`, `starting`, `connected`, `reconnecting`, or `stopped` for the compositor focus tracker.
+- `window_tracker_updates_total` (integer): Number of authenticated focus snapshots received during this daemon process, including snapshots with no active window.
+- `window_context_available`, `window_app_id_available` (bool): Whether the latest snapshot identified a window and whether it carried an application ID. These booleans expose neither IDs nor titles and distinguish a missing tracker event from an unusable application identity.
 - `window_tracker_reconnect_attempts_total`, `window_tracker_disconnects_total` (integer): Process-lifetime retry and established-connection loss counters. These never contain focus or input content.
 - `window_tracker_last_failure_reason` (string): Sanitized category: `none`, `probe_unavailable`, `connect_failed`, `tracker_disconnected`, `configuration_changed`, `compositor_unsupported`, or `supervisor_start_failed`.
 - `window_tracker_last_connected_unix`, `window_tracker_reconnect_backoff_ms` (integer): Unix timestamp of the last successful connection and the current bounded retry delay in milliseconds. A zero timestamp means no connection has succeeded in this process.

@@ -736,6 +736,9 @@ fn status_json_matches_documented_stable_contract() {
          capture_layout_state=tracked\n\
          window_tracker_connected=false\n\
          window_tracker_state=unavailable\n\
+         window_tracker_updates_total=0\n\
+         window_context_available=false\n\
+         window_app_id_available=false\n\
          window_tracker_reconnect_attempts_total=0\n\
          window_tracker_disconnects_total=0\n\
          window_tracker_last_failure_reason=none\n\
@@ -864,7 +867,7 @@ fn status_json_matches_documented_stable_contract() {
     let contract: serde_json::Value =
         serde_json::from_str(include_str!("../../../tests/contracts/status-json.json"))
             .expect("status contract fixture must be valid JSON");
-    assert_eq!(contract["schema_version"], 17);
+    assert_eq!(contract["schema_version"], 18);
     assert_eq!(contract["daemon_control_schema"], CONTROL_STATUS_SCHEMA);
     assert_ne!(
         contract["schema_version"],

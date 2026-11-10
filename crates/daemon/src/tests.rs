@@ -92,6 +92,7 @@ fn daemon_status_body_matches_documented_stable_contract() {
         false,
     );
     let body = body.as_str();
+    assert!(body.contains("window_tracker_updates_total="), "{body}");
     let mut fields: Vec<&str> = body
         .lines()
         .filter_map(|line| line.split_once('=').map(|(key, _)| key))
@@ -147,6 +148,9 @@ fn daemon_status_body_matches_documented_stable_contract() {
         "clipboard_deadline_misses_total",
         "clipboard_read_max_duration_us",
         "window_tracker_state",
+        "window_tracker_updates_total",
+        "window_context_available",
+        "window_app_id_available",
         "window_tracker_reconnect_attempts_total",
         "window_tracker_disconnects_total",
         "window_tracker_last_failure_reason",
