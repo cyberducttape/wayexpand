@@ -49,9 +49,7 @@ impl ExpansionEngine {
             .iter()
             .enumerate()
             .find(|(_, expansion)| {
-                expansion.enabled
-                    && expansion.delivery == crate::ExpansionDelivery::Insert
-                    && expansion.answers_to(trigger)
+                expansion.is_keyboard_matchable() && expansion.answers_to(trigger)
             })
             .ok_or(InsertError::NotFound)?;
         if self.user_paused {

@@ -196,7 +196,7 @@ fn desktop_test_for(
     let Some(expansion) = config
         .expansion
         .iter()
-        .find(|item| item.enabled && item.answers_to(trigger))
+        .find(|item| item.is_keyboard_matchable() && item.answers_to(trigger))
     else {
         bail!("no enabled expansion matches that trigger; run `wayexpand debug --trigger <trigger>` to inspect matching")
     };

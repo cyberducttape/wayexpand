@@ -92,11 +92,18 @@ pub(crate) fn config_command(mut args: Args) -> Result<()> {
             config
                 .apply_administrator_policy(&policy)
                 .map_err(|error| config_error(error.safe_summary()))?;
-            let value = serde_json::json!({"valid":true,"expansions":config.expansion.len(),"enabled":config.expansion.iter().filter(|e|e.enabled).count(),"dynamic_commands_validated":config.expansion.iter().filter(|e|e.command.is_some()).count()+config.hotkey.len(),"dynamic_commands_executed":false});
+            let value = serde_json::json!({
+                "valid": true,
+                "expansions": config.expansion.len(),
+                "enabled": config.expansion.iter().filter(|e| e.is_keyboard_matchable()).count(),
+                "generate_only": config.expansion.iter().filter(|e| e.enabled && e.delivery == wayexpand_core::ExpansionDelivery::GenerateOnly).count(),
+                "dynamic_commands_validated": config.expansion.iter().filter(|e|e.command.is_some()).count()+config.hotkey.len(),
+                "dynamic_commands_executed": false
+            });
             if json {
                 println!("{}", serde_json::to_string_pretty(&value)?);
             } else {
-                println!("configuration valid: {} expansion(s); dynamic declarations validated, none executed", value["expansions"]);
+                println!("configuration valid: {} keyboard expansion(s), {} generate-only template(s); dynamic declarations validated, none executed", value["enabled"], value["generate_only"]);
             }
         }
         "diff" => {

@@ -197,7 +197,7 @@ impl ExpansionEngine {
                 .expansion
                 .iter()
                 .zip(self.validated.app_filters.iter())
-                .filter(|(expansion, _)| expansion.enabled)
+                .filter(|(expansion, _)| expansion.is_keyboard_matchable())
                 .flat_map(|(_, filters)| filters.iter())
                 .any(|filter| matches!(filter, AppFilter::TitleContains(_)))
     }
@@ -527,7 +527,7 @@ impl ExpansionEngine {
             .iter()
             .enumerate()
             .any(|(index, expansion)| {
-                expansion.enabled
+                expansion.is_keyboard_matchable()
                     && (expansion.command.is_some()
                         || self
                             .validated

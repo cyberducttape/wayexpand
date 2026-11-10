@@ -6,8 +6,7 @@ fn desktop_test_options(expansions: &[ExpansionConfig]) -> Vec<(String, String)>
     expansions
         .iter()
         .filter(|expansion| {
-            expansion.enabled
-                && expansion.delivery == wayexpand_core::ExpansionDelivery::Insert
+            expansion.is_keyboard_matchable()
                 && expansion.app_filter.is_empty()
                 && expansion.command.is_none()
                 && !expansion.replacement.contains("{{")
@@ -1264,8 +1263,7 @@ impl GuiApp {
                 .selected_index()
                 .and_then(|index| self.config.expansion.get(index))
                 .filter(|expansion| {
-                    expansion.enabled
-                        && expansion.delivery == wayexpand_core::ExpansionDelivery::Insert
+                    expansion.is_keyboard_matchable()
                         && expansion.app_filter.is_empty()
                         && expansion.command.is_none()
                         && !expansion.replacement.contains("{{")

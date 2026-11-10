@@ -1,6 +1,6 @@
 {
   "schema_version": 16,
-  "daemon_control_schema": 30,
+  "daemon_control_schema": 31,
   "fields": {
     "response": "string",
     "source": "string",
@@ -48,6 +48,7 @@
     "config_last_successful_reload_unix": "integer",
     "config_enabled_expansions": "integer",
     "config_disabled_expansions": "integer",
+    "config_generate_only_expansions": "integer",
     "config_last_reload_failure": "string",
     "config_validation_error_count": "integer",
     "config_validation_errors": "string",

@@ -40,6 +40,7 @@ pub(crate) fn status_as_json(response: &str) -> Result<serde_json::Value> {
                         | "config_last_successful_reload_unix"
                         | "config_enabled_expansions"
                         | "config_disabled_expansions"
+                        | "config_generate_only_expansions"
                         | "window_tracker_reconnect_attempts_total"
                         | "window_tracker_disconnects_total"
                         | "window_tracker_last_connected_unix"

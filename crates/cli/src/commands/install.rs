@@ -1091,7 +1091,7 @@ fn terminal_match_self_test_for(config: &wayexpand_core::Config) -> serde_json::
         for expansion in config
             .expansion
             .iter()
-            .filter(|item| item.enabled && item.command.is_none())
+            .filter(|item| item.is_keyboard_matchable() && item.command.is_none())
         {
             engine.process(wayexpand_core::InputEvent::Reset);
             engine.process(wayexpand_core::InputEvent::WindowChanged(Some(

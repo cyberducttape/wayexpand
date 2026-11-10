@@ -335,9 +335,13 @@ mod tests {
     #[test]
     fn temporary_repository_paths_remain_unique_with_identical_timestamps() {
         let root = std::env::temp_dir();
-        let first = unique_test_repository_path(&root, std::process::id(), u128::MAX)
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock is after Unix epoch")
+            .as_nanos();
+        let first = unique_test_repository_path(&root, std::process::id(), timestamp)
             .expect("create first temporary directory");
-        let second = unique_test_repository_path(&root, std::process::id(), u128::MAX)
+        let second = unique_test_repository_path(&root, std::process::id(), timestamp)
             .expect("create second temporary directory");
         assert_ne!(first, second);
         fs::remove_dir(first).expect("remove first temporary directory");

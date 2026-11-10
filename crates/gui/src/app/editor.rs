@@ -18,8 +18,7 @@ impl GuiApp {
                 .expansion
                 .iter()
                 .filter(|expansion| {
-                    expansion.enabled
-                        && expansion.delivery == wayexpand_core::ExpansionDelivery::Insert
+                    expansion.is_keyboard_matchable()
                         && expansion.command.is_none()
                         && wayexpand_core::form_fields(&expansion.replacement)
                             .is_ok_and(|fields| fields.is_empty())

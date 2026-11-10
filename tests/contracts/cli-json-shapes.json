@@ -60,6 +60,7 @@
     "terminal_apps_only",
     "enabled_expansions",
     "disabled_expansions",
+    "generate_only_expansions",
     "state",
     "output_health",
     "matching_available",

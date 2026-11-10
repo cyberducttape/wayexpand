@@ -706,7 +706,7 @@ fn status_json_matches_documented_stable_contract() {
          backend=input-method-v2\n\
          route_id=input-method-v2\n\
          backend_mode=unknown\n\
-         status_schema=30\n\
+         status_schema=31\n\
          daemon_commit=test-commit\n\
          daemon_version=1.3.3-dev+test-commit\n\
          state=connected\n\
@@ -722,6 +722,7 @@ fn status_json_matches_documented_stable_contract() {
          config_last_successful_reload_unix=1\n\
          config_enabled_expansions=1\n\
          config_disabled_expansions=0\n\
+         config_generate_only_expansions=0\n\
          config_last_reload_failure=none\n\
          config_validation_error_count=0\n\
          config_validation_errors=none\n\

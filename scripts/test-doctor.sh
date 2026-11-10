@@ -121,7 +121,7 @@ fi
 setup_home="$test_root/setup-home"
 mkdir -m 0700 "$setup_home"
 if HOME="$setup_home" XDG_CONFIG_HOME="$setup_home/.config" \
-    "$project_dir/target/debug/wayexpand" setup --backend evdev \
+    "$project_dir/target/debug/wayexpand" setup --backend evdev --apply \
     >"$test_root/setup-evdev.out" 2>&1; then
     printf '%s\n' 'setup enabled evdev without the consent marker' >&2
     exit 1

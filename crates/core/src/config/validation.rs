@@ -436,7 +436,7 @@ impl Config {
                 (!fields.is_empty()).then(|| Arc::new(fields))
             };
             validated_form_fields.push(parsed_form_fields);
-            if expansion.enabled {
+            if expansion.is_keyboard_matchable() {
                 total_trigger_chars = total_trigger_chars.saturating_add(trigger_length);
                 if total_trigger_chars > MAX_TOTAL_TRIGGER_CHARS {
                     return Err(ConfigError::TriggerDataTooLarge {
@@ -462,9 +462,7 @@ impl Config {
             .expansion
             .iter()
             .enumerate()
-            .filter(|(_, entry)| {
-                entry.enabled && entry.delivery == crate::ExpansionDelivery::Insert
-            })
+            .filter(|(_, entry)| entry.is_keyboard_matchable())
             .flat_map(|(index, entry)| {
                 entry
                     .effective_triggers()

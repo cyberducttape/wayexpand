@@ -62,7 +62,7 @@ pub(crate) fn collect(trigger: Option<&str>) -> serde_json::Value {
             let enabled = config
                 .expansion
                 .iter()
-                .filter(|expansion| expansion.enabled)
+                .filter(|expansion| expansion.is_keyboard_matchable())
                 .count();
             (true, count, enabled, None)
         }

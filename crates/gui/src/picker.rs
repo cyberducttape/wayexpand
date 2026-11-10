@@ -419,7 +419,8 @@ impl eframe::App for PickerApp {
                 ui.add_space(10.0);
                                 if !self.safe_direct_insert
                                     && self.config.expansion.iter().any(|expansion| {
-                                        expansion.enabled && !expansion.app_filter.is_empty()
+                                        expansion.is_keyboard_matchable()
+                                            && !expansion.app_filter.is_empty()
                                     })
                 {
                     ui.label(
@@ -778,8 +779,7 @@ fn clipboard_fallback_allowed_by_policy(policy: &wayexpand_core::OrganizationPol
 }
 
 fn picker_expansion_is_eligible(expansion: &ExpansionConfig, safe_direct_insert: bool) -> bool {
-    expansion.enabled
-        && expansion.delivery == wayexpand_core::ExpansionDelivery::Insert
+    expansion.is_keyboard_matchable()
         && expansion.command.is_none()
         && form_fields(&expansion.replacement).is_ok_and(|fields| fields.is_empty())
         && (safe_direct_insert || expansion.app_filter.is_empty())

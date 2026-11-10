@@ -112,7 +112,7 @@ fn daemon_status_body_matches_documented_stable_contract() {
         "daemon status body fields no longer match tests/contracts/status-json.json"
     );
     assert!(body.starts_with(&format!(
-        "source=input-method\nbackend=input-method-v2\nroute_id=input-method-v2\nbackend_mode=unknown\nstatus_schema=30\ndaemon_commit={}\ndaemon_version={}\nstate=connected\nroute_available=false\nmatching_available=false\nmatching_unavailable_reason=replacement_route_unavailable\npaused=false\n",
+        "source=input-method\nbackend=input-method-v2\nroute_id=input-method-v2\nbackend_mode=unknown\nstatus_schema=31\ndaemon_commit={}\ndaemon_version={}\nstate=connected\nroute_available=false\nmatching_available=false\nmatching_unavailable_reason=replacement_route_unavailable\npaused=false\n",
         super::build_info::COMMIT,
         super::build_info::VERSION
     )));

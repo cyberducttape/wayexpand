@@ -122,9 +122,14 @@ impl ExpansionEngine {
                 if !typed.ends_with(&variant) {
                     continue;
                 }
-                let key = (expansion.enabled, variant.chars().count());
+                let key = (
+                    expansion.is_keyboard_matchable(),
+                    expansion.enabled,
+                    variant.chars().count(),
+                );
                 let replaces = candidate.as_ref().is_none_or(|(previous_index, previous)| {
                     key >= (
+                        self.config.expansion[*previous_index].is_keyboard_matchable(),
                         self.config.expansion[*previous_index].enabled,
                         previous.chars().count(),
                     )
@@ -173,6 +178,18 @@ impl ExpansionEngine {
             explanation.push("enabled", CheckStatus::Fail, "snippet is disabled");
         }
 
+        if expansion.delivery == crate::ExpansionDelivery::GenerateOnly {
+            explanation.push(
+                "delivery",
+                CheckStatus::Fail,
+                format!(
+                    "generate-only template; render it with `wayexpand new {}`",
+                    expansion.trigger
+                ),
+            );
+            return explanation;
+        }
+
         match expansion.match_mode {
             MatchMode::Immediate => {
                 let longer = self
@@ -180,7 +197,7 @@ impl ExpansionEngine {
                     .expansion
                     .iter()
                     .take_while(|_| deadline.is_none_or(|deadline| Instant::now() < deadline))
-                    .filter(|other| other.enabled)
+                    .filter(|other| other.is_keyboard_matchable())
                     .find_map(|other| {
                         other.effective_triggers().into_iter().find(|trigger| {
                             trigger.len() > variant.len() && trigger.starts_with(variant.as_str())

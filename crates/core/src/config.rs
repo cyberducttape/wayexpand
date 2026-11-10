@@ -473,6 +473,11 @@ impl ExpansionDelivery {
 }
 
 impl ExpansionConfig {
+    /// Whether this entry is enabled for passive keyboard matching.
+    pub fn is_keyboard_matchable(&self) -> bool {
+        self.enabled && self.delivery == ExpansionDelivery::Insert
+    }
+
     /// Whether `trigger` is this snippet's trigger or one of its aliases,
     /// exactly as configured (no case or normalization variants).
     pub fn answers_to(&self, trigger: &str) -> bool {
@@ -792,8 +797,7 @@ impl Config {
         for expansion in self.expansion.iter().filter(|expansion| {
             // Form snippets are not includable: their fields could
             // only be filled by the form of the snippet that owns them.
-            expansion.enabled
-                && expansion.delivery == crate::ExpansionDelivery::Insert
+            expansion.is_keyboard_matchable()
                 && expansion.command.is_none()
                 && crate::form_fields(&expansion.replacement).is_ok_and(|fields| fields.is_empty())
         }) {

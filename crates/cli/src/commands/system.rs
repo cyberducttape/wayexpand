@@ -433,7 +433,9 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
 /// excluded so setup never executes actions or starts an incomplete form.
 pub(crate) fn setup_test_trigger(config: &Config) -> Option<String> {
     let is_testable = |expansion: &&wayexpand_core::ExpansionConfig| {
-        expansion.enabled && expansion.command.is_none() && !expansion.replacement.contains("{{")
+        expansion.is_keyboard_matchable()
+            && expansion.command.is_none()
+            && !expansion.replacement.contains("{{")
     };
     config
         .expansion

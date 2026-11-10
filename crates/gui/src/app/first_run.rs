@@ -22,8 +22,7 @@ fn uses_gnome_ibus_route(is_gnome: bool, ibus_active: bool, recommends_ibus: boo
 
 fn onboarding_snippet(config: &Config) -> Option<&ExpansionConfig> {
     config.expansion.iter().find(|expansion| {
-        expansion.enabled
-            && expansion.delivery == wayexpand_core::ExpansionDelivery::Insert
+        expansion.is_keyboard_matchable()
             && expansion.app_filter.is_empty()
             && expansion.command.is_none()
             && !expansion.replacement.contains("{{")

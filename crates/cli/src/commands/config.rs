@@ -28,7 +28,7 @@ pub(crate) fn test_command(mut args: Args) -> Result<()> {
             wayexpand_core::form_fields(&expansion.replacement)
                 .is_ok_and(|fields| !fields.is_empty())
         })
-        .map(|expansion| (expansion.trigger.clone(), expansion.enabled))
+        .map(|expansion| (expansion.trigger.clone(), expansion.is_keyboard_matchable()))
         .collect();
     let mut engine = ExpansionEngine::new(config).map_err(|error| {
         config_error(format!("configuration invalid: {}", error.safe_summary()))
@@ -174,7 +174,7 @@ pub(crate) fn preview_command(mut args: Args) -> Result<()> {
             wayexpand_core::form_fields(&expansion.replacement)
                 .is_ok_and(|fields| !fields.is_empty())
         })
-        .map(|expansion| (expansion.trigger.clone(), expansion.enabled))
+        .map(|expansion| (expansion.trigger.clone(), expansion.is_keyboard_matchable()))
         .collect();
     let mut engine = ExpansionEngine::new(config).map_err(|error| {
         config_error(format!("configuration invalid: {}", error.safe_summary()))
