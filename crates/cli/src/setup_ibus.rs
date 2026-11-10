@@ -3304,6 +3304,10 @@ mod tests {
 
     #[test]
     fn default_terminal_apps_are_valid_terminal_app_ids() {
+        assert!(
+            DEFAULT_TERMINAL_APPS.contains(&"konsole"),
+            "include Konsole's WM_CLASS as well as its desktop-file ID"
+        );
         let mut config =
             Config::parse("[[expansion]]\ntrigger = \":x\"\nreplacement = \"y\"\n").unwrap();
         config.settings.terminal_apps = DEFAULT_TERMINAL_APPS
