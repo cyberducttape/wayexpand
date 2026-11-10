@@ -465,8 +465,8 @@ const LOAD_RETRY_DELAY: Duration = Duration::from_millis(150); // Delay between 
 
 **Manual cleanup (if concerned):**
 ```sh
-ls /tmp/wayexpand-window-tracker-*.js 2>/dev/null || echo "None found"
-# Safe to delete these manually if they exist
+ls "$XDG_RUNTIME_DIR"/wayexpand-window-tracker-*.js 2>/dev/null || echo "None found"
+# Stop the WayExpand service before removing stale tracker scripts.
 ```
 
 ### Wlroots Compositors (Sway, Hyprland, river)

@@ -4,6 +4,8 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Place KWin focus-tracker scripts in the validated user runtime directory so
+  the compositor can read them when systemd isolates a daemon's `/tmp`.
 - Recover the initial KWin focus snapshot from the uniquely active window in
   the compositor's stacking list when `workspace.activeWindow` is temporarily
   null; keep app-scoped matching unavailable if active-window state is

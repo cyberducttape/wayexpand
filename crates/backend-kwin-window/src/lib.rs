@@ -71,6 +71,8 @@ pub enum KwinWindowError {
     NotAvailable,
     #[error("could not generate a unique KWin tracker ID: {0}")]
     TrackerId(String),
+    #[error("XDG_RUNTIME_DIR is missing or is not a private directory owned by this user")]
+    InvalidRuntimeDirectory,
 }
 
 struct WindowTrackerService {
@@ -199,6 +201,12 @@ impl KwinWindowTracker {
         if cancelled.is_some_and(|flag| flag.load(Ordering::Acquire)) {
             return Err(KwinWindowError::ScriptNotReady);
         }
+        // KWin itself must be able to read this script. On systems that
+        // enforce PrivateTmp=yes, a file under std::env::temp_dir() is
+        // invisible to the compositor even though loadScript() can create a
+        // script object for the path. XDG_RUNTIME_DIR is shared with the
+        // compositor and remains private to this user.
+        let script_directory = tracker_script_directory()?;
         let pid = process::id();
         // Reconnects may overlap cleanup of a failed tracker. Give each
         // attempt distinct D-Bus and KWin script identities so a delayed
@@ -246,14 +254,14 @@ impl KwinWindowTracker {
 
         let plugin_name = format!("wayexpand-window-tracker-{pid}-{tracker_id:x}");
         // The path is otherwise predictable (PID plus a fixed prefix, under
-        // world-writable /tmp), so a local attacker who guesses this
+        // the user runtime directory), so another local process that guesses this
         // process's upcoming PID could pre-place a symlink here pointing at
         // a file this user owns elsewhere; `fs::write` follows symlinks and
         // would overwrite that target. A cryptographically random suffix makes
         // the exact path unguessable, and `create_new` (O_CREAT|O_EXCL) refuses
         // to open through anything already there -- symlink or not -- as defense
         // in depth against symlink attacks.
-        let script_path = std::env::temp_dir().join(format!("{plugin_name}-{tracker_id:x}.js"));
+        let script_path = script_directory.join(format!("{plugin_name}-{tracker_id:x}.js"));
         let script_contents = SCRIPT_TEMPLATE.replace("__WAYEXPAND_BUS_NAME__", &bus_name);
         let mut file = fs::OpenOptions::new()
             .write(true)
@@ -290,7 +298,7 @@ impl KwinWindowTracker {
         }
 
         cleanup_orphan_tracker_scripts(
-            &std::env::temp_dir(),
+            &script_directory,
             |old_pid| Path::new("/proc").join(old_pid.to_string()).exists(),
             |old_plugin| {
                 connection
@@ -386,6 +394,29 @@ impl KwinWindowTracker {
         }
         Err(KwinWindowError::ScriptNotReady)
     }
+}
+
+fn tracker_script_directory() -> Result<std::path::PathBuf, KwinWindowError> {
+    let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(std::path::PathBuf::from)
+        .ok_or(KwinWindowError::InvalidRuntimeDirectory)?;
+    validate_tracker_script_directory(&runtime_dir)?;
+    Ok(runtime_dir)
+}
+
+fn validate_tracker_script_directory(path: &Path) -> Result<(), KwinWindowError> {
+    let metadata =
+        fs::symlink_metadata(path).map_err(|_| KwinWindowError::InvalidRuntimeDirectory)?;
+    if !path.is_absolute()
+        || metadata.file_type().is_symlink()
+        || !metadata.is_dir()
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.mode() & 0o077 != 0
+        || metadata.mode() & 0o700 != 0o700
+    {
+        return Err(KwinWindowError::InvalidRuntimeDirectory);
+    }
+    Ok(())
 }
 
 /// Remove temporary files left by WayExpand tracker processes that exited
@@ -644,8 +675,9 @@ impl WindowTracker for KwinWindowTracker {
 mod tests {
     use super::{
         bounded_session_connection, cleanup_orphan_tracker_scripts, is_kwin_sender,
-        parse_tracker_script_filename, window_context_from_signal, KwinWindowError,
-        KwinWindowTracker, ORPHAN_CHECK_LIMIT, SCRIPT_TEMPLATE, TRACKER_HEALTH_CHECK_INTERVAL,
+        parse_tracker_script_filename, validate_tracker_script_directory,
+        window_context_from_signal, KwinWindowError, KwinWindowTracker, ORPHAN_CHECK_LIMIT,
+        SCRIPT_TEMPLATE, TRACKER_HEALTH_CHECK_INTERVAL,
     };
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
     use std::{
@@ -724,6 +756,43 @@ mod tests {
         assert!(is_kwin_sender(Some(kwin_owner), kwin_owner));
         assert!(!is_kwin_sender(Some(":1.43"), kwin_owner));
         assert!(!is_kwin_sender(None, kwin_owner));
+    }
+
+    #[test]
+    fn tracker_script_directory_must_be_private_and_user_owned() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-kwin-runtime-dir-{}-{suffix}",
+            process::id()
+        ));
+        fs::create_dir(&directory).unwrap();
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(validate_tracker_script_directory(&directory).is_ok());
+
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(matches!(
+            validate_tracker_script_directory(&directory),
+            Err(KwinWindowError::InvalidRuntimeDirectory)
+        ));
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+
+        let file = directory.join("not-a-directory");
+        fs::write(&file, "x").unwrap();
+        assert!(matches!(
+            validate_tracker_script_directory(&file),
+            Err(KwinWindowError::InvalidRuntimeDirectory)
+        ));
+
+        let symlink = directory.join("directory-link");
+        std::os::unix::fs::symlink(&directory, &symlink).unwrap();
+        assert!(matches!(
+            validate_tracker_script_directory(&symlink),
+            Err(KwinWindowError::InvalidRuntimeDirectory)
+        ));
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

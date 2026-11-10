@@ -41,6 +41,9 @@ SyslogIdentifier=wayexpand-evdev
 NoNewPrivileges=yes
 UMask=0077
 PrivateTmp=yes
+# KWin loads the app-identity tracker script from XDG_RUNTIME_DIR. Keep the
+# runtime directory visible to the compositor; the tracker script is created
+# there with mode 0600 rather than under this unit's private /tmp.
 PrivateMounts=yes
 ProtectSystem=strict
 ProtectHome=read-only
