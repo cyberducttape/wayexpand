@@ -27,6 +27,7 @@ fn import_expansion(trigger: &str, replacement: &str) -> wayexpand_core::Expansi
         id: wayexpand_core::ExpansionConfig::new_id(),
         trigger: trigger.into(),
         replacement: replacement.into(),
+        delivery: wayexpand_core::ExpansionDelivery::Insert,
         description: String::new(),
         tags: vec!["imported".into()],
         category: String::new(),
@@ -76,6 +77,7 @@ fn import_merge_deduplicates_and_keeps_existing_trigger_conflicts() {
             wayexpand_core::ExpansionConfig {
                 trigger: ":hello".into(),
                 replacement: "case variant wins".into(),
+                delivery: wayexpand_core::ExpansionDelivery::Insert,
                 propagate_case: true,
                 aliases: Vec::new(),
                 ..import_expansion(":hello", "case variant wins")
@@ -122,6 +124,7 @@ fn draft() -> Draft {
         match_mode: MatchMode::Immediate,
         propagate_case: false,
         output_file: String::new(),
+        delivery: wayexpand_core::ExpansionDelivery::Insert,
         command_enabled: true,
         command_action_mode: false,
         command_action: String::new(),
@@ -205,6 +208,7 @@ fn command_editor_round_trips_managed_action_configuration() {
         id: wayexpand_core::ExpansionConfig::new_id(),
         trigger: ":cluster".into(),
         replacement: String::new(),
+        delivery: wayexpand_core::ExpansionDelivery::Insert,
         description: String::new(),
         tags: Vec::new(),
         category: String::new(),
@@ -236,6 +240,7 @@ fn command_editor_preserves_advanced_environment_settings() {
         id: wayexpand_core::ExpansionConfig::new_id(),
         trigger: ":foo".into(),
         replacement: String::new(),
+        delivery: wayexpand_core::ExpansionDelivery::Insert,
         description: String::new(),
         tags: Vec::new(),
         category: String::new(),
@@ -639,6 +644,7 @@ fn invalid_command_draft_is_not_mistaken_for_clean_none() {
         id: wayexpand_core::ExpansionConfig::new_id(),
         trigger: ":foo".into(),
         replacement: String::new(),
+        delivery: wayexpand_core::ExpansionDelivery::Insert,
         description: String::new(),
         tags: Vec::new(),
         category: String::new(),
@@ -662,6 +668,7 @@ fn editor_draft_preserves_tag_and_app_filter_tokens_verbatim() {
         id: wayexpand_core::ExpansionConfig::new_id(),
         trigger: ":foo".into(),
         replacement: String::new(),
+        delivery: wayexpand_core::ExpansionDelivery::Insert,
         description: String::new(),
         tags: vec!["customer, west".into(), " email ".into()],
         category: String::new(),
@@ -676,6 +683,18 @@ fn editor_draft_preserves_tag_and_app_filter_tokens_verbatim() {
     let form = Draft::from_expansion(&source);
     assert_eq!(form.tags, source.tags);
     assert_eq!(form.app_filter, source.app_filter);
+}
+
+#[test]
+fn editor_round_trips_generate_only_delivery() {
+    let mut expansion = import_expansion(";;script", "#!/bin/sh\necho reviewed");
+    expansion.delivery = wayexpand_core::ExpansionDelivery::GenerateOnly;
+    let draft = Draft::from_expansion(&expansion);
+    let saved = draft.to_expansion(expansion.id.clone()).unwrap();
+    assert_eq!(
+        saved.delivery,
+        wayexpand_core::ExpansionDelivery::GenerateOnly
+    );
 }
 
 #[test]
@@ -741,6 +760,7 @@ fn switching_snippets_preserves_unsaved_draft_until_decision() {
                 id: ExpansionConfig::new_id(),
                 trigger: ":one".into(),
                 replacement: "one".into(),
+                delivery: wayexpand_core::ExpansionDelivery::Insert,
                 description: String::new(),
                 tags: Vec::new(),
                 category: String::new(),
@@ -756,6 +776,7 @@ fn switching_snippets_preserves_unsaved_draft_until_decision() {
                 id: ExpansionConfig::new_id(),
                 trigger: ":two".into(),
                 replacement: "two".into(),
+                delivery: wayexpand_core::ExpansionDelivery::Insert,
                 description: String::new(),
                 tags: Vec::new(),
                 category: String::new(),
@@ -799,6 +820,7 @@ fn gui_refuses_to_overwrite_an_external_config_change() {
             id: ExpansionConfig::new_id(),
             trigger: ":one".into(),
             replacement: "one".into(),
+            delivery: wayexpand_core::ExpansionDelivery::Insert,
             description: String::new(),
             tags: Vec::new(),
             category: String::new(),
@@ -855,6 +877,7 @@ fn a_conflicting_save_merges_with_an_external_edit_of_another_snippet() {
         id: ExpansionConfig::new_id(),
         trigger: trigger.into(),
         replacement: "original".into(),
+        delivery: wayexpand_core::ExpansionDelivery::Insert,
         description: String::new(),
         tags: Vec::new(),
         category: String::new(),
@@ -898,6 +921,7 @@ fn changes_queued_behind_a_save_in_flight_are_all_kept() {
         id: ExpansionConfig::new_id(),
         trigger: trigger.into(),
         replacement: "original".into(),
+        delivery: wayexpand_core::ExpansionDelivery::Insert,
         description: String::new(),
         tags: Vec::new(),
         category: String::new(),
@@ -980,6 +1004,7 @@ fn failed_reload_leaves_the_loaded_editor_snapshot_untouched() {
             id: ExpansionConfig::new_id(),
             trigger: ":before".into(),
             replacement: "original text".into(),
+            delivery: wayexpand_core::ExpansionDelivery::Insert,
             description: "original description".into(),
             tags: vec!["preserve".into()],
             category: "original category".into(),
@@ -1054,6 +1079,7 @@ fn reload_completion_cannot_overwrite_edits_made_while_loading() {
             id: ExpansionConfig::new_id(),
             trigger: ":before".into(),
             replacement: "original".into(),
+            delivery: wayexpand_core::ExpansionDelivery::Insert,
             description: String::new(),
             tags: Vec::new(),
             category: String::new(),
@@ -1115,6 +1141,7 @@ fn gui_core_revision_guard_catches_a_write_after_the_early_check() {
             id: ExpansionConfig::new_id(),
             trigger: ":one".into(),
             replacement: "initial".into(),
+            delivery: wayexpand_core::ExpansionDelivery::Insert,
             description: String::new(),
             tags: Vec::new(),
             category: String::new(),
@@ -1190,6 +1217,7 @@ fn undo_history_is_bounded() {
                 id: ExpansionConfig::new_id(),
                 trigger: ":undo-test".into(),
                 replacement: "previous value".into(),
+                delivery: wayexpand_core::ExpansionDelivery::Insert,
                 description: String::new(),
                 tags: Vec::new(),
                 category: String::new(),
@@ -1232,6 +1260,7 @@ fn undo_history_respects_its_byte_budget() {
                 id: ExpansionConfig::new_id(),
                 trigger: ":large-undo".into(),
                 replacement: "x".repeat(300_000),
+                delivery: wayexpand_core::ExpansionDelivery::Insert,
                 description: String::new(),
                 tags: Vec::new(),
                 category: String::new(),
@@ -1265,6 +1294,7 @@ fn saved_snippet_edit_can_be_undone_back_to_disk() {
             id: ExpansionConfig::new_id(),
             trigger: ":undo-save".into(),
             replacement: "before".into(),
+            delivery: wayexpand_core::ExpansionDelivery::Insert,
             description: String::new(),
             tags: Vec::new(),
             category: String::new(),
@@ -1308,6 +1338,7 @@ fn undo_is_refused_while_a_save_is_in_flight() {
             id: ExpansionConfig::new_id(),
             trigger: ":undo-flight".into(),
             replacement: "before".into(),
+            delivery: wayexpand_core::ExpansionDelivery::Insert,
             description: String::new(),
             tags: Vec::new(),
             category: String::new(),
@@ -1365,6 +1396,7 @@ fn a_save_that_finishes_after_newer_edits_still_updates_the_loaded_config() {
             id: ExpansionConfig::new_id(),
             trigger: ":race".into(),
             replacement: "before".into(),
+            delivery: wayexpand_core::ExpansionDelivery::Insert,
             description: String::new(),
             tags: Vec::new(),
             category: String::new(),
@@ -1445,6 +1477,7 @@ fn undo_delta_restores_modified_deleted_inserted_and_reordered_snippets() {
         id: "stable-a".into(),
         trigger: ":before".into(),
         replacement: "old text".into(),
+        delivery: wayexpand_core::ExpansionDelivery::Insert,
         description: String::new(),
         tags: Vec::new(),
         category: String::new(),
@@ -1460,6 +1493,7 @@ fn undo_delta_restores_modified_deleted_inserted_and_reordered_snippets() {
         id: "stable-b".into(),
         trigger: ":deleted".into(),
         replacement: "restore me".into(),
+        delivery: wayexpand_core::ExpansionDelivery::Insert,
         aliases: Vec::new(),
         ..existing.clone()
     };
@@ -1964,6 +1998,7 @@ fn the_window_title_names_the_open_file_and_marks_unsaved_edits() {
             id: ExpansionConfig::new_id(),
             trigger: ":one".into(),
             replacement: "one".into(),
+            delivery: wayexpand_core::ExpansionDelivery::Insert,
             description: String::new(),
             tags: Vec::new(),
             category: String::new(),
@@ -2028,6 +2063,7 @@ fn every_panel_and_dialog_renders_for_supported_languages_and_settings_tabs() {
                 id: ExpansionConfig::new_id(),
                 trigger: ":plain".into(),
                 replacement: "plain text".into(),
+                delivery: wayexpand_core::ExpansionDelivery::Insert,
                 description: "A plain snippet".into(),
                 tags: vec!["demo".into()],
                 category: "email".into(),
@@ -2043,6 +2079,7 @@ fn every_panel_and_dialog_renders_for_supported_languages_and_settings_tabs() {
                 id: ExpansionConfig::new_id(),
                 trigger: ":cmd".into(),
                 replacement: "fallback".into(),
+                delivery: wayexpand_core::ExpansionDelivery::Insert,
                 description: String::new(),
                 tags: Vec::new(),
                 category: String::new(),
@@ -2092,6 +2129,12 @@ fn every_panel_and_dialog_renders_for_supported_languages_and_settings_tabs() {
         capture_local_compose_aware: Some(false),
         capture_layout_aware: Some(false),
         window_tracker_connected: Some(true),
+        window_tracker_state: Some("connected".into()),
+        window_tracker_reconnect_attempts_total: Some(0),
+        window_tracker_disconnects_total: Some(0),
+        window_tracker_last_failure_reason: Some("none".into()),
+        window_tracker_last_connected_unix: Some(1_794_268_800),
+        window_tracker_reconnect_backoff_ms: Some(0),
         window_identity_exact: Some(true),
         inject_atomic_replace: Some(false),
         inject_full_unicode: Some(true),
@@ -2497,6 +2540,7 @@ fn format_preserving_saves_keep_manual_comments() {
             id: ExpansionConfig::new_id(),
             trigger: ":sig".into(),
             replacement: "Regards".into(),
+            delivery: wayexpand_core::ExpansionDelivery::Insert,
             description: "Signature".into(),
             tags: Vec::new(),
             category: String::new(),
@@ -2705,6 +2749,7 @@ fn duplicating_a_snippet_with_aliases_saves_a_copy_without_them() {
             id: ExpansionConfig::new_id(),
             trigger: ";sig".into(),
             replacement: "Best, Sam".into(),
+            delivery: wayexpand_core::ExpansionDelivery::Insert,
             description: String::new(),
             tags: Vec::new(),
             category: String::new(),
@@ -2741,6 +2786,7 @@ fn save_rejects_an_alias_that_collides_with_another_snippet() {
         id: ExpansionConfig::new_id(),
         trigger: trigger.into(),
         replacement: "value".into(),
+        delivery: wayexpand_core::ExpansionDelivery::Insert,
         description: String::new(),
         tags: Vec::new(),
         category: String::new(),

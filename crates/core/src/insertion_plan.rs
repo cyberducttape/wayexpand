@@ -40,6 +40,9 @@ pub fn plan_insertion(
     let Some(route) = route else {
         return InsertionStrategy::ClipboardAssistedPaste;
     };
+    if route.max_text_chars > 0 && characters > route.max_text_chars {
+        return InsertionStrategy::ClipboardAssistedPaste;
+    }
     if route.atomic_verified_replace {
         return InsertionStrategy::VerifiedReplacement;
     }
@@ -55,9 +58,6 @@ pub fn plan_insertion(
     else {
         return InsertionStrategy::ClipboardAssistedPaste;
     };
-    if route.max_text_chars > 0 && characters > route.max_text_chars {
-        return InsertionStrategy::ClipboardAssistedPaste;
-    }
     let characters = u64::try_from(characters).unwrap_or(u64::MAX);
     let rate = u64::from(rate);
     let predicted_ms = characters.saturating_mul(1_000).saturating_add(rate - 1) / rate;
@@ -83,6 +83,7 @@ mod tests {
             10_000,
             Some(InsertionRouteCapabilities {
                 atomic_verified_replace: true,
+                max_text_chars: 0,
                 ..route()
             }),
             CompatibilityMode::Off,
@@ -105,6 +106,7 @@ mod tests {
                 5_000,
                 Some(InsertionRouteCapabilities {
                     native_text_commit: true,
+                    max_text_chars: 0,
                     ..route()
                 }),
                 CompatibilityMode::TrackedFocus,
@@ -135,6 +137,30 @@ mod tests {
             plan_insertion(
                 9,
                 Some(InsertionRouteCapabilities {
+                    max_text_chars: 8,
+                    ..route()
+                }),
+                CompatibilityMode::TrackedFocus,
+            ),
+            InsertionStrategy::ClipboardAssistedPaste
+        );
+        assert_eq!(
+            plan_insertion(
+                9,
+                Some(InsertionRouteCapabilities {
+                    atomic_verified_replace: true,
+                    max_text_chars: 8,
+                    ..route()
+                }),
+                CompatibilityMode::Off,
+            ),
+            InsertionStrategy::ClipboardAssistedPaste
+        );
+        assert_eq!(
+            plan_insertion(
+                9,
+                Some(InsertionRouteCapabilities {
+                    native_text_commit: true,
                     max_text_chars: 8,
                     ..route()
                 }),

@@ -30,6 +30,121 @@ const TRACKER_INITIAL_BACKOFF: Duration = Duration::from_millis(250);
 const TRACKER_MAX_BACKOFF: Duration = Duration::from_secs(30);
 const TRACKER_STABLE_INTERVAL: Duration = Duration::from_secs(30);
 
+const TRACKER_STATE_UNAVAILABLE: u64 = 0;
+const TRACKER_STATE_STARTING: u64 = 1;
+const TRACKER_STATE_CONNECTED: u64 = 2;
+const TRACKER_STATE_RECONNECTING: u64 = 3;
+const TRACKER_STATE_STOPPED: u64 = 4;
+
+const TRACKER_FAILURE_PROBE_UNAVAILABLE: u64 = 1;
+const TRACKER_FAILURE_CONNECT_FAILED: u64 = 2;
+const TRACKER_FAILURE_DISCONNECTED: u64 = 3;
+const TRACKER_FAILURE_CONFIGURATION_CHANGED: u64 = 4;
+const TRACKER_FAILURE_COMPOSITOR_UNSUPPORTED: u64 = 5;
+const TRACKER_FAILURE_SUPERVISOR_START_FAILED: u64 = 6;
+
+/// Sanitized compositor focus-tracker lifecycle counters. Failure reasons are
+/// stable categories only; D-Bus errors, app IDs, and window titles stay out
+/// of the status contract.
+#[derive(Default)]
+struct WindowTrackerDiagnostics {
+    state: std::sync::atomic::AtomicU64,
+    reconnect_attempts_total: std::sync::atomic::AtomicU64,
+    disconnects_total: std::sync::atomic::AtomicU64,
+    last_failure_reason: std::sync::atomic::AtomicU64,
+    last_connected_unix: std::sync::atomic::AtomicU64,
+    reconnect_backoff_ms: std::sync::atomic::AtomicU64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WindowTrackerDiagnosticsSnapshot {
+    pub state: &'static str,
+    pub reconnect_attempts_total: u64,
+    pub disconnects_total: u64,
+    pub last_failure_reason: &'static str,
+    pub last_connected_unix: u64,
+    pub reconnect_backoff_ms: u64,
+}
+
+impl WindowTrackerDiagnostics {
+    fn snapshot(&self) -> WindowTrackerDiagnosticsSnapshot {
+        let state = match self.state.load(Ordering::Relaxed) {
+            TRACKER_STATE_STARTING => "starting",
+            TRACKER_STATE_CONNECTED => "connected",
+            TRACKER_STATE_RECONNECTING => "reconnecting",
+            TRACKER_STATE_STOPPED => "stopped",
+            _ => "unavailable",
+        };
+        let last_failure_reason = match self.last_failure_reason.load(Ordering::Relaxed) {
+            TRACKER_FAILURE_PROBE_UNAVAILABLE => "probe_unavailable",
+            TRACKER_FAILURE_CONNECT_FAILED => "connect_failed",
+            TRACKER_FAILURE_DISCONNECTED => "tracker_disconnected",
+            TRACKER_FAILURE_CONFIGURATION_CHANGED => "configuration_changed",
+            TRACKER_FAILURE_COMPOSITOR_UNSUPPORTED => "compositor_unsupported",
+            TRACKER_FAILURE_SUPERVISOR_START_FAILED => "supervisor_start_failed",
+            _ => "none",
+        };
+        WindowTrackerDiagnosticsSnapshot {
+            state,
+            reconnect_attempts_total: self.reconnect_attempts_total.load(Ordering::Relaxed),
+            disconnects_total: self.disconnects_total.load(Ordering::Relaxed),
+            last_failure_reason,
+            last_connected_unix: self.last_connected_unix.load(Ordering::Relaxed),
+            reconnect_backoff_ms: self.reconnect_backoff_ms.load(Ordering::Relaxed),
+        }
+    }
+
+    fn set_failure(&self, reason: u64) {
+        self.last_failure_reason.store(reason, Ordering::Relaxed);
+        self.state
+            .store(TRACKER_STATE_RECONNECTING, Ordering::Release);
+    }
+
+    fn set_backoff(&self, delay: Duration) {
+        self.reconnect_backoff_ms.store(
+            delay.as_millis().min(u128::from(u64::MAX)) as u64,
+            Ordering::Relaxed,
+        );
+    }
+
+    fn mark_connected(&self) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        self.last_connected_unix.store(now, Ordering::Relaxed);
+        self.reconnect_backoff_ms.store(0, Ordering::Relaxed);
+        self.state.store(TRACKER_STATE_CONNECTED, Ordering::Release);
+    }
+
+    fn mark_stopped(&self) {
+        self.reconnect_backoff_ms.store(0, Ordering::Relaxed);
+        self.state.store(TRACKER_STATE_STOPPED, Ordering::Release);
+    }
+
+    fn mark_unavailable(&self, reason: u64) {
+        self.last_failure_reason.store(reason, Ordering::Relaxed);
+        self.reconnect_backoff_ms.store(0, Ordering::Relaxed);
+        self.state
+            .store(TRACKER_STATE_UNAVAILABLE, Ordering::Release);
+    }
+}
+
+fn shared_tracker_diagnostics() -> Arc<WindowTrackerDiagnostics> {
+    use std::sync::OnceLock;
+    static DIAGNOSTICS: OnceLock<Arc<WindowTrackerDiagnostics>> = OnceLock::new();
+    Arc::clone(DIAGNOSTICS.get_or_init(|| Arc::new(WindowTrackerDiagnostics::default())))
+}
+
+pub(crate) fn window_tracker_diagnostics_snapshot() -> WindowTrackerDiagnosticsSnapshot {
+    shared_tracker_diagnostics().snapshot()
+}
+
+struct TrackerConnectionState {
+    connected: Arc<AtomicBool>,
+    diagnostics: Arc<WindowTrackerDiagnostics>,
+}
+
 pub struct WindowTrackerHandle {
     pub receiver: WindowUpdateReceiver,
     connected: Arc<AtomicBool>,
@@ -110,13 +225,21 @@ impl ReconnectBackoff {
 /// production daemon until its event-loop, ownership, and compositor test
 /// coverage are complete.
 pub fn spawn_window_tracker(requires_titles: bool) -> Option<WindowTrackerHandle> {
-    let kind = WindowTrackerKind::for_session()?;
+    let Some(kind) = WindowTrackerKind::for_session() else {
+        shared_tracker_diagnostics().mark_unavailable(TRACKER_FAILURE_COMPOSITOR_UNSUPPORTED);
+        return None;
+    };
 
     let (sender, receiver) = window_update_channel();
     let connected = Arc::new(AtomicBool::new(false));
     let supervisor_connected = Arc::clone(&connected);
     let stop = Arc::new(AtomicBool::new(false));
     let supervisor_stop = Arc::clone(&stop);
+    let diagnostics = shared_tracker_diagnostics();
+    diagnostics
+        .state
+        .store(TRACKER_STATE_STARTING, Ordering::Release);
+    let supervisor_diagnostics = Arc::clone(&diagnostics);
     let title_matching =
         (kind == WindowTrackerKind::GnomeShell).then(|| Arc::new(AtomicBool::new(requires_titles)));
     let supervisor_title_matching = title_matching.clone();
@@ -125,21 +248,27 @@ pub fn spawn_window_tracker(requires_titles: bool) -> Option<WindowTrackerHandle
         .spawn(move || match kind {
             WindowTrackerKind::Kwin => supervise_window_tracker(
                 sender,
-                supervisor_connected,
                 supervisor_stop,
                 kind.label(),
                 KwinWindowTracker::probe,
                 |_| KwinWindowTracker::new(),
                 None,
+                TrackerConnectionState {
+                    connected: supervisor_connected,
+                    diagnostics: supervisor_diagnostics,
+                },
             ),
             WindowTrackerKind::GnomeShell => supervise_window_tracker(
                 sender,
-                supervisor_connected,
                 supervisor_stop,
                 kind.label(),
                 GnomeWindowTracker::probe,
                 GnomeWindowTracker::new_with_titles,
                 supervisor_title_matching,
+                TrackerConnectionState {
+                    connected: supervisor_connected,
+                    diagnostics: supervisor_diagnostics,
+                },
             ),
         }) {
         Ok(supervisor) => Some(WindowTrackerHandle {
@@ -150,6 +279,7 @@ pub fn spawn_window_tracker(requires_titles: bool) -> Option<WindowTrackerHandle
             supervisor: Some(supervisor),
         }),
         Err(error) => {
+            diagnostics.mark_unavailable(TRACKER_FAILURE_SUPERVISOR_START_FAILED);
             warn!(%error, tracker = kind.label(), "could not start window tracker supervisor");
             None
         }
@@ -158,12 +288,12 @@ pub fn spawn_window_tracker(requires_titles: bool) -> Option<WindowTrackerHandle
 
 fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
     sender: WindowUpdateSender,
-    connected: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
     label: &'static str,
     mut probe: Probe,
     mut connect: Connect,
     title_matching: Option<Arc<AtomicBool>>,
+    lifecycle: TrackerConnectionState,
 ) where
     T: WindowTracker,
     Probe: FnMut() -> Result<(), ProbeError>,
@@ -172,18 +302,38 @@ fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
     ConnectError: std::fmt::Display,
 {
     let mut backoff = ReconnectBackoff::default();
+    let mut attempted = false;
     loop {
         if stop.load(Ordering::Acquire) {
+            lifecycle.diagnostics.mark_stopped();
             return;
         }
-        connected.store(false, Ordering::Release);
+        if attempted {
+            lifecycle
+                .diagnostics
+                .reconnect_attempts_total
+                .fetch_add(1, Ordering::Relaxed);
+            lifecycle
+                .diagnostics
+                .state
+                .store(TRACKER_STATE_RECONNECTING, Ordering::Release);
+        }
+        attempted = true;
+        lifecycle.connected.store(false, Ordering::Release);
         if sender.send(None).is_err() {
+            lifecycle.diagnostics.mark_stopped();
             return;
         }
 
         if let Err(error) = probe() {
+            lifecycle
+                .diagnostics
+                .set_failure(TRACKER_FAILURE_PROBE_UNAVAILABLE);
             warn!(%error, tracker = label, "window tracking unavailable; will reprobe");
-            if !wait_for_tracker_retry(&stop, &sender, backoff.after_failure(None)) {
+            let delay = backoff.after_failure(None);
+            lifecycle.diagnostics.set_backoff(delay);
+            if !wait_for_tracker_retry(&stop, &sender, delay) {
+                lifecycle.diagnostics.mark_stopped();
                 return;
             }
             continue;
@@ -195,8 +345,14 @@ fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
         let mut tracker = match connect(current_title_requirement) {
             Ok(tracker) => tracker,
             Err(error) => {
+                lifecycle
+                    .diagnostics
+                    .set_failure(TRACKER_FAILURE_CONNECT_FAILED);
                 warn!(%error, tracker = label, "window tracker failed to connect; will retry");
-                if !wait_for_tracker_retry(&stop, &sender, backoff.after_failure(None)) {
+                let delay = backoff.after_failure(None);
+                lifecycle.diagnostics.set_backoff(delay);
+                if !wait_for_tracker_retry(&stop, &sender, delay) {
+                    lifecycle.diagnostics.mark_stopped();
                     return;
                 }
                 continue;
@@ -205,10 +361,13 @@ fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
 
         // Clear any previously cached app identity before accepting the new
         // script's initial active-window snapshot.
-        connected.store(true, Ordering::Release);
+        lifecycle.connected.store(true, Ordering::Release);
         if sender.send(None).is_err() {
+            lifecycle.connected.store(false, Ordering::Release);
+            lifecycle.diagnostics.mark_stopped();
             return;
         }
+        lifecycle.diagnostics.mark_connected();
         info!(tracker = label, "window tracker connected");
         let connected_at = Instant::now();
         loop {
@@ -217,14 +376,19 @@ fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
             // to end this loop. Without this check, daemon shutdown hung on
             // a connected tracker until systemd killed it.
             if stop.load(Ordering::Acquire) {
-                connected.store(false, Ordering::Release);
+                lifecycle.connected.store(false, Ordering::Release);
+                lifecycle.diagnostics.mark_stopped();
                 return;
             }
             if title_matching.as_ref().is_some_and(|required| {
                 required.load(Ordering::Acquire) != current_title_requirement
             }) {
-                connected.store(false, Ordering::Release);
+                lifecycle.connected.store(false, Ordering::Release);
+                lifecycle
+                    .diagnostics
+                    .set_failure(TRACKER_FAILURE_CONFIGURATION_CHANGED);
                 if sender.send(None).is_err() {
+                    lifecycle.diagnostics.mark_stopped();
                     return;
                 }
                 break;
@@ -232,15 +396,25 @@ fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
             match tracker.next_window_timeout(TRACKER_POLL_INTERVAL) {
                 Ok(Some(window)) => {
                     if sender.send(window).is_err() {
+                        lifecycle.connected.store(false, Ordering::Release);
+                        lifecycle.diagnostics.mark_stopped();
                         return;
                     }
                 }
                 // No focus change within the timeout is expected.
                 Ok(None) => {}
                 Err(error) => {
-                    connected.store(false, Ordering::Release);
+                    lifecycle.connected.store(false, Ordering::Release);
+                    lifecycle
+                        .diagnostics
+                        .disconnects_total
+                        .fetch_add(1, Ordering::Relaxed);
+                    lifecycle
+                        .diagnostics
+                        .set_failure(TRACKER_FAILURE_DISCONNECTED);
                     warn!(%error, tracker = label, "window tracker disconnected; will reconnect");
                     if sender.send(None).is_err() {
+                        lifecycle.diagnostics.mark_stopped();
                         return;
                     }
                     break;
@@ -255,7 +429,9 @@ fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
             tracker = label,
             "waiting before reconnecting the window tracker"
         );
+        lifecycle.diagnostics.set_backoff(delay);
         if !wait_for_tracker_retry(&stop, &sender, delay) {
+            lifecycle.diagnostics.mark_stopped();
             return;
         }
     }
@@ -369,6 +545,48 @@ mod tests {
     }
 
     #[test]
+    fn tracker_diagnostics_expose_only_stable_lifecycle_categories() {
+        let diagnostics = WindowTrackerDiagnostics::default();
+        diagnostics.set_failure(TRACKER_FAILURE_DISCONNECTED);
+        diagnostics.set_backoff(Duration::from_millis(750));
+        diagnostics
+            .reconnect_attempts_total
+            .fetch_add(2, Ordering::Relaxed);
+        diagnostics
+            .disconnects_total
+            .fetch_add(1, Ordering::Relaxed);
+
+        let reconnecting = diagnostics.snapshot();
+        assert_eq!(reconnecting.state, "reconnecting");
+        assert_eq!(reconnecting.last_failure_reason, "tracker_disconnected");
+        assert_eq!(reconnecting.reconnect_attempts_total, 2);
+        assert_eq!(reconnecting.disconnects_total, 1);
+        assert_eq!(reconnecting.reconnect_backoff_ms, 750);
+
+        diagnostics.mark_connected();
+        let connected = diagnostics.snapshot();
+        assert_eq!(connected.state, "connected");
+        assert_eq!(connected.reconnect_backoff_ms, 0);
+        assert!(connected.last_connected_unix > 0);
+        // The retained failure is a sanitized category, useful for explaining
+        // why the last reconnect happened.
+        assert_eq!(connected.last_failure_reason, "tracker_disconnected");
+
+        diagnostics.mark_stopped();
+        assert_eq!(diagnostics.snapshot().state, "stopped");
+        diagnostics.mark_unavailable(TRACKER_FAILURE_COMPOSITOR_UNSUPPORTED);
+        let unavailable = diagnostics.snapshot();
+        assert_eq!(unavailable.state, "unavailable");
+        assert_eq!(unavailable.last_failure_reason, "compositor_unsupported");
+
+        diagnostics.mark_unavailable(TRACKER_FAILURE_SUPERVISOR_START_FAILED);
+        assert_eq!(
+            diagnostics.snapshot().last_failure_reason,
+            "supervisor_start_failed"
+        );
+    }
+
+    #[test]
     fn supervisor_reprobes_reconnects_and_publishes_fresh_context() {
         let (sender, receiver) = window_update_channel();
         let mut probe_count = 0;
@@ -395,15 +613,20 @@ mod tests {
         let supervisor_connected = Arc::clone(&connected);
         let stop = Arc::new(AtomicBool::new(false));
         let supervisor_stop = Arc::clone(&stop);
+        let diagnostics = Arc::new(WindowTrackerDiagnostics::default());
+        let supervisor_diagnostics = Arc::clone(&diagnostics);
         let supervisor = thread::spawn(move || {
             supervise_window_tracker(
                 sender,
-                supervisor_connected,
                 supervisor_stop,
                 "test tracker",
                 probe,
                 connect,
                 None,
+                TrackerConnectionState {
+                    connected: supervisor_connected,
+                    diagnostics: supervisor_diagnostics,
+                },
             );
         });
 
@@ -421,6 +644,11 @@ mod tests {
         drop(receiver);
         supervisor.join().unwrap();
         assert!(refreshed, "reconnected tracker must publish a fresh window");
+        let snapshot = diagnostics.snapshot();
+        assert_eq!(snapshot.state, "stopped");
+        assert_eq!(snapshot.reconnect_attempts_total, 2);
+        assert_eq!(snapshot.disconnects_total, 2);
+        assert_eq!(snapshot.last_failure_reason, "tracker_disconnected");
     }
 
     #[test]
@@ -441,12 +669,15 @@ mod tests {
         let supervisor = thread::spawn(move || {
             supervise_window_tracker(
                 sender,
-                supervisor_connected,
                 supervisor_stop,
                 "test tracker",
                 || Ok::<_, &'static str>(()),
                 |_| Ok::<_, &'static str>(tracker.take().unwrap()),
                 None,
+                TrackerConnectionState {
+                    connected: supervisor_connected,
+                    diagnostics: Arc::new(WindowTrackerDiagnostics::default()),
+                },
             );
         });
 
@@ -488,12 +719,15 @@ mod tests {
         let supervisor = thread::spawn(move || {
             supervise_window_tracker(
                 sender,
-                supervisor_connected,
                 supervisor_stop,
                 "test tracker",
                 || Ok::<_, &'static str>(()),
                 |_| Ok::<_, &'static str>(IdleTracker),
                 None,
+                TrackerConnectionState {
+                    connected: supervisor_connected,
+                    diagnostics: Arc::new(WindowTrackerDiagnostics::default()),
+                },
             );
         });
         let deadline = Instant::now() + Duration::from_secs(1);
@@ -528,7 +762,6 @@ mod tests {
         let supervisor = thread::spawn(move || {
             supervise_window_tracker(
                 sender,
-                supervisor_connected,
                 supervisor_stop,
                 "test tracker",
                 || Ok::<_, &'static str>(()),
@@ -537,6 +770,10 @@ mod tests {
                     Ok::<_, &'static str>(IdleTracker)
                 },
                 Some(supervisor_title_requirement),
+                TrackerConnectionState {
+                    connected: supervisor_connected,
+                    diagnostics: Arc::new(WindowTrackerDiagnostics::default()),
+                },
             );
         });
 

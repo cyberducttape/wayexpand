@@ -117,11 +117,17 @@ impl EventError {
             wayexpand_core::TransactionOutcome::NotApplied { source }
             | wayexpand_core::TransactionOutcome::UnknownApplicationOutcome { source }
             | wayexpand_core::TransactionOutcome::UnknownPartialFailure { source } => {
+                if source.kind() == wayexpand_core::InjectorErrorKind::InputInterrupted {
+                    return "partial_write_input_interrupted";
+                }
                 if let Some(category) = backend_refusal_category(&source.message) {
                     return category;
                 }
                 match source.kind() {
                     wayexpand_core::InjectorErrorKind::TransportFailure => "transport_failure",
+                    wayexpand_core::InjectorErrorKind::InputInterrupted => {
+                        "partial_write_input_interrupted"
+                    }
                     wayexpand_core::InjectorErrorKind::ExpansionRejected => "expansion_rejected",
                     wayexpand_core::InjectorErrorKind::FatalBackendFailure => "backend_failure",
                 }
@@ -136,7 +142,9 @@ impl EventError {
     /// lost libei/wlroots connection (non-atomic backends) must reconnect
     /// rather than terminate the daemon.
     fn retryable(&self) -> bool {
-        self.source.source().is_some_and(|source| source.retryable)
+        self.source.source().is_some_and(|source| {
+            source.retryable && source.kind() != wayexpand_core::InjectorErrorKind::InputInterrupted
+        })
     }
 
     /// The route limit that refused this expansion before typing, if that
@@ -361,11 +369,11 @@ fn main() -> Result<()> {
         .engine
         .set_title_matching_disabled(enforcement_policy.disable_title_matching);
     if terminal_apps_only {
-        // A terminal-only daemon with no terminals would run and never
-        // expand; refuse instead so the misconfiguration is visible.
+        // An app-scoped daemon with no configured applications would run and
+        // never expand; refuse instead so the misconfiguration is visible.
         if config.engine.terminal_app_count() == 0 {
             anyhow::bail!(
-                "--terminal-apps-only requires settings.terminal_apps in {}; add your terminal's app ID, for example terminal_apps = [\"org.kde.konsole\"]",
+                "--terminal-apps-only requires settings.terminal_apps or settings.raw_capture_apps in {}; add app IDs that own evdev matching",
                 path.display()
             );
         }
@@ -373,7 +381,7 @@ fn main() -> Result<()> {
         status::set_terminal_apps_only(true);
         info!(
             terminal_apps = config.engine.terminal_app_count(),
-            "automatic expansion is limited to settings.terminal_apps"
+            "automatic expansion is limited to the configured app-scoped evdev allowlist"
         );
     }
 

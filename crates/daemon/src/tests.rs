@@ -112,7 +112,7 @@ fn daemon_status_body_matches_documented_stable_contract() {
         "daemon status body fields no longer match tests/contracts/status-json.json"
     );
     assert!(body.starts_with(&format!(
-        "source=input-method\nbackend=input-method-v2\nroute_id=input-method-v2\nbackend_mode=unknown\nstatus_schema=29\ndaemon_commit={}\ndaemon_version={}\nstate=connected\nroute_available=false\nmatching_available=false\nmatching_unavailable_reason=replacement_route_unavailable\npaused=false\n",
+        "source=input-method\nbackend=input-method-v2\nroute_id=input-method-v2\nbackend_mode=unknown\nstatus_schema=30\ndaemon_commit={}\ndaemon_version={}\nstate=connected\nroute_available=false\nmatching_available=false\nmatching_unavailable_reason=replacement_route_unavailable\npaused=false\n",
         super::build_info::COMMIT,
         super::build_info::VERSION
     )));
@@ -144,6 +144,12 @@ fn daemon_status_body_matches_documented_stable_contract() {
         "clipboard_read_failures_total",
         "clipboard_deadline_misses_total",
         "clipboard_read_max_duration_us",
+        "window_tracker_state",
+        "window_tracker_reconnect_attempts_total",
+        "window_tracker_disconnects_total",
+        "window_tracker_last_failure_reason",
+        "window_tracker_last_connected_unix",
+        "window_tracker_reconnect_backoff_ms",
     ] {
         assert!(body
             .lines()

@@ -39,7 +39,7 @@ impl GlobPattern {
         }
     }
 
-    fn matches(&self, value: &str) -> bool {
+    pub(super) fn matches(&self, value: &str) -> bool {
         // Match Unicode scalar values rather than UTF-8 bytes. In particular,
         // `?` consumes one Rust `char` (Unicode scalar value), not one byte or
         // one grapheme cluster. `Chars` is clonable, so wildcard backtracking

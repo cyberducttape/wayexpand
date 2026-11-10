@@ -1053,10 +1053,9 @@ env \
     --log "$E2E_WORK/browser-ibus-e2e-chrome.log" \
     >"$E2E_WORK/browser-ibus-e2e.log" 2>&1 &
 browser_pid=$!
-# The Python helper has a 20-second Chromium readiness deadline. Leave a
-# cleanup margin so it can emit its own timeout and process-state diagnostics
-# before this outer watchdog terminates it.
-tries=250
+# Give Chromium's independent DevTools readiness deadline room to report its
+# failure details instead of racing this wrapper's timeout and being killed.
+tries=600
 while [ ! -e "$E2E_WORK/browser-window-ready" ]; do
     if ! kill -0 "$browser_pid" 2>/dev/null; then
         wait "$browser_pid" || true

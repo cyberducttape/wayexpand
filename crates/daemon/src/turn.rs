@@ -505,6 +505,17 @@ impl Daemon {
     /// output actor and schedule a reconnect, and only permanent failures end
     /// the event loop. The expansion is never replayed.
     pub(crate) fn recover_from_output_error(&mut self, error: EventError) -> Result<()> {
+        if error.source.source().is_some_and(|source| {
+            source.kind() == wayexpand_core::InjectorErrorKind::InputInterrupted
+        }) {
+            warn!(
+                outcome = error.diagnostic_category(),
+                trigger_chars = error.result.trigger.chars().count(),
+                insert_bytes = error.result.insert.len(),
+                "user input overlapped non-atomic output; the expansion was not committed or replayed"
+            );
+            return Ok(());
+        }
         if error.expansion_rejected() {
             self.note_unsupported_output(&error);
             warn!(

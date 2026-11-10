@@ -79,6 +79,8 @@ pub enum ConfigError {
     InvalidOutputFile { index: usize, reason: &'static str },
     #[error("expansion {index} has an invalid command: {reason}")]
     InvalidCommand { index: usize, reason: &'static str },
+    #[error("expansion {index} uses generate_only delivery with a command; generate-only entries must contain static text")]
+    InvalidDelivery { index: usize },
     #[error("duplicate trigger {trigger:?} in expansions {first} and {second}")]
     DuplicateTrigger {
         trigger: String,
@@ -91,6 +93,8 @@ pub enum ConfigError {
     InvalidKeystrokeLimit { maximum: usize },
     #[error("settings.terminal_apps entry {index} must be an app ID (`app_id_exact:` or `app_id_glob:`); at most {maximum} entries")]
     InvalidTerminalApp { index: usize, maximum: usize },
+    #[error("settings.raw_capture_apps entry {index} must be an app ID (`app_id_exact:` or `app_id_glob:`); at most {maximum} entries")]
+    InvalidRawCaptureApp { index: usize, maximum: usize },
     #[error("settings.undo_chord is empty, ambiguous, or contains an unknown modifier")]
     InvalidUndoChord,
     #[error("configuration contains {count} expansions; maximum is {maximum}")]
@@ -220,6 +224,9 @@ impl ConfigError {
             Self::InvalidCommand { index, reason } => {
                 format!("expansion {index} has an invalid command ({reason})")
             }
+            Self::InvalidDelivery { index } => format!(
+                "expansion {index} cannot use generate_only delivery with a command"
+            ),
             Self::DuplicateTrigger { first, second, .. } => {
                 format!("duplicate trigger in expansions {first} and {second}")
             }
@@ -229,6 +236,9 @@ impl ConfigError {
             }
             Self::InvalidTerminalApp { index, maximum } => format!(
                 "settings.terminal_apps entry {index} must be an app ID (app_id_exact: or app_id_glob:); at most {maximum} entries"
+            ),
+            Self::InvalidRawCaptureApp { index, maximum } => format!(
+                "settings.raw_capture_apps entry {index} must be an app ID (app_id_exact: or app_id_glob:); at most {maximum} entries"
             ),
             Self::InvalidUndoChord => "settings.undo_chord is invalid".into(),
             Self::TooManyExpansions { count, maximum } => {

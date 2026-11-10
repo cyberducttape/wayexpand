@@ -81,6 +81,28 @@ impl Strings {
         }
     }
 
+    pub fn generate_only(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Generate only (never expand while typing)",
+            Language::Indonesian => "Hanya buat berkas (jangan perluas saat mengetik)",
+            Language::German => "Nur generieren (beim Tippen nie expandieren)",
+        }
+    }
+
+    pub fn generate_only_hint(&self) -> &'static str {
+        match self.lang {
+            Language::English => {
+                "Use `wayexpand new <name> --stdout` or write the configured file."
+            }
+            Language::Indonesian => {
+                "Gunakan `wayexpand new <name> --stdout` atau tulis berkas yang dikonfigurasi."
+            }
+            Language::German => {
+                "`wayexpand new <name> --stdout` verwenden oder die konfigurierte Datei schreiben."
+            }
+        }
+    }
+
     pub fn output_file_hint(&self) -> &'static str {
         match self.lang {
             Language::English => "Dockerfile, site.yml (optional)",

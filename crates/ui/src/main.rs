@@ -454,6 +454,7 @@ impl App {
                     id: wayexpand_core::ExpansionConfig::new_id(),
                     trigger,
                     replacement: input,
+                    delivery: wayexpand_core::ExpansionDelivery::Insert,
                     description: String::new(),
                     tags: Vec::new(),
                     category: String::new(),

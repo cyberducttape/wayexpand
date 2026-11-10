@@ -462,6 +462,7 @@ fn convert_phrase(
         id: ExpansionConfig::new_id(),
         trigger,
         replacement: phrase,
+        delivery: crate::ExpansionDelivery::Insert,
         description: metadata.description.clone(),
         tags: Vec::new(),
         category: Path::new(entry)

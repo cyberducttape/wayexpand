@@ -255,8 +255,9 @@ impl Daemon {
         };
         // Outcomes reported by the worker were counted when it applied them;
         // only the ones synthesized here still need counting.
-        let (completed_result, outcome) = match pending.transaction.outcome.try_recv() {
-            Ok((result, outcome)) => (Some(result), outcome),
+        let (completed_result, mut outcome, trace_id) = match pending.transaction.outcome.try_recv()
+        {
+            Ok((result, outcome, trace_id)) => (Some(result), outcome, Some(trace_id)),
             Err(mpsc::TryRecvError::Disconnected) => {
                 let outcome = wayexpand_core::TransactionOutcome::UnknownPartialFailure {
                     source: InjectorError {
@@ -268,7 +269,7 @@ impl Daemon {
                     },
                 };
                 output_health::note_outcome(&outcome);
-                (None, outcome)
+                (None, outcome, None)
             }
             Err(mpsc::TryRecvError::Empty) => {
                 let remaining = pending
@@ -298,9 +299,51 @@ impl Daemon {
                     });
                 let outcome = wayexpand_core::TransactionOutcome::UnknownPartialFailure { source };
                 output_health::note_outcome(&outcome);
-                (None, outcome)
+                (None, outcome, None)
             }
         };
+        let physical_input_interrupted = self
+            .pending_output
+            .as_ref()
+            .is_some_and(|pending| pending.physical_input_interrupted);
+        if physical_input_interrupted {
+            outcome = match outcome {
+                wayexpand_core::TransactionOutcome::Applied
+                | wayexpand_core::TransactionOutcome::AppliedWithCursorPositionFailure { .. } => {
+                    if let Some(trace_id) = trace_id.as_deref() {
+                        failure_trace::mark_partial_after_input(trace_id, self.active_backend);
+                    }
+                    // The output worker may have completed its last send just
+                    // before the reactor observed the physical key. The key
+                    // can still have landed before that final synthetic key.
+                    let outcome = wayexpand_core::TransactionOutcome::UnknownPartialFailure {
+                        source: InjectorError::input_interrupted(self.active_backend),
+                    };
+                    output_health::note_outcome(&outcome);
+                    outcome
+                }
+                wayexpand_core::TransactionOutcome::NotApplied { .. } => {
+                    // Do not restore the deferred match after new input has
+                    // changed the target context, even though this output
+                    // transaction itself is known not to have started.
+                    let outcome = wayexpand_core::TransactionOutcome::UnknownApplicationOutcome {
+                        source: InjectorError::input_interrupted(self.active_backend),
+                    };
+                    output_health::note_outcome(&outcome);
+                    outcome
+                }
+                wayexpand_core::TransactionOutcome::UnknownApplicationOutcome { .. } => {
+                    wayexpand_core::TransactionOutcome::UnknownApplicationOutcome {
+                        source: InjectorError::input_interrupted(self.active_backend),
+                    }
+                }
+                wayexpand_core::TransactionOutcome::UnknownPartialFailure { .. } => {
+                    wayexpand_core::TransactionOutcome::UnknownPartialFailure {
+                        source: InjectorError::input_interrupted(self.active_backend),
+                    }
+                }
+            };
+        }
         self.resolve_pending_output(outcome, completed_result)?;
         Ok(Step::Next)
     }
@@ -990,6 +1033,79 @@ mod tests {
             "an interrupted non-atomic replacement must be surfaced as uncertain"
         );
         assert!(harness.daemon.evdev_quiet_since.is_some());
+    }
+
+    #[test]
+    fn input_observed_after_worker_success_downgrades_the_commit_and_reuses_the_actor() {
+        let partial_before = output_health::snapshot().partial_total;
+        let mut harness = Harness::new(false);
+        harness
+            .daemon
+            .start_output(
+                OutputOrigin::Typed,
+                vec![OutputJob::Expansion(result(":x", "replacement"))],
+                Vec::new(),
+            )
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !harness.waiting.load(Ordering::Acquire) {
+            assert!(Instant::now() < deadline, "transaction never started");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+
+        // The backend has applied the complete text, but the reactor has not
+        // consumed its acknowledgement. A real key may have arrived before
+        // the final synthetic key and only become visible in this turn.
+        harness.open_gate();
+        while harness.delivered.lock().unwrap().as_str() != "replacement" {
+            assert!(
+                Instant::now() < deadline,
+                "backend did not finish insertion"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        harness
+            .physical_input
+            .send(InputEvent::Text("concurrent input".into()))
+            .unwrap();
+        harness.daemon.service_pending_output().unwrap();
+        harness.run_until_resolved();
+
+        assert!(
+            output_health::snapshot().partial_total > partial_before,
+            "a physical-input race must override the worker's provisional success"
+        );
+        assert!(
+            harness
+                .daemon
+                .output_worker
+                .as_ref()
+                .is_some_and(OutputWorkerState::is_running),
+            "transaction cancellation must not strand the serialized output actor"
+        );
+
+        harness
+            .daemon
+            .start_output(
+                OutputOrigin::Typed,
+                vec![OutputJob::Expansion(result(":next", "second"))],
+                Vec::new(),
+            )
+            .unwrap();
+        harness.run_until_resolved();
+        assert_eq!(
+            *harness.calls.lock().unwrap(),
+            [
+                "erase::x",
+                "insert:replacement",
+                "erase::next",
+                "insert:second"
+            ]
+        );
+        assert_eq!(
+            harness.delivered.lock().unwrap().as_str(),
+            "replacementsecond"
+        );
     }
 
     #[test]

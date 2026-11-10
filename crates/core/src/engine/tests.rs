@@ -33,6 +33,31 @@ fn engine() -> ExpansionEngine {
 }
 
 #[test]
+fn generate_only_scripts_are_not_keyboard_expansions() {
+    let config = Config::parse(
+        r##"
+        [[expansion]]
+        trigger = ";deploy"
+        replacement = "#!/bin/sh\necho reviewed"
+        delivery = "generate_only"
+        output_file = "deploy.sh"
+        "##,
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    let mut results = engine.process(InputEvent::Text(";deploy".into()));
+    results.extend(engine.process(InputEvent::EndOfInput));
+    assert!(
+        results.is_empty(),
+        "generate-only script must remain literal"
+    );
+    assert_eq!(
+        engine.config.expansion[0].delivery,
+        crate::ExpansionDelivery::GenerateOnly
+    );
+}
+
+#[test]
 fn engine_uses_the_parsed_filters_and_chords_from_validation() {
     let config = Config::parse(
         r#"
@@ -1154,6 +1179,7 @@ fn engine_rejects_manually_constructed_invalid_config() {
             id: crate::ExpansionConfig::new_id(),
             trigger: String::new(),
             replacement: "value".into(),
+            delivery: crate::ExpansionDelivery::Insert,
             description: String::new(),
             tags: Vec::new(),
             category: String::new(),
@@ -7110,6 +7136,40 @@ fn terminal_apps_only_expands_in_listed_terminals_and_fails_closed_elsewhere() {
 }
 
 #[test]
+fn evdev_app_scope_is_shared_with_the_terminal_companion_route() {
+    let config = Config::parse(
+        r#"[settings]
+raw_capture_apps = ["app_id_exact:org.mozilla.firefox", "app_id_glob:com.google.*"]
+raw_capture_fallback_enabled = true
+
+[[expansion]]
+trigger = ";;browser"
+replacement = "browser fallback"
+"#,
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    engine.set_terminal_apps_only(true);
+    assert_eq!(engine.terminal_app_count(), 2);
+
+    focus(&mut engine, Some("org.mozilla.firefox"));
+    assert_eq!(
+        type_text(&mut engine, ";;browser").pop().unwrap().insert,
+        "browser fallback"
+    );
+    focus(&mut engine, Some("com.google.Chrome"));
+    assert_eq!(
+        type_text(&mut engine, ";;browser").pop().unwrap().insert,
+        "browser fallback"
+    );
+    focus(&mut engine, Some("org.gnome.TextEditor"));
+    assert!(type_text(&mut engine, ";;browser").is_empty());
+    assert!(!engine.raw_capture_app_owns_focus());
+    focus(&mut engine, Some("org.mozilla.firefox"));
+    assert!(engine.raw_capture_app_owns_focus());
+}
+
+#[test]
 fn terminal_apps_list_alone_does_not_restrict_matching() {
     let mut engine = terminal_scoped_engine();
     engine.set_terminal_apps_only(false);
@@ -7156,6 +7216,33 @@ fn terminal_apps_must_be_app_ids() {
         ConfigError::InvalidTerminalApp { .. }
     ));
     assert!(Config::parse("[settings]\nterminal_apps = [\"org.kde.konsole\"]\n").is_ok());
+}
+
+#[test]
+fn raw_capture_apps_must_be_bounded_app_ids() {
+    for bad in [
+        "raw_capture_apps = [\"title_contains:Firefox\"]",
+        "raw_capture_apps = [\"\"]",
+        "raw_capture_apps = [\"unknown_op:Firefox\"]",
+    ] {
+        let error = Config::parse(&format!("[settings]\n{bad}\n")).unwrap_err();
+        assert!(
+            matches!(error, ConfigError::InvalidRawCaptureApp { index: 0, .. }),
+            "{bad}: {error:?}"
+        );
+    }
+    let too_many = (0..=crate::config::MAX_RAW_CAPTURE_APPS)
+        .map(|index| format!("\"app{index}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    assert!(matches!(
+        Config::parse(&format!("[settings]\nraw_capture_apps = [{too_many}]\n")).unwrap_err(),
+        ConfigError::InvalidRawCaptureApp { .. }
+    ));
+    assert!(Config::parse(
+        "[settings]\nraw_capture_apps = [\"app_id_exact:org.mozilla.firefox\"]\n"
+    )
+    .is_ok());
 }
 
 #[test]

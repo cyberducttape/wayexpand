@@ -79,6 +79,16 @@ const STATUS_GAUGES: &[(&str, &str, &str)] = &[
         "Backend teardown workers that exited without completion acknowledgement.",
     ),
     (
+        "window_tracker_last_connected_unix",
+        "window_tracker_last_connected_unix",
+        "Unix time of the last successful compositor focus-tracker connection.",
+    ),
+    (
+        "window_tracker_reconnect_backoff_ms",
+        "window_tracker_reconnect_backoff_milliseconds",
+        "Current bounded retry delay for the compositor focus tracker.",
+    ),
+    (
         "output_partial_total",
         "output_partial_insertions_total",
         "Output transactions where insertion began before failing.",
@@ -298,6 +308,30 @@ pub(crate) fn render_metrics(
     );
     if let Some(status) = snapshot.filter(|_| running) {
         let text = |key: &str| label(status[key].as_str().unwrap_or("unknown"));
+        let tracker_state = status["window_tracker_state"]
+            .as_str()
+            .filter(|value| {
+                matches!(
+                    *value,
+                    "unavailable" | "starting" | "connected" | "reconnecting" | "stopped"
+                )
+            })
+            .unwrap_or("unknown");
+        let tracker_failure = status["window_tracker_last_failure_reason"]
+            .as_str()
+            .filter(|value| {
+                matches!(
+                    *value,
+                    "none"
+                        | "probe_unavailable"
+                        | "connect_failed"
+                        | "tracker_disconnected"
+                        | "configuration_changed"
+                        | "compositor_unsupported"
+                        | "supervisor_start_failed"
+                )
+            })
+            .unwrap_or("unknown");
         metric(
             &mut out,
             "wayexpand_daemon_route_info",
@@ -310,6 +344,20 @@ pub(crate) fn render_metrics(
                     text("source"),
                     text("backend"),
                     text("state")
+                ),
+                1.0,
+            )],
+        );
+        metric(
+            &mut out,
+            "wayexpand_daemon_window_tracker_info",
+            "gauge",
+            "Sanitized lifecycle state of the compositor focus tracker.",
+            &[(
+                format!(
+                    "{{state=\"{}\",last_failure_reason=\"{}\"}}",
+                    label(tracker_state),
+                    label(tracker_failure)
                 ),
                 1.0,
             )],
@@ -434,6 +482,28 @@ fn is_metric_name(name: &str) -> bool {
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn tracker_metric_labels_accept_only_documented_categories() {
+        let snapshot = serde_json::json!({
+            "response": "running",
+            "window_tracker_state": "/home/alice/private-window-title",
+            "window_tracker_last_failure_reason": "private D-Bus error for secret.app"
+        });
+        let output = render_metrics(
+            Some(&snapshot),
+            &serde_json::json!({"commit_matches": true}),
+            &ConfigMetrics::Invalid,
+        );
+
+        assert!(output.contains(
+            "wayexpand_daemon_window_tracker_info{state=\"unknown\",last_failure_reason=\"unknown\"} 1"
+        ));
+        assert!(!output.contains("/home/alice"));
+        assert!(!output.contains("private-window-title"));
+        assert!(!output.contains("secret.app"));
+        assert!(!output.contains("private D-Bus error"));
+    }
 
     #[test]
     fn atomic_output_replaces_symlink_without_writing_through_it() {

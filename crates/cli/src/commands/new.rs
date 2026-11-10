@@ -896,7 +896,9 @@ fn print_templates(layers: &[(&Config, Source)], requested_json: bool) {
                 .filter(|expansion| {
                     expansion.enabled
                         && expansion.command.is_none()
-                        && expansion.output_file.is_some()
+                        && (expansion.output_file.is_some()
+                            || expansion.delivery
+                                == wayexpand_core::ExpansionDelivery::GenerateOnly)
                 })
                 .map(move |expansion| (expansion, *source))
         })
@@ -919,6 +921,10 @@ fn print_templates(layers: &[(&Config, Source)], requested_json: bool) {
                     "trigger": snippet.trigger,
                     "name": short_name(&snippet.trigger),
                     "output_file": snippet.output_file,
+                    "delivery": match snippet.delivery {
+                        wayexpand_core::ExpansionDelivery::Insert => "insert",
+                        wayexpand_core::ExpansionDelivery::GenerateOnly => "generate_only",
+                    },
                     "description": snippet.description,
                     "fields": fields,
                     "built_in": *source == Source::BuiltIn,
@@ -929,11 +935,12 @@ fn print_templates(layers: &[(&Config, Source)], requested_json: bool) {
         return;
     }
     if templates.is_empty() {
-        println!("No file templates. Give a snippet an output_file to list it here, for example:");
+        println!("No file templates. Add output_file to a snippet, or set delivery = \"generate_only\" to keep a script out of keyboard expansion:");
         println!();
         println!("  [[expansion]]");
         println!("  trigger = \";;dockerfile\"");
         println!("  output_file = \"Dockerfile\"");
+        println!("  delivery = \"generate_only\"  # never inserted by typing the trigger");
         println!("  replacement = \"\"\"FROM {{{{field:image=debian:stable-slim}}}}\n  \"\"\"");
         return;
     }
@@ -960,6 +967,9 @@ fn print_templates(layers: &[(&Config, Source)], requested_json: bool) {
             short_name(&snippet.trigger),
             snippet.output_file.as_deref().unwrap_or_default()
         );
+        if snippet.delivery == wayexpand_core::ExpansionDelivery::GenerateOnly {
+            line.push_str("  (generate only; never typed)");
+        }
         if !snippet.description.is_empty() {
             line.push_str(&format!("  {}", snippet.description));
         }
@@ -969,7 +979,7 @@ fn print_templates(layers: &[(&Config, Source)], requested_json: bool) {
         println!("{}", line.trim_end());
     }
     println!();
-    println!("Run `wayexpand new <name>` to fill one in; --set NAME=VALUE skips a question.");
+    println!("Run `wayexpand new <name>` to write a file, or `wayexpand new <name> --stdout` to print it; --set NAME=VALUE skips a question.");
     println!("`wayexpand new --show <name>` prints one as a snippet you can copy and change.");
 }
 
@@ -2017,6 +2027,25 @@ replacement = "Regards"
         assert_eq!(found(&layers, "site").0, ";;playbook");
         assert_eq!(found(&layers, "Dockerfile").0, ";;dockerfile");
         assert!(find_template(&layers, "nothing").is_err());
+    }
+
+    #[test]
+    fn generate_only_scripts_are_discoverable_as_output_templates() {
+        let script = Config::parse(
+            r##"[[expansion]]
+trigger = ";;inspect"
+delivery = "generate_only"
+replacement = "#!/bin/sh\necho reviewed"
+"##,
+        )
+        .unwrap();
+        let layers = [(&script, Source::User)];
+        let (found, _) = find_template(&layers, "inspect").unwrap();
+        assert_eq!(
+            found.delivery,
+            wayexpand_core::ExpansionDelivery::GenerateOnly
+        );
+        assert_eq!(found.replacement, "#!/bin/sh\necho reviewed");
     }
 
     #[test]

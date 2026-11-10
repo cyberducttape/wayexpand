@@ -570,7 +570,7 @@ pub(crate) fn schema_command(mut args: Args) -> Result<()> {
             "types": {
                 "ExpansionConfig": {
                     "required": ["trigger", "replacement"],
-                    "fields": ["id", "trigger", "replacement", "description", "tags", "category", "enabled", "match_mode", "aliases", "app_filter", "propagate_case", "command", "output_file"]
+                    "fields": ["id", "trigger", "replacement", "delivery", "description", "tags", "category", "enabled", "match_mode", "aliases", "app_filter", "propagate_case", "command", "output_file"]
                 },
                 "HotkeyConfig": {
                     "required": ["chord", "command"],

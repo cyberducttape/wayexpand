@@ -28,8 +28,8 @@ pub(crate) fn ibus_command(mut args: Args) -> Result<()> {
 pub(crate) enum RouteOverlap {
     /// No daemon, or a daemon that does not capture keys (stdin harness).
     None,
-    /// A raw-input daemon limited to `settings.terminal_apps`.
-    TerminalsOnly { source: String },
+    /// A raw-input daemon limited to its configured app allowlist.
+    AppScoped { source: String },
     /// The control-only daemon: quick insert and hotkeys, no capture.
     ControlOnly,
     /// A capturing daemon that expands everywhere: IBus and it both expand.
@@ -51,7 +51,7 @@ impl RouteOverlap {
             return Self::None;
         }
         match status["terminal_apps_only"].as_bool() {
-            Some(true) => Self::TerminalsOnly { source },
+            Some(true) => Self::AppScoped { source },
             Some(false) => Self::Everywhere { source },
             None => Self::Unknown { source },
         }
@@ -60,7 +60,7 @@ impl RouteOverlap {
     fn label(&self) -> &'static str {
         match self {
             Self::None => "none",
-            Self::TerminalsOnly { .. } => "terminals-only",
+            Self::AppScoped { .. } => "app-scoped",
             Self::ControlOnly => "control-only",
             Self::Everywhere { .. } => "everywhere",
             Self::Unknown { .. } => "unknown",
@@ -91,11 +91,12 @@ impl RouteOverlap {
                 "wayexpand-control.service provides quick insert and hotkeys beside IBus".into(),
                 None,
             )),
-            Self::TerminalsOnly { source } => Some((
+            Self::AppScoped { source } if ibus_active => Some((
                 IbusCheckState::Pass,
-                format!("the WayExpand daemon ({source} capture) covers terminal_apps only, beside IBus"),
+                format!("the WayExpand daemon ({source} capture) is limited to its configured app allowlist, beside IBus"),
                 None,
             )),
+            Self::AppScoped { .. } => None,
             Self::Everywhere { source } if ibus_active => Some((
                 IbusCheckState::Fail,
                 format!("the WayExpand daemon ({source} capture) also expands in every app, so snippets expand twice where IBus works"),
@@ -394,6 +395,7 @@ mod tests {
             "source": "evdev",
             "terminal_apps_only": true,
         })));
+        assert_eq!(terminals.label(), "app-scoped");
         assert!(matches!(
             terminals.finding(true, true),
             Some((IbusCheckState::Pass, _, None))

@@ -87,6 +87,10 @@ pub(crate) fn last_successful_insertion_unix() -> u64 {
     LAST_SUCCESSFUL_INSERTION_UNIX.load(Ordering::Relaxed)
 }
 
+pub(crate) fn note_successful_insertion() {
+    LAST_SUCCESSFUL_INSERTION_UNIX.store(now_unix(), Ordering::Relaxed);
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct DiagnosticTotals {
     pub matcher_evaluations: u64,
@@ -181,7 +185,7 @@ impl<'a> TracedInjector<'a> {
         outcome: &TransactionOutcome,
         phases: &[TransactionPhase],
         progress: wayexpand_core::OutputProgress,
-    ) {
+    ) -> String {
         let completion = match outcome {
             TransactionOutcome::Applied => "applied",
             TransactionOutcome::AppliedWithCursorPositionFailure { .. } => {
@@ -191,13 +195,6 @@ impl<'a> TracedInjector<'a> {
             TransactionOutcome::UnknownApplicationOutcome { .. } => "application outcome unknown",
             TransactionOutcome::UnknownPartialFailure { .. } => "partial_write",
         };
-        if matches!(
-            outcome,
-            TransactionOutcome::Applied
-                | TransactionOutcome::AppliedWithCursorPositionFailure { .. }
-        ) {
-            LAST_SUCCESSFUL_INSERTION_UNIX.store(now_unix(), Ordering::Relaxed);
-        }
         let erase_acknowledged = if self.stages.erase.is_empty() {
             if self.inner.capabilities().atomic_replace {
                 "atomic replacement not acknowledged"
@@ -208,8 +205,9 @@ impl<'a> TracedInjector<'a> {
             self.stages.erase
         };
         let transaction_phases = phases.iter().map(|phase| phase.as_str()).collect();
+        let transaction_id = next_transaction_id();
         push(FailureTrace {
-            transaction_id: next_transaction_id(),
+            transaction_id: transaction_id.clone(),
             at_unix: now_unix(),
             backend: self.stages.backend,
             trigger_recognized: "yes",
@@ -223,7 +221,74 @@ impl<'a> TracedInjector<'a> {
             erased_units: progress.erased_units,
             inserted_units: progress.inserted_units,
         });
+        transaction_id
     }
+}
+
+/// Correct a successful worker-side trace when the reactor observes physical
+/// input before it accepts the transaction result. The user's input may have
+/// interleaved with the last generated characters, so the target outcome is
+/// uncertain even if the backend finished its send loop.
+pub(crate) fn mark_partial_after_input(transaction_id: &str, backend: &str) -> bool {
+    let _test_gate = history_test_gate();
+    let mut history = match history().try_lock() {
+        Ok(history) => history,
+        Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+        // This is called only after the unusual physical-input interruption
+        // path. Losing the correction would leave the correlated outcome
+        // reporting `applied` even though the reactor correctly downgraded
+        // the transaction to partial. The history is strictly bounded and
+        // its readers hold the lock only while serializing a few records, so
+        // wait here to preserve the safety diagnostic.
+        Err(TryLockError::WouldBlock) => history()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()),
+    };
+    let Some(trace) = history.outcomes.iter_mut().find(|trace| {
+        trace.transaction_id == transaction_id
+            && matches!(
+                trace.completion,
+                "applied" | "inserted; cursor placement failed"
+            )
+    }) else {
+        // The worker's first trace write is deliberately nonblocking. If it
+        // was dropped under contention (or evicted before the reactor
+        // consumed its acknowledgement), preserve the safety-critical result
+        // with a minimal record. Do not imply that the erase or insertion was
+        // acknowledged when the detailed progress record is unavailable.
+        let backend = backend
+            .chars()
+            .filter(|character| character.is_ascii_alphanumeric() || "-_.+".contains(*character))
+            .take(64)
+            .collect::<String>();
+        let trace = FailureTrace {
+            transaction_id: transaction_id.to_owned(),
+            at_unix: now_unix(),
+            backend,
+            trigger_recognized: "yes",
+            focus_admission: "not recorded",
+            backend_selected: "yes",
+            erase_acknowledged: "unknown",
+            insertion_attempted: true,
+            transaction_phases: vec!["uncertain"],
+            completion: "partial_write",
+            progress_tracked: false,
+            erased_units: 0,
+            inserted_units: 0,
+        };
+        push_bounded(&mut history.failures, HISTORY_LIMIT, trace.clone());
+        push_bounded(&mut history.outcomes, OUTCOME_STATUS_LIMIT, trace);
+        return false;
+    };
+    trace.completion = "partial_write";
+    if let Some(last_phase) = trace.transaction_phases.last_mut() {
+        if *last_phase == "committed" {
+            *last_phase = "uncertain";
+        }
+    }
+    let failed_trace = trace.clone();
+    push_bounded(&mut history.failures, HISTORY_LIMIT, failed_trace);
+    true
 }
 
 /// Record a matched expansion stopped before output. Only callers supply
@@ -651,7 +716,7 @@ mod tests {
                 folded_suffix_chars: 0,
             },
         );
-        traced.record_outcome(&report.outcome, &report.phases, report.progress);
+        let _trace_id = traced.record_outcome(&report.outcome, &report.phases, report.progress);
 
         let outcomes: serde_json::Value =
             serde_json::from_str(&recent_outcomes_json()).expect("outcomes should be JSON");
@@ -667,6 +732,64 @@ mod tests {
             .unwrap()
             .iter()
             .all(|trace| trace["completion"] != "applied"));
+    }
+
+    #[test]
+    fn correlated_success_can_be_downgraded_when_physical_input_overlaps() {
+        let _history_guard = history_test_guard();
+        let mut injector = MockInjector;
+        let mut traced = TracedInjector::new(&mut injector);
+        let report = wayexpand_core::ExpansionEngine::apply_with_report(
+            &mut traced,
+            &wayexpand_core::ExpansionResult {
+                snippet_id: "test".into(),
+                trigger: ":x".into(),
+                matched_text: ":x".into(),
+                insert: "value".into(),
+                cursor_offset: None,
+                reinsert_after: None,
+                command_backed: false,
+                undoable: false,
+                folded_suffix_chars: 0,
+            },
+        );
+        assert!(report.outcome.is_applied());
+        let transaction_id =
+            traced.record_outcome(&report.outcome, &report.phases, report.progress);
+        assert!(mark_partial_after_input(&transaction_id, "evdev+libei"));
+
+        let outcomes: serde_json::Value =
+            serde_json::from_str(&recent_outcomes_json()).expect("outcomes should be JSON");
+        let trace = outcomes
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|trace| trace["transaction_id"] == transaction_id)
+            .expect("the correlated transaction remains in bounded history");
+        assert_eq!(trace["completion"], "partial_write");
+        assert_eq!(
+            trace["transaction_phases"].as_array().unwrap().last(),
+            Some(&serde_json::json!("uncertain"))
+        );
+        assert_eq!(trace["recovery"], "manual_review");
+    }
+
+    #[test]
+    fn dropped_worker_trace_still_records_physical_input_as_partial() {
+        let _history_guard = history_test_guard();
+        let transaction_id = next_transaction_id();
+
+        assert!(!mark_partial_after_input(&transaction_id, "evdev+libei"));
+
+        let outcomes: serde_json::Value =
+            serde_json::from_str(&recent_outcomes_json()).expect("outcomes should be JSON");
+        assert!(outcomes.as_array().unwrap().iter().any(|trace| {
+            trace["transaction_id"] == transaction_id
+                && trace["backend"] == "evdev+libei"
+                && trace["completion"] == "partial_write"
+                && trace["erase_acknowledged"] == "unknown"
+                && trace["progress_tracked"] == false
+        }));
     }
 
     #[test]
@@ -696,7 +819,7 @@ mod tests {
         ));
         assert_eq!(report.progress.erased_units, 2);
         assert_eq!(report.progress.inserted_units, 2);
-        traced.record_outcome(&report.outcome, &report.phases, report.progress);
+        let _trace_id = traced.record_outcome(&report.outcome, &report.phases, report.progress);
 
         let outcomes: serde_json::Value =
             serde_json::from_str(&recent_outcomes_json()).expect("outcomes should be JSON");

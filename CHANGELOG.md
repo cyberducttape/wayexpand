@@ -4,6 +4,55 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add a Generate only delivery mode for reusable scripts and configuration
+  artifacts. These entries do not participate in keyboard matching and can
+  be rendered to a protected file or stdout with `wayexpand new`; WayExpand
+  never executes generated content.
+- Add an explicit app-scoped evdev fallback for browser input fields. The IBus engine now
+  yields matching only in configured `settings.raw_capture_apps`, while the
+  evdev companion is restricted to that same authenticated compositor focus
+  scope. KWin and GNOME IBus contexts receive app identity from their existing
+  authenticated focus bridges; unknown focus fails closed. The IBus-first
+  path requires reviewing raw-input privacy and confirming a real IBus
+  insertion with `wayexpand setup --backend ibus --evdev-apps`. If no app list
+  exists, explicit setup seeds exact IDs for common browsers; custom lists are
+  preserved. Existing evdev users can opt in directly with
+  `wayexpand setup --backend evdev --evdev-apps --apply`; this does not require
+  IBus registration. Raw keyboard observation is still global, password fields
+  cannot be detected, and browser replacement remains non-atomic and uncertified.
+- Downgrade a non-atomic output transaction to `partial_write` when physical
+  input arrives before the daemon accepts its completion, even if the output
+  worker has already finished sending. Keep the output actor alive, discard
+  stale queued input, and retain a content-free correlated partial-write
+  trace even when the worker's detailed diagnostic record was dropped.
+- Version `wayexpand health --json` as schema 2 and expose operational and
+  route-safety readiness separately, so a live matcher is not mistaken for a
+  production-certified route by deployment automation.
+- Mark a valid but empty active snippet library as `WX-CONFIG-002` in health
+  checks, and report loaded enabled/disabled counts with an actionable reload
+  instruction instead of claiming that an idle expander is ready.
+- Map daemon configuration failures, paused matching, and refused replacements
+  to configuration, input-state, and policy findings in health diagnostics,
+  with repair guidance that matches the failing subsystem.
+- Point daemon status-schema mismatches in `wayexpand health` to the
+  non-mutating upgrade preflight and report them as CLI/daemon compatibility
+  failures.
+- Pin the `wayexpand health --json` error-object fields in the CLI contract
+  fixture so monitoring consumers can rely on stable remediation data.
+- Expose sanitized window-tracker connection state, reconnect/disconnect
+  counters, failure category, last successful connection time, and retry
+  backoff through daemon status schema 30, `doctor --json`, certification
+  capabilities, Prometheus metrics, and the GUI diagnostics view. This makes
+  compositor focus-tracker interruptions diagnosable without logging
+  application identity or content. Restrict Prometheus state and failure
+  labels to the documented categories so malformed status cannot leak titles,
+  paths, or D-Bus error text.
+- Make build-identity test repositories collision-safe under parallel test
+  execution, avoiding intermittent CI failures from temporary path reuse.
+- Report the count and relative age of recent KWin/IBus helper crashes. Tailor
+  recovery to the observed helper state: test a recovered helper before
+  recommending a desktop restart, recognize the known Wayland surrounding-
+  text crash signature, and give an unavailable helper a direct recovery path.
 - Label `setup --check --json` readiness as `ready_for_setup` so automation
   cannot mistake a successful preflight for verified application insertion.
 - Publish the IBus factory connection before acquiring its well-known bus name,
@@ -11,6 +60,14 @@ All notable changes to WayExpand are documented here.
   reports its connection unavailable.
 - Cache Quick Picker snippet eligibility when it opens so each search edit
   avoids reparsing form fields and template variables across the library.
+- Reuse Quick Picker's ranking scratch buffer between query edits, keeping
+  large snippet libraries from reallocating the full candidate list on every
+  keystroke.
+- Honor each output route's advertised text limit before recommending atomic
+  replacement or native text commit, so the GUI directs oversized output to
+  manual paste instead of presenting an unavailable insertion plan.
+- Keep Chromium startup diagnostics alive long enough to report DevTools and
+  process state when the isolated browser acceptance page does not appear.
 - Pin CI and compositor-certification checkouts to the immutable workflow SHA
   by default, so queued jobs cannot silently validate a newer PR merge ref.
 - Report which invariant fails when the private KWin timeout contract test

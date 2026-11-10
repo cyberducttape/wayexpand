@@ -40,6 +40,10 @@ pub(crate) fn status_as_json(response: &str) -> Result<serde_json::Value> {
                         | "config_last_successful_reload_unix"
                         | "config_enabled_expansions"
                         | "config_disabled_expansions"
+                        | "window_tracker_reconnect_attempts_total"
+                        | "window_tracker_disconnects_total"
+                        | "window_tracker_last_connected_unix"
+                        | "window_tracker_reconnect_backoff_ms"
                         | "input_events_total"
                         | "matcher_evaluations_total"
                         | "matches_found_total"
@@ -152,6 +156,12 @@ pub(crate) fn runtime_capabilities_from_status(snapshot: &serde_json::Value) -> 
         },
         "window_context": {
             "tracker_connected": value("window_tracker_connected"),
+            "tracker_state": value("window_tracker_state"),
+            "tracker_reconnect_attempts_total": value("window_tracker_reconnect_attempts_total"),
+            "tracker_disconnects_total": value("window_tracker_disconnects_total"),
+            "tracker_last_failure_reason": value("window_tracker_last_failure_reason"),
+            "tracker_last_connected_unix": value("window_tracker_last_connected_unix"),
+            "tracker_reconnect_backoff_ms": value("window_tracker_reconnect_backoff_ms"),
         },
         "injection": {
             "insertion_mode": value("inject_insertion_mode"),
@@ -473,6 +483,14 @@ pub(crate) fn session_capabilities_from_status(
         "capture": capture,
         "injection": injection,
         "focus_tracking": focus_tracking,
+        "window_tracker_lifecycle": {
+            "state": text("window_tracker_state"),
+            "reconnect_attempts_total": snapshot.get("window_tracker_reconnect_attempts_total"),
+            "disconnects_total": snapshot.get("window_tracker_disconnects_total"),
+            "last_failure_reason": text("window_tracker_last_failure_reason"),
+            "last_connected_unix": snapshot.get("window_tracker_last_connected_unix"),
+            "reconnect_backoff_ms": snapshot.get("window_tracker_reconnect_backoff_ms"),
+        },
         "password_field_protection": password_protection,
         "replacement_assurance": replacement_assurance,
     })

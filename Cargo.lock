@@ -4432,6 +4432,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "wayexpand-backend-gnome-window",
+ "wayexpand-backend-kwin-window",
  "wayexpand-core",
  "wayexpand-process-supervisor",
  "xkeysym",

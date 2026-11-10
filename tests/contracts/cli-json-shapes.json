@@ -30,6 +30,56 @@
     "setup_recommendation",
     "capture_readiness"
   ],
+  "health": [
+    "schema_version",
+    "healthy",
+    "operational_state",
+    "exit_code",
+    "reason",
+    "readiness",
+    "errors",
+    "application_coverage",
+    "route_safety",
+    "configuration",
+    "daemon"
+  ],
+  "health_error": [
+    "id",
+    "component",
+    "message",
+    "repair_available",
+    "suggested_action"
+  ],
+  "health_daemon": [
+    "reachable",
+    "status_schema",
+    "status_schema_compatible",
+    "commit",
+    "source",
+    "backend",
+    "terminal_apps_only",
+    "enabled_expansions",
+    "disabled_expansions",
+    "state",
+    "output_health",
+    "matching_available",
+    "matching_unavailable_reason",
+    "production_certified"
+  ],
+  "health_schema": 2,
+  "health_readiness": [
+    "operational",
+    "route_safety"
+  ],
+  "health_operational_readiness": [
+    "state",
+    "ready",
+    "exit_code"
+  ],
+  "health_route_safety_readiness": [
+    "state",
+    "ready"
+  ],
   "doctor_security": [
     "schema",
     "profile",

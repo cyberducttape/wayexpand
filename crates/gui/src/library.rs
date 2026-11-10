@@ -219,6 +219,7 @@ mod tests {
             id: ExpansionConfig::new_id(),
             trigger: trigger.into(),
             replacement: "never searched".into(),
+            delivery: wayexpand_core::ExpansionDelivery::Insert,
             description: description.into(),
             tags: tags.iter().map(|tag| (*tag).to_owned()).collect(),
             category: category.into(),

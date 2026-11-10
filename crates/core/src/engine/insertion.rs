@@ -48,7 +48,11 @@ impl ExpansionEngine {
             .expansion
             .iter()
             .enumerate()
-            .find(|(_, expansion)| expansion.enabled && expansion.answers_to(trigger))
+            .find(|(_, expansion)| {
+                expansion.enabled
+                    && expansion.delivery == crate::ExpansionDelivery::Insert
+                    && expansion.answers_to(trigger)
+            })
             .ok_or(InsertError::NotFound)?;
         if self.user_paused {
             return Err(InsertError::Paused);

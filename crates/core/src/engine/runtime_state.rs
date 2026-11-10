@@ -125,6 +125,30 @@ impl ExpansionEngine {
         self.terminal_app_scope.len()
     }
 
+    /// Whether the focused application is explicitly assigned to the
+    /// configured raw evdev fallback. Unknown focus never counts as owned.
+    pub fn raw_capture_app_owns_focus(&self) -> bool {
+        if !self.raw_capture_fallback_enabled {
+            return false;
+        }
+        let Some(app_id) = self
+            .normalized_window
+            .as_ref()
+            .and_then(|window| window.app_id.as_deref())
+        else {
+            return false;
+        };
+        self.raw_capture_app_scope
+            .iter()
+            .any(|(filter, glob)| match filter {
+                crate::AppFilter::AppIdExact(expected) => app_id == expected,
+                crate::AppFilter::AppIdGlob(_) => {
+                    glob.as_ref().is_some_and(|glob| glob.matches(app_id))
+                }
+                _ => false,
+            })
+    }
+
     /// Whether a snippet form is open (capture is suspended meanwhile).
     pub fn is_form_open(&self) -> bool {
         self.form_active

@@ -2,7 +2,7 @@
 
 /// Version of the daemon's stable key/value control-socket status contract.
 /// Increment when a consumer must distinguish a newer required field set.
-pub const CONTROL_STATUS_SCHEMA: u32 = 29;
+pub const CONTROL_STATUS_SCHEMA: u32 = 30;
 
 pub use limits::{CommandLimits, COMMAND_LIMITS, CONTROL_MAX_RESPONSE_BYTES};
 pub use wayexpand_process_supervisor::containment_mode as command_containment_mode;
@@ -53,9 +53,9 @@ pub use backend::{
 pub use capabilities::{all_capabilities, Capabilities, TextMethod};
 pub use config::{
     validate_command_config, AppFilter, ClipboardMode, CommandConfig, CommandEnvironment,
-    CompatibilityMode, Config, ConfigError, ConfigRevision, ExpansionConfig, FontScale,
-    HotkeyConfig, LoadedConfig, MatchMode, OrganizationPolicy, Settings, ValidatedConfig,
-    DEFAULT_KEYSTROKE_MAX_CHARS, MAX_KEYSTROKE_MAX_CHARS,
+    CompatibilityMode, Config, ConfigError, ConfigRevision, ExpansionConfig, ExpansionDelivery,
+    FontScale, HotkeyConfig, LoadedConfig, MatchMode, OrganizationPolicy, Settings,
+    ValidatedConfig, DEFAULT_KEYSTROKE_MAX_CHARS, MAX_KEYSTROKE_MAX_CHARS,
 };
 pub use daemon_client::{DaemonClient, DaemonClientError, DaemonFocus, DaemonOperation};
 pub use daemon_status::{DaemonRouteState, DaemonStatus};

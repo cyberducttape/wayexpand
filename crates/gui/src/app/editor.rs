@@ -19,6 +19,7 @@ impl GuiApp {
                 .iter()
                 .filter(|expansion| {
                     expansion.enabled
+                        && expansion.delivery == wayexpand_core::ExpansionDelivery::Insert
                         && expansion.command.is_none()
                         && wayexpand_core::form_fields(&expansion.replacement)
                             .is_ok_and(|fields| fields.is_empty())
@@ -91,6 +92,7 @@ impl GuiApp {
             || draft.match_mode != expansion.match_mode
             || draft.propagate_case != expansion.propagate_case
             || draft.output_file.trim() != expansion.output_file.as_deref().unwrap_or_default()
+            || draft.delivery != expansion.delivery
             || !draft.matches_command(expansion.command.as_ref())
     }
 
@@ -415,6 +417,7 @@ impl GuiApp {
                     strings.app_filter(),
                     strings.matching(),
                     strings.output_file(),
+                    strings.generate_only(),
                     strings.replacement(),
                 ]
                 .iter()
@@ -669,6 +672,22 @@ impl GuiApp {
                             .desired_width(field_width),
                     )
                     .on_hover_text(strings.output_file_tooltip());
+                });
+
+                ui.horizontal(|ui| {
+                    let mut generate_only =
+                        draft.delivery == wayexpand_core::ExpansionDelivery::GenerateOnly;
+                    if ui
+                        .checkbox(&mut generate_only, strings.generate_only())
+                        .changed()
+                    {
+                        draft.delivery = if generate_only {
+                            wayexpand_core::ExpansionDelivery::GenerateOnly
+                        } else {
+                            wayexpand_core::ExpansionDelivery::Insert
+                        };
+                    }
+                    ui.label(strings.generate_only_hint());
                 });
 
                 form_row(ui, strings.app_filter(), columns, |ui| {

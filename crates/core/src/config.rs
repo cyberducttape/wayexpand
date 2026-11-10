@@ -215,14 +215,25 @@ pub struct Settings {
     /// `app_id_glob:`). Terminals cannot report the text before the cursor,
     /// so input-method routes cannot replace text there. A daemon started
     /// with `--terminal-apps-only` expands automatically only while one of
-    /// these apps is focused, which lets it cover terminals alongside IBus
-    /// without expanding twice elsewhere. Omitted when empty.
+    /// these apps is focused. Omitted when empty.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub terminal_apps: Vec<String>,
+    /// Applications owned by the explicitly enabled evdev fallback beside
+    /// IBus. IBus suppresses its own matcher in these applications, while the
+    /// evdev daemon is restricted to this list. Raw evdev still observes all
+    /// keyboard events and cannot identify sensitive fields.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub raw_capture_apps: Vec<String>,
+    /// Setup-managed switch for app ownership handoff to the evdev companion.
+    /// Merely listing apps never disables IBus matching.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub raw_capture_fallback_enabled: bool,
 }
 
 /// Upper bound on `settings.terminal_apps` entries.
 pub const MAX_TERMINAL_APPS: usize = 64;
+/// Upper bound on applications assigned to the explicit evdev fallback.
+pub const MAX_RAW_CAPTURE_APPS: usize = 64;
 
 /// About 100 ms of paced typing at the measured libei keysym fallback rate.
 pub const DEFAULT_KEYSTROKE_MAX_CHARS: usize = 8;
@@ -341,6 +352,8 @@ impl Default for Settings {
             compatibility_mode: CompatibilityMode::Off,
             keystroke_max_chars: DEFAULT_KEYSTROKE_MAX_CHARS,
             terminal_apps: Vec::new(),
+            raw_capture_apps: Vec::new(),
+            raw_capture_fallback_enabled: false,
         }
     }
 }
@@ -402,6 +415,11 @@ pub struct ExpansionConfig {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub aliases: Vec<String>,
     pub replacement: String,
+    /// How this entry is delivered. `generate_only` entries are available to
+    /// `wayexpand new` for reviewed file/stdout generation, but are never
+    /// considered by the passive keyboard matcher.
+    #[serde(default, skip_serializing_if = "ExpansionDelivery::is_default")]
+    pub delivery: ExpansionDelivery,
     #[serde(default)]
     pub description: String,
     #[serde(default)]
@@ -432,9 +450,26 @@ pub struct ExpansionConfig {
     /// File name `wayexpand new` writes this snippet to, relative to the
     /// current directory (for example `Dockerfile` or
     /// `.github/workflows/ci.yml`). Snippets with it are listed as file
-    /// templates; typing the trigger still inserts the text as usual.
+    /// templates.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_file: Option<String>,
+}
+
+/// Delivery route for an expansion entry.
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ExpansionDelivery {
+    /// Insert the rendered text when the trigger is typed.
+    #[default]
+    Insert,
+    /// Generate the rendered text only through an explicit CLI workflow.
+    GenerateOnly,
+}
+
+impl ExpansionDelivery {
+    fn is_default(delivery: &Self) -> bool {
+        *delivery == Self::Insert
+    }
 }
 
 impl ExpansionConfig {
@@ -758,6 +793,7 @@ impl Config {
             // Form snippets are not includable: their fields could
             // only be filled by the form of the snippet that owns them.
             expansion.enabled
+                && expansion.delivery == crate::ExpansionDelivery::Insert
                 && expansion.command.is_none()
                 && crate::form_fields(&expansion.replacement).is_ok_and(|fields| fields.is_empty())
         }) {

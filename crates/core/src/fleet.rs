@@ -133,6 +133,8 @@ fn setting_fields_from_non_defaults(settings: &crate::Settings) -> BTreeSet<Stri
         compatibility_mode,
         keystroke_max_chars,
         terminal_apps,
+        raw_capture_apps,
+        raw_capture_fallback_enabled,
     );
     fields
 }
@@ -165,6 +167,15 @@ fn resolve_setting_candidates(
             if field == "compatibility_mode" {
                 continue;
             }
+            // A signed content pack cannot opt a machine into globally
+            // observed raw-keyboard matching or redirect applications to it.
+            if matches!(
+                field.as_str(),
+                "raw_capture_apps" | "raw_capture_fallback_enabled"
+            ) && candidate.provenance.layer.starts_with("pack:")
+            {
+                continue;
+            }
             macro_rules! copy_field { ($($name:ident),+ $(,)?) => { match field.as_str() {
                 $(stringify!($name) => settings.$name = candidate.settings.$name.clone(),)+
                 _ => continue,
@@ -181,6 +192,8 @@ fn resolve_setting_candidates(
                 usage_stats,
                 keystroke_max_chars,
                 terminal_apps,
+                raw_capture_apps,
+                raw_capture_fallback_enabled,
             );
             sources.insert(field.clone(), candidate.provenance.clone());
         }
@@ -211,6 +224,8 @@ fn resolve_setting_candidates(
         "compatibility_mode",
         "keystroke_max_chars",
         "terminal_apps",
+        "raw_capture_apps",
+        "raw_capture_fallback_enabled",
     ] {
         sources
             .entry(field.to_owned())
@@ -1336,6 +1351,29 @@ replacement = "third"
 
         assert_eq!(merged.config.settings.max_buffer_chars, 4096);
         assert!(merged.policy_violations.is_empty());
+    }
+
+    #[test]
+    fn content_packs_cannot_assign_apps_to_raw_capture() {
+        let candidate = SettingCandidate {
+            settings: crate::Settings {
+                raw_capture_apps: vec!["app_id_glob:*browser*".into()],
+                raw_capture_fallback_enabled: true,
+                ..crate::Settings::default()
+            },
+            provenance: Provenance {
+                file: "settings.toml".into(),
+                layer: "pack:approved".into(),
+            },
+            fields: BTreeSet::from([
+                "raw_capture_apps".into(),
+                "raw_capture_fallback_enabled".into(),
+            ]),
+        };
+        let (settings, _) =
+            resolve_setting_candidates(&[candidate], &OrganizationPolicy::default());
+        assert!(settings.raw_capture_apps.is_empty());
+        assert!(!settings.raw_capture_fallback_enabled);
     }
 
     #[test]

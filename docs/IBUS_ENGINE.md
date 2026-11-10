@@ -159,11 +159,11 @@ the recorded session and says so. The steps are:
 5. Stops WayExpand daemons that capture keys in every application, since they
    would expand snippets a second time, and starts the core companion service:
    `wayexpand-control.service` (control socket, quick insert and hotkeys; it
-   captures no keys). Optional terminal coverage uses a separate evdev daemon
-   restricted to `terminal_apps`; setup offers it only after the user confirms
-   a real IBus insertion. It is never enabled by `--yes`, and terminal setup
-   still requires the separate raw-capture consent marker. Existing terminal
-   coverage is kept when setup runs again.
+   captures no keys). Optional terminal or browser coverage uses a separate
+   evdev daemon restricted to configured application IDs; setup offers it only
+   after the user confirms a real IBus insertion. It is never enabled by
+   `--yes`, and setup requires the separate raw-capture consent marker.
+   Existing scoped coverage is kept when setup runs again.
 
 `wayexpand ibus status --json` (IBus-route schema 2) separates configuration readiness from
 operational readiness. On GNOME it independently checks the GNOME Wayland
@@ -282,6 +282,44 @@ focused (KWin window tracking; fail-closed otherwise). IBus keeps handling
 other applications, so nothing expands twice. evdev reads raw keyboard input
 including password fields, so this requires the separate consent marker
 described in [BACKENDS_SENSITIVE_FIELDS.md](BACKENDS_SENSITIVE_FIELDS.md).
+
+## Browser fields without IBus surrounding text
+
+IBus deliberately passes keys through when a field does not provide
+surrounding text. For an explicit browser fallback, assign browser application
+IDs to evdev in the user configuration:
+
+```toml
+[settings]
+raw_capture_apps = [
+  "app_id_glob:*firefox*",
+  "app_id_glob:*chrom*",
+]
+```
+
+For an IBus-first setup, `wayexpand setup --backend ibus --evdev-apps` seeds a
+configuration with exact app IDs for common Firefox, Chromium, Chrome, Brave,
+Edge, Vivaldi, and Opera desktop identities when `raw_capture_apps` is empty.
+Existing evdev users can enable the scoped browser route directly with
+`wayexpand setup --backend evdev --evdev-apps --apply`, without IBus
+registration. An existing custom app list is preserved. Add or replace IDs if
+your browser uses a different desktop ID or KWin resource class.
+
+The compositor's authenticated focus tracker supplies the app ID to both
+routes. IBus yields matching in those apps, and the evdev companion matches
+only apps in `raw_capture_apps` plus any `terminal_apps`. Unknown focus fails
+closed in both paths. On KDE, the tracker reports KWin's `resourceClass`; on
+GNOME it reports the Shell application's ID, so verify that the chosen glob
+matches your installed browser. The IBus-first setup requires a successful
+core IBus insertion test; either path requires the evdev privacy-consent
+marker.
+
+This is application-scoped, not field-scoped: evdev still observes raw keys
+globally and cannot distinguish browser password fields. Replacement uses the
+non-atomic injection route and remains subject to the configured compatibility
+mode, focus checks, and partial-write limitations. Browser and compositor
+combinations still require real-session certification; this configuration
+does not claim universal browser support.
 
 ## Protocol notes
 

@@ -779,6 +779,7 @@ fn clipboard_fallback_allowed_by_policy(policy: &wayexpand_core::OrganizationPol
 
 fn picker_expansion_is_eligible(expansion: &ExpansionConfig, safe_direct_insert: bool) -> bool {
     expansion.enabled
+        && expansion.delivery == wayexpand_core::ExpansionDelivery::Insert
         && expansion.command.is_none()
         && form_fields(&expansion.replacement).is_ok_and(|fields| fields.is_empty())
         && (safe_direct_insert || expansion.app_filter.is_empty())
@@ -986,6 +987,7 @@ mod tests {
             id: ExpansionConfig::new_id(),
             trigger: ":clip".into(),
             replacement: "{{clipboard}}".into(),
+            delivery: wayexpand_core::ExpansionDelivery::Insert,
             description: String::new(),
             tags: Vec::new(),
             category: String::new(),
@@ -1050,6 +1052,7 @@ mod tests {
                 id: ExpansionConfig::new_id(),
                 trigger: format!(":{variable}"),
                 replacement: format!("{{{{{variable}}}}}"),
+                delivery: wayexpand_core::ExpansionDelivery::Insert,
                 description: String::new(),
                 tags: Vec::new(),
                 category: String::new(),
@@ -1071,6 +1074,7 @@ mod tests {
             id: ExpansionConfig::new_id(),
             trigger: ":production".into(),
             replacement: "restricted operational text".into(),
+            delivery: wayexpand_core::ExpansionDelivery::Insert,
             description: String::new(),
             tags: Vec::new(),
             category: String::new(),
@@ -1092,6 +1096,7 @@ mod tests {
             id: ExpansionConfig::new_id(),
             trigger: ":host".into(),
             replacement: "admin@host".into(),
+            delivery: wayexpand_core::ExpansionDelivery::Insert,
             description: "SSH prompt".into(),
             tags: Vec::new(),
             category: String::new(),
@@ -1178,6 +1183,7 @@ mod tests {
             id: ExpansionConfig::new_id(),
             trigger: ":form".into(),
             replacement: "Hello {{field:name}}".into(),
+            delivery: wayexpand_core::ExpansionDelivery::Insert,
             description: String::new(),
             tags: Vec::new(),
             category: String::new(),

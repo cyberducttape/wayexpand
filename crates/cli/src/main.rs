@@ -225,7 +225,7 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
         "Getting started",
         &[
             (
-                "setup --check [--json] | --apply [--mode recommended|maximum|experimental] [--terminals] [--yes] [--accept-non-atomic-replacement] [--install-system-integration]",
+                "setup --check [--json] | --apply [--mode recommended|maximum|experimental] [--terminals | --evdev-apps] [--yes] [--accept-non-atomic-replacement] [--install-system-integration]",
                 "Check setup readiness or configure a reviewed input route",
             ),
             ("install-check [--json]", "Audit installed WayExpand components"),

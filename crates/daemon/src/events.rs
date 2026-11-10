@@ -153,6 +153,7 @@ pub(crate) fn finish_undo(
     {
         warn!(%source, "undo applied but cursor repositioning failed");
     }
+    failure_trace::note_successful_insertion();
     engine.commit_undo(&result);
     info!("expansion undone");
     Ok(())
@@ -553,9 +554,11 @@ pub(crate) fn finish_expansion(
     match outcome {
         wayexpand_core::TransactionOutcome::Applied => {
             failure_trace::note_expansion_outcome(true);
+            failure_trace::note_successful_insertion();
         }
         wayexpand_core::TransactionOutcome::AppliedWithCursorPositionFailure { ref source } => {
             failure_trace::note_expansion_outcome(true);
+            failure_trace::note_successful_insertion();
             warn!(%source, "expansion applied but cursor repositioning failed");
         }
         wayexpand_core::TransactionOutcome::NotApplied { .. } => {

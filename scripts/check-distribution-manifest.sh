@@ -56,8 +56,12 @@ printf '%s\n' "$ibus_contract" | grep -q '^user_registration = false$' || {
     printf '%s\n' 'IBus contract must explicitly disallow per-user registration' >&2
     exit 1
 }
-printf '%s\n' "$ibus_contract" | grep -q '^user_install_exec = "/usr/local/libexec/wayexpand/wayexpand-ibus"$' || {
-    printf '%s\n' 'IBus user-install executable contract is missing or inconsistent' >&2
+printf '%s\n' "$ibus_contract" | grep -q '^source_install_exec = "/usr/local/libexec/wayexpand/wayexpand-ibus"$' || {
+    printf '%s\n' 'IBus source-install executable contract is missing or inconsistent' >&2
+    exit 1
+}
+printf '%s\n' "$ibus_contract" | grep -q '^source_install_exec_owner = "root"$' || {
+    printf '%s\n' 'IBus shared source-install executable must be root-owned' >&2
     exit 1
 }
 if printf '%s\n' "$ibus_contract" | grep -q '\.local/share/ibus/component'; then

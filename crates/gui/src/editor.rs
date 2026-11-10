@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use wayexpand_core::{
-    validate_command_config, CommandConfig, CommandEnvironment, ExpansionConfig, MatchMode,
+    validate_command_config, CommandConfig, CommandEnvironment, ExpansionConfig, ExpansionDelivery,
+    MatchMode,
 };
 
 /// Editable form state for one expansion. Keeping this separate from the
@@ -20,6 +21,7 @@ pub(crate) struct Draft {
     pub(crate) propagate_case: bool,
     /// `output_file` for `wayexpand new`; empty means none.
     pub(crate) output_file: String,
+    pub(crate) delivery: ExpansionDelivery,
     pub(crate) command_enabled: bool,
     pub(crate) command_action_mode: bool,
     pub(crate) command_action: String,
@@ -86,6 +88,7 @@ impl Draft {
             match_mode: expansion.match_mode,
             propagate_case: expansion.propagate_case,
             output_file: expansion.output_file.clone().unwrap_or_default(),
+            delivery: expansion.delivery,
             command_enabled,
             command_action_mode,
             command_action,
@@ -124,6 +127,7 @@ impl Draft {
             id,
             trigger: self.trigger.clone(),
             replacement: self.replacement.clone(),
+            delivery: self.delivery,
             description: self.description.clone(),
             tags: self.committed_tags(),
             category: self.category.clone(),

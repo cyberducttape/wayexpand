@@ -107,6 +107,11 @@ grep -Fxq "$policy_path" "$archive_listing" || {
     printf '%s\n' "release archive is missing $policy_path" >&2
     exit 1
 }
+policy_archive_mode=$(tar -tvzf "$archive" -- "$policy_path" | awk 'NR == 1 { print $1 }')
+test "$policy_archive_mode" = "-rw-r--r--" || {
+    printf '%s\n' "release archive PolicyKit policy must have mode 0644 (got $policy_archive_mode)" >&2
+    exit 1
+}
 grep -F 'id="org.wayexpand.execute-action"' "$extracted_archive/$policy_path" >/dev/null || {
     printf '%s\n' 'release archive PolicyKit policy is invalid' >&2
     exit 1

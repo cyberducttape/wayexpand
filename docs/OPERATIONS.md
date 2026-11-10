@@ -7,11 +7,35 @@
 `wayexpand health` reports whether the local configuration and live daemon can
 currently match expansions and whether the output worker is healthy. Its
 versioned JSON contract is available with `wayexpand health --json`
-(`schema_version: 1`). Exit codes are stable for monitoring: 0 ready, 1
-degraded, 2 daemon unavailable, 3 invalid configuration, 4 authorization
-required, and 5 internal error. “Ready” reports negotiated runtime operation
-only; it does not mean that a compositor/client combination has passed
-production certification.
+(`schema_version: 2`). Exit codes are stable for monitoring: 0 operationally
+ready, 1 degraded, 2 daemon unavailable, 3 invalid configuration, 4
+authorization required, and 5 internal error. “Ready” reports negotiated
+runtime operation only; it does not mean that a compositor/client combination
+has passed production certification.
+An otherwise valid configuration with zero enabled expansions is reported as
+`configuration_problem` with stable error ID `WX-CONFIG-002` and exit code 3.
+The daemon section reports loaded enabled and disabled expansion counts so an
+operator can distinguish an empty library from a matcher or output failure.
+When the daemon reports unhealthy configuration, health returns
+`WX-CONFIG-001`; paused matching returns `WX-INPUT-001`; and a replacement
+refused by the safety policy returns `WX-POLICY-001`. These findings include
+subsystem-specific next steps instead of attributing every matching failure to
+the output backend. If the CLI and daemon status schemas differ, health returns
+`WX-VERSION-001` and points to `wayexpand upgrade --check` before recommending
+any restart or upgrade.
+Each item in `errors` has stable `id`, `component`, `message`,
+`repair_available`, and `suggested_action` fields; the key set is pinned in
+`tests/contracts/cli-json-shapes.json` for monitoring clients.
+The JSON now separates `readiness.operational` from
+`readiness.route_safety`. Preserve `healthy` as the operational-health alias;
+automation that requires a certified safe route must also require
+`readiness.route_safety.ready: true`. At present that value remains false
+until production certification evidence is connected to the selected route.
+`readiness.route_safety.state` is `limited` when a known capability gap exists,
+`unknown` when required evidence is missing, `uncertified` when reported
+capabilities have no production certification, and `certified` only when the
+active route has accepted certification evidence. A route can be operationally
+ready while its safety state is limited or uncertified.
 The JSON report also includes `route_safety`, a concise summary of the active
 route's sensitive-field signal, target-identity evidence, atomic-replacement
 capability, compatibility override, and certification status. Atomicity alone
@@ -199,6 +223,35 @@ Available values are `{{date}}`, `{{time}}`, `{{datetime}}` (UTC),
 `{{hostname}}`, `{{unix_timestamp}}`, `{{newline}}`, and `{{tab}}`. Unknown
 variables make validation fail before a configuration reload is activated.
 Template values are rendered only when an expansion matches.
+
+### Generate-only scripts
+
+Store a reusable script as a template without registering its trigger for
+keyboard expansion:
+
+```toml
+[[expansion]]
+trigger = ";;nginx-check"
+delivery = "generate_only"
+description = "Read-only Nginx diagnostics"
+output_file = "nginx-check.sh"
+replacement = '''#!/usr/bin/env bash
+set -euo pipefail
+unit="{{field:unit=nginx.service|required|max=128|validate=systemd-unit}}"
+systemctl status "$unit" --no-pager
+journalctl -u "$unit" -n 100 --no-pager
+'''
+```
+
+`delivery = "generate_only"` excludes the trigger from the live matcher. Typing
+`;;nginx-check` leaves those characters untouched. Generate the configured
+file with `wayexpand new nginx-check`, or print the rendered script to stdout
+with `wayexpand new nginx-check --stdout` for review or piping to a validator,
+for example `wayexpand new nginx-check --stdout | shellcheck -s bash -`.
+Form fields can also be provided with `--set unit=nginx.service` or filled in
+interactively. Generated files use restrictive permissions and are not run by
+WayExpand. Running or piping the output to an interpreter remains an explicit
+operator action. The GUI snippet editor has the same Generate only option.
 
 ### Command-backed snippets
 
