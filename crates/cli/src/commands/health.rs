@@ -32,7 +32,7 @@ fn classify_health(
     let enabled_expansions = snapshot
         .get("config_enabled_expansions")
         .and_then(serde_json::Value::as_u64);
-    let terminal_apps_only = snapshot
+    let app_scoped_capture = snapshot
         .get("terminal_apps_only")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
@@ -66,7 +66,7 @@ fn classify_health(
     } else if matching
         && output_health == "ok"
         && enabled_expansions.is_some()
-        && terminal_apps_only
+        && app_scoped_capture
         && capture_app_scope_state == "unknown"
     {
         ("degraded", 1, "focus_identity_unavailable", matching)
@@ -305,7 +305,7 @@ fn health_report(
                 "configuration_unhealthy" => "The daemon rejected or has not loaded the active configuration",
                 "paused" => "Expansion matching is paused",
                 "replacement_not_admitted" => "Automatic replacement is refused by the active safety policy",
-                "focus_identity_unavailable" => "The terminal-scoped capture route cannot verify the focused application",
+                "focus_identity_unavailable" => "The app-scoped evdev route cannot verify the focused application",
                 "daemon_protocol_incompatible" => "The running daemon status schema is incompatible with this CLI",
                 _ => reason,
             },
@@ -315,7 +315,7 @@ fn health_report(
                 "configuration_unhealthy" => "Run `wayexpand status --json` and `wayexpand validate`, correct configuration errors, then run `wayexpand reload`",
                 "paused" => "Run `wayexpand resume`, then check `wayexpand health` again",
                 "replacement_not_admitted" => "Run `wayexpand policy check --json` and inspect `wayexpand status`; authorize non-atomic replacement only if you explicitly accept its risks",
-                "focus_identity_unavailable" => "Run `wayexpand debug --live --seconds 60` while testing a harmless trigger in the terminal, then inspect the sanitized app_scope events; do not disable terminal-only capture as a workaround",
+                "focus_identity_unavailable" => "Run `wayexpand debug --live --seconds 60` while testing a harmless trigger in a configured application, then inspect the sanitized app_scope events; do not disable app-scoped capture as a workaround",
                 "daemon_protocol_incompatible" => "Run `wayexpand upgrade --check`; restart or upgrade the daemon only after reviewing the reported process and compatibility details",
                 "status_incomplete" => "Run `wayexpand status --json` and check that the daemon reports loaded configuration counts",
                 _ => "Run `wayexpand doctor` for diagnostic details",
@@ -671,7 +671,7 @@ mod tests {
     }
 
     #[test]
-    fn terminal_scoped_health_degrades_when_focused_app_identity_is_unknown() {
+    fn app_scoped_health_degrades_when_focused_app_identity_is_unknown() {
         let snapshot = serde_json::json!({
             "matching_available": true,
             "output_health": "ok",
@@ -697,7 +697,7 @@ mod tests {
     }
 
     #[test]
-    fn terminal_scoped_health_stays_operational_when_known_focus_is_outside_scope() {
+    fn app_scoped_health_stays_operational_when_known_focus_is_outside_scope() {
         let snapshot = serde_json::json!({
             "matching_available": true,
             "output_health": "ok",

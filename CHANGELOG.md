@@ -6,7 +6,7 @@ All notable changes to WayExpand are documented here.
 
 - Raise the bounded control-socket response limit to 16 KiB so saturated
   diagnostic status remains readable by CLI, TUI, and GUI clients.
-- Mark terminal-scoped health degraded when compositor focus identity is
+- Mark app-scoped evdev health degraded when compositor focus identity is
   unavailable, with a sanitized live-debug remediation.
 - Report when terminal-only evdev matching is blocked because the compositor
   has not supplied a focused application ID, separately from the synthetic
