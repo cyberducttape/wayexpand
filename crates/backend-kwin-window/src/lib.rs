@@ -34,6 +34,11 @@ const SCRIPT_TEMPLATE: &str = include_str!("window-tracker.js");
 const LOAD_RETRY_ATTEMPTS: u32 = 15;
 const LOAD_RETRY_DELAY: Duration = Duration::from_millis(150);
 const TRACKER_SETUP_TIMEOUT: Duration = Duration::from_secs(12);
+/// Do not report a tracker as connected until KWin has delivered its initial
+/// focused-window state. Without this gate, a script can load successfully
+/// while its startup focus report is missed, leaving terminal-scoped matching
+/// fail-closed until the user changes windows.
+const INITIAL_SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(4);
 const DBUS_CONNECTION_TIMEOUT: Duration = Duration::from_secs(3);
 const TRACKER_HEALTH_CHECK_INTERVAL: Duration = Duration::from_millis(500);
 /// How long health checks may keep failing to get an answer before the
@@ -61,6 +66,12 @@ pub enum KwinWindowError {
     ScriptWrite(#[source] std::io::Error),
     #[error("KWin did not finish registering the loaded script in time")]
     ScriptNotReady,
+    #[error(
+        "KWin loaded the tracker script but did not publish an initial focus snapshot in time"
+    )]
+    InitialSnapshotTimedOut,
+    #[error("KWin failed before publishing its initial focus snapshot: {0}")]
+    InitialSnapshotFailed(String),
     #[error("KWin tracker setup exceeded its time limit")]
     SetupTimedOut,
     #[error("session D-Bus connection setup exceeded its time limit")]
@@ -145,6 +156,7 @@ pub struct KwinWindowTracker {
     service_name: String,
     plugin_name: String,
     script_path: std::path::PathBuf,
+    initial_snapshot: Option<Option<WindowContext>>,
     next_health_check: Instant,
     /// When KWin last answered a health check.
     last_healthy: Instant,
@@ -326,16 +338,29 @@ impl KwinWindowTracker {
             },
         );
 
-        Ok(Self {
+        let mut tracker = Self {
             connection,
             receiver,
             #[cfg(test)]
             service_name: bus_name,
             plugin_name,
             script_path,
+            initial_snapshot: None,
             next_health_check: Instant::now() + TRACKER_HEALTH_CHECK_INTERVAL,
             last_healthy: Instant::now(),
-        })
+        };
+        // `loadScript()` and `run()` only prove that KWin accepted the script;
+        // they do not prove that it observed the active window. Consume and
+        // retain the first callback here so the supervisor cannot publish a
+        // connected tracker with no usable focus state. An explicit empty
+        // snapshot is valid (for example, the desktop has no active window).
+        tracker.initial_snapshot = Some(
+            tracker
+                .next_window_timeout(INITIAL_SNAPSHOT_TIMEOUT)
+                .map_err(|error| KwinWindowError::InitialSnapshotFailed(error.to_string()))?
+                .ok_or(KwinWindowError::InitialSnapshotTimedOut)?,
+        );
+        Ok(tracker)
     }
 
     /// `loadScript` returns before the resulting `/Scripting/ScriptN`
@@ -600,6 +625,9 @@ impl WindowTracker for KwinWindowTracker {
         &mut self,
         timeout: Duration,
     ) -> Result<Option<Option<WindowContext>>, WindowTrackerError> {
+        if let Some(initial_snapshot) = self.initial_snapshot.take() {
+            return Ok(Some(initial_snapshot));
+        }
         let deadline = Instant::now() + timeout;
         loop {
             let now = Instant::now();
