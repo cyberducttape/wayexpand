@@ -133,3 +133,27 @@ workspace.windowActivated.connect(function (window) {
     report(window || currentActiveWindow());
 });
 report(currentActiveWindow());
+
+// KWin can start this script before its active-window snapshot is populated.
+// In that ordering, the initial report is empty and KWin may not emit another
+// activation signal for the already-focused client. Reconcile briefly against
+// KWin's compositor-owned activeWindow property. This is deliberately bounded
+// and never chooses a window from stacking order or metadata.
+if (typeof QTimer !== "undefined") {
+    var startupReconcileAttempts = 0;
+    var startupReconcileTimer = new QTimer();
+    startupReconcileTimer.interval = 100;
+    startupReconcileTimer.timeout.connect(function () {
+        startupReconcileAttempts += 1;
+        var activeWindow = currentActiveWindow();
+        if (activeWindow) {
+            report(activeWindow);
+            startupReconcileTimer.stop();
+            return;
+        }
+        if (startupReconcileAttempts >= 30) {
+            startupReconcileTimer.stop();
+        }
+    });
+    startupReconcileTimer.start();
+}

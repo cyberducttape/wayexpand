@@ -11,6 +11,9 @@ All notable changes to WayExpand are documented here.
 - Report a newly added KWin window immediately when the compositor already
   marks it active, covering sessions where the tracker starts before the first
   window and no later `activeChanged` signal is emitted.
+- Recheck KWin's compositor-owned active-window property for up to three
+  seconds after tracker startup, covering sessions where the initial snapshot
+  arrives late without an activation signal; stop as soon as focus is known.
 - Add the explicit `wayexpand debug --focused-app-id` diagnostic to show the
   sanitized focused application ID when terminal-only capture reports an
   allowlist mismatch; never include titles or typed content, and withhold the
