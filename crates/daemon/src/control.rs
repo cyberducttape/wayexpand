@@ -2067,7 +2067,7 @@ mod tests {
         let status = Arc::new(Mutex::new("starting".into()));
         assert_eq!(
             request("bogus\n", &reload, &stop, &pause, &status),
-            "unknown command; expected status, focus, reload, pause, resume, stop, insert <trigger>, or explain <text>\n"
+            "unknown command; expected status, focus, focused-app-id, reload, pause, resume, stop, insert <trigger>, or explain <text>\n"
         );
         assert!(!reload.load(Ordering::Acquire));
         assert!(!stop.load(Ordering::Acquire));
@@ -2082,7 +2082,7 @@ mod tests {
         let command = format!("{}\n", "x".repeat(MAX_COMMAND_BYTES + 1024));
         assert_eq!(
             request(&command, &reload, &stop, &pause, &status),
-        "unknown command; expected status, focus, reload, pause, resume, stop, insert <trigger>, or explain <text>\n"
+            "unknown command; expected status, focus, focused-app-id, reload, pause, resume, stop, insert <trigger>, or explain <text>\n"
         );
         assert!(!reload.load(Ordering::Acquire));
         assert!(!stop.load(Ordering::Acquire));
