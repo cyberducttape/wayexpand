@@ -144,4 +144,77 @@ assert.equal(
   "removed windows no longer report focus changes",
 );
 
+const startupActiveWindow = {
+  resourceClass: "org.example.StartupFocus",
+  desktopFileName: "",
+  resourceName: "startup-focus",
+  caption: "Startup focus test",
+  internalId: "window-startup-active",
+  active: true,
+  activeChanged: { connect() {} },
+};
+let startupActivated;
+const startupReports = [];
+const startupWorkspace = {
+  activeWindow: null,
+  stackingOrder: [
+    {
+      resourceClass: "org.example.Background",
+      caption: "Background window",
+      internalId: "window-background",
+      active: false,
+      activeChanged: { connect() {} },
+    },
+    startupActiveWindow,
+  ],
+  windowActivated: {
+    connect(callback) {
+      startupActivated = callback;
+    },
+  },
+  windowAdded: { connect() {} },
+  windowRemoved: { connect() {} },
+};
+vm.runInNewContext(source, {
+  workspace: startupWorkspace,
+  callDBus(...args) {
+    startupReports.push(args);
+  },
+});
+assert.deepEqual(
+  Array.from(startupReports.at(-1).slice(-3)),
+  [
+    "org.example.StartupFocus",
+    "Startup focus test",
+    "window-startup-active",
+  ],
+  "initial focus falls back to the unique active client in KWin's snapshot",
+);
+startupActivated(null);
+assert.equal(
+  startupReports.length,
+  1,
+  "a null activation signal coalesces with the recovered active client",
+);
+
+const ambiguousReports = [];
+const ambiguousWorkspace = {
+  ...startupWorkspace,
+  stackingOrder: [
+    startupActiveWindow,
+    { ...startupActiveWindow, internalId: "window-also-active" },
+  ],
+};
+vm.runInNewContext(source, {
+  workspace: ambiguousWorkspace,
+  callDBus(...args) {
+    ambiguousReports.push(args);
+  },
+});
+assert.deepEqual(
+  Array.from(ambiguousReports.at(-1).slice(-3)),
+  ["", "", ""],
+  "ambiguous active clients fail closed instead of selecting one",
+);
+
 console.log("KWin window tracker identity and activation checks passed");
