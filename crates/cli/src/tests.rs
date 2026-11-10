@@ -706,7 +706,7 @@ fn status_json_matches_documented_stable_contract() {
          backend=input-method-v2\n\
          route_id=input-method-v2\n\
          backend_mode=unknown\n\
-         status_schema=33\n\
+         status_schema=34\n\
          daemon_commit=test-commit\n\
          daemon_version=1.3.3-dev+test-commit\n\
          state=connected\n\
@@ -814,6 +814,8 @@ fn status_json_matches_documented_stable_contract() {
          recent_expansion_outcomes=[]\n\
          suppressed_expansions_total=0\n\
          input_events_total=42\n\
+         evdev_raw_key_events_total=84\n\
+         evdev_layout_unavailable_key_events_total=0\n\
          matcher_evaluations_total=5\n\
          matches_found_total=2\n\
          expansion_attempts_total=2\n\

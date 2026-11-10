@@ -87,6 +87,8 @@ fn source_with_provider(provider: Box<dyn KeyboardLayoutProvider>) -> EvdevSourc
         layout_provider: provider,
         layout_generation: None,
         layout_available: false,
+        raw_key_events_total: 0,
+        layout_unavailable_key_events_total: 0,
         pending: VecDeque::new(),
         raw_events: Vec::new(),
         raw_event_cursor: 0,
@@ -105,10 +107,42 @@ fn unavailable_layout_provider_fails_closed_but_tracks_physical_keys() {
     let mut source = source_with_provider(Box::new(UnavailableLayoutProvider));
     source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 1));
     assert_eq!(source.take_pending_events(), vec![InputEvent::Reset]);
+    assert_eq!(
+        source.input_diagnostics(),
+        EvdevInputDiagnostics {
+            raw_key_events_total: 1,
+            layout_unavailable_key_events_total: 1,
+        }
+    );
     assert!(source.keys_held());
     source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 0));
     assert!(!source.keys_held());
+    assert_eq!(source.input_diagnostics().raw_key_events_total, 2);
+    assert_eq!(
+        source
+            .input_diagnostics()
+            .layout_unavailable_key_events_total,
+        2
+    );
     assert!(source.take_pending_events().is_empty());
+}
+
+#[test]
+fn available_layout_counts_raw_keys_without_exposing_key_values() {
+    let mut source = source_with_provider(Box::new(TestLayoutProvider));
+    source.translate(evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 1));
+
+    assert_eq!(
+        source.input_diagnostics(),
+        EvdevInputDiagnostics {
+            raw_key_events_total: 1,
+            layout_unavailable_key_events_total: 0,
+        }
+    );
+    assert!(source
+        .take_pending_events()
+        .iter()
+        .any(|event| matches!(event, InputEvent::TextChar('a'))));
 }
 
 #[test]
@@ -321,6 +355,8 @@ fn readable_fake_keyboard_events_are_processed_and_disconnect_resets_state() {
         layout_provider: Box::new(TestLayoutProvider),
         layout_generation: Some(1),
         layout_available: true,
+        raw_key_events_total: 0,
+        layout_unavailable_key_events_total: 0,
         pending: VecDeque::new(),
         raw_events: Vec::new(),
         raw_event_cursor: 0,
@@ -397,6 +433,8 @@ fn output_monitor_observes_physical_input_without_refreshing_devices() {
         layout_provider: Box::new(TestLayoutProvider),
         layout_generation: Some(1),
         layout_available: true,
+        raw_key_events_total: 0,
+        layout_unavailable_key_events_total: 0,
         pending: VecDeque::new(),
         raw_events: Vec::new(),
         raw_event_cursor: 0,
@@ -493,6 +531,8 @@ fn hotplug_during_output_interrupts_before_device_discovery() {
         layout_provider: Box::new(TestLayoutProvider),
         layout_generation: Some(1),
         layout_available: true,
+        raw_key_events_total: 0,
+        layout_unavailable_key_events_total: 0,
         pending: VecDeque::new(),
         raw_events: Vec::new(),
         raw_event_cursor: 0,
@@ -537,6 +577,8 @@ fn topology_notification_interrupts_before_a_buffered_raw_event_slice() {
         layout_provider: Box::new(TestLayoutProvider),
         layout_generation: Some(1),
         layout_available: true,
+        raw_key_events_total: 0,
+        layout_unavailable_key_events_total: 0,
         pending: VecDeque::new(),
         raw_events: (0..MAX_RAW_EVENTS_PER_SLICE * 4)
             .map(|_| evdev::InputEvent::new(evdev::EventType::SYNCHRONIZATION.0, 0, 0))
@@ -580,6 +622,8 @@ fn output_monitor_detects_modifier_activity_without_matcher_input() {
         layout_provider: Box::new(TestLayoutProvider),
         layout_generation: Some(1),
         layout_available: true,
+        raw_key_events_total: 0,
+        layout_unavailable_key_events_total: 0,
         pending: VecDeque::new(),
         raw_events: Vec::new(),
         raw_event_cursor: 0,
@@ -624,6 +668,8 @@ fn oversized_device_batches_are_translated_in_bounded_slices_without_loss() {
         layout_provider: Box::new(TestLayoutProvider),
         layout_generation: Some(1),
         layout_available: true,
+        raw_key_events_total: 0,
+        layout_unavailable_key_events_total: 0,
         pending: VecDeque::new(),
         raw_events: Vec::new(),
         raw_event_cursor: 0,
@@ -684,6 +730,8 @@ fn event_slice_budget_does_not_hide_input_waiting_on_another_device() {
         layout_provider: Box::new(TestLayoutProvider),
         layout_generation: Some(1),
         layout_available: true,
+        raw_key_events_total: 0,
+        layout_unavailable_key_events_total: 0,
         pending: VecDeque::new(),
         raw_events: Vec::new(),
         raw_event_cursor: 0,
@@ -720,6 +768,8 @@ fn press(state: &mut State, code: u16) -> Option<InputEvent> {
         layout_provider: Box::new(TestLayoutProvider),
         layout_generation: Some(1),
         layout_available: true,
+        raw_key_events_total: 0,
+        layout_unavailable_key_events_total: 0,
         pending: VecDeque::new(),
         raw_events: Vec::new(),
         raw_event_cursor: 0,
@@ -771,6 +821,8 @@ fn auto_repeat_forwards_text_without_a_hotkey_event() {
         layout_provider: Box::new(TestLayoutProvider),
         layout_generation: Some(1),
         layout_available: true,
+        raw_key_events_total: 0,
+        layout_unavailable_key_events_total: 0,
         pending: VecDeque::new(),
         raw_events: Vec::new(),
         raw_event_cursor: 0,
@@ -797,6 +849,8 @@ fn release_events_do_not_emit_text() {
         layout_provider: Box::new(TestLayoutProvider),
         layout_generation: Some(1),
         layout_available: true,
+        raw_key_events_total: 0,
+        layout_unavailable_key_events_total: 0,
         pending: VecDeque::new(),
         raw_events: Vec::new(),
         raw_event_cursor: 0,
@@ -821,6 +875,8 @@ fn held_keys_are_tracked_until_released() {
         layout_provider: Box::new(TestLayoutProvider),
         layout_generation: Some(1),
         layout_available: true,
+        raw_key_events_total: 0,
+        layout_unavailable_key_events_total: 0,
         pending: VecDeque::new(),
         raw_events: Vec::new(),
         raw_event_cursor: 0,
@@ -858,6 +914,8 @@ fn identical_keycodes_remain_held_across_devices() {
         layout_provider: Box::new(TestLayoutProvider),
         layout_generation: Some(1),
         layout_available: true,
+        raw_key_events_total: 0,
+        layout_unavailable_key_events_total: 0,
         pending: VecDeque::new(),
         raw_events: Vec::new(),
         raw_event_cursor: 0,
@@ -911,6 +969,8 @@ fn surviving_keyboard_modifiers_are_replayed_after_disconnect() {
             layout_provider: Box::new(TestLayoutProvider),
             layout_generation: Some(1),
             layout_available: true,
+            raw_key_events_total: 0,
+            layout_unavailable_key_events_total: 0,
             pending: VecDeque::new(),
             raw_events: Vec::new(),
             raw_event_cursor: 0,
@@ -978,6 +1038,8 @@ fn quiet_period_rejects_already_queued_input() {
         layout_provider: Box::new(TestLayoutProvider),
         layout_generation: Some(1),
         layout_available: true,
+        raw_key_events_total: 0,
+        layout_unavailable_key_events_total: 0,
         pending: VecDeque::from([InputEvent::Text("a".into())]),
         raw_events: Vec::new(),
         raw_event_cursor: 0,
@@ -1004,6 +1066,8 @@ fn auto_repeat_does_not_clear_the_held_key() {
         layout_provider: Box::new(TestLayoutProvider),
         layout_generation: Some(1),
         layout_available: true,
+        raw_key_events_total: 0,
+        layout_unavailable_key_events_total: 0,
         pending: VecDeque::new(),
         raw_events: Vec::new(),
         raw_event_cursor: 0,
@@ -1029,6 +1093,8 @@ fn disconnect_resets_held_keys_and_modifier_state() {
         layout_provider: Box::new(TestLayoutProvider),
         layout_generation: Some(1),
         layout_available: true,
+        raw_key_events_total: 0,
+        layout_unavailable_key_events_total: 0,
         pending: VecDeque::new(),
         raw_events: Vec::new(),
         raw_event_cursor: 0,
@@ -1064,6 +1130,8 @@ fn held_key_at_release_deadline_is_rejected() {
         layout_provider: Box::new(TestLayoutProvider),
         layout_generation: Some(1),
         layout_available: true,
+        raw_key_events_total: 0,
+        layout_unavailable_key_events_total: 0,
         pending: VecDeque::new(),
         raw_events: Vec::new(),
         raw_event_cursor: 0,
@@ -1087,6 +1155,8 @@ fn empty_device_set_is_not_treated_as_a_successful_poll() {
         layout_provider: Box::new(TestLayoutProvider),
         layout_generation: Some(1),
         layout_available: true,
+        raw_key_events_total: 0,
+        layout_unavailable_key_events_total: 0,
         pending: VecDeque::new(),
         raw_events: Vec::new(),
         raw_event_cursor: 0,
@@ -1112,6 +1182,8 @@ fn pending_event_overflow_resets_the_queue_and_accepts_fresh_input() {
         layout_provider: Box::new(TestLayoutProvider),
         layout_generation: Some(1),
         layout_available: true,
+        raw_key_events_total: 0,
+        layout_unavailable_key_events_total: 0,
         pending: VecDeque::new(),
         raw_events: Vec::new(),
         raw_event_cursor: 0,

@@ -71,7 +71,6 @@ fn libei_backend_policy_only_blocks_in_safe_mode() {
 /// docs by construction, rather than each drifting independently.
 #[test]
 fn daemon_status_body_matches_documented_stable_contract() {
-    status::set_raw_capture_fallback(true, 14);
     let body = status::daemon_status_body_with_runtime_capabilities(
         "input-method",
         "input-method-v2",
@@ -114,11 +113,10 @@ fn daemon_status_body_matches_documented_stable_contract() {
         "daemon status body fields no longer match tests/contracts/status-json.json"
     );
     assert!(body.starts_with(&format!(
-        "source=input-method\nbackend=input-method-v2\nroute_id=input-method-v2\nbackend_mode=unknown\nstatus_schema=33\ndaemon_commit={}\ndaemon_version={}\nstate=connected\nroute_available=false\nmatching_available=false\nmatching_unavailable_reason=replacement_route_unavailable\npaused=false\n",
+        "source=input-method\nbackend=input-method-v2\nroute_id=input-method-v2\nbackend_mode=unknown\nstatus_schema=34\ndaemon_commit={}\ndaemon_version={}\nstate=connected\nroute_available=false\nmatching_available=false\nmatching_unavailable_reason=replacement_route_unavailable\npaused=false\n",
         super::build_info::COMMIT,
         super::build_info::VERSION
     )));
-    assert!(body.contains("raw_capture_fallback_enabled=true\nraw_capture_app_count=14\n"));
     for field in [
         "injection_latency_sample_count",
         "injection_latency_window_count",

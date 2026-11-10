@@ -182,6 +182,8 @@ pub struct EvdevSource {
     layout_provider: Box<dyn KeyboardLayoutProvider>,
     layout_generation: Option<u64>,
     layout_available: bool,
+    raw_key_events_total: u64,
+    layout_unavailable_key_events_total: u64,
     pending: VecDeque<InputEvent>,
     /// Reused storage for one device's raw batch. The cursor lets a large
     /// batch be translated over multiple scheduling slices without copying
@@ -213,6 +215,16 @@ pub struct EvdevSource {
 }
 
 impl EvdevSource {
+    /// Content-free capture diagnostics. These counters distinguish a quiet
+    /// device from keys received by evdev but refused because no trustworthy
+    /// active keyboard layout was available.
+    pub fn input_diagnostics(&self) -> EvdevInputDiagnostics {
+        EvdevInputDiagnostics {
+            raw_key_events_total: self.raw_key_events_total,
+            layout_unavailable_key_events_total: self.layout_unavailable_key_events_total,
+        }
+    }
+
     pub fn connect() -> Result<Self, EvdevError> {
         Self::connect_with_layout_provider(Box::new(UnavailableLayoutProvider))
     }
@@ -256,6 +268,8 @@ impl EvdevSource {
             layout_provider,
             layout_generation: None,
             layout_available: false,
+            raw_key_events_total: 0,
+            layout_unavailable_key_events_total: 0,
             pending: VecDeque::new(),
             raw_events: Vec::new(),
             raw_event_cursor: 0,
@@ -530,6 +544,13 @@ impl EvdevSource {
         self.topology_refresh_pending |= changed;
         Ok(changed)
     }
+}
+
+/// Aggregate evdev telemetry; never contains keycodes or typed content.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EvdevInputDiagnostics {
+    pub raw_key_events_total: u64,
+    pub layout_unavailable_key_events_total: u64,
 }
 
 impl InputSource for EvdevSource {

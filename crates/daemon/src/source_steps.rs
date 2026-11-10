@@ -257,6 +257,9 @@ impl Daemon {
                 Ok(source) => {
                     let mut source = source;
                     source.set_wake_fd(Some(self.waker.fd()));
+                    status::set_evdev_input_diagnostics(
+                        wayexpand_backend_evdev::EvdevInputDiagnostics::default(),
+                    );
                     self.evdev = Some(source);
                     self.reconnect_delay = Duration::from_millis(250);
                     self.connection_state = "connected";
@@ -297,6 +300,7 @@ impl Daemon {
             })
             .unwrap_or(poll_interval);
         let event_result = source.next_event_timeout(timeout);
+        status::set_evdev_input_diagnostics(source.input_diagnostics());
         match event_result {
             Ok(Some(event)) => {
                 drain_pending_window_events(
