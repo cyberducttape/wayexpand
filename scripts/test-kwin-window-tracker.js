@@ -144,6 +144,32 @@ assert.equal(
   "removed windows no longer report focus changes",
 );
 
+const alreadyActiveWindow = {
+  resourceClass: "org.example.AlreadyActive",
+  desktopFileName: "",
+  resourceName: "already-active",
+  caption: "Active when added",
+  internalId: "window-already-active",
+  active: true,
+  activeChanged: {
+    connect(callback) {
+      this.callback = callback;
+    },
+  },
+};
+const beforeAlreadyActive = reports.length;
+windowAdded(alreadyActiveWindow);
+assert.deepEqual(
+  lastIdentity(),
+  ["org.example.AlreadyActive", "Active when added", "window-already-active"],
+  "a window added already active publishes the initial focus snapshot",
+);
+assert.equal(
+  reports.length,
+  beforeAlreadyActive + 1,
+  "an already-active window is reported once",
+);
+
 const startupActiveWindow = {
   resourceClass: "org.example.StartupFocus",
   desktopFileName: "",

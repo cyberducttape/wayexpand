@@ -73,6 +73,14 @@ function watchWindow(window) {
             report(window);
         }
     });
+    // A window can be added after this script starts already active. In that
+    // case KWin need not emit a later activeChanged signal, so reporting only
+    // from the signal handler would leave the tracker without a focus snapshot.
+    // The active property is compositor-owned; never infer focus from stacking
+    // order or window metadata.
+    if (window.active === true) {
+        report(window);
+    }
 }
 
 function forgetWindow(window) {

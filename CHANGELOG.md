@@ -8,6 +8,9 @@ All notable changes to WayExpand are documented here.
   the compositor's stacking list when `workspace.activeWindow` is temporarily
   null; keep app-scoped matching unavailable if active-window state is
   ambiguous.
+- Report a newly added KWin window immediately when the compositor already
+  marks it active, covering sessions where the tracker starts before the first
+  window and no later `activeChanged` signal is emitted.
 - Add the explicit `wayexpand debug --focused-app-id` diagnostic to show the
   sanitized focused application ID when terminal-only capture reports an
   allowlist mismatch; never include titles or typed content, and withhold the
