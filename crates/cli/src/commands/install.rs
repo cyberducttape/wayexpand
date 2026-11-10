@@ -518,6 +518,9 @@ fn operational_checks(
         },
         evidence,
     ));
+    if let Some(scope_check) = evdev_capture_scope_check(daemon) {
+        checks.push(scope_check);
+    }
     checks.push(readiness_check(
         "target_insertion",
         "not_tested",
@@ -525,6 +528,61 @@ fn operational_checks(
         serde_json::json!({"verified":false}),
     ));
     checks
+}
+
+/// Report whether the running evdev route can match in the currently focused
+/// application. A successful synthetic matcher self-test proves configured
+/// allowlist entries work; it does not prove that KWin is supplying a live
+/// application identity for this session.
+fn evdev_capture_scope_check(daemon: Option<&serde_json::Value>) -> Option<ReadinessCheck> {
+    let daemon = daemon?;
+    if daemon.get("source").and_then(serde_json::Value::as_str) != Some("evdev")
+        || daemon
+            .get("terminal_apps_only")
+            .and_then(serde_json::Value::as_bool)
+            != Some(true)
+    {
+        return None;
+    }
+
+    let state = daemon
+        .get("capture_app_scope_state")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown");
+    let (status, detail, problem_id, remediation) = match state {
+        "allowed" => (
+            "pass",
+            "the focused application is within the configured evdev capture allowlist",
+            serde_json::Value::Null,
+            serde_json::Value::Null,
+        ),
+        "denied" => (
+            "unavailable",
+            "the focused application is outside the configured evdev allowlist; terminal-only matching is intentionally blocked here",
+            serde_json::json!("WX-EVDEV-SCOPE-001"),
+            serde_json::json!("If this is a terminal, confirm its stable desktop application ID is listed in settings.terminal_apps, then recheck with `wayexpand status`."),
+        ),
+        _ => (
+            "unavailable",
+            "the compositor has not supplied a focused application ID; terminal-only matching fails closed until focus identity is available",
+            serde_json::json!("WX-EVDEV-FOCUS-001"),
+            serde_json::json!("Run `wayexpand debug --live --seconds 60`, type a harmless configured trigger in the terminal, then inspect the sanitized app_scope and input_activity events."),
+        ),
+    };
+    Some(readiness_check(
+        "evdev_capture_scope",
+        status,
+        detail,
+        serde_json::json!({
+            "scope_state":state,
+            "window_tracker_state":daemon.get("window_tracker_state"),
+            "window_tracker_updates_total":daemon.get("window_tracker_updates_total"),
+            "window_context_available":daemon.get("window_context_available"),
+            "window_app_id_available":daemon.get("window_app_id_available"),
+            "problem_id":problem_id,
+            "remediation":remediation,
+        }),
+    ))
 }
 fn gnome_extension_install_check(path: Option<&Path>, package_install: bool) -> Check {
     let matching = path.is_some_and(crate::gnome_extension::matches_bundled);
@@ -1346,6 +1404,58 @@ mod tests {
                 .status,
             "not_tested"
         );
+    }
+
+    #[test]
+    fn setup_readiness_reports_unknown_evdev_focus_even_when_matcher_self_test_passes() {
+        let status = serde_json::json!({
+            "source":"evdev",
+            "terminal_apps_only":true,
+            "capture_app_scope_state":"unknown",
+            "window_tracker_state":"connected",
+            "window_tracker_updates_total":2,
+            "window_context_available":false,
+            "window_app_id_available":false,
+        });
+        let check = evdev_capture_scope_check(Some(&status)).unwrap();
+        assert_eq!(check.status, "unavailable");
+        assert_eq!(check.evidence["problem_id"], "WX-EVDEV-FOCUS-001");
+        assert_eq!(check.evidence["scope_state"], "unknown");
+        assert!(check.detail.contains("fails closed"));
+        assert!(check.evidence["remediation"]
+            .as_str()
+            .unwrap()
+            .contains("wayexpand debug --live"));
+    }
+
+    #[test]
+    fn setup_readiness_marks_evdev_scope_allowed_only_after_live_identity() {
+        let status = serde_json::json!({
+            "source":"evdev",
+            "terminal_apps_only":true,
+            "capture_app_scope_state":"allowed",
+            "window_app_id_available":true,
+        });
+        let check = evdev_capture_scope_check(Some(&status)).unwrap();
+        assert_eq!(check.status, "pass");
+        assert!(check.evidence["problem_id"].is_null());
+    }
+
+    #[test]
+    fn setup_readiness_omits_evdev_scope_when_the_route_is_not_restricted_evdev() {
+        assert!(evdev_capture_scope_check(None).is_none());
+        assert!(evdev_capture_scope_check(Some(&serde_json::json!({
+            "source":"ibus",
+            "terminal_apps_only":true,
+            "capture_app_scope_state":"unknown",
+        })))
+        .is_none());
+        assert!(evdev_capture_scope_check(Some(&serde_json::json!({
+            "source":"evdev",
+            "terminal_apps_only":false,
+            "capture_app_scope_state":"unrestricted",
+        })))
+        .is_none());
     }
 
     #[test]
