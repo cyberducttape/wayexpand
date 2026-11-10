@@ -9,6 +9,17 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+fn focused_app_scope_from_status(status_response: Option<&str>) -> (Option<String>, Option<bool>) {
+    let Some(status_response) = status_response else {
+        return (None, None);
+    };
+    let status = wayexpand_core::DaemonStatus::parse(status_response);
+    (
+        status.field("capture_app_scope_state").map(str::to_owned),
+        status.bool_field("terminal_apps_only"),
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DesktopTestResult {
     Verified,
@@ -132,15 +143,10 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
         // into a useful diagnosis for terminal-scoped evdev routes instead of
         // making users compare the ID against configuration by hand. Older
         // daemons may not publish these fields, so keep them optional.
-        let status = crate::control_operation(wayexpand_core::DaemonOperation::Status)
-            .ok()
-            .map(|response| wayexpand_core::DaemonStatus::parse(&response));
-        let scope_state = status
-            .as_ref()
-            .and_then(|status| status.field("capture_app_scope_state"));
-        let terminal_apps_only = status
-            .as_ref()
-            .and_then(|status| status.bool_field("terminal_apps_only"));
+        let status_response =
+            crate::control_operation(wayexpand_core::DaemonOperation::Status).ok();
+        let (scope_state, terminal_apps_only) =
+            focused_app_scope_from_status(status_response.as_deref());
         if json {
             println!(
                 "{}",
@@ -547,6 +553,32 @@ mod desktop_test_option_tests {
         assert!(validate_desktop_test_options(true, Some(""), true, true).is_err());
         assert!(validate_desktop_test_options(true, Some("gtk\nterminal"), true, true).is_err());
         assert!(validate_desktop_test_options(true, Some(&"a".repeat(65)), true, true).is_err());
+    }
+}
+
+#[cfg(test)]
+mod focused_app_scope_tests {
+    use super::focused_app_scope_from_status;
+
+    #[test]
+    fn reports_terminal_scope_and_fail_closed_allowlist_mismatch() {
+        assert_eq!(
+            focused_app_scope_from_status(Some(
+                "running\nterminal_apps_only=true\ncapture_app_scope_state=outside_allowlist\n",
+            )),
+            (Some("outside_allowlist".into()), Some(true))
+        );
+    }
+
+    #[test]
+    fn old_or_ambiguous_status_keeps_scope_unavailable() {
+        assert_eq!(focused_app_scope_from_status(None), (None, None));
+        assert_eq!(
+            focused_app_scope_from_status(Some(
+                "running\nterminal_apps_only=true\ncapture_app_scope_state=allowed\ncapture_app_scope_state=outside_allowlist\n",
+            )),
+            (None, Some(true))
+        );
     }
 }
 
