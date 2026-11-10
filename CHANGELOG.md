@@ -4,6 +4,12 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Recognize Ubuntu's `chromium-browser` desktop ID in the opt-in
+  browser-scoped evdev fallback. Upgrade only the exact previous built-in
+  browser allowlist; preserve custom app scopes.
+- Track KWin focus through both workspace activation and per-window active
+  state changes, coalescing duplicate reports and removing closed windows from
+  the bounded subscription set.
 - Release GNOME Shell's stage key focus before each synthetic acceptance-test
   key, since Shell can reclaim it between characters; report how many key pairs
   Mutter accepted while keeping target-widget delivery as a separate check.
