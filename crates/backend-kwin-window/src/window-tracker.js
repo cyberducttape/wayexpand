@@ -21,6 +21,13 @@ function report(window) {
                 appId = appId.slice(0, -8);
             }
         }
+        // Some XWayland clients expose an empty resourceClass and no desktop
+        // file association, while still providing the other half of WM_CLASS.
+        // Use that stable window-manager identity as a last resort; never use
+        // the editable title as an application identity.
+        if (!appId) {
+            appId = window.resourceName || "";
+        }
     }
     var title = window ? window.caption : "";
     // internalId is a compositor-issued identity for this exact KWin window.
