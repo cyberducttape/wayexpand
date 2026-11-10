@@ -7136,6 +7136,29 @@ fn terminal_apps_only_expands_in_listed_terminals_and_fails_closed_elsewhere() {
 }
 
 #[test]
+fn terminal_scope_accepts_konsole_wm_class_alias() {
+    let config = Config::parse(
+        r#"[settings]
+terminal_apps = ["konsole"]
+
+[[expansion]]
+trigger = ":ty"
+replacement = "Thank you"
+"#,
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    engine.set_terminal_apps_only(true);
+
+    // KWin can report the WM_CLASS rather than the desktop-file ID.
+    focus(&mut engine, Some("Konsole"));
+    assert_eq!(
+        type_text(&mut engine, ":ty").pop().unwrap().insert,
+        "Thank you"
+    );
+}
+
+#[test]
 fn evdev_app_scope_is_shared_with_the_terminal_companion_route() {
     let config = Config::parse(
         r#"[settings]
