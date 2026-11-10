@@ -35,6 +35,7 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
     let mut test_observe_only = false;
     let mut gnome_interactive = false;
     let mut gnome = false;
+    let mut focused_app_id = false;
     let mut values: Vec<String> = args.collect();
     let mut index = 0;
     while index < values.len() {
@@ -49,6 +50,10 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
             }
             "--gnome" => {
                 gnome = true;
+                values.remove(index);
+            }
+            "--focused-app-id" => {
+                focused_app_id = true;
                 values.remove(index);
             }
             "--interactive" => {
@@ -101,7 +106,36 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
         }
     }
     if !values.is_empty() {
-        bail!("usage: wayexpand debug [--json] [--trigger TEXT] [--live [--seconds 1..300]] | --test TRIGGER [--application-class CLASS --focus-confirmed [--observe-only]]");
+        bail!("usage: wayexpand debug [--json] [--trigger TEXT] [--live [--seconds 1..300]] | --focused-app-id [--json] | --test TRIGGER [--application-class CLASS --focus-confirmed [--observe-only]]");
+    }
+    if focused_app_id {
+        if live
+            || trigger.is_some()
+            || test_trigger.is_some()
+            || test_application_class.is_some()
+            || test_focus_confirmed
+            || test_observe_only
+            || gnome
+            || gnome_interactive
+        {
+            bail!("--focused-app-id cannot be combined with other debug modes");
+        }
+        let response = crate::control_operation(wayexpand_core::DaemonOperation::FocusedAppId)?;
+        let app_id = response
+            .lines()
+            .find_map(|line| line.strip_prefix("focused_app_id="))
+            .ok_or_else(|| anyhow::anyhow!("daemon returned an invalid focused app ID response"))?;
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({"focused_app_id": if app_id == "unavailable" { None } else { Some(app_id) }})
+            );
+        } else if app_id == "unavailable" {
+            println!("Focused application ID: unavailable");
+        } else {
+            println!("Focused application ID: {app_id}");
+        }
+        return Ok(());
     }
     if gnome || gnome_interactive {
         if !gnome

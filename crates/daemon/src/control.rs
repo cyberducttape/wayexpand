@@ -127,6 +127,9 @@ pub struct FocusSnapshot {
     pub generation: u64,
     pub token: Option<String>,
     pub exact_window_identity: bool,
+    /// Sanitized app identity for explicit local diagnostics. Window titles
+    /// and input contents are never included in this snapshot response.
+    pub diagnostic_app_id: Option<String>,
 }
 
 impl ControlServer {
@@ -1192,6 +1195,20 @@ fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
                 verified_replace
             )
         }
+        "focused-app-id" => {
+            let snapshot = focus
+                .lock()
+                .map_err(|_| anyhow::anyhow!("focus lock poisoned"))?;
+            let app_id = if disable_control_socket_mutations {
+                None
+            } else {
+                snapshot.diagnostic_app_id.as_deref()
+            };
+            format!(
+                "focused_app_id={}\n",
+                app_id.unwrap_or("unavailable")
+            )
+        }
         "reload" => {
             reload.store(true, Ordering::Release);
             crate::waker::wake_slot(&waker);
@@ -1212,7 +1229,7 @@ fn handle_request(mut stream: UnixStream, flags: Flags) -> Result<()> {
             crate::waker::wake_slot(&waker);
             "resumed\n".to_string()
         }
-        _ => "unknown command; expected status, focus, reload, pause, resume, stop, insert <trigger>, or explain <text>\n"
+        _ => "unknown command; expected status, focus, focused-app-id, reload, pause, resume, stop, insert <trigger>, or explain <text>\n"
             .to_string(),
     };
     stream.write_all(response.as_bytes())?;
@@ -1633,6 +1650,7 @@ mod tests {
             generation: 42,
             token: Some("deadbeef".into()),
             exact_window_identity: true,
+            diagnostic_app_id: Some("org.kde.konsole".into()),
         }));
         let flags = Flags {
             reload: Arc::new(AtomicBool::new(false)),
@@ -1664,6 +1682,7 @@ mod tests {
             send("focus\n"),
             "focus_generation=\nfocus_token=\nfocus_identity=exact\natomic_replace=false\nverified_replace=false\n"
         );
+        assert_eq!(send("focused-app-id\n"), "focused_app_id=unavailable\n");
         for request in [
             "insert-target 42 deadbeef ;sig\n",
             "insert ;sig\n",
@@ -1700,6 +1719,7 @@ mod tests {
                 generation: 9,
                 token: Some("deadbeef".into()),
                 exact_window_identity: true,
+                diagnostic_app_id: Some("org.kde.konsole".into()),
             })),
             explain: std::sync::mpsc::sync_channel(EXPLAIN_QUEUE_CAPACITY).0,
             usage_clear: Arc::new(Mutex::new(None)),
@@ -1726,6 +1746,7 @@ mod tests {
             send("focus\n"),
             "focus_generation=9\nfocus_token=deadbeef\nfocus_identity=exact\natomic_replace=true\nverified_replace=true\n"
         );
+        assert_eq!(send("focused-app-id\n"), "focused_app_id=org.kde.konsole\n");
         assert_eq!(
             send("insert-target 9 deadbeef ;sig\n"),
             "insert scheduled\n"
@@ -1747,7 +1768,13 @@ mod tests {
         ] {
             assert!(is_mutating_request(request), "{request}");
         }
-        for request in ["status", "focus", "explain ;sig", "explain-json ;sig"] {
+        for request in [
+            "status",
+            "focus",
+            "focused-app-id",
+            "explain ;sig",
+            "explain-json ;sig",
+        ] {
             assert!(!is_mutating_request(request), "{request}");
         }
     }
@@ -1964,6 +1991,7 @@ mod tests {
             generation: 4,
             token: Some("abcd".into()),
             exact_window_identity: true,
+            diagnostic_app_id: None,
         };
         assert_eq!(
             send("focus\n"),

@@ -800,6 +800,7 @@ mod tests {
             generation: 5,
             token: Some(actual_token.clone()),
             exact_window_identity: true,
+            diagnostic_app_id: None,
         };
         let bytes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let writer = std::sync::Arc::clone(&bytes);
@@ -877,6 +878,7 @@ mod tests {
             generation: 5,
             token: Some(current_token.clone()),
             exact_window_identity: true,
+            diagnostic_app_id: None,
         };
 
         assert!(!insert_target_matches_current_focus(
@@ -898,6 +900,7 @@ mod tests {
             generation: 8,
             token: Some(token.into()),
             exact_window_identity: false,
+            diagnostic_app_id: None,
         };
         assert!(!insert_target_matches_current_focus(
             &guarded,

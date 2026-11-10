@@ -292,6 +292,7 @@ fn focus_read_does_not_authorize_insert_target_in_restricted_mode() {
         generation: 42,
         token: Some("deadbeef".into()),
         exact_window_identity: true,
+        diagnostic_app_id: None,
     }));
     let flags = Flags {
         reload: Arc::new(AtomicBool::new(false)),
@@ -356,6 +357,7 @@ fn verified_target_policy_keeps_focus_identifiers_for_verified_inserts() {
             generation: 9,
             token: Some("deadbeef".into()),
             exact_window_identity: true,
+            diagnostic_app_id: None,
         })),
         explain: std::sync::mpsc::sync_channel(EXPLAIN_QUEUE_CAPACITY).0,
         usage_clear: Arc::new(Mutex::new(None)),
@@ -608,6 +610,7 @@ fn insert_takes_the_trigger_verbatim_and_refuses_control_characters() {
         generation: 4,
         token: Some("abcd".into()),
         exact_window_identity: true,
+        diagnostic_app_id: None,
     };
     assert_eq!(
             send("focus\n"),
