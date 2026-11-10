@@ -322,11 +322,13 @@ class MutterRemoteInputTests(unittest.TestCase):
             self.fail_first = fail_first
 
         def call_sync(self, _bus, _path, _interface, method, parameters, *_args):
-            values = parameters.unpack()
+            values = parameters.unpack() if parameters is not None else ()
             self.calls.append((method, values))
-            if self.fail_first:
+            if self.fail_first and method.startswith("NotifyKeyboard"):
                 self.fail_first = False
                 raise RuntimeError("simulated lost method reply")
+            if method == "ReleaseShellKeyFocus":
+                return mock.Mock(unpack=lambda: ("",))
 
     def test_window_activation_retries_only_while_window_is_unmapped(self):
         class FakeDbusError(Exception):
@@ -412,12 +414,17 @@ class MutterRemoteInputTests(unittest.TestCase):
             marker = Path(directory) / "ready"
             marker.write_text("1", encoding="ascii")
             with mock.patch.object(REMOTE_INPUT.time, "sleep"):
-                REMOTE_INPUT.send_text(bus, "/session", ";e2e", 0.06, marker)
+                sent = REMOTE_INPUT.send_text(bus, "/session", ";e2e", 0.06, marker)
 
+        self.assertEqual(sent, 4)
         expected = [
-            ("NotifyKeyboardKeysym", (ord(character), pressed))
+            call
             for character in ";e2e"
-            for pressed in (True, False)
+            for call in (
+                ("ReleaseShellKeyFocus", ()),
+                ("NotifyKeyboardKeysym", (ord(character), True)),
+                ("NotifyKeyboardKeysym", (ord(character), False)),
+            )
         ]
         self.assertEqual(bus.calls, expected)
         self.assertTrue(all(method != "NotifyKeyboardKeycode" for method, _ in bus.calls))
@@ -428,13 +435,15 @@ class MutterRemoteInputTests(unittest.TestCase):
             marker = Path(directory) / "ready"
             marker.write_text("1", encoding="ascii")
             with mock.patch.object(REMOTE_INPUT.time, "sleep"):
-                REMOTE_INPUT.send_text(
+                sent = REMOTE_INPUT.send_text(
                     bus, "/session", "a", 0.06, marker, keycode_probe=True
                 )
 
+        self.assertEqual(sent, 1)
         self.assertEqual(
             bus.calls,
             [
+                ("ReleaseShellKeyFocus", ()),
                 ("NotifyKeyboardKeycode", (30, True)),
                 ("NotifyKeyboardKeycode", (30, False)),
             ],
@@ -505,6 +514,7 @@ class MutterRemoteInputTests(unittest.TestCase):
         self.assertEqual(
             bus.calls,
             [
+                ("ReleaseShellKeyFocus", ()),
                 ("NotifyKeyboardKeysym", (ord("a"), True)),
                 ("NotifyKeyboardKeysym", (ord("a"), False)),
             ],
@@ -530,6 +540,7 @@ class MutterRemoteInputTests(unittest.TestCase):
         self.assertEqual(
             bus.calls,
             [
+                ("ReleaseShellKeyFocus", ()),
                 ("NotifyKeyboardKeysym", (ord("a"), True)),
                 ("NotifyKeyboardKeysym", (ord("a"), False)),
             ],
