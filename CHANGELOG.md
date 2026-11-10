@@ -45,6 +45,8 @@ All notable changes to WayExpand are documented here.
   application identity.
 - Distinguish evdev device activity from matcher input with sanitized raw-key
   and missing-layout counters; neither keycodes nor typed text are exposed.
+- Include a validated IBus package name and version from the latest matching
+  coredump in KWin crash diagnostics when the dump provides that metadata.
 - Expose whether app-scoped raw-capture fallback is enabled and its configured
   application count in daemon status and `wayexpand health --json`. These
   content-free fields help distinguish an inactive fallback from absent input

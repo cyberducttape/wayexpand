@@ -69,8 +69,10 @@ crashes `ibus-ui-gtk3`, update or repair the system IBus package and inspect
 If the diagnostic reports `WX-KWIN-IBUS-002`, it found a recent IBus helper
 segmentation fault for the current user. The finding includes the number of
 matching crashes in its bounded seven-day sample and the latest crash age when
-the journal provides a timestamp. The crash record identifies the process and
-stack, but does not by itself establish which package fix is installed. When
+the journal provides a timestamp. When available, it also reports the package
+name and version recorded for the process that crashed. This is the crashed
+process's package metadata, not proof of the currently installed version or
+that a distribution fix is present. When
 the latest dump has both `g_utf8_pointer_to_offset` and Wayland-dispatch
 frames, the diagnostic reports that it resembles Fedora bug 2444787, a
 Wayland surrounding-text anchor crash. This signature is evidence about the
