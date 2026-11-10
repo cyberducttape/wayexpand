@@ -34,10 +34,9 @@ const SCRIPT_TEMPLATE: &str = include_str!("window-tracker.js");
 const LOAD_RETRY_ATTEMPTS: u32 = 15;
 const LOAD_RETRY_DELAY: Duration = Duration::from_millis(150);
 const TRACKER_SETUP_TIMEOUT: Duration = Duration::from_secs(12);
-/// Do not report a tracker as connected until KWin has delivered its initial
-/// focused-window state. Without this gate, a script can load successfully
-/// while its startup focus report is missed, leaving terminal-scoped matching
-/// fail-closed until the user changes windows.
+/// Give KWin a short opportunity to publish its initial focus state. Missing
+/// this snapshot must not tear down the script: it remains subscribed and can
+/// report the next focus change while app-scoped matching stays fail-closed.
 const INITIAL_SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(4);
 const DBUS_CONNECTION_TIMEOUT: Duration = Duration::from_secs(3);
 const TRACKER_HEALTH_CHECK_INTERVAL: Duration = Duration::from_millis(500);
@@ -349,15 +348,14 @@ impl KwinWindowTracker {
             next_health_check: Instant::now() + TRACKER_HEALTH_CHECK_INTERVAL,
             last_healthy: Instant::now(),
         };
-        // `loadScript()` and `run()` only prove that KWin accepted the script;
-        // they do not prove that it observed the active window. Consume and
-        // retain the first callback here so the supervisor cannot publish a
-        // connected tracker with no usable focus state. Empty focus reports
-        // are ignored until an actual focused window is available.
-        tracker.initial_snapshot = Some(wait_for_initial_window(
-            INITIAL_SNAPSHOT_TIMEOUT,
-            |timeout| tracker.next_window_timeout(timeout),
-        )?);
+        // `loadScript()` and `run()` only prove that KWin accepted the script.
+        // Preserve a usable initial context when available, but keep the
+        // subscription alive if KWin has no snapshot yet: unloading it on a
+        // timeout can miss the next focus transition and create repeated
+        // gaps. The daemon still fails closed while focus is unknown.
+        tracker.initial_snapshot = wait_for_initial_window(INITIAL_SNAPSHOT_TIMEOUT, |timeout| {
+            tracker.next_window_timeout(timeout)
+        })?;
         Ok(tracker)
     }
 
@@ -588,19 +586,19 @@ fn health_outcome(
 fn wait_for_initial_window(
     timeout: Duration,
     mut next: impl FnMut(Duration) -> Result<Option<Option<WindowContext>>, WindowTrackerError>,
-) -> Result<WindowContext, KwinWindowError> {
+) -> Result<Option<WindowContext>, KwinWindowError> {
     let deadline = Instant::now() + timeout;
     loop {
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
-            return Err(KwinWindowError::InitialSnapshotTimedOut);
+            return Ok(None);
         }
         match next(remaining)
             .map_err(|error| KwinWindowError::InitialSnapshotFailed(error.to_string()))?
         {
-            Some(Some(window)) => return Ok(window),
+            Some(Some(window)) => return Ok(Some(window)),
             Some(None) => continue,
-            None => return Err(KwinWindowError::InitialSnapshotTimedOut),
+            None => return Ok(None),
         }
     }
 }
@@ -755,17 +753,14 @@ mod tests {
         })
         .unwrap();
 
-        assert_eq!(actual, expected);
+        assert_eq!(actual, Some(expected));
     }
 
     #[test]
-    fn tracker_without_a_focused_window_times_out() {
+    fn missing_initial_focus_does_not_fail_the_tracker_connection() {
         let result = wait_for_initial_window(Duration::from_secs(1), |_| Ok(Some(None)));
 
-        assert!(matches!(
-            result,
-            Err(KwinWindowError::InitialSnapshotTimedOut)
-        ));
+        assert_eq!(result.unwrap(), None);
     }
 
     #[test]

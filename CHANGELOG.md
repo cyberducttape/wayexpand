@@ -4,10 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
-- Require KWin to publish a non-empty initial focused-window snapshot before
-  the daemon reports its tracker connected; ignore empty startup reports and
-  retry boundedly so terminal-scoped matching cannot remain silently without
-  focus context.
+- Keep the KWin focus subscription alive when startup has no usable focus
+  snapshot; retain fail-closed app matching while waiting for the next
+  compositor focus event instead of repeatedly unloading and reconnecting.
 - Place KWin focus-tracker scripts in the validated user runtime directory so
   the compositor can read them when systemd isolates a daemon's `/tmp`.
 - Report sanitized evdev key and unavailable-layout activity in live debugging,
