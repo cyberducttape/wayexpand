@@ -156,7 +156,7 @@ pub struct KwinWindowTracker {
     service_name: String,
     plugin_name: String,
     script_path: std::path::PathBuf,
-    initial_snapshot: Option<Option<WindowContext>>,
+    initial_snapshot: Option<WindowContext>,
     next_health_check: Instant,
     /// When KWin last answered a health check.
     last_healthy: Instant,
@@ -352,14 +352,12 @@ impl KwinWindowTracker {
         // `loadScript()` and `run()` only prove that KWin accepted the script;
         // they do not prove that it observed the active window. Consume and
         // retain the first callback here so the supervisor cannot publish a
-        // connected tracker with no usable focus state. An explicit empty
-        // snapshot is valid (for example, the desktop has no active window).
-        tracker.initial_snapshot = Some(
-            tracker
-                .next_window_timeout(INITIAL_SNAPSHOT_TIMEOUT)
-                .map_err(|error| KwinWindowError::InitialSnapshotFailed(error.to_string()))?
-                .ok_or(KwinWindowError::InitialSnapshotTimedOut)?,
-        );
+        // connected tracker with no usable focus state. Empty focus reports
+        // are ignored until an actual focused window is available.
+        tracker.initial_snapshot = Some(wait_for_initial_window(
+            INITIAL_SNAPSHOT_TIMEOUT,
+            |timeout| tracker.next_window_timeout(timeout),
+        )?);
         Ok(tracker)
     }
 
@@ -582,6 +580,31 @@ fn health_outcome(
     }
 }
 
+/// Wait for a usable focused-window context. KWin may first report an empty
+/// focus transition while its startup state is settling; accepting that as
+/// readiness leaves app-scoped matching unavailable even though the tracker
+/// claims to be connected. Keep waiting within the same bounded startup
+/// deadline until a real window context arrives.
+fn wait_for_initial_window(
+    timeout: Duration,
+    mut next: impl FnMut(Duration) -> Result<Option<Option<WindowContext>>, WindowTrackerError>,
+) -> Result<WindowContext, KwinWindowError> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(KwinWindowError::InitialSnapshotTimedOut);
+        }
+        match next(remaining)
+            .map_err(|error| KwinWindowError::InitialSnapshotFailed(error.to_string()))?
+        {
+            Some(Some(window)) => return Ok(window),
+            Some(None) => continue,
+            None => return Err(KwinWindowError::InitialSnapshotTimedOut),
+        }
+    }
+}
+
 /// Build the session-bus connection without allowing authentication or socket
 /// setup to strand the tracker supervisor/UI worker indefinitely. `race`
 /// drops the unfinished connection future when the deadline wins.
@@ -626,7 +649,7 @@ impl WindowTracker for KwinWindowTracker {
         timeout: Duration,
     ) -> Result<Option<Option<WindowContext>>, WindowTrackerError> {
         if let Some(initial_snapshot) = self.initial_snapshot.take() {
-            return Ok(Some(initial_snapshot));
+            return Ok(Some(Some(initial_snapshot)));
         }
         let deadline = Instant::now() + timeout;
         loop {
@@ -703,7 +726,7 @@ impl WindowTracker for KwinWindowTracker {
 mod tests {
     use super::{
         bounded_session_connection, cleanup_orphan_tracker_scripts, is_kwin_sender,
-        parse_tracker_script_filename, validate_tracker_script_directory,
+        parse_tracker_script_filename, validate_tracker_script_directory, wait_for_initial_window,
         window_context_from_signal, KwinWindowError, KwinWindowTracker, ORPHAN_CHECK_LIMIT,
         SCRIPT_TEMPLATE, TRACKER_HEALTH_CHECK_INTERVAL,
     };
@@ -716,7 +739,34 @@ mod tests {
         process, thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     };
-    use wayexpand_core::WindowTracker;
+    use wayexpand_core::{WindowContext, WindowTracker};
+
+    #[test]
+    fn initial_empty_focus_report_does_not_mark_tracker_ready() {
+        let expected = WindowContext {
+            app_id: Some("org.kde.konsole".into()),
+            title: Some("Terminal".into()),
+            instance_id: Some("window-1".into()),
+        };
+        let mut reports = [Some(None), Some(Some(expected.clone()))].into_iter();
+
+        let actual = wait_for_initial_window(Duration::from_secs(1), |_| {
+            Ok(reports.next().expect("the initial focus report sequence"))
+        })
+        .unwrap();
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn tracker_without_a_focused_window_times_out() {
+        let result = wait_for_initial_window(Duration::from_secs(1), |_| Ok(Some(None)));
+
+        assert!(matches!(
+            result,
+            Err(KwinWindowError::InitialSnapshotTimedOut)
+        ));
+    }
 
     #[test]
     fn unanswered_health_checks_are_tolerated_for_the_grace_period() {
