@@ -4,6 +4,10 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add the explicit `wayexpand debug --focused-app-id` diagnostic to show the
+  sanitized focused application ID when terminal-only capture reports an
+  allowlist mismatch; never include titles or typed content, and withhold the
+  ID when control-socket privacy restrictions are active.
 - Include Konsole's `konsole` WM_CLASS alongside its desktop-file ID in the
   terminal evdev allowlist, so KWin identity variants retain terminal
   matching without widening capture to other applications.

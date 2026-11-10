@@ -43,11 +43,31 @@ pub(crate) fn focus_token(window: &WindowContext) -> Option<String> {
 
 pub(crate) fn publish_focus_snapshot(control: &ControlServer, state: &FocusState) {
     let token = state.previous.as_ref().and_then(focus_token);
+    let diagnostic_app_id = state
+        .previous
+        .as_ref()
+        .and_then(|window| window.app_id.as_deref())
+        .and_then(sanitize_diagnostic_app_id);
     control.set_focus_snapshot(FocusSnapshot {
         generation: state.generation,
         exact_window_identity: token.is_some(),
         token,
+        diagnostic_app_id,
     });
+}
+
+/// App IDs are exposed only through an explicit, local diagnostic command.
+/// Keep the response single-line and bounded, and reject non-identifier data.
+fn sanitize_diagnostic_app_id(app_id: &str) -> Option<String> {
+    if app_id.is_empty()
+        || app_id.len() > 128
+        || !app_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    {
+        return None;
+    }
+    Some(app_id.to_ascii_lowercase())
 }
 
 impl Daemon {
@@ -185,9 +205,19 @@ fn is_profile_path(
 
 #[cfg(test)]
 mod tests {
-    use super::{focus_token, is_profile_path, profile_path};
+    use super::{focus_token, is_profile_path, profile_path, sanitize_diagnostic_app_id};
     use std::path::Path;
     use wayexpand_core::WindowContext;
+
+    #[test]
+    fn diagnostic_app_id_is_bounded_and_single_line() {
+        assert_eq!(
+            sanitize_diagnostic_app_id("Org.KDE.Konsole").as_deref(),
+            Some("org.kde.konsole")
+        );
+        assert_eq!(sanitize_diagnostic_app_id("bad\nid"), None);
+        assert_eq!(sanitize_diagnostic_app_id(&"x".repeat(129)), None);
+    }
 
     #[test]
     fn profile_path_comparison_matches_the_built_target() {

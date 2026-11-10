@@ -121,6 +121,7 @@ impl DaemonFocus {
 pub enum DaemonOperation {
     Status,
     Focus,
+    FocusedAppId,
     Reload,
     Pause,
     Resume,
@@ -237,6 +238,7 @@ fn encode_operation(operation: &DaemonOperation) -> Result<String, DaemonClientE
     match operation {
         DaemonOperation::Status => Ok("status".into()),
         DaemonOperation::Focus => Ok("focus".into()),
+        DaemonOperation::FocusedAppId => Ok("focused-app-id".into()),
         DaemonOperation::Reload => Ok("reload".into()),
         DaemonOperation::Pause => Ok("pause".into()),
         DaemonOperation::Resume => Ok("resume".into()),
@@ -390,6 +392,14 @@ mod tests {
             None
         );
         assert_eq!(DaemonFocus::parse("running\n"), None);
+    }
+
+    #[test]
+    fn focused_app_id_operation_has_a_fixed_read_only_command() {
+        assert_eq!(
+            encode_operation(&DaemonOperation::FocusedAppId).unwrap(),
+            "focused-app-id"
+        );
     }
 
     #[test]
