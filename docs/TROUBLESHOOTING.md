@@ -30,8 +30,11 @@ so matching remains disabled for that focus until identity is available.
 
 When scope is `outside_allowlist`, focus the affected terminal and run
 `wayexpand debug --focused-app-id`. This explicit diagnostic prints only the
-bounded application ID (never the window title or typed text), which you can
-compare with `settings.terminal_apps` and `settings.raw_capture_apps`. It
+bounded application ID (never the window title or typed text) and the daemon's
+current app-scope decision. If it reports `outside_allowlist`, automatic
+matching is suppressed for the reported focus; compare the ID with
+`settings.terminal_apps` and `settings.raw_capture_apps`. The JSON form also
+includes `terminal_apps_only` when the running daemon supports it. The command
 reports `unavailable` if the tracker has no safe application ID or policy
 withholds focus identity. If the running daemon reports an unsupported
 command, update and restart it before retrying.

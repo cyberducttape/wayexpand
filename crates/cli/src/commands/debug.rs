@@ -128,15 +128,41 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
             .lines()
             .find_map(|line| line.strip_prefix("focused_app_id="))
             .ok_or_else(|| anyhow::anyhow!("daemon returned an invalid focused app ID response"))?;
+        // Read the scope decision beside the identity. This turns the command
+        // into a useful diagnosis for terminal-scoped evdev routes instead of
+        // making users compare the ID against configuration by hand. Older
+        // daemons may not publish these fields, so keep them optional.
+        let status = crate::control_operation(wayexpand_core::DaemonOperation::Status)
+            .ok()
+            .map(|response| wayexpand_core::DaemonStatus::parse(&response));
+        let scope_state = status
+            .as_ref()
+            .and_then(|status| status.field("capture_app_scope_state"));
+        let terminal_apps_only = status
+            .as_ref()
+            .and_then(|status| status.bool_field("terminal_apps_only"));
         if json {
             println!(
                 "{}",
-                serde_json::json!({"focused_app_id": if app_id == "unavailable" { None } else { Some(app_id) }})
+                serde_json::json!({
+                    "focused_app_id": if app_id == "unavailable" { None } else { Some(app_id) },
+                    "capture_app_scope_state": scope_state,
+                    "terminal_apps_only": terminal_apps_only,
+                })
             );
         } else if app_id == "unavailable" {
             println!("Focused application ID: unavailable");
+            if let Some(scope_state) = scope_state {
+                println!("Capture app scope: {scope_state}");
+            }
         } else {
             println!("Focused application ID: {app_id}");
+            if let Some(scope_state) = scope_state {
+                println!("Capture app scope: {scope_state}");
+                if terminal_apps_only == Some(true) && scope_state == "outside_allowlist" {
+                    println!("Expansion matching is suppressed for this focused application.");
+                }
+            }
         }
         return Ok(());
     }
