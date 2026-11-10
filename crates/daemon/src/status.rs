@@ -187,12 +187,12 @@ pub(crate) fn record_window_tracker_update(window: Option<&wayexpand_core::Windo
 }
 
 fn window_context_state_code(window: Option<&wayexpand_core::WindowContext>) -> u8 {
-    u8::from(window.is_some()) * WINDOW_CONTEXT_AVAILABLE_BIT
-        | u8::from(
+    (u8::from(window.is_some()) * WINDOW_CONTEXT_AVAILABLE_BIT)
+        | (u8::from(
             window
                 .and_then(|context| context.app_id.as_deref())
                 .is_some(),
-        ) * WINDOW_APP_ID_AVAILABLE_BIT
+        ) * WINDOW_APP_ID_AVAILABLE_BIT)
 }
 
 fn window_tracker_updates_total() -> u64 {
