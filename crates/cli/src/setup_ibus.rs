@@ -35,6 +35,9 @@ const LEGACY_PLASMA_IBUS_ENVIRONMENT_HEADER: &str =
 /// Common terminal app IDs (normalized), used when `terminal_apps` is empty.
 pub(crate) const DEFAULT_TERMINAL_APPS: &[&str] = &[
     "org.kde.konsole",
+    // KWin reports Konsole's WM_CLASS (`konsole`) for some XWayland and
+    // native-window configurations instead of its desktop-file ID above.
+    "konsole",
     "org.kde.yakuake",
     "org.gnome.console",
     "org.gnome.terminal",

@@ -4,6 +4,9 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Include Konsole's `konsole` WM_CLASS alongside its desktop-file ID in the
+  terminal evdev allowlist, so KWin identity variants retain terminal
+  matching without widening capture to other applications.
 - Raise the bounded control-socket response limit to 16 KiB so saturated
   diagnostic status remains readable by CLI, TUI, and GUI clients.
 - Mark app-scoped evdev health degraded when compositor focus identity is
