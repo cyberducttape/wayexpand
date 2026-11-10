@@ -29,7 +29,7 @@ All notable changes to WayExpand are documented here.
   worker has already finished sending. Keep the output actor alive, discard
   stale queued input, and retain a content-free correlated partial-write
   trace even when the worker's detailed diagnostic record was dropped.
-- Version `wayexpand health --json` as schema 2 and expose operational and
+- Version `wayexpand health --json` as schema 3 and expose operational and
   route-safety readiness separately, so a live matcher is not mistaken for a
   production-certified route by deployment automation.
 - Mark a valid but empty active snippet library as `WX-CONFIG-002` in health
