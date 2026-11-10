@@ -19,3 +19,4 @@ futures-lite = "2"
 thiserror.workspace = true
 getrandom.workspace = true
 libc.workspace = true
+tracing.workspace = true

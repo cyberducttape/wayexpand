@@ -23,6 +23,7 @@ use std::{
     time::{Duration, Instant},
 };
 use thiserror::Error;
+use tracing::{debug, info};
 use wayexpand_core::{
     window_update_channel, WindowContext, WindowTracker, WindowTrackerError, WindowUpdateReceiver,
     WindowUpdateSender,
@@ -121,13 +122,28 @@ impl WindowTrackerService {
         instance_id: String,
         #[zbus(header)] header: zbus::message::Header<'_>,
     ) {
-        if !is_kwin_sender(
+        let sender_is_kwin = is_kwin_sender(
             header.sender().map(|sender| sender.as_str()),
             &self.kwin_owner,
-        ) {
+        );
+        if !sender_is_kwin {
+            debug!("ignored a window-tracker callback from a non-KWin D-Bus owner");
             return;
         }
         let context = window_context_from_signal(app_id, title, instance_id);
+        info!(
+            has_context = context.is_some(),
+            has_app_id = context
+                .as_ref()
+                .is_some_and(|window| window.app_id.is_some()),
+            has_title = context
+                .as_ref()
+                .is_some_and(|window| window.title.is_some()),
+            has_instance_id = context
+                .as_ref()
+                .is_some_and(|window| window.instance_id.is_some()),
+            "accepted a KWin focus update"
+        );
         // The receiver may already be gone if the tracker was dropped
         // between the script firing and this call landing; that is not an
         // error, there is simply nothing left to notify. A poisoned mutex

@@ -4465,6 +4465,7 @@ dependencies = [
  "getrandom 0.4.3",
  "libc",
  "thiserror 2.0.21",
+ "tracing",
  "wayexpand-core",
  "zbus",
 ]
