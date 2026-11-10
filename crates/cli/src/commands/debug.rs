@@ -121,6 +121,9 @@ pub(crate) fn debug_command(args: Args) -> Result<()> {
             bail!("--focused-app-id cannot be combined with other debug modes");
         }
         let response = crate::control_operation(wayexpand_core::DaemonOperation::FocusedAppId)?;
+        if response.starts_with("unknown command;") {
+            bail!("the running daemon does not support focused-app diagnostics; update and restart the daemon, then retry");
+        }
         let app_id = response
             .lines()
             .find_map(|line| line.strip_prefix("focused_app_id="))
