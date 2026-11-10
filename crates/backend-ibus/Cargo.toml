@@ -24,6 +24,7 @@ serde.workspace = true
 serde_json.workspace = true
 wayexpand-process-supervisor = { path = "../process-supervisor" }
 wayexpand-backend-gnome-window = { path = "../backend-gnome-window" }
+wayexpand-backend-kwin-window = { path = "../backend-kwin-window" }
 
 [dev-dependencies]
 criterion = "0.8"

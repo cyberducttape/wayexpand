@@ -923,7 +923,7 @@ fn terminal_match_self_test(validated: &wayexpand_core::ValidatedConfig) -> Stri
         for expansion in config
             .expansion
             .iter()
-            .filter(|item| item.enabled && item.command.is_none())
+            .filter(|item| item.is_keyboard_matchable() && item.command.is_none())
         {
             if Instant::now() >= deadline {
                 return r#"{"status":"fail","detail":"terminal matching self-test exceeded its time budget"}"#.to_owned();

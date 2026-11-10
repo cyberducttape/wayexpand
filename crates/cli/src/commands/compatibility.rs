@@ -47,7 +47,7 @@ fn ibus_activation_check(
             ),
             Some("evdev") if terminal_apps_only == Some(true) => check(
                 "pass",
-                "IBus is selected for ordinary IBus clients; the supplemental evdev matcher expands only in configured terminals, but evdev still observes global keyboard input and has no sensitive-field signal",
+                "IBus is selected outside the configured evdev-owned applications; raw evdev still observes global keyboard input and has no sensitive-field signal",
             ),
             Some(source) => check(
                 "not_active_route",
@@ -110,8 +110,8 @@ fn active_route_report(daemon: Option<&serde_json::Value>) -> serde_json::Value 
             None => "unknown",
         },
         "expansion_scope": match terminal_apps_only {
-            Some(true) => "configured_terminal_applications",
-            Some(false) => "not_limited_to_terminal_applications",
+            Some(true) => "configured_applications",
+            Some(false) => "not_limited_to_configured_applications",
             None => "unknown",
         },
         "matching_available": matching_available,
@@ -358,10 +358,7 @@ mod tests {
         let report = active_route_report(Some(&daemon));
         assert_eq!(report["operational_status"], "connected_and_matching");
         assert_eq!(report["capture_scope"], "global_keyboard_devices");
-        assert_eq!(
-            report["expansion_scope"],
-            "configured_terminal_applications"
-        );
+        assert_eq!(report["expansion_scope"], "configured_applications");
         assert_eq!(report["input_privacy"], "no_sensitive_field_signal");
         assert_eq!(report["insertion_atomicity"], "non_atomic");
         assert!(report["operational_evidence_scope"]

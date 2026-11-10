@@ -1058,8 +1058,13 @@ fn parse_terminal_match_self_test(
 }
 
 fn terminal_match_self_test_for(config: &wayexpand_core::Config) -> serde_json::Value {
-    if config.settings.terminal_apps.is_empty() {
-        return serde_json::json!({"status":"not_applicable","detail":"no terminal application identifiers are configured"});
+    let raw_capture_apps = if config.settings.raw_capture_fallback_enabled {
+        config.settings.raw_capture_apps.as_slice()
+    } else {
+        &[]
+    };
+    if config.settings.terminal_apps.is_empty() && raw_capture_apps.is_empty() {
+        return serde_json::json!({"status":"not_applicable","detail":"no app identifiers are configured for the app-scoped evdev route"});
     }
     let mut engine = match wayexpand_core::ExpansionEngine::new(config.clone()) {
         Ok(engine) => engine,
@@ -1068,7 +1073,12 @@ fn terminal_match_self_test_for(config: &wayexpand_core::Config) -> serde_json::
         }
     };
     engine.set_terminal_apps_only(true);
-    for terminal_filter in &config.settings.terminal_apps {
+    for terminal_filter in config
+        .settings
+        .terminal_apps
+        .iter()
+        .chain(raw_capture_apps.iter())
+    {
         let app_id = terminal_filter
             .strip_prefix("app_id_exact:")
             .or_else(|| terminal_filter.strip_prefix("app_id_glob:"))
@@ -1081,7 +1091,7 @@ fn terminal_match_self_test_for(config: &wayexpand_core::Config) -> serde_json::
         for expansion in config
             .expansion
             .iter()
-            .filter(|item| item.enabled && item.command.is_none())
+            .filter(|item| item.is_keyboard_matchable() && item.command.is_none())
         {
             engine.process(wayexpand_core::InputEvent::Reset);
             engine.process(wayexpand_core::InputEvent::WindowChanged(Some(
@@ -1101,11 +1111,11 @@ fn terminal_match_self_test_for(config: &wayexpand_core::Config) -> serde_json::
                 .iter()
                 .any(|matched| matched.trigger.as_ref() == expansion.trigger)
             {
-                return serde_json::json!({"status":"pass","detail":"a configured static expansion matched through terminal-only admission","terminal_application_count":config.settings.terminal_apps.len()});
+                return serde_json::json!({"status":"pass","detail":"a configured static expansion matched through app-scoped evdev admission","terminal_application_count":config.settings.terminal_apps.len(),"raw_capture_application_count":config.settings.raw_capture_apps.len()});
             }
         }
     }
-    serde_json::json!({"status":"fail","detail":"no enabled static expansion matched for any configured terminal application under terminal-only admission","terminal_application_count":config.settings.terminal_apps.len()})
+    serde_json::json!({"status":"fail","detail":"no enabled static expansion matched for any configured evdev-owned application under app-scoped admission","terminal_application_count":config.settings.terminal_apps.len(),"raw_capture_application_count":config.settings.raw_capture_apps.len()})
 }
 pub(crate) fn repair(args: Args) -> Result<()> {
     let mut check = false;
@@ -1367,6 +1377,41 @@ mod tests {
         )
         .unwrap();
         assert_eq!(terminal_match_self_test_for(&blocked)["status"], "fail");
+    }
+
+    #[test]
+    fn evdev_app_self_test_only_claims_coverage_when_fallback_is_enabled() {
+        let disabled = wayexpand_core::Config::parse(
+            r#"
+            [settings]
+            raw_capture_apps = ["app_id_exact:org.mozilla.firefox"]
+
+            [[expansion]]
+            trigger = ";;health"
+            replacement = "read only check"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            terminal_match_self_test_for(&disabled)["status"],
+            "not_applicable"
+        );
+
+        let enabled = wayexpand_core::Config::parse(
+            r#"
+            [settings]
+            raw_capture_apps = ["app_id_exact:org.mozilla.firefox"]
+            raw_capture_fallback_enabled = true
+
+            [[expansion]]
+            trigger = ";;health"
+            replacement = "read only check"
+            "#,
+        )
+        .unwrap();
+        let report = terminal_match_self_test_for(&enabled);
+        assert_eq!(report["status"], "pass", "{report}");
+        assert_eq!(report["raw_capture_application_count"], 1);
     }
 
     #[test]

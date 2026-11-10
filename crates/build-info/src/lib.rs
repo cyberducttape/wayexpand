@@ -273,8 +273,28 @@ mod tests {
         fs,
         path::{Path, PathBuf},
         process::{Command, Output},
+        sync::atomic::{AtomicU64, Ordering},
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    static TEST_REPOSITORY_ID: AtomicU64 = AtomicU64::new(0);
+
+    fn unique_test_repository_path(
+        temp_root: &Path,
+        process_id: u32,
+        nonce: u128,
+    ) -> std::io::Result<PathBuf> {
+        loop {
+            let id = TEST_REPOSITORY_ID.fetch_add(1, Ordering::Relaxed);
+            let candidate =
+                temp_root.join(format!("wayexpand-build-info-{process_id}-{nonce}-{id}"));
+            match fs::create_dir(&candidate) {
+                Ok(()) => return Ok(candidate),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error),
+            }
+        }
+    }
 
     struct TestRepository(PathBuf);
 
@@ -284,11 +304,9 @@ mod tests {
                 .duration_since(UNIX_EPOCH)
                 .expect("system clock is after Unix epoch")
                 .as_nanos();
-            let path = std::env::temp_dir().join(format!(
-                "wayexpand-build-info-{}-{nonce}",
-                std::process::id()
-            ));
-            fs::create_dir(&path).expect("create temporary git repository");
+            let path =
+                unique_test_repository_path(&std::env::temp_dir(), std::process::id(), nonce)
+                    .expect("create temporary git repository");
             git_ok(&path, &["init", "--quiet"]);
             git_ok(&path, &["config", "user.name", "WayExpand Test"]);
             git_ok(
@@ -312,6 +330,22 @@ mod tests {
             git_ok(&path, &["tag", "v1.3.3"]);
             Self(path)
         }
+    }
+
+    #[test]
+    fn temporary_repository_paths_remain_unique_with_identical_timestamps() {
+        let root = std::env::temp_dir();
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock is after Unix epoch")
+            .as_nanos();
+        let first = unique_test_repository_path(&root, std::process::id(), timestamp)
+            .expect("create first temporary directory");
+        let second = unique_test_repository_path(&root, std::process::id(), timestamp)
+            .expect("create second temporary directory");
+        assert_ne!(first, second);
+        fs::remove_dir(first).expect("remove first temporary directory");
+        fs::remove_dir(second).expect("remove second temporary directory");
     }
 
     impl Drop for TestRepository {

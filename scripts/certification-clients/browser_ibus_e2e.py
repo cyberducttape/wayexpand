@@ -26,6 +26,7 @@ TITLE = f"WayExpand browser IBus acceptance {APP_ID}"
 TRIGGER = ";e2e"
 EXPECTED = "expanded"
 TIMEOUT_SECONDS = 20
+BROWSER_STARTUP_TIMEOUT_SECONDS = 45
 
 
 def fail(message):
@@ -55,7 +56,7 @@ def find_acceptance_page(targets, expected_url):
 
 
 def browser_startup_diagnostics(process, profile, active_port, log_path):
-    """Return content-free process state when Chromium startup stalls."""
+    """Return bounded, content-free process state when Chromium startup stalls."""
     proc_dir = Path("/proc") / str(process.pid)
     fields = {}
     try:
@@ -70,7 +71,9 @@ def browser_startup_diagnostics(process, profile, active_port, log_path):
     except OSError:
         fields["wait_channel"] = "unavailable"
     try:
-        fields["child_count"] = len((proc_dir / "task" / str(process.pid) / "children").read_text().split())
+        fields["child_count"] = len(
+            (proc_dir / "task" / str(process.pid) / "children").read_text().split()
+        )
     except OSError:
         fields["child_count"] = "unavailable"
     try:
@@ -138,6 +141,11 @@ def main():
     initial_status = status_snapshot()
     initial_focus_ins = int(initial_status.get("totals", {}).get("focus_ins", 0))
     log_file = open(args.log, "wb")
+    print(
+        "Starting Chromium acceptance client "
+        f"(executable={args.browser}, pid pending, profile={profile})",
+        flush=True,
+    )
     process = subprocess.Popen(
         [
             args.browser,
@@ -161,6 +169,7 @@ def main():
         env=os.environ.copy(),
         start_new_session=True,
     )
+    print(f"Chromium process started (pid={process.pid})", flush=True)
 
     def terminate(signum, _frame):
         raise SystemExit(f"received signal {signum}")
@@ -170,6 +179,7 @@ def main():
     connection = None
     try:
         active_port = profile / "DevToolsActivePort"
+        last_startup_state = {"description": "DevToolsActivePort has not been observed"}
 
         expected_page_url = page.resolve().as_uri()
 
@@ -177,26 +187,65 @@ def main():
             if process.poll() is not None:
                 fail(f"browser exited during startup ({process.returncode}); see {args.log}")
             if not active_port.is_file():
+                last_startup_state["description"] = "DevToolsActivePort is absent"
                 return None
-            lines = active_port.read_text(encoding="utf-8").splitlines()
+            try:
+                lines = active_port.read_text(encoding="utf-8").splitlines()
+            except OSError as error:
+                last_startup_state["description"] = (
+                    f"DevToolsActivePort could not be read ({type(error).__name__})"
+                )
+                return None
             if len(lines) < 2:
+                last_startup_state["description"] = (
+                    f"DevToolsActivePort is incomplete ({len(lines)} lines)"
+                )
                 return None
-            port = int(lines[0])
+            try:
+                port = int(lines[0])
+            except ValueError:
+                last_startup_state["description"] = "DevToolsActivePort has an invalid port"
+                return None
             try:
                 with urllib.request.urlopen(
                     f"http://127.0.0.1:{port}/json/list", timeout=1
                 ) as response:
                     targets = json.load(response)
-            except (OSError, urllib.error.URLError):
+            except (OSError, urllib.error.URLError, json.JSONDecodeError) as error:
+                last_startup_state["description"] = (
+                    "DevToolsActivePort exists but its endpoint is not ready "
+                    f"({type(error).__name__})"
+                )
                 return None
-            return find_acceptance_page(targets, expected_page_url)
+            target = find_acceptance_page(targets, expected_page_url)
+            last_startup_state["description"] = (
+                "DevTools endpoint is responsive but the isolated page is not listed"
+                if target is None
+                else "isolated page is ready"
+            )
+            return target
 
         try:
-            ws_url = wait_for(devtools_url, "Chromium's isolated acceptance page")
+            ws_url = wait_for(
+                devtools_url,
+                "Chromium's isolated acceptance page",
+                timeout=BROWSER_STARTUP_TIMEOUT_SECONDS,
+            )
         except SystemExit as error:
+            log_file.flush()
+            try:
+                browser_log_tail = Path(args.log).read_text(
+                    encoding="utf-8", errors="replace"
+                ).splitlines()[-20:]
+            except OSError:
+                browser_log_tail = []
             fail(
-                f"{error}; "
-                f"{browser_startup_diagnostics(process, profile, active_port, args.log)}"
+                f"{error}; pid={process.pid}, "
+                f"exit_status={process.poll()}, "
+                f"active_port_present={active_port.exists()}, "
+                f"startup_state={last_startup_state['description']}; "
+                f"{browser_startup_diagnostics(process, profile, active_port, args.log)}; "
+                f"Chromium log tail={browser_log_tail!r}"
             )
         connection = websocket.create_connection(ws_url, timeout=2)
         next_id = 0

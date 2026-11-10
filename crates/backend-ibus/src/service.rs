@@ -14,6 +14,7 @@ use std::{
 };
 use tracing::{info, warn};
 use wayexpand_backend_gnome_window::GnomeWindowTracker;
+use wayexpand_backend_kwin_window::KwinWindowTracker;
 use wayexpand_core::{
     default_config_path, Config, ConfigStore, OrganizationPolicy, ValidatedConfig, WindowContext,
     WindowTracker,
@@ -47,13 +48,13 @@ pub enum IbusServiceError {
 /// Feed only authenticated GNOME Shell focus updates to IBus engines. A
 /// tracker error clears the snapshot before reconnecting, so consumers
 /// immediately lose app identity instead of retaining stale focus metadata.
-fn spawn_gnome_focus_tracker(
+fn spawn_session_focus_tracker(
     focus: Arc<Mutex<Option<WindowContext>>>,
 ) -> Result<(), IbusServiceError> {
     std::thread::Builder::new()
-        .name("wayexpand-ibus-gnome-focus".into())
+        .name("wayexpand-ibus-window-focus".into())
         .spawn(move || loop {
-            match GnomeWindowTracker::new() {
+            match connect_session_window_tracker() {
                 Ok(mut tracker) => loop {
                     match tracker.next_window_timeout(Duration::from_millis(250)) {
                         Ok(Some(window)) => {
@@ -63,7 +64,7 @@ fn spawn_gnome_focus_tracker(
                         }
                         Ok(None) => {}
                         Err(error) => {
-                            warn!(%error, "GNOME focus tracking unavailable to IBus; app-filtered expansions fail closed");
+                            warn!(%error, "compositor focus tracking unavailable to IBus; app-scoped routing fails closed");
                             if let Ok(mut current) = focus.lock() {
                                 *current = None;
                             }
@@ -72,7 +73,7 @@ fn spawn_gnome_focus_tracker(
                     }
                 },
                 Err(error) => {
-                    warn!(%error, "GNOME focus tracking unavailable to IBus; app-filtered expansions fail closed");
+                    warn!(%error, "compositor focus tracking unavailable to IBus; app-scoped routing fails closed");
                     if let Ok(mut current) = focus.lock() {
                         *current = None;
                     }
@@ -82,6 +83,20 @@ fn spawn_gnome_focus_tracker(
         })
         .map_err(|error| IbusServiceError::Thread(error.to_string()))?;
     Ok(())
+}
+
+/// Select a compositor bridge by probing its real D-Bus endpoint. The KWin
+/// probe is side-effect free; `new()` is called only after it succeeds. Both
+/// trackers authenticate the compositor as the source of focus updates.
+fn connect_session_window_tracker() -> Result<Box<dyn WindowTracker>, String> {
+    if KwinWindowTracker::probe().is_ok() {
+        return KwinWindowTracker::new()
+            .map(|tracker| Box::new(tracker) as Box<dyn WindowTracker>)
+            .map_err(|error| error.to_string());
+    }
+    GnomeWindowTracker::new()
+        .map(|tracker| Box::new(tracker) as Box<dyn WindowTracker>)
+        .map_err(|error| error.to_string())
 }
 
 /// IBus factory state. Each CreateEngine call gets its own adapter and object
@@ -610,13 +625,10 @@ pub fn run_service(config_path: Option<std::path::PathBuf>) -> Result<(), IbusSe
     let config_generation = Arc::new(AtomicU64::new(initial_snapshot.generation));
     let instances: Instances = Arc::new(Mutex::new(HashMap::new()));
     let gnome_focus = Arc::new(Mutex::new(None));
-    if env::var("XDG_CURRENT_DESKTOP")
-        .unwrap_or_default()
-        .to_ascii_lowercase()
-        .contains("gnome")
-    {
-        spawn_gnome_focus_tracker(Arc::clone(&gnome_focus))?;
-    }
+    // App-scoped evdev ownership and app-filtered snippets require a live,
+    // authenticated compositor focus source. Probe the actual bridge rather
+    // than enabling tracking from a desktop-name heuristic.
+    spawn_session_focus_tracker(Arc::clone(&gnome_focus))?;
     let (completion_sender, completion_receiver) = mpsc::channel();
     let factory = Factory {
         connection: Arc::clone(&connection_slot),

@@ -6,7 +6,7 @@ fn desktop_test_options(expansions: &[ExpansionConfig]) -> Vec<(String, String)>
     expansions
         .iter()
         .filter(|expansion| {
-            expansion.enabled
+            expansion.is_keyboard_matchable()
                 && expansion.app_filter.is_empty()
                 && expansion.command.is_none()
                 && !expansion.replacement.contains("{{")
@@ -27,6 +27,40 @@ fn no_surrounding_text_guidance() -> &'static str {
 }
 
 impl GuiApp {
+    fn window_tracker_lifecycle_detail(
+        &self,
+        capabilities: &runtime::DaemonCapabilities,
+    ) -> Option<String> {
+        let state = capabilities.window_tracker_state.as_deref()?;
+        let last_connected_age_seconds = capabilities
+            .window_tracker_last_connected_unix
+            .filter(|timestamp| *timestamp > 0)
+            .map(|timestamp| {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs()
+                    .saturating_sub(timestamp)
+            });
+        Some(
+            self.strings.window_tracker_lifecycle_detail(
+                state,
+                capabilities
+                    .window_tracker_reconnect_attempts_total
+                    .unwrap_or(0),
+                capabilities.window_tracker_disconnects_total.unwrap_or(0),
+                capabilities
+                    .window_tracker_last_failure_reason
+                    .as_deref()
+                    .unwrap_or("unknown"),
+                last_connected_age_seconds,
+                capabilities
+                    .window_tracker_reconnect_backoff_ms
+                    .unwrap_or(0),
+            ),
+        )
+    }
+
     pub(crate) fn refresh_diagnostics(&mut self, announce: bool) {
         if self.diagnostics_running {
             return;
@@ -447,6 +481,11 @@ impl GuiApp {
                 ),
                 &self.strings,
             );
+            if let Some(detail) = capabilities
+                .and_then(|capabilities| self.window_tracker_lifecycle_detail(capabilities))
+            {
+                ui.label(RichText::new(detail).small().color(palette.muted));
+            }
             render_assessment_row(
                 ui,
                 palette,
@@ -780,6 +819,9 @@ impl GuiApp {
                 "window_tracker",
                 capabilities.window_tracker_connected,
             );
+            if let Some(detail) = self.window_tracker_lifecycle_detail(&capabilities) {
+                ui.label(RichText::new(detail).small().color(palette.muted));
+            }
             self.render_capability_row(
                 ui,
                 palette,
@@ -1221,7 +1263,7 @@ impl GuiApp {
                 .selected_index()
                 .and_then(|index| self.config.expansion.get(index))
                 .filter(|expansion| {
-                    expansion.enabled
+                    expansion.is_keyboard_matchable()
                         && expansion.app_filter.is_empty()
                         && expansion.command.is_none()
                         && !expansion.replacement.contains("{{")

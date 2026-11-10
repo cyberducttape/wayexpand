@@ -465,6 +465,12 @@ fn doctor_reports_current_session_capabilities_separately_with_recovery_steps() 
             "capture_sensitive_focus": false,
             "window_tracker_connected": true,
             "window_identity_exact": true,
+            "window_tracker_state": "connected",
+            "window_tracker_reconnect_attempts_total": 2,
+            "window_tracker_disconnects_total": 1,
+            "window_tracker_last_failure_reason": "tracker_disconnected",
+            "window_tracker_last_connected_unix": 1794268800,
+            "window_tracker_reconnect_backoff_ms": 0,
             "focus_assurance": "tracker",
             "inject_insertion_mode": "ei_text",
             "inject_full_unicode": true,
@@ -481,6 +487,12 @@ fn doctor_reports_current_session_capabilities_separately_with_recovery_steps() 
     assert_eq!(report["capture"]["layout_state"], "unavailable");
     assert_eq!(report["injection"]["status"], "active");
     assert_eq!(report["focus_tracking"]["status"], "exact-window-tracked");
+    assert_eq!(report["window_tracker_lifecycle"]["state"], "connected");
+    assert_eq!(report["window_tracker_lifecycle"]["disconnects_total"], 1);
+    assert_eq!(
+        report["window_tracker_lifecycle"]["last_failure_reason"],
+        "tracker_disconnected"
+    );
     assert_eq!(report["password_field_protection"]["status"], "unavailable");
     assert_eq!(report["replacement_assurance"]["status"], "best-effort");
     assert_eq!(report["end_to_end_certified"], false);
@@ -654,7 +666,7 @@ fn upgrade_status_distinguishes_current_stale_and_incompatible_daemons() {
 #[test]
 fn certification_separates_capture_and_injection_capabilities() {
     let status = status_as_json(
-        "running\nsource=evdev\nbackend=libei\ncapture_sensitive_focus=false\ncapture_exclusive=false\ninject_full_unicode=true\ninject_atomic_replace=false\n",
+        "running\nsource=evdev\nbackend=libei\ncapture_sensitive_focus=false\ncapture_exclusive=false\nwindow_tracker_state=reconnecting\nwindow_tracker_reconnect_attempts_total=3\nwindow_tracker_disconnects_total=2\nwindow_tracker_last_failure_reason=tracker_disconnected\nwindow_tracker_last_connected_unix=1794268800\nwindow_tracker_reconnect_backoff_ms=1000\ninject_full_unicode=true\ninject_atomic_replace=false\n",
     )
     .unwrap();
     let capabilities = runtime_capabilities_from_status(&status);
@@ -666,6 +678,18 @@ fn certification_separates_capture_and_injection_capabilities() {
     );
     assert_eq!(capabilities["injection"]["full_unicode"], true);
     assert_eq!(capabilities["injection"]["atomic_replace"], false);
+    assert_eq!(
+        capabilities["window_context"]["tracker_state"],
+        "reconnecting"
+    );
+    assert_eq!(
+        capabilities["window_context"]["tracker_reconnect_attempts_total"],
+        3
+    );
+    assert_eq!(
+        capabilities["window_context"]["tracker_last_failure_reason"],
+        "tracker_disconnected"
+    );
 }
 
 /// Contract test for docs/COMPATIBILITY.md's `wayexpand status --json`
@@ -682,7 +706,7 @@ fn status_json_matches_documented_stable_contract() {
          backend=input-method-v2\n\
          route_id=input-method-v2\n\
          backend_mode=unknown\n\
-         status_schema=29\n\
+         status_schema=31\n\
          daemon_commit=test-commit\n\
          daemon_version=1.3.3-dev+test-commit\n\
          state=connected\n\
@@ -698,6 +722,7 @@ fn status_json_matches_documented_stable_contract() {
          config_last_successful_reload_unix=1\n\
          config_enabled_expansions=1\n\
          config_disabled_expansions=0\n\
+         config_generate_only_expansions=0\n\
          config_last_reload_failure=none\n\
          config_validation_error_count=0\n\
          config_validation_errors=none\n\
@@ -710,6 +735,12 @@ fn status_json_matches_documented_stable_contract() {
          capture_layout_aware=true\n\
          capture_layout_state=tracked\n\
          window_tracker_connected=false\n\
+         window_tracker_state=unavailable\n\
+         window_tracker_reconnect_attempts_total=0\n\
+         window_tracker_disconnects_total=0\n\
+         window_tracker_last_failure_reason=none\n\
+         window_tracker_last_connected_unix=0\n\
+         window_tracker_reconnect_backoff_ms=0\n\
          window_identity_exact=false\n\
          inject_atomic_replace=true\n\
          inject_full_unicode=true\n\
@@ -830,7 +861,7 @@ fn status_json_matches_documented_stable_contract() {
     let contract: serde_json::Value =
         serde_json::from_str(include_str!("../../../tests/contracts/status-json.json"))
             .expect("status contract fixture must be valid JSON");
-    assert_eq!(contract["schema_version"], 15);
+    assert_eq!(contract["schema_version"], 16);
     assert_eq!(contract["daemon_control_schema"], CONTROL_STATUS_SCHEMA);
     assert_ne!(
         contract["schema_version"],
@@ -939,6 +970,50 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
         .into_iter()
         .collect()
     );
+    let health_fields = contract["health"]
+        .as_array()
+        .expect("health contract must be an array")
+        .iter()
+        .map(|field| field.as_str().unwrap())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        health_fields,
+        [
+            "schema_version",
+            "healthy",
+            "operational_state",
+            "exit_code",
+            "reason",
+            "readiness",
+            "errors",
+            "application_coverage",
+            "route_safety",
+            "configuration",
+            "daemon",
+        ]
+        .into_iter()
+        .collect()
+    );
+    assert_eq!(
+        crate::commands::health::HEALTH_SCHEMA,
+        contract["health_schema"].as_u64().unwrap() as u32
+    );
+    for (key, expected) in [
+        ("health_readiness", vec!["operational", "route_safety"]),
+        (
+            "health_operational_readiness",
+            vec!["state", "ready", "exit_code"],
+        ),
+        ("health_route_safety_readiness", vec!["state", "ready"]),
+    ] {
+        let fields = contract[key]
+            .as_array()
+            .expect("health nested contract must be an array")
+            .iter()
+            .map(|field| field.as_str().unwrap())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(fields, expected.iter().copied().collect());
+    }
     let security_fields = contract["doctor_security"]
         .as_array()
         .expect("security doctor contract must be an array")
@@ -1560,6 +1635,12 @@ fn metrics_export_status_counters_without_content() {
         "matching_available": true,
         "paused": false,
         "window_tracker_connected": true,
+        "window_tracker_state": "reconnecting",
+        "window_tracker_reconnect_attempts_total": 3,
+        "window_tracker_disconnects_total": 2,
+        "window_tracker_last_failure_reason": "tracker_disconnected",
+        "window_tracker_last_connected_unix": 1794268800,
+        "window_tracker_reconnect_backoff_ms": 1000,
         "command_queue_depth": 2,
         "command_worker_threads": 1,
         "hotkey_worker_threads": 1,
@@ -1589,6 +1670,11 @@ fn metrics_export_status_counters_without_content() {
         "wayexpand_daemon_up 1",
         "wayexpand_daemon_build_matches 1",
         "wayexpand_daemon_route_info{route_id=\"kde-evdev-libei\",source=\"evdev\",backend=\"libei\",state=\"connected\"} 1",
+        "wayexpand_daemon_window_tracker_info{state=\"reconnecting\",last_failure_reason=\"tracker_disconnected\"} 1",
+        "wayexpand_daemon_window_tracker_last_connected_unix 1794268800",
+        "wayexpand_daemon_window_tracker_reconnect_backoff_milliseconds 1000",
+        "wayexpand_daemon_window_tracker_reconnect_attempts_total 3",
+        "wayexpand_daemon_window_tracker_disconnects_total 2",
         "wayexpand_daemon_command_queue_depth 2",
         "wayexpand_daemon_route_available 1",
         "wayexpand_daemon_matching_available 1",

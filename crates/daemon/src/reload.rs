@@ -42,6 +42,7 @@ pub(crate) struct ConfigDiagnostics {
     pub last_successful_reload_unix: u64,
     pub enabled_expansions: usize,
     pub disabled_expansions: usize,
+    pub generate_only_expansions: usize,
     pub last_reload_failure: String,
     pub validation_errors: String,
 }
@@ -64,7 +65,7 @@ fn unix_now() -> u64 {
         .map_or(0, |duration| duration.as_secs())
 }
 
-fn record_initial_config(path: &Path, enabled: usize, disabled: usize) {
+fn record_initial_config(path: &Path, enabled: usize, disabled: usize, generate_only: usize) {
     let now = unix_now();
     let mut state = diagnostics_store()
         .lock()
@@ -75,10 +76,11 @@ fn record_initial_config(path: &Path, enabled: usize, disabled: usize) {
     state.last_successful_reload_unix = now;
     state.enabled_expansions = enabled;
     state.disabled_expansions = disabled;
+    state.generate_only_expansions = generate_only;
     state.validation_errors.clear();
 }
 
-fn record_reload_success(path: &Path, enabled: usize, disabled: usize) {
+fn record_reload_success(path: &Path, enabled: usize, disabled: usize, generate_only: usize) {
     let now = unix_now();
     let mut state = diagnostics_store()
         .lock()
@@ -89,6 +91,7 @@ fn record_reload_success(path: &Path, enabled: usize, disabled: usize) {
     state.last_successful_reload_unix = now;
     state.enabled_expansions = enabled;
     state.disabled_expansions = disabled;
+    state.generate_only_expansions = generate_only;
     state.validation_errors.clear();
 }
 
@@ -154,6 +157,7 @@ struct BuiltConfig {
     expansions: usize,
     enabled_expansions: usize,
     disabled_expansions: usize,
+    generate_only_expansions: usize,
     stamp: Option<FileStamp>,
     /// Fleet metadata as it existed before this load began. If a layer is
     /// edited while the build is running or before the reactor applies it,
@@ -194,9 +198,20 @@ fn build_config(path: &Path, fleet: bool, policy: &OrganizationPolicy) -> BuildR
         let enabled_expansions = config
             .expansion
             .iter()
-            .filter(|entry| entry.enabled)
+            .filter(|entry| entry.is_keyboard_matchable())
             .count();
-        let disabled_expansions = expansions.saturating_sub(enabled_expansions);
+        let disabled_expansions = config
+            .expansion
+            .iter()
+            .filter(|entry| !entry.enabled)
+            .count();
+        let generate_only_expansions = config
+            .expansion
+            .iter()
+            .filter(|entry| {
+                entry.enabled && entry.delivery == wayexpand_core::ExpansionDelivery::GenerateOnly
+            })
+            .count();
         let snapshot = config
             .validate_snapshot()
             .map_err(|error| BuildFailure::Engine(anyhow::Error::new(error)))?;
@@ -206,6 +221,7 @@ fn build_config(path: &Path, fleet: bool, policy: &OrganizationPolicy) -> BuildR
             expansions,
             enabled_expansions,
             disabled_expansions,
+            generate_only_expansions,
             stamp,
             fleet_signature: fleet_after,
         });
@@ -239,14 +255,30 @@ impl ReloadableConfig {
         let enabled_expansions = config
             .expansion
             .iter()
-            .filter(|entry| entry.enabled)
+            .filter(|entry| entry.is_keyboard_matchable())
             .count();
-        let disabled_expansions = config.expansion.len().saturating_sub(enabled_expansions);
+        let disabled_expansions = config
+            .expansion
+            .iter()
+            .filter(|entry| !entry.enabled)
+            .count();
+        let generate_only_expansions = config
+            .expansion
+            .iter()
+            .filter(|entry| {
+                entry.enabled && entry.delivery == wayexpand_core::ExpansionDelivery::GenerateOnly
+            })
+            .count();
         let snapshot = config
             .validate_snapshot()
             .map_err(|error| anyhow::anyhow!("invalid configuration: {error}"))?;
         let engine = ExpansionEngine::from_validated(Arc::new(snapshot));
-        record_initial_config(&path, enabled_expansions, disabled_expansions);
+        record_initial_config(
+            &path,
+            enabled_expansions,
+            disabled_expansions,
+            generate_only_expansions,
+        );
         let (retired_engine_sender, retired_engine_receiver) = mpsc::channel::<RetiredEngine>();
         thread::Builder::new()
             .name("wayexpand-engine-reaper".into())
@@ -559,6 +591,7 @@ impl ReloadableConfig {
                 expansions,
                 enabled_expansions,
                 disabled_expansions,
+                generate_only_expansions,
                 stamp: stable_stamp,
                 fleet_signature,
             }) => {
@@ -607,7 +640,12 @@ impl ReloadableConfig {
                 self.last_integrity_check = Instant::now();
                 self.fleet_signature = fleet_signature;
                 self.healthy = true;
-                record_reload_success(&self.path, enabled_expansions, disabled_expansions);
+                record_reload_success(
+                    &self.path,
+                    enabled_expansions,
+                    disabled_expansions,
+                    generate_only_expansions,
+                );
                 info!(expansions, "configuration reloaded");
             }
             Err(BuildFailure::Engine(error)) => {

@@ -3,6 +3,7 @@
 use super::Args;
 use crate::args::take_flag;
 use crate::*;
+use std::io::IsTerminal;
 
 fn setup_plan_actions(
     backend: &str,
@@ -10,6 +11,7 @@ fn setup_plan_actions(
     accept_non_atomic_replacement: bool,
     install_system_integration: bool,
     terminals_requested: bool,
+    evdev_apps_requested: bool,
 ) -> Vec<&'static str> {
     let mut actions = vec!["Create the default configuration only if it is missing"];
     match backend {
@@ -22,7 +24,12 @@ fn setup_plan_actions(
             actions.push("Register and activate the IBus engine, then verify the session route");
         }
         "input-method" => actions.push("Enable the input-method-v2 user service; portal authorization may be requested when it connects"),
-        "evdev" => actions.push("Configure global keyboard capture only with its separate privacy acknowledgment and device permission"),
+        "evdev" => {
+            actions.push("Configure global keyboard capture only with its separate privacy acknowledgment and device permission");
+            if evdev_apps_requested {
+                actions.push("Restrict automatic matching to configured terminal and browser application IDs; raw key observation still occurs globally, including password fields");
+            }
+        }
         _ => {}
     }
     if backend == "ibus" && !accept_non_atomic_replacement {
@@ -32,10 +39,24 @@ fn setup_plan_actions(
         actions
             .push("Request administrator authorization to install the system-wide IBus component");
     }
-    if terminals_requested && backend == "ibus" {
-        actions.push("Offer optional terminal coverage only after the core route's insertion test");
+    if evdev_apps_requested && backend == "ibus" {
+        actions.push(
+            "Offer evdev fallback only after the core insertion test; if no app scope exists, add known browser app IDs, while raw capture sees every key and IBus yields in those apps",
+        );
+    } else if terminals_requested && backend == "ibus" {
+        actions.push(
+            "Offer optional terminal coverage only after the core insertion test; raw capture sees every key, matching is limited to terminal app IDs",
+        );
     }
     actions
+}
+
+fn setup_can_apply_without_prompt(
+    assume_yes: bool,
+    apply_requested: bool,
+    stdin_is_tty: bool,
+) -> bool {
+    assume_yes || apply_requested || stdin_is_tty
 }
 
 pub(crate) fn setup_command(mut args: Args) -> Result<()> {
@@ -45,6 +66,7 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     let mut accept_non_atomic_replacement = false;
     let mut install_system_integration = false;
     let mut terminals = false;
+    let mut evdev_apps = false;
     let mut check_only = false;
     let mut apply_requested = false;
     let mut json = false;
@@ -56,6 +78,7 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
             "--json" => json = true,
             "--cancel-resume" => cancel_resume = true,
             "--terminals" => terminals = true,
+            "--evdev-apps" => evdev_apps = true,
             "--experimental-input-method-v2" => {
                 requested_backend = Some("input-method".into());
             }
@@ -80,7 +103,7 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
             }
             _ => {
                 usage_bail!(
-                    "usage: wayexpand setup [--mode recommended|maximum|experimental | --backend ibus|input-method|evdev] [--apply] [--terminals] [--yes] [--accept-non-atomic-replacement] [--install-system-integration]"
+        "usage: wayexpand setup [--mode recommended|maximum|experimental | --backend ibus|input-method|evdev] [--apply] [--terminals | --evdev-apps] [--yes] [--accept-non-atomic-replacement] [--install-system-integration]"
                 )
             }
         }
@@ -93,6 +116,7 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
             || assume_yes
             || json
             || terminals
+            || evdev_apps
             || accept_non_atomic_replacement
             || install_system_integration
         {
@@ -110,6 +134,7 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
         if requested_backend.is_some()
             || requested_mode.is_some()
             || terminals
+            || evdev_apps
             || assume_yes
             || accept_non_atomic_replacement
             || install_system_integration
@@ -252,6 +277,12 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
     if accept_non_atomic_replacement && backend != "ibus" {
         usage_bail!("--accept-non-atomic-replacement applies only to the IBus backend");
     }
+    if terminals && backend != "ibus" {
+        usage_bail!("--terminals applies only beside the IBus backend");
+    }
+    if evdev_apps && !matches!(backend.as_str(), "ibus" | "evdev") {
+        usage_bail!("--evdev-apps requires an IBus or evdev backend");
+    }
     if install_system_integration && backend != "ibus" {
         usage_bail!("--install-system-integration applies only to the IBus backend");
     }
@@ -271,8 +302,14 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
         accept_non_atomic_replacement,
         install_system_integration,
         terminals,
+        evdev_apps,
     ) {
         println!("  - {action}");
+    }
+    if !setup_can_apply_without_prompt(assume_yes, apply_requested, std::io::stdin().is_terminal())
+    {
+        println!("Setup plan only; no changes were made. Review the plan, then rerun with `--apply` to continue.");
+        return Ok(());
     }
     if !assume_yes && !apply_requested && !prompt_yes_no("Apply this setup plan? [Y/n] ", true)? {
         println!("Setup plan declined. No configuration, GNOME extension, input-source, or service changes were made.");
@@ -285,6 +322,7 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
         ))
     })?;
     let terminals_requested = terminals;
+    let evdev_apps_requested = evdev_apps;
     let setup_result = configure_setup_backend(
         &backend,
         crate::setup_ibus::IbusSetupOptions {
@@ -294,6 +332,7 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
             // route. Set it up only after the core IBus path passes a real
             // insertion check below.
             terminals: false,
+            evdev_apps: backend == "evdev" && evdev_apps_requested,
             real_insertion_verified: false,
             install_system_integration,
         },
@@ -352,32 +391,37 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
         }
     }
     if backend == "ibus" {
-        let enable_terminals = if real_insertion_verified && !terminals_requested && !assume_yes {
-            println!("\nOptional terminal coverage uses evdev and can observe raw keyboard input, including password fields. It requires separate permission and compatible output injection.");
+        let enable_evdev_scope = if real_insertion_verified
+            && !terminals_requested
+            && !evdev_apps_requested
+            && !assume_yes
+        {
+            println!("\nOptional evdev fallback observes raw keyboard input globally, including password fields, but can be restricted to application IDs for matching. The app list must be configured first; use this for browser applications only when you accept the privacy and non-atomic replacement limits.");
             crate::prompt_yes_no(
-                "Configure terminal coverage as a separate evdev service? [y/N] ",
+                "Configure the explicitly app-scoped evdev fallback beside IBus? [y/N] ",
                 false,
             )?
         } else {
-            terminals_requested
+            terminals_requested || evdev_apps_requested
         };
-        if enable_terminals && real_insertion_verified {
+        if enable_evdev_scope && real_insertion_verified {
             if let Err(error) = configure_setup_backend(
                 "ibus",
                 crate::setup_ibus::IbusSetupOptions {
                     assume_yes,
                     accept_non_atomic_replacement,
-                    terminals: true,
+                    terminals: terminals_requested,
+                    evdev_apps: evdev_apps_requested || !terminals_requested,
                     real_insertion_verified: true,
                     install_system_integration,
                 },
             ) {
-                eprintln!("SETUP RESULT: WORKING (core IBus); optional terminal coverage: ACTION REQUIRED.");
+                eprintln!("SETUP RESULT: WORKING (core IBus); optional evdev app fallback: ACTION REQUIRED.");
                 return Err(error);
             }
-        } else if terminals_requested {
-            println!("Optional terminal coverage was not configured because a real IBus insertion was not verified.");
-            println!("After verifying a harmless expansion in a disposable text field, rerun `wayexpand setup --backend ibus --terminals`.");
+        } else if terminals_requested || evdev_apps_requested {
+            println!("The evdev app fallback was not configured because a real IBus insertion was not verified.");
+            println!("After verifying a harmless expansion in a disposable text field, configure settings.raw_capture_apps and rerun `wayexpand setup --backend ibus --evdev-apps`.");
         }
     }
     Ok(())
@@ -389,7 +433,9 @@ pub(crate) fn setup_command(mut args: Args) -> Result<()> {
 /// excluded so setup never executes actions or starts an incomplete form.
 pub(crate) fn setup_test_trigger(config: &Config) -> Option<String> {
     let is_testable = |expansion: &&wayexpand_core::ExpansionConfig| {
-        expansion.enabled && expansion.command.is_none() && !expansion.replacement.contains("{{")
+        expansion.is_keyboard_matchable()
+            && expansion.command.is_none()
+            && !expansion.replacement.contains("{{")
     };
     config
         .expansion
@@ -1672,8 +1718,19 @@ pub(crate) fn live_explain_build_gate(
 
 #[cfg(test)]
 mod policy_check_tests {
-    use super::{policy_check_findings, setup_test_trigger, upgrade_health_failure};
+    use super::{
+        policy_check_findings, setup_can_apply_without_prompt, setup_test_trigger,
+        upgrade_health_failure,
+    };
     use wayexpand_core::{Config, OrganizationPolicy};
+
+    #[test]
+    fn setup_does_not_apply_a_plan_on_closed_noninteractive_stdin() {
+        assert!(!setup_can_apply_without_prompt(false, false, false));
+        assert!(setup_can_apply_without_prompt(false, true, false));
+        assert!(setup_can_apply_without_prompt(true, false, false));
+        assert!(setup_can_apply_without_prompt(false, false, true));
+    }
 
     #[test]
     fn setup_uses_hello_when_present_but_does_not_require_it() {

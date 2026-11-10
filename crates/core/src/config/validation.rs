@@ -100,6 +100,21 @@ impl Config {
                 });
             }
         }
+        // Evdev fallback ownership must be tied to stable application IDs,
+        // never an editable title or a broad heuristic.
+        for (index, raw) in self.settings.raw_capture_apps.iter().enumerate() {
+            let valid = index < crate::config::MAX_RAW_CAPTURE_APPS
+                && matches!(
+                    crate::AppFilter::parse(raw),
+                    Some(crate::AppFilter::AppIdExact(_) | crate::AppFilter::AppIdGlob(_))
+                );
+            if !valid {
+                return Err(ConfigError::InvalidRawCaptureApp {
+                    index,
+                    maximum: crate::config::MAX_RAW_CAPTURE_APPS,
+                });
+            }
+        }
         let undo_chord = self
             .settings
             .undo_chord
@@ -221,6 +236,11 @@ impl Config {
         let mut template_variables = Vec::with_capacity(self.expansion.len());
         let mut compiled_templates = Vec::with_capacity(self.expansion.len());
         for (index, expansion) in self.expansion.iter().enumerate() {
+            if expansion.delivery == crate::ExpansionDelivery::GenerateOnly
+                && expansion.command.is_some()
+            {
+                return Err(ConfigError::InvalidDelivery { index });
+            }
             if !is_uuid(&expansion.id) {
                 return Err(ConfigError::InvalidExpansionId { index });
             }
@@ -416,7 +436,7 @@ impl Config {
                 (!fields.is_empty()).then(|| Arc::new(fields))
             };
             validated_form_fields.push(parsed_form_fields);
-            if expansion.enabled {
+            if expansion.is_keyboard_matchable() {
                 total_trigger_chars = total_trigger_chars.saturating_add(trigger_length);
                 if total_trigger_chars > MAX_TOTAL_TRIGGER_CHARS {
                     return Err(ConfigError::TriggerDataTooLarge {
@@ -442,7 +462,7 @@ impl Config {
             .expansion
             .iter()
             .enumerate()
-            .filter(|(_, entry)| entry.enabled)
+            .filter(|(_, entry)| entry.is_keyboard_matchable())
             .flat_map(|(index, entry)| {
                 entry
                     .effective_triggers()

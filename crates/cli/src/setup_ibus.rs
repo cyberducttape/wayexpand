@@ -48,14 +48,37 @@ pub(crate) const DEFAULT_TERMINAL_APPS: &[&str] = &[
     "xterm",
 ];
 
+/// Stable desktop IDs and KWin resource classes used by common browsers.
+/// These are installed only after the user explicitly requests `--evdev-apps`;
+/// a custom non-empty `raw_capture_apps` list is always preserved as-is.
+const DEFAULT_BROWSER_APPS: &[&str] = &[
+    "app_id_exact:firefox",
+    "app_id_exact:org.mozilla.firefox",
+    "app_id_exact:chromium",
+    "app_id_exact:org.chromium.chromium",
+    "app_id_exact:google-chrome",
+    "app_id_exact:com.google.chrome",
+    "app_id_exact:brave-browser",
+    "app_id_exact:com.brave.browser",
+    "app_id_exact:microsoft-edge",
+    "app_id_exact:com.microsoft.edge",
+    "app_id_exact:vivaldi-stable",
+    "app_id_exact:com.vivaldi.vivaldi",
+    "app_id_exact:opera",
+    "app_id_exact:com.opera.opera",
+];
+
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct IbusSetupOptions {
     pub(crate) assume_yes: bool,
     /// Explicit user acceptance of IBus's verified but non-atomic replacement.
     /// This is intentionally separate from `assume_yes`.
     pub(crate) accept_non_atomic_replacement: bool,
-    /// Also cover terminals with a terminal-only evdev daemon.
+    /// Also cover the configured terminal app list with evdev.
     pub(crate) terminals: bool,
+    /// Also cover a common-browser or explicitly configured app list with a
+    /// raw evdev fallback. IBus yields matcher ownership in those apps.
+    pub(crate) evdev_apps: bool,
     /// The core IBus route passed the interactive target-app check in this
     /// setup invocation; terminal activation is only allowed after this.
     pub(crate) real_insertion_verified: bool,
@@ -192,9 +215,9 @@ fn shared_engine_path() -> PathBuf {
     let contract: toml::Value = toml::from_str(include_str!("../../../installer-components.toml"))
         .expect("checked-in installer component contract must be valid TOML");
     PathBuf::from(
-        contract["components"]["ibus"]["user_install_exec"]
+        contract["components"]["ibus"]["source_install_exec"]
             .as_str()
-            .expect("IBus user_install_exec must be a string"),
+            .expect("IBus source_install_exec must be a string"),
     )
 }
 
@@ -907,14 +930,21 @@ fn install_component(
     );
     let engine_observation = engine_journal.observe_after_install();
     let engine_cleanup = staged_engine.cleanup();
-    let engine_status =
-        engine_result.context("could not install the shared IBus engine executable")?;
+    let engine_status = engine_result.map_err(|error| {
+        if privileged {
+            anyhow::anyhow!(
+                "WX-IBUS-AUTH-001: could not install the shared IBus engine executable through the desktop authorization helper; check that a Polkit authentication agent is available and retry `wayexpand setup --backend ibus --install-system-integration` ({error:#})"
+            )
+        } else {
+            error.context("could not install the shared IBus engine executable")
+        }
+    })?;
     engine_cleanup.context("could not remove the staged shared IBus engine")?;
     engine_observation.context("could not verify the shared IBus engine")?;
     if !engine_status.success() {
         bail!(
-            "could not install shared IBus engine at {}; setup will roll back",
-            engine_journal.target.display()
+            "WX-IBUS-AUTH-002: installing the shared IBus engine at {} did not complete (authorization may have been denied or the destination may be unwritable); setup will roll back. Retry `wayexpand setup --backend ibus --install-system-integration` after resolving authorization, or install the distribution package",
+            engine_journal.target.display(),
         );
     }
     let source_engine_hash = sha256_hex(&engine_contents);
@@ -1294,6 +1324,8 @@ struct ConfigMutationJournal {
     path: PathBuf,
     original_mode: wayexpand_core::CompatibilityMode,
     original_terminal_apps: Vec<String>,
+    original_raw_capture_apps: Vec<String>,
+    original_raw_capture_fallback_enabled: bool,
     last_written_revision: Option<wayexpand_core::ConfigRevision>,
     write_attempted: bool,
     replacement_authorization_granted: bool,
@@ -1308,6 +1340,11 @@ impl ConfigMutationJournal {
             path,
             original_mode: loaded.config.settings.compatibility_mode,
             original_terminal_apps: loaded.config.settings.terminal_apps,
+            original_raw_capture_apps: loaded.config.settings.raw_capture_apps,
+            original_raw_capture_fallback_enabled: loaded
+                .config
+                .settings
+                .raw_capture_fallback_enabled,
             last_written_revision: None,
             write_attempted: false,
             replacement_authorization_granted: false,
@@ -1326,7 +1363,11 @@ impl ConfigMutationJournal {
             .map_err(|error| config_load_error(&self.path, error))?;
         let mode_changed = loaded.config.settings.compatibility_mode != self.original_mode;
         let terminals_changed = loaded.config.settings.terminal_apps != self.original_terminal_apps;
-        if !mode_changed && !terminals_changed {
+        let raw_apps_changed =
+            loaded.config.settings.raw_capture_apps != self.original_raw_capture_apps;
+        let raw_capture_changed = loaded.config.settings.raw_capture_fallback_enabled
+            != self.original_raw_capture_fallback_enabled;
+        if !mode_changed && !terminals_changed && !raw_apps_changed && !raw_capture_changed {
             return Ok(Vec::new());
         }
         if self
@@ -1351,6 +1392,16 @@ impl ConfigMutationJournal {
                     "settings.terminal_apps remains changed because {reason}"
                 ));
             }
+            if raw_capture_changed {
+                remaining.push(format!(
+                    "settings.raw_capture_fallback_enabled remains changed because {reason}"
+                ));
+            }
+            if raw_apps_changed {
+                remaining.push(format!(
+                    "settings.raw_capture_apps remains changed because {reason}"
+                ));
+            }
             bail!("{}", remaining.join("; "));
         }
         let mut config = loaded.config;
@@ -1359,6 +1410,11 @@ impl ConfigMutationJournal {
             .settings
             .terminal_apps
             .clone_from(&self.original_terminal_apps);
+        config
+            .settings
+            .raw_capture_apps
+            .clone_from(&self.original_raw_capture_apps);
+        config.settings.raw_capture_fallback_enabled = self.original_raw_capture_fallback_enabled;
         config.validate().map_err(|error| {
             config_error(format!(
                 "configuration invalid during setup rollback: {}",
@@ -1383,6 +1439,12 @@ impl ConfigMutationJournal {
         }
         if terminals_changed {
             restored.push("settings.terminal_apps was restored".into());
+        }
+        if raw_capture_changed {
+            restored.push("settings.raw_capture_fallback_enabled was restored".into());
+        }
+        if raw_apps_changed {
+            restored.push("settings.raw_capture_apps was restored".into());
         }
         Ok(restored)
     }
@@ -2155,7 +2217,7 @@ fn kwriteconfig() -> Option<&'static str> {
 /// Which daemon unit runs beside IBus after setup.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CompanionService {
-    /// The terminal-only evdev daemon (it also serves the control socket).
+    /// The app-scoped evdev daemon (it also serves the control socket).
     Terminals,
     /// The control-only daemon.
     Control,
@@ -2188,26 +2250,32 @@ fn preflight(options: IbusSetupOptions, inventory: &ServiceInventory) -> Result<
     // Terminal coverage set up earlier stays, unless --terminals is asked
     // for anew: enabling the control unit would stop it (Conflicts=).
     let keep_terminals = !options.terminals
+        && !options.evdev_apps
         && terminal_drop_in().is_some_and(|path| path.exists())
         && inventory.state(UserService::Evdev).enabled;
-    if options.terminals || keep_terminals {
+    if options.terminals || options.evdev_apps || keep_terminals {
         if !inventory.installed(UserService::Evdev) {
             bail!("wayexpand-evdev.service is not installed; reinstall WayExpand, then rerun setup with --terminals");
         }
         let marker = evdev_consent_marker()
             .context("cannot locate the evdev consent marker: HOME is not set")?;
         if !marker.exists() {
+            let follow_up = if options.evdev_apps {
+                "wayexpand setup --backend ibus --evdev-apps"
+            } else {
+                "wayexpand setup --backend ibus --terminals"
+            };
             bail!(
-                "terminal coverage uses evdev, which reads every keystroke (it only expands in terminal_apps).\n\
+                "evdev fallback reads every keystroke (matching is restricted to configured terminal_apps and raw_capture_apps).\n\
                  After reviewing docs/BACKENDS_SENSITIVE_FIELDS.md, accept that with:\n  \
                  install -d -m 0700 {}\n  install -m 0600 /dev/null {}\n\
-                 then rerun `wayexpand setup --backend ibus --terminals`. Nothing was changed.",
+                 then rerun `{follow_up}`. Nothing was changed.",
                 marker.parent().unwrap_or(&marker).display(),
                 marker.display()
             );
         }
         if keep_terminals {
-            step("Keeping the terminal coverage set up earlier (wayexpand-evdev.service)");
+            step("Keeping the app-scoped evdev fallback set up earlier (wayexpand-evdev.service)");
         }
         return Ok(CompanionService::Terminals);
     }
@@ -2237,6 +2305,152 @@ fn prepare_terminals(
         apps.len()
     ));
     Ok(())
+}
+
+/// Prepare the explicit evdev-owned application list. The IBus engine uses
+/// the same list to yield matcher ownership only when the authenticated
+/// compositor tracker identifies one of these applications.
+fn prepare_evdev_apps(
+    config_journal: &mut ConfigMutationJournal,
+    file_journal: &mut PreparedFileJournal,
+) -> Result<()> {
+    let path = default_config_path();
+    let loaded = Config::load_versioned(&path).map_err(|error| config_load_error(&path, error))?;
+    let mut config = loaded.config;
+    let (config_changed, defaults_seeded) = apply_evdev_browser_defaults(&mut config);
+    if defaults_seeded {
+        step("Selected known Firefox, Chromium, Chrome, Brave, Edge, Vivaldi, and Opera app IDs; verify your browser's ID if it is not matched");
+    }
+    if config_changed {
+        config.validate().map_err(|error| {
+            config_error(format!(
+                "configuration invalid after enabling the scoped evdev fallback: {}",
+                error.safe_summary()
+            ))
+        })?;
+        config_journal.write_attempted = true;
+        let revision = config
+            .save_atomic_if_revision_matches(&path, &loaded.revision)
+            .map_err(|error| {
+                config_error(format!(
+                    "could not enable the scoped evdev fallback: {}",
+                    error.safe_summary()
+                ))
+            })?;
+        config_journal.note_write(revision);
+    }
+    let raw_capture_app_count = config.settings.raw_capture_apps.len();
+    let terminal_app_count = config.settings.terminal_apps.len();
+    file_journal.write(
+        b"# Written by `wayexpand setup --evdev-apps`.\n\
+         # Evdev observes raw keyboard events globally but matches only configured app IDs.\n\
+         # Matching is restricted to terminal_apps and enabled raw_capture_apps.\n\
+         [Service]\nEnvironment=WAYEXPAND_TERMINAL_APPS_ONLY=1\n",
+    )?;
+    step(&format!(
+        "Prepared app-scoped evdev fallback for {} configured application IDs",
+        raw_capture_app_count + terminal_app_count
+    ));
+    Ok(())
+}
+
+/// Configure browser-scoped evdev independently of IBus. This supports
+/// applications whose input method does not expose verifiable surrounding
+/// text, while retaining the explicit raw-capture consent and app-ID scope.
+pub(crate) fn configure_evdev_apps_only() -> Result<()> {
+    let inventory = ServiceInventory::probe();
+    if !inventory.installed(UserService::Evdev) {
+        bail!("wayexpand-evdev.service is not installed; reinstall WayExpand before enabling the browser fallback");
+    }
+    let marker = evdev_consent_marker()
+        .context("cannot locate the evdev consent marker: HOME is not set")?;
+    if !marker.exists() {
+        bail!("evdev browser matching requires the existing raw-capture consent marker. Review docs/BACKENDS_SENSITIVE_FIELDS.md, then use the consent instructions from `wayexpand setup --backend evdev`; no changes were made.");
+    }
+
+    let active_config = Config::load(default_config_path())?;
+    if active_config.settings.compatibility_mode == wayexpand_core::CompatibilityMode::Off {
+        bail!("WX-POLICY-001: evdev matching is disabled while compatibility_mode = \"off\". Review the raw-input and non-atomic replacement risks, then explicitly choose a supported compatibility mode in Settings > Engine or [settings] before retrying `wayexpand setup --backend evdev --evdev-apps`.");
+    }
+
+    let original_service = inventory.state(UserService::Evdev);
+    let mut config = ConfigMutationJournal::capture()?;
+    let mut drop_in = PreparedFileJournal::capture(
+        terminal_drop_in().context("cannot locate the systemd user directory")?,
+    )?;
+    let preparation = prepare_evdev_apps(&mut config, &mut drop_in);
+    let applied = preparation.and_then(|()| {
+        enable_user_service(UserService::Evdev.unit())?;
+        start_companion(UserService::Evdev)
+    });
+    if let Err(error) = applied {
+        let mut rollback_errors = Vec::new();
+        if let Err(restore_error) = drop_in.restore() {
+            rollback_errors.push(format!("service drop-in: {restore_error}"));
+        }
+        if let Err(restore_error) = config.rollback() {
+            rollback_errors.push(format!("configuration: {restore_error}"));
+        }
+        let _ = run_setup_command("systemctl", &["--user", "daemon-reload"]);
+        if original_service.installed {
+            let enable_action = if original_service.enabled {
+                "enable"
+            } else {
+                "disable"
+            };
+            if !run_setup_command(
+                "systemctl",
+                &["--user", enable_action, UserService::Evdev.unit()],
+            )
+            .is_ok_and(|status| status.success())
+            {
+                rollback_errors.push("evdev service enablement".into());
+            }
+            let activity_action = if original_service.active {
+                "start"
+            } else {
+                "stop"
+            };
+            if !run_setup_command(
+                "systemctl",
+                &["--user", activity_action, UserService::Evdev.unit()],
+            )
+            .is_ok_and(|status| status.success())
+            {
+                rollback_errors.push("evdev service activity".into());
+            }
+        }
+        if rollback_errors.is_empty() {
+            bail!("browser-scoped evdev setup failed: {error:#}. Configuration, drop-in, and prior service state were restored.");
+        }
+        bail!(
+            "browser-scoped evdev setup failed: {error:#}. Rollback needs attention: {}",
+            rollback_errors.join("; ")
+        );
+    }
+    println!(
+        "Evdev browser matching is configured and running for the listed browser application IDs."
+    );
+    println!("Raw keyboard observation remains global, including in password fields; insertion is non-atomic and has not been certified for every browser field.");
+    Ok(())
+}
+
+/// Apply the explicit browser-fallback opt-in without replacing a user's
+/// configured app scope. Returns whether config changed and whether common
+/// browser IDs were seeded.
+fn apply_evdev_browser_defaults(config: &mut Config) -> (bool, bool) {
+    let seeded_defaults = if config.settings.raw_capture_apps.is_empty() {
+        config.settings.raw_capture_apps = DEFAULT_BROWSER_APPS
+            .iter()
+            .map(|app| (*app).to_owned())
+            .collect();
+        true
+    } else {
+        false
+    };
+    let was_enabled = config.settings.raw_capture_fallback_enabled;
+    config.settings.raw_capture_fallback_enabled = true;
+    (seeded_defaults || !was_enabled, seeded_defaults)
 }
 
 /// Enable and (re)start `service`, recording it for rollback when setup is
@@ -2284,7 +2498,7 @@ fn stop_global_capture(options: IbusSetupOptions, companion: CompanionService) -
         if !service_active(unit) {
             continue;
         }
-        // The terminal-only evdev daemon is the companion, not a conflict.
+        // The app-scoped evdev daemon is the companion, not a conflict.
         if service == UserService::Evdev && companion == CompanionService::Terminals {
             continue;
         }
@@ -2346,7 +2560,11 @@ fn activate_and_verify(
     stop_global_capture(options, companion)?;
     match companion {
         CompanionService::Terminals => {
-            step("Starting the terminal-only evdev daemon");
+            step(if options.evdev_apps {
+                "Starting the app-scoped evdev daemon"
+            } else {
+                "Starting the terminal-scoped evdev daemon"
+            });
             start_companion(UserService::Evdev)?;
         }
         CompanionService::Control => {
@@ -2471,14 +2689,17 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
             &mut transaction.shared_engine,
             options,
         )?;
-        if companion == CompanionService::Terminals && options.terminals {
-            prepare_terminals(
-                &mut transaction.config,
-                transaction
-                    .prepared_file
-                    .as_mut()
-                    .expect("terminal drop-in journal captured"),
-            )?;
+        if companion == CompanionService::Terminals {
+            let prepared = transaction
+                .prepared_file
+                .as_mut()
+                .expect("evdev drop-in journal captured");
+            if options.terminals {
+                prepare_terminals(&mut transaction.config, prepared)?;
+            }
+            if options.evdev_apps {
+                prepare_evdev_apps(&mut transaction.config, prepared)?;
+            }
         }
         Ok(authorization_required)
     })();
@@ -2626,7 +2847,7 @@ pub(crate) fn configure_ibus(options: IbusSetupOptions) -> Result<()> {
     );
     println!("To complete the first-run check, run `wayexpand ibus watch`, switch to a test application, and type a harmless trigger.");
     if companion != CompanionService::Terminals {
-        println!("Terminal coverage is optional and is offered separately after the real IBus insertion test.");
+        println!("An app-scoped evdev fallback is optional and is offered separately after the real IBus insertion test.");
     }
     transaction.commit()?;
     Ok(())
@@ -3054,6 +3275,52 @@ mod tests {
             .map(|app| (*app).to_owned())
             .collect();
         config.validate().unwrap();
+    }
+
+    #[test]
+    fn default_browser_apps_are_valid_and_exact_app_ids() {
+        let mut config = Config::parse(
+            r#"[[expansion]]
+trigger = ":x"
+replacement = "y"
+"#,
+        )
+        .unwrap();
+        config.settings.raw_capture_apps = DEFAULT_BROWSER_APPS
+            .iter()
+            .map(|app| (*app).to_owned())
+            .collect();
+        config.validate().unwrap();
+        assert!(config
+            .settings
+            .raw_capture_apps
+            .iter()
+            .all(|app| app.starts_with("app_id_exact:")));
+    }
+
+    #[test]
+    fn evdev_browser_setup_seeds_only_an_empty_scope_and_preserves_custom_apps() {
+        let mut empty =
+            Config::parse("[[expansion]]\ntrigger = \":x\"\nreplacement = \"y\"\n").unwrap();
+        let (changed, seeded) = apply_evdev_browser_defaults(&mut empty);
+        assert!(changed && seeded);
+        assert!(empty.settings.raw_capture_fallback_enabled);
+        assert_eq!(
+            empty.settings.raw_capture_apps.len(),
+            DEFAULT_BROWSER_APPS.len()
+        );
+
+        let custom_apps = vec!["app_id_exact:com.example.custom-browser".to_owned()];
+        let mut custom = empty.clone();
+        custom.settings.raw_capture_apps.clone_from(&custom_apps);
+        custom.settings.raw_capture_fallback_enabled = false;
+        let (changed, seeded) = apply_evdev_browser_defaults(&mut custom);
+        assert!(changed);
+        assert!(!seeded);
+        assert_eq!(custom.settings.raw_capture_apps, custom_apps);
+
+        let (changed, seeded) = apply_evdev_browser_defaults(&mut custom);
+        assert!(!changed && !seeded);
     }
 
     #[test]

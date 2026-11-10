@@ -229,7 +229,10 @@ pub(crate) fn configure_setup_backend(
     options: crate::setup_ibus::IbusSetupOptions,
 ) -> Result<()> {
     if options.terminals && backend != "ibus" {
-        bail!("--terminals only applies to the IBus route (`--backend ibus`)");
+        bail!("--terminals only applies beside the IBus route (`--backend ibus`)");
+    }
+    if options.evdev_apps && !matches!(backend, "ibus" | "evdev") {
+        bail!("--evdev-apps requires an IBus or evdev route");
     }
     match backend {
         "ibus" => crate::setup_ibus::configure_ibus(options)?,
@@ -250,9 +253,10 @@ pub(crate) fn configure_setup_backend(
             );
             println!("  - libei may request desktop portal authorization. A KDE/GNOME desktop name only identifies a possible provider; it does not prove the portal is available or authorized.");
             println!("Recommended for operators who understand and accept these limitations.");
-            println!("Typed expansions remain refused until you explicitly allow the compatibility mode:");
-            println!("  set compatibility_mode = \"tracked-focus\" (KDE window tracker confirms focus before typing)");
-            println!("  or \"untracked-focus\" under [settings], or use Settings > Engine in wayexpand-gui.");
+            if options.evdev_apps {
+                println!("The requested browser scope limits matching by tracked application ID, not by individual browser field.");
+            }
+            println!("Automatic replacement requires an explicitly enabled compatibility mode (tracked-focus or untracked-focus under [settings]).");
             // The unit is inert without the consent marker, and systemd
             // reports a failed condition as a successful start. Setup does
             // not create the marker: that would let a scripted rollout opt a
@@ -268,7 +272,11 @@ pub(crate) fn configure_setup_backend(
                     marker.display()
                 );
             }
-            enable_user_service("wayexpand-evdev.service")?;
+            if options.evdev_apps {
+                crate::setup_ibus::configure_evdev_apps_only()?;
+            } else {
+                enable_user_service("wayexpand-evdev.service")?;
+            }
         }
         _ => bail!("unknown setup backend {backend:?}; choose ibus, input-method, or evdev"),
     }

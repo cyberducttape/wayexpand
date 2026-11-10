@@ -168,6 +168,12 @@ fn render_context(args: Vec<String>) -> Result<()> {
     if !expansion.enabled {
         usage_bail!("the selected snippet is disabled");
     }
+    if !expansion.is_keyboard_matchable() {
+        usage_bail!(
+            "the selected entry is generate-only; render it with `wayexpand new {}`",
+            expansion.trigger
+        );
+    }
     if expansion.command.is_some() {
         usage_bail!(
             "context render only renders text snippets; command-backed snippets are never run"

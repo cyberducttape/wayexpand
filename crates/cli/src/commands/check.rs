@@ -98,13 +98,24 @@ pub(crate) fn check_command(args: Args) -> Result<()> {
         let enabled = current
             .expansion
             .iter()
-            .filter(|entry| entry.enabled)
+            .filter(|entry| entry.is_keyboard_matchable())
             .count();
-        let disabled = current.expansion.len().saturating_sub(enabled);
+        let disabled = current
+            .expansion
+            .iter()
+            .filter(|entry| !entry.enabled)
+            .count();
+        let generate_only = current
+            .expansion
+            .iter()
+            .filter(|entry| {
+                entry.enabled && entry.delivery == wayexpand_core::ExpansionDelivery::GenerateOnly
+            })
+            .count();
         let app_restricted = current
             .expansion
             .iter()
-            .filter(|entry| entry.enabled && !entry.app_filter.is_empty())
+            .filter(|entry| entry.is_keyboard_matchable() && !entry.app_filter.is_empty())
             .count();
         if enabled == 0 {
             warnings.push(finding(
@@ -124,8 +135,9 @@ pub(crate) fn check_command(args: Args) -> Result<()> {
         }
         checks.push(serde_json::json!({
             "id":"WX-CHECK-REACHABILITY", "component":"expansions", "status":if enabled == 0 {"warning"} else {"pass"},
-            "enabled":enabled, "disabled":disabled, "application_restricted":app_restricted,
-            "message":if enabled == 0 {"no enabled triggers"} else {"enabled triggers are unique and reachable by the matcher; application-filtered entries require a matching focused application"}
+            "enabled":enabled, "disabled":disabled, "generate_only":generate_only,
+            "application_restricted":app_restricted,
+            "message":if enabled == 0 && generate_only > 0 {"no keyboard triggers; generate-only templates are available through `wayexpand new`"} else if enabled == 0 {"no enabled keyboard triggers"} else {"enabled triggers are unique and reachable by the matcher; application-filtered entries require a matching focused application"}
         }));
         let declared_commands = current
             .expansion

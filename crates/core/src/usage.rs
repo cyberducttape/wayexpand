@@ -333,7 +333,7 @@ impl UsageStats {
         for expansion in config
             .expansion
             .iter()
-            .filter(|expansion| expansion.enabled)
+            .filter(|expansion| expansion.is_keyboard_matchable())
         {
             match self.snippets.get(&expansion.id) {
                 Some(usage) => {
@@ -557,7 +557,7 @@ pub fn trigger_risks(config: &Config) -> Vec<TriggerRisk> {
     let enabled: Vec<_> = config
         .expansion
         .iter()
-        .filter(|expansion| expansion.enabled)
+        .filter(|expansion| expansion.is_keyboard_matchable())
         .collect();
     let mut all_triggers: Vec<String> = enabled
         .iter()

@@ -504,6 +504,7 @@ fn import_espanso_file_with_limit(
             id: ExpansionConfig::new_id(),
             trigger,
             replacement,
+            delivery: crate::ExpansionDelivery::Insert,
             description: item.label.unwrap_or_default(),
             tags: vec!["imported".into()],
             category: String::new(),

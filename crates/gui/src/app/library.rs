@@ -304,6 +304,8 @@ impl GuiApp {
                                         theme::SnippetRow {
                                             selected: self.selected_index() == Some(index),
                                             enabled: expansion.enabled,
+                                            generated_only: expansion.delivery
+                                                == wayexpand_core::ExpansionDelivery::GenerateOnly,
                                             command_backed: expansion.command.is_some(),
                                             trigger: &expansion.trigger,
                                             detail,

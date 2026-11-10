@@ -236,7 +236,7 @@ enum OutputCommand {
     Transaction(
         Box<ExpansionResult>,
         std::time::Instant,
-        SyncSender<(ExpansionResult, TransactionOutcome)>,
+        SyncSender<(ExpansionResult, TransactionOutcome, String)>,
     ),
     Shutdown,
 }
@@ -246,7 +246,8 @@ enum OutputCommand {
 /// state and continues servicing stop and status while the backend types.
 pub struct TransactionSubmitter {
     sender: SyncSender<OutputCommand>,
-    cancel: Arc<AtomicBool>,
+    worker_stop: Arc<AtomicBool>,
+    transaction_cancel: Arc<AtomicBool>,
     failure_sender: SyncSender<OutputFailure>,
     capabilities: InjectorCapabilities,
     name: &'static str,
@@ -254,7 +255,7 @@ pub struct TransactionSubmitter {
 
 /// A transaction accepted by the worker, awaiting its outcome.
 pub struct SubmittedTransaction {
-    pub outcome: Receiver<(ExpansionResult, TransactionOutcome)>,
+    pub outcome: Receiver<(ExpansionResult, TransactionOutcome, String)>,
     pub deadline: std::time::Instant,
 }
 
@@ -263,6 +264,7 @@ impl TransactionSubmitter {
         &self,
         result: ExpansionResult,
     ) -> Result<SubmittedTransaction, Box<(InjectorError, ExpansionResult)>> {
+        self.transaction_cancel.store(false, Ordering::Release);
         let (completion, outcome) = sync_channel(1);
         let chars = transaction_keystrokes(&result);
         let submitted_at = std::time::Instant::now();
@@ -296,7 +298,7 @@ impl TransactionSubmitter {
     /// unknown: stop the worker from taking further work and report the
     /// failure like a synchronous timeout. Returns the timeout error.
     pub fn abandon_after_timeout(&self) -> InjectorError {
-        self.cancel.store(true, Ordering::Release);
+        self.worker_stop.store(true, Ordering::Release);
         let message = "output backend did not acknowledge the transaction in time".to_owned();
         let _ = self.failure_sender.try_send(OutputFailure {
             message: message.clone(),
@@ -313,7 +315,7 @@ impl TransactionSubmitter {
     /// The current replacement may already be partial, so its result remains
     /// uncertain and must never be replayed.
     pub fn cancel_for_physical_input(&self) {
-        self.cancel.store(true, Ordering::Release);
+        self.transaction_cancel.store(true, Ordering::Release);
     }
 }
 
@@ -324,7 +326,8 @@ impl TransactionSubmitter {
 struct AsyncInjector {
     sender: SyncSender<OutputCommand>,
     failures: Option<thread::JoinHandle<()>>,
-    cancel: Arc<AtomicBool>,
+    worker_stop: Arc<AtomicBool>,
+    transaction_cancel: Arc<AtomicBool>,
     failure_sender: SyncSender<OutputFailure>,
     capabilities: InjectorCapabilities,
     output_checkpoint: wayexpand_core::OutputCheckpoint,
@@ -349,6 +352,7 @@ impl AsyncInjector {
         chars: usize,
         command: impl FnOnce(Completion) -> OutputCommand,
     ) -> Result<(), InjectorError> {
+        self.transaction_cancel.store(false, Ordering::Release);
         let (completion_sender, completion) = sync_channel(1);
         enqueue_command(&self.sender, command(completion_sender), self.name)?;
         let deadline = completion_deadline(&self.capabilities, chars);
@@ -363,7 +367,7 @@ impl AsyncInjector {
                 // The operation may still complete later, so its outcome is
                 // unknown. Stop the worker from taking further work and route
                 // the daemon through normal reconnect recovery.
-                self.cancel.store(true, Ordering::Release);
+                self.worker_stop.store(true, Ordering::Release);
                 let message = format!(
                     "output backend did not acknowledge the operation within {}ms",
                     deadline.as_millis()
@@ -411,14 +415,18 @@ pub fn spawn_async_injector(
     let (sender, receiver) = sync_channel(ASYNC_OUTPUT_QUEUE_CAPACITY);
     let (failure_sender, failure_receiver) = sync_channel(1);
     let worker_failure_sender = failure_sender.clone();
-    let cancel = Arc::new(AtomicBool::new(false));
-    let worker_cancel = Arc::clone(&cancel);
+    let worker_stop = Arc::new(AtomicBool::new(false));
+    let worker_cancel = Arc::clone(&worker_stop);
+    let transaction_cancel = Arc::new(AtomicBool::new(false));
     // Cancellation (an abandoned transaction deadline, or shutdown) must also
     // stop a paced keystroke stream that is already running, not only the
     // commands still queued behind it.
-    let checkpoint_cancel = Arc::clone(&cancel);
+    let checkpoint_cancel = Arc::clone(&worker_stop);
+    let checkpoint_transaction_cancel = Arc::clone(&transaction_cancel);
     let output_checkpoint = wayexpand_core::OutputCheckpoint::new(move || {
-        if checkpoint_cancel.load(Ordering::Acquire) {
+        if checkpoint_cancel.load(Ordering::Acquire)
+            || checkpoint_transaction_cancel.load(Ordering::Acquire)
+        {
             Err("output was cancelled while in progress; the application may contain a partial replacement".into())
         } else {
             Ok(())
@@ -427,7 +435,8 @@ pub fn spawn_async_injector(
     backend.set_output_checkpoint(output_checkpoint.clone());
     let submitter = TransactionSubmitter {
         sender: sender.clone(),
-        cancel: Arc::clone(&cancel),
+        worker_stop: Arc::clone(&worker_stop),
+        transaction_cancel: Arc::clone(&transaction_cancel),
         failure_sender: failure_sender.clone(),
         capabilities,
         name,
@@ -475,13 +484,18 @@ pub fn spawn_async_injector(
                     ),
                     OutputCommand::Transaction(result, submitted_at, completion) => {
                         crate::latency::record_queue_latency(submitted_at.elapsed());
-                        let outcome = crate::latency::apply(backend.as_mut(), &result);
+                        let (outcome, trace_id) =
+                            crate::latency::apply_with_trace_id(backend.as_mut(), &result);
                         // As for single operations: a rejected expansion
                         // leaves the session healthy; any other failure
                         // stops the actor and triggers recovery.
-                        let failed = outcome
-                            .source()
-                            .filter(|error| error.kind() != InjectorErrorKind::ExpansionRejected);
+                        let failed = outcome.source().filter(|error| {
+                            !matches!(
+                                error.kind(),
+                                InjectorErrorKind::ExpansionRejected
+                                    | InjectorErrorKind::InputInterrupted
+                            )
+                        });
                         if let Some(error) = failed {
                             let _ = worker_failure_sender.try_send(OutputFailure {
                                 message: error.message.clone(),
@@ -489,7 +503,7 @@ pub fn spawn_async_injector(
                             });
                         }
                         let stop = failed.is_some();
-                        let _ = completion.send((*result, outcome));
+                        let _ = completion.send((*result, outcome, trace_id));
                         if let Some(waker) = &waker {
                             waker.wake();
                         }
@@ -504,11 +518,12 @@ pub fn spawn_async_injector(
                 // mismatched target) leaves the session healthy: return it to
                 // the caller, which drops that expansion. Only transport and
                 // fatal backend failures stop the actor and trigger recovery.
-                let failed = if let Some(error) = result
-                    .as_ref()
-                    .err()
-                    .filter(|error| error.kind() != InjectorErrorKind::ExpansionRejected)
-                {
+                let failed = if let Some(error) = result.as_ref().err().filter(|error| {
+                    !matches!(
+                        error.kind(),
+                        InjectorErrorKind::ExpansionRejected | InjectorErrorKind::InputInterrupted
+                    )
+                }) {
                     let _ = worker_failure_sender.try_send(OutputFailure {
                         message: error.message.clone(),
                         retryable: error.retryable,
@@ -531,7 +546,8 @@ pub fn spawn_async_injector(
     let injector = AsyncInjector {
         sender,
         failures: Some(worker),
-        cancel,
+        worker_stop,
+        transaction_cancel,
         failure_sender,
         capabilities,
         output_checkpoint,
@@ -548,7 +564,7 @@ impl TextInjector for AsyncInjector {
         // shutdown must never wait for that call. Closing the sender also
         // wakes a worker that is waiting for its next command when the
         // bounded queue cannot accept the sentinel.
-        self.cancel.store(true, Ordering::Release);
+        self.worker_stop.store(true, Ordering::Release);
         let _ = self.sender.try_send(OutputCommand::Shutdown);
         let sender = std::mem::replace(&mut self.sender, sync_channel(0).0);
         drop(sender);
@@ -644,7 +660,7 @@ impl TextInjector for AsyncInjector {
 
 impl Drop for AsyncInjector {
     fn drop(&mut self) {
-        self.cancel.store(true, Ordering::Release);
+        self.worker_stop.store(true, Ordering::Release);
     }
 }
 
@@ -1346,12 +1362,13 @@ mod tests {
         let result = test_transaction();
         let insert_ptr = result.insert.as_ptr();
         let transaction = submitter.submit(result).unwrap();
-        let (returned, outcome) = transaction
+        let (returned, outcome, trace_id) = transaction
             .outcome
             .recv_timeout(Duration::from_secs(2))
             .expect("the worker returns the transaction payload with its outcome");
         assert!(outcome.is_applied());
         assert_eq!(returned.insert.as_ptr(), insert_ptr);
+        assert!(!trace_id.is_empty());
     }
 
     #[test]

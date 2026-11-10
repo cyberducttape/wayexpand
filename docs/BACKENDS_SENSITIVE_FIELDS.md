@@ -62,6 +62,18 @@ When using `--source=evdev --allow-evdev-sensitive-fields`:
 - **Result:** Text matching is NEVER suspended, even in password fields
 - **User experience:** A typo in a password field could trigger an expansion
 
+The optional IBus companion mode can restrict *matching* to IDs in
+`settings.raw_capture_apps` (and `settings.terminal_apps`) and make IBus yield
+matcher ownership in those same applications. This does not restrict what the
+evdev reader can observe: it still receives raw keyboard events globally, and
+it still cannot distinguish a password field inside an allowed browser.
+When IBus is active, `wayexpand setup --backend ibus --evdev-apps` enables the
+fallback only after IBus replacement has been verified. Existing evdev users
+can instead opt in with `wayexpand setup --backend evdev --evdev-apps --apply`.
+Both paths require the evdev consent marker and
+an explicit setup apply. Only the IBus companion path requires the preceding
+IBus insertion test.
+
 **Security implications:**
 
 This is the documented tradeoff for using evdev. Before enabling evdev, you must:

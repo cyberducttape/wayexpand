@@ -220,16 +220,26 @@ pub(crate) fn queue_snapshot() -> Snapshot {
 }
 
 pub fn apply(injector: &mut dyn TextInjector, result: &ExpansionResult) -> TransactionOutcome {
+    apply_with_trace_id(injector, result).0
+}
+
+/// Apply one transaction on the serialized output actor and return the
+/// content-free trace ID so the reactor can correct a provisional success if
+/// it observes overlapping physical input before accepting the result.
+pub(crate) fn apply_with_trace_id(
+    injector: &mut dyn TextInjector,
+    result: &ExpansionResult,
+) -> (TransactionOutcome, String) {
     let mode = output_mode(injector.status_detail());
     let size = output_size_bucket(result.insert.chars().count());
     let mut traced = crate::failure_trace::TracedInjector::new(injector);
     let report = measure(mode, size, || {
         ExpansionEngine::apply_with_report(&mut traced, result)
     });
-    traced.record_outcome(&report.outcome, &report.phases, report.progress);
+    let trace_id = traced.record_outcome(&report.outcome, &report.phases, report.progress);
     let outcome = report.outcome;
     crate::output_health::note_outcome(&outcome);
-    outcome
+    (outcome, trace_id)
 }
 
 pub fn measure_matcher<T>(operation: impl FnOnce() -> T) -> T {

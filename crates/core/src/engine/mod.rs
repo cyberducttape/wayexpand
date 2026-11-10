@@ -85,6 +85,10 @@ pub struct ExpansionEngine {
     app_filter_globs: Vec<Vec<Option<GlobPattern>>>,
     /// `settings.terminal_apps`, parsed and compiled.
     terminal_app_scope: Vec<(AppFilter, Option<GlobPattern>)>,
+    /// `settings.raw_capture_apps`, parsed and compiled. IBus yields matching
+    /// ownership to the explicitly configured evdev fallback in these apps.
+    raw_capture_app_scope: Vec<(AppFilter, Option<GlobPattern>)>,
+    raw_capture_fallback_enabled: bool,
     /// Host restriction: expand automatically only in `terminal_apps`.
     terminal_apps_only: bool,
     matcher: Arc<Matcher>,
@@ -193,7 +197,7 @@ impl ExpansionEngine {
                 .expansion
                 .iter()
                 .zip(self.validated.app_filters.iter())
-                .filter(|(expansion, _)| expansion.enabled)
+                .filter(|(expansion, _)| expansion.is_keyboard_matchable())
                 .flat_map(|(_, filters)| filters.iter())
                 .any(|filter| matches!(filter, AppFilter::TitleContains(_)))
     }
@@ -270,9 +274,29 @@ impl ExpansionEngine {
                     .collect()
             })
             .collect();
+        let raw_capture_fallback_enabled = config.settings.raw_capture_fallback_enabled;
+        let raw_capture_apps = if raw_capture_fallback_enabled {
+            config.settings.raw_capture_apps.as_slice()
+        } else {
+            &[]
+        };
         let terminal_app_scope = config
             .settings
             .terminal_apps
+            .iter()
+            .chain(raw_capture_apps.iter())
+            .filter_map(|raw| AppFilter::parse(raw))
+            .map(|filter| {
+                let glob = match &filter {
+                    AppFilter::AppIdGlob(pattern) => Some(GlobPattern::compile(pattern)),
+                    _ => None,
+                };
+                (filter, glob)
+            })
+            .collect();
+        let raw_capture_app_scope = config
+            .settings
+            .raw_capture_apps
             .iter()
             .filter_map(|raw| AppFilter::parse(raw))
             .map(|filter| {
@@ -296,6 +320,8 @@ impl ExpansionEngine {
             compatibility_mode_override: None,
             app_filter_globs,
             terminal_app_scope,
+            raw_capture_app_scope,
+            raw_capture_fallback_enabled,
             terminal_apps_only: false,
             matcher,
             match_scratch: MatchScratch::default(),
@@ -501,7 +527,7 @@ impl ExpansionEngine {
             .iter()
             .enumerate()
             .any(|(index, expansion)| {
-                expansion.enabled
+                expansion.is_keyboard_matchable()
                     && (expansion.command.is_some()
                         || self
                             .validated

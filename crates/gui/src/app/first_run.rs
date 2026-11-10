@@ -22,7 +22,7 @@ fn uses_gnome_ibus_route(is_gnome: bool, ibus_active: bool, recommends_ibus: boo
 
 fn onboarding_snippet(config: &Config) -> Option<&ExpansionConfig> {
     config.expansion.iter().find(|expansion| {
-        expansion.enabled
+        expansion.is_keyboard_matchable()
             && expansion.app_filter.is_empty()
             && expansion.command.is_none()
             && !expansion.replacement.contains("{{")
@@ -751,6 +751,7 @@ mod tests {
             trigger: ":wayexpand-test".into(),
             aliases: Vec::new(),
             replacement: "WayExpand is working!".into(),
+            delivery: wayexpand_core::ExpansionDelivery::Insert,
             description: String::new(),
             tags: vec!["tutorial".into()],
             category: String::new(),

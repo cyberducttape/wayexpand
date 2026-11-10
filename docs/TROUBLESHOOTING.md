@@ -60,17 +60,25 @@ crashes `ibus-ui-gtk3`, update or repair the system IBus package and inspect
 `coredumpctl info ibus-ui-gtk3` before retesting.
 
 If the diagnostic reports `WX-KWIN-IBUS-002`, it found a recent IBus helper
-segmentation fault for the current user. The crash record identifies the
-process and stack, but does not by itself establish a fixed upstream version.
-In particular, a `g_utf8_pointer_to_offset` frame is not sufficient evidence
-to attribute the crash to an unrelated IBus change. Inspect the recorded PID
-with `coredumpctl info <PID>`, install the latest IBus package supported by
-your distribution, then log out of Plasma and back in. Run
-`wayexpand ibus status --json` and verify a harmless expansion in the affected
-application. If the crash recurs, report the backtrace and exact package
-version to your distribution or IBus maintainers. If the helper restarted,
-WayExpand reports the crash as degraded route health; it does not prove that
-the current helper is still down.
+segmentation fault for the current user. The finding includes the number of
+matching crashes in its bounded seven-day sample and the latest crash age when
+the journal provides a timestamp. The crash record identifies the process and
+stack, but does not by itself establish which package fix is installed. When
+the latest dump has both `g_utf8_pointer_to_offset` and Wayland-dispatch
+frames, the diagnostic reports that it resembles Fedora bug 2444787, a
+Wayland surrounding-text anchor crash. This signature is evidence about the
+IBus helper, not proof that every crash has the same cause. Inspect the
+recorded PID with `coredumpctl info <PID>` and check whether your
+distribution's IBus package includes the corresponding fix. If the helper is
+running again, first run
+`wayexpand ibus watch --seconds 30` and test a harmless trigger in the affected
+application; a historical crash alone is not a reason to restart the desktop
+session. If input still does not arrive, update the IBus package supported by
+your distribution and log out of Plasma and back in. If the helper is not
+running, inspect the coredump, update the IBus package, select **IBus Wayland**
+in Virtual Keyboard settings, and log out and back in. If the crash recurs,
+report the backtrace and exact package version to your distribution or IBus
+maintainers.
 
 If `wayexpand ibus status` reports `WX-IBUS-TOOLKIT-001`, remove the legacy
 variables from Plasma login files, run
@@ -92,10 +100,11 @@ bridge separately. Do not restart IBus solely because the old session-bus
 check failed.
 
 Check the capture scope with `wayexpand status --json`. If `source` is `evdev`
-and `terminal_apps_only` is `true`, that daemon intentionally handles terminal
-applications only; browser input must arrive through IBus. `wayexpand ibus
-status` reports the IBus route separately. Do not broaden the raw evdev route
-to browsers to work around an inactive IBus path.
+and `terminal_apps_only` is `true`, the daemon matches only its configured app
+allowlist. For the terminal-only setup that means terminal IDs; the explicit
+browser fallback may add `raw_capture_apps` to the same allowlist. `wayexpand
+ibus status` reports the IBus route separately. Do not broaden capture to
+every application to work around an inactive IBus path.
 
 To observe whether the browser sends input to IBus, run
 `wayexpand ibus watch --seconds 30`, switch to the browser, and type harmless
@@ -104,9 +113,15 @@ If it reports no new keys, the browser is not routing this field through the
 WayExpand IBus engine. If it reports `no-surrounding-text`, IBus cannot safely
 replace a trigger in that field. The telemetry does not identify the app, so
 do not treat this result as proof about every browser field. Do not add a
-browser to `terminal_apps`: the terminal-only evdev route is intended for
-terminal emulators and has weaker input-privacy guarantees. Use a separately
-tested browser route or paste the reviewed text manually.
+browser to `terminal_apps`. If you explicitly accept global raw keyboard
+observation and the absence of password-field detection, configure
+`settings.raw_capture_apps` and follow the browser-scoped IBus/evdev setup in
+`docs/IBUS_ENGINE.md`. IBus yields to evdev only when authenticated compositor
+focus identifies one of those apps; both routes fail closed when focus is
+unknown. If no app list exists, the explicit setup seeds known browser app IDs;
+replace them if your browser uses a different ID. This remains uncertified and
+may use non-atomic replacement. Otherwise
+use the Quick Picker's reviewed copy-and-paste path.
 
 ### WX-POLICY-001
 

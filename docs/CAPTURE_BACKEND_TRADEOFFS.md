@@ -33,7 +33,7 @@ WayExpand must choose between two fundamentally different capture methods:
 | **Arrow Keys** | ❌ Not captured | ✅ Full capture |
 | **Function Keys** | ❌ Not captured | ✅ Full capture |
 | **Escape/Ctrl+C** | ❌ Not captured | ✅ Full capture |
-| **Browser URLs** | Unverified per browser/compositor; requires IBus/input-method routing and usable surrounding text | Not certified; terminal-only evdev profiles do not cover browsers |
+| **Browser fields** | Unverified per browser/compositor; automatic replacement requires usable surrounding text | Experimental app-scoped fallback can match selected browser IDs; still observes raw keys globally and cannot identify password fields |
 | **IDE Code** | Unverified per IDE/compositor | Not certified; raw capture also sees sensitive fields |
 | **Office Docs** | Unverified per application/compositor | Not certified; raw capture also sees sensitive fields |
 | **Setup difficulty** | ⭐ Simple (no permissions needed) | ⭐⭐⭐⭐ Complex (requires permissions) |

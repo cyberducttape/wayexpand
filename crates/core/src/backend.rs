@@ -765,6 +765,10 @@ pub struct InjectorError {
 pub enum InjectorErrorKind {
     /// The backend/session may succeed after it is recreated.
     TransportFailure,
+    /// New user input overlapped non-atomic output. The output may be partial,
+    /// but the backend itself remains usable and must not be reconnected just
+    /// for this transaction outcome.
+    InputInterrupted,
     /// This expansion cannot be represented by the current backend. The
     /// input session remains healthy and the expansion should be dropped.
     ExpansionRejected,
@@ -774,9 +778,26 @@ pub enum InjectorErrorKind {
 }
 
 impl InjectorError {
+    const INPUT_INTERRUPTED_MESSAGE: &'static str =
+        "non-atomic output interrupted by new input; target text may be partial";
+
+    /// Build the content-free failure used when user input overlaps a
+    /// non-atomic replacement. This is an uncertain output result, not a
+    /// transport failure: keep the injector, discard this expansion, and do
+    /// not replay it.
+    pub fn input_interrupted(backend: &'static str) -> Self {
+        Self {
+            backend,
+            message: Self::INPUT_INTERRUPTED_MESSAGE.into(),
+            retryable: false,
+        }
+    }
+
     pub fn kind(&self) -> InjectorErrorKind {
         if self.retryable {
             InjectorErrorKind::TransportFailure
+        } else if self.message == Self::INPUT_INTERRUPTED_MESSAGE {
+            InjectorErrorKind::InputInterrupted
         } else if self.message.starts_with("backend cannot synthesize") {
             InjectorErrorKind::FatalBackendFailure
         } else {

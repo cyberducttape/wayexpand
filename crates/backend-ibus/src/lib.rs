@@ -581,6 +581,7 @@ impl IbusEngineAdapter {
             let captured = self.enabled
                 && self.capability_block.is_none()
                 && self.advertises_surrounding_text()
+                && !self.engine.raw_capture_app_owns_focus()
                 && !self.engine.is_sensitive_focus()
                 && !self.engine.is_user_paused();
             self.note(|telemetry, field| telemetry.key(field, captured));
@@ -607,6 +608,15 @@ impl IbusEngineAdapter {
         }
 
         if !self.enabled || self.capability_block.is_some() {
+            return IbusKeyResult::default();
+        }
+
+        // Applications explicitly assigned to the raw evdev fallback must
+        // have one expansion owner. If the authenticated compositor tracker
+        // cannot identify the current app, this returns false and IBus keeps
+        // its normal behavior; evdev also fails closed on an unknown app.
+        if self.engine.raw_capture_app_owns_focus() {
+            self.engine.process(InputEvent::Reset);
             return IbusKeyResult::default();
         }
 
@@ -927,6 +937,134 @@ app_filter = ["app_id_exact:org.gnome.TextEditor"]
             "{}",
             stale_binding.render_text()
         );
+    }
+
+    #[test]
+    fn ibus_yields_only_authenticated_raw_capture_apps_to_evdev() {
+        let config = Config::parse(
+            r#"[settings]
+raw_capture_apps = ["app_id_exact:org.mozilla.firefox"]
+raw_capture_fallback_enabled = true
+
+[[expansion]]
+trigger = ";;browser"
+replacement = "browser fallback"
+"#,
+        )
+        .unwrap();
+        let mut adapter = focused(IbusEngineAdapter::new(
+            ExpansionEngine::new(config).unwrap(),
+        ));
+        adapter.focus_in_for_context(Some("/org/freedesktop/IBus/Engine/WayExpand/9"));
+
+        let browser = WindowContext {
+            app_id: Some("org.mozilla.firefox".into()),
+            title: None,
+            instance_id: Some("kwin:browser-window".into()),
+        };
+        adapter.bind_gnome_focus(Some(&browser));
+        assert!(adapter.engine().raw_capture_app_owns_focus());
+        for character in ";;browser ".chars() {
+            let result = adapter.process_key_event(character as u32, 0, 0);
+            assert!(!result.handled, "IBus must yield to the scoped evdev owner");
+            assert!(result.actions.is_empty());
+        }
+
+        // A different verified client stays with IBus.
+        let editor = WindowContext {
+            app_id: Some("org.gnome.TextEditor".into()),
+            title: None,
+            instance_id: Some("kwin:editor-window".into()),
+        };
+        adapter.focus_in_for_context(Some("/org/freedesktop/IBus/Engine/WayExpand/9"));
+        adapter.bind_gnome_focus(Some(&editor));
+        assert!(!adapter.engine().raw_capture_app_owns_focus());
+
+        // If focus identity is lost, IBus does not yield ownership based on a
+        // stale app ID; the evdev route independently fails closed as well.
+        adapter.update_gnome_focus(None);
+        assert!(!adapter.engine().raw_capture_app_owns_focus());
+    }
+
+    #[test]
+    fn listing_evdev_apps_alone_does_not_disable_ibus_matching() {
+        let config = Config::parse(
+            "[settings]\nraw_capture_apps = [\"app_id_exact:org.mozilla.firefox\"]\n",
+        )
+        .unwrap();
+        let mut adapter = focused(IbusEngineAdapter::new(
+            ExpansionEngine::new(config).unwrap(),
+        ));
+        adapter.focus_in_for_context(Some("/org/freedesktop/IBus/Engine/WayExpand/10"));
+        let browser = WindowContext {
+            app_id: Some("org.mozilla.firefox".into()),
+            title: None,
+            instance_id: Some("kwin:browser-window".into()),
+        };
+        adapter.bind_gnome_focus(Some(&browser));
+        assert!(!adapter.engine().raw_capture_app_owns_focus());
+    }
+
+    #[test]
+    fn browser_input_is_passed_through_to_the_scoped_evdev_matcher_once() {
+        let config = Config::parse(
+            r#"[settings]
+raw_capture_apps = ["app_id_exact:org.mozilla.firefox"]
+raw_capture_fallback_enabled = true
+
+[[expansion]]
+trigger = ";;browser"
+replacement = "browser fallback"
+"#,
+        )
+        .unwrap();
+        let mut ibus = focused(IbusEngineAdapter::new(
+            ExpansionEngine::new(config.clone()).unwrap(),
+        ));
+        ibus.focus_in_for_context(Some("/org/freedesktop/IBus/Engine/WayExpand/11"));
+        ibus.set_capabilities(0);
+        let browser = WindowContext {
+            app_id: Some("org.mozilla.firefox".into()),
+            title: None,
+            instance_id: Some("kwin:browser-window".into()),
+        };
+        ibus.bind_gnome_focus(Some(&browser));
+
+        let mut evdev = ExpansionEngine::new(config).unwrap();
+        evdev.set_terminal_apps_only(true);
+        evdev.process(InputEvent::WindowChanged(Some(browser)));
+        let mut matched = Vec::new();
+        for character in ";;browser ".chars() {
+            let ibus_result = ibus.process_key_event(character as u32, 0, 0);
+            assert!(!ibus_result.handled);
+            assert!(ibus_result.actions.is_empty());
+            let event = if character == ' ' {
+                InputEvent::Delimiter(character)
+            } else {
+                InputEvent::Text(character.to_string())
+            };
+            matched.extend(evdev.process(event));
+        }
+        assert_eq!(matched.len(), 1);
+        assert_eq!(matched[0].trigger.as_ref(), ";;browser");
+        assert_eq!(matched[0].insert.as_str(), "browser fallback");
+
+        // If compositor focus identity disappears, neither route may keep
+        // assigning input to the previous browser window.
+        ibus.update_gnome_focus(None);
+        evdev.process(InputEvent::WindowChanged(None));
+        let mut unknown_matches = Vec::new();
+        for character in ";;browser ".chars() {
+            let ibus_result = ibus.process_key_event(character as u32, 0, 0);
+            assert!(!ibus_result.handled);
+            let event = if character == ' ' {
+                InputEvent::Delimiter(character)
+            } else {
+                InputEvent::Text(character.to_string())
+            };
+            unknown_matches.extend(evdev.process(event));
+        }
+        assert!(unknown_matches.is_empty());
     }
 
     #[cfg(unix)]

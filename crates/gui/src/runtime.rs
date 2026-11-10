@@ -129,6 +129,12 @@ pub(crate) struct DaemonCapabilities {
     pub capture_local_compose_aware: Option<bool>,
     pub capture_layout_aware: Option<bool>,
     pub window_tracker_connected: Option<bool>,
+    pub window_tracker_state: Option<String>,
+    pub window_tracker_reconnect_attempts_total: Option<u64>,
+    pub window_tracker_disconnects_total: Option<u64>,
+    pub window_tracker_last_failure_reason: Option<String>,
+    pub window_tracker_last_connected_unix: Option<u64>,
+    pub window_tracker_reconnect_backoff_ms: Option<u64>,
     pub window_identity_exact: Option<bool>,
     pub inject_atomic_replace: Option<bool>,
     pub inject_full_unicode: Option<bool>,
@@ -313,6 +319,55 @@ impl DaemonCapabilities {
                 });
         capabilities.capture_source = status.field("source").map(str::to_owned);
         found |= capabilities.capture_source.is_some();
+        capabilities.window_tracker_state = status
+            .field("window_tracker_state")
+            .filter(|value| {
+                matches!(
+                    *value,
+                    "unavailable" | "starting" | "connected" | "reconnecting" | "stopped"
+                )
+            })
+            .map(str::to_owned);
+        capabilities.window_tracker_last_failure_reason = status
+            .field("window_tracker_last_failure_reason")
+            .filter(|value| {
+                matches!(
+                    *value,
+                    "none"
+                        | "probe_unavailable"
+                        | "connect_failed"
+                        | "tracker_disconnected"
+                        | "configuration_changed"
+                        | "compositor_unsupported"
+                        | "supervisor_start_failed"
+                )
+            })
+            .map(str::to_owned);
+        for (key, slot) in [
+            (
+                "window_tracker_reconnect_attempts_total",
+                &mut capabilities.window_tracker_reconnect_attempts_total,
+            ),
+            (
+                "window_tracker_disconnects_total",
+                &mut capabilities.window_tracker_disconnects_total,
+            ),
+            (
+                "window_tracker_last_connected_unix",
+                &mut capabilities.window_tracker_last_connected_unix,
+            ),
+            (
+                "window_tracker_reconnect_backoff_ms",
+                &mut capabilities.window_tracker_reconnect_backoff_ms,
+            ),
+        ] {
+            if let Some(value) = status.u64_field(key) {
+                *slot = Some(value);
+                found = true;
+            }
+        }
+        found |= capabilities.window_tracker_state.is_some();
+        found |= capabilities.window_tracker_last_failure_reason.is_some();
         capabilities.output_last_refusal =
             status
                 .field("output_last_refusal")
@@ -781,7 +836,7 @@ mod tests {
     #[test]
     fn daemon_capability_parser_preserves_unknowns_and_separates_io_guarantees() {
         let capabilities = super::DaemonCapabilities::parse(
-            "status_schema=29\nsource=evdev\ncapture_sensitive_focus=false\ncapture_exclusive=true\ncapture_composition_aware=false\ncapture_local_compose_aware=true\nwindow_tracker_connected=true\ninject_atomic_replace=false\ninject_full_unicode=true\ninject_insertion_mode=libei keysym fallback\ninject_max_text_chars=250\ninject_expected_throughput_chars_per_sec=83\n",
+            "status_schema=31\nsource=evdev\ncapture_sensitive_focus=false\ncapture_exclusive=true\ncapture_composition_aware=false\ncapture_local_compose_aware=true\nwindow_tracker_connected=true\nwindow_tracker_state=reconnecting\nwindow_tracker_reconnect_attempts_total=3\nwindow_tracker_disconnects_total=2\nwindow_tracker_last_failure_reason=tracker_disconnected\nwindow_tracker_last_connected_unix=1794268800\nwindow_tracker_reconnect_backoff_ms=1000\ninject_atomic_replace=false\ninject_full_unicode=true\ninject_insertion_mode=libei keysym fallback\ninject_max_text_chars=250\ninject_expected_throughput_chars_per_sec=83\n",
         )
         .unwrap();
         assert_eq!(capabilities.injection_mode, Some("libei keysym fallback"));
@@ -794,6 +849,27 @@ mod tests {
         assert_eq!(capabilities.capture_local_compose_aware, Some(true));
         assert_eq!(capabilities.capture_reliable_key_state, None);
         assert_eq!(capabilities.window_tracker_connected, Some(true));
+        assert_eq!(
+            capabilities.window_tracker_state.as_deref(),
+            Some("reconnecting")
+        );
+        assert_eq!(
+            capabilities.window_tracker_reconnect_attempts_total,
+            Some(3)
+        );
+        assert_eq!(capabilities.window_tracker_disconnects_total, Some(2));
+        assert_eq!(
+            capabilities.window_tracker_last_failure_reason.as_deref(),
+            Some("tracker_disconnected")
+        );
+        assert_eq!(
+            capabilities.window_tracker_last_connected_unix,
+            Some(1_794_268_800)
+        );
+        assert_eq!(
+            capabilities.window_tracker_reconnect_backoff_ms,
+            Some(1_000)
+        );
         assert_eq!(capabilities.inject_atomic_replace, Some(false));
         assert_eq!(capabilities.inject_full_unicode, Some(true));
         assert_eq!(capabilities.inject_key_passthrough, None);
@@ -805,6 +881,16 @@ mod tests {
             super::DaemonCapabilities::parse("status_schema=24\nstate=connected\n"),
             None
         );
+    }
+
+    #[test]
+    fn tracker_diagnostic_labels_are_allowlisted_before_gui_display() {
+        let capabilities = super::DaemonCapabilities::parse(
+            "status_schema=31\nwindow_tracker_connected=false\nwindow_tracker_state=title=private-window\nwindow_tracker_last_failure_reason=/home/user/secret\n",
+        )
+        .unwrap();
+        assert_eq!(capabilities.window_tracker_state, None);
+        assert_eq!(capabilities.window_tracker_last_failure_reason, None);
     }
 
     #[test]
@@ -863,7 +949,7 @@ mod tests {
     #[test]
     fn daemon_capability_parser_recognizes_the_negotiated_libei_fallback_label() {
         let capabilities = super::DaemonCapabilities::parse(
-            "status_schema=29\ninject_insertion_mode=ei_keyboard keysym fallback (12ms key pacing)\ninject_max_text_chars=8\ninject_expected_throughput_chars_per_sec=83\ncompatibility_mode=tracked-focus\nmatcher_latency_p50_us=12\ninjection_latency_p95_us=3400\n",
+            "status_schema=31\ninject_insertion_mode=ei_keyboard keysym fallback (12ms key pacing)\ninject_max_text_chars=8\ninject_expected_throughput_chars_per_sec=83\ncompatibility_mode=tracked-focus\nmatcher_latency_p50_us=12\ninjection_latency_p95_us=3400\n",
         )
         .unwrap();
         assert_eq!(capabilities.injection_mode, Some("libei keysym fallback"));
@@ -886,7 +972,7 @@ mod tests {
     #[test]
     fn daemon_capability_parser_reads_usage_persistence_health() {
         let capabilities = super::DaemonCapabilities::parse(
-            "status_schema=29\nusage_flush_max_duration_us=1200\nusage_flush_failures_total=2\nusage_worker_failures_total=1\nusage_queue_rejected_total=3\nusage_events_recorded_total=100\nusage_events_persisted_total=94\nusage_events_dropped_total=6\n",
+            "status_schema=31\nusage_flush_max_duration_us=1200\nusage_flush_failures_total=2\nusage_worker_failures_total=1\nusage_queue_rejected_total=3\nusage_events_recorded_total=100\nusage_events_persisted_total=94\nusage_events_dropped_total=6\n",
         )
         .unwrap();
         assert_eq!(capabilities.usage_flush_max_duration_us, Some(1200));
@@ -901,7 +987,7 @@ mod tests {
     #[test]
     fn daemon_capability_parser_reads_replacement_assurance_and_refusals() {
         let capabilities = super::DaemonCapabilities::parse(
-            "status_schema=29\nreplacement_assurance=focus-tracked-best-effort\nfocus_assurance=tracker\noutput_refused_total=4\noutput_last_refusal=focus-changed\noutput_uncertain_total=1\noutput_partial_total=1\nevdev_quarantined_events_total=7\n",
+            "status_schema=31\nreplacement_assurance=focus-tracked-best-effort\nfocus_assurance=tracker\noutput_refused_total=4\noutput_last_refusal=focus-changed\noutput_uncertain_total=1\noutput_partial_total=1\nevdev_quarantined_events_total=7\n",
         )
         .unwrap();
         assert_eq!(
@@ -919,7 +1005,7 @@ mod tests {
         assert!(!capabilities.recent_expansion_outcomes_reported);
 
         let blocked = super::DaemonCapabilities::parse(
-            "status_schema=29\nreplacement_assurance=blocked\nfocus_assurance=unconfirmed\noutput_last_refusal=none\n",
+            "status_schema=31\nreplacement_assurance=blocked\nfocus_assurance=unconfirmed\noutput_last_refusal=none\n",
         )
         .unwrap();
         assert_eq!(
@@ -929,7 +1015,7 @@ mod tests {
         assert_eq!(blocked.output_last_refusal, None);
 
         let traced = super::DaemonCapabilities::parse(
-            r#"status_schema=29
+            r#"status_schema=31
 recent_expansion_outcomes=[{"at_unix":1,"backend":"input-method-v2","trigger_recognized":"yes","focus_admission":"passed","backend_selected":"yes","erase_acknowledged":"atomic replacement acknowledged","insertion_attempted":true,"completion":"applied"},{"at_unix":2,"backend":"libei","trigger_recognized":"yes","focus_admission":"passed","backend_selected":"yes","erase_acknowledged":"yes","insertion_attempted":true,"completion":"partial_write","recovery":"manual_review","progress_tracked":true,"erased_units":4,"inserted_units":3}]
 "#,
         )

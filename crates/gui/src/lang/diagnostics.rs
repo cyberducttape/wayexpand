@@ -561,6 +561,123 @@ impl Strings {
         }
     }
 
+    pub fn window_tracker_lifecycle_detail(
+        &self,
+        state: &str,
+        reconnect_attempts: u64,
+        disconnects: u64,
+        last_failure_reason: &str,
+        last_connected_age_seconds: Option<u64>,
+        reconnect_backoff_ms: u64,
+    ) -> String {
+        let state = match (self.lang, state) {
+            (Language::English, "starting") => "Starting",
+            (Language::Indonesian, "starting") => "Memulai",
+            (Language::German, "starting") => "Startet",
+            (Language::English, "connected") => "Connected",
+            (Language::Indonesian, "connected") => "Terhubung",
+            (Language::German, "connected") => "Verbunden",
+            (Language::English, "reconnecting") => "Reconnecting",
+            (Language::Indonesian, "reconnecting") => "Menyambungkan ulang",
+            (Language::German, "reconnecting") => "Verbindung wird erneut hergestellt",
+            (Language::English, "stopped") => "Stopped",
+            (Language::Indonesian, "stopped") => "Berhenti",
+            (Language::German, "stopped") => "Angehalten",
+            (Language::English, "unavailable") => "Unavailable",
+            (Language::Indonesian, "unavailable") => "Tidak tersedia",
+            (Language::German, "unavailable") => "Nicht verfügbar",
+            (_, _) => "Unknown",
+        };
+        let last_failure_reason = match (self.lang, last_failure_reason) {
+            (Language::English, "none") => "none",
+            (Language::Indonesian, "none") => "tidak ada",
+            (Language::German, "none") => "kein Fehler",
+            (Language::English, "probe_unavailable") => "compositor service unavailable",
+            (Language::Indonesian, "probe_unavailable") => "layanan kompositor tidak tersedia",
+            (Language::German, "probe_unavailable") => "Compositor-Dienst nicht verfügbar",
+            (Language::English, "connect_failed") => "connection failed",
+            (Language::Indonesian, "connect_failed") => "koneksi gagal",
+            (Language::German, "connect_failed") => "Verbindung fehlgeschlagen",
+            (Language::English, "tracker_disconnected") => "connection lost",
+            (Language::Indonesian, "tracker_disconnected") => "koneksi terputus",
+            (Language::German, "tracker_disconnected") => "Verbindung verloren",
+            (Language::English, "configuration_changed") => "restarting after a settings change",
+            (Language::Indonesian, "configuration_changed") => {
+                "dimulai ulang setelah perubahan pengaturan"
+            }
+            (Language::German, "configuration_changed") => {
+                "Neustart nach einer Einstellungsänderung"
+            }
+            (Language::English, "compositor_unsupported") => "compositor is unsupported",
+            (Language::Indonesian, "compositor_unsupported") => "kompositor tidak didukung",
+            (Language::German, "compositor_unsupported") => "Compositor wird nicht unterstützt",
+            (Language::English, "supervisor_start_failed") => "tracker worker could not start",
+            (Language::Indonesian, "supervisor_start_failed") => "worker pelacak gagal dimulai",
+            (Language::German, "supervisor_start_failed") => "Tracker-Worker konnte nicht starten",
+            (Language::English, _) => "unknown",
+            (Language::Indonesian, _) => "tidak diketahui",
+            (Language::German, _) => "unbekannt",
+        };
+        let last_connected = match (self.lang, last_connected_age_seconds) {
+            (_, None) => match self.lang {
+                Language::English => "never connected".to_owned(),
+                Language::Indonesian => "belum pernah terhubung".to_owned(),
+                Language::German => "bisher nicht verbunden".to_owned(),
+            },
+            (Language::English, Some(0..=4)) => "just now".to_owned(),
+            (Language::English, Some(seconds)) if seconds < 60 => {
+                let unit = if seconds == 1 { "second" } else { "seconds" };
+                format!("{seconds} {unit} ago")
+            }
+            (Language::English, Some(seconds)) if seconds < 3_600 => {
+                let minutes = seconds / 60;
+                let unit = if minutes == 1 { "minute" } else { "minutes" };
+                format!("{minutes} {unit} ago")
+            }
+            (Language::English, Some(seconds)) => {
+                let hours = seconds / 3_600;
+                let unit = if hours == 1 { "hour" } else { "hours" };
+                format!("{hours} {unit} ago")
+            }
+            (Language::Indonesian, Some(0..=4)) => "baru saja".to_owned(),
+            (Language::Indonesian, Some(seconds)) if seconds < 60 => {
+                format!("{} detik lalu", seconds.max(1))
+            }
+            (Language::Indonesian, Some(seconds)) if seconds < 3_600 => {
+                format!("{} menit lalu", seconds / 60)
+            }
+            (Language::Indonesian, Some(seconds)) => {
+                format!("{} jam lalu", seconds / 3_600)
+            }
+            (Language::German, Some(0..=4)) => "gerade eben".to_owned(),
+            (Language::German, Some(seconds)) if seconds < 60 => {
+                let unit = if seconds == 1 { "Sekunde" } else { "Sekunden" };
+                format!("vor {seconds} {unit}")
+            }
+            (Language::German, Some(seconds)) if seconds < 3_600 => {
+                let minutes = seconds / 60;
+                let unit = if minutes == 1 { "Minute" } else { "Minuten" };
+                format!("vor {minutes} {unit}")
+            }
+            (Language::German, Some(seconds)) => {
+                let hours = seconds / 3_600;
+                let unit = if hours == 1 { "Stunde" } else { "Stunden" };
+                format!("vor {hours} {unit}")
+            }
+        };
+        match self.lang {
+            Language::English => format!(
+                "Focus tracker: {state}; {reconnect_attempts} retries, {disconnects} disconnects; last issue: {last_failure_reason}; last connected {last_connected}; retry delay {reconnect_backoff_ms} ms."
+            ),
+            Language::Indonesian => format!(
+                "Pelacak fokus: {state}; {reconnect_attempts} percobaan ulang, {disconnects} kali terputus; masalah terakhir: {last_failure_reason}; terakhir terhubung {last_connected}; jeda coba ulang {reconnect_backoff_ms} ms."
+            ),
+            Language::German => format!(
+                "Fokus-Tracker: {state}; {reconnect_attempts} erneute Versuche, {disconnects} Verbindungsabbrüche; letzter Grund: {last_failure_reason}; zuletzt verbunden {last_connected}; Wiederholungswartezeit {reconnect_backoff_ms} ms."
+            ),
+        }
+    }
+
     pub fn capture_route(&self) -> &'static str {
         match self.lang {
             Language::English => "Capture route",
@@ -1184,6 +1301,46 @@ impl Strings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn focus_tracker_lifecycle_detail_humanizes_stable_codes() {
+        let english = Strings::new(Language::English).window_tracker_lifecycle_detail(
+            "reconnecting",
+            3,
+            2,
+            "tracker_disconnected",
+            Some(120),
+            1_000,
+        );
+        assert!(english.contains("Reconnecting"));
+        assert!(english.contains("connection lost"));
+        assert!(english.contains("2 minutes ago"));
+        assert!(!english.contains("tracker_disconnected"));
+
+        let indonesian = Strings::new(Language::Indonesian).window_tracker_lifecycle_detail(
+            "connected",
+            0,
+            0,
+            "none",
+            None,
+            0,
+        );
+        assert!(indonesian.contains("Terhubung"));
+        assert!(indonesian.contains("belum pernah terhubung"));
+        assert_ne!(indonesian, english);
+
+        let german = Strings::new(Language::German).window_tracker_lifecycle_detail(
+            "unavailable",
+            1,
+            0,
+            "compositor_unsupported",
+            Some(0),
+            250,
+        );
+        assert!(german.contains("Nicht verfügbar"));
+        assert!(german.contains("Compositor wird nicht unterstützt"));
+        assert!(german.contains("gerade eben"));
+    }
 
     #[test]
     fn input_method_progress_label_is_desktop_neutral_and_localized() {

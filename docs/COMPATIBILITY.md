@@ -374,7 +374,7 @@ verified rather than merely free of hard failures.
   `last_refusal`, and a derived `verdict` (`expanded`, `ready`,
   `no-content-type`, `sensitive`, `no-surrounding-text`, `text-mismatch`,
   `refused-by-policy`, `idle`) with an `explanation`.
-- `other_route` (object): `scope` (`none`, `terminals-only`, `control-only`,
+- `other_route` (object): `scope` (`none`, `app-scoped`, `control-only`,
   `everywhere`, `unknown`) of a running WayExpand capture daemon, from its
   `terminal_apps_only` status field, with `state`, `detail`, and `fix`. A
   daemon that expands `everywhere` while IBus is active fails readiness,
@@ -413,6 +413,7 @@ Diagnostic output suitable for health checks and monitoring systems.
       "capture": { "status": "active-shared", "summary": "...", "details": "...", "next_steps": ["..."] },
       "injection": { "status": "active", "summary": "...", "details": "...", "next_steps": ["..."] },
       "focus_tracking": { "status": "exact-window-tracked", "summary": "...", "details": "...", "next_steps": ["..."] },
+      "window_tracker_lifecycle": { "state": "connected", "reconnect_attempts_total": 0, "disconnects_total": 0, "last_failure_reason": "none", "last_connected_unix": 1794268800, "reconnect_backoff_ms": 0 },
       "password_field_protection": { "status": "unavailable", "summary": "...", "details": "...", "next_steps": ["..."] },
       "replacement_assurance": { "status": "best-effort", "summary": "...", "details": "...", "next_steps": ["..."] }
     }
@@ -522,7 +523,7 @@ Diagnostic output suitable for health checks and monitoring systems.
 - `control_socket.exists` (bool): Socket file exists on filesystem
 - `control_socket.valid` (bool): Existing path is a user-owned, non-group/world-accessible Unix socket
 - `daemon.insertion` (object): Insertion assurance from the daemon status: `assurance`, `compatibility_mode`, `focus`, `refused_total`, `last_refusal` (null when none), and `explanation` (a plain-language description of the guarantee). A `blocked` route makes `healthy` false and adds a `production_readiness` blocker. Added with status schema 8.
-- `daemon.session_capabilities` (object): Current daemon-reported status for `capture`, `injection`, `focus_tracking`, `password_field_protection`, and `replacement_assurance`. Each check has a `status`, `summary`, `details`, and actionable `next_steps`. Capture/injection report live route state; focus and password-field reporting distinguish absent support from unavailable/unknown data. `end_to_end_certified` remains false because live protocol capabilities are not real-client certification. The report is also present when the daemon is unavailable, with checks marked unavailable or unknown.
+- `daemon.session_capabilities` (object): Current daemon-reported status for `capture`, `injection`, `focus_tracking`, `window_tracker_lifecycle`, `password_field_protection`, and `replacement_assurance`. Capability checks have a `status`, `summary`, `details`, and actionable `next_steps`. `window_tracker_lifecycle` exposes sanitized tracker state, reconnect/disconnect counters, last failure category, last successful connection time, and retry delay; it contains no focused-app identity or window title. Capture/injection report live route state; focus and password-field reporting distinguish absent support from unavailable/unknown data. `end_to_end_certified` remains false because live protocol capabilities are not real-client certification. The report is also present when the daemon is unavailable, with checks marked unavailable or unknown.
 - `daemon.output` (object): Output-route health from the daemon status: `health`, `uncertain_transactions_total`, `retiring_workers`, `stalled_ms`, and `recovery` (restart guidance naming the running unit when `health` is `stalled`, otherwise null). A stalled route makes `healthy` false and adds a `production_readiness` blocker.
 - `production_readiness` (object): Derived safety summary for the connected daemon route. `status` is `unavailable`, `limited`, or `uncertified`; `certified` remains false until reviewed compositor/client evidence is collected. `blockers` names each missing guarantee rather than inferring readiness from daemon connectivity.
 - `production_readiness.capabilities` (object): Negotiated live-route guarantees for exclusive keyboard capture, sensitive-field detection, external IME/preedit awareness, local dead-key/Compose tracking, key pass-through, exact window identity, atomic replacement, and full Unicode injection. Exclusive capture and atomic replacement are separate guarantees. External IME/preedit awareness is separate and is not implied by local composition tracking.
@@ -612,7 +613,7 @@ legacy same-commit daemon as verified. Builds without Git metadata report
   "backend": "input-method-v2",
   "route_id": "input-method-v2",
   "backend_mode": "unknown",
-  "status_schema": 26,
+  "status_schema": 31,
   "daemon_commit": "example-commit",
   "daemon_version": "1.3.3-dev+example-commit",
   "client_commit": "example-commit",
@@ -626,6 +627,11 @@ legacy same-commit daemon as verified. Builds without Git metadata report
   "paused": false,
   "config": "/home/user/.config/wayexpand/expansions.toml",
   "config_state": "ok",
+  "config_active_path": "/home/user/.config/wayexpand/expansions.toml",
+  "config_generation": 1,
+  "config_enabled_expansions": 12,
+  "config_disabled_expansions": 0,
+  "config_generate_only_expansions": 3,
   "capture_sensitive_focus": true,
   "capture_exclusive": true,
   "capture_reliable_key_state": true,
@@ -634,6 +640,12 @@ legacy same-commit daemon as verified. Builds without Git metadata report
   "capture_local_compose_aware": true,
   "capture_layout_aware": true,
   "window_tracker_connected": true,
+  "window_tracker_state": "connected",
+  "window_tracker_reconnect_attempts_total": 0,
+  "window_tracker_disconnects_total": 0,
+  "window_tracker_last_failure_reason": "none",
+  "window_tracker_last_connected_unix": 1794268800,
+  "window_tracker_reconnect_backoff_ms": 0,
   "window_identity_exact": true,
   "inject_atomic_replace": true,
   "inject_full_unicode": true,
@@ -731,7 +743,7 @@ legacy same-commit daemon as verified. Builds without Git metadata report
 - `route_id` (string): Canonical capture/injection route ID from the shared route catalog; `"stdin-test"` identifies the stdin harness, and `"unknown"` means the active pair has no catalog entry. Consumers should use this field instead of reconstructing route identity from `source` and `backend`.
 - `backend_mode` (string): Negotiated backend capability detail. Libei reports either `"ei_text (UTF-8 insertion)"` or `"ei_keyboard keysym fallback (12ms key pacing)"`; it is `"unknown"` before a backend has negotiated a mode or for backends without submodes.
 - `sandbox_security` (object, optional): Live in-process evidence for namespace IDs, seccomp/NoNewPrivs, socket address-family probes, read-only mounts, proc restrictions, W^X, personality and SUID-bit probes, resource limits, and cgroup limits. It reports effective process state, not unit-file intent. See [SECURITY](../SECURITY.md#effective-sandbox-inspection).
-- `status_schema` (integer): Version of the daemon status contract. Certification requires a matching schema before treating runtime capabilities as current; missing or different values mean the daemon should be restarted/updated. Schema 11 adds canonical `route_id`; schema 12 adds usage-event recorded, persisted, and dropped counters; schema 13 adds precise `replacement_assurance`; schema 14 adds matcher-latency dropped-sample reporting; schema 15 adds aggregate and per-mode output-latency dropped-sample reporting; schema 16 adds capture_layout_state; schema 17 adds command cgroup cleanup health; schema 18 adds `output_partial_total`, distinguishing partial insertion from other outcomes whose target effect is unknown; schema 19 adds background connection-worker lifecycle counters and the daemon-context command containment self-test result; schema 20 adds effective route/matching availability, command-worker counts, suppressed-expansion totals, and input/output connection-attempt failure totals; schema 21 adds a distinct partial-write counter and confirmed per-transaction erase/insert progress; schema 22 adds active, acknowledged, timed-out, and failed backend-shutdown worker counters; schema 23 adds `matching_unavailable_reason`; schema 24 adds `replacement_not_admitted` so status reflects when the output safety guard refuses replacement; schema 26 adds `terminal_apps_only`; schema 27 adds the content-free `input_events_total` counter and opaque transaction IDs in bounded output traces; schema 28 adds the active config path/generation, successful reload times, enabled/disabled expansion counts, and sanitized reload-validation failure fields; schema 29 adds per-route connection lifecycle state, timestamps, reason categories, backoff, last successful insertion, bounded diagnostic counters, and output queue latency percentiles.
+- `status_schema` (integer): Version of the daemon status contract. Certification requires a matching schema before treating runtime capabilities as current; missing or different values mean the daemon should be restarted/updated. Schema 11 adds canonical `route_id`; schema 12 adds usage-event recorded, persisted, and dropped counters; schema 13 adds precise `replacement_assurance`; schema 14 adds matcher-latency dropped-sample reporting; schema 15 adds aggregate and per-mode output-latency dropped-sample reporting; schema 16 adds capture_layout_state; schema 17 adds command cgroup cleanup health; schema 18 adds `output_partial_total`, distinguishing partial insertion from other outcomes whose target effect is unknown; schema 19 adds background connection-worker lifecycle counters and the daemon-context command containment self-test result; schema 20 adds effective route/matching availability, command-worker counts, suppressed-expansion totals, and input/output connection-attempt failure totals; schema 21 adds a distinct partial-write counter and confirmed per-transaction erase/insert progress; schema 22 adds active, acknowledged, timed-out, and failed backend-shutdown worker counters; schema 23 adds `matching_unavailable_reason`; schema 24 adds `replacement_not_admitted` so status reflects when the output safety guard refuses replacement; schema 26 adds `terminal_apps_only`; schema 27 adds the content-free `input_events_total` counter and opaque transaction IDs in bounded output traces; schema 28 adds the active config path/generation, successful reload times, enabled/disabled expansion counts, and sanitized reload-validation failure fields; schema 29 adds per-route connection lifecycle state, timestamps, reason categories, backoff, last successful insertion, bounded diagnostic counters, and output queue latency percentiles; schema 30 adds sanitized compositor window-tracker lifecycle fields; schema 31 distinguishes keyboard-matchable expansions from enabled generate-only templates.
 - `state` (string): Backend connection state (e.g. `"connected"`, `"reconnecting"`)
 - `route_available` (bool): `true` only when capture is connected, evdev has a current layout snapshot when applicable, and an output route advertises replacement support. This is capability/connectivity status; a route can be available while the output safety guard refuses replacement.
 - `matching_available` (bool): `true` when `route_available` is true, the output safety guard admits replacement, matching is not paused, and the active configuration is healthy.
@@ -742,6 +754,10 @@ legacy same-commit daemon as verified. Builds without Git metadata report
 - `capture_sensitive_focus`, `capture_exclusive`, `capture_reliable_key_state`, `capture_key_passthrough`, `capture_composition_aware`, `capture_local_compose_aware`, `capture_layout_aware` (bool): Negotiated input-source guarantees. `capture_composition_aware` means awareness of external IME/preedit; it remains false for input-method-v2, whose local XKB dead-key/Compose tracking is reported separately as `capture_local_compose_aware`. Conservative false values are published while the source is disconnected or unknown. Evdev reports `capture_layout_aware=true` only while its provider has a current compositor layout snapshot; otherwise layout-dependent matching and hotkeys remain disabled.
 - `capture_layout_state` (string): `tracked`, `unavailable`, or `not-applicable`; KDE evdev reports `tracked` while KWin's active group and layout/variant list agree with `kxkbrc`, or with systemd-localed keyboard properties when `kxkbrc` is absent. The provider fails closed on missing or inconsistent state. Other evdev compositors currently report `unavailable`.
 - `window_tracker_connected` (bool): Whether the supervised compositor-specific window tracker is currently connected. This is reported separately from keyboard capture because application identity is provided by a distinct subsystem.
+- `window_tracker_state` (string): `unavailable`, `starting`, `connected`, `reconnecting`, or `stopped` for the compositor focus tracker.
+- `window_tracker_reconnect_attempts_total`, `window_tracker_disconnects_total` (integer): Process-lifetime retry and established-connection loss counters. These never contain focus or input content.
+- `window_tracker_last_failure_reason` (string): Sanitized category: `none`, `probe_unavailable`, `connect_failed`, `tracker_disconnected`, `configuration_changed`, `compositor_unsupported`, or `supervisor_start_failed`.
+- `window_tracker_last_connected_unix`, `window_tracker_reconnect_backoff_ms` (integer): Unix timestamp of the last successful connection and the current bounded retry delay in milliseconds. A zero timestamp means no connection has succeeded in this process.
 - `window_identity_exact` (bool): Whether the active window-tracking route provides an ephemeral identity for the exact focused toplevel. This is required for safe Quick Picker typing; false means the picker is clipboard-only.
 - `inject_atomic_replace`, `inject_full_unicode`, `inject_cursor_reposition`, `inject_key_passthrough` (bool): Negotiated output-injector guarantees. These do not imply corresponding capture guarantees or end-to-end certification.
 - inject_insertion_mode (string): Negotiated insertion protocol, such as ei_text or libei keysym fallback.
@@ -784,7 +800,7 @@ legacy same-commit daemon as verified. Builds without Git metadata report
 - `clipboard_read_max_duration_us` (integer): Longest completed clipboard command duration in microseconds since daemon start
 - `output_health` (string): `ok`; `recovering` while a retired output worker is stopping; or `stalled` once it has outlived the 5 s base acknowledgement deadline. While any retired worker runs, the output route does not reconnect, so a late operation cannot type into the current window. `stalled` persists until the worker stops or the daemon is restarted. Added in status schema 7.
 - `output_uncertain_total` (integer): Expansions and inserts since daemon start whose effect on the target text is unknown (a non-atomic backend failed mid-transaction or did not acknowledge in time). They are never retried. Added in status schema 7.
-- `terminal_apps_only` (bool): The daemon was started with `--terminal-apps-only` and expands automatically only while an app listed in `settings.terminal_apps` is focused (fail-closed when the focused window is unknown). Explicit inserts and hotkeys are not restricted. Diagnostics use it to tell a raw-input daemon that covers terminals beside IBus from one that would expand everywhere. Added in status schema 26.
+- `terminal_apps_only` (bool): The daemon was started with `--terminal-apps-only` and expands automatically only while an app in its configured allowlist is focused (fail-closed when focused-window identity is unknown). The allowlist includes `settings.terminal_apps`, plus `settings.raw_capture_apps` only when `raw_capture_fallback_enabled` is true. Despite the legacy field and flag names, this can represent non-terminal applications explicitly assigned to an evdev fallback beside IBus. Explicit inserts and hotkeys are not restricted. This reports scope, not proof that the application supports insertion. Added in status schema 26.
 - `input_events_total` (integer): Count of text/key/backspace/delimiter events accepted by the matching engine since daemon start. It contains no key or text values and is intended for sanitized live diagnostics. Added in status schema 27.
 - `suppressed_expansions_total` (integer): Matched expansions refused by policy, output safety gates, or preparation before reaching output. It does not count keys filtered before a match is produced (for example, while paused or in a sensitive field).
 - `output_partial_total` (integer): Legacy count of non-atomic transactions whose target effect may be partial. These are never retried.
@@ -847,6 +863,9 @@ daemon is running: `wayexpand_daemon_route_info` (labels `route_id`,
 `wayexpand_daemon_output_healthy`, the flags `wayexpand_daemon_paused`,
 `wayexpand_daemon_window_tracker_connected` and
 `wayexpand_daemon_sensitive_field_detection`, the gauges
+`wayexpand_daemon_window_tracker_info` (bounded `state` and sanitized
+`last_failure_reason` labels), `wayexpand_daemon_window_tracker_last_connected_unix`,
+`wayexpand_daemon_window_tracker_reconnect_backoff_milliseconds`,
 `wayexpand_daemon_command_queue_depth`, `wayexpand_daemon_command_in_flight`,
 `wayexpand_daemon_output_stalled_milliseconds`,
 `wayexpand_daemon_output_retiring_workers`, `wayexpand_daemon_command_worker_threads`,
@@ -1032,6 +1051,22 @@ These fields are guaranteed present and backward-compatible. Missing fields use 
   not restricted. The daemon refuses to start with the flag and an empty
   list. Older readers that reject unknown fields will not load a config that
   sets it.
+- `Settings::raw_capture_apps` (array of app IDs, default empty, omitted when
+  empty) — apps explicitly assigned to a raw evdev companion next to IBus.
+  Entries use only `app_id_exact:` or `app_id_glob:` (at most 64); unknown
+  focus never qualifies. Listing apps alone does not change routing. When the
+  list is empty, the explicit `wayexpand setup --backend ibus --evdev-apps`
+  flow seeds exact identities for common browsers; an existing custom list is
+  preserved.
+- `Settings::raw_capture_fallback_enabled` (bool, default `false`, omitted
+  when false) — setup-managed ownership handoff. When enabled alongside the
+  app-scoped evdev companion, IBus yields matching in listed apps so the two
+  routes do not expand the same trigger. Use
+  `wayexpand setup --backend ibus --evdev-apps` after reviewing
+  `docs/BACKENDS_SENSITIVE_FIELDS.md`. evdev reads
+  raw keyboard events globally and cannot detect password fields; the app
+  list limits matching, not observation. This fallback is experimental and
+  does not certify every browser field or guarantee atomic replacement.
 - `ExpansionConfig::output_file` (relative path string or absent, omitted
   from saved TOML and JSON when absent) — the file `wayexpand new` writes the
   snippet to. It may not be absolute or contain `..`, and command-backed

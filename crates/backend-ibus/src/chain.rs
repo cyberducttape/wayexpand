@@ -31,6 +31,7 @@ use wayexpand_process_supervisor::{configure_process_group, ChildSupervisor};
 
 const MAX_MANIFEST_BYTES: u64 = 64 * 1024;
 const MAX_ENVIRON_BYTES: u64 = 256 * 1024;
+const IBUS_COREDUMP_SAMPLE_LIMIT: usize = 20;
 /// The KWin Virtual Keyboard entry that launches IBus with Wayland support.
 pub const KWIN_IBUS_INPUT_METHOD: &str =
     "/usr/share/applications/org.freedesktop.IBus.Panel.Wayland.Gtk3.desktop";
@@ -1061,11 +1062,11 @@ fn config_generation_check(activity: Option<&IbusStatusReading>) -> IbusCheck {
 fn kwin_input_method_check(
     available: Option<bool>,
     helper_running: bool,
-    recent_helper_segv_pid: Option<u32>,
+    recent_helper_crash: Option<RecentIbusHelperCrash>,
 ) -> IbusCheck {
     match available {
-        Some(true) if recent_helper_segv_pid.is_some() => {
-            kwin_input_method_crash(recent_helper_segv_pid.unwrap(), helper_running)
+        Some(true) if recent_helper_crash.is_some() => {
+            kwin_input_method_crash(recent_helper_crash.unwrap(), helper_running)
         }
         Some(true) => check(
             "desktop",
@@ -1074,17 +1075,17 @@ fn kwin_input_method_check(
             "KWin's Virtual Keyboard is IBus Wayland and running",
             None,
         ),
-        Some(false) if recent_helper_segv_pid.is_some() => {
-            kwin_input_method_crash(recent_helper_segv_pid.unwrap(), helper_running)
+        Some(false) if recent_helper_crash.is_some() => {
+            kwin_input_method_crash(recent_helper_crash.unwrap(), helper_running)
         }
         Some(false) => kwin_input_method_failure(
             "KWin reports that its configured IBus Wayland input method is not running",
         ),
-        None if !helper_running && recent_helper_segv_pid.is_some() => {
-            kwin_input_method_crash(recent_helper_segv_pid.unwrap(), false)
+        None if !helper_running && recent_helper_crash.is_some() => {
+            kwin_input_method_crash(recent_helper_crash.unwrap(), false)
         }
-        None if recent_helper_segv_pid.is_some() => {
-            kwin_input_method_crash(recent_helper_segv_pid.unwrap(), true)
+        None if recent_helper_crash.is_some() => {
+            kwin_input_method_crash(recent_helper_crash.unwrap(), true)
         }
         None if !helper_running => kwin_input_method_failure(
             "KWin is configured for IBus, but its IBus Wayland helper is not running and KWin's status interface could not be queried",
@@ -1115,16 +1116,60 @@ fn kwin_unconfigured_input_method(configured: Option<&str>) -> IbusCheck {
     kwin_input_method_failure(detail)
 }
 
-fn kwin_input_method_crash(pid: u32, helper_running: bool) -> IbusCheck {
+fn kwin_input_method_crash(crash: RecentIbusHelperCrash, helper_running: bool) -> IbusCheck {
+    let age = crash
+        .latest_unix
+        .and_then(recent_crash_age)
+        .map(|age| format!(", most recent about {age}"))
+        .unwrap_or_default();
+    let crash_count = if crash.crashes_seen == IBUS_COREDUMP_SAMPLE_LIMIT {
+        format!("at least {} recent SIGSEGVs", crash.crashes_seen)
+    } else if crash.crashes_seen == 1 {
+        "1 recent SIGSEGV".into()
+    } else {
+        format!("{} recent SIGSEGVs", crash.crashes_seen)
+    };
+    let crash_signature = match crash.signature {
+        IbusHelperCrashSignature::WaylandSurroundingTextAnchor => {
+            "; latest stack matches the IBus Wayland surrounding-text anchor crash signature (g_utf8_pointer_to_offset)"
+        }
+        IbusHelperCrashSignature::Other | IbusHelperCrashSignature::Unknown => "",
+    };
+    let signature_guidance = if crash.signature
+        == IbusHelperCrashSignature::WaylandSurroundingTextAnchor
+    {
+        " This resembles Fedora bug 2444787; check whether your distribution's IBus package includes the surrounding-text fix, and report the package version with the coredump if it recurs."
+    } else {
+        ""
+    };
+    let (state, helper_state, fix) = if helper_running {
+        (
+            IbusCheckState::Warn,
+            "is running again, but has crashed recently",
+            format!(
+                "the IBus Wayland helper is running again. First test the affected text field with `wayexpand ibus watch --seconds 30` and a harmless trigger. If input still does not reach WayExpand, inspect `coredumpctl info {}` and check whether your distribution provides an IBus fix for this crash signature; log out of Plasma and back in only if input still fails after the helper recovers. If the crash recurs, report the backtrace and exact package version to your distribution or IBus maintainers.{signature_guidance}",
+                crash.pid,
+            ),
+        )
+    } else {
+        (
+            IbusCheckState::Fail,
+            "is not running",
+            format!(
+                "inspect `coredumpctl info {}`, check whether your distribution provides an IBus fix for this crash signature, then select IBus Wayland in System Settings → Keyboard → Virtual Keyboard and log out of Plasma and back in. Rerun `wayexpand ibus status --json` and test a real application; if the crash recurs, report the backtrace and exact package version to your distribution or IBus maintainers.{signature_guidance}",
+                crash.pid,
+            ),
+        )
+    };
     let mut result = check(
         "desktop",
         "KWin sends input to IBus",
-        if helper_running { IbusCheckState::Warn } else { IbusCheckState::Fail },
+        state,
         format!(
-            "coredumpctl recorded a recent SIGSEGV for ibus-ui-gtk3 (PID {pid}); the IBus Wayland helper {}",
-            if helper_running { "is running again, but has crashed recently" } else { "is not running" }
+            "coredumpctl recorded {crash_count} for ibus-ui-gtk3 in its bounded 7-day sample (latest PID {}{age}); the IBus Wayland helper {helper_state}{crash_signature}",
+            crash.pid
         ),
-        Some(format!("inspect `coredumpctl info {pid}`, install the latest IBus package supported by your distribution, then log out of Plasma and back in. Rerun `wayexpand ibus status --json` and test a real application; if the crash recurs, report the backtrace and exact package version to your distribution or IBus maintainers")),
+        Some(fix),
     );
     result.problem_id = Some("WX-KWIN-IBUS-002");
     result
@@ -1173,11 +1218,52 @@ struct CoredumpRecord {
     uid: u32,
     sig: u32,
     exe: String,
+    #[serde(default)]
+    time: Option<u64>,
 }
 
-fn recent_ibus_wayland_segv() -> Option<u32> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RecentIbusHelperCrash {
+    pid: u32,
+    crashes_seen: usize,
+    latest_unix: Option<u64>,
+    signature: IbusHelperCrashSignature,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IbusHelperCrashSignature {
+    Unknown,
+    Other,
+    WaylandSurroundingTextAnchor,
+}
+
+fn ibus_helper_crash_signature_from_info(info: &str) -> IbusHelperCrashSignature {
+    if info.contains("g_utf8_pointer_to_offset")
+        && (info.contains("wl_display_dispatch_queue_pending")
+            || info.contains("libwayland-client.so"))
+    {
+        IbusHelperCrashSignature::WaylandSurroundingTextAnchor
+    } else {
+        IbusHelperCrashSignature::Other
+    }
+}
+
+fn recent_ibus_helper_crash_signature(pid: u32) -> IbusHelperCrashSignature {
+    let pid = pid.to_string();
+    let Some(info) = bounded_command_output(
+        "coredumpctl",
+        &["--no-pager", "info", pid.as_str()],
+        Duration::from_secs(2),
+    ) else {
+        return IbusHelperCrashSignature::Unknown;
+    };
+    ibus_helper_crash_signature_from_info(&info)
+}
+
+fn recent_ibus_wayland_segv() -> Option<RecentIbusHelperCrash> {
     let uid = unsafe { libc::geteuid() };
     let uid_filter = coredump_uid_filter(uid);
+    let result_limit = IBUS_COREDUMP_SAMPLE_LIMIT.to_string();
     let output = bounded_command_output(
         "coredumpctl",
         &[
@@ -1187,28 +1273,69 @@ fn recent_ibus_wayland_segv() -> Option<u32> {
             "7 days ago",
             "--reverse",
             "-n",
-            "20",
+            result_limit.as_str(),
             "list",
             "COREDUMP_COMM=ibus-ui-gtk3",
             uid_filter.as_str(),
         ],
         Duration::from_secs(2),
     )?;
-    recent_ibus_wayland_segv_from_json(&output, uid)
+    let mut crash = recent_ibus_wayland_segv_from_json(&output, uid)?;
+    crash.signature = recent_ibus_helper_crash_signature(crash.pid);
+    Some(crash)
 }
 
 fn coredump_uid_filter(uid: u32) -> String {
     format!("COREDUMP_UID={uid}")
 }
 
-fn recent_ibus_wayland_segv_from_json(output: &str, current_uid: u32) -> Option<u32> {
+fn recent_ibus_wayland_segv_from_json(
+    output: &str,
+    current_uid: u32,
+) -> Option<RecentIbusHelperCrash> {
     let records: Vec<CoredumpRecord> = serde_json::from_str(output).ok()?;
-    records.into_iter().find_map(|record| {
-        (record.uid == current_uid
-            && record.sig == libc::SIGSEGV as u32
-            && Path::new(&record.exe).file_name() == Some(OsStr::new("ibus-ui-gtk3")))
-        .then_some(record.pid)
+    let matching = records
+        .into_iter()
+        .filter(|record| {
+            record.uid == current_uid
+                && record.sig == libc::SIGSEGV as u32
+                && Path::new(&record.exe).file_name() == Some(OsStr::new("ibus-ui-gtk3"))
+        })
+        .collect::<Vec<_>>();
+    let crashes_seen = matching.len();
+    let (pid, time) = matching
+        .iter()
+        .max_by_key(|record| record.time.unwrap_or_default())
+        .map(|record| (record.pid, record.time))?;
+    Some(RecentIbusHelperCrash {
+        pid,
+        crashes_seen,
+        latest_unix: time.map(|microseconds| microseconds / 1_000_000),
+        signature: IbusHelperCrashSignature::Unknown,
     })
+}
+
+fn recent_crash_age(crashed_unix: u64) -> Option<String> {
+    let now_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    Some(format_crash_age(Duration::from_secs(
+        now_unix.saturating_sub(crashed_unix),
+    )))
+}
+
+fn format_crash_age(age: Duration) -> String {
+    let seconds = age.as_secs();
+    if seconds < 60 {
+        "less than a minute ago".into()
+    } else if seconds < 3_600 {
+        format!("{} minutes ago", seconds / 60)
+    } else if seconds < 86_400 {
+        format!("{} hours ago", seconds / 3_600)
+    } else {
+        format!("{} days ago", seconds / 86_400)
+    }
 }
 
 /// The native KWin/IBus Wayland route must not be forced through the legacy
@@ -2416,27 +2543,46 @@ mod tests {
 
     #[test]
     fn kwin_helper_segfault_has_specific_repair_finding() {
-        let check = kwin_input_method_check(None, false, Some(1234));
+        let check = kwin_input_method_check(None, false, Some(test_recent_crash(1234)));
         assert_eq!(check.state, IbusCheckState::Fail);
         assert_eq!(check.problem_id, Some("WX-KWIN-IBUS-002"));
         assert!(check.detail.contains("recent SIGSEGV"));
+        assert!(check.detail.contains("1 recent SIGSEGV"));
         assert!(check
             .fix
             .as_deref()
             .unwrap()
             .contains("coredumpctl info 1234"));
         let fix = check.fix.as_deref().unwrap();
-        assert!(fix.contains("latest IBus package supported by your distribution"));
+        assert!(fix.contains("check whether your distribution provides an IBus fix"));
         assert!(fix.contains("report the backtrace and exact package version"));
+        assert!(fix.contains("log out of Plasma and back in"));
         assert!(!fix.contains("5bbe88a"));
         assert!(!fix.contains("surrounding-text crash"));
+
+        let mut bounded_sample = test_recent_crash(4321);
+        bounded_sample.crashes_seen = 20;
+        let repeated = kwin_input_method_check(None, false, Some(bounded_sample));
+        assert!(repeated.detail.contains("at least 20 recent SIGSEGVs"));
     }
 
     #[test]
     fn recovered_kwin_helper_does_not_hide_a_recent_segfault() {
-        let check = kwin_input_method_check(Some(true), true, Some(1234));
+        let mut crash = test_recent_crash(1234);
+        crash.crashes_seen = 2;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        crash.latest_unix = Some(now.saturating_sub(4 * 60 * 60));
+        let expected_age = recent_crash_age(crash.latest_unix.unwrap()).unwrap();
+        let check = kwin_input_method_check(Some(true), true, Some(crash));
         assert_eq!(check.state, IbusCheckState::Warn);
         assert_eq!(check.problem_id, Some("WX-KWIN-IBUS-002"));
+        assert!(check.detail.contains("2 recent SIGSEGVs"));
+        assert!(check
+            .detail
+            .contains(&format!("most recent about {expected_age}")));
         assert!(check
             .detail
             .contains("is running again, but has crashed recently"));
@@ -2445,6 +2591,46 @@ mod tests {
             .as_deref()
             .unwrap()
             .contains("coredumpctl info 1234"));
+        let fix = check.fix.as_deref().unwrap();
+        assert!(fix.contains("wayexpand ibus watch --seconds 30"));
+        assert!(
+            fix.find("wayexpand ibus watch --seconds 30").unwrap()
+                < fix.find("log out of Plasma and back in").unwrap()
+        );
+    }
+
+    #[test]
+    fn recognized_wayland_surrounding_text_crash_is_diagnosed_separately() {
+        let info = "#0 g_utf8_pointer_to_offset (libglib-2.0.so.0)\n#1 ibus-ui-gtk3\n#7 wl_display_dispatch_queue_pending (libwayland-client.so.0)";
+        assert_eq!(
+            ibus_helper_crash_signature_from_info(info),
+            IbusHelperCrashSignature::WaylandSurroundingTextAnchor
+        );
+
+        let mut crash = test_recent_crash(1234);
+        crash.signature = IbusHelperCrashSignature::WaylandSurroundingTextAnchor;
+        let check = kwin_input_method_check(Some(true), true, Some(crash));
+        assert!(check
+            .detail
+            .contains("surrounding-text anchor crash signature"));
+        let fix = check.fix.as_deref().unwrap();
+        assert!(fix.contains("resembles Fedora bug 2444787"));
+        assert!(fix.contains(
+            "check whether your distribution's IBus package includes the surrounding-text fix"
+        ));
+
+        assert_eq!(
+            ibus_helper_crash_signature_from_info(
+                "#0 g_utf8_pointer_to_offset (libglib-2.0.so.0)\n#1 ibus-ui-gtk3"
+            ),
+            IbusHelperCrashSignature::Other
+        );
+        assert_eq!(
+            ibus_helper_crash_signature_from_info(
+                "#0 wl_display_dispatch_queue_pending (libwayland-client.so.0)"
+            ),
+            IbusHelperCrashSignature::Other
+        );
     }
 
     #[test]
@@ -2453,11 +2639,49 @@ mod tests {
             {"pid":1,"uid":1000,"sig":6,"exe":"/usr/libexec/ibus-ui-gtk3"},
             {"pid":2,"uid":1001,"sig":11,"exe":"/usr/libexec/ibus-ui-gtk3"},
             {"pid":3,"uid":1000,"sig":11,"exe":"/usr/bin/other"},
-            {"pid":4,"uid":1000,"sig":11,"exe":"/usr/libexec/ibus-ui-gtk3"}
+            {"pid":4,"uid":1000,"sig":11,"time":100000000,"exe":"/usr/libexec/ibus-ui-gtk3"},
+            {"pid":5,"uid":1000,"sig":11,"time":200000000,"exe":"/usr/libexec/ibus-ui-gtk3"}
         ]"#;
-        assert_eq!(recent_ibus_wayland_segv_from_json(records, 1000), Some(4));
+        assert_eq!(
+            recent_ibus_wayland_segv_from_json(records, 1000),
+            Some(RecentIbusHelperCrash {
+                pid: 5,
+                crashes_seen: 2,
+                latest_unix: Some(200),
+                signature: IbusHelperCrashSignature::Unknown,
+            })
+        );
         assert_eq!(recent_ibus_wayland_segv_from_json("[]", 1000), None);
         assert_eq!(recent_ibus_wayland_segv_from_json("not json", 1000), None);
+    }
+
+    #[test]
+    fn recent_helper_crash_age_is_reported_in_bounded_units() {
+        assert_eq!(
+            format_crash_age(Duration::from_secs(45)),
+            "less than a minute ago"
+        );
+        assert_eq!(
+            format_crash_age(Duration::from_secs(60 * 7)),
+            "7 minutes ago"
+        );
+        assert_eq!(
+            format_crash_age(Duration::from_secs(3_600 * 4)),
+            "4 hours ago"
+        );
+        assert_eq!(
+            format_crash_age(Duration::from_secs(86_400 * 2)),
+            "2 days ago"
+        );
+    }
+
+    fn test_recent_crash(pid: u32) -> RecentIbusHelperCrash {
+        RecentIbusHelperCrash {
+            pid,
+            crashes_seen: 1,
+            latest_unix: None,
+            signature: IbusHelperCrashSignature::Unknown,
+        }
     }
 
     #[test]
