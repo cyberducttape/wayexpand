@@ -608,6 +608,10 @@ impl ReloadableConfig {
                 // this input-reactor turn. New workers remain disabled until
                 // the reaper confirms the old set has exited.
                 let old_engine = std::mem::replace(&mut self.engine, engine);
+                crate::status::set_raw_capture_fallback(
+                    self.engine.raw_capture_fallback_enabled(),
+                    self.engine.raw_capture_app_count(),
+                );
                 let old_runtime_enabled = old_engine.async_commands_enabled();
                 self.async_workers |= old_runtime_enabled;
                 if old_runtime_enabled {

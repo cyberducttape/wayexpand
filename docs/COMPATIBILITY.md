@@ -595,6 +595,10 @@ build identity or a status protocol mismatch is reported as unverifiable.
 The optional `sandbox_security` object contains direct `/proc` and syscall
 probes from the daemon process for `wayexpand doctor --security`; older daemons
 omit it, and this optional additive field does not change the status schema.
+The content-free `window_tracker_updates_total`, `window_context_available`,
+and `window_app_id_available` fields distinguish a tracker that has delivered
+no focus report from one that reported a window without an application ID. They
+never expose the ID or window title.
 
 `daemon_commit` identifies the source revision, and `daemon_version` identifies
 the exact source-tree build. Dirty development builds include a short digest of
@@ -613,7 +617,7 @@ legacy same-commit daemon as verified. Builds without Git metadata report
   "backend": "input-method-v2",
   "route_id": "input-method-v2",
   "backend_mode": "unknown",
-  "status_schema": 31,
+  "status_schema": 33,
   "daemon_commit": "example-commit",
   "daemon_version": "1.3.3-dev+example-commit",
   "client_commit": "example-commit",
@@ -641,6 +645,9 @@ legacy same-commit daemon as verified. Builds without Git metadata report
   "capture_layout_aware": true,
   "window_tracker_connected": true,
   "window_tracker_state": "connected",
+  "window_tracker_updates_total": 12,
+  "window_context_available": true,
+  "window_app_id_available": true,
   "window_tracker_reconnect_attempts_total": 0,
   "window_tracker_disconnects_total": 0,
   "window_tracker_last_failure_reason": "none",
@@ -723,6 +730,9 @@ legacy same-commit daemon as verified. Builds without Git metadata report
   "recent_expansion_outcomes": [],
   "suppressed_expansions_total": 0,
   "terminal_apps_only": false,
+  "capture_app_scope_state": "unrestricted",
+  "raw_capture_fallback_enabled": false,
+  "raw_capture_app_count": 0,
   "input_events_total": 42,
   "output_reconnect_total": 0,
   "input_reconnect_total": 0,
@@ -743,7 +753,7 @@ legacy same-commit daemon as verified. Builds without Git metadata report
 - `route_id` (string): Canonical capture/injection route ID from the shared route catalog; `"stdin-test"` identifies the stdin harness, and `"unknown"` means the active pair has no catalog entry. Consumers should use this field instead of reconstructing route identity from `source` and `backend`.
 - `backend_mode` (string): Negotiated backend capability detail. Libei reports either `"ei_text (UTF-8 insertion)"` or `"ei_keyboard keysym fallback (12ms key pacing)"`; it is `"unknown"` before a backend has negotiated a mode or for backends without submodes.
 - `sandbox_security` (object, optional): Live in-process evidence for namespace IDs, seccomp/NoNewPrivs, socket address-family probes, read-only mounts, proc restrictions, W^X, personality and SUID-bit probes, resource limits, and cgroup limits. It reports effective process state, not unit-file intent. See [SECURITY](../SECURITY.md#effective-sandbox-inspection).
-- `status_schema` (integer): Version of the daemon status contract. Certification requires a matching schema before treating runtime capabilities as current; missing or different values mean the daemon should be restarted/updated. Schema 11 adds canonical `route_id`; schema 12 adds usage-event recorded, persisted, and dropped counters; schema 13 adds precise `replacement_assurance`; schema 14 adds matcher-latency dropped-sample reporting; schema 15 adds aggregate and per-mode output-latency dropped-sample reporting; schema 16 adds capture_layout_state; schema 17 adds command cgroup cleanup health; schema 18 adds `output_partial_total`, distinguishing partial insertion from other outcomes whose target effect is unknown; schema 19 adds background connection-worker lifecycle counters and the daemon-context command containment self-test result; schema 20 adds effective route/matching availability, command-worker counts, suppressed-expansion totals, and input/output connection-attempt failure totals; schema 21 adds a distinct partial-write counter and confirmed per-transaction erase/insert progress; schema 22 adds active, acknowledged, timed-out, and failed backend-shutdown worker counters; schema 23 adds `matching_unavailable_reason`; schema 24 adds `replacement_not_admitted` so status reflects when the output safety guard refuses replacement; schema 26 adds `terminal_apps_only`; schema 27 adds the content-free `input_events_total` counter and opaque transaction IDs in bounded output traces; schema 28 adds the active config path/generation, successful reload times, enabled/disabled expansion counts, and sanitized reload-validation failure fields; schema 29 adds per-route connection lifecycle state, timestamps, reason categories, backoff, last successful insertion, bounded diagnostic counters, and output queue latency percentiles; schema 30 adds sanitized compositor window-tracker lifecycle fields; schema 31 distinguishes keyboard-matchable expansions from enabled generate-only templates.
+- `status_schema` (integer): Version of the daemon status contract. Certification requires a matching schema before treating runtime capabilities as current; missing or different values mean the daemon should be restarted/updated. Schema 11 adds canonical `route_id`; schema 12 adds usage-event recorded, persisted, and dropped counters; schema 13 adds precise `replacement_assurance`; schema 14 adds matcher-latency dropped-sample reporting; schema 15 adds aggregate and per-mode output-latency dropped-sample reporting; schema 16 adds capture_layout_state; schema 17 adds command cgroup cleanup health; schema 18 adds `output_partial_total`, distinguishing partial insertion from other outcomes whose target effect is unknown; schema 19 adds background connection-worker lifecycle counters and the daemon-context command containment self-test result; schema 20 adds effective route/matching availability, command-worker counts, suppressed-expansion totals, and input/output connection-attempt failure totals; schema 21 adds a distinct partial-write counter and confirmed per-transaction erase/insert progress; schema 22 adds active, acknowledged, timed-out, and failed backend-shutdown worker counters; schema 23 adds `matching_unavailable_reason`; schema 24 adds `replacement_not_admitted` so status reflects when the output safety guard refuses replacement; schema 26 adds `terminal_apps_only`; schema 27 adds the content-free `input_events_total` counter and opaque transaction IDs in bounded output traces; schema 28 adds the active config path/generation, successful reload times, enabled/disabled expansion counts, and sanitized reload-validation failure fields; schema 29 adds per-route connection lifecycle state, timestamps, reason categories, backoff, last successful insertion, bounded diagnostic counters, and output queue latency percentiles; schema 30 adds sanitized compositor window-tracker lifecycle fields; schema 31 distinguishes keyboard-matchable expansions from enabled generate-only templates; schema 32 reports whether the app-scoped raw-capture fallback is active and its effective app-ID count without exposing the configured IDs; schema 33 reports whether the focused app is allowed by the daemon's capture scope without exposing its identity.
 - `state` (string): Backend connection state (e.g. `"connected"`, `"reconnecting"`)
 - `route_available` (bool): `true` only when capture is connected, evdev has a current layout snapshot when applicable, and an output route advertises replacement support. This is capability/connectivity status; a route can be available while the output safety guard refuses replacement.
 - `matching_available` (bool): `true` when `route_available` is true, the output safety guard admits replacement, matching is not paused, and the active configuration is healthy.
@@ -755,6 +765,8 @@ legacy same-commit daemon as verified. Builds without Git metadata report
 - `capture_layout_state` (string): `tracked`, `unavailable`, or `not-applicable`; KDE evdev reports `tracked` while KWin's active group and layout/variant list agree with `kxkbrc`, or with systemd-localed keyboard properties when `kxkbrc` is absent. The provider fails closed on missing or inconsistent state. Other evdev compositors currently report `unavailable`.
 - `window_tracker_connected` (bool): Whether the supervised compositor-specific window tracker is currently connected. This is reported separately from keyboard capture because application identity is provided by a distinct subsystem.
 - `window_tracker_state` (string): `unavailable`, `starting`, `connected`, `reconnecting`, or `stopped` for the compositor focus tracker.
+- `window_tracker_updates_total` (integer): Number of authenticated focus snapshots received during this daemon process, including snapshots with no active window.
+- `window_context_available`, `window_app_id_available` (bool): Whether the latest snapshot identified a window and whether it carried an application ID. These booleans expose neither IDs nor titles and distinguish a missing tracker event from an unusable application identity.
 - `window_tracker_reconnect_attempts_total`, `window_tracker_disconnects_total` (integer): Process-lifetime retry and established-connection loss counters. These never contain focus or input content.
 - `window_tracker_last_failure_reason` (string): Sanitized category: `none`, `probe_unavailable`, `connect_failed`, `tracker_disconnected`, `configuration_changed`, `compositor_unsupported`, or `supervisor_start_failed`.
 - `window_tracker_last_connected_unix`, `window_tracker_reconnect_backoff_ms` (integer): Unix timestamp of the last successful connection and the current bounded retry delay in milliseconds. A zero timestamp means no connection has succeeded in this process.
@@ -801,6 +813,9 @@ legacy same-commit daemon as verified. Builds without Git metadata report
 - `output_health` (string): `ok`; `recovering` while a retired output worker is stopping; or `stalled` once it has outlived the 5 s base acknowledgement deadline. While any retired worker runs, the output route does not reconnect, so a late operation cannot type into the current window. `stalled` persists until the worker stops or the daemon is restarted. Added in status schema 7.
 - `output_uncertain_total` (integer): Expansions and inserts since daemon start whose effect on the target text is unknown (a non-atomic backend failed mid-transaction or did not acknowledge in time). They are never retried. Added in status schema 7.
 - `terminal_apps_only` (bool): The daemon was started with `--terminal-apps-only` and expands automatically only while an app in its configured allowlist is focused (fail-closed when focused-window identity is unknown). The allowlist includes `settings.terminal_apps`, plus `settings.raw_capture_apps` only when `raw_capture_fallback_enabled` is true. Despite the legacy field and flag names, this can represent non-terminal applications explicitly assigned to an evdev fallback beside IBus. Explicit inserts and hotkeys are not restricted. This reports scope, not proof that the application supports insertion. Added in status schema 26.
+- `raw_capture_fallback_enabled` (bool): Whether the validated configuration assigns app-scoped input ownership to the raw-capture fallback. It does not prove that evdev is receiving events or that a target field can be safely replaced. Added in status schema 32.
+- `raw_capture_app_count` (integer): Number of effective app IDs assigned to the active raw-capture fallback, or zero when disabled. The IDs themselves are not exposed. Added in status schema 32.
+- `capture_app_scope_state` (string): `unrestricted`, `allowed`, `outside_allowlist`, or `unknown`. It reports whether the current focus is accepted by the daemon's application scope without exposing an app ID. `unknown` means a live focus tracker or app identity is unavailable; scoped matching fails closed in that state. Added in status schema 33.
 - `input_events_total` (integer): Count of text/key/backspace/delimiter events accepted by the matching engine since daemon start. It contains no key or text values and is intended for sanitized live diagnostics. Added in status schema 27.
 - `suppressed_expansions_total` (integer): Matched expansions refused by policy, output safety gates, or preparation before reaching output. It does not count keys filtered before a match is produced (for example, while paused or in a sensitive field).
 - `output_partial_total` (integer): Legacy count of non-atomic transactions whose target effect may be partial. These are never retried.

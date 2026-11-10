@@ -43,6 +43,7 @@ pub(crate) fn status_as_json(response: &str) -> Result<serde_json::Value> {
                         | "config_generate_only_expansions"
                         | "window_tracker_reconnect_attempts_total"
                         | "window_tracker_disconnects_total"
+                        | "window_tracker_updates_total"
                         | "window_tracker_last_connected_unix"
                         | "window_tracker_reconnect_backoff_ms"
                         | "input_events_total"

@@ -284,6 +284,45 @@ impl Strings {
         }
     }
 
+    pub fn raw_capture_app_scope_notice(&self, count: usize) -> String {
+        match self.lang {
+            Language::English => format!(
+                "Raw-input matching is assigned to {count} configured applications. This limits where WayExpand matches, not where evdev observes keys; password fields cannot be detected, and browser-field insertion is not verified."
+            ),
+            Language::Indonesian => format!(
+                "Pencocokan input mentah ditetapkan untuk {count} aplikasi. Ini membatasi lokasi WayExpand mencocokkan teks, bukan lokasi evdev mengamati tombol; kolom kata sandi tidak dapat dideteksi dan penyisipan di kolom browser belum diverifikasi."
+            ),
+            Language::German => format!(
+                "Die Raw-Input-Suche ist {count} konfigurierten Anwendungen zugewiesen. Das begrenzt, wo WayExpand vergleicht, nicht wo evdev Tasten beobachtet; Passwortfelder werden nicht erkannt und das Einfügen in Browserfelder ist nicht verifiziert."
+            ),
+        }
+    }
+
+    pub fn capture_app_scope_state(&self, state: &str) -> &'static str {
+        match (self.lang, state) {
+            (_, "allowed") => match self.lang {
+                Language::English => "Focused application matches the configured capture scope.",
+                Language::Indonesian => "Aplikasi yang difokuskan cocok dengan cakupan tangkapan yang dikonfigurasi.",
+                Language::German => "Die fokussierte Anwendung entspricht dem konfigurierten Erfassungsbereich.",
+            },
+            (_, "outside_allowlist") => match self.lang {
+                Language::English => "Focused application is outside the capture allowlist; expansions are suppressed.",
+                Language::Indonesian => "Aplikasi yang difokuskan tidak termasuk dalam daftar izin tangkapan; ekspansi ditekan.",
+                Language::German => "Die fokussierte Anwendung steht nicht auf der Erfassungsliste; Expansionen werden unterdrückt.",
+            },
+            (_, "unrestricted") => match self.lang {
+                Language::English => "This daemon route has no focused-application allowlist.",
+                Language::Indonesian => "Rute daemon ini tidak memiliki daftar izin aplikasi yang difokuskan.",
+                Language::German => "Diese Daemon-Route hat keine Allowlist für fokussierte Anwendungen.",
+            },
+            _ => match self.lang {
+                Language::English => "Focused application is unknown; scoped expansion fails closed.",
+                Language::Indonesian => "Aplikasi yang difokuskan tidak diketahui; ekspansi dengan cakupan diblokir secara aman.",
+                Language::German => "Die fokussierte Anwendung ist unbekannt; begrenzte Expansionen werden sicher blockiert.",
+            },
+        }
+    }
+
     pub fn next_step_terminal_only_route(&self) -> &'static str {
         match self.lang {
             Language::English => "For browser or editor fields, open Quick Picker and copy/paste, or configure an input-method route that supports that application. This route will not capture those fields.",
@@ -1301,6 +1340,30 @@ impl Strings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn raw_capture_scope_notice_explains_app_matching_and_global_observation() {
+        let english = Strings::new(Language::English).raw_capture_app_scope_notice(14);
+        assert!(english.contains("14 configured applications"));
+        assert!(english.contains("not where evdev observes keys"));
+        assert!(english.contains("password fields cannot be detected"));
+        assert!(english.contains("browser-field insertion is not verified"));
+        assert!(!english.contains("firefox"));
+
+        assert!(Strings::new(Language::Indonesian)
+            .raw_capture_app_scope_notice(2)
+            .contains("2 aplikasi"));
+        assert!(Strings::new(Language::German)
+            .raw_capture_app_scope_notice(3)
+            .contains("3 konfigurierten Anwendungen"));
+
+        assert!(Strings::new(Language::English)
+            .capture_app_scope_state("unknown")
+            .contains("fails closed"));
+        assert!(Strings::new(Language::German)
+            .capture_app_scope_state("outside_allowlist")
+            .contains("nicht auf der Erfassungsliste"));
+    }
 
     #[test]
     fn focus_tracker_lifecycle_detail_humanizes_stable_codes() {

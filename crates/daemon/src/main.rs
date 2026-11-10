@@ -384,6 +384,10 @@ fn main() -> Result<()> {
             "automatic expansion is limited to the configured app-scoped evdev allowlist"
         );
     }
+    status::set_raw_capture_fallback(
+        config.engine.raw_capture_fallback_enabled(),
+        config.engine.raw_capture_app_count(),
+    );
 
     // Reject impossible deployment guarantees before opening either the input
     // source or output backend. The input-method protocol is the only shipped

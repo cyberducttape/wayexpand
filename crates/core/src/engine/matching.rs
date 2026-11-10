@@ -348,8 +348,9 @@ impl ExpansionEngine {
         }
     }
 
-    /// Whether the focused window is one of `settings.terminal_apps`. Fails
-    /// closed without a known window or app ID, and with an empty list.
+    /// Whether the focused window is in the daemon's automatic capture
+    /// allowlist. This includes `settings.terminal_apps` and, when enabled,
+    /// `settings.raw_capture_apps`. Fails closed without a known window or app ID.
     pub fn focused_app_is_terminal(&self) -> bool {
         let Some(app_id) = self
             .normalized_window

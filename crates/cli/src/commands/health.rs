@@ -4,7 +4,7 @@ use super::Args;
 use crate::errors::{classified_error, CliErrorKind};
 use crate::*;
 
-pub(crate) const HEALTH_SCHEMA: u32 = 2;
+pub(crate) const HEALTH_SCHEMA: u32 = 4;
 
 fn classify_health(
     config_valid: bool,
@@ -32,6 +32,14 @@ fn classify_health(
     let enabled_expansions = snapshot
         .get("config_enabled_expansions")
         .and_then(serde_json::Value::as_u64);
+    let app_scoped_capture = snapshot
+        .get("terminal_apps_only")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let capture_app_scope_state = snapshot
+        .get("capture_app_scope_state")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown");
     let schema_compatible = snapshot
         .get("status_schema")
         .and_then(serde_json::Value::as_u64)
@@ -55,6 +63,13 @@ fn classify_health(
             "no_enabled_expansions",
             matching,
         )
+    } else if matching
+        && output_health == "ok"
+        && enabled_expansions.is_some()
+        && app_scoped_capture
+        && capture_app_scope_state == "unknown"
+    {
+        ("degraded", 1, "focus_identity_unavailable", matching)
     } else if matching && output_health == "ok" && enabled_expansions.is_some() {
         ("ready", 0, "none", matching)
     } else {
@@ -77,13 +92,25 @@ fn classify_health(
 }
 
 fn application_coverage(snapshot: Option<&serde_json::Value>) -> serde_json::Value {
+    let raw_capture_fallback_enabled = snapshot
+        .and_then(|status| status.get("raw_capture_fallback_enabled"))
+        .and_then(serde_json::Value::as_bool);
+    let raw_capture_app_count = snapshot
+        .and_then(|status| status.get("raw_capture_app_count"))
+        .and_then(serde_json::Value::as_u64);
     let app_scope_only = snapshot
         .and_then(|status| status.get("terminal_apps_only"))
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
+    let capture_app_scope_state = snapshot
+        .and_then(|status| status.get("capture_app_scope_state"))
+        .and_then(serde_json::Value::as_str);
     if app_scope_only {
         serde_json::json!({
             "scope":"daemon_route_configured_applications_only",
+            "raw_capture_fallback_enabled":raw_capture_fallback_enabled,
+            "raw_capture_app_count":raw_capture_app_count,
+            "focused_app_scope_state":capture_app_scope_state,
             "terminal_only":null,
             "configured_app_scope_only":true,
             "desktop_wide":null,
@@ -97,10 +124,14 @@ fn application_coverage(snapshot: Option<&serde_json::Value>) -> serde_json::Val
     } else {
         serde_json::json!({
             "scope":"active_route",
+            "raw_capture_fallback_enabled":raw_capture_fallback_enabled,
+            "raw_capture_app_count":raw_capture_app_count,
+            "focused_app_scope_state":capture_app_scope_state,
             "terminal_only":false,
             "configured_app_scope_only":false,
             "desktop_wide":null,
             "browser_fields_covered":null,
+            "daemon_route":null,
             "detail":"health describes the active daemon route; it does not certify input delivery in every application"
         })
     }
@@ -263,6 +294,7 @@ fn health_report(
             }
             "paused" => ("WX-INPUT-001", "matching", true),
             "replacement_not_admitted" => ("WX-POLICY-001", "replacement-policy", false),
+            "focus_identity_unavailable" => ("WX-EVDEV-FOCUS-001", "input-scope", true),
             _ => ("WX-OUTPUT-001", "output-backend", false),
         };
         vec![serde_json::json!({
@@ -273,6 +305,7 @@ fn health_report(
                 "configuration_unhealthy" => "The daemon rejected or has not loaded the active configuration",
                 "paused" => "Expansion matching is paused",
                 "replacement_not_admitted" => "Automatic replacement is refused by the active safety policy",
+                "focus_identity_unavailable" => "The app-scoped evdev route cannot verify the focused application",
                 "daemon_protocol_incompatible" => "The running daemon status schema is incompatible with this CLI",
                 _ => reason,
             },
@@ -282,6 +315,7 @@ fn health_report(
                 "configuration_unhealthy" => "Run `wayexpand status --json` and `wayexpand validate`, correct configuration errors, then run `wayexpand reload`",
                 "paused" => "Run `wayexpand resume`, then check `wayexpand health` again",
                 "replacement_not_admitted" => "Run `wayexpand policy check --json` and inspect `wayexpand status`; authorize non-atomic replacement only if you explicitly accept its risks",
+                "focus_identity_unavailable" => "Run `wayexpand debug --live --seconds 60` while testing a harmless trigger in a configured application, then inspect the sanitized app_scope events; do not disable app-scoped capture as a workaround",
                 "daemon_protocol_incompatible" => "Run `wayexpand upgrade --check`; restart or upgrade the daemon only after reviewing the reported process and compatibility details",
                 "status_incomplete" => "Run `wayexpand status --json` and check that the daemon reports loaded configuration counts",
                 _ => "Run `wayexpand doctor` for diagnostic details",
@@ -311,6 +345,9 @@ fn health_report(
             "source": snapshot.get("source"),
             "backend": snapshot.get("backend"),
             "terminal_apps_only": snapshot.get("terminal_apps_only"),
+            "raw_capture_fallback_enabled": snapshot.get("raw_capture_fallback_enabled"),
+            "raw_capture_app_count": snapshot.get("raw_capture_app_count"),
+            "capture_app_scope_state": snapshot.get("capture_app_scope_state"),
             "enabled_expansions": snapshot.get("config_enabled_expansions"),
             "disabled_expansions": snapshot.get("config_disabled_expansions"),
             "generate_only_expansions": snapshot.get("config_generate_only_expansions"),
@@ -453,6 +490,10 @@ mod tests {
         };
 
         assert_eq!(keys(&report), expected("health"));
+        assert_eq!(
+            keys(&report["application_coverage"]),
+            expected("health_application_coverage")
+        );
         assert_eq!(keys(&report["daemon"]), expected("health_daemon"));
         assert_eq!(
             report["schema_version"].as_u64(),
@@ -481,7 +522,10 @@ mod tests {
     fn app_scoped_daemon_route_does_not_claim_terminal_only_or_browser_coverage() {
         let snapshot = serde_json::json!({
             "source":"evdev",
-            "terminal_apps_only":true
+            "terminal_apps_only":true,
+            "raw_capture_fallback_enabled":true,
+            "raw_capture_app_count":14,
+            "capture_app_scope_state":"allowed"
         });
         let coverage = application_coverage(Some(&snapshot));
         assert_eq!(
@@ -489,6 +533,9 @@ mod tests {
             "daemon_route_configured_applications_only"
         );
         assert!(coverage["desktop_wide"].is_null());
+        assert_eq!(coverage["raw_capture_fallback_enabled"], true);
+        assert_eq!(coverage["raw_capture_app_count"], 14);
+        assert_eq!(coverage["focused_app_scope_state"], "allowed");
         assert!(coverage["browser_fields_covered"].is_null());
         assert!(coverage["terminal_only"].is_null());
         assert_eq!(coverage["daemon_route"]["desktop_wide"], false);
@@ -500,6 +547,9 @@ mod tests {
     fn older_or_missing_status_does_not_invent_application_coverage() {
         let coverage = application_coverage(None);
         assert_eq!(coverage["scope"], "active_route");
+        assert!(coverage["raw_capture_fallback_enabled"].is_null());
+        assert!(coverage["raw_capture_app_count"].is_null());
+        assert!(coverage["focused_app_scope_state"].is_null());
         assert!(coverage["desktop_wide"].is_null());
         assert!(coverage["browser_fields_covered"].is_null());
     }
@@ -617,6 +667,50 @@ mod tests {
         assert_eq!(
             classify_health(true, None),
             ("unavailable", 2, "daemon_unreachable", false)
+        );
+    }
+
+    #[test]
+    fn app_scoped_health_degrades_when_focused_app_identity_is_unknown() {
+        let snapshot = serde_json::json!({
+            "matching_available": true,
+            "output_health": "ok",
+            "state": "connected",
+            "status_schema": crate::CONTROL_STATUS_SCHEMA,
+            "config_enabled_expansions": 281,
+            "terminal_apps_only": true,
+            "capture_app_scope_state": "unknown"
+        });
+        let (report, state, exit_code, reason, matching_available) = health_report(
+            std::path::Path::new("/tmp/wayexpand/expansions.toml"),
+            true,
+            Some(&snapshot),
+        );
+
+        assert_eq!(state, "degraded");
+        assert_eq!(exit_code, 1);
+        assert_eq!(reason, "focus_identity_unavailable");
+        assert!(matching_available);
+        assert_eq!(report["healthy"], false);
+        assert_eq!(report["errors"][0]["id"], "WX-EVDEV-FOCUS-001");
+        assert_eq!(report["errors"][0]["component"], "input-scope");
+    }
+
+    #[test]
+    fn app_scoped_health_stays_operational_when_known_focus_is_outside_scope() {
+        let snapshot = serde_json::json!({
+            "matching_available": true,
+            "output_health": "ok",
+            "state": "connected",
+            "status_schema": crate::CONTROL_STATUS_SCHEMA,
+            "config_enabled_expansions": 281,
+            "terminal_apps_only": true,
+            "capture_app_scope_state": "denied"
+        });
+
+        assert_eq!(
+            classify_health(true, Some(&snapshot)),
+            ("ready", 0, "none", true)
         );
     }
 

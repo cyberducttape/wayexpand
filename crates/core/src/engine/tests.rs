@@ -7151,6 +7151,8 @@ replacement = "browser fallback"
     let mut engine = ExpansionEngine::new(config).unwrap();
     engine.set_terminal_apps_only(true);
     assert_eq!(engine.terminal_app_count(), 2);
+    assert!(engine.raw_capture_fallback_enabled());
+    assert_eq!(engine.raw_capture_app_count(), 2);
 
     focus(&mut engine, Some("org.mozilla.firefox"));
     assert_eq!(
@@ -7167,6 +7169,21 @@ replacement = "browser fallback"
     assert!(!engine.raw_capture_app_owns_focus());
     focus(&mut engine, Some("org.mozilla.firefox"));
     assert!(engine.raw_capture_app_owns_focus());
+}
+
+#[test]
+fn disabled_raw_capture_scope_is_not_reported_as_effective() {
+    let config = Config::parse(
+        r#"[settings]
+raw_capture_apps = ["app_id_exact:org.mozilla.firefox"]
+raw_capture_fallback_enabled = false
+"#,
+    )
+    .unwrap();
+    let engine = ExpansionEngine::new(config).unwrap();
+
+    assert!(!engine.raw_capture_fallback_enabled());
+    assert_eq!(engine.raw_capture_app_count(), 0);
 }
 
 #[test]

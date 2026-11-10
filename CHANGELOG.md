@@ -4,6 +4,49 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Raise the bounded control-socket response limit to 16 KiB so saturated
+  diagnostic status remains readable by CLI, TUI, and GUI clients.
+- Mark app-scoped evdev health degraded when compositor focus identity is
+  unavailable, with a sanitized live-debug remediation.
+- Report when terminal-only evdev matching is blocked because the compositor
+  has not supplied a focused application ID, separately from the synthetic
+  terminal matcher self-test.
+- Unload stale KWin focus-tracker scripts only after confirming their daemon
+  process is gone and their generated script file is intact.
+- Recognize Ubuntu's `chromium-browser` desktop ID in the opt-in
+  browser-scoped evdev fallback. Upgrade only the exact previous built-in
+  browser allowlist; preserve custom app scopes.
+- Track KWin focus through both workspace activation and per-window active
+  state changes, coalescing duplicate reports and removing closed windows from
+  the bounded subscription set.
+- Release GNOME Shell's stage key focus before each synthetic acceptance-test
+  key, since Shell can reclaim it between characters; report how many key pairs
+  Mutter accepted while keeping target-widget delivery as a separate check.
+- Do not describe an app-scoped raw-capture route as terminal-only when daemon
+  status reports configured fallback applications; preserve terminal-only
+  guidance for terminal-scoped routes and older status snapshots.
+- Show the configured raw-capture application count in GUI diagnostics and
+  explain that app-scoped matching does not limit evdev's global observation,
+  detect password fields, or verify browser insertion.
+- Report whether the current focused application is accepted by the daemon's
+  evdev app scope, without exposing its identity; use `unknown` when focus
+  tracking cannot establish a trustworthy app ID.
+- Extend `wayexpand debug --live` to report app-scope changes and content-free
+  matcher/output counters, so browser capture, allowlist, matching, and output
+  failures can be distinguished without logging app IDs or typed text.
+- Let the KWin focus tracker fall back to the owning desktop-file ID when a
+  Wayland window has no resource class; app-scoped evdev matching can then
+  identify native Wayland applications without weakening its allowlist.
+- Let the KWin focus tracker use the window resource name when both the
+  resource class and desktop-file identity are unavailable, so app-scoped
+  capture can still identify clients that expose only the other WM_CLASS field.
+- Expose content-free focus tracker update and app-ID availability fields so
+  diagnostics can distinguish missing focus reports from reports without an
+  application identity.
+- Expose whether app-scoped raw-capture fallback is enabled and its configured
+  application count in daemon status and `wayexpand health --json`. These
+  content-free fields help distinguish an inactive fallback from absent input
+  activity without disclosing application IDs or typed text.
 - Add a Generate only delivery mode for reusable scripts and configuration
   artifacts. These entries do not participate in keyboard matching and can
   be rendered to a protected file or stdout with `wayexpand new`; WayExpand
@@ -25,7 +68,7 @@ All notable changes to WayExpand are documented here.
   worker has already finished sending. Keep the output actor alive, discard
   stale queued input, and retain a content-free correlated partial-write
   trace even when the worker's detailed diagnostic record was dropped.
-- Version `wayexpand health --json` as schema 2 and expose operational and
+- Version `wayexpand health --json` as schema 3 and expose operational and
   route-safety readiness separately, so a live matcher is not mistaken for a
   production-certified route by deployment automation.
 - Mark a valid but empty active snippet library as `WX-CONFIG-002` in health

@@ -97,11 +97,16 @@ def send_text(
     """Inject fixed test text as keysyms or a single US evdev-keycode probe."""
     if keycode_probe and text != "a":
         raise ValueError("the evdev-keycode probe is limited to the fixed ASCII 'a' input")
+    sent = 0
     for character in text:
         if not os.path.isfile(ready_marker):
             raise RuntimeError(
                 "GTK active focus was lost; stopped before sending remaining test input"
             )
+        # GNOME Shell can reclaim stage key focus after a client key event (for
+        # example, from its notification actor). A single release before the
+        # sequence is not enough: clear Shell-owned focus before every press.
+        release_shell_key_focus(bus)
         if keycode_probe:
             # Linux input-event-codes.h defines KEY_A as evdev keycode 30.
             # The US XKB source is active for this baseline, so this exercises
@@ -118,7 +123,9 @@ def send_text(
             # A failed reply can leave it uncertain whether Mutter accepted
             # the press, so always attempt the matching release.
             key_event(bus, path, key, False, keycode=keycode_probe)
+        sent += 1
         time.sleep(delay_seconds)
+    return sent
 
 
 def prime_keyboard_device(bus, path):
@@ -279,7 +286,7 @@ def main():
             )
         release_shell_key_focus(bus)
         report_shell_input_state(bus, "before-input")
-        send_text(
+        sent = send_text(
             bus,
             session_path,
             args.text,
@@ -308,9 +315,15 @@ def main():
             except GLib.Error:
                 pass
     if args.keycode_probe:
-        print("Mutter accepted the fixed KEY_A evdev probe; GTK verifies delivery")
+        print(
+            f"Mutter accepted {sent} fixed KEY_A press/release pair; "
+            "GTK verifies delivery"
+        )
     else:
-        print("Mutter accepted the fixed ASCII keysym input; GTK verifies delivery")
+        print(
+            f"Mutter accepted {sent} fixed ASCII keysym press/release pairs; "
+            "GTK verifies delivery"
+        )
     return 0
 
 

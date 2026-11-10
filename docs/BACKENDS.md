@@ -311,6 +311,10 @@ tracker worker (not the daemon's input loop).
 If the script unloads or the health check fails, the supervisor clears the
 cached window context and reconnects; app-filtered expansions fail closed
 until the new script reports its initial active window.
+The tracker uses `resourceClass` when present and falls back to KWin's
+`desktopFileName` for native Wayland windows that do not provide a resource
+class. A full desktop-file path is reduced to its basename, with a trailing
+`.desktop` suffix removed, so the result can match configured app IDs.
 
 An `app_filter`-scoped expansion fails closed rather than matching
 everywhere when window tracking is unavailable (no tracker for this

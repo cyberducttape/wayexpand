@@ -552,6 +552,7 @@ jobs:
           bash scripts/test-certification-driver.sh
           sh scripts/test-certification-processes.sh
           sh scripts/test-kwin-certification-driver.sh
+          node scripts/test-kwin-window-tracker.js
           sh scripts/test-check-snippet-repo.sh target/debug/wayexpand
           WAYEXPAND_CLI=target/debug/wayexpand sh scripts/check-snippet-repo.sh --deny-risks packs
           bash scripts/test-kwin-e2e-timeout.sh
@@ -849,9 +850,22 @@ jobs:
           toolchain: 1.96.0
       - name: Install packaging dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential debhelper devscripts \
-            dpkg-dev rpm cpio libwayland-dev libxkbcommon-dev pkg-config
+          # Do not let a stalled package mirror hold the integration CI queue
+          # for the full job timeout. Bound each network operation and the
+          # whole apt invocation while preserving a clear nonzero failure.
+          sudo timeout --signal=TERM --kill-after=10s 6m env \
+            DEBIAN_FRONTEND=noninteractive apt-get \
+            -o Acquire::Retries=2 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            update
+          sudo timeout --signal=TERM --kill-after=10s 6m env \
+            DEBIAN_FRONTEND=noninteractive apt-get \
+            -o Acquire::Retries=2 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            install -y build-essential debhelper devscripts dpkg-dev rpm cpio \
+              libwayland-dev libxkbcommon-dev pkg-config
           rustc --version
           cargo --version
       - name: Vendor dependencies for offline package builds

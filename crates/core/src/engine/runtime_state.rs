@@ -120,6 +120,22 @@ impl ExpansionEngine {
         self.terminal_apps_only
     }
 
+    /// Whether the configured app-scoped raw-capture fallback is enabled.
+    /// The status API reports this without exposing any configured app IDs.
+    pub fn raw_capture_fallback_enabled(&self) -> bool {
+        self.raw_capture_fallback_enabled
+    }
+
+    /// Number of app IDs assigned to the active raw-capture fallback.
+    /// Returns zero when the fallback is disabled.
+    pub fn raw_capture_app_count(&self) -> usize {
+        if self.raw_capture_fallback_enabled {
+            self.raw_capture_app_scope.len()
+        } else {
+            0
+        }
+    }
+
     /// Number of configured `settings.terminal_apps` entries.
     pub fn terminal_app_count(&self) -> usize {
         self.terminal_app_scope.len()

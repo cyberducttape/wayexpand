@@ -706,7 +706,7 @@ fn status_json_matches_documented_stable_contract() {
          backend=input-method-v2\n\
          route_id=input-method-v2\n\
          backend_mode=unknown\n\
-         status_schema=31\n\
+         status_schema=33\n\
          daemon_commit=test-commit\n\
          daemon_version=1.3.3-dev+test-commit\n\
          state=connected\n\
@@ -736,6 +736,9 @@ fn status_json_matches_documented_stable_contract() {
          capture_layout_state=tracked\n\
          window_tracker_connected=false\n\
          window_tracker_state=unavailable\n\
+         window_tracker_updates_total=0\n\
+         window_context_available=false\n\
+         window_app_id_available=false\n\
          window_tracker_reconnect_attempts_total=0\n\
          window_tracker_disconnects_total=0\n\
          window_tracker_last_failure_reason=none\n\
@@ -855,13 +858,16 @@ fn status_json_matches_documented_stable_contract() {
          connect_workers_cancelled_total=0\n\
          connect_workers_rejected_total=0\n\
          sandbox_security={\"no_new_privileges\":true}\n\
-         terminal_apps_only=false";
+         terminal_apps_only=false\n\
+         capture_app_scope_state=unrestricted\n\
+         raw_capture_fallback_enabled=false\n\
+         raw_capture_app_count=0";
     let value = status_as_json(daemon_response).unwrap();
     let object = value.as_object().expect("status --json returns an object");
     let contract: serde_json::Value =
         serde_json::from_str(include_str!("../../../tests/contracts/status-json.json"))
             .expect("status contract fixture must be valid JSON");
-    assert_eq!(contract["schema_version"], 16);
+    assert_eq!(contract["schema_version"], 18);
     assert_eq!(contract["daemon_control_schema"], CONTROL_STATUS_SCHEMA);
     assert_ne!(
         contract["schema_version"],
@@ -1116,6 +1122,7 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "backend",
             "backend_mode",
             "state",
+            "capture_app_scope_state",
             "paused",
             "config",
             "config_state",

@@ -50,8 +50,33 @@ pub(crate) const DEFAULT_TERMINAL_APPS: &[&str] = &[
 
 /// Stable desktop IDs and KWin resource classes used by common browsers.
 /// These are installed only after the user explicitly requests `--evdev-apps`;
-/// a custom non-empty `raw_capture_apps` list is always preserved as-is.
+/// custom `raw_capture_apps` lists are preserved. The exact prior built-in
+/// list is migrated to include IDs used by newer distro packages.
 const DEFAULT_BROWSER_APPS: &[&str] = &[
+    "app_id_exact:firefox",
+    "app_id_exact:org.mozilla.firefox",
+    "app_id_exact:chromium",
+    // Ubuntu's Chromium package uses chromium-browser.desktop, while other
+    // builds use chromium.desktop or org.chromium.chromium.desktop.
+    "app_id_exact:chromium-browser",
+    "app_id_exact:org.chromium.chromium",
+    "app_id_exact:google-chrome",
+    "app_id_exact:com.google.chrome",
+    "app_id_exact:brave-browser",
+    "app_id_exact:com.brave.browser",
+    "app_id_exact:microsoft-edge",
+    "app_id_exact:com.microsoft.edge",
+    "app_id_exact:vivaldi-stable",
+    "app_id_exact:com.vivaldi.vivaldi",
+    "app_id_exact:opera",
+    "app_id_exact:com.opera.opera",
+];
+
+/// Browser IDs previously seeded by `--evdev-apps`. If a configuration still
+/// contains exactly this built-in list, it is safe to migrate it to the
+/// expanded built-in list below: this only adds identities for the same
+/// browsers the user already opted into. Any customized list is preserved.
+const LEGACY_DEFAULT_BROWSER_APPS: &[&str] = &[
     "app_id_exact:firefox",
     "app_id_exact:org.mozilla.firefox",
     "app_id_exact:chromium",
@@ -2439,7 +2464,15 @@ pub(crate) fn configure_evdev_apps_only() -> Result<()> {
 /// configured app scope. Returns whether config changed and whether common
 /// browser IDs were seeded.
 fn apply_evdev_browser_defaults(config: &mut Config) -> (bool, bool) {
-    let seeded_defaults = if config.settings.raw_capture_apps.is_empty() {
+    let is_legacy_default = config.settings.raw_capture_apps.len()
+        == LEGACY_DEFAULT_BROWSER_APPS.len()
+        && config
+            .settings
+            .raw_capture_apps
+            .iter()
+            .zip(LEGACY_DEFAULT_BROWSER_APPS)
+            .all(|(configured, legacy)| configured == legacy);
+    let seeded_defaults = if config.settings.raw_capture_apps.is_empty() || is_legacy_default {
         config.settings.raw_capture_apps = DEFAULT_BROWSER_APPS
             .iter()
             .map(|app| (*app).to_owned())
