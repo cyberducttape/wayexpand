@@ -73,12 +73,43 @@ function watchWindow(window) {
             report(window);
         }
     });
+    // A window can be added after this script starts already active. In that
+    // case KWin need not emit a later activeChanged signal, so reporting only
+    // from the signal handler would leave the tracker without a focus snapshot.
+    // The active property is compositor-owned; never infer focus from stacking
+    // order or window metadata.
+    if (window.active === true) {
+        report(window);
+    }
 }
 
 function forgetWindow(window) {
     if (window && window.internalId) {
         delete watchedWindows[String(window.internalId)];
     }
+}
+
+function currentActiveWindow() {
+    if (workspace.activeWindow) {
+        return workspace.activeWindow;
+    }
+
+    // During KWin startup, activeWindow can briefly be null even though the
+    // stacking snapshot already contains the active client. Recover only if
+    // exactly one window explicitly reports active; never guess from order,
+    // title, or the most recently created window.
+    var activeWindow = null;
+    var windows = workspace.stackingOrder || [];
+    for (var index = 0; index < windows.length; index++) {
+        var window = windows[index];
+        if (window && window.active === true) {
+            if (activeWindow) {
+                return null;
+            }
+            activeWindow = window;
+        }
+    }
+    return activeWindow;
 }
 
 if (workspace.stackingOrder) {
@@ -99,6 +130,30 @@ workspace.windowActivated.connect(function (window) {
     // If activation's argument is temporarily null while KWin updates its
     // activeWindow property, use the current compositor snapshot. A true
     // no-active-window state is still published as empty context.
-    report(window || workspace.activeWindow);
+    report(window || currentActiveWindow());
 });
-report(workspace.activeWindow);
+report(currentActiveWindow());
+
+// KWin can start this script before its active-window snapshot is populated.
+// In that ordering, the initial report is empty and KWin may not emit another
+// activation signal for the already-focused client. Reconcile briefly against
+// KWin's compositor-owned activeWindow property. This is deliberately bounded
+// and never chooses a window from stacking order or metadata.
+if (typeof QTimer !== "undefined") {
+    var startupReconcileAttempts = 0;
+    var startupReconcileTimer = new QTimer();
+    startupReconcileTimer.interval = 100;
+    startupReconcileTimer.timeout.connect(function () {
+        startupReconcileAttempts += 1;
+        var activeWindow = currentActiveWindow();
+        if (activeWindow) {
+            report(activeWindow);
+            startupReconcileTimer.stop();
+            return;
+        }
+        if (startupReconcileAttempts >= 30) {
+            startupReconcileTimer.stop();
+        }
+    });
+    startupReconcileTimer.start();
+}
