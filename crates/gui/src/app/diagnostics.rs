@@ -2390,7 +2390,19 @@ fn compact_status_value<'a>(status: &'a str, key: &str) -> Option<&'a str> {
 }
 
 fn terminal_only_route(status: &str) -> bool {
-    compact_status_value(status, "terminal_apps_only") == Some("true")
+    if compact_status_value(status, "terminal_apps_only") != Some("true") {
+        return false;
+    }
+
+    // `terminal_apps_only` is a legacy name for the daemon's app-scoped
+    // evdev mode. Newer daemons can add explicitly opted-in browser (or other
+    // application) IDs through `raw_capture_apps`; calling that route
+    // terminal-only would give users incorrect compatibility guidance.
+    let raw_fallback_enabled =
+        compact_status_value(status, "raw_capture_fallback_enabled") == Some("true");
+    let raw_capture_app_count = compact_status_value(status, "raw_capture_app_count")
+        .and_then(|value| value.parse::<usize>().ok());
+    !(raw_fallback_enabled && raw_capture_app_count.is_none_or(|count| count > 0))
 }
 
 fn render_assessment_row(
@@ -2551,9 +2563,23 @@ mod route_scope_tests {
     use super::terminal_only_route;
 
     #[test]
-    fn terminal_only_scope_requires_an_explicit_true_status() {
+    fn terminal_only_scope_excludes_an_enabled_raw_capture_application_fallback() {
         assert!(terminal_only_route(
             "state=connected · source=evdev · terminal_apps_only=true"
+        ));
+        assert!(terminal_only_route(
+            "state=connected · source=evdev · terminal_apps_only=true · raw_capture_fallback_enabled=false · raw_capture_app_count=14"
+        ));
+        assert!(terminal_only_route(
+            "state=connected · source=evdev · terminal_apps_only=true · raw_capture_fallback_enabled=true · raw_capture_app_count=0"
+        ));
+        assert!(!terminal_only_route(
+            "state=connected · source=evdev · terminal_apps_only=true · raw_capture_fallback_enabled=true · raw_capture_app_count=14"
+        ));
+        // If the fallback is enabled but the daemon lacks the newer count
+        // field, do not claim that the route is terminal-only.
+        assert!(!terminal_only_route(
+            "state=connected · source=evdev · terminal_apps_only=true · raw_capture_fallback_enabled=true"
         ));
         assert!(!terminal_only_route(
             "state=connected · source=ibus · terminal_apps_only=false"

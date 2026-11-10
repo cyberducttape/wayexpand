@@ -7,6 +7,9 @@ All notable changes to WayExpand are documented here.
 - Release GNOME Shell's stage key focus before each synthetic acceptance-test
   key, since Shell can reclaim it between characters; report how many key pairs
   Mutter accepted while keeping target-widget delivery as a separate check.
+- Do not describe an app-scoped raw-capture route as terminal-only when daemon
+  status reports configured fallback applications; preserve terminal-only
+  guidance for terminal-scoped routes and older status snapshots.
 - Expose whether app-scoped raw-capture fallback is enabled and its configured
   application count in daemon status and `wayexpand health --json`. These
   content-free fields help distinguish an inactive fallback from absent input
