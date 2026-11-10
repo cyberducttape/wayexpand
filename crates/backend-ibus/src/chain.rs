@@ -1122,6 +1122,11 @@ fn kwin_input_method_crash(crash: RecentIbusHelperCrash, helper_running: bool) -
         .and_then(recent_crash_age)
         .map(|age| format!(", most recent about {age}"))
         .unwrap_or_default();
+    let package = crash
+        .package
+        .as_deref()
+        .map(|package| format!("; coredump package {package}"))
+        .unwrap_or_default();
     let crash_count = if crash.crashes_seen == IBUS_COREDUMP_SAMPLE_LIMIT {
         format!("at least {} recent SIGSEGVs", crash.crashes_seen)
     } else if crash.crashes_seen == 1 {
@@ -1166,8 +1171,8 @@ fn kwin_input_method_crash(crash: RecentIbusHelperCrash, helper_running: bool) -
         "KWin sends input to IBus",
         state,
         format!(
-            "coredumpctl recorded {crash_count} for ibus-ui-gtk3 in its bounded 7-day sample (latest PID {}{age}); the IBus Wayland helper {helper_state}{crash_signature}",
-            crash.pid
+            "coredumpctl recorded {crash_count} for ibus-ui-gtk3 in its bounded 7-day sample (latest PID {}{age}{package}); the IBus Wayland helper {helper_state}{crash_signature}",
+            crash.pid,
         ),
         Some(fix),
     );
@@ -1222,12 +1227,13 @@ struct CoredumpRecord {
     time: Option<u64>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct RecentIbusHelperCrash {
     pid: u32,
     crashes_seen: usize,
     latest_unix: Option<u64>,
     signature: IbusHelperCrashSignature,
+    package: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1248,16 +1254,37 @@ fn ibus_helper_crash_signature_from_info(info: &str) -> IbusHelperCrashSignature
     }
 }
 
-fn recent_ibus_helper_crash_signature(pid: u32) -> IbusHelperCrashSignature {
+fn recent_ibus_helper_crash_details(pid: u32) -> (IbusHelperCrashSignature, Option<String>) {
     let pid = pid.to_string();
     let Some(info) = bounded_command_output(
         "coredumpctl",
         &["--no-pager", "info", pid.as_str()],
         Duration::from_secs(2),
     ) else {
-        return IbusHelperCrashSignature::Unknown;
+        return (IbusHelperCrashSignature::Unknown, None);
     };
-    ibus_helper_crash_signature_from_info(&info)
+    (
+        ibus_helper_crash_signature_from_info(&info),
+        coredump_package_from_info(&info),
+    )
+}
+
+fn coredump_package_from_info(info: &str) -> Option<String> {
+    let package = info
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("Package: "))?;
+    let (name, version) = package.split_once('/')?;
+    let valid_package_name = name == "ibus"
+        || (name.starts_with("ibus-")
+            && name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')));
+    let valid_version = !version.is_empty()
+        && version.len() <= 128
+        && version.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'+' | b'~' | b':' | b'-' | b'_')
+        });
+    (valid_package_name && valid_version).then(|| package.to_owned())
 }
 
 fn recent_ibus_wayland_segv() -> Option<RecentIbusHelperCrash> {
@@ -1281,7 +1308,7 @@ fn recent_ibus_wayland_segv() -> Option<RecentIbusHelperCrash> {
         Duration::from_secs(2),
     )?;
     let mut crash = recent_ibus_wayland_segv_from_json(&output, uid)?;
-    crash.signature = recent_ibus_helper_crash_signature(crash.pid);
+    (crash.signature, crash.package) = recent_ibus_helper_crash_details(crash.pid);
     Some(crash)
 }
 
@@ -1312,6 +1339,7 @@ fn recent_ibus_wayland_segv_from_json(
         crashes_seen,
         latest_unix: time.map(|microseconds| microseconds / 1_000_000),
         signature: IbusHelperCrashSignature::Unknown,
+        package: None,
     })
 }
 
@@ -2634,6 +2662,34 @@ mod tests {
     }
 
     #[test]
+    fn crash_package_version_is_reported_and_untrusted_values_are_rejected() {
+        assert_eq!(
+            coredump_package_from_info(
+                "PID: 1234 (ibus-ui-gtk3)\n       Package: ibus/1.5.34~rc2-1\n"
+            ),
+            Some("ibus/1.5.34~rc2-1".into())
+        );
+        assert_eq!(
+            coredump_package_from_info("Package: ibus-gtk3/1.5.34-2.fc44"),
+            Some("ibus-gtk3/1.5.34-2.fc44".into())
+        );
+        for info in [
+            "Package: other/1.2.3",
+            "Package: ibus/../../other",
+            "Package: ibus/",
+            "not package metadata",
+        ] {
+            assert_eq!(coredump_package_from_info(info), None, "{info:?}");
+        }
+
+        let mut crash = test_recent_crash(1234);
+        crash.package = Some("ibus/1.5.34~rc2-1".into());
+        crash.signature = IbusHelperCrashSignature::WaylandSurroundingTextAnchor;
+        let check = kwin_input_method_check(Some(true), true, Some(crash));
+        assert!(check.detail.contains("coredump package ibus/1.5.34~rc2-1"));
+    }
+
+    #[test]
     fn recent_ibus_segv_parser_ignores_other_signals_users_and_programs() {
         let records = r#"[
             {"pid":1,"uid":1000,"sig":6,"exe":"/usr/libexec/ibus-ui-gtk3"},
@@ -2649,6 +2705,7 @@ mod tests {
                 crashes_seen: 2,
                 latest_unix: Some(200),
                 signature: IbusHelperCrashSignature::Unknown,
+                package: None,
             })
         );
         assert_eq!(recent_ibus_wayland_segv_from_json("[]", 1000), None);
@@ -2681,6 +2738,7 @@ mod tests {
             crashes_seen: 1,
             latest_unix: None,
             signature: IbusHelperCrashSignature::Unknown,
+            package: None,
         }
     }
 

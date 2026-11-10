@@ -1038,11 +1038,15 @@ replacement = "signature"
         socket: std::path::PathBuf,
         stdout: &'static str,
         delay: Duration,
-    ) -> std::thread::JoinHandle<Result<String, String>> {
+    ) -> (
+        std::thread::JoinHandle<Result<String, String>>,
+        mpsc::Receiver<()>,
+    ) {
         use std::io::{BufRead, Write};
         let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
         listener.set_nonblocking(true).unwrap();
-        std::thread::spawn(move || {
+        let (request_sender, request_receiver) = mpsc::channel();
+        let broker = std::thread::spawn(move || {
             let deadline = std::time::Instant::now() + Duration::from_secs(10);
             let (stream, _) = loop {
                 match listener.accept() {
@@ -1060,6 +1064,7 @@ replacement = "signature"
             std::io::BufReader::new(stream.try_clone().map_err(|error| error.to_string())?)
                 .read_line(&mut request)
                 .map_err(|error| error.to_string())?;
+            let _ = request_sender.send(());
             std::thread::sleep(delay);
             let response = serde_json::json!({ "Success": {
                 "exit_code": 0, "stdout": stdout, "stderr": "",
@@ -1073,7 +1078,8 @@ replacement = "signature"
             let request: serde_json::Value =
                 serde_json::from_str(&request).map_err(|error| error.to_string())?;
             Ok(request["action_id"].as_str().unwrap_or_default().to_owned())
-        })
+        });
+        (broker, request_receiver)
     }
 
     /// A broker answering one request, with the socket variable pointing at
@@ -1083,6 +1089,7 @@ replacement = "signature"
         root: std::path::PathBuf,
         previous_socket: Option<std::ffi::OsString>,
         broker: Option<std::thread::JoinHandle<Result<String, String>>>,
+        request_received: mpsc::Receiver<()>,
     }
 
     impl BrokerFixture {
@@ -1097,13 +1104,22 @@ replacement = "signature"
             let socket = root.join("broker.sock");
             let previous_socket = std::env::var_os("WAYEXPAND_ACTION_BROKER_SOCKET");
             std::env::set_var("WAYEXPAND_ACTION_BROKER_SOCKET", &socket);
-            let broker = Some(fake_broker(socket, stdout, delay));
+            let (broker, request_received) = fake_broker(socket, stdout, delay);
             Self {
                 _guard: guard,
                 root,
                 previous_socket,
-                broker,
+                broker: Some(broker),
+                request_received,
             }
+        }
+
+        /// Wait until an action is actually in flight before changing the
+        /// input-context state under test.
+        fn wait_for_request(&self) {
+            self.request_received
+                .recv_timeout(Duration::from_secs(10))
+                .expect("fake broker did not receive a request before the test changed focus");
         }
 
         /// Wait until the broker has answered; returns the requested action.
@@ -1694,11 +1710,11 @@ replacement = "signature"
 
     #[test]
     fn switching_to_a_password_field_discards_an_in_flight_result() {
-        let mut broker =
-            BrokerFixture::start("to-password", "from-broker", Duration::from_millis(200));
+        let mut broker = BrokerFixture::start("to-password", "from-broker", Duration::from_secs(1));
         let harness = Harness::start(BROKER_CONFIG);
         harness.focus_text_field();
         harness.type_trigger();
+        broker.wait_for_request();
         harness.set_content_type(8, 0);
         broker.answered();
         assert_eq!(harness.commits(Duration::from_millis(500)), ["o", "k"]);
