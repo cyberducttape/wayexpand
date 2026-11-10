@@ -637,7 +637,11 @@ fn emit(json: bool, started: Instant, event: &str, detail: &str) {
 fn status_counter(status: Option<&serde_json::Value>, key: &str) -> u64 {
     status
         .and_then(|snapshot| snapshot.get(key))
-        .and_then(serde_json::Value::as_u64)
+        .and_then(|value| {
+            value
+                .as_u64()
+                .or_else(|| value.as_str().and_then(|value| value.parse().ok()))
+        })
         .unwrap_or(0)
 }
 
@@ -688,6 +692,12 @@ fn run_live(seconds: u64, json: bool) -> Result<()> {
     let mut last_applied = status_counter(initial_daemon.as_ref(), "expansions_applied_total");
     let mut last_refused = status_counter(initial_daemon.as_ref(), "output_refused_total");
     let mut last_partial = status_counter(initial_daemon.as_ref(), "partial_write_total");
+    let mut last_evdev_raw_keys =
+        status_counter(initial_daemon.as_ref(), "evdev_raw_key_events_total");
+    let mut last_evdev_layout_unavailable = status_counter(
+        initial_daemon.as_ref(),
+        "evdev_layout_unavailable_key_events_total",
+    );
     emit(
         json,
         started,
@@ -737,6 +747,43 @@ fn run_live(seconds: u64, json: bool) -> Result<()> {
             );
             last_input_events = input_events;
         }
+        let evdev_raw_keys = status_counter(daemon.as_ref(), "evdev_raw_key_events_total");
+        if evdev_raw_keys < last_evdev_raw_keys {
+            emit(
+                json,
+                started,
+                "evdev_capture",
+                "raw key counter reset; new daemon input session observed",
+            );
+            last_evdev_raw_keys = 0;
+            last_evdev_layout_unavailable = 0;
+        }
+        if evdev_raw_keys > last_evdev_raw_keys {
+            emit(
+                json,
+                started,
+                "evdev_capture",
+                &format!(
+                    "{} raw evdev key event(s) observed; key values omitted",
+                    evdev_raw_keys - last_evdev_raw_keys
+                ),
+            );
+            last_evdev_raw_keys = evdev_raw_keys;
+        }
+        let layout_unavailable =
+            status_counter(daemon.as_ref(), "evdev_layout_unavailable_key_events_total");
+        if layout_unavailable > last_evdev_layout_unavailable {
+            emit(
+                json,
+                started,
+                "capture_layout",
+                &format!(
+                    "{} raw key event(s) were ignored because the active keyboard layout was unavailable",
+                    layout_unavailable - last_evdev_layout_unavailable
+                ),
+            );
+        }
+        last_evdev_layout_unavailable = layout_unavailable;
         if keys < last_keys {
             emit(
                 json,
@@ -873,5 +920,26 @@ mod tests {
         assert!(first.starts_with("desktop-"));
         assert_ne!(first, second);
         assert!(!first.contains("trigger"));
+    }
+}
+
+#[cfg(test)]
+mod status_counter_tests {
+    use super::status_counter;
+    use serde_json::json;
+
+    #[test]
+    fn reads_numeric_and_decimal_string_status_counters() {
+        let status = json!({"numeric": 12, "string": "34"});
+        assert_eq!(status_counter(Some(&status), "numeric"), 12);
+        assert_eq!(status_counter(Some(&status), "string"), 34);
+    }
+
+    #[test]
+    fn invalid_or_signed_status_counters_fail_closed_to_zero() {
+        let status = json!({"negative": "-1", "invalid": "not-a-counter"});
+        assert_eq!(status_counter(Some(&status), "negative"), 0);
+        assert_eq!(status_counter(Some(&status), "invalid"), 0);
+        assert_eq!(status_counter(None, "missing"), 0);
     }
 }
