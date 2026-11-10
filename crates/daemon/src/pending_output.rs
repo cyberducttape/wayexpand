@@ -442,7 +442,9 @@ impl Daemon {
             );
             return;
         };
-        match source.next_event_during_output(timeout) {
+        let input_result = source.next_event_during_output(timeout);
+        status::set_evdev_input_diagnostics(source.input_diagnostics());
+        match input_result {
             Ok(false) => {}
             Ok(true) => {
                 self.interrupt_pending_non_atomic_output(

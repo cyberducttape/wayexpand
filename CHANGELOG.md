@@ -43,6 +43,8 @@ All notable changes to WayExpand are documented here.
 - Expose content-free focus tracker update and app-ID availability fields so
   diagnostics can distinguish missing focus reports from reports without an
   application identity.
+- Distinguish evdev device activity from matcher input with sanitized raw-key
+  and missing-layout counters; neither keycodes nor typed text are exposed.
 - Expose whether app-scoped raw-capture fallback is enabled and its configured
   application count in daemon status and `wayexpand health --json`. These
   content-free fields help distinguish an inactive fallback from absent input

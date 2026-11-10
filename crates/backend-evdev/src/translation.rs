@@ -19,9 +19,12 @@ impl EvdevSource {
         let evdev::EventSummary::Key(_, key_code, value) = event.destructure() else {
             return;
         };
+        self.raw_key_events_total = self.raw_key_events_total.saturating_add(1);
         let keycode = u32::from(key_code.code());
         if value == 2 {
             if !self.refresh_layout() {
+                self.layout_unavailable_key_events_total =
+                    self.layout_unavailable_key_events_total.saturating_add(1);
                 return;
             }
             let action = key_action(&self.state, keycode);
@@ -49,6 +52,8 @@ impl EvdevSource {
         // when no trustworthy layout is available. Do not infer characters,
         // delimiters, or hotkeys from a startup-only keymap.
         if !layout_available {
+            self.layout_unavailable_key_events_total =
+                self.layout_unavailable_key_events_total.saturating_add(1);
             if key_state == KeyState::Pressed {
                 self.queue_event(InputEvent::Reset);
             }

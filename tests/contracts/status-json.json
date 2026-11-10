@@ -1,6 +1,6 @@
 {
   "schema_version": 18,
-  "daemon_control_schema": 33,
+  "daemon_control_schema": 34,
   "fields": {
     "response": "string",
     "source": "string",
@@ -138,6 +138,8 @@
     "terminal_apps_only": "boolean",
     "input_connection_failures_total": "integer",
     "input_events_total": "integer",
+    "evdev_raw_key_events_total": "integer",
+    "evdev_layout_unavailable_key_events_total": "integer",
     "matcher_evaluations_total": "integer",
     "matches_found_total": "integer",
     "expansion_attempts_total": "integer",
