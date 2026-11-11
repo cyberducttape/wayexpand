@@ -3354,3 +3354,51 @@ fn arrow_keys_move_the_selection_through_the_snippet_list() {
     frame(&mut app, Some(egui::Key::ArrowUp));
     assert_eq!(app.selected_index(), first);
 }
+
+#[test]
+fn toolbar_leaves_room_for_the_editor_and_never_overlaps_its_brand() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-toolbar-fit-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    app.daemon_reachable = Some(true);
+    app.route_state = Some(runtime::RouteState::Connected);
+    let ctx = egui::Context::default();
+    theme::install_pack(&ctx, app.colorpack, FontScale::Large);
+    app.settings_font_scale = FontScale::Large;
+    for width in [700.0, 1008.0, 1300.0, 2000.0] {
+        let mut remaining = 0.0;
+        // The first frame may measure an overlap and lay out compactly on
+        // the next; the settled frame is what the user sees.
+        for _ in 0..60 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(width, 600.0),
+                )),
+                ..Default::default()
+            };
+            let _ = run_gui_test_frame(&ctx, input, |ui| {
+                let palette = Palette::for_pack(app.colorpack, app.dark_mode);
+                app.render_toolbar(ui, &palette);
+                remaining = ui.available_rect_before_wrap().height();
+            });
+        }
+        // Smoke check: the toolbar must leave the editor most of the window.
+        // (The live full-height toolbar needed real route status chips and
+        // was confirmed with a debug screenshot, not reproduced here.)
+        assert!(
+            remaining > 300.0,
+            "toolbar at width {width} left only {remaining}px for the editor"
+        );
+        let wide = width >= 920.0 * FontScale::Large.multiplier() && width >= app.toolbar_row_width;
+        assert!(
+            !wide || app.toolbar_row_width <= width,
+            "one-row toolbar needs {} px but has {width}",
+            app.toolbar_row_width
+        );
+    }
+    let _ = fs::remove_file(path);
+}

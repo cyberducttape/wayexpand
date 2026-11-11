@@ -4,6 +4,18 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Start KWin focus-tracker scripts with `Scripting.start()` instead of the
+  `/Scripting/ScriptN` object: KWin can reuse a still-loaded script's ID, so
+  `run()` reached the wrong script and the tracker never reported focus,
+  silently disabling terminal and browser expansion on the evdev route.
+- Pace libei backspace and cursor-arrow key events like typed text. Unpaced
+  bursts could lose a backspace and leave a trigger's first character (such
+  as a leading `.`) in front of the replacement.
+- Seed the Firefox snap's KWin app ID (`firefox_firefox`) in the default
+  browser raw-capture list.
+- GUI: lay the header out on one row only when its measured contents fit, and
+  stop the compact header from claiming the whole window height.
+
 - Keep the KWin focus subscription alive when startup has no usable focus
   snapshot; retain fail-closed app matching while waiting for the next
   compositor focus event instead of repeatedly unloading and reconnecting.

@@ -314,6 +314,10 @@ struct GuiApp {
     settings_compatibility_mode: wayexpand_core::CompatibilityMode,
     settings_keystroke_limit: String,
     settings_font_scale: FontScale,
+    /// Width the one-row toolbar needed when it was last laid out. The
+    /// status chips change with the route, so a fixed breakpoint cannot
+    /// tell whether they fit beside the brand.
+    toolbar_row_width: f32,
     settings_error: Option<String>,
     dark_mode: bool,
     onboarding_visible: bool,
@@ -721,6 +725,7 @@ impl GuiApp {
             settings_compatibility_mode,
             settings_keystroke_limit,
             settings_font_scale,
+            toolbar_row_width: 0.0,
             settings_error: None,
             dark_mode: prefs.dark_mode.unwrap_or(true),
             onboarding_visible,
