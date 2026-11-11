@@ -105,12 +105,22 @@ const KEY_EVENT_INTERVAL: Duration = Duration::from_millis(12);
 // below, which is already evdev-numbered).
 const XKB_KEYCODE_OFFSET: u32 = 8;
 
+/// Send `count` paced key actions, checking the output checkpoint before
+/// each. `pause` runs between actions (never after the last): backspaces and
+/// arrow keys need the same inter-key pacing as typed text, because a
+/// back-to-back burst of identical synthetic presses is partly dropped by
+/// compositors and toolkits. A dropped backspace leaves the trigger's first
+/// character (for example a leading `.`) in front of the replacement.
 fn run_checkpointed<E>(
     count: usize,
     mut checkpoint: impl FnMut() -> Result<(), E>,
     mut action: impl FnMut() -> Result<(), E>,
+    mut pause: impl FnMut(),
 ) -> Result<(), E> {
-    for _ in 0..count {
+    for index in 0..count {
+        if index > 0 {
+            pause();
+        }
         checkpoint()?;
         action()?;
     }
@@ -564,6 +574,7 @@ impl LibeiSession {
                     .map_err(|error| LibeiError::Flush(error.to_string()))
                     .map(|()| checkpoint.record_erasure(1))
             },
+            || std::thread::sleep(KEY_EVENT_INTERVAL),
         )
     }
 
@@ -595,6 +606,7 @@ impl LibeiSession {
                     .flush()
                     .map_err(|error| LibeiError::Flush(error.to_string()))
             },
+            || std::thread::sleep(KEY_EVENT_INTERVAL),
         )
     }
 
