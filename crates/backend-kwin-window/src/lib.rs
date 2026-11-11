@@ -23,7 +23,7 @@ use std::{
     time::{Duration, Instant},
 };
 use thiserror::Error;
-use tracing::{debug, info};
+use tracing::info;
 use wayexpand_core::{
     window_update_channel, WindowContext, WindowTracker, WindowTrackerError, WindowUpdateReceiver,
     WindowUpdateSender,
@@ -32,8 +32,6 @@ use zbus::{blocking::Connection, interface};
 
 const BACKEND_NAME: &str = "kwin-window";
 const SCRIPT_TEMPLATE: &str = include_str!("window-tracker.js");
-const LOAD_RETRY_ATTEMPTS: u32 = 15;
-const LOAD_RETRY_DELAY: Duration = Duration::from_millis(150);
 const TRACKER_SETUP_TIMEOUT: Duration = Duration::from_secs(12);
 /// Give KWin a short opportunity to publish its initial focus state. Missing
 /// this snapshot must not tear down the script: it remains subscribed and can
@@ -57,6 +55,7 @@ const DBUS_METHOD_TIMEOUT: Duration = Duration::from_secs(1);
 /// a series of slow synchronous compositor round trips.
 const ORPHAN_SCAN_ENTRY_LIMIT: usize = 512;
 const ORPHAN_CHECK_LIMIT: usize = 4;
+static REJECTED_KWIN_CALLBACKS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 #[derive(Debug, Error)]
 pub enum KwinWindowError {
@@ -88,13 +87,21 @@ pub enum KwinWindowError {
 
 struct WindowTrackerService {
     sender: Mutex<WindowUpdateSender>,
-    // Session-bus methods are callable by other local clients; only accept
-    // focus reports from the KWin process that owns org.kde.KWin at setup.
+    // KWin's callDBus() helper sends script callbacks over a distinct D-Bus
+    // connection, so the message sender is not necessarily the connection
+    // that owns org.kde.KWin. Authenticate either the owner name or a sender
+    // whose bus credentials identify the same KWin process.
     kwin_owner: String,
+    kwin_pid: u32,
 }
 
-fn is_kwin_sender(sender: Option<&str>, kwin_owner: &str) -> bool {
-    sender == Some(kwin_owner)
+fn is_kwin_sender(
+    sender: Option<&str>,
+    kwin_owner: &str,
+    sender_pid: Option<u32>,
+    kwin_pid: u32,
+) -> bool {
+    sender == Some(kwin_owner) || sender_pid == Some(kwin_pid)
 }
 
 fn window_context_from_signal(
@@ -115,20 +122,56 @@ fn window_context_from_signal(
 
 #[interface(name = "org.wayexpand.WindowTracker1")]
 impl WindowTrackerService {
-    fn window_changed(
+    async fn window_changed(
         &self,
         app_id: String,
         title: String,
         instance_id: String,
         #[zbus(header)] header: zbus::message::Header<'_>,
-    ) {
+        #[zbus(connection)] connection: &zbus::Connection,
+    ) -> bool {
+        let sender = header.sender().map(|sender| sender.to_string());
+        let sender_is_owner = sender.as_deref() == Some(self.kwin_owner.as_str());
+        let sender_pid = if !sender_is_owner {
+            if let Some(sender) = sender.as_deref() {
+                connection
+                    .call_method(
+                        Some("org.freedesktop.DBus"),
+                        "/org/freedesktop/DBus",
+                        Some("org.freedesktop.DBus"),
+                        "GetConnectionUnixProcessID",
+                        &(sender,),
+                    )
+                    .await
+                    .ok()
+                    .and_then(|reply| reply.body().deserialize::<u32>().ok())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         let sender_is_kwin = is_kwin_sender(
-            header.sender().map(|sender| sender.as_str()),
+            sender.as_deref(),
             &self.kwin_owner,
+            sender_pid,
+            self.kwin_pid,
         );
         if !sender_is_kwin {
-            debug!("ignored a window-tracker callback from a non-KWin D-Bus owner");
-            return;
+            // Emit one sanitized identity diagnostic per process. KWin may
+            // dispatch script D-Bus calls through a helper connection; this
+            // distinguishes that case from a missing script callback without
+            // logging window titles or application IDs.
+            if REJECTED_KWIN_CALLBACKS.fetch_add(1, Ordering::Relaxed) == 0 {
+                tracing::warn!(
+                    sender_present = sender.is_some(),
+                    sender_is_owner,
+                    sender_pid,
+                    kwin_pid = self.kwin_pid,
+                    "ignored an unauthenticated KWin window-tracker callback"
+                );
+            }
+            return false;
         }
         let context = window_context_from_signal(app_id, title, instance_id);
         info!(
@@ -153,8 +196,9 @@ impl WindowTrackerService {
         // app_filter-scoped snippets on the first poisoning instead of just
         // this one window-change notification.
         if let Ok(sender) = self.sender.lock() {
-            let _ = sender.send(context);
+            return sender.send(context).is_ok();
         }
+        false
     }
 }
 
@@ -258,6 +302,16 @@ impl KwinWindowTracker {
             )?
             .body()
             .deserialize()?;
+        let kwin_pid: u32 = owner_connection
+            .call_method(
+                Some("org.freedesktop.DBus"),
+                "/org/freedesktop/DBus",
+                Some("org.freedesktop.DBus"),
+                "GetConnectionUnixProcessID",
+                &(kwin_owner.as_str(),),
+            )?
+            .body()
+            .deserialize()?;
         drop(owner_connection);
 
         // Register the callback object on the builder before the connection is
@@ -274,6 +328,7 @@ impl KwinWindowTracker {
                     WindowTrackerService {
                         sender: Mutex::new(sender),
                         kwin_owner,
+                        kwin_pid,
                     },
                 )?,
             DBUS_CONNECTION_TIMEOUT,
@@ -375,12 +430,14 @@ impl KwinWindowTracker {
         Ok(tracker)
     }
 
-    /// `loadScript` returns before the resulting `/Scripting/ScriptN`
-    /// object is necessarily reachable yet -- observed directly against a
-    /// live KWin 6.6 session, where `run()` immediately after `loadScript`
-    /// reliably fails with "No such object path" for roughly the first
-    /// second. There is no signal to wait on, so this retries `run()` with
-    /// a short, bounded backoff instead of guessing a fixed delay.
+    /// Start the script through `/Scripting.start()`, never through the
+    /// `/Scripting/ScriptN` object that `loadScript` names. KWin derives that
+    /// ID from its list size, so after any unload it can repeat the ID of a
+    /// script that is still loaded (observed on KWin 6.6: a load returned 7
+    /// while another script held 7). `run()` then reaches the older script and
+    /// reports success while the new one never starts, leaving a tracker that
+    /// looks connected but never reports focus. `start()` runs every loaded
+    /// script that is not already running, regardless of ID.
     fn load_and_run(
         connection: &Connection,
         script_path: &std::path::Path,
@@ -404,32 +461,18 @@ impl KwinWindowTracker {
             )?
             .body()
             .deserialize()?;
-        let script_object_path = format!("/Scripting/Script{script_id}");
-
-        for attempt in 0..LOAD_RETRY_ATTEMPTS {
-            if cancelled.is_some_and(|flag| flag.load(Ordering::Acquire)) {
-                return Err(KwinWindowError::ScriptNotReady);
-            }
-            if Instant::now() >= deadline {
-                return Err(KwinWindowError::SetupTimedOut);
-            }
-            match connection.call_method(
-                Some("org.kde.KWin"),
-                script_object_path.as_str(),
-                Some("org.kde.kwin.Script"),
-                "run",
-                &(),
-            ) {
-                Ok(_) => return Ok(()),
-                Err(_) if attempt + 1 < LOAD_RETRY_ATTEMPTS => {
-                    std::thread::sleep(
-                        LOAD_RETRY_DELAY.min(deadline.saturating_duration_since(Instant::now())),
-                    );
-                }
-                Err(_) => return Err(KwinWindowError::ScriptNotReady),
-            }
+        // KWin answers -1 when this plugin name is already loaded.
+        if script_id < 0 {
+            return Err(KwinWindowError::ScriptNotReady);
         }
-        Err(KwinWindowError::ScriptNotReady)
+        connection.call_method(
+            Some("org.kde.KWin"),
+            "/Scripting",
+            Some("org.kde.kwin.Scripting"),
+            "start",
+            &(),
+        )?;
+        Ok(())
     }
 }
 
@@ -840,11 +883,12 @@ mod tests {
     }
 
     #[test]
-    fn window_tracker_accepts_only_the_current_kwin_bus_owner() {
+    fn window_tracker_accepts_only_the_current_kwin_process() {
         let kwin_owner = ":1.42";
-        assert!(is_kwin_sender(Some(kwin_owner), kwin_owner));
-        assert!(!is_kwin_sender(Some(":1.43"), kwin_owner));
-        assert!(!is_kwin_sender(None, kwin_owner));
+        assert!(is_kwin_sender(Some(kwin_owner), kwin_owner, None, 42));
+        assert!(is_kwin_sender(Some(":1.43"), kwin_owner, Some(42), 42));
+        assert!(!is_kwin_sender(Some(":1.43"), kwin_owner, Some(99), 42));
+        assert!(!is_kwin_sender(None, kwin_owner, None, 42));
     }
 
     #[test]
@@ -1099,6 +1143,13 @@ mod tests {
                 .is_some_and(|identity| !identity.is_empty()),
             "KWin should provide a strong identity for the exact focused window"
         );
+        assert!(
+            initial_window
+                .app_id
+                .as_deref()
+                .is_some_and(|app_id| !app_id.is_empty()),
+            "KWin should provide an application identity for the focused window"
+        );
         assert_eq!(
             std::fs::metadata(&tracker.script_path).unwrap().mode() & 0o777,
             0o600,
@@ -1107,7 +1158,7 @@ mod tests {
 
         let untrusted_client =
             zbus::blocking::Connection::session().expect("connect a second session-bus client");
-        untrusted_client
+        let accepted: bool = untrusted_client
             .call_method(
                 Some(tracker.service_name.as_str()),
                 "/WindowTracker",
@@ -1115,7 +1166,14 @@ mod tests {
                 "WindowChanged",
                 &("org.example.Spoof", "fake-window", "not-a-kwin-id"),
             )
-            .expect("the tracker method should reject an untrusted caller without disconnecting");
+            .expect("the tracker method should reject an untrusted caller without disconnecting")
+            .body()
+            .deserialize()
+            .expect("the tracker should return an authorization result");
+        assert!(
+            !accepted,
+            "an untrusted caller must receive an explicit refusal"
+        );
         assert!(
             tracker
                 .next_window_timeout(std::time::Duration::from_millis(100))

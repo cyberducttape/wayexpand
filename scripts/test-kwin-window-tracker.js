@@ -37,13 +37,14 @@ vm.runInNewContext(source, {
   workspace,
   callDBus(...args) {
     reports.push(args);
+    if (typeof args.at(-1) === "function") args.at(-1)(true);
   },
 });
 
 assert.equal(typeof activated, "function", "tracker subscribes to window activation");
 
 function lastIdentity() {
-  return Array.from(reports.at(-1).slice(-3));
+  return Array.from(reports.at(-1).slice(4, 7));
 }
 
 activated({
@@ -205,10 +206,11 @@ vm.runInNewContext(source, {
   workspace: startupWorkspace,
   callDBus(...args) {
     startupReports.push(args);
+    if (typeof args.at(-1) === "function") args.at(-1)(true);
   },
 });
 assert.deepEqual(
-  Array.from(startupReports.at(-1).slice(-3)),
+  Array.from(startupReports.at(-1).slice(4, 7)),
   [
     "org.example.StartupFocus",
     "Startup focus test",
@@ -235,10 +237,11 @@ vm.runInNewContext(source, {
   workspace: ambiguousWorkspace,
   callDBus(...args) {
     ambiguousReports.push(args);
+    if (typeof args.at(-1) === "function") args.at(-1)(true);
   },
 });
 assert.deepEqual(
-  Array.from(ambiguousReports.at(-1).slice(-3)),
+  Array.from(ambiguousReports.at(-1).slice(4, 7)),
   ["", "", ""],
   "ambiguous active clients fail closed instead of selecting one",
 );
@@ -282,19 +285,32 @@ vm.runInNewContext(source, {
   QTimer: FakeQTimer,
   callDBus(...args) {
     delayedStartupReports.push(args);
+    if (typeof args.at(-1) === "function") args.at(-1)(true);
   },
 });
-const delayedStartupTimer = reconcileTimers.at(-1);
-assert.equal(delayedStartupTimer.interval, 100, "startup reconciliation is paced");
+const delayedStartupTimer = reconcileTimers.find((timer) => !timer.stopped);
+assert.equal(delayedStartupTimer.interval, 1000, "startup reconciliation is low rate");
 assert.equal(delayedStartupTimer.stopped, false, "startup reconciliation starts");
+for (let attempt = 0; attempt < 30; attempt += 1) {
+  delayedStartupTimer.callback();
+}
+assert.equal(
+  delayedStartupTimer.stopped,
+  false,
+  "reconciliation remains active while KWin has not reported a focused app",
+);
 delayedStartupWorkspace.activeWindow = delayedActiveWindow;
 delayedStartupTimer.callback();
 assert.deepEqual(
-  Array.from(delayedStartupReports.at(-1).slice(-3)),
+  Array.from(delayedStartupReports.at(-1).slice(4, 7)),
   ["org.example.DelayedStartup", "Delayed startup window", "window-delayed-startup"],
   "delayed compositor active-window state is reconciled",
 );
-assert.equal(delayedStartupTimer.stopped, true, "timer stops after finding focus");
+assert.equal(
+  delayedStartupTimer.stopped,
+  false,
+  "low-rate reconciliation remains active after finding an app ID",
+);
 
 const noFocusTimers = [];
 class NoFocusQTimer extends FakeQTimer {
@@ -315,13 +331,97 @@ vm.runInNewContext(source, {
   QTimer: NoFocusQTimer,
   callDBus(...args) {
     noFocusReports.push(args);
+    if (typeof args.at(-1) === "function") args.at(-1)(true);
   },
 });
-const noFocusTimer = noFocusTimers.at(-1);
-for (let attempt = 0; attempt < 30; attempt += 1) {
+const noFocusTimer = noFocusTimers.find((timer) => !timer.stopped);
+for (let attempt = 0; attempt < 300; attempt += 1) {
   noFocusTimer.callback();
 }
-assert.equal(noFocusTimer.stopped, true, "empty focus reconciliation is bounded");
-assert.equal(noFocusReports.length, 1, "no focus is not guessed after timeout");
+assert.equal(noFocusTimer.stopped, false, "unknown focus is reconciled until KWin reports an app ID");
+assert.equal(noFocusReports.length, 1, "unchanged unknown focus is deduplicated");
+
+const deliveryRetryTimers = [];
+class DeliveryRetryTimer extends FakeQTimer {
+  constructor() {
+    super();
+    deliveryRetryTimers.push(this);
+  }
+}
+const retryWindow = {
+  resourceClass: "org.example.Retry",
+  caption: "Retry delivery test",
+  internalId: "window-retry",
+};
+let deliveryAttempts = 0;
+const retryWorkspace = {
+  activeWindow: retryWindow,
+  stackingOrder: [],
+  windowActivated: { connect(callback) { this.callback = callback; } },
+  windowAdded: { connect() {} },
+  windowRemoved: { connect() {} },
+};
+vm.runInNewContext(source, {
+  workspace: retryWorkspace,
+  QTimer: DeliveryRetryTimer,
+  callDBus(...args) {
+    deliveryAttempts += 1;
+    if (deliveryAttempts === 2 && typeof args.at(-1) === "function") {
+      args.at(-1)(true);
+    }
+  },
+});
+assert.equal(deliveryAttempts, 1, "initial focus report is sent once");
+const deliveryRetryTimer = deliveryRetryTimers.find((timer) => timer.interval === 250);
+assert.equal(deliveryRetryTimer.interval, 250, "D-Bus delivery retry is bounded");
+deliveryRetryTimer.callback();
+assert.equal(deliveryAttempts, 2, "unacknowledged initial focus report is retried");
+assert.equal(deliveryRetryTimer.stopped, true, "successful report acknowledgment stops retry");
+retryWorkspace.windowActivated.callback(retryWindow);
+assert.equal(deliveryAttempts, 2, "acknowledged focus report is deduplicated");
+
+const persistentRetryTimers = [];
+class PersistentRetryTimer extends FakeQTimer {
+  constructor() {
+    super();
+    persistentRetryTimers.push(this);
+  }
+}
+let persistentAttempts = 0;
+const persistentWorkspace = {
+  activeWindow: retryWindow,
+  stackingOrder: [],
+  windowActivated: { connect() {} },
+  windowAdded: { connect() {} },
+  windowRemoved: { connect() {} },
+};
+vm.runInNewContext(source, {
+  workspace: persistentWorkspace,
+  QTimer: PersistentRetryTimer,
+  callDBus(...args) {
+    persistentAttempts += 1;
+    if (typeof args.at(-1) === "function") {
+      args.at(-1)(persistentAttempts >= 9);
+    }
+  },
+});
+for (let attempt = 0; attempt < 8; attempt += 1) {
+  const retryTimer = persistentRetryTimers.find(
+    (timer) => timer.interval === 250 && !timer.stopped,
+  );
+  assert.ok(retryTimer, "a bounded delivery retry is scheduled");
+  retryTimer.callback();
+}
+assert.equal(persistentAttempts, 8, "delivery retries stop at the configured limit");
+const persistentReconciliationTimer = persistentRetryTimers.find(
+  (timer) => timer.interval === 1000 && !timer.stopped,
+);
+assert.ok(persistentReconciliationTimer, "focus reconciliation remains active");
+persistentReconciliationTimer.callback();
+assert.equal(
+  persistentAttempts,
+  9,
+  "periodic reconciliation retries a report after bounded delivery attempts expire",
+);
 
 console.log("KWin window tracker identity and activation checks passed");

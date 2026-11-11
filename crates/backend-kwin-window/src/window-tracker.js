@@ -5,6 +5,109 @@
 // interface, reached over the session D-Bus, is the same mechanism tools
 // like kdotool use.
 var lastReportKey = null;
+var pendingReportKey = null;
+var pendingReport = null;
+var pendingReportGeneration = 0;
+var pendingReportAttempts = 0;
+var reportRetryTimer = null;
+var MAX_REPORT_ATTEMPTS = 8;
+var REPORT_RETRY_INTERVAL = 250;
+var reconciliationTimer = null;
+
+function stopReportRetry() {
+    if (reportRetryTimer) {
+        reportRetryTimer.stop();
+        reportRetryTimer = null;
+    }
+}
+
+function scheduleReportRetry(generation) {
+    if (reportRetryTimer || typeof QTimer === "undefined") {
+        return;
+    }
+    try {
+        reportRetryTimer = new QTimer();
+        reportRetryTimer.interval = REPORT_RETRY_INTERVAL;
+        reportRetryTimer.timeout.connect(function () {
+            reportRetryTimer.stop();
+            reportRetryTimer = null;
+            if (generation !== pendingReportGeneration || pendingReportKey === null) {
+                return;
+            }
+            if (pendingReportAttempts >= MAX_REPORT_ATTEMPTS) {
+                pendingReportKey = null;
+                pendingReport = null;
+                return;
+            }
+            sendPendingReport(generation);
+        });
+        reportRetryTimer.start();
+    } catch (_error) {
+        reportRetryTimer = null;
+    }
+}
+
+function sendPendingReport(generation) {
+    if (generation !== pendingReportGeneration || pendingReportKey === null) {
+        return;
+    }
+    var reportKey = pendingReportKey;
+    var report = pendingReport;
+    if (!report) {
+        return;
+    }
+    pendingReportAttempts += 1;
+    scheduleReportRetry(generation);
+    try {
+        callDBus(
+            "__WAYEXPAND_BUS_NAME__",
+            "/WindowTracker",
+            "org.wayexpand.WindowTracker1",
+            "WindowChanged",
+            report.appId,
+            report.title,
+            report.instanceId,
+            function (accepted) {
+                if (generation !== pendingReportGeneration || pendingReportKey !== reportKey) {
+                    return;
+                }
+                if (accepted !== true) {
+                    return;
+                }
+                stopReportRetry();
+                lastReportKey = reportKey;
+                pendingReportKey = null;
+                pendingReport = null;
+            }
+        );
+    } catch (_error) {
+        // The bounded retry timer resends this content-free focus snapshot.
+    }
+}
+
+// KWin can load a script before its active-window snapshot is available, and
+// it can miss an activation callback while this D-Bus client reconnects. Keep
+// a low-rate in-compositor reconciliation running for the script lifetime.
+// This is an in-process property read, not a D-Bus query, and report()
+// deduplicates unchanged snapshots. It also retries reports after the bounded
+// per-call delivery retry has expired.
+function startReconciliation() {
+    if (reconciliationTimer || typeof QTimer === "undefined") {
+        return;
+    }
+    try {
+        reconciliationTimer = new QTimer();
+        reconciliationTimer.interval = 1000;
+        reconciliationTimer.timeout.connect(function () {
+            report(currentActiveWindow());
+        });
+        reconciliationTimer.start();
+    } catch (_error) {
+        // A timer is an optional recovery aid. It must never prevent the
+        // ordinary focus callback path from starting.
+        reconciliationTimer = null;
+    }
+}
 
 function report(window) {
     var appId = "";
@@ -37,20 +140,16 @@ function report(window) {
     var instanceId = window && window.internalId ? String(window.internalId) : "";
     // KWin may deliver the same transition through both workspace activation
     // and a window's activeChanged signal. Avoid duplicate D-Bus traffic.
-    var reportKey = appId + "\n" + title + "\n" + instanceId;
-    if (instanceId && reportKey === lastReportKey) {
+    var reportKey = JSON.stringify([appId, title, instanceId]);
+    if (reportKey === lastReportKey || reportKey === pendingReportKey) {
         return;
     }
-    lastReportKey = reportKey;
-    callDBus(
-        "__WAYEXPAND_BUS_NAME__",
-        "/WindowTracker",
-        "org.wayexpand.WindowTracker1",
-        "WindowChanged",
-        appId,
-        title,
-        instanceId
-    );
+    stopReportRetry();
+    pendingReportGeneration += 1;
+    pendingReportKey = reportKey;
+    pendingReport = { appId: appId, title: title, instanceId: instanceId };
+    pendingReportAttempts = 0;
+    sendPendingReport(pendingReportGeneration);
 }
 
 // Subscribe to each KWin window's own activation state as a second focus
@@ -132,28 +231,9 @@ workspace.windowActivated.connect(function (window) {
     // no-active-window state is still published as empty context.
     report(window || currentActiveWindow());
 });
+startReconciliation();
 report(currentActiveWindow());
 
-// KWin can start this script before its active-window snapshot is populated.
-// In that ordering, the initial report is empty and KWin may not emit another
-// activation signal for the already-focused client. Reconcile briefly against
-// KWin's compositor-owned activeWindow property. This is deliberately bounded
-// and never chooses a window from stacking order or metadata.
-if (typeof QTimer !== "undefined") {
-    var startupReconcileAttempts = 0;
-    var startupReconcileTimer = new QTimer();
-    startupReconcileTimer.interval = 100;
-    startupReconcileTimer.timeout.connect(function () {
-        startupReconcileAttempts += 1;
-        var activeWindow = currentActiveWindow();
-        if (activeWindow) {
-            report(activeWindow);
-            startupReconcileTimer.stop();
-            return;
-        }
-        if (startupReconcileAttempts >= 30) {
-            startupReconcileTimer.stop();
-        }
-    });
-    startupReconcileTimer.start();
-}
+// Initial absence starts reconciliation through report(). It continues only
+// until KWin provides a window with an application identity; it does not infer
+// focus from stacking order, titles, or keyboard activity.
