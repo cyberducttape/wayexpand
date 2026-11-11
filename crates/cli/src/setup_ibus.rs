@@ -57,6 +57,8 @@ pub(crate) const DEFAULT_TERMINAL_APPS: &[&str] = &[
 /// list is migrated to include IDs used by newer distro packages.
 const DEFAULT_BROWSER_APPS: &[&str] = &[
     "app_id_exact:firefox",
+    // The Firefox snap (Ubuntu's default) reports this desktop ID to KWin.
+    "app_id_exact:firefox_firefox",
     "app_id_exact:org.mozilla.firefox",
     "app_id_exact:chromium",
     // Ubuntu's Chromium package uses chromium-browser.desktop, while other
