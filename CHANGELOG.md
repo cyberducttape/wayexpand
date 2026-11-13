@@ -15,6 +15,11 @@ All notable changes to WayExpand are documented here.
   browser raw-capture list.
 - GUI: lay the header out on one row only when its measured contents fit, and
   stop the compact header from claiming the whole window height.
+- evdev: stop cutting long typed (terminal and browser) expansions off
+  partway when an unrelated `/dev/input` node changes. A device change during
+  paced output is rescanned at once, and output stops only if a new keyboard
+  appeared; headphone jacks, HDMI audio, mice, removals and permission
+  updates no longer interrupt it.
 
 - Keep the KWin focus subscription alive when startup has no usable focus
   snapshot; retain fail-closed app matching while waiting for the next

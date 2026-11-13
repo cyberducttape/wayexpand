@@ -408,8 +408,8 @@ impl EvdevSource {
         }
         // Device discovery scans /dev/input and is intentionally decoupled
         // from latency-sensitive polling. A topology event forces this pass
-        // on the next ordinary turn; during output, the event is returned to
-        // the daemon immediately so it can cancel before discovery begins.
+        // on the next ordinary turn; during output, the change is rescanned
+        // immediately and cancels output only if it added a keyboard.
         if !self.has_buffered_raw_events()
             && self.pending_lost_devices.is_empty()
             && (self.topology_refresh_pending
@@ -455,6 +455,7 @@ impl EvdevSource {
                 retryable: error.is_retryable(),
                 message: error.to_string(),
             })?
+            && self.topology_change_interrupts_output()
         {
             return Ok(true);
         }
@@ -478,6 +479,9 @@ impl EvdevSource {
         key_activity |= self.raw_events[self.raw_event_cursor..]
             .iter()
             .any(|event| matches!(event.destructure(), evdev::EventSummary::Key(..)));
+        if !key_activity && self.topology_change_interrupts_output() {
+            return Ok(true);
+        }
         if self.devices.is_empty() {
             return Err(InputSourceError {
                 source: SOURCE_NAME,
@@ -500,6 +504,29 @@ impl EvdevSource {
             self.pending.pop_front();
         }
         Ok(key_activity)
+    }
+
+    /// Decide whether a device-topology change seen during non-atomic output
+    /// must stop it. Only a newly attached keyboard can deliver keys this
+    /// source has not seen, so the devices are rescanned at once and output
+    /// stops only when that adds a keyboard. Removals, permission updates
+    /// and non-keyboard nodes (audio jacks, HDMI audio, mice) let a long
+    /// paced replacement finish instead of cutting it off partway. A node
+    /// that is not readable yet is picked up by the permission (ATTRIB)
+    /// event that follows, which interrupts then. While a device batch or a
+    /// lost slot is still pending, rescanning could reorder slots, so that
+    /// case stays conservative and interrupts.
+    fn topology_change_interrupts_output(&mut self) -> bool {
+        if !self.topology_refresh_pending {
+            return false;
+        }
+        if self.has_buffered_raw_events() || !self.pending_lost_devices.is_empty() {
+            return true;
+        }
+        let added = self.refresh_devices();
+        self.topology_refresh_pending = false;
+        self.last_device_refresh = Instant::now();
+        added > 0
     }
 
     /// Check the topology watch even when a previously read device batch is

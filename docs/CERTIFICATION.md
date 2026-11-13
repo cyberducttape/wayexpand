@@ -718,9 +718,10 @@ second physical trigger while a paced replacement is still running and checks
 for interleaved text corruption or a stale expansion. The private KWin driver
 uses stdin for capture, so it reports this case as `UNVERIFIED`; a passing
 result requires a real capture session that types during the in-flight output.
-The required scenario `keyboard-hotplug-during-nonatomic-replacement` removes
-or reconnects a physical keyboard while paced output is active and verifies
-that output is interrupted before further synthetic input is sent. The private
+The required scenario `keyboard-hotplug-during-nonatomic-replacement`
+reconnects a physical keyboard while paced output is active and verifies
+that output is interrupted before further synthetic input is sent. Removing a
+keyboard, or attaching a device that is not a keyboard, does not interrupt. The private
 KWin driver has no physical devices and reports this case as `UNVERIFIED`;
 inotify unit coverage is not a real-session pass.
 The latest current-source negative reproduction is preserved in

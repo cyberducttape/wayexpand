@@ -65,19 +65,26 @@ session evidence; unit tests alone do not satisfy them.
       simulated. The monitor treats every raw key event as activity, including
       modifiers and lock keys ignored by matcher translation.
       The evdev source also watches `/dev/input` topology with inotify. A
-      device-node create, remove, move, attribute change, or watcher failure
-      interrupts pending non-atomic output; device discovery is deferred until
-      the next ordinary input turn so discovery cannot delay cancellation.
+      device-node create, remove, move, or attribute change during pending
+      non-atomic output triggers an immediate rescan, and output is
+      interrupted only when the rescan adds a keyboard, because only a new
+      keyboard can deliver keys the monitor has not seen. Non-keyboard nodes
+      (audio jacks, HDMI audio, mice), removals, and permission updates no
+      longer cut a paced replacement off partway; a keyboard node that is not
+      readable yet is added, and interrupts, on its following permission
+      (attribute) event. A change seen while a device batch or lost slot is
+      still pending interrupts without rescanning.
       Watch invalidation, unmount, read failure, and excessive event backlog
       retire the monitor instead of leaving it silently inactive.
-      Unit tests verify notification delivery and interruption before
-      discovery, but do not verify a real keyboard hotplug during output.
+      Unit tests verify that a non-keyboard node does not interrupt and that
+      an added keyboard does, but do not verify a real keyboard hotplug
+      during output.
       A separate `modifier-during-nonatomic-replacement` certification case
       now records this requirement; the headless KWin driver marks it
       unverified because it does not exercise physical capture.
       The `keyboard-hotplug-during-nonatomic-replacement` case separately
-      requires removing or reconnecting a physical keyboard while paced output
-      is active. The headless driver marks it unverified because it has no
+      requires reconnecting a physical keyboard while paced output is
+      active. The headless driver marks it unverified because it has no
       physical input devices; monitor unit tests do not satisfy this gate.
       This is containment only: any already delivered physical keys or
       synthetic characters may leave partial text, so the target-integrity
