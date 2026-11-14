@@ -591,6 +591,78 @@ fn app_filter_operators_and_safe_mode_are_explicit() {
 }
 
 #[test]
+fn executable_path_filters_are_exact_and_reject_unsafe_paths() {
+    let parsed = AppFilter::parse("process_executable_exact:/usr/bin/Konsole").unwrap();
+    assert_eq!(
+        parsed,
+        AppFilter::ProcessExecutableExact("/usr/bin/Konsole".into())
+    );
+    for invalid in [
+        "process_executable_exact:relative/program",
+        "process_executable_exact:/usr/bin/../bin/konsole",
+        "process_executable_exact:/usr/bin/./konsole",
+        "app_id_exact:process-executable:/usr/bin/konsole",
+    ] {
+        assert!(AppFilter::parse(invalid).is_none(), "{invalid}");
+    }
+}
+
+#[test]
+fn process_name_filters_are_explicit_lower_assurance_and_bounded() {
+    assert_eq!(
+        AppFilter::parse("process_name_exact:Konsole"),
+        Some(AppFilter::ProcessNameExact("konsole".into()))
+    );
+    assert!(AppFilter::ProcessNameExact("konsole".into()).is_weak());
+    for invalid in [
+        "process_name_exact:",
+        "process_name_exact:konsole/ssh",
+        "process_name_exact:konsole terminal",
+        "process_name_exact:konsole\nbad",
+        "process_name_exact:konsole😀",
+        "process_name_exact:1234567890123456",
+        "app_id_exact:process-name:konsole",
+    ] {
+        assert!(AppFilter::parse(invalid).is_none(), "{invalid:?}");
+    }
+}
+
+#[test]
+fn safe_mode_applies_weak_identity_policy_to_global_capture_scopes() {
+    let terminal_name = Config::parse(
+        "[organization]\nsafe_mode = true\n[settings]\nterminal_apps = ['process_name_exact:konsole']\n",
+    );
+    assert!(matches!(
+        terminal_name,
+        Err(ConfigError::InvalidTerminalApp { index: 0, .. })
+    ));
+
+    let raw_capture_glob = Config::parse(
+        "[organization]\nsafe_mode = true\n[settings]\nraw_capture_apps = ['app_id_glob:org.example.*']\n",
+    );
+    assert!(matches!(
+        raw_capture_glob,
+        Err(ConfigError::InvalidRawCaptureApp { index: 0, .. })
+    ));
+
+    let explicitly_permitted = Config::parse(
+        "[organization]\nsafe_mode = true\nallow_weak_app_filters = true\n[settings]\nterminal_apps = ['process_name_exact:konsole']\nraw_capture_apps = ['app_id_glob:org.example.*']\n",
+    );
+    assert!(explicitly_permitted.is_ok());
+
+    let mut externally_managed =
+        Config::parse("[settings]\nterminal_apps = ['process_name_exact:konsole']\n").unwrap();
+    let administrator_policy = OrganizationPolicy {
+        safe_mode: true,
+        ..OrganizationPolicy::default()
+    };
+    assert!(matches!(
+        externally_managed.apply_administrator_policy(&administrator_policy),
+        Err(ConfigError::InvalidTerminalApp { index: 0, .. })
+    ));
+}
+
+#[test]
 fn organization_policy_can_require_absolute_command_paths() {
     let error = Config::parse(
         r#"
@@ -832,6 +904,7 @@ fn capability_requirements_distinguish_atomic_and_sensitive_guarantees() {
 
     let atomic = crate::InjectorCapabilities {
         atomic_replace: true,
+        replacement_guarantee: crate::ReplacementGuarantee::Atomic,
         ..crate::InjectorCapabilities::default()
     };
     assert_eq!(
@@ -858,6 +931,18 @@ fn capability_requirements_distinguish_atomic_and_sensitive_guarantees() {
             }
         )
         .is_some_and(|violation| violation.contains("sensitive-field focus")));
+
+    let inconsistent_atomic_declaration = crate::InjectorCapabilities {
+        atomic_replace: true,
+        replacement_guarantee: crate::ReplacementGuarantee::VerifiedSurroundingText,
+        ..crate::InjectorCapabilities::default()
+    };
+    assert_eq!(
+        policy
+            .capability_violation(inconsistent_atomic_declaration, true)
+            .as_deref(),
+        Some("selected injector cannot guarantee atomic replacement transactions")
+    );
 }
 
 #[test]
@@ -1234,4 +1319,29 @@ fn control_socket_only_policy_preserves_user_embedded_policy() {
     assert!(config.organization.disable_clipboard);
     assert!(config.organization.require_verified_insert_target);
     assert!(config.organization.disable_control_socket_mutations);
+}
+
+#[test]
+fn terminal_paste_parses_and_decides_which_text_to_paste() {
+    let config = Config::parse("[settings]\nterminal_paste = \"multiline\"\n").unwrap();
+    assert_eq!(config.settings.terminal_paste, TerminalPaste::Multiline);
+    assert_eq!(Settings::default().terminal_paste, TerminalPaste::Off);
+    assert!(Config::parse("[settings]\nterminal_paste = \"sometimes\"\n").is_err());
+    assert!(
+        !toml::to_string(&Settings::default())
+            .unwrap()
+            .contains("terminal_paste"),
+        "the default is omitted so older readers still load saved configs"
+    );
+
+    assert!(!TerminalPaste::Off.pastes("a\nb", 8));
+    assert!(TerminalPaste::Always.pastes("short", 8));
+    assert!(!TerminalPaste::Always.pastes("", 8));
+    assert!(TerminalPaste::Multiline.pastes("line one\nline two", 1000));
+    assert!(TerminalPaste::Multiline.pastes("carriage\rreturn", 1000));
+    assert!(!TerminalPaste::Multiline.pastes("one line", 1000));
+    assert!(
+        TerminalPaste::Multiline.pastes("longer than the typing limit", 8),
+        "text the keystroke route would refuse is pasted instead"
+    );
 }

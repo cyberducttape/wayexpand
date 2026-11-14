@@ -316,8 +316,9 @@ new fields may be added compatibly.
 
 Checks the IBus route link by link and reports recent engine activity. It
 contains no typed text, triggers, or replacements. Exit code 0 when `ready`
-is true, 1 otherwise. The IBus-route JSON object has `schema: 2`; this version
-adds separate readiness states and changes `ready` to mean operationally
+is true, 1 otherwise. The IBus-route JSON object has `schema: 4`; this version
+distinguishes replacement-context observations from unverified output emission
+and changes `ready` to mean operationally
 verified rather than merely free of hard failures.
 
 - `ready` (bool): operational readiness is fully verified and no second
@@ -357,10 +358,11 @@ verified rather than merely free of hard failures.
   `component_installed`, `registered`, `ibus_running`, `selected`,
   `engine_running`, `text_received` (a normal field sent keys),
   `replacement_context_received` (a normal field supplied nonempty
-  surrounding text), and `expanded` (at least one expansion since the
-  engine started). This input evidence is independent of the client's
-  advertised surrounding-text capability and does not imply that replacement
-  succeeded. It is aggregate across recent fields: IBus telemetry does not
+  surrounding text), and `output_emitted_unverified` (IBus emitted replacement
+  actions at least once since the engine started). This input evidence is
+  independent of the client's advertised surrounding-text capability and
+  does not imply that replacement succeeded or appeared in the target. It is
+  aggregate across recent fields: IBus telemetry does not
   record application identity, so `text_received` cannot certify a browser or
   any other particular client.
 - `activity` (object or null): the engine's published status: `live`, `pid`,
@@ -371,7 +373,8 @@ verified rather than merely free of hard failures.
   `keys`, `keys_without_capture`, `expansions`, `refusals` (counts for
   `no_surrounding_capability`, `surrounding_text_empty`,
   `surrounding_text_unknown`, `surrounding_text_mismatch`, `policy`),
-  `last_refusal`, and a derived `verdict` (`expanded`, `ready`,
+  `last_refusal`, and a derived `verdict` (`output-emitted-unverified`,
+  `replacement-context-observed`,
   `no-content-type`, `sensitive`, `no-surrounding-text`, `text-mismatch`,
   `refused-by-policy`, `idle`) with an `explanation`.
 - `other_route` (object): `scope` (`none`, `app-scoped`, `control-only`,
@@ -500,7 +503,7 @@ Diagnostic output suitable for health checks and monitoring systems.
     },
     "app_filter": {
       "status": "kwin_or_gnome_extension",
-      "detail": "Focused-window tracking is provided by the KWin bridge on KDE Plasma and by the WayExpand GNOME Shell extension (GNOME 45+) on GNOME; filtered snippets fail closed when tracking is unavailable."
+      "detail": "Focused-window tracking is provided by the KWin bridge on KDE Plasma and by the WayExpand GNOME Shell extension on runtime-gated GNOME Shell 46, 50, and 51; filtered snippets fail closed when tracking is unavailable."
     }
   },
   "capture_readiness": {
@@ -557,11 +560,11 @@ Diagnostic output suitable for health checks and monitoring systems.
   keyboard capture, safe sensitive-field behavior, or end-to-end certification.
 - `automatic_selection` (object): The daemon's shared source/backend resolver result; `ready` is false for the conservative stdin-only fallback.
 - `setup_recommendation` (object): The route Recommended mode would configure, chosen by the shared route planner from current capabilities, organization policy, and certification status (certified routes first, then input-method-v2 with libei key pass-through, then IBus). It may be an experimental route; it is never a raw-input (evdev) route.
-- `route_plan` (object): The full route order from the same planner, including each route's stable `id`, `standing` (`recommended`, `available`, `requires-consent`, `blocked-by-policy`, or `unavailable`), explanation `reason`, capture and injection methods, catalog `certification` status, replacement assurance, and whether sensitive-field protection is certified. Each route also contains a normalized `assessment` with independent `installed`, `supported`, `authorized`, and `connected` evidence (`yes`, `no`, `unknown`, or `requires_action`), `policy_allowed`, `certified`, `requires_user_action`, and explicit limitations. The optional `portal` assessment separates provider-candidate discovery from implementation/interface availability, authorization, direct socket configuration, EIS connection, negotiated injection, and verified injection. Desktop-name discovery is only a candidate hint. This is an additive field; availability and catalog certification are distinct claims.
+- `route_plan` (object): The full route order from the same planner, including each route's stable `id`, `standing` (`recommended`, `available`, `requires-consent`, `blocked-by-policy`, or `unavailable`), explanation `reason`, capture and injection methods, catalog certification status, trigger precondition, output transaction type, application-result observability, and whether sensitive-field protection is certified. Trigger preconditions do not imply atomic output; accepted output does not prove that the application changed its document. Each route also contains a normalized `assessment` with independent `installed`, `supported`, `authorized`, and `connected` evidence (`yes`, `no`, `unknown`, or `requires_action`), `policy_allowed`, `certified`, `requires_user_action`, and explicit limitations. The optional `portal` assessment separates provider-candidate discovery from implementation/interface availability, authorization, direct socket configuration, EIS connection, negotiated injection, and verified injection. Desktop-name discovery is only a candidate hint. This is an additive field; availability and catalog certification are distinct claims.
 - `gnome_window_tracker` (object or null): `null` outside GNOME. On GNOME: `uuid`, `installed_path` (the copy GNOME Shell loads, user copy first), `installed_matches_bundled`, `state` (`active`, `inactive`, `error`, `out-of-date`, `not-loaded`, `other`, or `shell-unavailable`), `user_extensions_enabled`, `ready`, `detail`, and `fix`. `build_identity` reports the bundled, on-disk, and live extension identities, whether on-disk metadata matches the extension JavaScript, and `runtime_state` (`current`, `logout-required`, `update-required`, `invalid-on-disk`, `unavailable`, or `not-running`). The live identity comes from the currently loaded Shell extension metadata, so replacing files cannot make an older loaded instance appear current. Additive.
 - `ibus` (object): `installed` (bool, IBus' live registry lists the engine), `status`, and `route`, which has the same shape as `wayexpand ibus status --json` (below). Additive.
 - `capture_readiness` (object): Non-invasive source/output readiness after organization-policy filtering across IBus, libei, wlroots, and input-method-v2. `state` is one of `available-to-try`, `authorization-required`, `not-probed`, or `unavailable`; `end_to_end_verified` remains false until a compositor/client certification harness supplies evidence.
-- `feature_support` (object): Product-wide integration limits, separate from backend probes. `ime_preedit.status` is `unsupported`; `app_filter.status` is `kwin_or_gnome_extension` (KWin on KDE Plasma, the WayExpand GNOME Shell extension on GNOME 45+; it was `kwin_only` before GNOME support). These are implementation-scope statements, not compositor certification.
+- `feature_support` (object): Product-wide integration limits, separate from backend probes. `ime_preedit.status` is `unsupported`; `app_filter.status` is `kwin_or_gnome_extension` (KWin on KDE Plasma, the WayExpand GNOME Shell extension on runtime-gated GNOME Shell 46, 50, and 51; it was `kwin_only` before GNOME support). These are implementation-scope statements, not compositor certification.
 - `capabilities` (array): Backend feature contracts, including explicit `limitations` that consumers must display rather than infer away.
 
 The graphical diagnostics view uses the same IBus installation probe as the
@@ -596,9 +599,17 @@ The optional `sandbox_security` object contains direct `/proc` and syscall
 probes from the daemon process for `wayexpand doctor --security`; older daemons
 omit it, and this optional additive field does not change the status schema.
 The content-free `window_tracker_updates_total`, `window_context_available`,
-and `window_app_id_available` fields distinguish a tracker that has delivered
-no focus report from one that reported a window without an application ID. They
-never expose the ID or window title.
+`window_app_id_available`, `window_process_executable_available`, and
+`window_process_name_available` fields
+distinguish a tracker that has delivered no focus report from one that reported
+a window without a desktop application ID. KWin may provide an authenticated
+same-user executable identity when its desktop ID is absent. If executable
+inspection is denied, an explicitly configured lower-assurance process-name
+identity may be available. Executable identity is available only to exact
+`process_executable_exact:/absolute/path` filters; process name identity is
+available only to exact `process_name_exact:<name>` filters and can be changed
+by the application. Neither satisfies ordinary app-ID filters. Status exposes
+only their presence, never the path, name, ID, or window title.
 
 `daemon_commit` identifies the source revision, and `daemon_version` identifies
 the exact source-tree build. Dirty development builds include a short digest of
@@ -648,6 +659,7 @@ legacy same-commit daemon as verified. Builds without Git metadata report
   "window_tracker_updates_total": 12,
   "window_context_available": true,
   "window_app_id_available": true,
+  "window_process_executable_available": false,
   "window_tracker_reconnect_attempts_total": 0,
   "window_tracker_disconnects_total": 0,
   "window_tracker_last_failure_reason": "none",
@@ -671,6 +683,7 @@ legacy same-commit daemon as verified. Builds without Git metadata report
   "hotkey_in_flight": 0,
   "command_queue_rejected_total": 0,
   "command_timeout_total": 0,
+  "command_cancelled_total": 0,
   "command_failure_total": 0,
   "action_broker": {
     "required": false,
@@ -688,6 +701,12 @@ legacy same-commit daemon as verified. Builds without Git metadata report
   "injection_latency_dropped_total": 0,
   "injection_latency_profile_dropped_total": 0,
   "injection_latency_profiles": {},
+  "output_interrupt_to_backend_return_sample_count": 0,
+  "output_interrupt_to_backend_return_window_count": 0,
+  "output_interrupt_to_backend_return_p50_us": 0,
+  "output_interrupt_to_backend_return_p95_us": 0,
+  "output_interrupt_to_backend_return_p99_us": 0,
+  "output_interrupt_to_backend_return_dropped_total": 0,
   "matcher_latency_sample_count": 0,
   "matcher_latency_window_count": 0,
   "matcher_latency_dropped_total": 0,
@@ -733,6 +752,10 @@ legacy same-commit daemon as verified. Builds without Git metadata report
   "capture_app_scope_state": "unrestricted",
   "raw_capture_fallback_enabled": false,
   "raw_capture_app_count": 0,
+  "terminal_paste": "off",
+  "terminal_paste_total": 0,
+  "terminal_paste_fallbacks_total": 0,
+  "terminal_paste_unread_total": 0,
   "input_events_total": 42,
   "output_reconnect_total": 0,
   "input_reconnect_total": 0,
@@ -753,11 +776,11 @@ legacy same-commit daemon as verified. Builds without Git metadata report
 - `route_id` (string): Canonical capture/injection route ID from the shared route catalog; `"stdin-test"` identifies the stdin harness, and `"unknown"` means the active pair has no catalog entry. Consumers should use this field instead of reconstructing route identity from `source` and `backend`.
 - `backend_mode` (string): Negotiated backend capability detail. Libei reports either `"ei_text (UTF-8 insertion)"` or `"ei_keyboard keysym fallback (12ms key pacing)"`; it is `"unknown"` before a backend has negotiated a mode or for backends without submodes.
 - `sandbox_security` (object, optional): Live in-process evidence for namespace IDs, seccomp/NoNewPrivs, socket address-family probes, read-only mounts, proc restrictions, W^X, personality and SUID-bit probes, resource limits, and cgroup limits. It reports effective process state, not unit-file intent. See [SECURITY](../SECURITY.md#effective-sandbox-inspection).
-- `status_schema` (integer): Version of the daemon status contract. Certification requires a matching schema before treating runtime capabilities as current; missing or different values mean the daemon should be restarted/updated. Schema 11 adds canonical `route_id`; schema 12 adds usage-event recorded, persisted, and dropped counters; schema 13 adds precise `replacement_assurance`; schema 14 adds matcher-latency dropped-sample reporting; schema 15 adds aggregate and per-mode output-latency dropped-sample reporting; schema 16 adds capture_layout_state; schema 17 adds command cgroup cleanup health; schema 18 adds `output_partial_total`, distinguishing partial insertion from other outcomes whose target effect is unknown; schema 19 adds background connection-worker lifecycle counters and the daemon-context command containment self-test result; schema 20 adds effective route/matching availability, command-worker counts, suppressed-expansion totals, and input/output connection-attempt failure totals; schema 21 adds a distinct partial-write counter and confirmed per-transaction erase/insert progress; schema 22 adds active, acknowledged, timed-out, and failed backend-shutdown worker counters; schema 23 adds `matching_unavailable_reason`; schema 24 adds `replacement_not_admitted` so status reflects when the output safety guard refuses replacement; schema 26 adds `terminal_apps_only`; schema 27 adds the content-free `input_events_total` counter and opaque transaction IDs in bounded output traces; schema 28 adds the active config path/generation, successful reload times, enabled/disabled expansion counts, and sanitized reload-validation failure fields; schema 29 adds per-route connection lifecycle state, timestamps, reason categories, backoff, last successful insertion, bounded diagnostic counters, and output queue latency percentiles; schema 30 adds sanitized compositor window-tracker lifecycle fields; schema 31 distinguishes keyboard-matchable expansions from enabled generate-only templates; schema 32 reports whether the app-scoped raw-capture fallback is active and its effective app-ID count without exposing the configured IDs; schema 33 reports whether the focused app is allowed by the daemon's capture scope without exposing its identity. Schema 34 adds content-free evdev raw-key counts and counts keys whose translation was refused because the active layout was unavailable.
+- `status_schema` (integer): Version of the daemon status contract. Certification requires a matching schema before treating runtime capabilities as current; missing or different values mean the daemon should be restarted/updated. Schema 11 adds canonical `route_id`; schema 12 adds usage-event recorded, persisted, and dropped counters; schema 13 adds precise `replacement_assurance`; schema 14 adds matcher-latency dropped-sample reporting; schema 15 adds aggregate and per-mode output-latency dropped-sample reporting; schema 16 adds capture_layout_state; schema 17 adds command cgroup cleanup health; schema 18 adds `output_partial_total`, distinguishing partial insertion from other outcomes whose target effect is unknown; schema 19 adds background connection-worker lifecycle counters and the daemon-context command containment self-test result; schema 20 adds effective route/matching availability, command-worker counts, suppressed-expansion totals, and input/output connection-attempt failure totals; schema 21 adds a distinct partial-write counter and confirmed per-transaction erase/insert progress; schema 22 adds active, acknowledged, timed-out, and failed backend-shutdown worker counters; schema 23 adds `matching_unavailable_reason`; schema 24 adds `replacement_not_admitted` so status reflects when the output safety guard refuses replacement; schema 26 adds `terminal_apps_only`; schema 27 adds the content-free `input_events_total` counter and opaque transaction IDs in bounded output traces; schema 28 adds the active config path/generation, successful reload times, enabled/disabled expansion counts, and sanitized reload-validation failure fields; schema 29 adds per-route connection lifecycle state, timestamps, reason categories, backoff, output-acknowledgment time, bounded diagnostic counters, and output queue latency percentiles; schema 30 adds sanitized compositor window-tracker lifecycle fields; schema 31 distinguishes keyboard-matchable expansions from enabled generate-only templates; schema 32 reports whether the app-scoped raw-capture fallback is active and its effective app-ID count without exposing the configured IDs; schema 33 reports whether the focused app is allowed by the daemon's capture scope without exposing its identity; schema 34 adds content-free evdev raw-key counts and counts keys whose translation was refused because the active layout was unavailable; schema 35 adds a distinct counter for command work cancelled because its input context became stale, separate from command failures and timeouts; schema 37 adds a content-free window identity-source category (`resource-class`, `desktop-file-name`, `resource-name`, `compositor-identity-only`, or `unavailable`) for diagnosing fail-closed app scoping without exposing identity values; schema 38 removes legacy output-acknowledgment aliases whose names implied successful insertion into the client document; schema 39 distinguishes window-context, app-ID, and process-executable availability; schema 40 makes terminal-only matching unavailable when focus is unknown or outside the configured app scope; schema 41 adds the verified insert-only route state; schema 42 reports lower-assurance process-name identity separately from app IDs and executable paths, for explicit `process_name_exact:` scoping only. Schema 43 adds the sanitized `window_process_identity_state` category to explain why KWin could not resolve an exact executable identity.
 - `state` (string): Backend connection state (e.g. `"connected"`, `"reconnecting"`)
 - `route_available` (bool): `true` only when capture is connected, evdev has a current layout snapshot when applicable, and an output route advertises replacement support. This is capability/connectivity status; a route can be available while the output safety guard refuses replacement.
-- `matching_available` (bool): `true` when `route_available` is true, the output safety guard admits replacement, matching is not paused, and the active configuration is healthy.
-- `matching_unavailable_reason` (string): Stable reason code for matching/output availability: `none`, `capture_disconnected`, `keyboard_layout_unavailable`, `replacement_route_unavailable`, `replacement_not_admitted`, `paused`, or `configuration_unhealthy`. This distinguishes a connected capture path from one that cannot currently perform a replacement because its safety guard refuses it.
+- `matching_available` (bool): `true` when `route_available` is true, the output safety guard admits replacement, matching is not paused, the active configuration is healthy, and any terminal-only application scope currently authorizes the focused application.
+- `matching_unavailable_reason` (string): Stable reason code for matching/output availability: `none`, `capture_disconnected`, `keyboard_layout_unavailable`, `replacement_route_unavailable`, `replacement_not_admitted`, `paused`, `configuration_unhealthy`, `application_scope_unknown`, or `application_scope_denied`. This distinguishes route readiness from a terminal-only route that currently refuses matching because focus identity is missing or outside the configured allowlist.
 - `paused` (bool): Whether expansion matching is currently disabled
 - `config` (string): Path to the active configuration file
 - `config_state` (string): `"ok"`, `"loading"`, or `"reload-rejected"`. `loading` means the current requested config is being built off the input reactor; `reload-rejected` means a completed load failed and the previous valid engine was retained.
@@ -766,17 +789,19 @@ legacy same-commit daemon as verified. Builds without Git metadata report
 - `window_tracker_connected` (bool): Whether the supervised compositor-specific window tracker is currently connected. This is reported separately from keyboard capture because application identity is provided by a distinct subsystem.
 - `window_tracker_state` (string): `unavailable`, `starting`, `connected`, `reconnecting`, or `stopped` for the compositor focus tracker.
 - `window_tracker_updates_total` (integer): Number of authenticated focus snapshots received during this daemon process, including snapshots with no active window.
-- `window_context_available`, `window_app_id_available` (bool): Whether the latest snapshot identified a window and whether it carried an application ID. These booleans expose neither IDs nor titles and distinguish a missing tracker event from an unusable application identity.
+- `window_context_available`, `window_app_id_available`, `window_process_executable_available` (bool): Whether the latest snapshot identified a window, carried a desktop application ID, or carried an authenticated process executable identity. The executable identity is usable only with an exact `process_executable_exact:/absolute/path` filter. These booleans expose neither IDs, paths, nor titles.
 - `window_tracker_reconnect_attempts_total`, `window_tracker_disconnects_total` (integer): Process-lifetime retry and established-connection loss counters. These never contain focus or input content.
 - `window_tracker_last_failure_reason` (string): Sanitized category: `none`, `probe_unavailable`, `connect_failed`, `tracker_disconnected`, `configuration_changed`, `compositor_unsupported`, or `supervisor_start_failed`.
 - `window_tracker_last_connected_unix`, `window_tracker_reconnect_backoff_ms` (integer): Unix timestamp of the last successful connection and the current bounded retry delay in milliseconds. A zero timestamp means no connection has succeeded in this process.
+- `window_tracker_identity_source` (string): Sanitized source category for the latest focused-window identity (`resource-class`, `desktop-file-name`, `resource-name`, `compositor-identity-only`, `process-executable`, `process-name`, or `unavailable`). It never includes the application ID, executable path, process name, or title.
+- `window_process_identity_state` (string): Sanitized process-identity lookup outcome: `not-applicable`, `not-requested`, `compositor-application-id`, `process-executable`, `process-id-unavailable`, `process-metadata-unavailable`, `different-user`, `executable-permission-denied`, `executable-link-unavailable`, `executable-invalid`, or `process-changed-during-lookup`. Combined with `window_tracker_identity_source`, this distinguishes a weak process-name fallback from the reason an exact executable identity could not be resolved. It never contains a PID, path, or process name.
 - `window_identity_exact` (bool): Whether the active window-tracking route provides an ephemeral identity for the exact focused toplevel. This is required for safe Quick Picker typing; false means the picker is clipboard-only.
 - `inject_atomic_replace`, `inject_full_unicode`, `inject_cursor_reposition`, `inject_key_passthrough` (bool): Negotiated output-injector guarantees. These do not imply corresponding capture guarantees or end-to-end certification.
 - inject_insertion_mode (string): Negotiated insertion protocol, such as ei_text or libei keysym fallback.
 - inject_max_text_chars (integer): Mode-specific maximum replacement length in Unicode scalar values; 0 means no mode-specific limit is advertised.
 - inject_expected_throughput_chars_per_sec (integer): Approximate sustained output rate for paced modes; 0 means no rate estimate is advertised.
 - `command_queue_depth` (integer): Backward-compatible aggregate of expansion-command and hotkey work waiting for workers
-- `command_worker_threads`, `hotkey_worker_threads` (integers): Configured command and hotkey worker thread counts; these are fixed worker-pool sizes, not in-flight task counts.
+- `command_worker_threads`, `hotkey_worker_threads` (integers): Process-wide shared command and hotkey worker-pool sizes, not per-input-context counts or in-flight task counts. Each IBus context retains its own bounded admission slots, cancellation generation, and completion queue.
 - `command_in_flight` (integer): Backward-compatible aggregate of expansion commands and hotkeys currently executing
 - `expansion_command_queue_depth` (integer): Accepted command-backed expansions waiting for the expansion worker
 - `expansion_command_in_flight` (integer): Command-backed expansions currently executing
@@ -784,6 +809,7 @@ legacy same-commit daemon as verified. Builds without Git metadata report
 - `hotkey_in_flight` (integer): Hotkey actions currently executing
 - `command_queue_rejected_total` (integer): Number of command actions rejected because the bounded queue was full or unavailable
 - `command_timeout_total` (integer): Number of command actions that exceeded their configured timeout
+- `command_cancelled_total` (integer): Number of command actions cancelled because their input context became stale
 - `command_failure_total` (integer): Number of command actions that failed for another reason, including spawn failures and non-zero exits
 - `action_broker` (object): Current named-action broker dependency status, matching the doctor field
 - `injection_latency_sample_count` (integer): Lifetime count of completed output-backend apply attempts, including failures
@@ -793,6 +819,10 @@ legacy same-commit daemon as verified. Builds without Git metadata report
 - `injection_latency_dropped_total` (integer): Output timing samples skipped because a diagnostics snapshot held the aggregate recording lock; recording is best-effort and never waits for the lock
 - `injection_latency_profile_dropped_total` (integer): Per-mode output timing samples skipped because a diagnostics snapshot held the profile recording lock; recording is best-effort and never waits for the lock
 - `injection_latency_profiles` (object): Non-empty rolling percentile profiles keyed by negotiated output mode (`ei_text`, `libei_keysym_fallback`, `input_method_v2`, `wlroots_virtual_keyboard`, or `other`) and replacement-size bucket (`small` ≤32, `medium` 33–256, `large` >256 Unicode scalar values). Each profile contains `sample_count`, `window_count`, and p50/p95/p99 microsecond values; empty profiles are omitted.
+- `output_interrupt_to_backend_return_sample_count` (integer): Lifetime count of observed overlapping-input interruptions for which the backend transaction call returned.
+- `output_interrupt_to_backend_return_window_count` (integer): Number of most recent interruption samples in the bounded percentile window (maximum 1,024).
+- `output_interrupt_to_backend_return_p50_us`, `output_interrupt_to_backend_return_p95_us`, `output_interrupt_to_backend_return_p99_us` (integers): Nearest-rank percentiles from daemon observation of overlapping input until the backend transaction call returns. This is not physical key-to-paint latency or proof of what the application displayed.
+- `output_interrupt_to_backend_return_dropped_total` (integer): Interruption timing samples omitted because the nonblocking diagnostics window was contended.
 - `matcher_latency_sample_count` (integer): Lifetime count of matcher timing samples recorded; contended samples are reported separately
 - `matcher_latency_window_count` (integer): Number of recent matcher samples used for percentiles (maximum 1,024)
 - `matcher_latency_dropped_total` (integer): Matcher timing samples skipped because a diagnostics snapshot held the recording lock; measurement is best-effort and never blocks input processing
@@ -813,13 +843,19 @@ legacy same-commit daemon as verified. Builds without Git metadata report
 - `output_health` (string): `ok`; `recovering` while a retired output worker is stopping; or `stalled` once it has outlived the 5 s base acknowledgement deadline. While any retired worker runs, the output route does not reconnect, so a late operation cannot type into the current window. `stalled` persists until the worker stops or the daemon is restarted. Added in status schema 7.
 - `output_uncertain_total` (integer): Expansions and inserts since daemon start whose effect on the target text is unknown (a non-atomic backend failed mid-transaction or did not acknowledge in time). They are never retried. Added in status schema 7.
 - `terminal_apps_only` (bool): The daemon was started with `--terminal-apps-only` and expands automatically only while an app in its configured allowlist is focused (fail-closed when focused-window identity is unknown). The allowlist includes `settings.terminal_apps`, plus `settings.raw_capture_apps` only when `raw_capture_fallback_enabled` is true. Despite the legacy field and flag names, this can represent non-terminal applications explicitly assigned to an evdev fallback beside IBus. Explicit inserts and hotkeys are not restricted. This reports scope, not proof that the application supports insertion. Added in status schema 26.
-- `raw_capture_fallback_enabled` (bool): Whether the validated configuration assigns app-scoped input ownership to the raw-capture fallback. It does not prove that evdev is receiving events or that a target field can be safely replaced. Added in status schema 32.
+- `raw_capture_fallback_enabled` (bool): Whether the validated configuration assigns app-scoped input ownership to the evdev companion. IBus yields matching in configured terminal apps and, when enabled, `raw_capture_apps`. It does not prove that evdev is receiving events or that a target field can be safely replaced. Added in status schema 32.
 - `raw_capture_app_count` (integer): Number of effective app IDs assigned to the active raw-capture fallback, or zero when disabled. The IDs themselves are not exposed. Added in status schema 32.
 - `capture_app_scope_state` (string): `unrestricted`, `allowed`, `outside_allowlist`, or `unknown`. It reports whether the current focus is accepted by the daemon's application scope without exposing an app ID. `unknown` means a live focus tracker or app identity is unavailable; scoped matching fails closed in that state. Added in status schema 33.
+- `terminal_paste` (string): Paste mode in effect for the focused window: `off`, `multiline`, or `always`. It is the configured `settings.terminal_paste` while one of `settings.terminal_apps` has focus on the libei route, and `off` otherwise. Added in status schema 44.
+- `terminal_paste_total` (integer): Replacements the focused terminal read from the clipboard since daemon start. Added in status schema 44.
+- `terminal_paste_fallbacks_total` (integer): Pastes that could not start (no data control, or a clipboard holding non-text data) and were typed instead. Added in status schema 44.
+- `terminal_paste_unread_total` (integer): Paste keys pressed that the terminal never answered by reading the clipboard; such outcomes are uncertain. Added in status schema 44.
 - `input_events_total` (integer): Count of text/key/backspace/delimiter events accepted by the matching engine since daemon start. It contains no key or text values and is intended for sanitized live diagnostics. Added in status schema 27.
 - `evdev_raw_key_events_total` (integer): Count of raw key press, release, and repeat events processed by the evdev source since daemon start. It contains no keycodes or text and distinguishes device activity from matcher input. Added in status schema 34.
 - `evdev_layout_unavailable_key_events_total` (integer): Count of evdev key events discarded because no trustworthy active keyboard layout snapshot was available. Added in status schema 34.
 - `suppressed_expansions_total` (integer): Matched expansions refused by policy, output safety gates, or preparation before reaching output. It does not count keys filtered before a match is produced (for example, while paused or in a sensitive field).
+- `expansion_output_acknowledgements_total` (integer): Expansion output operations for which the backend returned an applied/acknowledged result. This is protocol evidence only; it does not verify that the client document changed. The misleading legacy alias `expansions_applied_total` was removed in status schema 38.
+- `last_output_acknowledged_unix` (integer): Unix timestamp of the latest expansion or undo output acknowledgement. It does not mean the resulting text was verified. The misleading legacy alias `last_successful_insertion_unix` was removed in status schema 38.
 - `output_partial_total` (integer): Legacy count of non-atomic transactions whose target effect may be partial. These are never retried.
 - `partial_write_total` (integer): Explicit count of transactions with a potentially partial non-atomic write. This currently aliases `output_partial_total` for compatibility. Recent outcome records identify `completion="partial_write"`, set `recovery="manual_review"`, and include `progress_tracked`, `erased_units`, and `inserted_units` when a backend can count successfully flushed units. Counts are protocol progress, not proof of what the application rendered; no automatic recovery or replay is attempted. `wayexpand doctor --json` continues to report `partial_insertions_total`.
 - `transaction_id` (string, in recent output trace records): Process-local correlation identifier unrelated to trigger or replacement text. It lets `wayexpand debug --live` correlate content-free transaction completion with the bounded daemon history.
@@ -841,7 +877,7 @@ legacy same-commit daemon as verified. Builds without Git metadata report
 - `command_cleanup_failed_attempts` (integer): Number of failed asynchronous cgroup cleanup attempts since daemon start.
 - `command_cleanup_degraded` (boolean): `true` when cleanup reaches the backlog limit; new command-backed work is refused until stale cgroups are resolved and the daemon restarts.
 - `connect_workers_active`, `connect_workers_started_total`, `connect_workers_completed_total`, `connect_workers_cancelled_total`, `connect_workers_rejected_total` (integers): Connection-attempt lifecycle counters. The daemon caps input and output portal connections at two concurrent workers; retries are refused while that cap is occupied.
-- `recent_expansion_failures` (array): Up to eight content-free transaction traces from this daemon session. Each record has a timestamp, backend, trigger-recognition marker, output-admission result, backend-selection marker, erase acknowledgement, insertion-attempt marker, `transaction_phases`, and completion result. `transaction_phases` records the ordered lifecycle (`prepared`, optionally `validated` and `applying`, then `committed`, `failed`, or `uncertain`). An uncertain transaction is terminal and is never automatically replayed. Output admission does not itself claim that the focused client was verified; consult `focus_assurance` for that route-level guarantee. It never contains trigger text, replacement text, clipboard contents, or raw key events. Added additively without changing the status schema.
+- `recent_expansion_failures` (array): Up to eight content-free transaction traces from this daemon session. Each record has a timestamp, backend, `duration_us` measured from transaction preparation through backend acknowledgement, `expected_insert_units` (Unicode scalar count, including a reinserted delimiter), trigger-recognition marker, output-admission result, backend-selection marker, erase acknowledgement, insertion-attempt marker, `transaction_phases`, completion result, and `application_result`. The duration is backend acknowledgement time, not time until the target renders visible text. Blocked work without an output transaction has null duration and expected units. `transaction_phases` records the ordered lifecycle (`prepared`, optionally `validated` and `applying`, then `committed`, `failed`, or `uncertain`). An uncertain transaction is terminal and is never automatically replayed. `completion="applied"` means the output backend/protocol acknowledged its operation; it does not prove that the application changed the intended document. `application_result` is `unverified` for acknowledged output, `unknown` for partial or uncertain output, `not_applied` when an attempted operation was rejected without effect, or `not_attempted` when output was refused before an attempt. No route currently reports `verified` from this trace. Output admission does not itself claim that the focused client was verified; consult `focus_assurance` for that route-level guarantee. It never contains trigger text, replacement text, clipboard contents, or raw key events. Added additively without changing the status schema.
 - `output_reconnect_total` (integer): Output routes reconnected since daemon start, after the first connection was lost. Steady growth means the route keeps dropping (portal revoked, compositor restarting). Added in 1.2.x without a schema change.
 - `input_reconnect_total` (integer): Input sources (input-method or evdev) reconnected since daemon start. Added in 1.2.x without a schema change.
 - `input_connection_failures_total`, `output_connection_failures_total` (integers): Retryable initial connection and reconnect attempts that failed. These are attempt failures; successful reconnect totals remain separately available above.
@@ -1057,10 +1093,13 @@ These fields are guaranteed present and backward-compatible. Missing fields use 
   route (the libei keysym fallback) accepts; longer ones are refused before
   anything is erased. It is reported as `inject_max_text_chars`. Older
   readers that reject unknown fields will not load a config that sets it.
-- `Settings::terminal_apps` (array of app IDs, default empty, omitted from
-  saved TOML when empty) — terminal apps, as `app_id_exact:` (the default
-  for a bare value) or `app_id_glob:` filters; `title_contains:` is
-  rejected, as are empty entries and more than 64 entries. A daemon started
+- `Settings::terminal_apps` (array of scope filters, default empty, omitted
+  from saved TOML when empty) — terminal apps may use `app_id_exact:` (the
+  default for a bare value), `app_id_glob:`, `process_executable_exact:`, or
+  the lower-assurance `process_name_exact:`. In safe mode, weak filters such
+  as globs and mutable process names are rejected unless
+  `allow_weak_app_filters = true` is explicitly configured. `title_contains:`
+  is always rejected, as are empty entries and more than 64 entries. A daemon started
   with `--terminal-apps-only` (or `WAYEXPAND_TERMINAL_APPS_ONLY=1`, which
   `wayexpand setup --backend ibus --terminals` sets in a systemd drop-in)
   expands automatically only while one of these apps is focused, and fails
@@ -1068,22 +1107,36 @@ These fields are guaranteed present and backward-compatible. Missing fields use 
   not restricted. The daemon refuses to start with the flag and an empty
   list. Older readers that reject unknown fields will not load a config that
   sets it.
-- `Settings::raw_capture_apps` (array of app IDs, default empty, omitted when
-  empty) — apps explicitly assigned to a raw evdev companion next to IBus.
-  Entries use only `app_id_exact:` or `app_id_glob:` (at most 64); unknown
-  focus never qualifies. Listing apps alone does not change routing. When the
+- `Settings::raw_capture_apps` (array of scope filters, default empty, omitted
+  when empty) — apps explicitly assigned to a raw evdev companion next to
+  IBus. It accepts the same identity operators as `terminal_apps`; safe mode
+  applies the same weak-filter restriction. Unknown focus never qualifies.
+  Listing apps alone does not change routing. When the
   list is empty, the explicit `wayexpand setup --backend ibus --evdev-apps`
   flow seeds exact identities for common browsers; an existing custom list is
   preserved.
 - `Settings::raw_capture_fallback_enabled` (bool, default `false`, omitted
   when false) — setup-managed ownership handoff. When enabled alongside the
-  app-scoped evdev companion, IBus yields matching in listed apps so the two
-  routes do not expand the same trigger. Use
+  app-scoped evdev companion, IBus yields matching in `terminal_apps` and
+  `raw_capture_apps` so the two routes do not expand the same trigger. Use
   `wayexpand setup --backend ibus --evdev-apps` after reviewing
   `docs/BACKENDS_SENSITIVE_FIELDS.md`. evdev reads
   raw keyboard events globally and cannot detect password fields; the app
   list limits matching, not observation. This fallback is experimental and
   does not certify every browser field or guarantee atomic replacement.
+- `Settings::terminal_paste` (`"off"`, `"multiline"` or `"always"`, default
+  `"off"`, omitted when off) — on the libei route, deliver replacements in
+  `settings.terminal_apps` (not `raw_capture_apps`) through the clipboard and
+  Ctrl+Shift+V instead of typing them. `multiline` pastes replacements that
+  contain a line break, exceed `keystroke_max_chars`, or contain characters
+  the keyboard layout cannot type; `always` pastes every replacement. The
+  trigger is still erased with backspaces, and only after the clipboard holds
+  the replacement. The offer carries KDE's `x-kde-passwordManagerHint=secret`
+  so Klipper does not record it, and the previous clipboard text is restored
+  afterwards. Paste mode needs `ext-data-control-v1`; when it is unavailable,
+  or the clipboard holds non-text data that could not be restored, the
+  replacement is typed instead. A content pack cannot set it. Older readers
+  that reject unknown fields will not load a config that sets it.
 - `ExpansionConfig::output_file` (relative path string or absent, omitted
   from saved TOML and JSON when absent) — the file `wayexpand new` writes the
   snippet to. It may not be absolute or contain `..`, and command-backed
@@ -1110,8 +1163,10 @@ These fields are guaranteed present and backward-compatible. Missing fields use 
   uppercased replacement). Off by default, so existing configs are
   unaffected; matching stays strictly literal unless a snippet opts in.
 - `Settings::undo_chord` (string or absent, default absent) — a key chord
-  (e.g. `"Ctrl+Z"`) that, pressed immediately after a successful expansion
-  with no other keystroke in between, reverts it. Disabled unless set.
+  (e.g. `"Ctrl+Z"`) reserved for undo after a replacement is verified in the
+  target application. Backend output acknowledgment alone is not enough. The
+  current IBus and daemon output paths report application results as
+  unverified, so they do not create undo state and clear any older undo record.
 - Template variables `{{date:FORMAT}}` (on every clock variable, with or
   without an offset), `{{uuid}}`, `{{uuid:NAME}}`, `{{random:KIND:LENGTH}}`
   and `{{random:A|B}}`. These names were unknown variables before, so no
@@ -1251,4 +1306,4 @@ For clarification on what's stable for your use case, open an issue on GitHub wi
 
 `config_generation` advances only after a candidate configuration has passed validation and its engine has replaced the active matcher. A rejected reload leaves the previous generation and expansion counts active while reporting a sanitized failure. `config_active_path` therefore continues to name the source that produced the live matcher even while a different path is being loaded.
 
-`matcher_latency_*` measures matcher processing and replacement preparation, `output_queue_latency_*` measures time from worker admission to worker start, and `injection_latency_*` measures the backend transaction acknowledgement. These daemon-side stages do not measure physical capture delay or when a target application paints the inserted text; those require an instrumented real-client certification harness. Percentiles are rolling-window p50/p95/p99 and dropped diagnostic samples are counted.
+`matcher_latency_*` measures matcher processing and replacement preparation, `output_queue_latency_*` measures time from worker admission to worker start, `injection_latency_*` measures the backend transaction acknowledgement, and `output_interrupt_to_backend_return_*` measures how long an interrupted backend call takes to return after daemon observation of overlapping input. These daemon-side stages do not measure physical capture delay or when a target application paints the inserted text; those require an instrumented real-client certification harness. Percentiles are rolling-window p50/p95/p99 and dropped diagnostic samples are counted.

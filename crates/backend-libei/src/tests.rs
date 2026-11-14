@@ -37,6 +37,7 @@ fn checkpointed_sequence_stops_before_the_next_action() {
             sent += 1;
             Ok(())
         },
+        || {},
     );
 
     assert_eq!(result, Err("focus changed"));
@@ -57,10 +58,33 @@ fn checkpointed_replacement_stops_after_a_mid_send_failure() {
                 Ok(())
             }
         },
+        || {},
     );
 
     assert_eq!(result, Err("injected output flush failure"));
     assert_eq!(sent, 2, "no replacement keys follow the failed send");
+}
+
+#[test]
+fn checkpointed_keys_are_paced_between_but_not_after_actions() {
+    // Unpaced backspace bursts lose presses in real compositors, which left
+    // the leading `.` of a trigger behind the replacement.
+    let events = std::cell::RefCell::new(Vec::new());
+    let result = super::run_checkpointed(
+        3,
+        || Ok::<(), ()>(()),
+        || {
+            events.borrow_mut().push("key");
+            Ok(())
+        },
+        || events.borrow_mut().push("pause"),
+    );
+    assert_eq!(result, Ok(()));
+    assert_eq!(
+        events.into_inner(),
+        ["key", "pause", "key", "pause", "key"],
+        "every key after the first waits for the inter-key interval"
+    );
 }
 
 #[test]

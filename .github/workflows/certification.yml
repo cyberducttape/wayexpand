@@ -80,16 +80,17 @@ jobs:
           # The matrix is authoritative for candidates and release-gate
           # status. Keep this list derived so newly eligible routes cannot
           # silently fall through as optional or use a stale backend.
-          targets=$(jq -r '.targets[] | [.id, .certification_backend, (.production_certification_required | tostring)] | @tsv' \
+          targets=$(jq -r '.targets[] | [.id, .certification_backend, (.production_certification_required | tostring), .certification_session] | @tsv' \
             tests/certification/compositor-matrix.json)
           missing=()
           include='[]'
-          while read -r compositor backend required; do
+          while read -r compositor backend required certification_session; do
             if ! jq -e --arg compositor "$compositor" --arg backend "$backend" '
               any(.targets[];
                 .id == $compositor
                 and .certification_backend == $backend
                 and (.input_paths | index($backend)) != null
+                and .certification_session == "wayland"
                 and ((.production_certification_required != true) or $backend == "input-method-v2"))
             ' tests/certification/compositor-matrix.json >/dev/null; then
               echo "Invalid certification backend declaration for $compositor: $backend" >&2
@@ -102,8 +103,9 @@ jobs:
                 and (([.labels[].name] | index($compositor)) != null))
             ' <<<"$runners_json" >/dev/null; then
               include=$(jq -c --arg compositor "$compositor" --arg backend "$backend" \
+                --arg certification_session "$certification_session" \
                 --argjson required "$required" \
-                '. + [{compositor: $compositor, backend: $backend, production_required: $required}]' \
+                '. + [{compositor: $compositor, backend: $backend, certification_session: $certification_session, production_required: $required}]' \
                 <<<"$include")
             elif [ "$required" = true ]; then
               missing+=("$compositor")
@@ -149,15 +151,27 @@ jobs:
           cargo test --locked -p wayexpand-backend-kwin-window
           live_kwin_tracker_health_probe_detects_script_unload
           -- --ignored --nocapture
+      - name: Verify live KWin application identity separately
+        if: ${{ matrix.compositor == 'kde' }}
+        run: >-
+          cargo test --locked -p wayexpand-backend-kwin-window
+          live_kwin_tracker_requires_trustworthy_application_identity
+          -- --ignored --nocapture
       - name: Require runner-provided compositor driver
         id: metadata
         env:
           EXPECTED_COMPOSITOR: ${{ matrix.compositor }}
+          EXPECTED_SESSION: ${{ matrix.certification_session }}
+          PRODUCTION_REQUIRED: ${{ matrix.production_required }}
         run: |
           set -eu
           export PATH="$GITHUB_WORKSPACE/target/debug:$PATH"
           test -x "${WAYEXPAND_CERTIFICATION_DRIVER:?WAYEXPAND_CERTIFICATION_DRIVER is not configured on this runner}"
           test "${WAYEXPAND_CERTIFICATION_COMPOSITOR:?WAYEXPAND_CERTIFICATION_COMPOSITOR is not configured on this runner}" = "$EXPECTED_COMPOSITOR"
+          if [ "$PRODUCTION_REQUIRED" = true ] && [ "${XDG_SESSION_TYPE:-unknown}" != "$EXPECTED_SESSION" ]; then
+            echo "Production certification requires the declared $EXPECTED_SESSION session; found ${XDG_SESSION_TYPE:-unknown}." >&2
+            exit 1
+          fi
           test -n "${WAYEXPAND_CERTIFICATION_VERSION:?WAYEXPAND_CERTIFICATION_VERSION is not configured on this runner}"
           test -n "${WAYEXPAND_CERTIFICATION_LAYOUT:?WAYEXPAND_CERTIFICATION_LAYOUT is not configured on this runner}"
           test -n "${WAYEXPAND_CERTIFICATION_TARGET_APPS:?WAYEXPAND_CERTIFICATION_TARGET_APPS is not configured on this runner}"

@@ -32,9 +32,11 @@ zeroize.workspace = true
 [features]
 # Exposes the engine state-machine checker to the fuzz crate.
 fuzzing = []
+loom-tests = []
 
 [dev-dependencies]
 criterion = "0.8"
+loom = "0.7.2"
 
 [[bench]]
 name = "matcher"

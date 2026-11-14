@@ -1,5 +1,6 @@
 //! Toolbar: brand, route status, pause/run controls, and library search.
 
+use crate::lang::RouteTrustDetails;
 use crate::*;
 
 impl GuiApp {
@@ -46,31 +47,54 @@ impl GuiApp {
                     }),
             )
             .show(root, |ui| {
-                // Keep the brand and controls on one line while there is room.
-                // At narrow widths, separate them into wrapped rows: placing a
-                // right-to-left control layout in the remainder of a horizontal
-                // row can make it overlap the brand when the labels no longer fit.
-                let compact_width = 920.0 * self.settings_font_scale.multiplier();
-                if ui.available_width() < compact_width {
+                // Keep the brand and controls on one line while they fit.
+                // Otherwise separate them into rows: a right-to-left control
+                // layout placed in the remainder of a horizontal row overlaps
+                // the brand once its labels no longer fit. The width the row
+                // needs depends on the status chips, so it is measured each
+                // time the row is laid out rather than guessed.
+                let compact_width =
+                    (920.0 * self.settings_font_scale.multiplier()).max(self.toolbar_row_width);
+                let compact = ui.available_width() < compact_width;
+                if compact {
                     ui.vertical(|ui| {
                         ui.horizontal_wrapped(|ui| self.render_toolbar_brand(ui, palette));
                         ui.add_space(6.0);
                         // Right to left, like the wide layout, so the primary
-                        // action keeps its place at the end of the row.
-                        ui.with_layout(
+                        // action keeps its place at the end of the row. The
+                        // zero height keeps this centered layout from claiming
+                        // the whole window and hiding the panels below.
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(ui.available_width(), 0.0),
                             egui::Layout::right_to_left(egui::Align::Center).with_main_wrap(true),
                             |ui| self.render_toolbar_controls(ui, palette, true),
                         );
                     });
                 } else {
+                    let row_width = ui.available_width();
                     ui.horizontal(|ui| {
                         // One fixed row height, whichever chips and buttons
                         // are visible, so the panels below never jump.
                         ui.set_min_height(34.0);
-                        self.render_toolbar_brand(ui, palette);
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            self.render_toolbar_controls(ui, palette, false);
-                        });
+                        let brand = ui
+                            .horizontal(|ui| self.render_toolbar_brand(ui, palette))
+                            .response
+                            .rect
+                            .width();
+                        let controls = ui
+                            .with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                self.render_toolbar_controls(ui, palette, false);
+                                ui.min_rect().width()
+                            })
+                            .inner;
+                        let spacing = ui.spacing().item_spacing.x * 2.0 + 16.0;
+                        let needed = brand + controls + spacing;
+                        self.toolbar_row_width = needed;
+                        if needed > row_width {
+                            // This frame overlapped; redo it in compact rows.
+                            ui.ctx()
+                                .request_discard("toolbar no longer fits on one row");
+                        }
                     });
                 }
             });
@@ -171,14 +195,15 @@ impl GuiApp {
                 Some(false)
             };
             (
-                self.strings.route_trust_status(
-                    &contract.label,
-                    &contract.status,
-                    sensitive_field_protection,
-                    contract.atomic_replace,
-                    &contract.replacement_assurance,
-                    contract.is_certified(),
-                ),
+                self.strings.route_trust_status(RouteTrustDetails {
+                    route: &contract.label,
+                    maturity: &contract.status,
+                    sensitive_fields: sensitive_field_protection,
+                    trigger_precondition: &contract.trigger_precondition,
+                    output_transaction: &contract.output_transaction,
+                    application_result: &contract.application_result,
+                    certified: contract.is_certified(),
+                }),
                 if sensitive_field_protection == Some(false) {
                     palette.danger
                 } else if contract.is_certified() && sensitive_field_protection == Some(true) {
@@ -545,7 +570,8 @@ impl GuiApp {
         if let Some(capabilities) = self.daemon_capabilities.as_ref() {
             if let Some(assurance) = capabilities.replacement_assurance {
                 let color = match assurance {
-                    runtime::ReplacementAssurance::Verified => palette.success,
+                    // The atomic route contract does not verify application output.
+                    runtime::ReplacementAssurance::Verified => palette.muted,
                     runtime::ReplacementAssurance::FocusTrackedBestEffort => palette.warning,
                     runtime::ReplacementAssurance::Unverified
                     | runtime::ReplacementAssurance::Blocked => palette.danger,

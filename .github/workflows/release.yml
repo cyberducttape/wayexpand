@@ -155,7 +155,18 @@ jobs:
       - name: Install build and package dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config build-essential debhelper devscripts dpkg-dev rpm
       - name: Generate vendored dependencies (offline builds)
-        run: mkdir -p .cargo && cargo vendor --locked vendor/ > .cargo/config.toml
+        run: |
+          set -euo pipefail
+          mkdir -p .cargo
+          cargo vendor --locked vendor/ > .cargo/config.toml
+          # This generated source-replacement config is local build plumbing,
+          # not a release source input. Keep it out of the worktree status so
+          # build-info can verify the tagged checkout as clean. The vendored
+          # crate contents remain checksum-verified against Cargo.lock.
+          exclude_file="$(git rev-parse --git-path info/exclude)"
+          grep -Fxq '/.cargo/config.toml' "$exclude_file" || \
+            printf '%s\n' '/.cargo/config.toml' >> "$exclude_file"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
       - name: Verify version consistency across all sources
         shell: bash
         run: |

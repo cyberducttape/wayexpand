@@ -60,6 +60,10 @@ local, offline, no account, no telemetry.
 | Any other Linux distribution | [a source build](#build-from-source), about five minutes |
 | Any distribution, no compiler | the `.tar.gz`, `.deb` or `.rpm` attached to a [GitHub release](https://github.com/cyberducttape/wayexpand/releases) or *Experimental build* prerelease; release 1.3.3 has none attached |
 
+<!-- generated-install-status:start -->
+**Package availability (audited 2026-11-11):** experimental daily builds for Ubuntu 26.04 (Resolute) (amd64), Ubuntu 26.10 (Stonking) (amd64). GitHub release 1.3.3 has no uploaded binary assets. No PPA packages are published for Ubuntu 24.04 (Noble), Ubuntu 22.04 (Jammy). Fedora Copr published: False. Package availability is separate from desktop certification.
+<!-- generated-install-status:end -->
+
 None of these channels is compositor-certified yet; see the
 [packaging status](docs/PACKAGING.md) and the
 [certification matrix](docs/CERTIFICATION_MATRIX.md).

@@ -23,18 +23,26 @@ impl Strings {
                 Language::German => "Die Route meldet Layout-Unterstützung; Änderungen hängen weiterhin von Compositor und Backend ab.".into(),
             },
             (_, Some(false)) => match self.lang {
-                Language::English => "The route cannot reliably track the active layout. Character matching or output may be wrong after a layout change.".into(),
-                Language::Indonesian => "Rute tidak dapat melacak tata letak aktif dengan andal. Pencocokan karakter atau keluaran dapat salah setelah perubahan tata letak.".into(),
-                Language::German => "Die Route kann das aktive Layout nicht zuverlässig verfolgen. Nach einem Layoutwechsel können Erkennung oder Ausgabe falsch sein.".into(),
+                Language::English => "This route cannot verify the active layout. Layout-dependent matching or synthetic output is refused instead of guessed; text-commit routes may not need keyboard-layout information.".into(),
+                Language::Indonesian => "Rute ini tidak dapat memverifikasi tata letak aktif. Pencocokan atau keluaran sintetis yang bergantung pada tata letak ditolak; rute komit teks mungkin tidak memerlukan informasi tata letak.".into(),
+                Language::German => "Diese Route kann das aktive Layout nicht verifizieren. Layoutabhängige Erkennung oder synthetische Ausgabe wird verweigert; Text-Commit-Routen benötigen möglicherweise keine Layoutdaten.".into(),
             },
         }
     }
 
     pub fn next_step_layout(&self) -> &'static str {
         match self.lang {
-            Language::English => "Keep the configured keyboard layout unchanged while using this route, or choose a backend that tracks layout changes. Restart the daemon after changing layouts if this backend uses a startup snapshot.",
-            Language::Indonesian => "Jangan ubah tata letak papan ketik saat memakai rute ini, atau pilih backend yang melacak perubahan tata letak. Mulai ulang daemon setelah perubahan jika backend memakai snapshot saat mulai.",
-            Language::German => "Lassen Sie das Tastaturlayout bei dieser Route unverändert oder wählen Sie ein Backend mit Layout-Erkennung. Starten Sie den Daemon nach Änderungen neu, wenn das Backend einen Startzeitpunkt-Snapshot verwendet.",
+            Language::English => "If this is a layout-dependent route, use one configured layout or choose a route with a live, trustworthy layout provider. On multi-layout KWin/libei, the optional Fcitx5 direct-commit bridge may provide Unicode output; it does not fix capture-side layout or IME composition awareness.",
+            Language::Indonesian => "Untuk rute yang bergantung pada tata letak, gunakan satu tata letak atau penyedia tata letak langsung yang tepercaya. Pada KWin/libei, jembatan Fcitx5 opsional dapat menyediakan keluaran Unicode, tetapi tidak menambahkan pelacakan tata letak input atau kesadaran komposisi IME.",
+            Language::German => "Bei layoutabhängigen Routen verwenden Sie ein einzelnes Layout oder einen vertrauenswürdigen Live-Layoutanbieter. Unter KWin/libei kann die optionale Fcitx5-Brücke Unicode ausgeben, ergänzt aber keine Layout- oder IME-Kompositionserkennung beim Erfassen.",
+        }
+    }
+
+    pub fn composition_assessment_detail(&self) -> &'static str {
+        match self.lang {
+            Language::English => "WayExpand sees committed text, not another IME's live preedit. Commit or cancel Chinese, Japanese, Korean, Rime, or other IME composition before typing a trigger. Committed Unicode support depends on this route and the target application.",
+            Language::Indonesian => "WayExpand menerima teks yang sudah dikomit, bukan preedit langsung dari IME lain. Selesaikan atau batalkan komposisi IME sebelum mengetik pemicu. Dukungan Unicode bergantung pada rute dan aplikasi tujuan.",
+            Language::German => "WayExpand verarbeitet bestätigten Text, nicht die laufende Vorschau eines anderen IME. Schließen oder verwerfen Sie die IME-Komposition vor dem Trigger. Unicode-Unterstützung hängt von Route und Zielanwendung ab.",
         }
     }
 
@@ -100,9 +108,9 @@ impl Strings {
 
     pub fn replacement_assurance_label(&self) -> &'static str {
         match self.lang {
-            Language::English => "Replacement assurance",
-            Language::Indonesian => "Jaminan penggantian",
-            Language::German => "Ersetzungssicherheit",
+            Language::English => "Route replacement contract",
+            Language::Indonesian => "Kontrak penggantian rute",
+            Language::German => "Ersetzungsvertrag der Route",
         }
     }
 
@@ -127,6 +135,14 @@ impl Strings {
             Language::English => "Output p99",
             Language::Indonesian => "Keluaran p99",
             Language::German => "Ausgabe p99",
+        }
+    }
+
+    pub fn interruption_latency(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Observed input interruption → backend return (not rendered-text latency)",
+            Language::Indonesian => "Input tumpang tindih teramati → backend kembali (bukan latensi teks yang ditampilkan)",
+            Language::German => "Eingabeunterbrechung erkannt → Backend-Rückkehr (keine sichtbare Textlatenz)",
         }
     }
 
@@ -320,6 +336,14 @@ impl Strings {
                 Language::Indonesian => "Aplikasi yang difokuskan tidak diketahui; ekspansi dengan cakupan diblokir secara aman.",
                 Language::German => "Die fokussierte Anwendung ist unbekannt; begrenzte Expansionen werden sicher blockiert.",
             },
+        }
+    }
+
+    pub fn compositor_surface_focus_diagnostic(&self) -> &'static str {
+        match self.lang {
+            Language::English => "WX-EVDEV-FOCUS-006: KWin reported its own process ID for a compositor surface, not an application. Focus the actual terminal or browser window and refresh diagnostics. Do not allowlist kwin_wayland or use a window title as a substitute for client identity.",
+            Language::Indonesian => "WX-EVDEV-FOCUS-006: KWin melaporkan ID prosesnya sendiri untuk permukaan kompositor, bukan aplikasi. Fokuskan jendela terminal atau browser yang sebenarnya lalu segarkan diagnostik. Jangan izinkan kwin_wayland atau memakai judul jendela sebagai pengganti identitas klien.",
+            Language::German => "WX-EVDEV-FOCUS-006: KWin meldet seine eigene Prozess-ID für eine Compositor-Oberfläche, nicht für eine Anwendung. Fokussieren Sie das eigentliche Terminal- oder Browserfenster und aktualisieren Sie die Diagnose. kwin_wayland nicht freigeben und keinen Fenstertitel als Client-Identität verwenden.",
         }
     }
 
@@ -875,13 +899,25 @@ impl Strings {
 
     pub fn trace_completion(&self, completion: &str) -> String {
         match (self.lang, completion) {
-            (Language::English, "applied") => "Output transaction acknowledged".into(),
-            (Language::Indonesian, "applied") => "Transaksi keluaran dikonfirmasi".into(),
-            (Language::German, "applied") => "Ausgabetransaktion bestätigt".into(),
+            (Language::English, "applied") => {
+                "Output acknowledged; application text unverified".into()
+            }
+            (Language::Indonesian, "applied") => {
+                "Keluaran dikonfirmasi; teks aplikasi belum diverifikasi".into()
+            }
+            (Language::German, "applied") => {
+                "Ausgabe bestätigt; Anwendungstext nicht verifiziert".into()
+            }
             (_, "inserted; cursor placement failed") => match self.lang {
-                Language::English => "Text inserted; cursor placement failed".into(),
-                Language::Indonesian => "Teks disisipkan; penempatan kursor gagal".into(),
-                Language::German => "Text eingefügt; Cursorpositionierung fehlgeschlagen".into(),
+                Language::English => {
+                    "Output acknowledged; cursor placement failed; text unverified".into()
+                }
+                Language::Indonesian => {
+                    "Keluaran dikonfirmasi; penempatan kursor gagal; teks belum diverifikasi".into()
+                }
+                Language::German => {
+                    "Ausgabe bestätigt; Cursorpositionierung fehlgeschlagen; Text nicht verifiziert".into()
+                }
             },
             (_, "not applied") => match self.lang {
                 Language::English => "Output was not applied".into(),
@@ -1033,6 +1069,85 @@ impl Strings {
             },
             _ => completion.to_owned(),
         }
+    }
+
+    pub fn trace_application_result(&self, result: &str) -> String {
+        match (self.lang, result) {
+            (Language::English, "verified") => "Target text verified".into(),
+            (Language::Indonesian, "verified") => "Teks target terverifikasi".into(),
+            (Language::German, "verified") => "Zieltext verifiziert".into(),
+            (Language::English, "unverified") => "Target text not verified".into(),
+            (Language::Indonesian, "unverified") => "Teks target belum diverifikasi".into(),
+            (Language::German, "unverified") => "Zieltext nicht verifiziert".into(),
+            (Language::English, "not_applied") => {
+                "Output was rejected; target text was not changed".into()
+            }
+            (Language::Indonesian, "not_applied") => {
+                "Keluaran ditolak; teks target tidak berubah".into()
+            }
+            (Language::German, "not_applied") => {
+                "Ausgabe abgelehnt; Zieltext wurde nicht geändert".into()
+            }
+            (Language::English, "unknown") => "Target text may be partial or uncertain".into(),
+            (Language::Indonesian, "unknown") => {
+                "Teks target mungkin sebagian atau tidak pasti".into()
+            }
+            (Language::German, "unknown") => {
+                "Zieltext möglicherweise teilweise oder ungewiss".into()
+            }
+            (Language::English, "not_attempted") => "No output was attempted".into(),
+            (Language::Indonesian, "not_attempted") => "Tidak ada keluaran yang dicoba".into(),
+            (Language::German, "not_attempted") => "Keine Ausgabe versucht".into(),
+            (Language::English, _) => "Target text not verified".into(),
+            (Language::Indonesian, _) => "Teks target belum diverifikasi".into(),
+            (Language::German, _) => "Zieltext nicht verifiziert".into(),
+        }
+    }
+
+    pub fn trace_timing(&self, duration_us: Option<u64>, expected_units: Option<usize>) -> String {
+        let duration = duration_us.map_or_else(
+            || match self.lang {
+                Language::English => "timing unavailable".to_owned(),
+                Language::Indonesian => "durasi tidak tersedia".to_owned(),
+                Language::German => "Dauer nicht verfügbar".to_owned(),
+            },
+            |value| match self.lang {
+                Language::English => format!("backend acknowledgement in {value} µs"),
+                Language::Indonesian => format!("pengakuan backend dalam {value} µs"),
+                Language::German => format!("Backend-Bestätigung in {value} µs"),
+            },
+        );
+        let units = expected_units.map_or_else(
+            || match self.lang {
+                Language::English => "expected output size unavailable".to_owned(),
+                Language::Indonesian => "ukuran keluaran yang diharapkan tidak tersedia".to_owned(),
+                Language::German => "erwartete Ausgabegröße nicht verfügbar".to_owned(),
+            },
+            |value| match self.lang {
+                Language::English => format!("{value} expected output units"),
+                Language::Indonesian => format!("{value} unit keluaran yang diharapkan"),
+                Language::German => format!("{value} erwartete Ausgabeeinheiten"),
+            },
+        );
+        match self.lang {
+            Language::English => format!("{units} · {duration}; not visible-text latency"),
+            Language::Indonesian => format!("{units} · {duration}; bukan latensi teks terlihat"),
+            Language::German => format!("{units} · {duration}; keine sichtbare Textlatenz"),
+        }
+    }
+
+    pub fn trace_interrupt_timing(&self, duration_us: Option<u64>) -> Option<String> {
+        duration_us.map(|value| match self.lang {
+            Language::English => {
+                format!("overlap observed → backend returned in {value} µs; client result unverified")
+            }
+            Language::Indonesian => format!(
+                "tumpang tindih terdeteksi → backend kembali dalam {value} µs; hasil klien belum diverifikasi"
+            ),
+            Language::German => format!(
+                "Überlappung erkannt → Backend-Rückkehr nach {value} µs; Client-Ergebnis nicht verifiziert"
+            ),
+        })
     }
 
     pub fn trace_progress(&self, erased: usize, inserted: usize) -> String {
@@ -1299,11 +1414,17 @@ impl Strings {
         }
     }
 
-    pub fn ibus_field_counts(&self, keys: u64, expansions: u64) -> String {
+    pub fn ibus_field_counts(&self, keys: u64, output_emissions: u64) -> String {
         match self.lang {
-            Language::English => format!("{keys} keys · {expansions} expansion(s)"),
-            Language::Indonesian => format!("{keys} tombol · {expansions} ekspansi"),
-            Language::German => format!("{keys} Tasten · {expansions} Erweiterung(en)"),
+            Language::English => {
+                format!("{keys} keys · {output_emissions} output emission(s), unverified")
+            }
+            Language::Indonesian => {
+                format!("{keys} tombol · {output_emissions} keluaran dikirim, belum terverifikasi")
+            }
+            Language::German => {
+                format!("{keys} Tasten · {output_emissions} Ausgabe(n) gesendet, nicht verifiziert")
+            }
         }
     }
     pub fn ibus_readiness_stage(&self, stage: &str) -> &'static str {
@@ -1329,9 +1450,25 @@ impl Strings {
             ("replacement_context", Language::English) => "replacement context observed",
             ("replacement_context", Language::Indonesian) => "konteks penggantian teramati",
             ("replacement_context", Language::German) => "Ersetzungskontext erkannt",
-            ("expanded", Language::English) => "expanded",
-            ("expanded", Language::Indonesian) => "terekspansi",
-            ("expanded", Language::German) => "erweitert",
+            ("replacement-context-observed", Language::English) => "replacement context observed",
+            ("replacement-context-observed", Language::Indonesian) => {
+                "konteks penggantian teramati"
+            }
+            ("replacement-context-observed", Language::German) => "Ersetzungskontext erkannt",
+            ("output-emitted-unverified", Language::English) => "output emitted (unverified)",
+            ("output-emitted-unverified", Language::Indonesian) => {
+                "keluaran dikirim (belum terverifikasi)"
+            }
+            ("output-emitted-unverified", Language::German) => {
+                "Ausgabe gesendet (nicht verifiziert)"
+            }
+            ("output_emitted_unverified", Language::English) => "output emitted (unverified)",
+            ("output_emitted_unverified", Language::Indonesian) => {
+                "keluaran dikirim (belum terverifikasi)"
+            }
+            ("output_emitted_unverified", Language::German) => {
+                "Ausgabe gesendet (nicht verifiziert)"
+            }
             _ => "",
         }
     }
@@ -1363,6 +1500,13 @@ mod tests {
         assert!(Strings::new(Language::German)
             .capture_app_scope_state("outside_allowlist")
             .contains("nicht auf der Erfassungsliste"));
+
+        for language in [Language::English, Language::Indonesian, Language::German] {
+            let message = Strings::new(language).compositor_surface_focus_diagnostic();
+            assert!(message.contains("WX-EVDEV-FOCUS-006"));
+            assert!(message.contains("kwin_wayland"));
+            assert!(!message.contains("2720"));
+        }
     }
 
     #[test]
@@ -1475,5 +1619,52 @@ mod tests {
             assert_eq!(Strings::new(Language::German).trace_completion(key), german);
             assert_ne!(Strings::new(Language::English).trace_completion(key), key);
         }
+    }
+
+    #[test]
+    fn trace_application_result_never_implies_unverified_output_was_applied() {
+        assert_eq!(
+            Strings::new(Language::English).trace_application_result("unverified"),
+            "Target text not verified"
+        );
+        assert_eq!(
+            Strings::new(Language::English).trace_application_result("unknown"),
+            "Target text may be partial or uncertain"
+        );
+        assert_eq!(
+            Strings::new(Language::English).trace_application_result("not_attempted"),
+            "No output was attempted"
+        );
+        assert_eq!(
+            Strings::new(Language::English).trace_application_result("not_applied"),
+            "Output was rejected; target text was not changed"
+        );
+        for language in [Language::Indonesian, Language::German] {
+            for state in [
+                "verified",
+                "unverified",
+                "unknown",
+                "not_attempted",
+                "not_applied",
+            ] {
+                let label = Strings::new(language).trace_application_result(state);
+                assert!(!label.is_empty());
+                assert_ne!(label, state);
+            }
+        }
+    }
+
+    #[test]
+    fn trace_timing_labels_backend_acknowledgement_as_not_visible_text_latency() {
+        let english = Strings::new(Language::English).trace_timing(Some(42), Some(5));
+        assert!(english.contains("42 µs"));
+        assert!(english.contains("5 expected output units"));
+        assert!(english.contains("not visible-text latency"));
+        assert!(Strings::new(Language::Indonesian)
+            .trace_timing(None, None)
+            .contains("bukan latensi teks terlihat"));
+        assert!(Strings::new(Language::German)
+            .trace_timing(None, None)
+            .contains("keine sichtbare Textlatenz"));
     }
 }

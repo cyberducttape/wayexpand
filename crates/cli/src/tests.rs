@@ -4,7 +4,9 @@ use crate::doctor::backends::{
 };
 use crate::doctor::certification::certification_selection_status;
 use crate::doctor::files::existing_control_socket_is_healthy;
-use crate::doctor::json::{production_readiness, protocol_probe_report};
+use crate::doctor::json::{
+    production_readiness, protocol_probe_report, GNOME_APP_FILTER_SUPPORT_DETAIL,
+};
 use crate::doctor::policy::{
     absolute_command_policy_diagnostic, composition_policy_diagnostic,
     exclusive_capture_policy_diagnostic, print_policy_diagnostics_json,
@@ -13,6 +15,12 @@ use crate::doctor::status::{
     runtime_capabilities_from_status, status_as_json, status_schema_compatible,
 };
 use std::time::{SystemTime, UNIX_EPOCH};
+
+#[test]
+fn doctor_app_filter_support_does_not_overstate_gnome_shell_compatibility() {
+    assert!(GNOME_APP_FILTER_SUPPORT_DETAIL.contains("GNOME Shell 46, 50, and 51"));
+    assert!(!GNOME_APP_FILTER_SUPPORT_DETAIL.contains("GNOME 45+"));
+}
 
 #[test]
 fn live_explain_requires_matching_daemon_build_and_status_schema() {
@@ -39,7 +47,8 @@ fn live_explain_requires_matching_daemon_build_and_status_schema() {
     if cli_version.contains(".dirty-unknown") {
         assert!(stale_result.contains("cannot be verified"));
     } else {
-        assert!(stale_result.contains("different build"));
+        assert!(stale_result.contains("differs from this CLI"));
+        assert!(stale_result.contains("active installation"));
     }
 
     let unknown = format!("running\nstatus_schema={}\n", CONTROL_STATUS_SCHEMA);
@@ -84,7 +93,7 @@ fn live_explain_requires_matching_daemon_build_and_status_schema() {
         cli_version
     )
     .unwrap()
-    .contains("incompatible status protocol"));
+    .contains("status protocol differs from this CLI"));
 }
 
 #[test]
@@ -347,7 +356,7 @@ fn backup_refuses_existing_destination_atomically() {
 #[test]
 fn status_json_preserves_types_and_ignores_banner() {
     let value = status_as_json(
-        "running\nsource=stdin\nroute_id=stdin-test\nstatus_schema=11\ndaemon_commit=test-commit\npaused=true\ncommand_queue_depth=3\nconfig_state=ok\ncapture_sensitive_focus=false\nwindow_tracker_connected=true\nwindow_identity_exact=true\ninject_full_unicode=true\nclipboard_reads_total=6\nclipboard_read_max_duration_us=125000\n",
+        "running\nsource=stdin\nroute_id=stdin-test\nstatus_schema=11\ndaemon_commit=test-commit\npaused=true\nbackend_policy_blocked=true\ncommand_queue_depth=3\nconfig_state=ok\ncapture_sensitive_focus=false\nwindow_tracker_connected=true\nwindow_identity_exact=true\ninject_full_unicode=true\nclipboard_reads_total=6\nclipboard_read_max_duration_us=125000\n",
     )
     .unwrap();
     assert_eq!(value["response"], "running");
@@ -356,6 +365,7 @@ fn status_json_preserves_types_and_ignores_banner() {
     assert_eq!(value["status_schema"], 11);
     assert_eq!(value["daemon_commit"], "test-commit");
     assert_eq!(value["paused"], true);
+    assert_eq!(value["backend_policy_blocked"], true);
     assert_eq!(value["command_queue_depth"], 3);
     assert_eq!(value["config_state"], "ok");
     assert_eq!(value["capture_sensitive_focus"], false);
@@ -363,6 +373,52 @@ fn status_json_preserves_types_and_ignores_banner() {
     assert_eq!(value["inject_full_unicode"], true);
     assert_eq!(value["clipboard_reads_total"], 6);
     assert_eq!(value["clipboard_read_max_duration_us"], 125_000);
+}
+
+#[test]
+fn status_json_parses_recent_output_outcomes_and_keeps_application_result_explicit() {
+    let value = status_as_json(
+        r#"running
+recent_expansion_outcomes=[{"completion":"applied","application_result":"unverified","transaction_id":"8f91c2"}]
+recent_expansion_failures=[{"completion":"partial_write","application_result":"unknown"}]
+injection_latency_profiles={"libei_keysym_fallback":{"sample_count":1}}
+"#,
+    )
+    .unwrap();
+
+    let outcomes = value["recent_expansion_outcomes"]
+        .as_array()
+        .expect("outcomes follow the documented JSON array contract");
+    assert_eq!(outcomes.len(), 1);
+    assert_eq!(outcomes[0]["completion"], "applied");
+    assert_eq!(outcomes[0]["application_result"], "unverified");
+    assert_eq!(outcomes[0]["transaction_id"], "8f91c2");
+    assert_eq!(
+        value["recent_expansion_failures"][0]["application_result"],
+        "unknown"
+    );
+    assert_eq!(
+        value["injection_latency_profiles"]["libei_keysym_fallback"]["sample_count"],
+        1
+    );
+
+    // A daemon predating application_result must not make an acknowledged
+    // output look verified merely because the field is absent.
+    let legacy = status_as_json(
+        r#"running
+recent_expansion_outcomes=[{"completion":"applied","insertion_attempted":true}]
+recent_expansion_failures=[{"completion":"partial_write","insertion_attempted":true}]
+"#,
+    )
+    .unwrap();
+    assert_eq!(
+        legacy["recent_expansion_outcomes"][0]["application_result"],
+        "unverified"
+    );
+    assert_eq!(
+        legacy["recent_expansion_failures"][0]["application_result"],
+        "unknown"
+    );
 }
 
 #[test]
@@ -647,6 +703,7 @@ fn upgrade_status_distinguishes_current_stale_and_incompatible_daemons() {
             .contains("cannot be verified"));
     } else {
         let action = stale["action"].as_str().unwrap();
+        assert!(action.contains("Verify that this CLI matches the active installation"));
         assert!(action.contains("same launch method"));
         assert!(action.contains("updated binary"));
         assert!(action.contains("systemd"));
@@ -657,6 +714,10 @@ fn upgrade_status_distinguishes_current_stale_and_incompatible_daemons() {
     );
     assert_eq!(incompatible["status"], "incompatible");
     assert_eq!(incompatible["compatible"], false);
+    assert!(incompatible["action"]
+        .as_str()
+        .unwrap()
+        .contains("before deciding whether a restart is needed"));
 
     let unavailable = crate::doctor::status::upgrade_status_unavailable();
     assert_eq!(unavailable["status"], "unavailable");
@@ -706,13 +767,14 @@ fn status_json_matches_documented_stable_contract() {
          backend=input-method-v2\n\
          route_id=input-method-v2\n\
          backend_mode=unknown\n\
-         status_schema=34\n\
+         status_schema=43\n\
          daemon_commit=test-commit\n\
          daemon_version=1.3.3-dev+test-commit\n\
          state=connected\n\
          route_available=true\n\
          matching_available=true\n\
          matching_unavailable_reason=none\n\
+         backend_policy_blocked=false\n\
          paused=false\n\
          config=/home/user/.config/wayexpand/expansions.toml\n\
          config_state=ok\n\
@@ -739,11 +801,15 @@ fn status_json_matches_documented_stable_contract() {
          window_tracker_updates_total=0\n\
          window_context_available=false\n\
          window_app_id_available=false\n\
+         window_process_executable_available=false\n\
+         window_process_name_available=false\n\
+         window_process_identity_state=not-requested\n\
          window_tracker_reconnect_attempts_total=0\n\
          window_tracker_disconnects_total=0\n\
          window_tracker_last_failure_reason=none\n\
          window_tracker_last_connected_unix=0\n\
          window_tracker_reconnect_backoff_ms=0\n\
+         window_tracker_identity_source=unavailable\n\
          window_identity_exact=false\n\
          inject_atomic_replace=true\n\
          inject_full_unicode=true\n\
@@ -762,6 +828,7 @@ fn status_json_matches_documented_stable_contract() {
          hotkey_in_flight=0\n\
          command_queue_rejected_total=0\n\
          command_timeout_total=0\n\
+         command_cancelled_total=0\n\
          command_failure_total=0\n\
          injection_latency_sample_count=0\n\
          injection_latency_window_count=0\n\
@@ -819,7 +886,7 @@ fn status_json_matches_documented_stable_contract() {
          matcher_evaluations_total=5\n\
          matches_found_total=2\n\
          expansion_attempts_total=2\n\
-         expansions_applied_total=1\n\
+         expansion_output_acknowledgements_total=1\n\
          expansions_rejected_total=1\n\
          diagnostic_events_dropped_total=0\n\
          input_connection_state=connected\n\
@@ -832,13 +899,19 @@ fn status_json_matches_documented_stable_contract() {
          output_reconnect_attempts=0\n\
          input_reconnect_backoff_ms=0\n\
          output_reconnect_backoff_ms=0\n\
-         last_successful_insertion_unix=1\n\
+         last_output_acknowledged_unix=1\n\
          output_queue_latency_sample_count=0\n\
          output_queue_latency_window_count=0\n\
          output_queue_latency_p50_us=0\n\
          output_queue_latency_p95_us=0\n\
          output_queue_latency_p99_us=0\n\
          output_queue_latency_dropped_total=0\n\
+         output_interrupt_to_backend_return_sample_count=0\n\
+         output_interrupt_to_backend_return_window_count=0\n\
+         output_interrupt_to_backend_return_p50_us=0\n\
+         output_interrupt_to_backend_return_p95_us=0\n\
+         output_interrupt_to_backend_return_p99_us=0\n\
+         output_interrupt_to_backend_return_dropped_total=0\n\
          output_reconnect_total=1\n\
          input_reconnect_total=2\n\
          input_connection_failures_total=0\n\
@@ -863,13 +936,17 @@ fn status_json_matches_documented_stable_contract() {
          terminal_apps_only=false\n\
          capture_app_scope_state=unrestricted\n\
          raw_capture_fallback_enabled=false\n\
-         raw_capture_app_count=0";
+         raw_capture_app_count=0\n\
+         terminal_paste=off\n\
+         terminal_paste_total=0\n\
+         terminal_paste_fallbacks_total=0\n\
+         terminal_paste_unread_total=0";
     let value = status_as_json(daemon_response).unwrap();
     let object = value.as_object().expect("status --json returns an object");
     let contract: serde_json::Value =
         serde_json::from_str(include_str!("../../../tests/contracts/status-json.json"))
             .expect("status contract fixture must be valid JSON");
-    assert_eq!(contract["schema_version"], 18);
+    assert_eq!(contract["schema_version"], 25);
     assert_eq!(contract["daemon_control_schema"], CONTROL_STATUS_SCHEMA);
     assert_ne!(
         contract["schema_version"],
@@ -881,13 +958,24 @@ fn status_json_matches_documented_stable_contract() {
         .keys()
         .map(String::as_str)
         .collect::<Vec<_>>();
-    assert_eq!(
-        object
-            .keys()
-            .map(|key| key.as_str())
-            .collect::<std::collections::BTreeSet<_>>(),
-        documented_fields.into_iter().collect(),
-        "status --json fields no longer match docs/COMPATIBILITY.md's documented Stable contract"
+    let actual_fields = object
+        .keys()
+        .map(|key| key.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    let documented_fields = documented_fields
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+    let undocumented = actual_fields
+        .difference(&documented_fields)
+        .copied()
+        .collect::<Vec<_>>();
+    let no_longer_emitted = documented_fields
+        .difference(&actual_fields)
+        .copied()
+        .collect::<Vec<_>>();
+    assert!(
+        undocumented.is_empty() && no_longer_emitted.is_empty(),
+        "status --json stable contract drift: undocumented fields {undocumented:?}; documented but not emitted {no_longer_emitted:?}"
     );
     assert_eq!(value["response"], "running");
     assert_eq!(value["source"], "input-method");
@@ -899,6 +987,8 @@ fn status_json_matches_documented_stable_contract() {
     assert_eq!(value["matching_unavailable_reason"], "none");
     assert_eq!(value["suppressed_expansions_total"], 0);
     assert_eq!(value["input_connection_failures_total"], 0);
+    assert_eq!(value["output_interrupt_to_backend_return_sample_count"], 0);
+    assert_eq!(value["output_interrupt_to_backend_return_p95_us"], 0);
     assert_eq!(value["output_connection_failures_total"], 0);
     assert_eq!(value["command_worker_threads"], 0);
     assert_eq!(value["hotkey_worker_threads"], 0);
@@ -916,6 +1006,7 @@ fn status_json_matches_documented_stable_contract() {
     assert_eq!(value["hotkey_in_flight"], 0);
     assert_eq!(value["command_queue_rejected_total"], 0);
     assert_eq!(value["command_timeout_total"], 0);
+    assert_eq!(value["command_cancelled_total"], 0);
     assert_eq!(value["command_failure_total"], 0);
     assert_eq!(value["usage_flush_max_duration_us"], 25);
     assert_eq!(value["usage_flush_failures_total"], 1);
@@ -935,6 +1026,10 @@ fn status_json_matches_documented_stable_contract() {
     assert_eq!(value["output_last_refusal"], "focus-changed");
     assert_eq!(value["output_unsupported_total"], 7);
     assert_eq!(value["output_last_unsupported"], "unicode");
+    assert_eq!(value["expansion_output_acknowledgements_total"], 1);
+    assert!(value.get("expansions_applied_total").is_none());
+    assert_eq!(value["last_output_acknowledged_unix"], 1);
+    assert!(value.get("last_successful_insertion_unix").is_none());
     assert_eq!(value["output_reconnect_total"], 1);
     assert_eq!(value["input_reconnect_total"], 2);
     assert_eq!(value["input_overflow_total"], 3);
@@ -950,6 +1045,62 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
         "../../../tests/contracts/cli-json-shapes.json"
     ))
     .expect("CLI contract fixture must be valid JSON");
+    assert_eq!(contract["backend_list_schema"], 2);
+    assert_eq!(
+        contract["backend_list_route"],
+        serde_json::json!([
+            "id",
+            "label",
+            "capture",
+            "injection",
+            "standing",
+            "reason",
+            "assessment",
+            "trigger_precondition",
+            "output_transaction",
+            "application_result",
+            "atomic_replace",
+            "sensitive_field_detection"
+        ])
+    );
+    assert_eq!(
+        contract["doctor_route"],
+        serde_json::json!([
+            "id",
+            "label",
+            "standing",
+            "reason",
+            "capture",
+            "injection",
+            "certification",
+            "trigger_precondition",
+            "output_transaction",
+            "application_result",
+            "atomic_replace",
+            "sensitive_field_protection",
+            "assessment"
+        ])
+    );
+    assert_eq!(
+        contract["debug_focused_app"],
+        serde_json::json!([
+            "focused_app_id",
+            "focused_process_executable",
+            "focused_process_name",
+            "daemon_status_schema",
+            "daemon_schema_compatible",
+            "capture_app_scope_state",
+            "terminal_apps_only",
+            "window_tracker_connected",
+            "window_context_available",
+            "window_app_id_available",
+            "window_process_executable_available",
+            "window_process_name_available",
+            "matching_status",
+            "problem_id",
+            "suggested_action"
+        ])
+    );
     let doctor_fields = contract["doctor"]
         .as_array()
         .expect("doctor contract must be an array")
@@ -998,6 +1149,7 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "route_safety",
             "configuration",
             "daemon",
+            "output_integrity",
         ]
         .into_iter()
         .collect()
@@ -1041,6 +1193,7 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "action_broker_availability_readiness",
             "target_integrity_readiness",
             "daemon_runtime",
+            "host_namespace_context",
             "healthy",
             "checks",
         ]
@@ -1153,6 +1306,7 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "hotkey_in_flight",
             "command_queue_rejected_total",
             "command_timeout_total",
+            "command_cancelled_total",
             "command_failure_total",
             "injection_latency_sample_count",
             "injection_latency_window_count",
@@ -1163,12 +1317,19 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "injection_latency_dropped_total",
             "injection_latency_profile_dropped_total",
             "injection_latency_profiles",
+            "output_interrupt_to_backend_return_sample_count",
+            "output_interrupt_to_backend_return_window_count",
+            "output_interrupt_to_backend_return_p50_us",
+            "output_interrupt_to_backend_return_p95_us",
+            "output_interrupt_to_backend_return_p99_us",
+            "output_interrupt_to_backend_return_dropped_total",
             "matcher_latency_sample_count",
             "matcher_latency_window_count",
             "matcher_latency_dropped_total",
             "matcher_latency_p50_us",
             "matcher_latency_p95_us",
             "matcher_latency_p99_us",
+            "window_process_identity_state",
             "usage_flush_max_duration_us",
             "usage_flush_failures_total",
             "usage_queue_rejected_total",
@@ -1204,7 +1365,9 @@ fn stable_cli_shape_fixture_is_valid_and_includes_status_contract() {
             "replacement_assurance",
             "output_reconnect_total",
             "input_reconnect_total",
+            "expansion_output_acknowledgements_total",
             "input_overflow_total",
+            "last_output_acknowledged_unix",
             "evdev_quarantined_events_total",
             "control_rejected_total",
             "memory_rss_kib",

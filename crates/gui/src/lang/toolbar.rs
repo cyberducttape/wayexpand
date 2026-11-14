@@ -1,4 +1,4 @@
-use super::{Language, Strings};
+use super::{Language, RouteTrustDetails, Strings};
 use crate::*;
 
 impl Strings {
@@ -198,35 +198,77 @@ impl Strings {
         }
     }
 
-    pub fn route_trust_status(
-        &self,
-        route: &str,
-        maturity: &str,
-        sensitive_fields: Option<bool>,
-        atomic_replace: bool,
-        replacement_assurance: &str,
-        certified: bool,
-    ) -> String {
-        let privacy = match (self.lang, sensitive_fields) {
-            (Language::English, Some(true)) => "sensitive-field protection verified",
+    pub fn route_trust_status(&self, details: RouteTrustDetails<'_>) -> String {
+        let privacy = match (self.lang, details.sensitive_fields) {
+            (Language::English, Some(true)) => "sensitive-field signal available",
             (Language::English, Some(false)) => "no sensitive-field protection",
             (Language::English, None) => "sensitive-field protection unknown",
-            (Language::Indonesian, Some(true)) => "perlindungan kolom sensitif terverifikasi",
+            (Language::Indonesian, Some(true)) => "sinyal kolom sensitif tersedia",
             (Language::Indonesian, Some(false)) => "tanpa perlindungan kolom sensitif",
             (Language::Indonesian, None) => "perlindungan kolom sensitif tidak diketahui",
-            (Language::German, Some(true)) => "Schutz sensibler Felder verifiziert",
+            (Language::German, Some(true)) => "Signal für sensible Felder verfügbar",
             (Language::German, Some(false)) => "kein Schutz sensibler Felder",
             (Language::German, None) => "Schutz sensibler Felder unbekannt",
         };
-        let replacement = match (self.lang, atomic_replace) {
-            (Language::English, true) => "atomic replacement",
-            (Language::English, false) => "non-atomic replacement",
-            (Language::Indonesian, true) => "penggantian atomik",
-            (Language::Indonesian, false) => "penggantian non-atomik",
-            (Language::German, true) => "atomare Ersetzung",
-            (Language::German, false) => "nicht-atomare Ersetzung",
+        let precondition = match (self.lang, details.trigger_precondition) {
+            (Language::English, "surrounding_text_matches_trigger") => {
+                "trigger checked against surrounding text"
+            }
+            (Language::English, "focus_checked_with_compatibility_consent") => {
+                "focus checked with compatibility consent"
+            }
+            (Language::English, "none") => "trigger target not verified",
+            (Language::English, _) => "trigger precondition unknown",
+            (Language::Indonesian, "surrounding_text_matches_trigger") => {
+                "pemicu dicocokkan dengan teks sekitar"
+            }
+            (Language::Indonesian, "focus_checked_with_compatibility_consent") => {
+                "fokus diperiksa dengan izin kompatibilitas"
+            }
+            (Language::Indonesian, "none") => "tujuan pemicu tidak terverifikasi",
+            (Language::Indonesian, _) => "prasyarat pemicu tidak diketahui",
+            (Language::German, "surrounding_text_matches_trigger") => {
+                "Auslöser mit umgebendem Text abgeglichen"
+            }
+            (Language::German, "focus_checked_with_compatibility_consent") => {
+                "Fokus mit Kompatibilitätsfreigabe geprüft"
+            }
+            (Language::German, "none") => "Auslöserziel nicht verifiziert",
+            (Language::German, _) => "Auslöservoraussetzung unbekannt",
         };
-        let evidence = match (self.lang, certified) {
+        let transaction = match (self.lang, details.output_transaction) {
+            (Language::English, "separate_delete_and_commit") => "non-atomic delete and commit",
+            (Language::English, "separate_delete_and_key_events") => {
+                "non-atomic delete and key events"
+            }
+            (Language::English, "atomic_protocol_batch") => "atomic protocol batch",
+            (Language::English, _) => "output transaction unknown",
+            (Language::Indonesian, "separate_delete_and_commit") => {
+                "penghapusan dan komit non-atomik"
+            }
+            (Language::Indonesian, "separate_delete_and_key_events") => {
+                "penghapusan dan tombol non-atomik"
+            }
+            (Language::Indonesian, "atomic_protocol_batch") => "batch protokol atomik",
+            (Language::Indonesian, _) => "transaksi keluaran tidak diketahui",
+            (Language::German, "separate_delete_and_commit") => {
+                "nicht atomisches Löschen und Übernehmen"
+            }
+            (Language::German, "separate_delete_and_key_events") => {
+                "nicht atomisches Löschen und Tastenereignisse"
+            }
+            (Language::German, "atomic_protocol_batch") => "atomarer Protokollbatch",
+            (Language::German, _) => "Ausgabetransaktion unbekannt",
+        };
+        let application = match (self.lang, details.application_result) {
+            (Language::English, "unobservable") => "application result unverified",
+            (Language::Indonesian, "unobservable") => "hasil aplikasi belum terverifikasi",
+            (Language::German, "unobservable") => "Anwendungsergebnis unverifiziert",
+            (Language::English, _) => "application result unknown",
+            (Language::Indonesian, _) => "hasil aplikasi tidak diketahui",
+            (Language::German, _) => "Anwendungsergebnis unbekannt",
+        };
+        let evidence = match (self.lang, details.certified) {
             (Language::English, true) => "certified",
             (Language::Indonesian, true) => "tersertifikasi",
             (Language::English, false) => "certification pending",
@@ -234,29 +276,10 @@ impl Strings {
             (Language::German, true) => "zertifiziert",
             (Language::German, false) => "Zertifizierung ausstehend",
         };
-        let assurance = match (self.lang, replacement_assurance) {
-            (Language::English, "verified") => "target text verified",
-            (Language::English, "focus-tracked-best-effort") => "focus-tracked best effort",
-            (Language::English, "unverified") => "target text unverified",
-            (Language::English, "blocked") => "replacement blocked",
-            (Language::English, "unavailable") => "replacement unavailable",
-            (Language::English, _) => "replacement assurance unknown",
-            (Language::Indonesian, "verified") => "teks tujuan terverifikasi",
-            (Language::Indonesian, "focus-tracked-best-effort") => {
-                "upaya terbaik dengan pelacakan fokus"
-            }
-            (Language::Indonesian, "unverified") => "teks tujuan tidak terverifikasi",
-            (Language::Indonesian, "blocked") => "penggantian diblokir",
-            (Language::Indonesian, "unavailable") => "penggantian tidak tersedia",
-            (Language::Indonesian, _) => "jaminan penggantian tidak diketahui",
-            (Language::German, "verified") => "verifizierter Zieltext",
-            (Language::German, "focus-tracked-best-effort") => "fokusgeprüft nach bestem Bemühen",
-            (Language::German, "unverified") => "unverifizierter Zieltext",
-            (Language::German, "blocked") => "Ersetzung blockiert",
-            (Language::German, "unavailable") => "Ersetzung nicht verfügbar",
-            (Language::German, _) => "Ersetzungssicherheit unbekannt",
-        };
-        format!("{route} · {assurance} · {maturity} · {privacy} · {replacement} · {evidence}")
+        format!(
+            "{} · {precondition} · {transaction} · {application} · {} · {privacy} · {evidence}",
+            details.route, details.maturity
+        )
     }
 
     pub fn route_connected_status(&self) -> &'static str {
@@ -689,14 +712,6 @@ impl Strings {
         }
     }
 
-    pub fn onboarding_backend_first(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Finish the session check before testing input in another app.",
-            Language::Indonesian => "Selesaikan pemeriksaan sesi sebelum menguji masukan di aplikasi lain.",
-            Language::German => "Schließen Sie die Sitzungsprüfung ab, bevor Sie die Eingabe in einer anderen App testen.",
-        }
-    }
-
     pub fn onboarding_troubleshooting_title(&self) -> &'static str {
         match self.lang {
             Language::English => "Let’s recover the test",
@@ -884,82 +899,39 @@ impl Strings {
             }
         };
         let label = match self.lang {
-            Language::English => "Safe integration".to_owned(),
-            Language::Indonesian => "Integrasi aman".to_owned(),
-            Language::German => "Sichere Integration".to_owned(),
+            Language::English => "Recommended integration".to_owned(),
+            Language::Indonesian => "Integrasi yang direkomendasikan".to_owned(),
+            Language::German => "Empfohlene Integration".to_owned(),
         };
-        let detail = match self.lang {
-            Language::English => {
-                let mut properties = vec![state.to_owned()];
-                if route.sensitive_fields {
-                    properties.push("best protection for unsupported or sensitive contexts".into());
-                }
-                if route.atomic_replace {
-                    properties.push("atomic replacement".into());
+        let detail = format!(
+            "{state} · {} · focus tracking {}",
+            self.route_trust_status(RouteTrustDetails {
+                route: route.capture_label,
+                maturity: if route.certified {
+                    "certified"
                 } else {
-                    properties
-                        .push("best-effort replacement; strict mode blocks it by default".into());
+                    "experimental"
+                },
+                sensitive_fields: Some(route.sensitive_fields),
+                trigger_precondition: route.trigger_precondition,
+                output_transaction: route.output_transaction,
+                application_result: route.application_result,
+                certified: route.certified,
+            },),
+            if route.focus_tracking {
+                match self.lang {
+                    Language::English => "available",
+                    Language::Indonesian => "tersedia",
+                    Language::German => "verfügbar",
                 }
-                if route.focus_tracking {
-                    properties.push("application focus tracking".into());
+            } else {
+                match self.lang {
+                    Language::English => "unavailable",
+                    Language::Indonesian => "tidak tersedia",
+                    Language::German => "nicht verfügbar",
                 }
-                properties.push(if route.certified {
-                    "certified".into()
-                } else {
-                    "experimental until certified".into()
-                });
-                properties.join(" · ")
             }
-            Language::Indonesian => {
-                let mut properties = vec![state.to_owned()];
-                if route.sensitive_fields {
-                    properties.push(
-                        "perlindungan terbaik untuk konteks yang tidak didukung atau sensitif"
-                            .into(),
-                    );
-                }
-                if route.atomic_replace {
-                    properties.push("penggantian atomik".into());
-                } else {
-                    properties.push(
-                        "penggantian upaya terbaik; mode ketat memblokir secara default".into(),
-                    );
-                }
-                if route.focus_tracking {
-                    properties.push("pelacakan fokus aplikasi".into());
-                }
-                properties.push(if route.certified {
-                    "tersertifikasi".into()
-                } else {
-                    "eksperimental hingga tersertifikasi".into()
-                });
-                properties.join(" · ")
-            }
-            Language::German => {
-                let mut properties = vec![state.to_owned()];
-                if route.sensitive_fields {
-                    properties
-                        .push("bester Schutz für nicht unterstützte oder sensible Kontexte".into());
-                }
-                if route.atomic_replace {
-                    properties.push("atomare Ersetzung".into());
-                } else {
-                    properties.push(
-                        "Ersetzung nach bestem Bemühen; strikter Modus blockiert standardmäßig"
-                            .into(),
-                    );
-                }
-                if route.focus_tracking {
-                    properties.push("Verfolgung des App-Fokus".into());
-                }
-                properties.push(if route.certified {
-                    "zertifiziert".into()
-                } else {
-                    "experimentell bis zur Zertifizierung".into()
-                });
-                properties.join(" · ")
-            }
-        };
+        );
         (label, detail)
     }
 
@@ -1011,23 +983,47 @@ mod route_trust_tests {
     use super::*;
     use crate::lang::Language;
 
+    fn summary(
+        language: Language,
+        route: &str,
+        maturity: &str,
+        sensitive_fields: Option<bool>,
+        trigger_precondition: &str,
+        output_transaction: &str,
+        certified: bool,
+    ) -> String {
+        Strings::new(language).route_trust_status(RouteTrustDetails {
+            route,
+            maturity,
+            sensitive_fields,
+            trigger_precondition,
+            output_transaction,
+            application_result: "unobservable",
+            certified,
+        })
+    }
+
     #[test]
-    fn route_summary_distinguishes_unverified_from_best_effort_and_atomicity() {
-        let strings = Strings::new(Language::English);
-        let unverified = strings.route_trust_status(
+    fn route_summary_separates_precondition_transaction_and_application_result() {
+        let unverified = summary(
+            Language::English,
             "Evdev + libei",
             "experimental",
             Some(false),
-            false,
-            "unverified",
+            "none",
+            "separate_delete_and_key_events",
             false,
         );
         assert!(
-            unverified.contains("target text unverified"),
+            unverified.contains("trigger target not verified"),
             "{unverified}"
         );
         assert!(
-            unverified.contains("non-atomic replacement"),
+            unverified.contains("non-atomic delete and key events"),
+            "{unverified}"
+        );
+        assert!(
+            unverified.contains("application result unverified"),
             "{unverified}"
         );
         assert!(
@@ -1036,31 +1032,80 @@ mod route_trust_tests {
         );
         assert!(!unverified.contains("best effort"), "{unverified}");
 
-        let verified = strings.route_trust_status(
+        let verified = summary(
+            Language::English,
             "IBus",
             "experimental",
             Some(true),
-            false,
-            "verified",
+            "surrounding_text_matches_trigger",
+            "separate_delete_and_commit",
             false,
         );
-        assert!(verified.contains("target text verified"), "{verified}");
         assert!(
-            verified.contains("sensitive-field protection verified"),
+            verified.contains("trigger checked against surrounding text"),
             "{verified}"
         );
-        assert!(verified.contains("non-atomic replacement"), "{verified}");
-        assert!(!verified.contains("· atomic replacement"), "{verified}");
+        assert!(
+            verified.contains("application result unverified"),
+            "{verified}"
+        );
+        assert!(
+            verified.contains("sensitive-field signal available"),
+            "{verified}"
+        );
+        assert!(
+            verified.contains("non-atomic delete and commit"),
+            "{verified}"
+        );
+        assert!(!verified.contains("atomic protocol batch"), "{verified}");
+    }
+
+    #[test]
+    fn atomic_route_never_claims_application_result_was_verified() {
+        for (language, transaction, app_unverified, misleading) in [
+            (
+                Language::English,
+                "atomic protocol batch",
+                "application result unverified",
+                "application result verified",
+            ),
+            (
+                Language::Indonesian,
+                "batch protokol atomik",
+                "hasil aplikasi belum terverifikasi",
+                "hasil aplikasi terverifikasi",
+            ),
+            (
+                Language::German,
+                "atomarer Protokollbatch",
+                "Anwendungsergebnis unverifiziert",
+                "Anwendungsergebnis verifiziert",
+            ),
+        ] {
+            let status = summary(
+                language,
+                "route",
+                "experimental",
+                None,
+                "surrounding_text_matches_trigger",
+                "atomic_protocol_batch",
+                false,
+            );
+            assert!(status.contains(transaction), "{language:?}: {status}");
+            assert!(status.contains(app_unverified), "{language:?}: {status}");
+            assert!(!status.contains(misleading), "{language:?}: {status}");
+        }
     }
 
     #[test]
     fn missing_live_status_is_reported_as_unknown_sensitive_protection() {
-        let text = Strings::new(Language::English).route_trust_status(
+        let text = summary(
+            Language::English,
             "input-method-v2",
             "supported",
             None,
-            true,
-            "verified",
+            "surrounding_text_matches_trigger",
+            "atomic_protocol_batch",
             false,
         );
         assert!(

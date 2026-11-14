@@ -25,6 +25,22 @@ while [ "$#" -gt 0 ]; do
     case "$1" in
         --keep) keep=true; shift ;;
         --allow-unverified-unicode) allow_unicode_unverified=true; shift ;;
+        --help|-h)
+            cat <<'EOF'
+usage: scripts/test-kwin-e2e.sh [--keep] [--allow-unverified-unicode] [--source stdin|input-method] [SCENARIO...]
+
+Runs selected scenarios in a private headless KWin session. Keyboard capture
+is simulated; this does not certify physical keyboard behavior or a desktop
+session. With no scenario names, the complete scenario set runs.
+
+Options:
+  --keep                       Preserve the temporary session and logs
+  --allow-unverified-unicode   Continue when Unicode keysym support is absent
+  --source stdin|input-method  Select the test capture source
+  -h, --help                   Show this help without starting KWin
+EOF
+            exit 0
+            ;;
         --source=stdin|--source=input-method)
             input_source=${1#--source=}
             shift

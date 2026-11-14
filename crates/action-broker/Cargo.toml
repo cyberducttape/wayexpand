@@ -29,11 +29,15 @@ rustix = { workspace = true, features = ["process", "fs"] }
 shellexpand = "3"
 landlock = "0.4.7"
 
+[features]
+loom-tests = []
+
 [[bin]]
 name = "wayexpand-action-broker"
 path = "src/bin/wayexpand-action-broker.rs"
 
 [dev-dependencies]
+loom = "0.7.2"
 
 [build-dependencies]
 wayexpand-build-info = { path = "../build-info" }

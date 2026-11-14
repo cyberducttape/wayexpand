@@ -178,8 +178,44 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Run tests (locked, debug)
         run: cargo test --locked --workspace
+      - name: Model output cancellation interleavings with Loom
+        run: >-
+          bash scripts/test-loom-target.sh wayexpand-daemon
+          output_loop::loom_models::physical_input_race_bounds_in_flight_output_and_forbids_continuation
+      - name: Model output shutdown and reconnect interleavings with Loom
+        run: >-
+          bash scripts/test-loom-target.sh wayexpand-daemon
+          output_loop::loom_models::retired_backend_blocks_reconnect_until_shutdown_acknowledgement
+      - name: Model stdin interruption and output checkpoints with Loom
+        run: >-
+          bash scripts/test-loom-target.sh wayexpand-daemon
+          input_loop::loom_models::later_stdin_generation_blocks_following_output_checkpoints
+      - name: Model control-request admission and shutdown with Loom
+        run: >-
+          bash scripts/test-loom-target.sh wayexpand-daemon
+          control_admission_loom::shutdown_closes_control_request_admission
+      - name: Model focus and consent invalidation with Loom
+        run: >-
+          bash scripts/test-loom-target.sh wayexpand-daemon
+          assurance::loom_models
+      - name: Model async completion delivery and focus invalidation with Loom
+        run: >-
+          bash scripts/test-loom-target.sh wayexpand-core
+          engine::async_runtime::loom_models
+      - name: Model async worker admission and shutdown with Loom
+        run: >-
+          bash scripts/test-loom-target.sh wayexpand-core
+          engine::async_runtime::active_jobs_loom::shutdown_waits_for_admitted_work_and_refuses_late_workers
+      - name: Model configuration reload and completion epochs with Loom
+        run: >-
+          bash scripts/test-loom-target.sh wayexpand-daemon
+          reload_async_loom
       - name: Test Action Broker build
         run: cargo test --locked -p action-broker
+      - name: Model Action Broker shutdown admission with Loom
+        run: >-
+          bash scripts/test-loom-target.sh action-broker
+          executor::shutdown_loom::action_start_requires_authorization_and_linearizes_before_shutdown
       - name: Action Broker end-to-end test
         run: bash scripts/test-action-broker-e2e.sh
       - name: Run tests (locked, release)
@@ -409,6 +445,10 @@ jobs:
         run: bash scripts/test-gnome-extension-state.sh
       - name: Stress-test bounded GNOME notification delivery
         run: node --test scripts/test-gnome-notification-queue.mjs
+      - name: Verify advertised GNOME Shell versions have runtime integration gates
+        run: |
+          python3 scripts/check-gnome-shell-runtime-matrix.py
+          python3 scripts/test-gnome-shell-runtime-matrix.py
       - name: Verify GNOME keyboard API compatibility boundary
         run: node scripts/test-gnome-keyboard-compat.mjs
       - name: Verify bundled GNOME extension build identity
@@ -496,7 +536,9 @@ jobs:
       - name: Build CLI for executable documentation examples
         run: cargo build --locked -p wayexpand
       - name: Check documentation contracts
-        run: python3 scripts/check-documentation-contracts.py
+        run: |
+          python3 scripts/check-documentation-contracts.py
+          python3 scripts/generate-install-status.py
 
   integration:
     name: Integration & System Tests
@@ -588,6 +630,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends dbus-daemon jq kwin-common kwin-wayland libglib2.0-bin libwayland-dev libxkbcommon-dev pkg-config wl-clipboard
       - name: Test production output and KWin focus tracking
         run: bash scripts/test-kwin-e2e.sh --keep
+      - name: Test terminal paste into Konsole
+        run: |
+          # qt6-wayland provides the xdg-shell integration Konsole needs.
+          sudo apt-get install -y --no-install-recommends konsole qt6-wayland
+          bash scripts/test-kwin-e2e.sh --keep terminal-paste-multiline
       - name: Test isolated doctor certification report
         run: bash scripts/test-doctor-certify.sh target/debug/wayexpand
       - name: Upload headless KWin diagnostics
@@ -666,7 +713,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, ubuntu-26.04]
+        include:
+          - os: ubuntu-24.04
+            shell_major: '46'
+          - os: ubuntu-26.04
+            shell_major: '50'
     timeout-minutes: 45
     steps:
       - name: Explain out-of-scope GNOME acceptance
@@ -710,6 +761,7 @@ jobs:
         if: needs.change-scope.outputs.ibus == 'true' || needs.change-scope.outputs.gnome_extension == 'true'
         env:
           E2E_IBUS_COMPONENT_PATH: /usr/share/ibus/component
+          WX_GNOME_EXPECTED_SHELL_MAJOR: ${{ matrix.shell_major }}
         run: bash scripts/test-gnome-e2e.sh --keep
       - name: Upload isolated GNOME diagnostics
         if: always() && (needs.change-scope.outputs.ibus == 'true' || needs.change-scope.outputs.gnome_extension == 'true')
@@ -833,6 +885,7 @@ jobs:
           runuser -u wayexpand-test -- env \
             E2E_BIN="$GITHUB_WORKSPACE/target/debug" \
             E2E_SKIP_BUILD=1 E2E_BROWSER_BIN="$browser" E2E_BROWSER_NO_SANDBOX=1 \
+            WX_GNOME_EXPECTED_SHELL_MAJOR=51 \
             E2E_IBUS_COMPONENT_PATH=/usr/share/ibus/component \
             bash scripts/test-gnome-e2e.sh --keep
       - name: Upload Fedora GNOME acceptance diagnostics
@@ -851,7 +904,7 @@ jobs:
     # Build Linux packages against Ubuntu 24.04's runtime baseline so the
     # published binaries remain usable on the supported Ubuntu LTS target.
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -981,6 +1034,37 @@ jobs:
             "$rpm_root/usr/lib/systemd/user/wayexpand-evdev.service"
           grep -Fx 'ExecStart=/usr/bin/wayexpand-action-broker --config %h/.config/wayexpand/broker.toml --socket %t/wayexpand-broker.sock' \
             "$rpm_root/usr/lib/systemd/user/wayexpand-action-broker.service"
+      - name: Build previous release packages for upgrade migration tests
+        run: |
+          # Keep this fixture strictly older than the candidate package. The
+          # 1.3.3 release tag is also the current package version on this
+          # branch, so using it would test a same-version reinstall rather
+          # than an upgrade. Pin the source commit for the 1.3.2 release.
+          previous_commit=4fd32abdde4a073ec906e76b24447efda2ac5a60
+          git fetch --depth=1 origin "$previous_commit"
+          previous="$RUNNER_TEMP/wayexpand-previous"
+          git worktree add --detach "$previous" FETCH_HEAD
+          (
+            cd "$previous"
+            # The 1.3.2 spec required `wayland-libs`, which no Fedora package
+            # provides, so its RPM cannot install there. Apply the later fix
+            # (rely on rpmbuild's generated library dependencies) so the
+            # fixture tests an upgrade rather than that known packaging bug.
+            sed -i '/^Requires:[[:space:]]*wayland-libs$/d' wayexpand.spec
+            if grep -q 'wayland-libs' wayexpand.spec; then exit 1; fi
+            mkdir -p .cargo
+            cargo vendor --locked vendor/ > .cargo/config.toml
+            TMPDIR="$RUNNER_TEMP" bash scripts/build-release-packages.sh 1.3.2
+            mkdir -p "$GITHUB_WORKSPACE/dist/previous"
+            deb=wayexpand_1.3.2-1_amd64.deb
+            rpm=$(find . -maxdepth 1 -type f -name 'wayexpand-1.3.2-1.*.rpm' -print -quit)
+            test -f "$deb"
+            test -n "$rpm"
+            test "$(dpkg-deb -f "$deb" Version)" = '1.3.2-1'
+            test "$(rpm -qp --qf '%{VERSION}-%{RELEASE}' "$rpm")" = '1.3.2-1'
+            cp "$deb" "$GITHUB_WORKSPACE/dist/previous/"
+            cp "$rpm" "$GITHUB_WORKSPACE/dist/previous/"
+          )
       - name: Upload packages for install smoke tests
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -1016,7 +1100,7 @@ jobs:
         with:
           name: ci-packages
           path: dist
-      - name: Install, reinstall, and remove the package
+      - name: Upgrade, rollback, reinstall, and remove the package
         env:
           WAYEXPAND_PACKAGE_SMOKE_DISPOSABLE: "1"
         run: |
@@ -1036,9 +1120,11 @@ jobs:
                 apt-get install -y -qq passwd util-linux python3
               fi
               version=$(sed -n '\''s/^version = "\([^"]*\)"/\1/p'\'' Cargo.toml | head -n1)
-              package=$(find dist -type f -name "*.${{ matrix.package }}" -print -quit)
+              package=$(find dist -maxdepth 1 -type f -name "*.${{ matrix.package }}" -print -quit)
+              previous_package=$(find dist/previous -type f -name "*.${{ matrix.package }}" -print -quit)
               test -n "$package"
-              sh scripts/test-package-smoke.sh "$package" "$version"
+              test -n "$previous_package"
+              sh scripts/test-package-smoke.sh "$package" "$version" "$previous_package"
             '
 
   systemd:

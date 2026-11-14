@@ -22,10 +22,33 @@ export DBUS_SESSION_BUS_ADDRESS="unix:path=$isolated_runtime/bus"
 
 release_dir="$test_root/wayexpand-0.0.0-linux-x86_64"
 mkdir -p "$release_dir/bin" "$release_dir/systemd" "$release_dir/desktop" "$release_dir/docs" "$release_dir/scripts" "$release_dir/udev" "$release_dir/ibus/component" "$release_dir/icons" "$release_dir/libexec/wayexpand-certification/bin"
-for binary in wayexpand-daemon wayexpand wayexpand-action-broker wayexpand-ui wayexpand-gui wayexpand-ibus; do
+for binary in wayexpand-daemon wayexpand-action-broker wayexpand-ui wayexpand-gui wayexpand-ibus; do
     printf '#!/bin/sh\nexit 0\n' >"$release_dir/bin/$binary"
     chmod 0755 "$release_dir/bin/$binary"
 done
+cat >"$release_dir/bin/wayexpand" <<'EOF'
+#!/bin/sh
+if [ "$#" -eq 2 ] && [ "$1" = upgrade ] && [ "$2" = --check ]; then
+    printf '%s\n' 'Daemon: old-test-build'
+    case "${UPGRADE_REPORT:-daemon}" in
+        daemon)
+            printf '%s\n' 'Action: restart the affected service after validating the new payload'
+            printf '%s\n' 'Process to restart: /test/wayexpand-daemon (PID 4242)'
+            printf '%s\n' 'Service: wayexpand-evdev.service (systemd --user)'
+            ;;
+        broker)
+            printf '%s\n' 'Action: restart the active Action Broker service to load its updated binary'
+            printf '%s\n' 'Action Broker process to restart: /test/wayexpand-action-broker (PID 4343)'
+            printf '%s\n' 'Service: wayexpand-action-broker.service (systemd --user)'
+            ;;
+        none)
+            printf '%s\n' 'Action: no runtime version mismatch detected'
+            ;;
+    esac
+fi
+exit 0
+EOF
+chmod 0755 "$release_dir/bin/wayexpand"
 for helper in wx-e2e-sink wx-e2e-type wx-e2e-eis-relay; do
     printf '#!/bin/sh\nexit 0\n' >"$release_dir/libexec/wayexpand-certification/bin/$helper"
     chmod 0755 "$release_dir/libexec/wayexpand-certification/bin/$helper"
@@ -106,7 +129,30 @@ chmod 0755 "$stub_bin/ps"
 PATH="$stub_bin:$PATH" \
 HOME="$test_root/home" \
 XDG_CONFIG_HOME="$test_root/config" \
-"$release_dir/scripts/install-release.sh"
+"$release_dir/scripts/install-release.sh" >"$test_root/release-install.out" 2>&1
+
+grep -F 'Process to restart: /test/wayexpand-daemon (PID 4242)' \
+    "$test_root/release-install.out" >/dev/null
+grep -F 'Service: wayexpand-evdev.service (systemd --user)' \
+    "$test_root/release-install.out" >/dev/null
+grep -F 'wayexpand upgrade --apply' "$test_root/release-install.out" >/dev/null
+
+PATH="$stub_bin:$PATH" UPGRADE_REPORT=broker \
+HOME="$test_root/broker-home" XDG_CONFIG_HOME="$test_root/broker-config" \
+"$release_dir/scripts/install-release.sh" >"$test_root/broker-install.out" 2>&1
+grep -F 'Action Broker process to restart: /test/wayexpand-action-broker (PID 4343)' \
+    "$test_root/broker-install.out" >/dev/null
+grep -F 'Service: wayexpand-action-broker.service (systemd --user)' \
+    "$test_root/broker-install.out" >/dev/null
+grep -F 'wayexpand upgrade --apply' "$test_root/broker-install.out" >/dev/null
+
+PATH="$stub_bin:$PATH" UPGRADE_REPORT=none \
+HOME="$test_root/no-upgrade-home" XDG_CONFIG_HOME="$test_root/no-upgrade-config" \
+"$release_dir/scripts/install-release.sh" >"$test_root/no-upgrade-install.out" 2>&1
+if grep -F 'wayexpand upgrade --apply' "$test_root/no-upgrade-install.out" >/dev/null; then
+    printf '%s\n' 'release installer recommended an upgrade without a runtime mismatch' >&2
+    exit 1
+fi
 
 [ -x "$test_root/home/.local/bin/wayexpand" ]
 [ -x "$test_root/home/.local/bin/wayexpand-daemon" ]

@@ -10,7 +10,7 @@ use anyhow::Result;
 use std::{
     io,
     path::Path,
-    sync::atomic::AtomicBool,
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
     sync::mpsc,
     thread,
     time::{Duration, Instant},
@@ -19,6 +19,111 @@ use tracing::{info, warn};
 use wayexpand_backend_evdev::EvdevSource;
 use wayexpand_backend_input_method::{InputMethodError, InputMethodSource};
 use wayexpand_core::{CommandMetrics, OrganizationPolicy, TextInjector};
+
+/// A line read from the pipe-driven source. The generation lets output
+/// checkpoints distinguish the line currently being matched from any later
+/// input, including a line already queued before the reactor starts matching.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct StdinLine {
+    pub generation: u64,
+    pub text: String,
+}
+
+/// Shared, content-free input epoch used to stop non-atomic output when a
+/// later stdin line arrives. The reader only advances `observed`; the reactor
+/// publishes the line currently being processed in `baseline`.
+#[derive(Clone, Default)]
+pub(crate) struct StdinInputMonitor {
+    observed: std::sync::Arc<AtomicU64>,
+    baseline: std::sync::Arc<AtomicU64>,
+}
+
+impl StdinInputMonitor {
+    pub(crate) fn begin_line(&self, generation: u64) {
+        self.baseline.store(generation, Ordering::Release);
+    }
+
+    pub(crate) fn next_generation(&self) -> u64 {
+        self.observed.fetch_add(1, Ordering::AcqRel) + 1
+    }
+
+    pub(crate) fn interrupted(&self) -> bool {
+        stdin_generation_is_stale(
+            self.observed.load(Ordering::Acquire),
+            self.baseline.load(Ordering::Acquire),
+        )
+    }
+
+    pub(crate) fn observed_generation(&self) -> u64 {
+        self.observed.load(Ordering::Acquire)
+    }
+}
+
+fn stdin_generation_is_stale(observed: u64, baseline: u64) -> bool {
+    observed > baseline
+}
+
+#[cfg(all(test, feature = "loom-tests"))]
+mod loom_models {
+    use loom::sync::atomic::{AtomicUsize, Ordering};
+    use loom::sync::Arc;
+    use loom::thread;
+
+    use super::stdin_generation_is_stale;
+
+    /// A queued later line invalidates every output checkpoint after it is
+    /// observed. An output unit whose checkpoint passed before the line was
+    /// published may still be in flight, but no subsequent checkpoint can
+    /// authorize more output.
+    #[test]
+    fn later_stdin_generation_blocks_following_output_checkpoints() {
+        loom::model(|| {
+            let observed = Arc::new(AtomicUsize::new(1));
+            let baseline = 1;
+            let emitted = Arc::new(AtomicUsize::new(0));
+            let emitted_after_invalidation = Arc::new(AtomicUsize::new(0));
+            let worker_observed = Arc::clone(&observed);
+            let worker_emitted = Arc::clone(&emitted);
+            let worker_late = Arc::clone(&emitted_after_invalidation);
+            let worker = thread::spawn(move || {
+                for _ in 0..2 {
+                    if stdin_generation_is_stale(
+                        worker_observed.load(Ordering::Acquire) as u64,
+                        baseline,
+                    ) {
+                        return;
+                    }
+                    thread::yield_now();
+                    worker_emitted.fetch_add(1, Ordering::Release);
+                    if stdin_generation_is_stale(
+                        worker_observed.load(Ordering::Acquire) as u64,
+                        baseline,
+                    ) {
+                        worker_late.fetch_add(1, Ordering::Release);
+                    }
+                }
+            });
+
+            let reader_observed = Arc::clone(&observed);
+            let reader = thread::spawn(move || {
+                thread::yield_now();
+                reader_observed.store(2, Ordering::Release);
+            });
+
+            worker.join().expect("modeled output worker panicked");
+            reader.join().expect("modeled stdin reader panicked");
+            assert!(stdin_generation_is_stale(
+                observed.load(Ordering::Acquire) as u64,
+                baseline,
+            ));
+            assert!(emitted.load(Ordering::Acquire) <= 2);
+            assert!(
+                emitted_after_invalidation.load(Ordering::Acquire) <= 1,
+                "only the output unit already in flight may finish after invalidation"
+            );
+        });
+    }
+}
 
 /// Low-latency polling while command/hotkey work is queued or running.
 const ACTIVE_COMPLETION_POLL_INTERVAL: Duration = Duration::from_millis(10);
@@ -37,7 +142,7 @@ use crate::{control, status};
 /// Reading is isolated from the reactor because stdin has no useful polling
 /// timeout on all supported platforms. The bounded channel keeps a producer
 /// that writes faster than the matcher from consuming unbounded memory.
-pub fn spawn_stdin_reader() -> Result<mpsc::Receiver<String>> {
+pub fn spawn_stdin_reader(monitor: StdinInputMonitor) -> Result<mpsc::Receiver<StdinLine>> {
     let (sender, receiver) = mpsc::sync_channel(crate::MAX_PENDING_INPUT_LINES);
     thread::Builder::new()
         .name("wayexpand-stdin-reader".into())
@@ -46,6 +151,10 @@ pub fn spawn_stdin_reader() -> Result<mpsc::Receiver<String>> {
             loop {
                 match crate::read_bounded_line(&mut reader) {
                     Ok(Some(line)) => {
+                        let line = StdinLine {
+                            generation: monitor.next_generation(),
+                            text: line,
+                        };
                         if sender.send(line).is_err() {
                             break;
                         }

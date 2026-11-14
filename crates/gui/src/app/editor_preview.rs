@@ -125,7 +125,43 @@ impl GuiApp {
                 .show(ui, |ui| match preview_result {
                     Ok(preview_text) => {
                         if let Some(capabilities) = self.daemon_capabilities.as_ref() {
-                            let plan = capabilities.insertion_plan(preview_text.chars().count());
+                            let plan = self.draft.as_ref().map_or_else(
+                                || capabilities.insertion_plan(0, 0),
+                                |draft| {
+                                    let alias_chars = draft
+                                        .committed_aliases()
+                                        .iter()
+                                        .map(|alias| alias.chars().count())
+                                        .max()
+                                        .unwrap_or(0);
+                                    let trigger_chars = draft
+                                        .trigger
+                                        .chars()
+                                        .count()
+                                        .max(alias_chars)
+                                        .max(self.preview_input.chars().count());
+                                    let replacement_chars = preview_text.chars().count();
+                                    let has_delimiter =
+                                        draft.match_mode == wayexpand_core::MatchMode::WordBoundary;
+                                    let output_chars = replacement_chars
+                                        .saturating_add(usize::from(has_delimiter));
+                                    // Without template evaluation metadata, use the
+                                    // entire rendered output as an upper bound for
+                                    // cursor travel when a cursor marker is present.
+                                    let cursor_offset = draft
+                                        .replacement
+                                        .contains("{{cursor}}")
+                                        .then_some(replacement_chars);
+                                    let paced_events =
+                                        wayexpand_core::paced_replacement_event_count(
+                                            trigger_chars,
+                                            replacement_chars,
+                                            has_delimiter,
+                                            cursor_offset,
+                                        );
+                                    capabilities.insertion_plan(output_chars, paced_events)
+                                },
+                            );
                             let color = match plan {
                                 wayexpand_core::InsertionStrategy::VerifiedReplacement => {
                                     palette.success
@@ -260,6 +296,18 @@ impl GuiApp {
                 }
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod paced_plan_tests {
+    use wayexpand_core::paced_replacement_event_count;
+
+    #[test]
+    fn estimates_the_complete_paced_replacement_transaction() {
+        assert_eq!(paced_replacement_event_count(3, 8, false, None), 11);
+        assert_eq!(paced_replacement_event_count(3, 8, true, None), 13);
+        assert_eq!(paced_replacement_event_count(3, 8, false, Some(8)), 19);
     }
 }
 

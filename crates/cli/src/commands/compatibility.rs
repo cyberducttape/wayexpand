@@ -3,7 +3,7 @@
 use super::Args;
 use crate::*;
 
-const SCHEMA_VERSION: u32 = 3;
+const SCHEMA_VERSION: u32 = 4;
 
 fn environment_value(key: &str) -> Option<String> {
     let contents = fs::read_to_string("/etc/os-release").ok()?;
@@ -17,17 +17,7 @@ fn environment_value(key: &str) -> Option<String> {
 }
 
 fn installation_method() -> &'static str {
-    let Ok(executable) = env::current_exe() else {
-        return "unknown";
-    };
-    let path = executable.to_string_lossy();
-    if path.contains("/.local/lib/wayexpand/") {
-        "user-release"
-    } else if path.starts_with("/usr/bin/") || path.starts_with("/usr/local/bin/") {
-        "system-installation (package manager not verified)"
-    } else {
-        "unknown"
-    }
+    super::install::installation_method(env::current_exe().ok().as_deref())
 }
 
 fn check(status: &'static str, evidence: impl Into<String>) -> serde_json::Value {
@@ -81,8 +71,26 @@ fn active_route_report(daemon: Option<&serde_json::Value>) -> serde_json::Value 
     let route_available = optional_bool("route_available");
     let matching_available = optional_bool("matching_available");
     let terminal_apps_only = optional_bool("terminal_apps_only");
+    let app_scope_state = field("capture_app_scope_state");
+    let source_name = source.as_ref().and_then(|value| value.as_str());
     let connected = state.as_ref().and_then(|value| value.as_str()) == Some("connected");
     let matching_ready = matching_available == Some(true);
+    let app_scope_required = terminal_apps_only == Some(true)
+        || (terminal_apps_only.is_none() && source_name == Some("evdev"));
+    let app_scope_ready = !app_scope_required
+        || app_scope_state.as_ref().and_then(|value| value.as_str()) == Some("allowed");
+    let operational_status = if daemon.is_none() {
+        "not_observed"
+    } else if !(connected && route_available == Some(true) && matching_ready) {
+        "unavailable_or_degraded"
+    } else if app_scope_required && !app_scope_ready {
+        match app_scope_state.as_ref().and_then(|value| value.as_str()) {
+            Some("outside_allowlist" | "denied") => "connected_but_scope_suppressed",
+            _ => "connected_but_scope_unverified",
+        }
+    } else {
+        "connected_and_matching"
+    };
     let input_privacy = match optional_bool("capture_sensitive_focus") {
         Some(true) => "sensitive_field_signal_reported",
         Some(false) => "no_sensitive_field_signal",
@@ -102,7 +110,8 @@ fn active_route_report(daemon: Option<&serde_json::Value>) -> serde_json::Value 
         "state": state,
         "route_available": route_available,
         "terminal_apps_only": terminal_apps_only,
-        "capture_scope": match source.as_ref().and_then(|value| value.as_str()) {
+        "capture_app_scope_state": app_scope_state,
+        "capture_scope": match source_name {
             Some("evdev") => "global_keyboard_devices",
             Some("input-method") => "ibus_input_contexts",
             Some("stdin") => "simulated_stdin_input",
@@ -119,13 +128,7 @@ fn active_route_report(daemon: Option<&serde_json::Value>) -> serde_json::Value 
         "input_privacy": input_privacy,
         "insertion_atomicity": insertion_atomicity,
         "target_identity_exact": field("window_identity_exact"),
-        "operational_status": if daemon.is_none() {
-            "not_observed"
-        } else if connected && route_available == Some(true) && matching_ready {
-            "connected_and_matching"
-        } else {
-            "unavailable_or_degraded"
-        },
+        "operational_status": operational_status,
         "operational_evidence_scope": "daemon status only; this does not verify text delivery in a target application",
     })
 }
@@ -169,7 +172,7 @@ fn report() -> serde_json::Value {
         "ibus_activation": ibus_activation_check(readiness, active_source, terminal_apps_only),
         "active_route": check(
             if daemon.is_none() {"not_tested"} else if active_route["operational_status"] == "connected_and_matching" {"pass"} else {"fail"},
-            if daemon.is_none() {"daemon status is unavailable"} else if active_route["operational_status"] == "connected_and_matching" {"the reported active route is connected and matching is available; target-application insertion remains untested"} else {"the daemon does not report a connected route with matching available"},
+            if daemon.is_none() {"daemon status is unavailable"} else if active_route["operational_status"] == "connected_and_matching" {"the reported active route is connected, matching is enabled, and any configured application scope is currently allowed; target-application insertion remains untested"} else if active_route["operational_status"] == "connected_but_scope_suppressed" {"the route is connected, but the focused application is outside its configured allowlist and matching is suppressed"} else if active_route["operational_status"] == "connected_but_scope_unverified" {"the route is connected, but the focused application identity is unknown; matching remains suppressed until scope can be verified"} else {"the daemon does not report a connected route with matching available"},
         ),
         "control_service": check(if control_service_active || route_service_active {"pass"} else {"fail"}, if control_service_active {"the control service is active"} else if route_service_active {"the daemon service for the active capture route is active"} else {"no active control or capture-route service was found"}),
         // Runtime status does not identify or verify an application toolkit.
@@ -180,7 +183,7 @@ fn report() -> serde_json::Value {
     });
     // Engine telemetry proves only that the engine attempted an expansion. This
     // report does not observe the target widget, so it cannot certify insertion.
-    let engine_expansion_activity_observed = readiness.expanded;
+    let output_emission_observed_unverified = readiness.output_emitted_unverified;
     serde_json::json!({
         "schema_version": SCHEMA_VERSION,
         "wayexpand_version": crate::build_info::VERSION,
@@ -190,8 +193,7 @@ fn report() -> serde_json::Value {
         "installation": installation_method(),
         "active_route": active_route,
         "checks": rows,
-        "ibus_engine_expansion_activity_since_start": engine_expansion_activity_observed,
-        "observed_expansion_since_ibus_engine_start": engine_expansion_activity_observed,
+        "ibus_output_emitted_unverified_since_start": output_emission_observed_unverified,
         "overall": "not_yet_verified_end_to_end",
         "certification": "full_desktop_certification_incomplete",
         "privacy": "report contains environment and operational status only; no keystrokes or snippet contents",
@@ -299,6 +301,36 @@ pub(crate) fn compatibility_report(args: Args) -> Result<()> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn compatibility_report_uses_the_shared_install_origin_classifier() {
+        let root = env::temp_dir().join(format!(
+            "wayexpand-compatibility-install-origin-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let executable = root.join("bin/wayexpand");
+        fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        fs::create_dir_all(root.join("share/wayexpand")).unwrap();
+        fs::write(&executable, "test executable").unwrap();
+
+        for (origin, expected) in [
+            ("source-installation", "source-installation"),
+            ("user-local-release-archive", "user-local-release-archive"),
+            ("developer-build", "developer-build"),
+        ] {
+            fs::write(root.join("share/wayexpand/install-origin"), origin).unwrap();
+            assert_eq!(
+                super::super::install::installation_method(Some(&executable)),
+                expected
+            );
+        }
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
     fn selected_running_ibus() -> wayexpand_backend_ibus::chain::IbusReadiness {
         wayexpand_backend_ibus::chain::IbusReadiness {
             selected: true,
@@ -353,7 +385,8 @@ mod tests {
             "route_available": true,
             "matching_available": true,
             "capture_sensitive_focus": false,
-            "inject_atomic_replace": false
+            "inject_atomic_replace": false,
+            "capture_app_scope_state": "allowed"
         });
         let report = active_route_report(Some(&daemon));
         assert_eq!(report["operational_status"], "connected_and_matching");
@@ -361,6 +394,8 @@ mod tests {
         assert_eq!(report["expansion_scope"], "configured_applications");
         assert_eq!(report["input_privacy"], "no_sensitive_field_signal");
         assert_eq!(report["insertion_atomicity"], "non_atomic");
+        assert_eq!(report["capture_app_scope_state"], "allowed");
+        assert_eq!(report["operational_status"], "connected_and_matching");
         assert!(report["operational_evidence_scope"]
             .as_str()
             .unwrap()
@@ -377,5 +412,57 @@ mod tests {
         });
         let report = active_route_report(Some(&daemon));
         assert_eq!(report["operational_status"], "unavailable_or_degraded");
+    }
+
+    #[test]
+    fn route_report_does_not_claim_matching_when_app_scoped_focus_is_unknown() {
+        let daemon = serde_json::json!({
+            "source": "evdev",
+            "backend": "libei",
+            "state": "connected",
+            "route_available": true,
+            "matching_available": true,
+            "terminal_apps_only": true,
+            "capture_app_scope_state": "unknown"
+        });
+        let report = active_route_report(Some(&daemon));
+        assert_eq!(
+            report["operational_status"],
+            "connected_but_scope_unverified"
+        );
+        assert_eq!(report["capture_app_scope_state"], "unknown");
+    }
+
+    #[test]
+    fn route_report_distinguishes_known_allowlist_suppression() {
+        let daemon = serde_json::json!({
+            "source": "evdev",
+            "backend": "libei",
+            "state": "connected",
+            "route_available": true,
+            "matching_available": true,
+            "terminal_apps_only": true,
+            "capture_app_scope_state": "outside_allowlist"
+        });
+        let report = active_route_report(Some(&daemon));
+        assert_eq!(
+            report["operational_status"],
+            "connected_but_scope_suppressed"
+        );
+    }
+
+    #[test]
+    fn legacy_evdev_status_without_scope_fields_is_not_reported_as_matching() {
+        let daemon = serde_json::json!({
+            "source": "evdev",
+            "state": "connected",
+            "route_available": true,
+            "matching_available": true
+        });
+        let report = active_route_report(Some(&daemon));
+        assert_eq!(
+            report["operational_status"],
+            "connected_but_scope_unverified"
+        );
     }
 }

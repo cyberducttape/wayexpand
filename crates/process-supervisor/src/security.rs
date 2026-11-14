@@ -12,6 +12,9 @@ pub struct EffectiveSecuritySnapshot {
     pub seccomp_filters: Option<u32>,
     pub address_families: AddressFamilySnapshot,
     pub memory_write_execute_blocked: ProbeState,
+    /// Whether a child can create a user namespace and map one caller UID/GID.
+    /// This is stronger evidence than `unshare(CLONE_NEWUSER)` alone, but it
+    /// does not attest that systemd configured a particular service sandbox.
     pub namespace_creation: ProbeState,
     pub personality_syscall: ProbeState,
     pub setuid_mode_bit: ProbeState,
@@ -77,7 +80,7 @@ fn probe_effective_security() -> EffectiveSecuritySnapshot {
             inet6: probe_socket(libc::AF_INET6),
         },
         memory_write_execute_blocked: probe_write_execute_mapping(),
-        namespace_creation: probe_user_namespace_creation(),
+        namespace_creation: probe_user_namespace_setup(),
         personality_syscall: probe_personality_syscall(),
         setuid_mode_bit: probe_setuid_mode_bit(),
         home_read_only: std::env::var_os("HOME").and_then(|home| path_read_only(Path::new(&home))),
@@ -195,7 +198,13 @@ fn probe_personality_syscall() -> ProbeState {
     }
 }
 
-fn probe_user_namespace_creation() -> ProbeState {
+fn probe_user_namespace_setup() -> ProbeState {
+    // Merely entering CLONE_NEWUSER is not sufficient for systemd's
+    // unprivileged filesystem sandboxing: the caller must also be able to map
+    // its UID and GID inside the namespace. Build these bytes before fork so
+    // the child needs no allocator or other non-async-signal-safe runtime.
+    let uid_map = format!("0 {} 1", unsafe { libc::getuid() }).into_bytes();
+    let gid_map = format!("0 {} 1", unsafe { libc::getgid() }).into_bytes();
     let mut pipe = [0; 2];
     // SAFETY: pipe2 initializes the two-element descriptor array.
     if unsafe { libc::pipe2(pipe.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
@@ -205,23 +214,26 @@ fn probe_user_namespace_creation() -> ProbeState {
     // async-signal-safe syscalls and immediately exits.
     let pid = unsafe { libc::fork() };
     if pid == 0 {
-        // SAFETY: close the read end, perform the one namespace probe, report
-        // one byte, then exit without running destructors or touching locks.
+        // SAFETY: close the read end, create and map a disposable user
+        // namespace, report one byte, then exit without running destructors
+        // or touching locks.
         unsafe {
             libc::close(pipe[0]);
             let result = libc::unshare(libc::CLONE_NEWUSER);
-            let outcome = if result == 0 {
-                1u8
+            let outcome = if result != 0 {
+                namespace_probe_errno_outcome(*libc::__errno_location())
             } else {
-                let errno = *libc::__errno_location();
-                if errno == libc::EPERM
-                    || errno == libc::EACCES
-                    || errno == libc::EINVAL
-                    || errno == libc::ENOSYS
-                {
-                    0
+                let setgroups = write_namespace_file(c"/proc/self/setgroups".as_ptr(), b"deny");
+                let uid = write_namespace_file(c"/proc/self/uid_map".as_ptr(), &uid_map);
+                let gid = write_namespace_file(c"/proc/self/gid_map".as_ptr(), &gid_map);
+                if setgroups == 0 && uid == 0 && gid == 0 {
+                    1
                 } else {
-                    2
+                    let errno = [setgroups, uid, gid]
+                        .into_iter()
+                        .find(|error| *error != 0)
+                        .unwrap_or(libc::EIO);
+                    namespace_probe_errno_outcome(errno)
                 }
             };
             libc::write(pipe[1], (&outcome as *const u8).cast(), 1);
@@ -250,6 +262,64 @@ fn probe_user_namespace_creation() -> ProbeState {
         0 => ProbeState::Blocked,
         1 => ProbeState::Allowed,
         _ => ProbeState::Unknown,
+    }
+}
+
+/// Write a short mapping to a proc file from the post-fork probe child.
+/// Returns zero on success or the syscall errno. The caller passes static
+/// paths and buffers allocated before fork.
+unsafe fn write_namespace_file(path: *const libc::c_char, contents: &[u8]) -> libc::c_int {
+    // SAFETY: path is a NUL-terminated static C string and the returned fd is
+    // closed before this function returns.
+    let fd = unsafe { libc::open(path, libc::O_WRONLY | libc::O_CLOEXEC) };
+    if fd < 0 {
+        return unsafe { *libc::__errno_location() };
+    }
+    let mut written = 0;
+    while written < contents.len() {
+        // SAFETY: the slice remains valid for the duration of the syscall and
+        // fd is the proc file opened above.
+        let count = unsafe {
+            libc::write(
+                fd,
+                contents[written..].as_ptr().cast(),
+                contents.len() - written,
+            )
+        };
+        if count < 0 {
+            let errno = unsafe { *libc::__errno_location() };
+            if errno == libc::EINTR {
+                continue;
+            }
+            // SAFETY: fd is owned by this function.
+            unsafe { libc::close(fd) };
+            return errno;
+        }
+        if count == 0 {
+            // SAFETY: fd is owned by this function.
+            unsafe { libc::close(fd) };
+            return libc::EIO;
+        }
+        written += count as usize;
+    }
+    // SAFETY: fd is owned by this function.
+    let close_result = unsafe { libc::close(fd) };
+    if close_result == 0 {
+        0
+    } else {
+        unsafe { *libc::__errno_location() }
+    }
+}
+
+fn namespace_probe_errno_outcome(errno: libc::c_int) -> u8 {
+    if errno == libc::EPERM
+        || errno == libc::EACCES
+        || errno == libc::EINVAL
+        || errno == libc::ENOSYS
+    {
+        0
+    } else {
+        2
     }
 }
 
@@ -314,8 +384,22 @@ fn mount_id_for(path: &Path) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{effective_security_snapshot, mount_id_for};
+    use super::{
+        effective_security_snapshot, mount_id_for, namespace_probe_errno_outcome, ProbeState,
+    };
     use std::path::Path;
+
+    #[test]
+    fn namespace_probe_classifies_expected_policy_denials_as_blocked() {
+        for errno in [libc::EPERM, libc::EACCES, libc::EINVAL, libc::ENOSYS] {
+            assert_eq!(namespace_probe_errno_outcome(errno), 0);
+        }
+        assert_eq!(namespace_probe_errno_outcome(libc::EIO), 2);
+        assert!(matches!(
+            effective_security_snapshot().namespace_creation,
+            ProbeState::Allowed | ProbeState::Blocked | ProbeState::Unknown
+        ));
+    }
 
     #[test]
     fn effective_snapshot_reports_live_kernel_state_without_user_data() {

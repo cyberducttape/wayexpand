@@ -211,23 +211,73 @@ pub struct Settings {
         skip_serializing_if = "is_default_keystroke_max_chars"
     )]
     pub keystroke_max_chars: usize,
-    /// Terminal apps, as app IDs (`app_id_exact:` by default, or
-    /// `app_id_glob:`). Terminals cannot report the text before the cursor,
+    /// Terminal apps, as app IDs (`app_id_exact:` by default,
+    /// `app_id_glob:`), compositor-verified executable paths
+    /// (`process_executable_exact:`), or explicitly accepted Linux process
+    /// names (`process_name_exact:`). Process names are weaker identities:
+    /// applications can change them. Terminals cannot report the text before the cursor,
     /// so input-method routes cannot replace text there. A daemon started
     /// with `--terminal-apps-only` expands automatically only while one of
     /// these apps is focused. Omitted when empty.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub terminal_apps: Vec<String>,
-    /// Applications owned by the explicitly enabled evdev fallback beside
-    /// IBus. IBus suppresses its own matcher in these applications, while the
-    /// evdev daemon is restricted to this list. Raw evdev still observes all
-    /// keyboard events and cannot identify sensitive fields.
+    /// Additional applications owned by the explicitly enabled evdev
+    /// fallback beside IBus. IBus suppresses its own matcher in these apps,
+    /// while the evdev daemon is restricted to this list and `terminal_apps`.
+    /// Raw evdev still observes all keyboard events and cannot identify
+    /// sensitive fields.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub raw_capture_apps: Vec<String>,
     /// Setup-managed switch for app ownership handoff to the evdev companion.
-    /// Merely listing apps never disables IBus matching.
+    /// When enabled, IBus yields matching in both `terminal_apps` and
+    /// `raw_capture_apps`; merely listing apps never disables IBus matching.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub raw_capture_fallback_enabled: bool,
+    /// Deliver replacements in `terminal_apps` by pasting them (the terminal's
+    /// Ctrl+Shift+V) instead of typing them key by key. Pasting is not
+    /// limited by `keystroke_max_chars`, is much faster, and lets a shell's
+    /// bracketed paste hold multi-line text until Enter is pressed instead of
+    /// running each line as it is typed. Omitted when off.
+    #[serde(skip_serializing_if = "TerminalPaste::is_off")]
+    pub terminal_paste: TerminalPaste,
+}
+
+/// When replacements in terminal apps are pasted rather than typed.
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum TerminalPaste {
+    /// Always type replacements key by key.
+    #[default]
+    Off,
+    /// Paste replacements that contain a line break, or that are longer than
+    /// `keystroke_max_chars`; type the rest.
+    Multiline,
+    /// Paste every replacement.
+    Always,
+}
+
+impl TerminalPaste {
+    fn is_off(&self) -> bool {
+        *self == Self::Off
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Multiline => "multiline",
+            Self::Always => "always",
+        }
+    }
+
+    /// Whether `text` should be pasted under this mode. `typed_limit` is the
+    /// longest replacement the paced keystroke route will type.
+    pub fn pastes(self, text: &str, typed_limit: usize) -> bool {
+        match self {
+            Self::Off => false,
+            Self::Always => !text.is_empty(),
+            Self::Multiline => text.contains(['\n', '\r']) || text.chars().count() > typed_limit,
+        }
+    }
 }
 
 /// Upper bound on `settings.terminal_apps` entries.
@@ -354,6 +404,7 @@ impl Default for Settings {
             terminal_apps: Vec::new(),
             raw_capture_apps: Vec::new(),
             raw_capture_fallback_enabled: false,
+            terminal_paste: TerminalPaste::Off,
         }
     }
 }
@@ -373,7 +424,34 @@ impl Settings {
 pub enum AppFilter {
     AppIdExact(String),
     AppIdGlob(String),
+    ProcessExecutableExact(String),
+    ProcessNameExact(String),
     TitleContains(String),
+}
+
+/// Reserved internal namespace used when a trusted compositor reports an
+/// executable path but no desktop application ID. Configurations select this
+/// identity only with `process_executable_exact:`; ordinary app-ID filters
+/// cannot match it.
+pub const PROCESS_EXECUTABLE_APP_ID_PREFIX: &str = "process-executable:";
+/// Reserved identity used only when the user explicitly opted into a Linux
+/// process-name scope. The kernel comm field can be changed by the process.
+pub const PROCESS_NAME_APP_ID_PREFIX: &str = "process-name:";
+
+/// Whether `app_id` uses one of the reserved process-identity namespaces,
+/// ignoring ASCII case. Window trackers must discard client-supplied app IDs
+/// for which this is true: only a tracker's own verified process lookup may
+/// produce these identities, or a client could name itself
+/// `process-executable:/usr/bin/konsole` and satisfy an exact executable
+/// filter.
+pub fn is_reserved_process_app_id(app_id: &str) -> bool {
+    [PROCESS_EXECUTABLE_APP_ID_PREFIX, PROCESS_NAME_APP_ID_PREFIX]
+        .iter()
+        .any(|prefix| {
+            app_id
+                .get(..prefix.len())
+                .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+        })
 }
 
 impl AppFilter {
@@ -387,9 +465,46 @@ impl AppFilter {
         if value.is_empty() || value.contains('\0') {
             return None;
         }
+        if operator == "process_executable_exact" {
+            let path = std::path::Path::new(value);
+            if value.chars().count() > crate::limits::MAX_PROCESS_EXECUTABLE_PATH_CHARS
+                || value.chars().any(char::is_control)
+                || !path.is_absolute()
+                || path.components().any(|component| {
+                    matches!(
+                        component,
+                        std::path::Component::CurDir | std::path::Component::ParentDir
+                    )
+                })
+                || value
+                    .split('/')
+                    .skip(1)
+                    .any(|component| component.is_empty() || matches!(component, "." | ".."))
+                || path.file_name().is_none()
+            {
+                return None;
+            }
+            return Some(Self::ProcessExecutableExact(value.to_owned()));
+        }
+        if operator == "process_name_exact" {
+            if value.len() > crate::limits::MAX_PROCESS_NAME_BYTES
+                || !value.is_ascii()
+                || !value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+            {
+                return None;
+            }
+            return Some(Self::ProcessNameExact(value.to_ascii_lowercase()));
+        }
         let value = value.to_lowercase();
         match operator {
-            "app_id_exact" => Some(Self::AppIdExact(value)),
+            "app_id_exact"
+                if !value.starts_with(PROCESS_EXECUTABLE_APP_ID_PREFIX)
+                    && !value.starts_with(PROCESS_NAME_APP_ID_PREFIX) =>
+            {
+                Some(Self::AppIdExact(value))
+            }
             "app_id_glob" => Some(Self::AppIdGlob(value)),
             "title_contains" => Some(Self::TitleContains(value)),
             _ => None,
@@ -397,7 +512,7 @@ impl AppFilter {
     }
 
     pub fn is_weak(&self) -> bool {
-        !matches!(self, Self::AppIdExact(_))
+        !matches!(self, Self::AppIdExact(_) | Self::ProcessExecutableExact(_))
     }
 }
 
@@ -1120,8 +1235,11 @@ impl Config {
 
     /// Save only if the exact validated source snapshot is still current.
     /// A stable per-path advisory lock serializes cooperating WayExpand
-    /// writers; the revision comparison also detects changes made by editors
-    /// and tools that do not participate in that lock protocol.
+    /// writers; revision comparisons before staging and immediately before
+    /// replacement detect external edits made during staging, even when those
+    /// editors do not participate in that lock protocol. No filesystem API
+    /// here can make the final pathname rename conditional against an
+    /// uncoordinated writer racing in the interval after the last comparison.
     pub fn save_atomic_if_revision_matches(
         &self,
         path: impl AsRef<Path>,
@@ -1158,6 +1276,20 @@ impl Config {
         if current.revision != *expected {
             return Err(ConfigError::RevisionConflict);
         }
+        #[cfg(target_os = "linux")]
+        {
+            let file_name = resolved
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("expansions.toml");
+            storage::save_atomic_serialized_relative_if_revision_matches(
+                &resolved,
+                file_name,
+                text.as_bytes(),
+                expected,
+            )?;
+        }
+        #[cfg(not(target_os = "linux"))]
         Self::save_atomic_serialized(&resolved, text.as_bytes())?;
         Ok(ConfigRevision(Arc::from(text)))
     }

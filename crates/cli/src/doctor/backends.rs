@@ -473,7 +473,7 @@ mod ibus_summary_tests {
             IbusCheck {
                 id: "manifest-scope",
                 title: "Shared IBus registration is multi-user safe",
-                state: IbusCheckState::Warn,
+                state: IbusCheckState::Fail,
                 problem_id: Some("WX-IBUS-MULTIUSER-001"),
                 detail: "shared manifest resolves into a user's home".into(),
                 fix: Some("repair the shared IBus registration".into()),

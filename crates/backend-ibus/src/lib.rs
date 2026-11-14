@@ -7,12 +7,9 @@
 //! testable and prevents D-Bus threading details from entering the matcher.
 
 #[cfg(test)]
-use std::{
-    thread,
-    time::{Duration, Instant},
-};
+use std::{thread, time::Duration};
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 use tracing::warn;
 use wayexpand_core::{
     CompletionNotifier, Config, ExpansionEngine, ExpansionResult, InjectorCapabilities, InputEvent,
@@ -393,15 +390,38 @@ impl IbusEngineAdapter {
                 self.reset();
                 continue;
             }
+            let output_started = Instant::now();
             if let Err(error) = emit(&actions) {
                 self.last_expansion_outcome = Some(IbusExpansionOutcome::UnknownPartialEmission);
+                let target_identity_state = self.target_identity_state();
+                let duration_us = output_started.elapsed().as_micros().min(u64::MAX as u128) as u64;
+                self.note(|telemetry, field| {
+                    telemetry.output_record(
+                        field,
+                        target_identity_state,
+                        result.insert.chars().count(),
+                        Some(duration_us),
+                        "partial-uncertain",
+                    );
+                });
                 self.output_failed();
                 return Err(error);
             }
-            self.engine.commit_applied_expansion(&result);
+            let duration_us = output_started.elapsed().as_micros().min(u64::MAX as u128) as u64;
+            self.engine.commit_emitted_unverified_expansion(&result);
             self.last_expansion_outcome = Some(IbusExpansionOutcome::EmittedUnverified);
             self.record_emitted(&actions);
-            self.note(|telemetry, field| telemetry.expansion(field));
+            let target_identity_state = self.target_identity_state();
+            self.note(|telemetry, field| {
+                telemetry.expansion(field);
+                telemetry.output_record(
+                    field,
+                    target_identity_state,
+                    result.insert.chars().count(),
+                    Some(duration_us),
+                    "emitted-unverified",
+                );
+            });
             emitted += 1;
         }
         Ok(emitted)
@@ -550,9 +570,23 @@ impl IbusEngineAdapter {
     /// so an emission error cannot prove the client document is unchanged.
     /// A fresh focus lifecycle is required before matching resumes.
     pub fn output_failed(&mut self) {
+        self.output_failed_after(None);
+    }
+
+    pub fn output_failed_after(&mut self, duration_us: Option<u64>) {
         self.note(|telemetry, field| telemetry.output_failure(field));
-        if self.pending_output.take().is_some() {
+        if let Some(result) = self.pending_output.take() {
             self.last_expansion_outcome = Some(IbusExpansionOutcome::UnknownPartialEmission);
+            let target_identity_state = self.target_identity_state();
+            self.note(|telemetry, field| {
+                telemetry.output_record(
+                    field,
+                    target_identity_state,
+                    result.insert.chars().count(),
+                    duration_us,
+                    "partial-uncertain",
+                )
+            });
         }
         self.output_retired = true;
         self.enabled = false;
@@ -563,10 +597,34 @@ impl IbusEngineAdapter {
     /// action successfully. This acknowledges signal emission only; IBus
     /// provides no receipt that the client document applied those signals.
     pub fn output_succeeded(&mut self) {
+        self.output_succeeded_after(None);
+    }
+
+    pub fn output_succeeded_after(&mut self, duration_us: Option<u64>) {
         if let Some(result) = self.pending_output.take() {
-            self.note(|telemetry, field| telemetry.expansion(field));
-            self.engine.commit_applied_expansion(&result);
+            let target_identity_state = self.target_identity_state();
+            self.note(|telemetry, field| {
+                telemetry.expansion(field);
+                telemetry.output_record(
+                    field,
+                    target_identity_state,
+                    result.insert.chars().count(),
+                    duration_us,
+                    "emitted-unverified",
+                );
+            });
+            self.engine.commit_emitted_unverified_expansion(&result);
             self.last_expansion_outcome = Some(IbusExpansionOutcome::EmittedUnverified);
+        }
+    }
+
+    fn target_identity_state(&self) -> &'static str {
+        if self.gnome_focus_binding.is_some() {
+            "application-focus-bound"
+        } else if self.ibus_context_identity.is_some() {
+            "ibus-context-only"
+        } else {
+            "unavailable"
         }
     }
 
@@ -581,7 +639,7 @@ impl IbusEngineAdapter {
             let captured = self.enabled
                 && self.capability_block.is_none()
                 && self.advertises_surrounding_text()
-                && !self.engine.raw_capture_app_owns_focus()
+                && !self.engine.evdev_fallback_owns_focus()
                 && !self.engine.is_sensitive_focus()
                 && !self.engine.is_user_paused();
             self.note(|telemetry, field| telemetry.key(field, captured));
@@ -615,7 +673,7 @@ impl IbusEngineAdapter {
         // have one expansion owner. If the authenticated compositor tracker
         // cannot identify the current app, this returns false and IBus keeps
         // its normal behavior; evdev also fails closed on an unknown app.
-        if self.engine.raw_capture_app_owns_focus() {
+        if self.engine.evdev_fallback_owns_focus() {
             self.engine.process(InputEvent::Reset);
             return IbusKeyResult::default();
         }
@@ -1067,6 +1125,54 @@ replacement = "browser fallback"
         assert!(unknown_matches.is_empty());
     }
 
+    #[test]
+    fn ibus_yields_to_terminal_evdev_even_when_surrounding_text_is_advertised() {
+        let config = Config::parse(
+            r#"[settings]
+terminal_apps = ["app_id_exact:org.kde.konsole"]
+raw_capture_fallback_enabled = true
+
+[[expansion]]
+trigger = ";;term"
+replacement = "terminal fallback"
+"#,
+        )
+        .unwrap();
+        let mut ibus = focused(IbusEngineAdapter::new(
+            ExpansionEngine::new(config.clone()).unwrap(),
+        ));
+        ibus.focus_in_for_context(Some("/org/freedesktop/IBus/Engine/WayExpand/12"));
+        let terminal = WindowContext {
+            app_id: Some("org.kde.konsole".into()),
+            title: None,
+            instance_id: Some("kwin:terminal-window".into()),
+        };
+        ibus.bind_gnome_focus(Some(&terminal));
+        // Model a terminal client that does advertise surrounding text. It
+        // must still have exactly one matcher owner: the scoped evdev route.
+        for character in ";;term ".chars() {
+            ibus.set_surrounding_text("", 0, 0);
+            let result = ibus.process_key_event(character as u32, 0, 0);
+            assert!(!result.handled, "IBus must yield the terminal field");
+            assert!(result.actions.is_empty());
+        }
+
+        let mut evdev = ExpansionEngine::new(config).unwrap();
+        evdev.set_terminal_apps_only(true);
+        evdev.process(InputEvent::WindowChanged(Some(terminal)));
+        let mut matches = Vec::new();
+        for character in ";;term ".chars() {
+            let event = if character == ' ' {
+                InputEvent::Delimiter(character)
+            } else {
+                InputEvent::Text(character.to_string())
+            };
+            matches.extend(evdev.process(event));
+        }
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].insert.as_str(), "terminal fallback");
+    }
+
     #[cfg(unix)]
     #[test]
     fn form_completes_after_the_original_ibus_context_regains_focus() {
@@ -1280,6 +1386,17 @@ replacement = "signature"
         );
         let undo = wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap();
         assert!(adapter.engine().prepare_undo(&undo).is_none());
+
+        // Ordinary IBus Enable must not resume matching on the document that
+        // may have observed only the deletion half of the signal sequence.
+        // Recovery requires a fresh focus lifecycle, never an automatic
+        // retry of this uncertain replacement.
+        adapter.enable();
+        assert!(!adapter.process_key_event(':' as u32, 0, 0).handled);
+        assert_eq!(
+            adapter.last_expansion_outcome(),
+            Some(IbusExpansionOutcome::UnknownPartialEmission)
+        );
     }
 
     #[test]
@@ -1638,7 +1755,7 @@ replacement = "世界 🌍"
     }
 
     #[test]
-    fn synchronous_ibus_expansion_commits_undo_after_actions_are_created() {
+    fn synchronous_ibus_emission_is_unverified_and_does_not_create_undo() {
         let config: Config = toml::from_str(
             r#"
             [settings]
@@ -1655,12 +1772,14 @@ replacement = "世界 🌍"
         ));
         Client::default().type_text(&mut adapter, ":sig");
 
-        let undo = adapter
+        assert_eq!(
+            adapter.last_expansion_outcome(),
+            Some(IbusExpansionOutcome::EmittedUnverified)
+        );
+        assert!(adapter
             .engine()
             .prepare_undo(&wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap())
-            .expect("a successfully emitted IBus expansion should be undoable");
-        assert_eq!(undo.matched_text, "signature");
-        assert_eq!(undo.insert, ":sig");
+            .is_none());
     }
 
     #[test]
@@ -1676,12 +1795,10 @@ replacement = "世界 🌍"
             ]
         );
         assert_eq!(client.text(), "signature ");
-        let undo = adapter
+        assert!(adapter
             .engine()
             .prepare_undo(&wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap())
-            .expect("a boundary expansion should be undoable");
-        assert_eq!(undo.matched_text, "signature ");
-        assert_eq!(undo.insert, ":sig ");
+            .is_none());
     }
 
     #[cfg(unix)]

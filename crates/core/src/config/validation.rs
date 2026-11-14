@@ -85,14 +85,21 @@ impl Config {
                 maximum: crate::config::MAX_KEYSTROKE_MAX_CHARS,
             });
         }
-        // Terminal scoping must name app IDs: an editable window title is too
-        // weak to decide where raw-input expansion may type.
+        // Terminal scoping must name a stable app ID or exact executable path;
+        // an editable window title is too weak to decide where raw-input
+        // expansion may type.
         for (index, raw) in self.settings.terminal_apps.iter().enumerate() {
+            let parsed = crate::AppFilter::parse(raw);
             let valid = index < crate::config::MAX_TERMINAL_APPS
-                && matches!(
-                    crate::AppFilter::parse(raw),
-                    Some(crate::AppFilter::AppIdExact(_) | crate::AppFilter::AppIdGlob(_))
-                );
+                && parsed.as_ref().is_some_and(|filter| {
+                    matches!(
+                        filter,
+                        crate::AppFilter::AppIdExact(_)
+                            | crate::AppFilter::AppIdGlob(_)
+                            | crate::AppFilter::ProcessExecutableExact(_)
+                            | crate::AppFilter::ProcessNameExact(_)
+                    ) && weak_scope_filter_allowed(filter, &self.organization)
+                });
             if !valid {
                 return Err(ConfigError::InvalidTerminalApp {
                     index,
@@ -100,14 +107,21 @@ impl Config {
                 });
             }
         }
-        // Evdev fallback ownership must be tied to stable application IDs,
-        // never an editable title or a broad heuristic.
+        // Evdev fallback ownership must be tied to a stable application ID
+        // or exact executable path, never an editable title or a broad
+        // heuristic.
         for (index, raw) in self.settings.raw_capture_apps.iter().enumerate() {
+            let parsed = crate::AppFilter::parse(raw);
             let valid = index < crate::config::MAX_RAW_CAPTURE_APPS
-                && matches!(
-                    crate::AppFilter::parse(raw),
-                    Some(crate::AppFilter::AppIdExact(_) | crate::AppFilter::AppIdGlob(_))
-                );
+                && parsed.as_ref().is_some_and(|filter| {
+                    matches!(
+                        filter,
+                        crate::AppFilter::AppIdExact(_)
+                            | crate::AppFilter::AppIdGlob(_)
+                            | crate::AppFilter::ProcessExecutableExact(_)
+                            | crate::AppFilter::ProcessNameExact(_)
+                    ) && weak_scope_filter_allowed(filter, &self.organization)
+                });
             if !valid {
                 return Err(ConfigError::InvalidRawCaptureApp {
                     index,
@@ -560,6 +574,17 @@ impl Config {
         }
         self.validate()
     }
+}
+
+/// Weak identities in the global input-capture scopes obey the same
+/// organization control as weak per-expansion app filters. In particular,
+/// enabling safe mode must not let a process-name or glob allowlist silently
+/// authorize raw keyboard capture.
+fn weak_scope_filter_allowed(
+    filter: &crate::AppFilter,
+    organization: &crate::OrganizationPolicy,
+) -> bool {
+    !organization.safe_mode || organization.allow_weak_app_filters || !filter.is_weak()
 }
 
 fn form_action_parameter_name(key: &str) -> Option<&str> {

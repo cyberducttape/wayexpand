@@ -51,6 +51,86 @@ fn finding(
     }
 }
 
+/// Explain a terminal-only capture refusal without publishing application
+/// identity. The focus CLI can provide more detail on request, but the normal
+/// debug report must remain safe to attach to support tickets.
+fn focused_scope_finding(daemon: &serde_json::Value) -> Option<DiagnosticFinding> {
+    if daemon
+        .get("terminal_apps_only")
+        .and_then(serde_json::Value::as_bool)
+        != Some(true)
+    {
+        return None;
+    }
+
+    let scope = daemon
+        .get("capture_app_scope_state")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown");
+    if daemon
+        .get("window_process_identity_state")
+        .and_then(serde_json::Value::as_str)
+        == Some("compositor-process-id")
+    {
+        return Some(finding(
+            "WX-EVDEV-FOCUS-006",
+            Severity::Error,
+            Component::Input,
+            "Terminal-only matching is suppressed because KWin reported a compositor surface",
+            ["The reported process ID belongs to KWin, not to a focused application."],
+            ["Focus the actual terminal or browser window and rerun `wayexpand debug --focused-app-id --json`; do not allowlist `kwin_wayland` or use a window title as a substitute for client identity."],
+        ));
+    }
+    match scope {
+        "allowed" | "unrestricted" => None,
+        "outside_allowlist"
+            if daemon
+                .get("window_tracker_identity_source")
+                .and_then(serde_json::Value::as_str)
+                == Some("process-name") =>
+        {
+            Some(finding(
+                "WX-EVDEV-FOCUS-004",
+                Severity::Warning,
+                Component::Input,
+                "Terminal-only matching is suppressed; only a mutable process name is available",
+                ["A process-name filter is lower assurance than an executable path and can be changed by the application."],
+                ["Use `wayexpand debug --focused-app-id --json` to inspect the exact process name. If your policy permits this weaker identity, add an explicit `process_name_exact:<name>` filter and retest; otherwise use an application-ID-capable route or manual paste."],
+            ))
+        }
+        "outside_allowlist" => Some(finding(
+            "WX-EVDEV-FOCUS-002",
+            Severity::Error,
+            Component::Input,
+            "Terminal-only matching is suppressed for the focused application",
+            ["The focused application does not match the configured capture scope."],
+            ["Run `wayexpand debug --focused-app-id --json` to inspect the scope decision; add only a verified exact application ID or executable path, then retest."],
+        )),
+        _ if daemon
+            .get("window_tracker_identity_source")
+            .and_then(serde_json::Value::as_str)
+            == Some("process-executable-unavailable") =>
+        {
+            Some(finding(
+                "WX-EVDEV-FOCUS-003",
+                Severity::Error,
+                Component::Input,
+                "The focused window cannot be authorized for terminal-only matching",
+                ["KWin provided a window process ID, but WayExpand could not verify its executable identity."],
+                ["Run `wayexpand debug --focused-app-id --json` to confirm the host limitation. Do not weaken process permissions or replace exact scope with a title or wildcard; use an application-ID-capable route or manual paste, then retest."],
+            ))
+        }
+        _ => Some(finding(
+            "WX-EVDEV-FOCUS-001",
+            Severity::Error,
+            Component::Input,
+            "Terminal-only matching is suppressed because focused application identity is unknown",
+            ["The daemon cannot confirm that the focused window is in the configured application scope."],
+            ["Focus the intended terminal and run `wayexpand debug --focused-app-id --json`. Keep terminal-only capture enabled; do not use a title or wildcard to bypass an unknown identity."],
+        )),
+    }
+}
+
 pub(crate) fn collect(trigger: Option<&str>) -> serde_json::Value {
     use crate::commands::install;
     let checks = install::checks();
@@ -260,6 +340,9 @@ pub(crate) fn collect(trigger: Option<&str>) -> serde_json::Value {
         ));
     }
     if let Some(daemon) = &daemon {
+        if let Some(scope_finding) = focused_scope_finding(daemon) {
+            findings.push(scope_finding);
+        }
         let route_state = daemon.get("state").and_then(serde_json::Value::as_str);
         if matches!(route_state, Some("permission_required" | "portal_revoked")) {
             findings.push(finding(
@@ -553,7 +636,7 @@ pub(crate) fn print(report: &serde_json::Value, json: bool) -> anyhow::Result<()
 
 #[cfg(test)]
 mod tests {
-    use super::{kwin_bridge_finding, Component, Severity};
+    use super::{focused_scope_finding, kwin_bridge_finding, Component, Severity};
     use wayexpand_backend_ibus::chain::{IbusCheck, IbusCheckState};
 
     fn check(problem_id: &'static str) -> IbusCheck {
@@ -582,5 +665,81 @@ mod tests {
     #[test]
     fn doctor_ignores_unrelated_kwin_check_ids() {
         assert!(kwin_bridge_finding(&check("WX-IBUS-001")).is_none());
+    }
+
+    #[test]
+    fn terminal_scope_diagnostics_distinguish_unknown_allowlist_and_host_denial() {
+        let unknown = focused_scope_finding(&serde_json::json!({
+            "terminal_apps_only": true,
+            "capture_app_scope_state": "unknown"
+        }))
+        .unwrap();
+        assert_eq!(unknown.id, "WX-EVDEV-FOCUS-001");
+        assert_eq!(unknown.component, Component::Input);
+        assert!(unknown
+            .suggested_actions
+            .iter()
+            .any(|action| action.contains("debug --focused-app-id --json")));
+
+        let denied = focused_scope_finding(&serde_json::json!({
+            "terminal_apps_only": true,
+            "capture_app_scope_state": "unknown",
+            "window_tracker_identity_source": "process-executable-unavailable",
+            "focused_app_id": "process-executable-exact:/home/user/private-terminal",
+            "window_title": "secret production session"
+        }))
+        .unwrap();
+        assert_eq!(denied.id, "WX-EVDEV-FOCUS-003");
+        assert!(denied
+            .suggested_actions
+            .iter()
+            .any(|action| action.contains("Do not weaken process permissions")));
+        let serialized = serde_json::to_string(&denied).unwrap();
+        assert!(!serialized.contains("private-terminal"));
+        assert!(!serialized.contains("secret production session"));
+
+        let outside = focused_scope_finding(&serde_json::json!({
+            "terminal_apps_only": true,
+            "capture_app_scope_state": "outside_allowlist"
+        }))
+        .unwrap();
+        assert_eq!(outside.id, "WX-EVDEV-FOCUS-002");
+
+        let process_name = focused_scope_finding(&serde_json::json!({
+            "terminal_apps_only": true,
+            "capture_app_scope_state": "outside_allowlist",
+            "window_tracker_identity_source": "process-name"
+        }))
+        .unwrap();
+        assert_eq!(process_name.id, "WX-EVDEV-FOCUS-004");
+        let serialized = serde_json::to_string(&process_name).unwrap();
+        assert!(serialized.contains("mutable process name"));
+        assert!(serialized.contains("process_name_exact:<name>"));
+        assert!(!serialized.contains("konsole"));
+
+        let compositor = focused_scope_finding(&serde_json::json!({
+            "terminal_apps_only": true,
+            "capture_app_scope_state": "unknown",
+            "window_process_identity_state": "compositor-process-id"
+        }))
+        .unwrap();
+        assert_eq!(compositor.id, "WX-EVDEV-FOCUS-006");
+        assert!(compositor
+            .suggested_actions
+            .iter()
+            .any(|action| action.contains("do not allowlist `kwin_wayland`")));
+        let serialized = serde_json::to_string(&compositor).unwrap();
+        assert!(!serialized.contains("focused-window-pid"));
+
+        assert!(focused_scope_finding(&serde_json::json!({
+            "terminal_apps_only": false,
+            "capture_app_scope_state": "unknown"
+        }))
+        .is_none());
+        assert!(focused_scope_finding(&serde_json::json!({
+            "terminal_apps_only": true,
+            "capture_app_scope_state": "allowed"
+        }))
+        .is_none());
     }
 }

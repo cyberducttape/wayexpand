@@ -41,9 +41,11 @@ session evidence; unit tests alone do not satisfy them.
 - [x] Keep paced keysym output bounded by a short default and preview route
       strategy. The planner recommends atomic verified replacement first,
       otherwise native text commit only under explicit compatibility consent,
-      paced keystrokes only for estimates within 100 ms, and clipboard/manual
-      paste when the active route cannot meet those conditions. The latency
-      threshold is a product objective, not certification evidence.
+      paced keystrokes only within the configured `keystroke_max_chars` limit
+      (8 characters, about 100 ms, by default), and clipboard/manual paste
+      when the active route cannot meet those conditions. Raising the limit is
+      explicit consent to slower output. The throughput estimate is not
+      certification evidence.
 - [ ] Pass a compositor-specific integration matrix. See
       [CERTIFICATION_MATRIX](CERTIFICATION_MATRIX.md).
 - [ ] Record zero unintended deletions, duplicate insertions, or wrong-window
@@ -65,19 +67,26 @@ session evidence; unit tests alone do not satisfy them.
       simulated. The monitor treats every raw key event as activity, including
       modifiers and lock keys ignored by matcher translation.
       The evdev source also watches `/dev/input` topology with inotify. A
-      device-node create, remove, move, attribute change, or watcher failure
-      interrupts pending non-atomic output; device discovery is deferred until
-      the next ordinary input turn so discovery cannot delay cancellation.
+      device-node create, remove, move, or attribute change during pending
+      non-atomic output triggers an immediate rescan, and output is
+      interrupted only when the rescan adds a keyboard, because only a new
+      keyboard can deliver keys the monitor has not seen. Non-keyboard nodes
+      (audio jacks, HDMI audio, mice), removals, and permission updates no
+      longer cut a paced replacement off partway; a keyboard node that is not
+      readable yet is added, and interrupts, on its following permission
+      (attribute) event. A change seen while a device batch or lost slot is
+      still pending interrupts without rescanning.
       Watch invalidation, unmount, read failure, and excessive event backlog
       retire the monitor instead of leaving it silently inactive.
-      Unit tests verify notification delivery and interruption before
-      discovery, but do not verify a real keyboard hotplug during output.
+      Unit tests verify that a non-keyboard node does not interrupt and that
+      an added keyboard does, but do not verify a real keyboard hotplug
+      during output.
       A separate `modifier-during-nonatomic-replacement` certification case
       now records this requirement; the headless KWin driver marks it
       unverified because it does not exercise physical capture.
       The `keyboard-hotplug-during-nonatomic-replacement` case separately
-      requires removing or reconnecting a physical keyboard while paced output
-      is active. The headless driver marks it unverified because it has no
+      requires reconnecting a physical keyboard while paced output is
+      active. The headless driver marks it unverified because it has no
       physical input devices; monitor unit tests do not satisfy this gate.
       This is containment only: any already delivered physical keys or
       synthetic characters may leave partial text, so the target-integrity
@@ -122,6 +131,16 @@ session evidence; unit tests alone do not satisfy them.
       [2026-10-29 report](evidence/kwin-overlap-reproduction-0803d915.json)
       and [2026-10-28 report](evidence/kwin-overlap-reproduction-2026-10-28.json)
       also record failures.
+      A rerun on 2026-11-11 against commit `9da90fb36d45` (dirty worktree)
+      failed. It observed only 26 acknowledged insertion units
+      out of 128, with 5 erased units, interleaved text, and
+      `output_partial_total=1`. The machine-readable record is
+      [here](evidence/kwin-overlap-reproduction-9da90fb3.json). Capture was
+      stdin-simulated, and the scenario explicitly raised the keysym limit
+      from its default of 8 to 250 characters to exercise a long replacement.
+      This confirms the libei output integrity failure under the opt-in long
+      output setting but does not certify or falsify physical-evdev interruption
+      handling.
       Keep this gate open until the current route passes the live target-integrity
       scenario with physical capture or automatic replacement is refused on
       that route. The current-source private KWin smoke report

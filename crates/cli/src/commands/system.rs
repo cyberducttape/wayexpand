@@ -529,7 +529,7 @@ pub(crate) fn doctor_command(args: Args) -> Result<()> {
         build_info::COMMIT
     );
     println!("Session: {}", session_description());
-    println!("Feature limits: IME preedit/composition is unsupported; app_filter window tracking needs KWin (KDE Plasma) or the WayExpand GNOME Shell extension (GNOME 45+); it fails closed elsewhere.");
+    println!("Feature limits: WayExpand does not observe another IME's active preedit; commit or cancel composition before typing a trigger. Local dead-key/Compose guards and committed-Unicode support depend on the selected route. App-filter window tracking requires KWin or the WayExpand GNOME Shell extension and fails closed when unavailable.");
     let config_ok = print_config_diagnostics(&config_path);
     let control_socket_ok = print_control_socket_diagnostics();
     let output_ok = crate::doctor::status::print_output_health_diagnostics();
@@ -766,12 +766,33 @@ pub(crate) fn upgrade_status_command(args: Args) -> Result<()> {
     if !rest.is_empty() {
         usage_bail!("usage: wayexpand upgrade-status [--json]");
     }
-    let report = match crate::doctor::status::read_daemon_status()
+    let mut report = match crate::doctor::status::read_daemon_status()
         .and_then(|response| crate::doctor::status::status_as_json(&response))
     {
         Ok(snapshot) => crate::doctor::status::upgrade_status_from_snapshot(&snapshot),
         Err(_) => crate::doctor::status::upgrade_status_unavailable(),
     };
+    let home = env::var_os("HOME").map(PathBuf::from);
+    let current = home
+        .as_ref()
+        .map(|home| home.join(".local/lib/wayexpand/current"));
+    let active_target = current.as_ref().and_then(|path| fs::read_link(path).ok());
+    let running_cli = env::current_exe().ok();
+    let install_identity = crate::doctor::status::cli_install_identity();
+    let active_payload_cli = install_identity.active_user_cli;
+    let cli_matches_active_install = install_identity.cli_matches_active_user_install;
+    let action = upgrade_status_invoker_action(
+        report["action"].as_str().unwrap_or("unknown"),
+        cli_matches_active_install,
+        active_payload_cli.as_deref(),
+    );
+    report["action"] = serde_json::Value::String(action.clone());
+    report["active_install"] = serde_json::json!({
+        "payload": active_target.map(|target| target.to_string_lossy().into_owned()),
+        "cli": active_payload_cli.as_ref().map(|path| path.display().to_string()),
+        "running_cli": running_cli.as_ref().map(|path| path.display().to_string()),
+        "cli_matches": cli_matches_active_install,
+    });
     if requested_json {
         println!("{report}");
     } else {
@@ -781,12 +802,37 @@ pub(crate) fn upgrade_status_command(args: Args) -> Result<()> {
             report["cli"]["commit"].as_str().unwrap_or("unknown")
         );
         println!("Daemon: {}", report["status"].as_str().unwrap_or("unknown"));
+        if let Some(matches) = cli_matches_active_install {
+            println!(
+                "CLI matches active user installation: {}",
+                if matches { "yes" } else { "no" }
+            );
+        }
+        if let Some(path) = active_payload_cli.as_ref() {
+            println!("Active installation CLI: {}", path.display());
+        }
         if let Some(commit) = report["daemon"]["commit"].as_str() {
             println!("Daemon commit: {commit}");
         }
-        println!("Action: {}", report["action"].as_str().unwrap_or("unknown"));
+        println!("Action: {action}");
     }
     Ok(())
+}
+
+fn upgrade_status_invoker_action(
+    daemon_action: &str,
+    cli_matches_active_install: Option<bool>,
+    active_payload_cli: Option<&Path>,
+) -> String {
+    if cli_matches_active_install == Some(false) {
+        if let Some(path) = active_payload_cli {
+            return format!(
+                "This CLI does not match the active user installation. Run `{} upgrade-status` to assess the daemon against its installed build; this report does not establish that the service needs restarting.",
+                path.display()
+            );
+        }
+    }
+    daemon_action.to_owned()
 }
 
 /// Completes the runtime half of a content-addressed installer upgrade. The
@@ -817,6 +863,20 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
     let rollback_file = state.join("previous-install");
     let current_target = fs::read_link(&current).ok();
     let installed_cli = env::current_exe().ok();
+    let active_payload_cli = current.join("bin/wayexpand");
+    let cli_matches_current_install = current_target
+        .as_ref()
+        .and_then(|_| match_executable_paths(&active_payload_cli, installed_cli.as_deref()));
+    if !upgrade_mutation_cli_identity_is_valid(
+        &action,
+        current_target.is_some(),
+        cli_matches_current_install,
+    ) {
+        bail!(
+            "refusing to change the active installation from a CLI whose identity does not match it; run {} upgrade --check or --apply",
+            active_payload_cli.display()
+        )
+    }
     let config = default_config_path();
     let config_valid = Config::load(&config).is_ok();
     let status_snapshot = crate::doctor::status::read_daemon_status()
@@ -840,24 +900,25 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
         .as_ref()
         .and_then(|s| s.get("source"))
         .and_then(serde_json::Value::as_str);
-    let proposed_service = match source {
-        Some("evdev") => Some("wayexpand-evdev.service"),
-        Some("input-method") => Some("wayexpand-input-method.service"),
-        Some("stdin") => Some("wayexpand-control.service"),
-        _ => None,
-    };
     let service_is_active = |unit: &str| {
         crate::setup::run_setup_command("systemctl", &["--user", "is-active", "--quiet", unit])
             .is_ok_and(|status| status.success())
     };
-    let service = proposed_service
-        .filter(|unit| service_is_active(unit))
-        .or_else(|| {
-            crate::services::UserService::ALL
-                .into_iter()
-                .map(crate::services::UserService::unit)
-                .find(|unit| service_is_active(unit))
-        });
+    // A different active WayExpand unit is not evidence that it owns this
+    // daemon. Never select an unrelated service as a restart target.
+    let service = active_managed_daemon_service(source, service_is_active);
+    let restart_process = service.map(upgrade_restart_process);
+    let broker_unit = "wayexpand-action-broker.service";
+    let broker_restart_process =
+        service_is_active(broker_unit).then(|| upgrade_restart_process(broker_unit));
+    let runtime_action = upgrade_check_runtime_action(
+        current_target.is_some(),
+        cli_matches_current_install,
+        status_snapshot.is_some(),
+        mismatch,
+        service.is_some(),
+        broker_restart_process.is_some(),
+    );
     let stale_ibus_processes = crate::setup_ibus::stale_engine_processes();
     let stale_ibus_processes_json: Vec<_> = stale_ibus_processes
         .iter()
@@ -872,9 +933,15 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
     let report = serde_json::json!({
         "schema":1, "action":action, "cli_commit":cli_commit, "cli_version":cli_version,
         "current_install":current_target.as_ref().map(|v|v.to_string_lossy().into_owned()).or_else(|| installed_cli.as_ref().map(|p|p.display().to_string())),
+        "running_cli":installed_cli.as_ref().map(|p|p.display().to_string()),
+        "active_payload_cli":current_target.as_ref().map(|_|active_payload_cli.display().to_string()),
+        "cli_matches_current_install":cli_matches_current_install,
         "daemon_commit":daemon_commit, "daemon_version":daemon_version, "daemon_running":status_snapshot.is_some(),
         "config_valid":config_valid, "version_mismatch":mismatch,
         "restart_service":service, "rollback_available":rollback_file.is_file(),
+        "restart_process":restart_process.clone(),
+        "broker_restart_process":broker_restart_process.clone(),
+        "runtime_action":runtime_action,
         "ibus_stale_engine_processes":stale_ibus_processes_json,
         "ibus_engine_note":"IBus engine processes are owned by ibus-daemon; restarting a WayExpand systemd unit does not reload a stale engine."
     });
@@ -898,16 +965,58 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
                 "Daemon: {}",
                 daemon_version.or(daemon_commit).unwrap_or("not responding")
             );
+            if current_target.is_some() {
+                println!(
+                    "CLI identity: {}",
+                    match cli_matches_current_install {
+                        Some(true) => "matches active installed payload",
+                        Some(false) => "does not match active installed payload",
+                        None => "could not be verified against active installed payload",
+                    }
+                );
+            }
             println!(
                 "Action: {}",
-                if status_snapshot.is_none() {
-                    "no daemon responded; start the selected route before applying an upgrade"
-                } else if mismatch {
-                    "restart the affected service after validating the new payload"
-                } else {
-                    "no runtime version mismatch detected"
-                }
+                upgrade_check_runtime_action_text(runtime_action)
             );
+            if mismatch {
+                if let Some(target) = restart_process.as_ref() {
+                    println!(
+                        "Process to restart: {} (PID {})",
+                        target["executable"]
+                            .as_str()
+                            .unwrap_or("unknown executable"),
+                        target["pid"]
+                            .as_u64()
+                            .map(|pid| pid.to_string())
+                            .unwrap_or_else(|| "unknown".into())
+                    );
+                    println!(
+                        "Service: {} (systemd --user)",
+                        target["unit"].as_str().unwrap_or("unknown")
+                    );
+                } else {
+                    println!(
+                        "Process to restart: no managed WayExpand service was identified; inspect the process owner before restarting it."
+                    );
+                }
+            }
+            if let Some(target) = broker_restart_process.as_ref() {
+                println!(
+                    "Action Broker process to restart: {} (PID {})",
+                    target["executable"]
+                        .as_str()
+                        .unwrap_or("executable could not be identified"),
+                    target["pid"]
+                        .as_u64()
+                        .map(|pid| pid.to_string())
+                        .unwrap_or_else(|| "unknown".into())
+                );
+                println!(
+                    "Service: {} (systemd --user)",
+                    target["unit"].as_str().unwrap_or("unknown")
+                );
+            }
             if source == Some("ibus") && stale_ibus_processes.is_empty() {
                 println!("IBus: no stale WayExpand engine process was found.");
             } else if !stale_ibus_processes.is_empty() {
@@ -1046,6 +1155,100 @@ pub(crate) fn upgrade_command(args: Args) -> Result<()> {
         print_ibus_engine_restart_guidance(&stale_ibus_processes);
     }
     Ok(())
+}
+
+fn upgrade_restart_process(unit: &str) -> serde_json::Value {
+    let pid = crate::setup_ibus::command_output(
+        "systemctl",
+        &["--user", "show", unit, "--property=MainPID", "--value"],
+    )
+    .and_then(|value| value.trim().parse::<u32>().ok())
+    .filter(|pid| *pid > 0);
+    let executable = pid
+        .and_then(|pid| fs::read_link(format!("/proc/{pid}/exe")).ok())
+        .map(|path| path.to_string_lossy().into_owned());
+    serde_json::json!({
+        "unit": unit,
+        "pid": pid,
+        "executable": executable,
+    })
+}
+
+fn active_managed_daemon_service(
+    source: Option<&str>,
+    mut is_active: impl FnMut(&str) -> bool,
+) -> Option<&'static str> {
+    let unit = match source {
+        Some("evdev") => "wayexpand-evdev.service",
+        Some("input-method") => "wayexpand-input-method.service",
+        Some("stdin") => "wayexpand-control.service",
+        _ => return None,
+    };
+    is_active(unit).then_some(unit)
+}
+
+fn upgrade_check_runtime_action(
+    content_addressed_install: bool,
+    cli_matches_current_install: Option<bool>,
+    daemon_running: bool,
+    daemon_mismatch: bool,
+    managed_daemon_service_active: bool,
+    broker_active: bool,
+) -> &'static str {
+    if content_addressed_install && cli_matches_current_install == Some(false) {
+        "run_current_install_cli"
+    } else if content_addressed_install && cli_matches_current_install.is_none() {
+        "verify_current_install_cli"
+    } else if !daemon_running {
+        "start_selected_route"
+    } else if daemon_mismatch {
+        if managed_daemon_service_active {
+            "restart_daemon_service"
+        } else {
+            "restart_daemon_manually"
+        }
+    } else if broker_active {
+        "restart_action_broker"
+    } else {
+        "none"
+    }
+}
+
+fn upgrade_check_runtime_action_text(action: &str) -> &'static str {
+    match action {
+        "run_current_install_cli" => {
+            "this CLI is not from the active payload; run the active installation's CLI before applying changes"
+        }
+        "verify_current_install_cli" => {
+            "could not verify this CLI against the active payload; do not apply changes until its identity is verified"
+        }
+        "start_selected_route" => {
+            "no daemon responded; start the selected route before applying an upgrade"
+        }
+        "restart_daemon_service" => "restart the affected service after validating the new payload",
+        "restart_daemon_manually" => {
+            "daemon build mismatch; no active service matching its reported route was identified, so do not restart another WayExpand unit"
+        }
+        "restart_action_broker" => {
+            "restart the active Action Broker service to load its updated binary"
+        }
+        _ => "no runtime version mismatch detected",
+    }
+}
+
+fn match_executable_paths(
+    expected: &std::path::Path,
+    actual: Option<&std::path::Path>,
+) -> Option<bool> {
+    crate::doctor::status::executable_paths_match(expected, actual)
+}
+
+fn upgrade_mutation_cli_identity_is_valid(
+    action: &str,
+    content_addressed_install: bool,
+    cli_matches_current_install: Option<bool>,
+) -> bool {
+    action != "--apply" || !content_addressed_install || cli_matches_current_install == Some(true)
 }
 
 fn print_ibus_engine_restart_guidance(processes: &[crate::setup_ibus::StaleEngineProcess]) {
@@ -1215,38 +1418,13 @@ fn backend_list_command(arguments: Vec<String>) -> Result<()> {
     let routes = plan
         .routes
         .iter()
-        .map(|planned| {
-            let contract = planned.contract;
-            let assessment = &planned.assessment;
-            serde_json::json!({
-                "id": contract.id,
-                "label": contract.label,
-                "capture": contract.capture,
-                "injection": contract.injection,
-                "standing": planned.standing.as_str(),
-                "reason": planned.reason,
-                "assessment": {
-                    "installed": assessment.installed.as_str(),
-                    "supported": assessment.supported.as_str(),
-                    "authorized": assessment.authorized.as_str(),
-                    "connected": assessment.connected.as_str(),
-                    "policy_allowed": assessment.policy_allowed,
-                    "certified": assessment.certified,
-                    "requires_user_action": assessment.requires_user_action,
-                    "limitations": assessment.limitations.iter().map(|item| item.description()).collect::<Vec<_>>(),
-                    "portal": assessment.portal,
-                },
-                "replacement_assurance": contract.replacement_assurance,
-                "atomic_replace": contract.atomic_replace,
-                "sensitive_field_detection": contract.sensitive_fields,
-            })
-        })
+        .map(backend_route_json)
         .collect::<Vec<_>>();
     if json {
         println!(
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({
-                "schema_version": 1,
+                "schema_version": 2,
                 "session": capabilities.compositor.name(),
                 "routes": routes,
                 "production_certification_claimed": false,
@@ -1272,6 +1450,12 @@ fn backend_list_command(arguments: Vec<String>) -> Result<()> {
                 assessment["policy_allowed"],
                 assessment["certified"],
             );
+            println!(
+                "  trigger_precondition={} output_transaction={} application_result={}",
+                route["trigger_precondition"].as_str().unwrap_or("unknown"),
+                route["output_transaction"].as_str().unwrap_or("unknown"),
+                route["application_result"].as_str().unwrap_or("unknown"),
+            );
             for limitation in assessment["limitations"].as_array().into_iter().flatten() {
                 if let Some(limitation) = limitation.as_str() {
                     println!("  limitation: {limitation}");
@@ -1281,6 +1465,35 @@ fn backend_list_command(arguments: Vec<String>) -> Result<()> {
         println!("Routes are not production-certified unless their certification evidence explicitly says so.");
     }
     Ok(())
+}
+
+fn backend_route_json(planned: &wayexpand_backend_selection::PlannedRoute) -> serde_json::Value {
+    let contract = planned.contract;
+    let assessment = &planned.assessment;
+    serde_json::json!({
+        "id": contract.id,
+        "label": contract.label,
+        "capture": contract.capture,
+        "injection": contract.injection,
+        "standing": planned.standing.as_str(),
+        "reason": planned.reason,
+        "assessment": {
+            "installed": assessment.installed.as_str(),
+            "supported": assessment.supported.as_str(),
+            "authorized": assessment.authorized.as_str(),
+            "connected": assessment.connected.as_str(),
+            "policy_allowed": assessment.policy_allowed,
+            "certified": assessment.certified,
+            "requires_user_action": assessment.requires_user_action,
+            "limitations": assessment.limitations.iter().map(|item| item.description()).collect::<Vec<_>>(),
+            "portal": assessment.portal,
+        },
+        "trigger_precondition": contract.trigger_precondition,
+        "output_transaction": contract.output_transaction,
+        "application_result": contract.application_result,
+        "atomic_replace": contract.atomic_replace,
+        "sensitive_field_detection": contract.sensitive_fields,
+    })
 }
 
 fn backend_profile_command(arguments: Vec<String>) -> Result<()> {
@@ -1675,7 +1888,7 @@ pub(crate) fn live_explain_build_gate(
     let status = wayexpand_core::DaemonStatus::parse(status_response);
     if status.status_schema() != Some(CONTROL_STATUS_SCHEMA) {
         return Some(
-            "the running daemon uses an incompatible status protocol; restart it before relying on live explanations",
+            "the running daemon's status protocol differs from this CLI; use the active installation's CLI to assess compatibility before deciding whether a restart is needed",
         );
     }
     let daemon_commit = status.field("daemon_commit");
@@ -1707,11 +1920,11 @@ pub(crate) fn live_explain_build_gate(
         )
     {
         Some(
-            "the running daemon build cannot be verified; restart it before relying on live explanations",
+            "the running daemon build cannot be verified; use the active installation's CLI to assess compatibility before deciding whether a restart is needed",
         )
     } else {
         Some(
-            "the running daemon is from a different build; restart it before relying on live explanations",
+            "the running daemon differs from this CLI; verify this CLI belongs to the active installation before deciding whether a restart is needed",
         )
     }
 }
@@ -1719,10 +1932,53 @@ pub(crate) fn live_explain_build_gate(
 #[cfg(test)]
 mod policy_check_tests {
     use super::{
+        active_managed_daemon_service, backend_route_json, match_executable_paths,
         policy_check_findings, setup_can_apply_without_prompt, setup_test_trigger,
-        upgrade_health_failure,
+        upgrade_check_runtime_action, upgrade_check_runtime_action_text, upgrade_health_failure,
+        upgrade_mutation_cli_identity_is_valid, upgrade_status_invoker_action,
     };
     use wayexpand_core::{Config, OrganizationPolicy};
+
+    #[test]
+    fn backend_route_json_does_not_conflate_trigger_check_with_applied_text() {
+        let plan = wayexpand_backend_selection::plan_routes(
+            &wayexpand_backend_selection::Capabilities::default(),
+            true,
+            |_| true,
+        );
+        let ibus = plan
+            .routes
+            .iter()
+            .find(|route| route.contract.id == "ibus")
+            .expect("IBus route is present in the shared catalog");
+        let report = backend_route_json(ibus);
+
+        assert_eq!(
+            report["trigger_precondition"],
+            "surrounding_text_matches_trigger"
+        );
+        assert_eq!(report["output_transaction"], "separate_delete_and_commit");
+        assert_eq!(report["application_result"], "unobservable");
+        assert_eq!(report["atomic_replace"], false);
+        assert!(report.get("replacement_assurance").is_none());
+        let contract: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../tests/contracts/cli-json-shapes.json"
+        ))
+        .unwrap();
+        let expected = contract["backend_list_route"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|field| field.as_str().unwrap().to_owned())
+            .collect::<std::collections::BTreeSet<_>>();
+        let actual = report
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(actual, expected);
+    }
 
     #[test]
     fn setup_does_not_apply_a_plan_on_closed_noninteractive_stdin() {
@@ -1859,5 +2115,138 @@ replacement = "value: {{field:value}}"
         let message = upgrade_health_failure("cli-sha", "unknown", false, false);
         assert!(message.contains("did not return a readable status"));
         assert!(message.contains("run `wayexpand upgrade --rollback`"));
+    }
+
+    #[test]
+    fn upgrade_check_calls_out_an_active_broker_even_when_daemon_matches() {
+        let action = upgrade_check_runtime_action(false, None, true, false, true, true);
+        assert_eq!(action, "restart_action_broker");
+        assert!(upgrade_check_runtime_action_text(action).contains("Action Broker"));
+    }
+
+    #[test]
+    fn missing_daemon_takes_precedence_over_service_restart_advice() {
+        let action = upgrade_check_runtime_action(false, None, false, false, false, true);
+        assert_eq!(action, "start_selected_route");
+        assert!(upgrade_check_runtime_action_text(action).contains("no daemon responded"));
+    }
+
+    #[test]
+    fn daemon_mismatch_does_not_guess_an_unrelated_active_unit() {
+        let action = upgrade_check_runtime_action(false, None, true, true, false, true);
+        assert_eq!(action, "restart_daemon_manually");
+        assert!(upgrade_check_runtime_action_text(action).contains("do not restart another"));
+    }
+
+    #[test]
+    fn development_cli_mismatch_takes_precedence_over_daemon_restart_advice() {
+        let action = upgrade_check_runtime_action(true, Some(false), true, true, true, true);
+        assert_eq!(action, "run_current_install_cli");
+        assert!(upgrade_check_runtime_action_text(action).contains("active installation's CLI"));
+    }
+
+    #[test]
+    fn upgrade_status_does_not_call_a_daemon_stale_when_the_cli_is_not_installed_payload() {
+        let action = upgrade_status_invoker_action(
+            "The running daemon does not speak this CLI's status protocol; restart it.",
+            Some(false),
+            Some(std::path::Path::new(
+                "/home/user/.local/lib/wayexpand/current/bin/wayexpand",
+            )),
+        );
+        assert!(action.contains("does not match the active user installation"));
+        assert!(
+            action.contains("/home/user/.local/lib/wayexpand/current/bin/wayexpand upgrade-status")
+        );
+        assert!(action.contains("does not establish that the service needs restarting"));
+
+        let current_action = upgrade_status_invoker_action(
+            "Restart the daemon because its build is stale.",
+            Some(true),
+            Some(std::path::Path::new(
+                "/home/user/.local/lib/wayexpand/current/bin/wayexpand",
+            )),
+        );
+        assert_eq!(
+            current_action,
+            "Restart the daemon because its build is stale."
+        );
+    }
+
+    #[test]
+    fn daemon_service_resolution_checks_only_the_reported_route() {
+        let mut checked = Vec::new();
+        let service = active_managed_daemon_service(Some("evdev"), |unit| {
+            checked.push(unit.to_owned());
+            unit == "wayexpand-input-method.service"
+        });
+        assert_eq!(service, None);
+        assert_eq!(checked, ["wayexpand-evdev.service"]);
+    }
+
+    #[test]
+    fn executable_identity_follows_the_current_payload_symlink() {
+        use std::os::unix::fs::symlink;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "wayexpand-upgrade-path-{}-{nonce}",
+            std::process::id()
+        ));
+        let payload = root.join("payload");
+        let current = root.join("current");
+        std::fs::create_dir_all(payload.join("bin")).unwrap();
+        std::fs::write(payload.join("bin/wayexpand"), b"test cli").unwrap();
+        symlink(&payload, &current).unwrap();
+
+        assert_eq!(
+            match_executable_paths(
+                &current.join("bin/wayexpand"),
+                Some(&payload.join("bin/wayexpand"))
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            match_executable_paths(
+                &current.join("bin/wayexpand"),
+                Some(&root.join("other-cli"))
+            ),
+            None
+        );
+        assert_eq!(
+            upgrade_check_runtime_action(true, Some(false), true, true, true, false),
+            "run_current_install_cli"
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn upgrade_mutations_require_verified_identity_for_content_addressed_installs() {
+        assert!(upgrade_mutation_cli_identity_is_valid(
+            "--apply", false, None
+        ));
+        assert!(upgrade_mutation_cli_identity_is_valid(
+            "--apply",
+            true,
+            Some(true)
+        ));
+        assert!(!upgrade_mutation_cli_identity_is_valid(
+            "--apply",
+            true,
+            Some(false)
+        ));
+        assert!(!upgrade_mutation_cli_identity_is_valid(
+            "--apply", true, None
+        ));
+        assert!(upgrade_mutation_cli_identity_is_valid(
+            "--rollback",
+            true,
+            Some(false)
+        ));
     }
 }

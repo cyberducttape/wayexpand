@@ -71,7 +71,10 @@ it is never selected automatically.
 **App-filter changes:**
 - Bare filters now mean exact normalized desktop app-ID matches.
 - Use `app_id_exact:<id>` for the security-strength form, `app_id_glob:<pattern>` for explicit glob matching, or `title_contains:<text>` for weak title matching.
-- Safe mode permits exact app-ID filters only unless `allow_weak_app_filters = true` is explicitly configured.
+- Safe mode rejects weak app-filter operators, including globs and mutable
+  process names, unless `allow_weak_app_filters = true` is explicitly
+  configured. This also applies to the global `terminal_apps` and
+  `raw_capture_apps` input-capture allowlists.
 - **Action:** Review app-filtered snippets after upgrade; convert old substring/title intent to an explicit operator.
 
 **Example:** `app_filter = ["app_id_exact:org.mozilla.Thunderbird"]` matches only that desktop app. `app_filter = ["title_contains:thunderbird"]` is weaker and is not a security boundary.

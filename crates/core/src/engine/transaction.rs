@@ -6,12 +6,17 @@
 use super::{ExpansionEngine, ExpansionResult};
 use crate::{InjectorCapabilities, InjectorError, OutputProgress, SensitiveText, TextInjector};
 
-/// Result of the multi-stage replacement transaction.
+/// Result of the multi-stage output transaction.
 ///
 /// Failures are separated by what can safely be inferred about their effect.
-/// Callers may restore/retry only `NotApplied`; an uncertain acknowledgement
-/// from an atomic protocol is also non-replayable, even though the protocol
-/// itself cannot have applied only part of the replacement.
+/// A `NotApplied` result is necessary but not sufficient for retry: callers
+/// must also establish that the original target context remains valid. An
+/// uncertain acknowledgement from an atomic protocol is non-replayable, even
+/// though the protocol itself cannot have applied only part of the
+/// replacement. `Applied` means the backend acknowledged its operation; it
+/// does not prove that the target application rendered the expected text.
+/// That evidence is reported separately as `application_result = "unverified"`
+/// until a client-level confirmation mechanism exists.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TransactionOutcome {
     Applied,
@@ -114,11 +119,30 @@ impl TransactionJournal {
 }
 
 impl TransactionOutcome {
-    pub fn is_applied(&self) -> bool {
+    /// Whether the engine can safely restore the pending trigger or undo
+    /// record and let the user retry. This is deliberately narrower than
+    /// `retryable()` on the underlying error: only an explicit acknowledgement
+    /// that no output started makes replay safe.
+    pub fn is_safe_to_retry(&self) -> bool {
+        matches!(self, Self::NotApplied { .. })
+    }
+
+    /// Whether the output backend acknowledged the transaction. This is not
+    /// a claim that the target application contains the expected text.
+    pub fn is_output_acknowledged(&self) -> bool {
         matches!(
             self,
             Self::Applied | Self::AppliedWithCursorPositionFailure { .. }
         )
+    }
+
+    /// Compatibility alias for [`Self::is_output_acknowledged`]. This does
+    /// not prove the application changed its document.
+    #[deprecated(
+        note = "use is_output_acknowledged; backend acknowledgment is not application verification"
+    )]
+    pub fn is_applied(&self) -> bool {
+        self.is_output_acknowledged()
     }
 
     pub fn source(&self) -> Option<&InjectorError> {
@@ -135,11 +159,13 @@ impl TransactionOutcome {
 impl std::fmt::Display for TransactionOutcome {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Applied => formatter.write_str("transaction applied"),
+            Self::Applied => {
+                formatter.write_str("output acknowledged; application text unverified")
+            }
             Self::AppliedWithCursorPositionFailure { source } => {
                 write!(
                     formatter,
-                    "replacement applied but cursor repositioning failed: {source}"
+                    "output acknowledged, but cursor repositioning failed; application text unverified: {source}"
                 )
             }
             Self::NotApplied { source } => write!(formatter, "transaction not applied: {source}"),
@@ -328,11 +354,12 @@ impl ExpansionEngine {
         match result.reinsert_after {
             None => {
                 if let Err(source) = injector.replace(&result.matched_text, &result.insert) {
-                    let outcome = if injector.capabilities().atomic_replace
-                        && !injector.replace_error_may_have_applied()
+                    let atomic = injector.capabilities().has_atomic_replacement_contract();
+                    let outcome = if source.is_pre_output_refusal()
+                        || (atomic && !injector.replace_error_may_have_applied())
                     {
                         TransactionOutcome::NotApplied { source }
-                    } else if injector.capabilities().atomic_replace {
+                    } else if atomic {
                         TransactionOutcome::UnknownApplicationOutcome { source }
                     } else {
                         TransactionOutcome::UnknownPartialFailure { source }
@@ -351,11 +378,12 @@ impl ExpansionEngine {
                 let erase = SensitiveText::from(erase);
                 let insert = SensitiveText::from(insert);
                 if let Err(source) = injector.replace(erase.as_str(), insert.as_str()) {
-                    let outcome = if injector.capabilities().atomic_replace
-                        && !injector.replace_error_may_have_applied()
+                    let atomic = injector.capabilities().has_atomic_replacement_contract();
+                    let outcome = if source.is_pre_output_refusal()
+                        || (atomic && !injector.replace_error_may_have_applied())
                     {
                         TransactionOutcome::NotApplied { source }
-                    } else if injector.capabilities().atomic_replace {
+                    } else if atomic {
                         TransactionOutcome::UnknownApplicationOutcome { source }
                     } else {
                         TransactionOutcome::UnknownPartialFailure { source }
@@ -391,6 +419,38 @@ mod journal_tests {
             message: "simulated".into(),
             retryable: true,
         }
+    }
+
+    #[test]
+    fn only_a_known_not_applied_outcome_is_safe_to_retry() {
+        let outcomes = [
+            TransactionOutcome::Applied,
+            TransactionOutcome::AppliedWithCursorPositionFailure { source: error() },
+            TransactionOutcome::NotApplied { source: error() },
+            TransactionOutcome::UnknownApplicationOutcome { source: error() },
+            TransactionOutcome::UnknownPartialFailure { source: error() },
+        ];
+
+        for outcome in outcomes {
+            assert_eq!(
+                outcome.is_safe_to_retry(),
+                matches!(outcome, TransactionOutcome::NotApplied { .. }),
+                "retry safety must not be inferred from acknowledgement or error retryability"
+            );
+        }
+    }
+
+    #[test]
+    fn acknowledged_output_display_does_not_claim_application_verification() {
+        assert_eq!(
+            TransactionOutcome::Applied.to_string(),
+            "output acknowledged; application text unverified"
+        );
+        let cursor_failure =
+            TransactionOutcome::AppliedWithCursorPositionFailure { source: error() }.to_string();
+        assert!(cursor_failure.contains("output acknowledged"));
+        assert!(cursor_failure.contains("application text unverified"));
+        assert!(!cursor_failure.contains("replacement applied"));
     }
 
     #[test]

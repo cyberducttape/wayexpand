@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "observed_at_utc": "2026-11-11T10:32:47Z",
+  "tested_commit": "9da90fb36d45",
+  "working_tree_dirty": true,
+  "command": "bash scripts/test-kwin-e2e.sh --keep second-trigger-during-nonatomic-replacement",
+  "result": "fail",
+  "scenario": "second-trigger-during-nonatomic-replacement",
+  "environment": {
+    "compositor": "KWin 6.6.6",
+    "session": "headless",
+    "capture_source": "stdin-simulated",
+    "injection_backend": "libei",
+    "insertion_mode": "libei keysym fallback",
+    "key_pacing_ms": 12,
+    "default_keysym_max_chars": 8,
+    "configured_keysym_max_chars": 250,
+    "sensitive_field_detection": false,
+    "compatibility_mode": "tracked-focus"
+  },
+  "expected_insert_units": 128,
+  "acknowledged_insert_units": 26,
+  "erased_units": 5,
+  "output_uncertain_total": 1,
+  "output_partial_total": 1,
+  "partial_write_total": 1,
+  "application_result": "unknown",
+  "observed_text": "AAAAAAAAAAAAA;AnAeAxtAAAAAAAAAA",
+  "cursor": 31,
+  "diagnostic": "overlapping input left partial/corrupted text"
+}

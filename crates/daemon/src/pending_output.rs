@@ -19,9 +19,11 @@ use std::collections::VecDeque;
 use wayexpand_core::InjectorError;
 
 use crate::events::{
-    dispatch_pending_results_with_pending_buffer, expansion_allowed, finish_expansion, finish_undo,
-    process_key_event,
+    dispatch_pending_results_with_pending_buffer, expansion_allowed,
+    finish_expansion_with_retry_allowed, finish_undo_with_retry_allowed, process_key_event,
 };
+#[cfg(test)]
+use crate::output_loop::spawn_async_injector;
 use crate::output_loop::SubmittedTransaction;
 use crate::source_steps::Step;
 use crate::*;
@@ -31,6 +33,38 @@ use crate::*;
 /// enough for many simulated characters to be delivered before cancellation.
 /// Keep this short and use it only while such a transaction is active.
 const NON_ATOMIC_INPUT_POLL_INTERVAL: Duration = Duration::from_millis(2);
+
+/// Integrity state for one submitted output transaction. Physical input is a
+/// monotonic invalidation: once observed, even a later `Applied` worker result
+/// is uncertain because the last synthetic event may have raced with that
+/// input. The reactor drains input before resolving a ready completion, so
+/// both completion/input orderings pass through this same gate.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct OutputIntegrityGate {
+    physical_input_interrupted: bool,
+    resolved_invalidate_context: Option<bool>,
+}
+
+impl OutputIntegrityGate {
+    pub(crate) fn interrupt_for_physical_input(&mut self) {
+        if self.resolved_invalidate_context.is_none() {
+            self.physical_input_interrupted = true;
+        }
+    }
+
+    fn was_interrupted(self) -> bool {
+        self.physical_input_interrupted
+    }
+
+    pub(crate) fn resolve(&mut self, invalidate_context: bool) -> bool {
+        if let Some(resolved) = self.resolved_invalidate_context {
+            return resolved;
+        }
+        let resolved = self.physical_input_interrupted || invalidate_context;
+        self.resolved_invalidate_context = Some(resolved);
+        resolved
+    }
+}
 
 /// Where a batch of output came from; failures are handled as on the
 /// synchronous path for that source.
@@ -42,6 +76,45 @@ pub(crate) enum OutputOrigin {
     Command,
     /// A picker or `wayexpand insert` request; failures are never fatal.
     Insert,
+}
+
+/// What the reactor may do with queued work after resolving one output job.
+/// Keep this decision pure so adversarial sequence tests exercise the same
+/// branch that controls the live follow-up path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OutputContinuation {
+    Quarantine,
+    AdvanceBatch,
+    ReplayFollowUp,
+}
+
+pub(crate) fn output_continuation(
+    origin: OutputOrigin,
+    invalidate_context: bool,
+    completed: bool,
+) -> OutputContinuation {
+    if invalidate_context || (!completed && origin == OutputOrigin::Typed) {
+        OutputContinuation::Quarantine
+    } else if completed {
+        OutputContinuation::AdvanceBatch
+    } else {
+        OutputContinuation::ReplayFollowUp
+    }
+}
+
+/// Whether the backend's terminal result proves that the matcher context can
+/// no longer be trusted. A clean pre-output refusal normally permits retry,
+/// but a refusal specifically caused by focus loss must drop stale context.
+pub(crate) fn outcome_invalidates_context(outcome: &wayexpand_core::TransactionOutcome) -> bool {
+    match outcome {
+        wayexpand_core::TransactionOutcome::UnknownApplicationOutcome { .. }
+        | wayexpand_core::TransactionOutcome::UnknownPartialFailure { .. }
+        | wayexpand_core::TransactionOutcome::AppliedWithCursorPositionFailure { .. } => true,
+        wayexpand_core::TransactionOutcome::NotApplied { source } => {
+            source.invalidates_target_context()
+        }
+        wayexpand_core::TransactionOutcome::Applied => false,
+    }
 }
 
 pub(crate) enum OutputJob {
@@ -91,7 +164,8 @@ pub(crate) struct PendingOutput {
     transaction: SubmittedTransaction,
     queued: VecDeque<OutputJob>,
     follow_up: Vec<InputEvent>,
-    physical_input_interrupted: bool,
+    integrity: OutputIntegrityGate,
+    interrupted_at: Option<Instant>,
 }
 
 impl Daemon {
@@ -169,7 +243,8 @@ impl Daemon {
                         transaction,
                         queued,
                         follow_up,
-                        physical_input_interrupted: false,
+                        integrity: OutputIntegrityGate::default(),
+                        interrupted_at: None,
                     });
                     return Ok(());
                 }
@@ -178,7 +253,7 @@ impl Daemon {
                 Err(error) => {
                     let (source, result) = *error;
                     let outcome = wayexpand_core::TransactionOutcome::NotApplied { source };
-                    if !self.complete_job(origin, pending_job.with_result(result), outcome)? {
+                    if !self.complete_job(origin, pending_job.with_result(result), outcome, true)? {
                         return self.end_failed_batch(origin, follow_up);
                     }
                 }
@@ -194,12 +269,21 @@ impl Daemon {
         origin: OutputOrigin,
         job: OutputJob,
         outcome: wayexpand_core::TransactionOutcome,
+        retry_allowed: bool,
     ) -> Result<bool> {
         let finished = match job {
-            OutputJob::Expansion(result) => {
-                finish_expansion(&mut self.config.engine, result, outcome)
-            }
-            OutputJob::Undo(result) => finish_undo(&mut self.config.engine, result, outcome),
+            OutputJob::Expansion(result) => finish_expansion_with_retry_allowed(
+                &mut self.config.engine,
+                result,
+                outcome,
+                retry_allowed,
+            ),
+            OutputJob::Undo(result) => finish_undo_with_retry_allowed(
+                &mut self.config.engine,
+                result,
+                outcome,
+                retry_allowed,
+            ),
         };
         let Err(error) = finished else {
             return Ok(true);
@@ -216,11 +300,14 @@ impl Daemon {
     /// After a failure the synchronous typed path returned before replaying
     /// its follow-up; command completions and inserts still replayed it.
     fn end_failed_batch(&mut self, origin: OutputOrigin, follow_up: Vec<InputEvent>) -> Result<()> {
-        if origin == OutputOrigin::Typed {
-            self.quarantine_evdev_input();
-            return Ok(());
+        match output_continuation(origin, false, false) {
+            OutputContinuation::Quarantine => {
+                self.quarantine_evdev_input();
+                Ok(())
+            }
+            OutputContinuation::ReplayFollowUp => self.replay_follow_up(follow_up),
+            OutputContinuation::AdvanceBatch => unreachable!("failed batch cannot advance"),
         }
-        self.replay_follow_up(follow_up)
     }
 
     fn replay_follow_up(&mut self, follow_up: Vec<InputEvent>) -> Result<()> {
@@ -247,7 +334,7 @@ impl Daemon {
         {
             return Ok(Step::Stop);
         }
-        self.cancel_non_atomic_output_on_physical_input(Duration::ZERO);
+        self.cancel_non_atomic_output_on_new_input(Duration::ZERO);
         let metrics = self.config.engine.command_metrics();
         self.publish_status(metrics);
         let Some(pending) = self.pending_output.as_ref() else {
@@ -279,7 +366,7 @@ impl Daemon {
                 if !remaining.is_zero() {
                     if self.watches_non_atomic_output_for_input() {
                         let wait = remaining.min(NON_ATOMIC_INPUT_POLL_INTERVAL);
-                        self.cancel_non_atomic_output_on_physical_input(wait);
+                        self.cancel_non_atomic_output_on_new_input(wait);
                     } else {
                         let wait = remaining.min(input_loop::IDLE_MAINTENANCE_INTERVAL);
                         self.waker.wait(wait);
@@ -302,10 +389,15 @@ impl Daemon {
                 (None, outcome, None)
             }
         };
+        // Drain once more after observing worker completion. Physical input
+        // may have arrived between the reactor's initial poll and the worker
+        // acknowledgement; it still invalidates an emitted-but-unverified
+        // result and must not be replayed into the target.
+        self.cancel_non_atomic_output_on_new_input(Duration::ZERO);
         let physical_input_interrupted = self
             .pending_output
             .as_ref()
-            .is_some_and(|pending| pending.physical_input_interrupted);
+            .is_some_and(|pending| pending.integrity.was_interrupted());
         if physical_input_interrupted {
             outcome = match outcome {
                 wayexpand_core::TransactionOutcome::Applied
@@ -344,7 +436,11 @@ impl Daemon {
                 }
             };
         }
-        self.resolve_pending_output(outcome, completed_result)?;
+        // The single interruption-latency sample is recorded by
+        // resolve_pending_output, which takes ownership of the pending job.
+        // Keep this pre-resolution path focused on outcome classification so
+        // one interrupted transaction cannot be counted twice.
+        self.resolve_pending_output(outcome, completed_result, trace_id)?;
         Ok(Step::Next)
     }
 
@@ -352,29 +448,46 @@ impl Daemon {
         &mut self,
         outcome: wayexpand_core::TransactionOutcome,
         completed_result: Option<ExpansionResult>,
+        trace_id: Option<String>,
     ) -> Result<()> {
         let Some(PendingOutput {
             origin,
             in_flight,
             queued,
             follow_up,
-            physical_input_interrupted,
+            mut integrity,
+            interrupted_at,
             ..
         }) = self.pending_output.take()
         else {
             return Ok(());
         };
+        if completed_result.is_some()
+            && matches!(
+                &outcome,
+                wayexpand_core::TransactionOutcome::Applied
+                    | wayexpand_core::TransactionOutcome::AppliedWithCursorPositionFailure { .. }
+                    | wayexpand_core::TransactionOutcome::UnknownApplicationOutcome { .. }
+                    | wayexpand_core::TransactionOutcome::UnknownPartialFailure { .. }
+            )
+        {
+            if let (Some(trace_id), Some(interrupted_at)) = (trace_id.as_deref(), interrupted_at) {
+                failure_trace::record_interrupt_to_backend_return(
+                    trace_id,
+                    interrupted_at.elapsed(),
+                );
+            }
+        }
         let in_flight = match completed_result {
             Some(result) => in_flight.with_result(result),
             None => in_flight,
         };
-        let outcome_uncertain = matches!(
-            &outcome,
-            wayexpand_core::TransactionOutcome::UnknownApplicationOutcome { .. }
-                | wayexpand_core::TransactionOutcome::UnknownPartialFailure { .. }
-        );
-        let completed = self.complete_job(origin, in_flight, outcome)?;
-        if physical_input_interrupted || outcome_uncertain {
+        let invalidate_context = outcome_invalidates_context(&outcome);
+        let invalidate_context = integrity.resolve(invalidate_context);
+        // Recovery can itself fail. Apply the integrity action before
+        // propagating that error, otherwise an already-applied replacement
+        // with an unknown cursor could escape quarantine on the error path.
+        if invalidate_context {
             // The input event has already reached the application. Do not
             // replay captured input or continue a queued batch against text
             // that may have changed while output was in progress. An
@@ -384,11 +497,21 @@ impl Daemon {
             // needs its quiet-window quarantine.
             self.config.engine.reset_with_unknown_preceding_text();
             self.quarantine_evdev_input();
-            Ok(())
-        } else if completed {
-            self.advance_output(origin, queued, follow_up)
-        } else {
-            self.end_failed_batch(origin, follow_up)
+        }
+        // A known pre-output refusal is retryable only while the target
+        // context is still valid. Physical input, focus changes, or uncertain
+        // output invalidate that context and must not resurrect a deferred
+        // trigger (or retain undo state) after the matcher reset.
+        let completed = self.complete_job(origin, in_flight, outcome, !invalidate_context)?;
+        match output_continuation(origin, invalidate_context, completed) {
+            OutputContinuation::Quarantine => {
+                if !invalidate_context {
+                    self.quarantine_evdev_input();
+                }
+                Ok(())
+            }
+            OutputContinuation::AdvanceBatch => self.advance_output(origin, queued, follow_up),
+            OutputContinuation::ReplayFollowUp => self.replay_follow_up(follow_up),
         }
     }
 
@@ -401,14 +524,14 @@ impl Daemon {
             && self
                 .injector
                 .as_ref()
-                .is_some_and(|injector| !injector.capabilities().atomic_replace)
+                .is_some_and(|injector| !injector.capabilities().has_atomic_replacement_contract())
             && self
                 .pending_output
                 .as_ref()
-                .is_some_and(|pending| !pending.physical_input_interrupted)
+                .is_some_and(|pending| !pending.integrity.was_interrupted())
     }
 
-    fn cancel_non_atomic_output_on_physical_input(&mut self, timeout: Duration) {
+    fn cancel_non_atomic_output_on_new_input(&mut self, timeout: Duration) {
         if !self.watches_non_atomic_output_for_input() {
             return;
         }
@@ -468,7 +591,8 @@ impl Daemon {
 
     fn interrupt_pending_non_atomic_output(&mut self, reason: &str) {
         if let Some(pending) = self.pending_output.as_mut() {
-            pending.physical_input_interrupted = true;
+            pending.integrity.interrupt_for_physical_input();
+            pending.interrupted_at.get_or_insert_with(Instant::now);
         }
         if let Some(submitter) = self
             .output_worker
@@ -489,6 +613,19 @@ impl Daemon {
         // The capture source delivered an event, so its reconnect backoff
         // starts over; output failures are recovered separately.
         self.reconnect_delay = Duration::from_millis(250);
+        if matches!(
+            &event,
+            InputEvent::TextChar(_)
+                | InputEvent::Text(_)
+                | InputEvent::Key(_)
+                | InputEvent::Backspace
+                | InputEvent::Delimiter(_)
+        ) {
+            // This serialized path bypasses `process_event_with_pending_buffer`
+            // so output can be submitted to its worker. Keep the same
+            // content-free input accounting as that shared event path.
+            crate::status::record_input_event();
+        }
         if let InputEvent::Key(chord) = event {
             if let Some(undo) =
                 process_key_event(&mut self.config.engine, chord, true, &self.policy)
@@ -505,9 +642,13 @@ impl Daemon {
             // preventing every typed trigger from reaching the matcher.
             return Ok(());
         }
-        self.config
-            .engine
-            .process_deferred_into(event, &mut self.pending_results);
+        crate::failure_trace::note_matcher_evaluation();
+        crate::latency::measure_matcher(|| {
+            self.config
+                .engine
+                .process_deferred_into(event, &mut self.pending_results)
+        });
+        crate::failure_trace::note_matches(self.pending_results.len());
         dispatch_pending_results_with_pending_buffer(
             &mut self.config.engine,
             &mut self.pending_results,
@@ -539,6 +680,339 @@ impl Daemon {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn outcome_context_invalidation_distinguishes_focus_refusal_from_policy_refusal() {
+        let focus_refusal = wayexpand_core::TransactionOutcome::NotApplied {
+            source: InjectorError {
+                backend: "libei",
+                message: "refused: the focused window changed after the trigger was typed".into(),
+                retryable: false,
+            },
+        };
+        let policy_refusal = wayexpand_core::TransactionOutcome::NotApplied {
+            source: InjectorError {
+                backend: "libei",
+                message: "refused: this route cannot verify the trigger at the target; compatibility_mode is off"
+                    .into(),
+                retryable: false,
+            },
+        };
+
+        assert!(outcome_invalidates_context(&focus_refusal));
+        assert!(!outcome_invalidates_context(&policy_refusal));
+        assert!(outcome_invalidates_context(
+            &wayexpand_core::TransactionOutcome::UnknownPartialFailure {
+                source: InjectorError::input_interrupted("libei"),
+            }
+        ));
+        assert!(!outcome_invalidates_context(
+            &wayexpand_core::TransactionOutcome::Applied
+        ));
+    }
+
+    #[test]
+    fn focus_refusal_and_physical_input_compose_as_terminal_invalidation() {
+        for physical_input_seen in [false, true] {
+            for refusal_invalidates_target in [false, true] {
+                let mut integrity = OutputIntegrityGate::default();
+                if physical_input_seen {
+                    integrity.interrupt_for_physical_input();
+                }
+                let outcome = wayexpand_core::TransactionOutcome::NotApplied {
+                    source: InjectorError {
+                        backend: "libei",
+                        message: if refusal_invalidates_target {
+                            "refused: the focused window changed after the trigger was typed"
+                        } else {
+                            "refused: this route cannot verify the trigger at the target; compatibility_mode is off"
+                        }
+                        .into(),
+                        retryable: false,
+                    },
+                };
+
+                let invalidated = integrity.resolve(outcome_invalidates_context(&outcome));
+                assert_eq!(
+                    invalidated,
+                    physical_input_seen || refusal_invalidates_target,
+                    "physical_input_seen={physical_input_seen}, refusal_invalidates_target={refusal_invalidates_target}"
+                );
+
+                // Resolution is terminal even if the physical monitor reports
+                // another input after a clean policy refusal was observed.
+                integrity.interrupt_for_physical_input();
+                assert_eq!(
+                    integrity.resolve(false),
+                    invalidated,
+                    "late input cannot rewrite the resolved transaction"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn output_continuation_never_advances_or_replays_an_invalidated_transaction() {
+        for origin in [
+            OutputOrigin::Typed,
+            OutputOrigin::Command,
+            OutputOrigin::Insert,
+        ] {
+            for invalidated in [false, true] {
+                for completed in [false, true] {
+                    let continuation = output_continuation(origin, invalidated, completed);
+                    if invalidated {
+                        assert_eq!(continuation, OutputContinuation::Quarantine);
+                    } else if completed {
+                        assert_eq!(continuation, OutputContinuation::AdvanceBatch);
+                    } else if origin == OutputOrigin::Typed {
+                        assert_eq!(continuation, OutputContinuation::Quarantine);
+                    } else {
+                        assert_eq!(continuation, OutputContinuation::ReplayFollowUp);
+                    }
+
+                    if invalidated {
+                        assert_ne!(continuation, OutputContinuation::AdvanceBatch);
+                        assert_ne!(continuation, OutputContinuation::ReplayFollowUp);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn integrity_gate_exhaustively_checks_input_and_completion_orderings() {
+        #[derive(Clone, Copy)]
+        enum Event {
+            PhysicalInput,
+            AppliedCompletion,
+            AppliedCursorFailure,
+            UncertainCompletion,
+            FocusChangedDuringOutput,
+            Resolve,
+        }
+
+        fn check_permutations(events: &mut [Event], index: usize) {
+            if index == events.len() {
+                let resolve_index = events
+                    .iter()
+                    .position(|event| matches!(event, Event::Resolve))
+                    .unwrap();
+                if resolve_index != events.len() - 1 {
+                    return;
+                }
+
+                let mut gate = OutputIntegrityGate::default();
+                let mut outcome_invalidates_context = false;
+                let mut physical_input_seen = false;
+                for event in events.iter().copied() {
+                    match event {
+                        Event::PhysicalInput => {
+                            physical_input_seen = true;
+                            gate.interrupt_for_physical_input();
+                        }
+                        Event::AppliedCompletion => {}
+                        Event::AppliedCursorFailure
+                        | Event::UncertainCompletion
+                        | Event::FocusChangedDuringOutput => {
+                            outcome_invalidates_context = true;
+                        }
+                        Event::Resolve => {
+                            assert!(
+                                gate.resolve(outcome_invalidates_context)
+                                    == (physical_input_seen || outcome_invalidates_context),
+                                "physical input, cursor failure, focus change, or uncertain completion quarantines"
+                            );
+                            gate.interrupt_for_physical_input();
+                            assert_eq!(
+                                gate.was_interrupted(),
+                                physical_input_seen,
+                                "a late event cannot mutate a resolved transaction"
+                            );
+                        }
+                    }
+                }
+                return;
+            }
+
+            for swap in index..events.len() {
+                events.swap(index, swap);
+                check_permutations(events, index + 1);
+                events.swap(index, swap);
+            }
+        }
+
+        for completion in [
+            Event::AppliedCompletion,
+            Event::AppliedCursorFailure,
+            Event::UncertainCompletion,
+        ] {
+            for physical_input in [false, true] {
+                let mut sequence = vec![completion, Event::Resolve];
+                if physical_input {
+                    sequence.push(Event::PhysicalInput);
+                }
+                check_permutations(&mut sequence, 0);
+            }
+        }
+        let mut focus_sequence = [Event::FocusChangedDuringOutput, Event::Resolve];
+        check_permutations(&mut focus_sequence, 0);
+
+        // An exact focus change is also covered alongside an input interrupt
+        // in both orders relative to output completion.
+        for input_first in [false, true] {
+            let mut sequence = if input_first {
+                [
+                    Event::PhysicalInput,
+                    Event::FocusChangedDuringOutput,
+                    Event::Resolve,
+                ]
+            } else {
+                [
+                    Event::FocusChangedDuringOutput,
+                    Event::PhysicalInput,
+                    Event::Resolve,
+                ]
+            };
+            check_permutations(&mut sequence, 0);
+        }
+    }
+
+    #[test]
+    fn integrity_gate_preserves_invariants_for_generated_event_sequences() {
+        #[derive(Clone, Copy, Debug)]
+        enum Event {
+            PhysicalInput,
+            FocusRefusal,
+            PolicyRefusal,
+            OutputApplied,
+            OutputUncertain,
+        }
+
+        fn check(sequence: &[Event]) -> bool {
+            let mut gate = OutputIntegrityGate::default();
+            let mut physical_input_seen = false;
+            // The transaction has one terminal backend outcome. Additional
+            // terminal-looking events in a generated sequence model late or
+            // duplicate notifications; they must not overwrite the first
+            // result (in particular, Applied must not erase an earlier
+            // uncertain result).
+            let mut outcome = None;
+
+            for event in sequence {
+                match event {
+                    Event::PhysicalInput => {
+                        physical_input_seen = true;
+                        gate.interrupt_for_physical_input();
+                    }
+                    Event::FocusRefusal => {
+                        outcome.get_or_insert_with(|| wayexpand_core::TransactionOutcome::NotApplied {
+                            source: InjectorError {
+                                backend: "test",
+                                message:
+                                    "refused: the focused window changed after the trigger was typed"
+                                        .into(),
+                                retryable: false,
+                            },
+                        });
+                    }
+                    Event::PolicyRefusal => {
+                        outcome.get_or_insert_with(|| wayexpand_core::TransactionOutcome::NotApplied {
+                            source: InjectorError {
+                                backend: "test",
+                                message: "refused: this route cannot verify the trigger at the target; compatibility_mode is off"
+                                    .into(),
+                                retryable: false,
+                            },
+                        });
+                    }
+                    Event::OutputApplied => {
+                        outcome.get_or_insert(wayexpand_core::TransactionOutcome::Applied);
+                    }
+                    Event::OutputUncertain => {
+                        outcome.get_or_insert_with(|| {
+                            wayexpand_core::TransactionOutcome::UnknownPartialFailure {
+                                source: InjectorError::input_interrupted("test"),
+                            }
+                        });
+                    }
+                }
+            }
+
+            let outcome = outcome.unwrap_or(wayexpand_core::TransactionOutcome::Applied);
+            let invalidating_result = outcome_invalidates_context(&outcome);
+            let expected_quarantine = physical_input_seen || invalidating_result;
+            let actual_quarantine = gate.resolve(invalidating_result);
+            assert_eq!(
+                actual_quarantine, expected_quarantine,
+                "wrong integrity decision for event sequence {sequence:?}"
+            );
+
+            // Resolution is terminal: late physical input cannot change the
+            // already-recorded transaction result or authorize another try.
+            gate.interrupt_for_physical_input();
+            assert_eq!(
+                gate.was_interrupted(),
+                physical_input_seen,
+                "late events mutated resolved sequence {sequence:?}"
+            );
+            let replay_allowed = !actual_quarantine;
+            assert!(
+                !(physical_input_seen || invalidating_result) || !replay_allowed,
+                "an interrupted, focus-stale, or uncertain transaction was replayable"
+            );
+            actual_quarantine
+        }
+
+        // Exhaust every ordering, including repeated input, focus and output
+        // events. This deterministic property-style generator makes the
+        // adversarial state space reproducible without scheduler or RNG seeds.
+        fn generate(prefix: &mut Vec<Event>, remaining: usize) {
+            check(prefix);
+            if remaining == 0 {
+                return;
+            }
+            for event in [
+                Event::PhysicalInput,
+                Event::FocusRefusal,
+                Event::PolicyRefusal,
+                Event::OutputApplied,
+                Event::OutputUncertain,
+            ] {
+                prefix.push(event);
+                generate(prefix, remaining - 1);
+                prefix.pop();
+            }
+        }
+
+        generate(&mut Vec::new(), 6);
+        assert!(
+            check(&[Event::OutputUncertain, Event::OutputApplied]),
+            "a late Applied notification must not clear an uncertain terminal result"
+        );
+    }
+
+    #[test]
+    fn integrity_gate_resolution_is_immutable_and_idempotent() {
+        let mut focus_invalidated = OutputIntegrityGate::default();
+        assert!(focus_invalidated.resolve(true));
+        assert!(focus_invalidated.resolve(false));
+        focus_invalidated.interrupt_for_physical_input();
+        assert!(focus_invalidated.resolve(false));
+        assert!(
+            !focus_invalidated.was_interrupted(),
+            "late input must not be recorded as part of a resolved transaction"
+        );
+
+        let mut clean = OutputIntegrityGate::default();
+        assert!(!clean.resolve(false));
+        clean.interrupt_for_physical_input();
+        assert!(!clean.resolve(true));
+        assert!(
+            !clean.was_interrupted(),
+            "a late interruption must not alter the resolved outcome"
+        );
+    }
     use std::sync::atomic::Ordering;
     use std::sync::{Arc, Mutex};
 
@@ -548,7 +1022,11 @@ mod tests {
         calls: Arc<Mutex<Vec<String>>>,
         delivered: Arc<Mutex<String>>,
         erase_started: Arc<std::sync::atomic::AtomicUsize>,
+        insert_gate: Arc<(Mutex<bool>, std::sync::Condvar)>,
+        insert_waiting: Arc<std::sync::atomic::AtomicBool>,
         fail: bool,
+        cursor_failure: bool,
+        capabilities: InjectorCapabilities,
         checkpoint: wayexpand_core::OutputCheckpoint,
         /// Set once an operation (already admitted) is waiting at the gate.
         waiting: Arc<std::sync::atomic::AtomicBool>,
@@ -563,6 +1041,15 @@ mod tests {
                 open = changed.wait(open).unwrap();
             }
         }
+
+        fn wait_for_insert_return(&self) {
+            self.insert_waiting.store(true, Ordering::Release);
+            let (open, changed) = &*self.insert_gate;
+            let mut open = open.lock().unwrap();
+            while !*open {
+                open = changed.wait(open).unwrap();
+            }
+        }
     }
 
     impl TextInjector for GatedInjector {
@@ -571,10 +1058,7 @@ mod tests {
         }
 
         fn capabilities(&self) -> InjectorCapabilities {
-            InjectorCapabilities {
-                replacement_guarantee: wayexpand_core::ReplacementGuarantee::BestEffort,
-                ..InjectorCapabilities::default()
-            }
+            self.capabilities
         }
 
         fn erase(&mut self, trigger: &str) -> std::result::Result<(), InjectorError> {
@@ -600,6 +1084,19 @@ mod tests {
                 });
             }
             self.delivered.lock().unwrap().push_str(text);
+            self.wait_for_insert_return();
+            Ok(())
+        }
+
+        fn move_cursor_left(&mut self, count: usize) -> std::result::Result<(), InjectorError> {
+            self.calls.lock().unwrap().push(format!("cursor:{count}"));
+            if self.cursor_failure {
+                return Err(InjectorError {
+                    backend: "gated-test",
+                    message: "cursor reposition failed".into(),
+                    retryable: false,
+                });
+            }
             Ok(())
         }
 
@@ -615,21 +1112,46 @@ mod tests {
         delivered: Arc<Mutex<String>>,
         erase_started: Arc<std::sync::atomic::AtomicUsize>,
         waiting: Arc<std::sync::atomic::AtomicBool>,
+        insert_gate: Arc<(Mutex<bool>, std::sync::Condvar)>,
+        insert_waiting: Arc<std::sync::atomic::AtomicBool>,
         physical_input: mpsc::Sender<InputEvent>,
         directory: PathBuf,
     }
 
     impl Harness {
         fn new(fail: bool) -> Self {
-            Self::build(fail, None)
+            Self::build(fail, false, None, None)
+        }
+
+        fn cursor_failure() -> Self {
+            Self::build(false, true, None, None)
+        }
+
+        fn inconsistent_atomic_claim() -> Self {
+            Self::build(
+                false,
+                false,
+                None,
+                Some(InjectorCapabilities {
+                    atomic_replace: true,
+                    replacement_guarantee:
+                        wayexpand_core::ReplacementGuarantee::VerifiedSurroundingText,
+                    ..InjectorCapabilities::default()
+                }),
+            )
         }
 
         /// The backend behind the assurance gate, as production connects it.
         fn guarded(guard: Arc<crate::assurance::GuardState>) -> Self {
-            Self::build(false, Some(guard))
+            Self::build(false, false, Some(guard), None)
         }
 
-        fn build(fail: bool, guard: Option<Arc<crate::assurance::GuardState>>) -> Self {
+        fn build(
+            fail: bool,
+            cursor_failure: bool,
+            guard: Option<Arc<crate::assurance::GuardState>>,
+            capabilities: Option<InjectorCapabilities>,
+        ) -> Self {
             static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
             let directory = std::env::temp_dir().join(format!(
                 "wayexpand-pending-output-{}-{}",
@@ -657,6 +1179,8 @@ mod tests {
             let delivered = Arc::new(Mutex::new(String::new()));
             let erase_started = Arc::new(std::sync::atomic::AtomicUsize::new(0));
             let waiting = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let insert_gate = Arc::new((Mutex::new(true), std::sync::Condvar::new()));
+            let insert_waiting = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let (physical_input, physical_input_events) = mpsc::channel();
             let waker = waker::Waker::new().unwrap();
             let backend: Box<dyn TextInjector> = Box::new(GatedInjector {
@@ -664,7 +1188,15 @@ mod tests {
                 calls: Arc::clone(&calls),
                 delivered: Arc::clone(&delivered),
                 erase_started: Arc::clone(&erase_started),
+                insert_gate: Arc::clone(&insert_gate),
+                insert_waiting: Arc::clone(&insert_waiting),
                 fail,
+                cursor_failure,
+                capabilities: capabilities.unwrap_or(InjectorCapabilities {
+                    replacement_guarantee: wayexpand_core::ReplacementGuarantee::BestEffort,
+                    cursor_reposition: cursor_failure,
+                    ..InjectorCapabilities::default()
+                }),
                 checkpoint: wayexpand_core::OutputCheckpoint::default(),
                 waiting: Arc::clone(&waiting),
             });
@@ -699,6 +1231,8 @@ mod tests {
                 evdev: None,
                 evdev_output_test_events: Some(physical_input_events),
                 receiver: None,
+                stdin_input_monitor: crate::input_loop::StdinInputMonitor::default(),
+                stdin_quarantine_through: 0,
                 status_publisher: StatusPublisher::default(),
                 focus_state: FocusState::new(None),
                 profile_assignments: wayexpand_core::ProfileAssignments::default(),
@@ -730,6 +1264,8 @@ mod tests {
                 delivered,
                 erase_started,
                 waiting,
+                insert_gate,
+                insert_waiting,
                 physical_input,
                 directory,
             }
@@ -737,6 +1273,12 @@ mod tests {
 
         fn open_gate(&self) {
             let (open, changed) = &*self.gate;
+            *open.lock().unwrap() = true;
+            changed.notify_all();
+        }
+
+        fn open_insert_gate(&self) {
+            let (open, changed) = &*self.insert_gate;
             *open.lock().unwrap() = true;
             changed.notify_all();
         }
@@ -754,6 +1296,7 @@ mod tests {
     impl Drop for Harness {
         fn drop(&mut self) {
             self.open_gate();
+            self.open_insert_gate();
             let _ = std::fs::remove_dir_all(&self.directory);
         }
     }
@@ -924,6 +1467,26 @@ mod tests {
     }
 
     #[test]
+    fn serialized_evdev_matching_updates_content_free_diagnostics() {
+        let mut harness = Harness::new(false);
+        let input_events_before = crate::status::input_events_total();
+        let diagnostics_before = crate::failure_trace::totals();
+
+        harness
+            .daemon
+            .start_evdev_output(InputEvent::Text(".ssl".into()))
+            .unwrap();
+
+        let diagnostics_after = crate::failure_trace::totals();
+        assert!(crate::status::input_events_total() > input_events_before);
+        assert!(diagnostics_after.matcher_evaluations > diagnostics_before.matcher_evaluations);
+        assert!(diagnostics_after.matches_found > diagnostics_before.matches_found);
+
+        harness.open_gate();
+        harness.run_until_resolved();
+    }
+
+    #[test]
     fn ordinary_key_event_does_not_quarantine_its_following_text_event() {
         let mut harness = Harness::new(false);
         let ordinary_key = || {
@@ -1014,14 +1577,13 @@ mod tests {
             .send(InputEvent::Text("user input".into()))
             .unwrap();
         harness.daemon.service_pending_output().unwrap();
-        assert!(
-            harness
-                .daemon
-                .pending_output
-                .as_ref()
-                .unwrap()
-                .physical_input_interrupted
-        );
+        assert!(harness
+            .daemon
+            .pending_output
+            .as_ref()
+            .unwrap()
+            .integrity
+            .was_interrupted());
         harness.open_gate();
         harness.run_until_resolved();
 
@@ -1035,6 +1597,104 @@ mod tests {
             "an interrupted non-atomic replacement must be surfaced as uncertain"
         );
         assert!(harness.daemon.evdev_quiet_since.is_some());
+    }
+
+    #[test]
+    fn interruption_monitor_does_not_trust_an_inconsistent_atomic_claim() {
+        let mut harness = Harness::inconsistent_atomic_claim();
+        harness
+            .daemon
+            .start_output(
+                OutputOrigin::Typed,
+                vec![OutputJob::Expansion(result(":x", "replacement"))],
+                Vec::new(),
+            )
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !harness.waiting.load(Ordering::Acquire) {
+            assert!(
+                Instant::now() < deadline,
+                "replacement never reached injector"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+
+        assert!(harness.daemon.watches_non_atomic_output_for_input());
+        harness
+            .physical_input
+            .send(InputEvent::Key(wayexpand_core::KeyChord {
+                modifiers: wayexpand_core::Modifiers::default(),
+                key: "x".into(),
+            }))
+            .unwrap();
+        harness
+            .daemon
+            .cancel_non_atomic_output_on_new_input(Duration::ZERO);
+        assert!(harness
+            .daemon
+            .pending_output
+            .as_ref()
+            .unwrap()
+            .integrity
+            .was_interrupted());
+
+        harness.open_gate();
+        harness.run_until_resolved();
+        assert_eq!(harness.delivered.lock().unwrap().as_str(), "");
+    }
+
+    #[test]
+    fn cursor_reposition_failure_invalidates_context_and_stops_queued_output() {
+        let mut harness = Harness::cursor_failure();
+        let mut first = result(":first", "first");
+        first.cursor_offset = Some(1);
+        harness
+            .daemon
+            .start_output(
+                OutputOrigin::Command,
+                vec![
+                    OutputJob::Expansion(first),
+                    OutputJob::Expansion(result(":second", "second")),
+                ],
+                vec![InputEvent::Text("follow-up".into())],
+            )
+            .unwrap();
+
+        assert!(harness.daemon.serialized_output());
+        assert!(harness.daemon.pending_output.is_some());
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !harness.waiting.load(Ordering::Acquire) {
+            assert!(
+                Instant::now() < deadline,
+                "cursor-failure transaction never started"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        harness.open_gate();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while harness.daemon.pending_output.is_some() {
+            assert!(Instant::now() < deadline, "transaction never resolved");
+            if let Err(error) = harness.daemon.service_pending_output() {
+                assert!(error.to_string().contains("cursor repositioning failed"));
+                break;
+            }
+        }
+        assert!(harness.daemon.pending_output.is_none());
+
+        assert_eq!(
+            *harness.calls.lock().unwrap(),
+            ["erase::first", "insert:first", "cursor:1"],
+            "unknown cursor position must stop queued transactions"
+        );
+        assert_eq!(
+            harness.delivered.lock().unwrap().as_str(),
+            "first",
+            "known inserted text remains, but no further output is attempted"
+        );
+        assert!(
+            harness.daemon.evdev_quiet_since.is_some(),
+            "follow-up input must be quarantined after cursor-position failure"
+        );
     }
 
     #[test]
@@ -1133,14 +1793,13 @@ mod tests {
         }
 
         harness.daemon.service_pending_output().unwrap();
-        assert!(
-            harness
-                .daemon
-                .pending_output
-                .as_ref()
-                .unwrap()
-                .physical_input_interrupted
-        );
+        assert!(harness
+            .daemon
+            .pending_output
+            .as_ref()
+            .unwrap()
+            .integrity
+            .was_interrupted());
         harness.open_gate();
         harness.run_until_resolved();
 
@@ -1187,7 +1846,7 @@ mod tests {
             .daemon
             .pending_output
             .as_ref()
-            .is_some_and(|pending| pending.physical_input_interrupted)
+            .is_some_and(|pending| pending.integrity.was_interrupted())
         {
             assert!(
                 Instant::now() < poll_deadline,
@@ -1270,6 +1929,158 @@ mod tests {
             .receiver
             .try_recv_stamped()
             .expect("the focus change was left for the next reactor turn");
+        assert_eq!(pending_window, window("w2"));
+    }
+
+    #[test]
+    fn focus_aba_before_worker_start_discards_the_deferred_trigger() {
+        use wayexpand_core::{window_update_channel, CompatibilityMode, WindowContext};
+        let window = |instance: &str| {
+            Some(WindowContext {
+                app_id: Some("editor".into()),
+                title: None,
+                instance_id: Some(instance.into()),
+            })
+        };
+        let guard = Arc::new(crate::assurance::GuardState::default());
+        guard.set_mode(CompatibilityMode::TrackedFocus);
+        let (sender, receiver) = window_update_channel();
+        guard.set_witness(Some(receiver.focus_witness()));
+        sender.send(window("w1")).unwrap();
+        guard.set_stamp(receiver.try_recv_stamped().unwrap().1);
+        let mut harness = Harness::guarded(Arc::clone(&guard));
+        harness.daemon.window_tracker =
+            Some(backend_lifecycle::WindowTrackerHandle::for_test(receiver));
+        process_event(
+            &mut harness.daemon.config.engine,
+            InputEvent::WindowChanged(window("w1")),
+            None,
+            &harness.daemon.policy,
+            harness.daemon.active_backend,
+        )
+        .unwrap();
+        let pending = harness
+            .daemon
+            .config
+            .engine
+            .process_deferred(InputEvent::Text(":x".into()))
+            .pop()
+            .expect("test trigger should be reserved in the original window");
+        let result = match harness
+            .daemon
+            .config
+            .engine
+            .dispatch_pending_with_policy(pending, 0)
+            .unwrap()
+        {
+            wayexpand_core::PendingExpansionDispatch::Ready(result) => result,
+            wayexpand_core::PendingExpansionDispatch::Queued => {
+                panic!("static replacement must be ready")
+            }
+        };
+
+        // Focus crosses to another window and back after matching but before
+        // the output worker starts. The live tracker witness advances while
+        // the reactor still holds the original focus stamp.
+        sender.send(window("w2")).unwrap();
+        sender.send(window("w1")).unwrap();
+        harness
+            .daemon
+            .start_output(
+                OutputOrigin::Typed,
+                vec![OutputJob::Expansion(result)],
+                Vec::new(),
+            )
+            .unwrap();
+        harness.run_until_resolved();
+
+        assert!(harness.calls.lock().unwrap().is_empty());
+        assert_eq!(guard.refused_total(), 1);
+        assert!(
+            harness
+                .daemon
+                .config
+                .engine
+                .process_deferred(InputEvent::Text(" ".into()))
+                .is_empty(),
+            "the old trigger must not return to the matcher after focus ABA"
+        );
+        assert!(harness.daemon.evdev_quiet_since.is_some());
+    }
+
+    #[test]
+    fn focus_change_after_insertion_but_before_ack_refuses_the_next_batch_item() {
+        use wayexpand_core::{window_update_channel, CompatibilityMode, WindowContext};
+        let window = |instance: &str| {
+            Some(WindowContext {
+                app_id: Some("editor".into()),
+                title: None,
+                instance_id: Some(instance.into()),
+            })
+        };
+        let guard = Arc::new(crate::assurance::GuardState::default());
+        guard.set_mode(CompatibilityMode::TrackedFocus);
+        let (sender, receiver) = window_update_channel();
+        guard.set_witness(Some(receiver.focus_witness()));
+        sender.send(window("w1")).unwrap();
+        guard.set_stamp(receiver.try_recv_stamped().unwrap().1);
+        let mut harness = Harness::guarded(Arc::clone(&guard));
+        harness.daemon.window_tracker =
+            Some(backend_lifecycle::WindowTrackerHandle::for_test(receiver));
+        *harness.insert_gate.0.lock().unwrap() = false;
+
+        harness
+            .daemon
+            .start_output(
+                OutputOrigin::Command,
+                vec![
+                    OutputJob::Expansion(result(":a", "first")),
+                    OutputJob::Expansion(result(":b", "second")),
+                ],
+                // This trigger was already captured in the original target
+                // before focus changed. Replaying it after the output ack must
+                // not authorize insertion into the new focus.
+                vec![InputEvent::Text(":x".into())],
+            )
+            .unwrap();
+        harness.open_gate();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !harness.insert_waiting.load(Ordering::Acquire) {
+            assert!(
+                Instant::now() < deadline,
+                "first insertion never reached its ack gap"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+
+        // The first replacement is fully delivered, but its worker result has
+        // not yet reached the reactor. Publish a new live focus stamp without
+        // draining it into the engine, as happens while pending output is
+        // serviced.
+        sender.send(window("w2")).unwrap();
+        harness.open_insert_gate();
+        harness.run_until_resolved();
+
+        assert_eq!(
+            *harness.calls.lock().unwrap(),
+            ["erase::a", "insert:first"],
+            "the next transaction must be refused before erasing in the new window"
+        );
+        assert_eq!(harness.delivered.lock().unwrap().as_str(), "first");
+        assert!(harness.daemon.injector.is_some());
+        assert_eq!(
+            guard.last_refusal(),
+            Some(crate::assurance::Refusal::FocusChanged),
+            "the buffered trigger must be rejected against the changed target"
+        );
+        let (pending_window, _) = harness
+            .daemon
+            .window_tracker
+            .as_ref()
+            .unwrap()
+            .receiver
+            .try_recv_stamped()
+            .expect("the focus event should remain queued for the next reactor turn");
         assert_eq!(pending_window, window("w2"));
     }
 

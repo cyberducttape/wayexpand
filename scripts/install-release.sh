@@ -325,8 +325,22 @@ if command -v systemctl >/dev/null 2>&1; then
         fi
     done
     if [ "$active_upgrade" -eq 1 ]; then
-        printf '%s\n' 'An active WayExpand service still uses its current process. After this installation finishes, run:'
-        printf '%s\n' '  wayexpand upgrade --apply'
+        printf '%s\n' 'An active WayExpand service was detected. Runtime process check:'
+        if runtime_check_output=$("$bin_dir/wayexpand" upgrade --check 2>&1); then
+            printf '%s\n' "$runtime_check_output"
+            case "$runtime_check_output" in
+                *'Action: restart the affected service'*|*'Action: restart the active Action Broker service'*)
+                    printf '%s\n' 'After reviewing the process details above, apply the restart and health check with:'
+                    printf '  %s/wayexpand upgrade --apply\n' "$bin_dir"
+                    ;;
+                *)
+                    printf '%s\n' 'The runtime check did not identify a managed daemon version mismatch; inspect the status above before restarting anything.'
+                    ;;
+            esac
+        else
+            printf '%s\n' "$runtime_check_output"
+            printf '%s\n' 'Could not complete the runtime check. Inspect the check output and rerun wayexpand upgrade --check before applying.'
+        fi
     fi
 fi
 

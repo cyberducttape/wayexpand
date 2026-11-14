@@ -623,6 +623,12 @@ fn format_app_scope(filters: &[String]) -> String {
             Some(wayexpand_core::AppFilter::TitleContains(value)) => {
                 format!("window title containing {value:?}")
             }
+            Some(wayexpand_core::AppFilter::ProcessExecutableExact(value)) => {
+                format!("process executable {value:?}")
+            }
+            Some(wayexpand_core::AppFilter::ProcessNameExact(value)) => {
+                format!("mutable process name (lower assurance) {value:?}")
+            }
             None => format!("configured filter {filter:?}"),
         })
         .collect::<Vec<_>>()
@@ -1125,12 +1131,14 @@ mod tests {
             "app_id_exact:org.example.Editor".into(),
             "app_id_glob:org.example.*".into(),
             "title_contains:production".into(),
+            "process_executable_exact:/usr/bin/konsole".into(),
+            "process_name_exact:Konsole".into(),
             "unrecognized:value".into(),
         ]);
 
         assert_eq!(
             scope,
-            "app ID org.example.editor; app ID matching org.example.*; window title containing \"production\"; configured filter \"unrecognized:value\""
+            "app ID org.example.editor; app ID matching org.example.*; window title containing \"production\"; process executable \"/usr/bin/konsole\"; mutable process name (lower assurance) \"konsole\"; configured filter \"unrecognized:value\""
         );
     }
 

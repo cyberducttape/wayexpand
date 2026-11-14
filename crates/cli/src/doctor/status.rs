@@ -9,6 +9,52 @@ pub(crate) fn read_daemon_status() -> Result<String> {
         .map_err(Into::into)
 }
 
+pub(crate) struct CliInstallIdentity {
+    pub(crate) active_user_install_detected: bool,
+    pub(crate) cli_matches_active_user_install: Option<bool>,
+    pub(crate) active_user_cli: Option<PathBuf>,
+}
+
+/// Compare the current executable with the content-addressed user install,
+/// when that install is present. A source build or distribution package must
+/// not infer that restarting the user service will make it match this CLI.
+pub(crate) fn cli_install_identity() -> CliInstallIdentity {
+    let active_user_cli = env::var_os("HOME").map(PathBuf::from).and_then(|home| {
+        let current = home.join(".local/lib/wayexpand/current");
+        let is_active_link = fs::symlink_metadata(&current)
+            .ok()
+            .is_some_and(|metadata| metadata.file_type().is_symlink());
+        is_active_link.then(|| current.join("bin/wayexpand"))
+    });
+    let running_cli = env::current_exe().ok();
+    let active_user_install_detected = active_user_cli.is_some();
+    let cli_matches_active_user_install = active_user_cli
+        .as_deref()
+        .and_then(|active| executable_paths_match(active, running_cli.as_deref()));
+    CliInstallIdentity {
+        active_user_install_detected,
+        cli_matches_active_user_install,
+        active_user_cli,
+    }
+}
+
+pub(crate) fn executable_paths_match(
+    expected: &std::path::Path,
+    actual: Option<&std::path::Path>,
+) -> Option<bool> {
+    let expected = expected.canonicalize().ok()?;
+    let actual = actual?.canonicalize().ok()?;
+    Some(expected == actual)
+}
+
+pub(crate) fn cli_install_recovery_advice(matches: Option<bool>) -> &'static str {
+    match matches {
+        Some(false) => "This CLI does not match the active user-local payload. Run `~/.local/lib/wayexpand/current/bin/wayexpand upgrade-status` to assess that installation before deciding whether a restart is needed.",
+        Some(true) => "This CLI matches the active user-local payload. Run `wayexpand upgrade-status` for the service-specific recovery action before restarting.",
+        None => "This CLI cannot verify its identity against the daemon's installation. Run `wayexpand upgrade-status` with the active installation's CLI before deciding whether a restart is needed.",
+    }
+}
+
 pub(crate) fn status_as_json(response: &str) -> Result<serde_json::Value> {
     let mut object = serde_json::Map::new();
     let status = wayexpand_core::DaemonStatus::parse(response);
@@ -32,6 +78,7 @@ pub(crate) fn status_as_json(response: &str) -> Result<serde_json::Value> {
                         | "hotkey_in_flight"
                         | "command_queue_rejected_total"
                         | "command_timeout_total"
+                        | "command_cancelled_total"
                         | "command_failure_total"
                         | "status_schema"
                         | "config_generation"
@@ -50,7 +97,7 @@ pub(crate) fn status_as_json(response: &str) -> Result<serde_json::Value> {
                         | "matcher_evaluations_total"
                         | "matches_found_total"
                         | "expansion_attempts_total"
-                        | "expansions_applied_total"
+                        | "expansion_output_acknowledgements_total"
                         | "expansions_rejected_total"
                         | "diagnostic_events_dropped_total"
                         | "input_last_connected_unix"
@@ -59,7 +106,7 @@ pub(crate) fn status_as_json(response: &str) -> Result<serde_json::Value> {
                         | "output_reconnect_attempts"
                         | "input_reconnect_backoff_ms"
                         | "output_reconnect_backoff_ms"
-                        | "last_successful_insertion_unix"
+                        | "last_output_acknowledged_unix"
                         | "output_queue_latency_sample_count"
                         | "output_queue_latency_window_count"
                         | "output_queue_latency_p50_us"
@@ -77,6 +124,12 @@ pub(crate) fn status_as_json(response: &str) -> Result<serde_json::Value> {
                         | "injection_latency_p50_us"
                         | "injection_latency_p95_us"
                         | "injection_latency_p99_us"
+                        | "output_interrupt_to_backend_return_sample_count"
+                        | "output_interrupt_to_backend_return_window_count"
+                        | "output_interrupt_to_backend_return_p50_us"
+                        | "output_interrupt_to_backend_return_p95_us"
+                        | "output_interrupt_to_backend_return_p99_us"
+                        | "output_interrupt_to_backend_return_dropped_total"
                         | "matcher_latency_sample_count"
                         | "matcher_latency_window_count"
                         | "matcher_latency_p50_us"
@@ -121,12 +174,12 @@ pub(crate) fn status_as_json(response: &str) -> Result<serde_json::Value> {
                     Err(_) => value.into(),
                 }
             }
-            "injection_latency_profiles" => serde_json::from_str(value)
+            value if key == "injection_latency_profiles" => serde_json::from_str(value)
                 .unwrap_or_else(|_| serde_json::Value::String(value.into())),
             value if key == "sandbox_security" => serde_json::from_str(value)
                 .unwrap_or_else(|_| serde_json::Value::String(value.into())),
-            "recent_expansion_failures" => serde_json::from_str(value)
-                .unwrap_or_else(|_| serde_json::Value::String(value.into())),
+            value if key == "recent_expansion_failures" => parse_outcome_history(value),
+            value if key == "recent_expansion_outcomes" => parse_outcome_history(value),
             _ => value.into(),
         };
         object.insert(key.to_owned(), value);
@@ -136,6 +189,45 @@ pub(crate) fn status_as_json(response: &str) -> Result<serde_json::Value> {
         broker_diagnostics(Config::load(default_config_path()).ok().as_ref()),
     );
     Ok(serde_json::Value::Object(object))
+}
+
+/// Older daemons may omit `application_result` from the content-free output
+/// history. Preserve the field's contract for CLI consumers without
+/// overstating what the older protocol could observe: an acknowledged output
+/// is unverified at the application, while unknown states remain unknown.
+fn parse_outcome_history(value: &str) -> serde_json::Value {
+    let Ok(mut history) = serde_json::from_str::<serde_json::Value>(value) else {
+        return serde_json::Value::String(value.into());
+    };
+    let Some(records) = history.as_array_mut() else {
+        return history;
+    };
+    for record in records {
+        let Some(fields) = record.as_object_mut() else {
+            continue;
+        };
+        if fields.contains_key("application_result") {
+            continue;
+        }
+        let completion = fields
+            .get("completion")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("unknown");
+        let insertion_attempted = fields
+            .get("insertion_attempted")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let result = match completion {
+            "applied" | "inserted; cursor placement failed" => "unverified",
+            "partial_write" | "application outcome unknown" => "unknown",
+            "not applied" if insertion_attempted => "not_applied",
+            "not applied" => "not_attempted",
+            _ if insertion_attempted => "unknown",
+            _ => "not_attempted",
+        };
+        fields.insert("application_result".into(), result.into());
+    }
+    history
 }
 
 pub(crate) fn runtime_capabilities_from_status(snapshot: &serde_json::Value) -> serde_json::Value {
@@ -856,13 +948,11 @@ pub(crate) fn upgrade_status_from_snapshot(snapshot: &serde_json::Value) -> serd
         "current"
     };
     let action = match status {
-        "incompatible" => {
-            "The running daemon does not speak this CLI's status protocol; stop it and start the installed daemon."
-        }
+        "incompatible" => "The running daemon does not speak this CLI's status protocol. First verify that this CLI belongs to the active installation; then run `upgrade-status` with that installation's CLI before deciding whether a restart is needed.",
         "restart-required" => {
-            "The running daemon is from a different build; stop and restart it using the same launch method, and ensure the updated binary is used. If systemd manages it, restart the corresponding user service before relying on this CLI."
+            "The daemon build differs from this CLI. Verify that this CLI matches the active installation before restarting; if it does, restart using the same launch method and ensure the updated binary is used. If systemd manages it, restart the corresponding user service before relying on this CLI."
         }
-        "unverified" => "This build identity cannot be verified against the running daemon; restart it using the same launch method with the matching installation payload, then rerun this check.",
+        "unverified" => "This build identity cannot be verified against the running daemon. Verify that this CLI matches the active installation before restarting with the matching payload, then rerun this check.",
         _ => "The running daemon matches this CLI build.",
     };
     serde_json::json!({

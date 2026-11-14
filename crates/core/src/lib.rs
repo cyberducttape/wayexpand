@@ -2,7 +2,7 @@
 
 /// Version of the daemon's stable key/value control-socket status contract.
 /// Increment when a consumer must distinguish a newer required field set.
-pub const CONTROL_STATUS_SCHEMA: u32 = 34;
+pub const CONTROL_STATUS_SCHEMA: u32 = 44;
 
 pub use limits::{CommandLimits, COMMAND_LIMITS, CONTROL_MAX_RESPONSE_BYTES};
 pub use wayexpand_process_supervisor::containment_mode as command_containment_mode;
@@ -46,16 +46,17 @@ pub use backend::{
     discover_backends, keystroke_max_chars, set_keystroke_max_chars, window_update_channel,
     BackendKind, BackendState, BackendStatus, FocusCheck, FocusStamp, FocusWitness,
     InjectorCapabilities, InjectorError, InjectorErrorKind, InputSource, InputSourceCapabilities,
-    InputSourceError, KeyEventState, OutputCheckpoint, OutputProgress, ReplacementAdmission,
-    ReplacementGuarantee, TextInjector, WindowTracker, WindowTrackerError, WindowUpdateReceiver,
-    WindowUpdateSendError, WindowUpdateSender,
+    InputSourceError, KeyEventState, OutputCheckpoint, OutputProgress, ProcessIdentityState,
+    ReplacementAdmission, ReplacementGuarantee, TextInjector, WindowIdentitySource, WindowTracker,
+    WindowTrackerError, WindowUpdateReceiver, WindowUpdateSendError, WindowUpdateSender,
 };
 pub use capabilities::{all_capabilities, Capabilities, TextMethod};
 pub use config::{
-    validate_command_config, AppFilter, ClipboardMode, CommandConfig, CommandEnvironment,
-    CompatibilityMode, Config, ConfigError, ConfigRevision, ExpansionConfig, ExpansionDelivery,
-    FontScale, HotkeyConfig, LoadedConfig, MatchMode, OrganizationPolicy, Settings,
-    ValidatedConfig, DEFAULT_KEYSTROKE_MAX_CHARS, MAX_KEYSTROKE_MAX_CHARS,
+    is_reserved_process_app_id, validate_command_config, AppFilter, ClipboardMode, CommandConfig,
+    CommandEnvironment, CompatibilityMode, Config, ConfigError, ConfigRevision, ExpansionConfig,
+    ExpansionDelivery, FontScale, HotkeyConfig, LoadedConfig, MatchMode, OrganizationPolicy,
+    Settings, TerminalPaste, ValidatedConfig, DEFAULT_KEYSTROKE_MAX_CHARS, MAX_KEYSTROKE_MAX_CHARS,
+    PROCESS_EXECUTABLE_APP_ID_PREFIX, PROCESS_NAME_APP_ID_PREFIX,
 };
 pub use daemon_client::{DaemonClient, DaemonClientError, DaemonFocus, DaemonOperation};
 pub use daemon_status::{DaemonRouteState, DaemonStatus};
@@ -70,7 +71,10 @@ pub use engine::{
     WindowContext, MAX_WINDOW_INSTANCE_ID_BYTES,
 };
 pub use fleet::{FleetConfig, FleetError, Layer, MergeStats, Provenance};
-pub use insertion_plan::{plan_insertion, InsertionRouteCapabilities, InsertionStrategy};
+pub use insertion_plan::{
+    paced_output_duration_ms, paced_replacement_event_count, plan_insertion, plan_replacement,
+    InsertionRouteCapabilities, InsertionStrategy,
+};
 pub use keys::{KeyChord, KeyChordError, Modifiers};
 pub use matcher::{Matcher, MatcherBuildError};
 pub use migration::{

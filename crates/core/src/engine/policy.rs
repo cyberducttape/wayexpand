@@ -16,12 +16,11 @@ impl ExpansionEngine {
             command_worker_threads: self
                 .async_commands
                 .as_ref()
-                .map_or(0, |runtime| runtime.command_workers.len()),
+                .map_or(0, |runtime| runtime.command_worker_threads()),
             hotkey_worker_threads: self
                 .async_commands
                 .as_ref()
-                .is_some_and(|runtime| runtime.hotkey_worker.is_some())
-                as usize,
+                .map_or(0, |runtime| runtime.hotkey_worker_threads()),
             command_queue_depth: expansion_command_queue_depth + hotkey_queue_depth,
             command_in_flight: expansion_command_in_flight + hotkey_in_flight,
             expansion_command_queue_depth,
@@ -38,6 +37,11 @@ impl ExpansionEngine {
                     .load(Ordering::Relaxed),
             command_timeout_total: self.expansion_metrics.timeout_total.load(Ordering::Relaxed)
                 + self.hotkey_metrics.timeout_total.load(Ordering::Relaxed),
+            command_cancelled_total: self
+                .expansion_metrics
+                .cancelled_total
+                .load(Ordering::Relaxed)
+                + self.hotkey_metrics.cancelled_total.load(Ordering::Relaxed),
             command_failure_total: self.expansion_metrics.failure_total.load(Ordering::Relaxed)
                 + self.hotkey_metrics.failure_total.load(Ordering::Relaxed),
         }
@@ -47,6 +51,11 @@ impl ExpansionEngine {
     /// Longest replacement a paced keystroke route will type.
     pub fn keystroke_max_chars(&self) -> usize {
         self.config.settings.keystroke_max_chars
+    }
+
+    /// When replacements in terminal apps are pasted instead of typed.
+    pub fn terminal_paste(&self) -> crate::TerminalPaste {
+        self.config.settings.terminal_paste
     }
 
     /// Whether keystroke routes may erase text they cannot verify.

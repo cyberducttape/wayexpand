@@ -12,7 +12,13 @@
 //! when it equals this crate's version and a source commit is supplied.
 
 use sha2::{Digest, Sha256};
-use std::{env, fmt::Write as _, fs, path::Path, process::Command};
+use std::{
+    env,
+    fmt::Write as _,
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 const BUILD_INPUT_PATHS: &[&str] = &[
     "Cargo.toml",
@@ -76,6 +82,43 @@ fn ignored_build_inputs(root: &Path) -> Option<Vec<Vec<u8>>> {
 fn build_inputs_are_clean(root: &Path) -> bool {
     git_worktree_is_clean(root)
         && ignored_build_inputs(root).is_some_and(|inputs| inputs.is_empty())
+}
+
+/// Collect every file and directory below the build-input roots for Cargo's
+/// rerun tracking. `rerun-if-changed` on a top-level directory does not
+/// reliably notice edits several levels below it, so watching only `crates/`
+/// can leave a binary carrying a stale dirty-source identity after editing
+/// `crates/<crate>/src/...`.
+fn build_input_watch_paths(root: &Path, inputs: &[&str]) -> Vec<PathBuf> {
+    let mut pending = inputs
+        .iter()
+        .map(|input| root.join(input))
+        .collect::<Vec<_>>();
+    let mut watched = Vec::new();
+
+    while let Some(path) = pending.pop() {
+        if path
+            .components()
+            .any(|component| component.as_os_str() == "target")
+        {
+            continue;
+        }
+        let Ok(metadata) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        watched.push(path.clone());
+        if !metadata.is_dir() || metadata.file_type().is_symlink() {
+            continue;
+        }
+        let Ok(entries) = fs::read_dir(&path) else {
+            continue;
+        };
+        pending.extend(entries.filter_map(|entry| entry.ok().map(|entry| entry.path())));
+    }
+
+    watched.sort();
+    watched.dedup();
+    watched
 }
 
 /// A stable digest of build inputs changed from HEAD, including untracked and
@@ -201,11 +244,11 @@ pub fn emit() {
     println!("cargo:rerun-if-env-changed=WAYEXPAND_BUILD_RELEASE_VERSION");
 
     let root = Path::new(&env::var("CARGO_MANIFEST_DIR").unwrap()).join("../..");
-    // Source edits do not change Git's index. Watching the workspace source
-    // tree ensures this helper runs again after tracked edits or source files
-    // are added, so the release cleanliness check cannot reuse an old result.
-    for input in BUILD_INPUT_PATHS {
-        println!("cargo:rerun-if-changed={}", root.join(input).display());
+    // Source edits do not change Git's index. Watch nested files as well as
+    // directories so both edits to existing source and new files invalidate
+    // the build identity before Rust recompiles a dependent binary.
+    for path in build_input_watch_paths(&root, BUILD_INPUT_PATHS) {
+        println!("cargo:rerun-if-changed={}", path.display());
     }
     // `.git/HEAD` only names the current branch, so it does not change on a
     // commit; the branch ref (or `packed-refs`) does. Watching only HEAD left
@@ -267,7 +310,8 @@ pub fn emit() {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_inputs_are_clean, dirty_source_digest, git_worktree_is_clean, is_exact_release,
+        build_input_watch_paths, build_inputs_are_clean, dirty_source_digest,
+        git_worktree_is_clean, is_exact_release,
     };
     use std::{
         fs,
@@ -319,7 +363,7 @@ mod tests {
                 .expect("write source file");
             fs::write(
                 path.join(".gitignore"),
-                "crates/cli/src/ignored.rs\ncrates/cli/src/target/\n",
+                "crates/cli/src/ignored.rs\ncrates/cli/src/target/\n/vendor/\n",
             )
             .expect("write test ignore rules");
             git_ok(
@@ -330,6 +374,36 @@ mod tests {
             git_ok(&path, &["tag", "v1.3.3"]);
             Self(path)
         }
+    }
+
+    #[test]
+    fn cargo_watch_paths_include_nested_sources_and_exclude_target_output() {
+        let repository = TestRepository::new();
+        let root = &repository.0;
+        fs::create_dir_all(root.join("crates/cli/src/deep/module"))
+            .expect("create nested source directory");
+        fs::write(
+            root.join("crates/cli/src/deep/module/state.rs"),
+            "pub struct State;\n",
+        )
+        .expect("write nested source file");
+        fs::create_dir_all(root.join("crates/cli/src/target/generated"))
+            .expect("create build output directory");
+        fs::write(
+            root.join("crates/cli/src/target/generated/output.rs"),
+            "generated\n",
+        )
+        .expect("write generated output");
+
+        let watched = build_input_watch_paths(root, &["crates"]);
+        assert!(watched.contains(&root.join("crates/cli/src/deep/module/state.rs")));
+        assert!(watched.contains(&root.join("crates/cli/src/deep/module")));
+        assert!(
+            !watched.iter().any(|path| path
+                .components()
+                .any(|component| component.as_os_str() == "target")),
+            "Cargo build output must not invalidate source identity tracking"
+        );
     }
 
     #[test]
@@ -454,6 +528,50 @@ mod tests {
         fs::write(repository.0.join("untracked-secret.txt"), "untracked\n")
             .expect("write untracked file");
         assert!(!git_worktree_is_clean(&repository.0));
+    }
+
+    #[test]
+    fn generated_vendor_config_can_be_excluded_without_downgrading_release_identity() {
+        let repository = TestRepository::new();
+        let root = &repository.0;
+        assert!(is_exact_release(
+            root,
+            "1.3.3",
+            Some("native-commit"),
+            false,
+            None
+        ));
+
+        fs::create_dir_all(root.join(".cargo")).expect("create generated Cargo config dir");
+        fs::write(
+            root.join(".cargo/config.toml"),
+            "[source.crates-io]\nreplace-with = 'vendor'\n",
+        )
+        .expect("write generated Cargo vendor config");
+        fs::create_dir_all(root.join("vendor/example")).expect("create vendored crate dir");
+        fs::write(
+            root.join("vendor/example/Cargo.toml"),
+            "[package]\nname='example'\n",
+        )
+        .expect("write vendored crate metadata");
+        assert!(
+            !is_exact_release(root, "1.3.3", Some("native-commit"), false, None),
+            "generated config must be visible as dirty until the release workflow excludes it"
+        );
+
+        let exclude = root.join(".git/info/exclude");
+        let mut existing = fs::read_to_string(&exclude).unwrap_or_default();
+        existing.push_str("\n/.cargo/config.toml\n");
+        fs::write(&exclude, existing).expect("exclude local vendoring artifacts");
+        assert!(git_worktree_is_clean(root));
+        assert!(build_inputs_are_clean(root));
+        assert!(is_exact_release(
+            root,
+            "1.3.3",
+            Some("native-commit"),
+            false,
+            None
+        ));
     }
 
     #[test]

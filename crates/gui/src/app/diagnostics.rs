@@ -224,15 +224,18 @@ impl GuiApp {
                         });
                         ui.label(
                             RichText::new(format!(
-                                "{} capture · {} injection · {} · focus tracking {} · {}",
+                                "{} capture · {} injection · trigger precondition {} · transaction {} · app result {} · live assurance {} · focus tracking {} · {}",
                                 route.contract.capture,
                                 route.contract.injection,
+                                route.contract.trigger_precondition,
+                                route.contract.output_transaction,
+                                route.contract.application_result,
                                 if active_route_id.as_deref() == Some(route.contract.id.as_str()) {
                                     active_replacement
                                         .as_deref()
-                                        .unwrap_or(route.contract.replacement_assurance.as_str())
+                                        .unwrap_or("unknown")
                                 } else {
-                                    route.contract.replacement_assurance.as_str()
+                                    "not active"
                                 },
                                 if route.contract.focus_tracking {
                                     "available"
@@ -551,10 +554,11 @@ impl GuiApp {
                 ui.label(self.strings.no_recent_outcomes());
             }
             for trace in traces.iter().rev() {
-                let color = if trace.completion == "applied" {
+                let color = if trace.application_result == "verified" {
                     palette.success
                 } else if trace.completion.contains("unknown")
                     || trace.completion.contains("failed")
+                    || trace.application_result == "unknown"
                 {
                     palette.danger
                 } else {
@@ -565,6 +569,31 @@ impl GuiApp {
                         color,
                         RichText::new(self.strings.trace_completion(&trace.completion)).strong(),
                     );
+                    ui.label(
+                        RichText::new(
+                            self.strings
+                                .trace_application_result(&trace.application_result),
+                        )
+                        .small(),
+                    );
+                    ui.label(
+                        RichText::new(
+                            self.strings
+                                .trace_timing(trace.duration_us, trace.expected_insert_units),
+                        )
+                        .small()
+                        .color(palette.muted),
+                    );
+                    if let Some(interrupt_timing) = self
+                        .strings
+                        .trace_interrupt_timing(trace.interrupt_to_backend_return_us)
+                    {
+                        ui.label(
+                            RichText::new(interrupt_timing)
+                                .small()
+                                .color(palette.danger),
+                        );
+                    }
                     if trace.progress_tracked {
                         ui.label(
                             RichText::new(
@@ -650,7 +679,9 @@ impl GuiApp {
         if let Some(capabilities) = self.daemon_capabilities.as_ref() {
             if let Some(assurance) = capabilities.replacement_assurance {
                 let color = match assurance {
-                    runtime::ReplacementAssurance::Verified => palette.success,
+                    // This is a backend contract, not evidence that a target
+                    // application rendered the replacement.
+                    runtime::ReplacementAssurance::Verified => palette.muted,
                     runtime::ReplacementAssurance::FocusTrackedBestEffort => palette.warning,
                     runtime::ReplacementAssurance::Unverified
                     | runtime::ReplacementAssurance::Blocked => palette.danger,
@@ -722,6 +753,19 @@ impl GuiApp {
                                         palette.warning
                                     },
                                     self.strings.capture_app_scope_state(scope_state),
+                                );
+                            }
+                            if capabilities.window_process_identity_state.as_deref()
+                                == Some("compositor-process-id")
+                            {
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(
+                                            self.strings.compositor_surface_focus_diagnostic(),
+                                        )
+                                        .color(palette.warning),
+                                    )
+                                    .wrap(),
                                 );
                             }
                         }
@@ -882,6 +926,20 @@ impl GuiApp {
                 capabilities.injection_latency_p95_us,
                 capabilities.injection_latency_p99_us,
             );
+            if capabilities
+                .output_interrupt_sample_count
+                .unwrap_or_default()
+                > 0
+            {
+                self.render_latency_row(
+                    ui,
+                    palette,
+                    self.strings.interruption_latency(),
+                    capabilities.output_interrupt_p50_us,
+                    capabilities.output_interrupt_p95_us,
+                    capabilities.output_interrupt_p99_us,
+                );
+            }
             theme::section_header(ui, "", self.strings.usage_persistence());
             theme::card(ui, palette, |ui| {
                 ui.columns(2, |columns| {
@@ -1978,8 +2036,8 @@ impl GuiApp {
                     || "user-confirmed in an application this session".to_owned(),
                     |app| format!("user-confirmed in {app} this session"),
                 )
-        } else if readiness.expanded {
-            "Output observed; application result unverified".to_owned()
+        } else if readiness.output_emitted_unverified {
+            "Output emitted; application result unknown".to_owned()
         } else {
             "Not verified in an application".to_owned()
         };
@@ -2004,6 +2062,28 @@ impl GuiApp {
                 if ui.small_button("Run Desktop Integration Test…").clicked() {
                     self.test_expansion_dialog_open = true;
                 }
+            }
+            if let Some(output) = report
+                .activity
+                .as_ref()
+                .and_then(|activity| activity.status.recent_outputs.last())
+            {
+                ui.label(
+                    RichText::new(format!(
+                        "Latest IBus output {}: {} · {} expected characters · {} · target identity {}",
+                        output.transaction_id,
+                        output.outcome,
+                        output.expected_characters,
+                        output.duration_us.map_or_else(
+                            || "duration unavailable".to_owned(),
+                            |duration| format!("{duration} µs")
+                        ),
+                        output.target_identity_state,
+                    ))
+                    .small()
+                    .color(palette.warning),
+                );
+                ui.label(RichText::new("IBus cannot confirm that the target application applied emitted signals.").small().color(palette.muted));
             }
         });
         if report.desktop == wayexpand_backend_ibus::chain::IbusDesktop::Gnome {
@@ -2125,8 +2205,12 @@ impl GuiApp {
             for field in typed.iter().rev().take(5) {
                 let verdict = wayexpand_backend_ibus::IbusFieldVerdict::of(field);
                 let color = match verdict {
-                    wayexpand_backend_ibus::IbusFieldVerdict::Expanded
-                    | wayexpand_backend_ibus::IbusFieldVerdict::Ready => palette.success,
+                    wayexpand_backend_ibus::IbusFieldVerdict::OutputEmittedUnverified => {
+                        palette.warning
+                    }
+                    wayexpand_backend_ibus::IbusFieldVerdict::ReplacementContextObserved => {
+                        palette.muted
+                    }
                     wayexpand_backend_ibus::IbusFieldVerdict::Sensitive
                     | wayexpand_backend_ibus::IbusFieldVerdict::Idle => palette.muted,
                     _ => palette.warning,
@@ -2263,7 +2347,8 @@ impl GuiApp {
                 let replacement_color = match capabilities
                     .and_then(|caps| caps.replacement_assurance)
                 {
-                    Some(runtime::ReplacementAssurance::Verified) => palette.success,
+                    // Route capability is not an application-level success.
+                    Some(runtime::ReplacementAssurance::Verified) => palette.muted,
                     Some(runtime::ReplacementAssurance::FocusTrackedBestEffort) => palette.warning,
                     Some(
                         runtime::ReplacementAssurance::Unverified
@@ -2312,6 +2397,14 @@ impl GuiApp {
                 );
             });
 
+            if capabilities.and_then(|caps| caps.capture_composition_aware) != Some(true) {
+                ui.label(
+                    RichText::new(self.strings.composition_assessment_detail())
+                        .small()
+                        .color(palette.muted),
+                );
+            }
+
             let permission_color = assessment_color(assessment.permissions, palette);
             overview_value(
                 ui,
@@ -2357,7 +2450,9 @@ impl GuiApp {
                     if failures.is_some_and(|count| count > 0) {
                         palette.warning
                     } else if failures.is_some() {
-                        palette.success
+                        // No recent failed transaction is not evidence that
+                        // an acknowledged output was rendered by the target.
+                        palette.muted
                     } else {
                         palette.muted
                     },

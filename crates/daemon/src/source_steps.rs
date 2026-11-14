@@ -20,6 +20,42 @@ pub(crate) enum Step {
 impl Daemon {
     const EVDEV_POST_OUTPUT_QUIET: Duration = Duration::from_millis(40);
 
+    /// Stop after the first output checkpoint observes a newer stdin line.
+    /// The current replacement may already be partial, so invalidate matcher
+    /// state and quarantine every generation the reader has observed.
+    fn quarantine_interrupted_stdin(
+        &mut self,
+        error: Option<&EventError>,
+        output_attempted: bool,
+    ) -> bool {
+        if !self.stdin_input_monitor.interrupted() {
+            return false;
+        }
+        let observed = self.stdin_input_monitor.observed_generation();
+        if error.is_none() && !output_attempted {
+            // A later line arrived, but no output ran while it did, so
+            // nothing was interleaved. Keep processing; later output in this
+            // line is checked against the new epoch.
+            self.stdin_input_monitor.begin_line(observed);
+            return false;
+        }
+        if let Some(error) = error {
+            warn!(
+                outcome = error.diagnostic_category(),
+                trigger_chars = error.result.trigger.chars().count(),
+                insert_bytes = error.result.insert.len(),
+                "new stdin input interrupted non-atomic output; quarantining buffered input"
+            );
+        } else {
+            warn!("new stdin input arrived during output; quarantining buffered input");
+        }
+        self.retire_output_injector();
+        self.config.engine.reset_with_unknown_preceding_text();
+        self.stdin_quarantine_through = observed;
+        self.stdin_input_monitor.begin_line(observed);
+        true
+    }
+
     /// Start a quiet window after serialized output. Any evdev events already
     /// queued by typing during the injection are discarded, and matching
     /// resumes only after a short interval with no captured input.
@@ -170,6 +206,20 @@ impl Daemon {
                 };
                 match result {
                     Ok(()) => self.reconnect_delay = Duration::from_millis(250),
+                    Err(error)
+                        if error.applied_with_cursor_position_failure() && !error.retryable() =>
+                    {
+                        // The replacement is already applied and finish_expansion
+                        // invalidated the matcher context. A non-retryable cursor
+                        // placement failure must not terminate the input service.
+                        warn!(
+                            outcome = error.diagnostic_category(),
+                            trigger_chars = error.result.trigger.chars().count(),
+                            insert_bytes = error.result.insert.len(),
+                            "input-method replacement applied but cursor placement failed; continuing"
+                        );
+                        self.reconnect_delay = Duration::from_millis(250);
+                    }
                     Err(error) if error.expansion_rejected() => {
                         self.note_unsupported_output(&error);
                         warn!(
@@ -425,6 +475,18 @@ impl Daemon {
         };
         match lines.recv_timeout(poll_interval) {
             Ok(line) => {
+                if line.generation <= self.stdin_quarantine_through {
+                    warn!("stdin input line quarantined after interrupted output");
+                    self.config.engine.reset_with_unknown_preceding_text();
+                    return Ok(Step::Next);
+                }
+                // The reader thread reads ahead, so lines already queued when
+                // this one starts were not typed during its output. Only lines
+                // read after this point count as concurrent input.
+                self.stdin_input_monitor.begin_line(
+                    line.generation
+                        .max(self.stdin_input_monitor.observed_generation()),
+                );
                 drain_pending_window_events(
                     &self.window_tracker,
                     &mut self.config.engine,
@@ -434,9 +496,11 @@ impl Daemon {
                     &mut self.focus_state,
                 )?;
                 self.update_profile_for_focus()?;
+                let mut stdin_interrupted = false;
                 if self.injector.is_some() {
-                    for character in line.chars() {
+                    for character in line.text.chars() {
                         let event = InputEvent::TextChar(character);
+                        let attempts_before = crate::failure_trace::expansion_attempts();
                         let (result, backend) = if let Some(mut backend) = self.injector.take() {
                             let result = process_event_with_pending_buffer(
                                 &mut self.config.engine,
@@ -463,8 +527,18 @@ impl Daemon {
                             )
                         };
                         self.injector = backend;
+                        let output_attempted =
+                            crate::failure_trace::expansion_attempts() != attempts_before;
+                        if self.quarantine_interrupted_stdin(
+                            result.as_ref().err().map(Box::as_ref),
+                            output_attempted,
+                        ) {
+                            stdin_interrupted = true;
+                            break;
+                        }
                         if let Err(error) = result {
                             if error.expansion_rejected() {
+                                self.note_unsupported_output(&error);
                                 warn!(
                                     outcome = error.diagnostic_category(),
                                     trigger_chars = error.result.trigger.chars().count(),
@@ -511,35 +585,49 @@ impl Daemon {
                     // The line break is the harness's, not typed text. While a
                     // command from this line runs, ending the input would
                     // discard it, so its flush waits for the next line.
-                    if let Some(backend) = self.injector.as_deref_mut() {
-                        if !self.config.engine.has_deferred_reservations() {
-                            // The flush can apply an expansion too; a refused
-                            // one typed nothing and must not stop the daemon.
-                            if let Err(error) = process_event_with_pending_buffer(
-                                &mut self.config.engine,
-                                InputEvent::EndOfInput,
-                                Some(backend),
-                                &self.policy,
-                                self.active_backend,
-                                &mut self.pending_results,
-                                &mut self.ready_results,
-                            ) {
-                                if !error.expansion_rejected() {
-                                    return Err(error.into());
-                                }
-                                warn!(
-                                    outcome = error.diagnostic_category(),
-                                    trigger_chars = error.result.trigger.chars().count(),
-                                    insert_bytes = error.result.insert.len(),
-                                    "output backend rejected expansion; continuing"
+                    if !stdin_interrupted {
+                        if let Some(backend) = self.injector.as_deref_mut() {
+                            if !self.config.engine.has_deferred_reservations() {
+                                // The flush can apply an expansion too; a refused
+                                // one typed nothing and must not stop the daemon.
+                                let attempts_before = crate::failure_trace::expansion_attempts();
+                                let result = process_event_with_pending_buffer(
+                                    &mut self.config.engine,
+                                    InputEvent::EndOfInput,
+                                    Some(backend),
+                                    &self.policy,
+                                    self.active_backend,
+                                    &mut self.pending_results,
+                                    &mut self.ready_results,
                                 );
+                                let output_attempted =
+                                    crate::failure_trace::expansion_attempts() != attempts_before;
+                                let interrupted = self.quarantine_interrupted_stdin(
+                                    result.as_ref().err().map(Box::as_ref),
+                                    output_attempted,
+                                );
+                                if !interrupted {
+                                    if let Err(error) = result {
+                                        if error.expansion_rejected() {
+                                            self.note_unsupported_output(&error);
+                                        } else {
+                                            return Err(error.into());
+                                        }
+                                        warn!(
+                                            outcome = error.diagnostic_category(),
+                                            trigger_chars = error.result.trigger.chars().count(),
+                                            insert_bytes = error.result.insert.len(),
+                                            "output backend rejected expansion; continuing"
+                                        );
+                                    }
+                                }
                             }
                         }
                     }
                 } else {
                     process_event_with_pending_buffer(
                         &mut self.config.engine,
-                        InputEvent::Text(line),
+                        InputEvent::Text(line.text),
                         None,
                         &self.policy,
                         self.active_backend,

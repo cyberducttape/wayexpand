@@ -133,6 +133,12 @@ fn is_shell_sender(sender: Option<&str>, shell_owner: &str) -> bool {
 }
 
 fn window_context(app_id: String, title: String, instance_id: String) -> Option<WindowContext> {
+    // A client-chosen app ID must not claim a reserved process identity.
+    let app_id = if wayexpand_core::is_reserved_process_app_id(&app_id) {
+        String::new()
+    } else {
+        app_id
+    };
     if app_id.is_empty() && title.is_empty() && instance_id.is_empty() {
         // Shell UI (overview, a menu) has focus, or no window does.
         None
@@ -811,6 +817,17 @@ pub fn disable_extension() -> Result<bool, GnomeWindowError> {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn client_app_id_cannot_claim_a_reserved_process_identity() {
+        let window = window_context(
+            "Process-Executable:/usr/bin/konsole".into(),
+            "Terminal".into(),
+            "42".into(),
+        )
+        .unwrap();
+        assert_eq!(window.app_id, None);
+    }
 
     #[test]
     fn empty_report_means_no_window_and_ids_are_namespaced() {

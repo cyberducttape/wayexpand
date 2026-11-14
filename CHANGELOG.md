@@ -4,6 +4,288 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add `settings.terminal_paste` (`off` by default). On the libei route,
+  replacements in `terminal_apps` are delivered with the clipboard and
+  Ctrl+Shift+V instead of typed: `multiline` pastes text with a line break,
+  over `keystroke_max_chars`, or with characters the layout cannot type, and
+  `always` pastes everything. Bracketed paste keeps shells from running each
+  line as it arrives. The trigger is erased only once the clipboard holds the
+  replacement, Klipper is asked not to record it, and the previous clipboard
+  text is restored. Without `ext-data-control-v1`, or when the clipboard holds
+  non-text data, the replacement is typed. Covered by an opt-in KWin e2e
+  scenario with Konsole (`terminal-paste-multiline`), which CI runs.
+- Offer terminal paste under Settings > Engine in the GUI, and report the
+  focused window's paste mode with content-free paste, fallback, and unread
+  counters in daemon status (schema 44: `terminal_paste`,
+  `terminal_paste_total`, `terminal_paste_fallbacks_total`,
+  `terminal_paste_unread_total`).
+
+- Discard client-supplied window app IDs that use the reserved
+  `process-executable:` or `process-name:` namespaces (in any letter case)
+  in the KWin and GNOME trackers, so a client cannot name itself
+  `process-executable:/usr/bin/konsole` and satisfy an exact executable
+  filter.
+- Keep a KWin executable identity after a package upgrade replaces the
+  running binary (`/proc/<pid>/exe` ends in ` (deleted)`) while an executable
+  is installed at the same path again.
+- Do not quarantine stdin-source input because the reader had already read a
+  later line before the current one started; only lines that arrive while
+  output runs count as concurrent input.
+- Forward the start of each per-operation output transaction to the output
+  worker, so its assurance guard validates against a fresh baseline.
+- Advance the output guard's focus stamp even when applying a window change
+  fails, instead of refusing all later output.
+- Clear undo state when the backend policy blocks the active route.
+- Warn when `undo_chord` is set: no current output route can verify the
+  application text, so expansion undo is unavailable.
+- Trust root-owned IBus install directories that are group-writable only by
+  a system group, such as Debian's `/usr/local` (`root:staff 2775`).
+
+- Reject KWin's own PID as a focused-application identity instead of falling
+  back to the mutable `kwin_wayland` process name; report the compositor-surface
+  case as `WX-EVDEV-FOCUS-006` in focused-app, health, and support diagnostics.
+- Make the generated output-integrity sequence model preserve its first terminal
+  result, so a late `Applied` notification cannot erase an earlier uncertain
+  outcome or make the transaction appear replayable.
+- Watch nested build-input files when computing embedded build identity so
+  edits below top-level workspace directories rebuild version metadata and
+  cannot make a stale daemon appear to match the current CLI.
+- Expose a content-free KWin process-identity resolution category in daemon
+  status and focused-app diagnostics. Distinguish missing process IDs,
+  `/proc` metadata and executable-link failures, invalid executable identities,
+  and PID changes without logging process names or paths.
+- Separate route trigger preconditions, output transaction semantics, and
+  application-result observability in backend and doctor JSON, GUI route
+  summaries, and generated certification tables. Bump `backend list --json` to
+  schema 2; no current backend can observe the target application's final
+  document result.
+- Recheck effective organization capability requirements whenever a validated
+  configuration is promoted or an output route reconnects. If the active route
+  cannot satisfy an enforced requirement, automatic expansion stays disabled
+  until a compatible policy or route is active.
+- Publish the effective backend-policy block in daemon status and report a
+  distinct matching-unavailable reason, so health checks can distinguish an
+  incompatible route from disconnected capture or missing injection.
+- Include sanitized window-tracker context and app-ID availability in health
+  output, and distinguish a connected KWin tracker with no app ID from a
+  disconnected tracker when app-scoped evdev matching is suppressed.
+- Treat a route as atomic only when both its atomic flag and replacement
+  guarantee agree, including during transaction outcome classification, evdev
+  overlap cancellation, and the machine-readable capability status.
+- Record the content-free time from observing overlapping input until an
+  interrupted output backend call returns, and show it separately from
+  visible-text latency in recent diagnostics. The measure does not prove when
+  the compositor or application stopped rendering output. Record one sample
+  per transaction and keep per-transaction history enrichment nonblocking.
+- Include the daemon's effective configuration state and generation in the
+  security configuration-integrity gate, so a rejected fleet-layer reload
+  cannot appear healthy because the base config file remains valid.
+- Serialize control-request admission with daemon shutdown so requests arriving
+  after the stop boundary are refused; add a Loom model for the close/admission
+  ordering.
+- Verify targeted Loom filters select at least one test before running them in
+  CI, preventing a stale test name from silently skipping a concurrency model.
+- Make `wayexpand doctor --security` derive the sensitive-field requirement
+  from the same embedded-versus-administrator policy precedence used by the
+  daemon, and report audit-only requirements separately from enforced ones.
+- Clarify that verified surrounding text does not make a split erase/insert
+  atomic, and cover the non-atomic route's consent and focus-loss boundary in
+  the daemon assurance regression tests.
+- Scope first-run's success state to the application used for the real test;
+  do not summarize a single application confirmation as globally verified.
+- Require organization atomic-replacement policy checks, runtime admission, and
+  route diagnostics to agree on both atomic capability declarations.
+- Carry an action-specific authorization permit to the broker's process-spawn
+  boundary, and model authorization, shutdown, and irreversible launch order
+  together so a missing or mismatched permit cannot start a command.
+- Make `wayexpand debug --focused-app-id --json` report whether matching is
+  allowed, suppressed by an unknown focus, outside the app allowlist, or
+  unverified; distinguish a connected KWin tracker with no app ID from a
+  disconnected tracker, and explain why terminal-only matching is suppressed.
+- Allow terminal scope to opt into an exact Linux process name when KWin's
+  executable lookup is denied, but keep that mutable identity in a reserved
+  namespace that ordinary app-ID filters cannot match. Report it separately
+  from app IDs and executable paths, warn that it is lower assurance, and
+  require an explicit `process_name_exact:` filter. Bump daemon status schema
+  to 42.
+- Apply `allow_weak_app_filters` to terminal and raw-evdev capture allowlists
+  as well as snippet app filters. Safe mode now rejects glob and mutable
+  process-name identities in global input-capture scopes unless an administrator
+  explicitly permits weak filters.
+- Do not create undo transactions from output acknowledgments unless the
+  target application result is verified. Current IBus and daemon output paths
+  clear older undo state rather than risk targeting a document whose text is
+  unverified.
+- Explain in the GUI undo-shortcut help that current IBus and daemon routes
+  cannot verify document changes and therefore cannot safely offer output undo.
+- Deprecate the ambiguous `TransactionOutcome::is_applied()` alias in favor of
+  `is_output_acknowledged()` and update internal callers to use the explicit
+  output-layer meaning.
+- Preserve the `application_result` distinction when newer CLI diagnostics read
+  output histories from an older daemon; live debug now reports backend
+  acknowledgement separately from application-level verification.
+- Remove the misleading `expansions_applied_total` and
+  `last_successful_insertion_unix` status aliases. Status schema 38 exposes
+  backend acknowledgments only; it does not claim that the client document
+  changed.
+- Label the GUI's verified route assurance as an atomic route contract and
+  state explicitly that route capability does not verify the text rendered by
+  a specific application.
+- Make insertion-plan previews distinguish an atomic route contract from a
+  real-application result, and disclose non-atomic, unverified output in
+  compatibility-mode plans.
+- Keep the GUI's zero recent-failure count neutral; absence of a failed output
+  acknowledgement does not establish that an application rendered the text.
+- Separate exact window identity from application identity in `wayexpand health
+  --json`. App-scoped routes now report an effective target identity only when
+  both signals are available, preventing an exact compositor window token from
+  overstating app-filter readiness.
+- Align the support-matrix certification validator with schema-4 collector
+  reports. Require every required scenario × layout × client cell exactly
+  once and passing, complete client-version data, the declared production
+  route, successful readiness probes, and agreement between matrix
+  certification/sensitive-field status and its evidence. Reject stale-schema,
+  incomplete, failed, or mismatched evidence.
+- Bind compositor certification evidence to the declared Wayland session.
+  Production collection now remains incomplete outside that session, and the
+  release workflow checks the session before running a production matrix.
+- Make the production-evidence validator reject matrices with no
+  production-required compositor routes, so direct validation cannot report
+  vacuous success.
+- Exhaust every ordering of output checkpoint, send, focus, and consent events
+  through six steps, alongside seeded long histories, to verify that focus or
+  consent invalidation cannot reauthorize an in-flight replacement.
+- Add a deterministic focus-identity state model that exercises 3,906 event
+  histories and verifies buffered trigger state is discarded on uncertain
+  target changes while same-window title updates preserve it.
+- Parse `recent_expansion_outcomes` into the documented JSON array in `wayexpand
+  status --json`, preserving `application_result` such as `unverified` or
+  `unknown` for diagnostics and support tooling.
+- Make `wayexpand upgrade-status` identify when the invoking CLI differs from
+  the active user-local installation, avoiding incorrect restart advice from
+  a source-built CLI inspecting an older installed daemon.
+- Make shared upgrade diagnostics verify installation identity before
+  recommending a service restart for status-schema or build mismatches.
+- Make `wayexpand certify` distinguish daemon build identity from commit-only
+  identity and check whether the invoking CLI matches the active user payload
+  before recommending runtime recovery.
+- Extend `wayexpand doctor --security --json` with a host probe that creates a
+  user namespace and maps the caller's UID/GID, plus relevant kernel settings.
+  When daemon mount isolation is absent,
+  explain whether the host probe points toward a host restriction or a unit
+  setup issue; keep this evidence explicitly separate from proof that systemd
+  enforced the sandbox.
+- Make the first-run IBus replacement consent and CLI setup prompt state that
+  concurrent typing can interleave with non-atomic output, leave partial or
+  corrupted text, and cannot be rolled back; clarify that uncertain output is
+  never retried, that headless tests do not prove physical-session target
+  integrity, and that no accepted physical-session certification exists for
+  this route.
+- Extend the active-route explanations in the toolbar, first-run view, and
+  diagnostics with the same irreversible-output, no-retry, and physical
+  certification limits in English, German, and Indonesian.
+- Share a bounded process-wide command worker pool and a separate hotkey pool
+  across IBus contexts instead of creating five threads per context. Keep
+  per-context cancellation, completion routing, and bounded admission; hold
+  admission slots until completions are drained so one stalled context cannot
+  block shared workers on a full result channel. Close per-context job
+  admission atomically before shutdown waits for active work, and model that
+  admission race with Loom using the production state transition. Verify that
+  another context still completes work while the first context's result channel
+  is full. Add regression tests and before/after resource and latency
+  measurements, including a 1/4/16-context concurrent command-load profile.
+- Count trigger erasure, delimiter reinsertion, and cursor movement in the
+  GUI's paced-output duration estimate. Paced typing remains bounded only by
+  the explicit `keystroke_max_chars` setting; an interim fixed 100 ms budget
+  that refused nearly every keysym expansion was removed before release.
+- Report GNOME Shell extension runtime coverage as the exact tested majors
+  (46, 50, and 51) instead of the ambiguous "45+" label; these are headless
+  compatibility gates and do not imply physical desktop certification.
+- Recheck physical input after an output worker completion is observed, then
+  resolve the transaction through a monotonic integrity gate. Physical input,
+  focus loss, or an uncertain result quarantines target context and prevents
+  queued work from proceeding. Add bounded exhaustive event-order coverage;
+  this is not a substitute for Loom or live physical-keyboard certification.
+- Treat a known-applied replacement with failed cursor repositioning as a
+  context-invalidating output result. Stop queued writes and quarantine
+  follow-up input because the document cursor no longer matches engine state.
+- Keep the daemon running after a non-retryable cursor-placement failure.
+  The text was already applied, so the transaction is committed and never
+  replayed; the matcher context is reset and later input can continue safely.
+- Apply the same commit-and-invalidate rule to undo transactions whose text
+  was restored but whose cursor repositioning failed.
+- Add a Loom model for the output cancellation/checkpoint race and run it in CI
+  under Rust 1.92; constrain the transitive generator version to preserve the
+  project's MSRV. Exercise a physical-input monitor and paced-output worker
+  concurrently, rather than setting cancellation before the modeled worker
+  starts. Model the retired-worker/reconnect gate as well: reconnect must wait
+  until the prior backend operation acknowledges shutdown.
+- Add a Loom model for command completion publication racing with input-context
+  invalidation. Reuse the production generation predicate in both worker
+  preflight and engine postflight, and model target-window identity changing
+  before the completion is drained.
+- Route command and hotkey completion publication and reactor notification
+  through one shared delivery transition. Hotkey completion now wakes the
+  reactor that drains its bounded result queue. Loom covers enqueue/wake
+  interleavings and shutdown release from a full queue; a dropped completion
+  never emits a wakeup.
+- Cancel a running direct expansion subprocess when its input generation goes
+  stale, terminating its owned process group instead of only discarding its
+  eventual output. Named broker actions continue to follow their explicit
+  authorization and broker-shutdown lifecycle.
+- Exercise broker shutdown racing with blocking client-read registration on
+  real Unix sockets. Whether registration wins the registry lock before or
+  after shutdown, the client connection is canceled and the tracked guard is
+  released.
+- Centralize reload-result admission in a production predicate and exhaustively
+  test path, file-stamp, and fleet-signature mismatches for successful and
+  failed loads. Stale results cannot replace the active configuration or
+  report an obsolete load failure as current.
+- Exercise every trigger split across a focus-update matrix: same-window title
+  refresh preserves the typing context, while a different window/application,
+  missing identity, or lost focus prevents cross-target matching.
+- Document which existing performance percentiles describe daemon-side stages
+  and which user-visible latency measures remain uncollected. Prioritize
+  physical capture-to-match and interruption-to-output-stop evidence, real
+  client integrity, and long soaks before further matcher micro-optimization.
+- Generate README and packaging publication-status sections from one dated
+  release manifest. Package CI now exercises installation of 1.3.3, upgrade to
+  the candidate package, rollback, re-upgrade, reinstall, and removal; a live
+  GNOME session after package upgrade remains a separate desktop gate.
+- Clarify that active external IME preedit is not observed, distinguish it from
+  route-specific local dead-key/Compose guards and committed-Unicode support,
+  and show those limits with actionable guidance in CLI JSON and GUI
+  diagnostics. Explain that unknown layouts cause a fail-closed refusal; the
+  optional Fcitx5 bridge can provide Unicode output but does not add capture-
+  side IME or layout awareness.
+- Pin GNOME Shell extension compatibility claims to the runtime-tested Shell
+  majors (46, 50, and 51). CI now asserts the actual Shell version and runs the
+  GNOME input-source, engine-selection, layout, focus, extension-reload, and
+  persistence acceptance checkpoints for each advertised major. Older and
+  intermediate majors remain undeclared until their runtime gates exist.
+- Cancel in-flight GNOME tracker authorization when a client unsubscribes or
+  Shell disables the extension; cancel the active D-Bus identity lookup, ignore
+  late replies, and test slow, disappearing, and rapidly resubscribing clients.
+- Start KWin focus-tracker scripts with `Scripting.start()` instead of the
+  `/Scripting/ScriptN` object: KWin can reuse a still-loaded script's ID, so
+  `run()` reached the wrong script and the tracker never reported focus,
+  silently disabling terminal and browser expansion on the evdev route.
+- Do not treat KWin's `kwin_wayland`/`kwin_x11` resource class as the focused
+  application. Resolve those windows through KWin's owning desktop-file ID,
+  and keep app-scoped matching disabled if that identity is unavailable.
+- Pace libei backspace and cursor-arrow key events like typed text. Unpaced
+  bursts could lose a backspace and leave a trigger's first character (such
+  as a leading `.`) in front of the replacement.
+- Seed the Firefox snap's KWin app ID (`firefox_firefox`) in the default
+  browser raw-capture list.
+- GUI: lay the header out on one row only when its measured contents fit, and
+  stop the compact header from claiming the whole window height.
+- evdev: stop cutting long typed (terminal and browser) expansions off
+  partway when an unrelated `/dev/input` node changes. A device change during
+  paced output is rescanned at once, and output stops only if a new keyboard
+  appeared; headphone jacks, HDMI audio, mice, removals and permission
+  updates no longer interrupt it.
+
 - Keep the KWin focus subscription alive when startup has no usable focus
   snapshot; retain fail-closed app matching while waiting for the next
   compositor focus event instead of repeatedly unloading and reconnecting.

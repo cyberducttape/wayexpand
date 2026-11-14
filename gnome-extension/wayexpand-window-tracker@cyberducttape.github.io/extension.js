@@ -1,4 +1,4 @@
-// WayExpand window tracker for GNOME Shell (GNOME 45+).
+// WayExpand window tracker for runtime-gated GNOME Shell releases.
 //
 // Mutter offers no Wayland protocol or public D-Bus API that tells another
 // process which window has focus (org.gnome.Shell.Introspect is limited to
@@ -28,6 +28,7 @@ import {
 } from './keyboard-compat.js';
 import {
     CancellableSources,
+    AuthorizationAttempt,
     clearTitleWatch,
     isAuthorizedTrackerClient,
     LatestOnlyDelivery,
@@ -117,6 +118,7 @@ export default class WayExpandWindowTracker extends Extension {
         this._pendingSubscriptions = new Map();
         this._subscriptionReservations = new SubscriptionReservations(MAX_SUBSCRIBERS);
         this._pendingAuthorizedCalls = new Map();
+        this._authorizationAttempts = new Map();
         this._authorizationReservations = new SubscriptionReservations(MAX_PENDING_AUTHORIZATIONS);
         this._focused = null;
         this._notifySource = 0;
@@ -153,6 +155,7 @@ export default class WayExpandWindowTracker extends Extension {
             Gio.bus_unwatch_name(subscriber.watchId);
         }
         for (const invocation of this._pendingSubscriptions.values()) {
+            this._cancelAuthorization(invocation);
             invocation.return_dbus_error(
                 'org.wayexpand.ShellWindowTracker1.Error.Unavailable',
                 'the GNOME window tracker was disabled during subscription',
@@ -161,12 +164,16 @@ export default class WayExpandWindowTracker extends Extension {
         this._pendingSubscriptions.clear();
         this._subscriptionReservations.clear();
         for (const invocation of this._pendingAuthorizedCalls.keys()) {
+            this._cancelAuthorization(invocation);
             invocation.return_dbus_error(
                 'org.wayexpand.ShellWindowTracker1.Error.Unavailable',
                 'the GNOME window tracker was disabled during caller authorization',
             );
         }
         this._pendingAuthorizedCalls.clear();
+        for (const attempt of this._authorizationAttempts.values())
+            attempt.cancel();
+        this._authorizationAttempts.clear();
         this._authorizationReservations.clear();
         this._subscribers = null;
         this._exported.unexport();
@@ -356,7 +363,8 @@ export default class WayExpandWindowTracker extends Extension {
             return;
         }
         this._pendingSubscriptions.set(subscriber, invocation);
-        this._isAuthorizedClient(subscriber, authorized => {
+        const authorization = this._isAuthorizedClient(subscriber, authorized => {
+            this._authorizationAttempts.delete(invocation);
             if (this._pendingSubscriptions.get(subscriber) !== invocation)
                 return;
             this._pendingSubscriptions.delete(subscriber);
@@ -378,6 +386,8 @@ export default class WayExpandWindowTracker extends Extension {
             this._watchTitle(this._focused);
             invocation.return_value(new GLib.Variant('(sss)', describe(this._focused, state.includeTitles)));
         });
+        if (authorization.active)
+            this._authorizationAttempts.set(invocation, authorization);
     }
 
     _addSubscriber(subscriber, includeTitles) {
@@ -404,10 +414,22 @@ export default class WayExpandWindowTracker extends Extension {
         const pending = this._pendingSubscriptions.get(subscriber);
         if (pending) {
             this._pendingSubscriptions.delete(subscriber);
+            this._cancelAuthorization(pending);
             this._subscriptionReservations.release(subscriber);
             pending.return_dbus_error(
                 'org.wayexpand.ShellWindowTracker1.Error.Cancelled',
                 'the WayExpand client cancelled its pending tracker subscription',
+            );
+        }
+        for (const [pendingInvocation, pendingSender] of this._pendingAuthorizedCalls) {
+            if (pendingSender !== subscriber)
+                continue;
+            this._pendingAuthorizedCalls.delete(pendingInvocation);
+            this._cancelAuthorization(pendingInvocation);
+            this._authorizationReservations.release(subscriber);
+            pendingInvocation.return_dbus_error(
+                'org.wayexpand.ShellWindowTracker1.Error.Cancelled',
+                'the WayExpand client cancelled its pending tracker request',
             );
         }
         this._drop(subscriber);
@@ -434,17 +456,13 @@ export default class WayExpandWindowTracker extends Extension {
     }
 
     _isAuthorizedClient(subscriber, complete) {
-        let completed = false;
-        const finish = authorized => {
-            if (completed)
-                return;
-            completed = true;
-            complete(authorized);
-        };
+        const cancellable = new Gio.Cancellable();
+        const attempt = new AuthorizationAttempt(complete, () => cancellable.cancel());
+        const finish = authorized => attempt.finish(authorized);
         try {
             Gio.DBus.session.call(DBUS_NAME, DBUS_PATH, DBUS_NAME,
                 'GetConnectionUnixUser', new GLib.Variant('(s)', [subscriber]),
-                new GLib.VariantType('(u)'), Gio.DBusCallFlags.NONE, 500, null,
+                new GLib.VariantType('(u)'), Gio.DBusCallFlags.NONE, 500, cancellable,
                 (connection, userResult) => {
                     let uid;
                     try {
@@ -458,7 +476,7 @@ export default class WayExpandWindowTracker extends Extension {
                     try {
                         Gio.DBus.session.call(DBUS_NAME, DBUS_PATH, DBUS_NAME,
                             'GetConnectionUnixProcessID', new GLib.Variant('(s)', [subscriber]),
-                            new GLib.VariantType('(u)'), Gio.DBusCallFlags.NONE, 500, null,
+                            new GLib.VariantType('(u)'), Gio.DBusCallFlags.NONE, 500, cancellable,
                             (pidConnection, pidResult) => {
                                 try {
                                     const [pid] = pidConnection.call_finish(pidResult).deep_unpack();
@@ -466,7 +484,7 @@ export default class WayExpandWindowTracker extends Extension {
                                     const ownName = Gio.DBus.session.get_unique_name();
                                     Gio.DBus.session.call(DBUS_NAME, DBUS_PATH, DBUS_NAME,
                                         'GetConnectionUnixUser', new GLib.Variant('(s)', [ownName]),
-                                        new GLib.VariantType('(u)'), Gio.DBusCallFlags.NONE, 500, null,
+                                        new GLib.VariantType('(u)'), Gio.DBusCallFlags.NONE, 500, cancellable,
                                         (ownConnection, ownResult) => {
                                             try {
                                                 const [ownUid] = ownConnection.call_finish(ownResult).deep_unpack();
@@ -499,6 +517,14 @@ export default class WayExpandWindowTracker extends Extension {
         } catch {
             finish(false);
         }
+        return attempt;
+    }
+
+    _cancelAuthorization(invocation) {
+        const attempt = this._authorizationAttempts.get(invocation);
+        if (attempt)
+            attempt.cancel();
+        this._authorizationAttempts.delete(invocation);
     }
 
     _logAuthorizationDiagnostic(message) {
@@ -516,7 +542,8 @@ export default class WayExpandWindowTracker extends Extension {
             return;
         }
         this._pendingAuthorizedCalls.set(invocation, sender);
-        this._isAuthorizedClient(sender, authorized => {
+        const authorization = this._isAuthorizedClient(sender, authorized => {
+            this._authorizationAttempts.delete(invocation);
             if (!this._pendingAuthorizedCalls.has(invocation))
                 return;
             this._pendingAuthorizedCalls.delete(invocation);
@@ -535,6 +562,8 @@ export default class WayExpandWindowTracker extends Extension {
             }
             operation();
         });
+        if (authorization.active)
+            this._authorizationAttempts.set(invocation, authorization);
     }
 
     _focusChanged() {

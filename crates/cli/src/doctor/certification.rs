@@ -1,9 +1,22 @@
 //! Compositor certification scenarios and selection status.
 
 use super::status::{
-    read_daemon_status, runtime_capabilities_from_status, status_as_json, status_schema_compatible,
+    cli_install_identity, cli_install_recovery_advice, read_daemon_status,
+    runtime_capabilities_from_status, status_as_json, status_schema_compatible,
 };
 use crate::*;
+
+fn daemon_mismatch_detail(
+    kind: &str,
+    actual: &str,
+    expected: &str,
+    cli_matches_active_install: Option<bool>,
+) -> String {
+    format!(
+        "{kind} mismatch (daemon {actual}; CLI expects {expected}). {}",
+        cli_install_recovery_advice(cli_matches_active_install)
+    )
+}
 
 pub(crate) fn print_certification(json: bool) -> Result<bool> {
     let required_scenarios = certification_scenarios()?;
@@ -201,6 +214,9 @@ pub(crate) fn print_certification(json: bool) -> Result<bool> {
     // selection so a connected evdev/libei service is not presented as if the
     // machine were currently stdin-only. A status response is observational;
     // it never changes the certification result or promotes a probe to proof.
+    let cli_install = cli_install_identity();
+    let active_user_install_detected = cli_install.active_user_install_detected;
+    let cli_matches_active_install = cli_install.cli_matches_active_user_install;
     let active_daemon = match read_daemon_status() {
         Ok(response) => {
             let snapshot = status_as_json(&response)?;
@@ -231,19 +247,29 @@ pub(crate) fn print_certification(json: bool) -> Result<bool> {
                     format!("state={state}; compatible active route is {source} + {backend}")
                 }
                 (Some(source), Some(backend), _, false) if commit_unknown => format!(
-                    "route {source} + {backend} is connected, but this CLI or the daemon has no build commit (daemon {:?}, CLI {}), so the daemon cannot be shown to match. Restart the daemon after upgrading, or build with WAYEXPAND_BUILD_SHA set",
-                    daemon_commit,
-                    build_info::COMMIT
+                    "route {source} + {backend} is connected, but this CLI or daemon lacks a build commit (daemon {:?}, CLI {}). Assess it with `upgrade-status` from the active installation before deciding whether a restart is needed; builds should set WAYEXPAND_BUILD_SHA",
+                    daemon_commit, build_info::COMMIT
                 ),
-                (Some(source), Some(backend), _, false) => format!(
-                    "route {source} + {backend} is connected, but daemon commit is {:?}; expected {}. Restart/update the daemon before relying on these diagnostics",
-                    daemon_commit,
-                    build_info::COMMIT
+                (Some(source), Some(backend), _, false) => daemon_mismatch_detail(
+                    &format!("route {source} + {backend} build identity"),
+                    &format!(
+                        "commit {:?}, version {:?}",
+                        daemon_commit, daemon_version
+                    ),
+                    &format!(
+                        "commit {}, version {}",
+                        build_info::COMMIT,
+                        build_info::VERSION
+                    ),
+                    cli_matches_active_install,
                 ),
-                (Some(source), Some(backend), false, true) => format!(
-                    "route {source} + {backend} is connected, but daemon status schema is {:?}; expected {}. Restart/update the daemon before relying on these diagnostics",
-                    status_schema,
-                    CONTROL_STATUS_SCHEMA
+                (Some(source), Some(backend), false, true) => daemon_mismatch_detail(
+                    &format!("route {source} + {backend} status schema"),
+                    &status_schema
+                        .map(|schema| schema.to_string())
+                        .unwrap_or_else(|| "unknown".to_owned()),
+                    &CONTROL_STATUS_SCHEMA.to_string(),
+                    cli_matches_active_install,
                 ),
                 _ => format!("daemon returned state={state}, but no complete active route"),
             };
@@ -263,6 +289,8 @@ pub(crate) fn print_certification(json: bool) -> Result<bool> {
                 "commit_matches": commit_matches,
                 "daemon_commit": daemon_commit,
                 "build_matches": commit_matches,
+                "active_user_install_detected": active_user_install_detected,
+                "cli_matches_active_user_install": cli_matches_active_install,
                 "daemon_version": daemon_version,
                 "status_schema": status_schema,
                 "state": state,
@@ -320,12 +348,12 @@ pub(crate) fn print_certification(json: bool) -> Result<bool> {
                 ]
             } else if active_daemon["compatible"] == true {
                 vec![
-                    "the running daemon was built from a different commit; restart/update it before relying on runtime diagnostics",
+                    "the running daemon was built from a different commit; verify this CLI belongs to the active installation before deciding whether the service needs restarting/updating",
                     "automatic selection remains stdin-only and desktop client behavior still requires certification scenarios",
                 ]
             } else {
                 vec![
-                    "the running daemon status contract is missing or incompatible; restart/update it before relying on runtime diagnostics",
+                    "the running daemon status contract is missing or incompatible; verify this CLI belongs to the active installation before deciding whether the service needs restarting/updating",
                     "automatic selection remains stdin-only and desktop client behavior still requires certification scenarios",
                 ]
             }
@@ -439,5 +467,45 @@ pub(crate) fn certification_scenario_category(scenario: &str) -> &'static str {
         | "compose-committed-text"
         | "expansion-after-committed-composition" => "input-method",
         _ => "other",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::daemon_mismatch_detail;
+    use crate::doctor::status::executable_paths_match;
+    use std::path::Path;
+
+    #[test]
+    fn executable_identity_comparison_fails_closed_when_unavailable() {
+        let running = std::env::current_exe().expect("test executable path");
+        assert_eq!(executable_paths_match(&running, Some(&running)), Some(true));
+        if Path::new("/bin/sh").exists() {
+            assert_eq!(
+                executable_paths_match(&running, Some(Path::new("/bin/sh"))),
+                Some(false)
+            );
+        }
+        assert_eq!(executable_paths_match(&running, None), None);
+        assert_eq!(
+            executable_paths_match(Path::new("/missing/wayexpand"), Some(&running)),
+            None
+        );
+    }
+
+    #[test]
+    fn source_cli_mismatch_advice_does_not_order_a_service_restart() {
+        let detail = daemon_mismatch_detail("build", "installed", "source", Some(false));
+        assert!(detail.contains("does not match the active user-local payload"));
+        assert!(detail.contains("upgrade-status` to assess that installation"));
+        assert!(detail.contains("before deciding whether a restart is needed"));
+        assert!(!detail.contains("Restart/update the daemon"));
+    }
+
+    #[test]
+    fn unknown_install_identity_requires_installed_cli_assessment() {
+        let detail = daemon_mismatch_detail("status schema", "34", "35", None);
+        assert!(detail.contains("cannot verify its identity"));
+        assert!(detail.contains("active installation's CLI"));
     }
 }

@@ -35,6 +35,7 @@ pub struct LibeiInjector {
     worker: Option<JoinHandle<()>>,
     capabilities: InjectorCapabilities,
     status_detail: &'static str,
+    output_checkpoint: OutputCheckpoint,
 }
 
 impl LibeiInjector {
@@ -77,6 +78,7 @@ impl LibeiInjector {
             worker: Some(worker),
             capabilities,
             status_detail,
+            output_checkpoint: OutputCheckpoint::default(),
         })
     }
 
@@ -141,8 +143,17 @@ impl TextInjector for LibeiInjector {
 
     fn set_output_checkpoint(&mut self, checkpoint: OutputCheckpoint) {
         if let Some(sender) = self.sender.as_ref() {
-            let _ = sender.send(SessionCommand::Checkpoint(checkpoint));
+            let _ = sender.send(SessionCommand::Checkpoint(checkpoint.clone()));
         }
+        self.output_checkpoint = checkpoint;
+    }
+
+    fn reset_output_progress(&mut self) {
+        self.output_checkpoint.reset_progress();
+    }
+
+    fn output_progress(&self) -> wayexpand_core::OutputProgress {
+        self.output_checkpoint.progress()
     }
 
     fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {

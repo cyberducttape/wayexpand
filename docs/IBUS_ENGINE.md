@@ -165,7 +165,7 @@ the recorded session and says so. The steps are:
    `--yes`, and setup requires the separate raw-capture consent marker.
    Existing scoped coverage is kept when setup runs again.
 
-`wayexpand ibus status --json` (IBus-route schema 2) separates configuration readiness from
+`wayexpand ibus status --json` (IBus-route schema 4) separates configuration readiness from
 operational readiness. On GNOME it independently checks the GNOME Wayland
 session (including the live Shell bus name), source registration, the active
 source reported by GNOME Shell's `InputSourceManager`, and content-free input
@@ -178,7 +178,9 @@ pass. `mru-sources` is persistence context only and is not used to infer or
 trigger activation. Seeing key events or emitted replacement actions
 does not prove that the target application applied the edit: IBus does not
 receive an acknowledgement of the resulting document text. `ready` therefore
-remains false until target insertion is independently verified. Use
+remains false until target insertion is independently verified. Field verdicts
+distinguish `replacement-context-observed` from `output-emitted-unverified`;
+neither means the target document was changed. Use
 `wayexpand debug --test ';;hello'` and confirm the result in the application.
 `wayexpand repair --gnome-input-source` repairs the GNOME source list, asks
 GNOME Shell's live input-source manager to select WayExpand, reads that
@@ -265,21 +267,25 @@ snippet text, clipboard data, and environment values. The older
 `wayexpand support-bundle` command remains available. The engine publishes
 content-free activity (counts and states only, never text) to
 `$XDG_RUNTIME_DIR/wayexpand-ibus-status.json`; field verdicts distinguish
-`expanded`, `ready`, `sensitive` (password/PIN), `no-surrounding-text`
+`output-emitted-unverified`, `replacement-context-observed`, `sensitive` (password/PIN), `no-surrounding-text`
 (typical of terminals), `text-mismatch`, `refused-by-policy`, and
 `no-content-type`.
 
 ## Terminals
 
-Terminals do not report the text before the cursor, so IBus cannot replace a
-trigger there (the engine refuses rather than deleting blindly). After a
+Most terminal input contexts do not report the text before the cursor, so IBus
+cannot replace a trigger there (the engine refuses rather than deleting
+blindly). The scoped handoff also prevents duplicate matching if a terminal
+does advertise surrounding text. After a
 successful real IBus insertion test, setup can offer optional terminal
 coverage (or use `wayexpand setup --backend ibus --terminals` to request it
 after completing the same insertion test). It uses a separate evdev daemon
 with `WAYEXPAND_TERMINAL_APPS_ONLY=1`
 and expands only while one of the configured `settings.terminal_apps` is
 focused (KWin window tracking; fail-closed otherwise). IBus keeps handling
-other applications, so nothing expands twice. evdev reads raw keyboard input
+other applications and yields matching in the configured terminal apps,
+including if a terminal advertises surrounding text, so only one route owns
+each focused app. evdev reads raw keyboard input
 including password fields, so this requires the separate consent marker
 described in [BACKENDS_SENSITIVE_FIELDS.md](BACKENDS_SENSITIVE_FIELDS.md).
 

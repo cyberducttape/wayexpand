@@ -60,12 +60,12 @@ fn daemon_build_warning(
 ) -> Option<&'static str> {
     let status = wayexpand_core::DaemonStatus::parse(response);
     if status.status_schema() != Some(CONTROL_STATUS_SCHEMA) {
-        Some("the running daemon uses an incompatible status protocol; restart it before relying on its behavior")
+        Some("the running daemon's status protocol differs from this CLI; verify this CLI belongs to the active installation and use that installation's `upgrade-status` before deciding whether a restart is needed")
     } else {
         match daemon_build_matches(response, client_commit, client_version) {
             Some(true) => None,
-            Some(false) => Some("the running daemon is from a different build; update and restart it before relying on its behavior"),
-            None => Some("the running daemon build cannot be verified; update or rebuild it with a commit ID, then restart it"),
+            Some(false) => Some("the running daemon differs from this CLI; verify this CLI belongs to the active installation before updating or restarting the daemon"),
+            None => Some("the running daemon build cannot be verified; verify this CLI belongs to the active installation before deciding whether to update or restart it"),
         }
     }
 }
@@ -170,6 +170,10 @@ mod status_build_tests {
             daemon_build_matches(&same_commit_different_tree, "old-build", dirty_version),
             Some(false)
         );
+        let warning =
+            daemon_build_warning(&same_commit_different_tree, "old-build", dirty_version).unwrap();
+        assert!(warning.contains("verify this CLI belongs to the active installation"));
+        assert!(!warning.contains("restart it before relying"));
         let matching_dirty_tree = format!(
             "running\nstatus_schema={CONTROL_STATUS_SCHEMA}\ndaemon_commit=old-build\ndaemon_version={dirty_version}\n"
         );
@@ -216,7 +220,10 @@ mod status_build_tests {
         );
 
         let old_protocol = "running\nstatus_schema=1\ndaemon_commit=old-build\n";
-        assert!(daemon_build_warning(old_protocol, "old-build", "1.3.3-dev+old").is_some());
+        let warning = daemon_build_warning(old_protocol, "old-build", "1.3.3-dev+old")
+            .expect("protocol mismatch should warn");
+        assert!(warning.contains("verify this CLI belongs to the active installation"));
+        assert!(!warning.contains("restart it before relying"));
         assert_eq!(
             daemon_build_matches(old_protocol, "old-build", "1.3.3-dev+old"),
             None

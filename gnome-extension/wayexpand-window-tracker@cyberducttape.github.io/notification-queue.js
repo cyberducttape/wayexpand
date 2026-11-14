@@ -102,6 +102,44 @@ export class SubscriptionReservations {
     }
 }
 
+/** A single-shot authorization callback that can be cancelled when the peer
+ * unsubscribes or GNOME Shell disables the extension. Late D-Bus replies are
+ * ignored after cancellation, and duplicate replies cannot complete twice. */
+export class AuthorizationAttempt {
+    constructor(complete, cancelOperation = null) {
+        this._complete = complete;
+        this._cancelOperation = cancelOperation;
+        this._active = true;
+    }
+
+    get active() {
+        return this._active;
+    }
+
+    finish(authorized) {
+        if (!this._active)
+            return false;
+        this._active = false;
+        const complete = this._complete;
+        this._complete = null;
+        this._cancelOperation = null;
+        complete(authorized === true);
+        return true;
+    }
+
+    cancel() {
+        if (!this._active)
+            return false;
+        this._active = false;
+        this._complete = null;
+        const cancelOperation = this._cancelOperation;
+        this._cancelOperation = null;
+        if (typeof cancelOperation === 'function')
+            cancelOperation();
+        return true;
+    }
+}
+
 /** Own GLib source IDs for work that must not outlive an extension instance. */
 export class CancellableSources {
     constructor(removeSource) {

@@ -1,0 +1,24 @@
+{
+  "audited_on": "2026-11-11",
+  "latest_github_release": {
+    "version": "1.3.3",
+    "published": true,
+    "binary_assets_published": false
+  },
+  "ppa": {
+    "name": "ppa:cyberducttape/ppa",
+    "status": "experimental daily builds",
+    "architectures": ["amd64"],
+    "series": {
+      "Ubuntu 26.04 (Resolute)": {"version": "1.3.3", "status": "current"},
+      "Ubuntu 26.10 (Stonking)": {"version": "1.3.3", "status": "current"},
+      "Ubuntu 24.04 (Noble)": {"version": null, "status": "unavailable"},
+      "Ubuntu 22.04 (Jammy)": {"version": null, "status": "unavailable"}
+    }
+  },
+  "fedora_copr_published": false,
+  "arch_aur_submitted": false,
+  "package_ci_targets": ["Ubuntu 24.04", "Ubuntu 26.04", "Fedora 45"],
+  "physical_desktop_certification": false,
+  "upgrade_from_previous_package_tested": false
+}

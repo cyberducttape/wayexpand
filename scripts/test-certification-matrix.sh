@@ -13,6 +13,7 @@ jq -e '
   ([.out_of_scope_capabilities[] | select(.id == "active-ime-preedit" and .status == "unsupported-by-design")] | length == 1) and
   ([.targets[].id] | sort == ["gnome", "hyprland", "kde", "sway"]) and
   ([.targets[] | select((.input_paths | length) > 0 and (.toolkits | sort == ["GTK", "Qt"]) and (.requires_password_field_check == true))] | length == 4) and
+  ([.targets[] | select(.certification_session == "wayland")] | length == 4) and
   ([.targets[] | select(.id != "gnome" and (.required_client_markers | sort == ["browser", "editor", "electron", "gtk", "password", "qt", "terminal"]))] | length == 3) and
   ([.targets[] | select(.id == "gnome" and (.required_client_markers | sort == ["browser", "editor", "electron", "gtk3", "gtk4", "password", "qt", "terminal"]))] | length == 1) and
   ([.targets[] | select((.id == "kde" or .id == "gnome") and (.input_paths | index("ibus")) and (.input_paths | index("evdev+libei")))] | length == 2) and
@@ -22,7 +23,7 @@ jq -e '
   ([.targets[] | select((.id == "sway" or .id == "hyprland") and (.input_paths | index("input-method-v2")))] | length == 2) and
   ([.targets[] | select((.id == "sway" or .id == "hyprland") and .certification_backend == "input-method-v2" and .production_certification_required == false)] | length == 2) and
   ([.targets[] | select(.id == "kde" and .application_filter == "supported" and .window_tracker == "KWin application tracker")] | length == 1) and
-  ([.targets[] | select(.id == "gnome" and .application_filter == "implemented" and .window_tracker == "WayExpand GNOME Shell extension (GNOME 45+)")] | length == 1) and
+  ([.targets[] | select(.id == "gnome" and .application_filter == "implemented" and .window_tracker == "WayExpand GNOME Shell extension (headless runtime gates: GNOME 46, 50, 51)")] | length == 1) and
   ([.targets[] | select((.id == "sway" or .id == "hyprland") and .application_filter == "unavailable" and .window_tracker == "none")] | length == 2) and
   ([.required_scenarios | length] | all(. == 48)) and
   ([.required_scenarios[]] | unique | length == 48) and
@@ -60,6 +61,12 @@ grep -F -- "targets=\$(jq -r '.targets[]" "$workflow" >/dev/null
 grep -F -- 'Invalid certification backend declaration' "$workflow" >/dev/null
 grep -F -- 'scripts/run-certification-driver.sh' "$workflow" >/dev/null
 grep -F -- 'scripts/certify-compositor.sh' "$workflow" >/dev/null
+# These are literal GitHub Actions expressions, not shell expansions.
+# shellcheck disable=SC2016
+grep -F -- 'EXPECTED_SESSION: ${{ matrix.certification_session }}' "$workflow" >/dev/null
+# shellcheck disable=SC2016
+grep -F -- 'PRODUCTION_REQUIRED: ${{ matrix.production_required }}' "$workflow" >/dev/null
+grep -F -- 'XDG_SESSION_TYPE:-unknown' "$workflow" >/dev/null
 grep -F -- '.certification_scope == "production"' "$workflow" >/dev/null
 grep -F -- 'continue-on-error: true' "$workflow" >/dev/null
 grep -F -- 'if: always()' "$workflow" >/dev/null
@@ -79,11 +86,17 @@ grep -F -- 'No declared compositor route currently meets WayExpand production ce
 python3 - "$matrix" "$workflow" <<'PY'
 import json
 import importlib.util
+import copy
+import itertools
 import sys
 from pathlib import Path
 
 matrix_path, workflow_path = sys.argv[1:]
 matrix = json.load(open(matrix_path, encoding="utf-8"))
+project_root = Path(matrix_path).resolve().parents[2]
+route_catalog = json.load(
+    open(project_root / "crates/backend-selection/routes.json", encoding="utf-8")
+)
 workflow = open(workflow_path, encoding="utf-8").read()
 if "targets=$(jq -r '.targets[]" not in workflow:
     raise SystemExit("certification workflow must derive candidates from the matrix")
@@ -93,6 +106,8 @@ workflow_backends = {
 if "evdev+libei" in workflow_backends.values():
     raise SystemExit("certification workflow must not use raw evdev as a certification candidate")
 for target in matrix["targets"]:
+    if target.get("certification_session") != "wayland":
+        raise SystemExit(f"production certification target {target['id']} must be Wayland-bound")
     expected = target["production_certification_required"]
     backend = target.get("certification_backend")
     if backend not in target["input_paths"]:
@@ -116,7 +131,16 @@ if spec is None or spec.loader is None:
 generator = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(generator)
 production_evidence = {
-    "schema": 3,
+    "schema": 5,
+    "wayexpand_version": "1.3.3",
+    "wayexpand_commit": "0123456789ab",
+    "compositor_version": "1.0",
+    "kernel_release": "6.1.0-test",
+    "cli_binary_sha256": "a" * 64,
+    "keyboard_layout": "us,de,fr,altgr,multi-layout-switching",
+    "expected_desktop": "Sway/wlroots",
+    "detected_desktop": "Sway/wlroots",
+    "recorded_at_utc": "2026-11-11T00:00:00Z",
     "certified": True,
     "status": "certified",
     "certification_scope": "production",
@@ -124,21 +148,171 @@ production_evidence = {
     "production_certification_required": True,
     "compositor": "sway",
     "backend": "input-method-v2",
+    "expected_session": "wayland",
+    "session": "wayland",
+    "session_kind": "physical-wayland-session",
+    "physical_keyboard": "USB keyboard model recorded by reviewer",
+    "physical_evidence_ref": "reviewed://CERT-123/evidence",
+    "physical_input_observed": True,
+    "physical_session_attestation_valid": True,
+    "reviewed_by": "release-reviewer",
+    "session_probe_valid": True,
+    "backend_certification_eligible": True,
+    "doctor_probe_valid": True,
+    "desktop_probe_valid": True,
+    "backend_probe_valid": True,
+    "status_required": True,
+    "status_probe_valid": True,
+    "client_versions_valid": True,
 }
+required_scenarios = matrix["required_scenarios"]
+required_layouts = matrix["required_layout_profiles"]
+target = next(target for target in matrix["targets"] if target["id"] == "sway")
+required_client_markers = target["required_client_markers"]
+target_apps = required_client_markers
+production_evidence.update(
+    {
+        "target_apps": target_apps,
+        "client_versions": {
+            app: {
+                "application_version": "1.0",
+                "toolkit_name": "test-toolkit",
+                "toolkit_version": "1.0",
+            }
+            for app in target_apps
+        },
+        "required_layout_profiles": required_layouts,
+        "required_client_markers": required_client_markers,
+        "scenarios": [
+            {
+                "name": name,
+                "layout_profile": layout,
+                "target_app": app,
+                "result": "pass",
+            }
+            for name, layout, app in itertools.product(
+                required_scenarios, required_layouts, target_apps
+            )
+        ],
+    }
+)
 if not generator.is_production_evidence(
-    production_evidence, "sway", ["evdev+wlroots", "input-method-v2"]
+    production_evidence,
+    "sway",
+    ["evdev+wlroots", "input-method-v2"],
+    "input-method-v2",
+    "Sway/wlroots",
+    "wayland",
+    required_scenarios,
+    required_layouts,
+    required_client_markers,
 ):
     raise SystemExit("valid production evidence was rejected")
 for field, value in (
     ("certification_scope", "compatibility"),
     ("production_eligible", False),
     ("production_certification_required", False),
+    ("status_probe_valid", False),
+    ("backend_certification_eligible", False),
 ):
     compatibility_report = {**production_evidence, field: value}
     if generator.is_production_evidence(
-        compatibility_report, "sway", ["evdev+wlroots", "input-method-v2"]
+        compatibility_report,
+        "sway",
+        ["evdev+wlroots", "input-method-v2"],
+        "input-method-v2",
+        "Sway/wlroots",
+        "wayland",
+        required_scenarios,
+        required_layouts,
+        required_client_markers,
     ):
         raise SystemExit(f"compatibility evidence was accepted as production: {field}")
+
+for label, incomplete in (
+    ("old schema", {**production_evidence, "schema": 4}),
+    ("unknown build identity", {**production_evidence, "wayexpand_commit": "unknown"}),
+    ("dirty build identity", {**production_evidence, "wayexpand_version": "1.3.3-dev+abc.dirty.1234"}),
+    ("desktop identity mismatch", {**production_evidence, "detected_desktop": "GNOME"}),
+    ("invalid binary digest", {**production_evidence, "cli_binary_sha256": "unknown"}),
+    ("headless Wayland session", {**production_evidence, "session_kind": "headless-wayland-session"}),
+    ("no physical keyboard identified", {**production_evidence, "physical_keyboard": ""}),
+    ("no physical-session evidence reference", {**production_evidence, "physical_evidence_ref": ""}),
+    ("physical input not observed", {**production_evidence, "physical_input_observed": False}),
+    ("session attestation absent", {**production_evidence, "physical_session_attestation_valid": False}),
+    ("unreviewed evidence", {**production_evidence, "reviewed_by": ""}),
+    (
+        "missing matrix cell",
+        {
+            **production_evidence,
+            "scenarios": production_evidence["scenarios"][:-1],
+        },
+    ),
+    (
+        "failed scenario",
+        {
+            **production_evidence,
+            "scenarios": [
+                *production_evidence["scenarios"][:-1],
+                {
+                    **production_evidence["scenarios"][-1],
+                    "result": "fail",
+                },
+            ],
+        },
+    ),
+    ("unsupported route", {**production_evidence, "backend": "ibus"}),
+):
+    if generator.is_production_evidence(
+        incomplete,
+        "sway",
+        ["evdev+wlroots", "input-method-v2"],
+        "input-method-v2",
+        "Sway/wlroots",
+        "wayland",
+        required_scenarios,
+        required_layouts,
+        required_client_markers,
+    ):
+        raise SystemExit(f"incomplete certification evidence was accepted: {label}")
+
+if generator.is_production_evidence(
+    production_evidence,
+    "sway",
+    ["evdev+wlroots", "input-method-v2"],
+    "ibus",
+    "Sway/wlroots",
+    "wayland",
+    required_scenarios,
+    required_layouts,
+    required_client_markers,
+):
+    raise SystemExit("evidence for a different backend was accepted")
+
+for label, updates, message in (
+    (
+        "certification flag disagreement",
+        {"production_certification_required": False, "sensitive_field_observation": "observed"},
+        "certified status requires production certification to be required",
+    ),
+    (
+        "sensitive-field evidence disagreement",
+        {"production_certification_required": True, "sensitive_field_observation": "not-observed"},
+        "certified status requires observed sensitive-field handling",
+    ),
+):
+    inconsistent = copy.deepcopy(matrix)
+    target = inconsistent["targets"][0]
+    target.update(updates)
+    target["certification_status"] = "certified"
+    target["certification_evidence"] = "docs/evidence/not-created.json"
+    try:
+        generator.render(inconsistent, route_catalog)
+    except ValueError as error:
+        if message not in str(error):
+            raise SystemExit(f"{label} failed for the wrong reason: {error}")
+    else:
+        raise SystemExit(f"inconsistent certification claim was accepted: {label}")
 PY
 if grep -F -- 'backend: evdev+libei' "$workflow" >/dev/null; then
     printf '%s\n' 'certification workflow must not certify raw evdev' >&2

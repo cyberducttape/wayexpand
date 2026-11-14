@@ -19,8 +19,8 @@ use wayexpand_backend_gnome_window::GnomeWindowTracker;
 use wayexpand_backend_kwin_window::KwinWindowTracker;
 use wayexpand_backend_selection::WindowTrackerKind;
 use wayexpand_core::{
-    window_update_channel, FocusStamp, WindowContext, WindowTracker, WindowUpdateReceiver,
-    WindowUpdateSender,
+    window_update_channel, FocusStamp, ProcessIdentityState, WindowContext, WindowIdentitySource,
+    WindowTracker, WindowUpdateReceiver, WindowUpdateSender,
 };
 
 /// How long one tracker poll may block. It bounds how quickly the supervisor
@@ -54,6 +54,8 @@ struct WindowTrackerDiagnostics {
     last_failure_reason: std::sync::atomic::AtomicU64,
     last_connected_unix: std::sync::atomic::AtomicU64,
     reconnect_backoff_ms: std::sync::atomic::AtomicU64,
+    identity_source: std::sync::atomic::AtomicU64,
+    process_identity_state: std::sync::atomic::AtomicU64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -64,6 +66,8 @@ pub(crate) struct WindowTrackerDiagnosticsSnapshot {
     pub last_failure_reason: &'static str,
     pub last_connected_unix: u64,
     pub reconnect_backoff_ms: u64,
+    pub identity_source: &'static str,
+    pub process_identity_state: &'static str,
 }
 
 impl WindowTrackerDiagnostics {
@@ -84,6 +88,18 @@ impl WindowTrackerDiagnostics {
             TRACKER_FAILURE_SUPERVISOR_START_FAILED => "supervisor_start_failed",
             _ => "none",
         };
+        let identity_source = WindowIdentitySource::from_code(
+            self.identity_source
+                .load(Ordering::Relaxed)
+                .min(u64::from(u8::MAX)) as u8,
+        )
+        .as_str();
+        let process_identity_state = ProcessIdentityState::from_code(
+            self.process_identity_state
+                .load(Ordering::Relaxed)
+                .min(u64::from(u8::MAX)) as u8,
+        )
+        .as_str();
         WindowTrackerDiagnosticsSnapshot {
             state,
             reconnect_attempts_total: self.reconnect_attempts_total.load(Ordering::Relaxed),
@@ -91,6 +107,8 @@ impl WindowTrackerDiagnostics {
             last_failure_reason,
             last_connected_unix: self.last_connected_unix.load(Ordering::Relaxed),
             reconnect_backoff_ms: self.reconnect_backoff_ms.load(Ordering::Relaxed),
+            identity_source,
+            process_identity_state,
         }
     }
 
@@ -108,6 +126,14 @@ impl WindowTrackerDiagnostics {
     }
 
     fn mark_connected(&self) {
+        self.identity_source.store(
+            u64::from(WindowIdentitySource::Unavailable.code()),
+            Ordering::Relaxed,
+        );
+        self.process_identity_state.store(
+            u64::from(ProcessIdentityState::NotApplicable.code()),
+            Ordering::Relaxed,
+        );
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -145,11 +171,35 @@ struct TrackerConnectionState {
     diagnostics: Arc<WindowTrackerDiagnostics>,
 }
 
+#[derive(Clone, Default)]
+struct TrackerRequirements {
+    title_matching: Option<Arc<AtomicBool>>,
+    process_identity: Option<Arc<AtomicBool>>,
+}
+
+impl TrackerRequirements {
+    fn title_matching(&self) -> bool {
+        self.title_matching
+            .as_ref()
+            .is_some_and(|value| value.load(Ordering::Acquire))
+    }
+
+    fn process_identity(&self) -> bool {
+        self.process_identity
+            .as_ref()
+            .is_some_and(|value| value.load(Ordering::Acquire))
+    }
+
+    fn changed_since(&self, titles: bool, process_identity: bool) -> bool {
+        self.title_matching() != titles || self.process_identity() != process_identity
+    }
+}
+
 pub struct WindowTrackerHandle {
     pub receiver: WindowUpdateReceiver,
     connected: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
-    title_matching: Option<Arc<AtomicBool>>,
+    requirements: TrackerRequirements,
     supervisor: Option<JoinHandle<()>>,
 }
 
@@ -162,10 +212,21 @@ impl WindowTrackerHandle {
     /// `title_contains` matching. The supervisor reconnects the GNOME bridge
     /// to apply changes; KWin never sends titles through this contract.
     pub fn set_title_matching_required(&self, required: bool) {
-        if let Some(enabled) = &self.title_matching {
+        if let Some(enabled) = &self.requirements.title_matching {
             if enabled.load(Ordering::Acquire) != required {
                 enabled.store(required, Ordering::Release);
             }
+        }
+    }
+
+    /// Resolve focused process identity only while the active configuration
+    /// needs it for an explicit process filter or terminal-only scope. The
+    /// tracker prefers an exact executable path and reports a mutable process
+    /// name only as a lower-assurance fallback; neither is inferred into an
+    /// application-ID filter.
+    pub fn set_process_identity_required(&self, required: bool) {
+        if let Some(enabled) = &self.requirements.process_identity {
+            enabled.store(required, Ordering::Release);
         }
     }
 
@@ -176,7 +237,7 @@ impl WindowTrackerHandle {
             receiver,
             connected: Arc::new(AtomicBool::new(true)),
             stop: Arc::new(AtomicBool::new(false)),
-            title_matching: None,
+            requirements: TrackerRequirements::default(),
             supervisor: None,
         }
     }
@@ -224,7 +285,10 @@ impl ReconnectBackoff {
 /// no tracker. The wlroots toplevel prototype is deliberately not part of the
 /// production daemon until its event-loop, ownership, and compositor test
 /// coverage are complete.
-pub fn spawn_window_tracker(requires_titles: bool) -> Option<WindowTrackerHandle> {
+pub fn spawn_window_tracker(
+    requires_titles: bool,
+    requires_process_identity: bool,
+) -> Option<WindowTrackerHandle> {
     let Some(kind) = WindowTrackerKind::for_session() else {
         shared_tracker_diagnostics().mark_unavailable(TRACKER_FAILURE_COMPOSITOR_UNSUPPORTED);
         return None;
@@ -240,9 +304,17 @@ pub fn spawn_window_tracker(requires_titles: bool) -> Option<WindowTrackerHandle
         .state
         .store(TRACKER_STATE_STARTING, Ordering::Release);
     let supervisor_diagnostics = Arc::clone(&diagnostics);
-    let title_matching =
-        (kind == WindowTrackerKind::GnomeShell).then(|| Arc::new(AtomicBool::new(requires_titles)));
-    let supervisor_title_matching = title_matching.clone();
+    let requirements = TrackerRequirements {
+        title_matching: (kind == WindowTrackerKind::GnomeShell)
+            .then(|| Arc::new(AtomicBool::new(requires_titles))),
+        process_identity: (kind == WindowTrackerKind::Kwin)
+            .then(|| Arc::new(AtomicBool::new(requires_process_identity))),
+    };
+    let supervisor_requirements = requirements.clone();
+    let kwin_process_identity = supervisor_requirements
+        .process_identity
+        .as_ref()
+        .map(Arc::clone);
     match thread::Builder::new()
         .name("wayexpand-window-tracker-supervisor".into())
         .spawn(move || match kind {
@@ -251,8 +323,14 @@ pub fn spawn_window_tracker(requires_titles: bool) -> Option<WindowTrackerHandle
                 supervisor_stop,
                 kind.label(),
                 KwinWindowTracker::probe,
-                |_| KwinWindowTracker::new(),
-                None,
+                move |_| {
+                    KwinWindowTracker::new_with_process_identity(Arc::clone(
+                        kwin_process_identity
+                            .as_ref()
+                            .expect("KWin tracker has process-identity state"),
+                    ))
+                },
+                supervisor_requirements,
                 TrackerConnectionState {
                     connected: supervisor_connected,
                     diagnostics: supervisor_diagnostics,
@@ -264,7 +342,7 @@ pub fn spawn_window_tracker(requires_titles: bool) -> Option<WindowTrackerHandle
                 kind.label(),
                 GnomeWindowTracker::probe,
                 GnomeWindowTracker::new_with_titles,
-                supervisor_title_matching,
+                supervisor_requirements,
                 TrackerConnectionState {
                     connected: supervisor_connected,
                     diagnostics: supervisor_diagnostics,
@@ -275,7 +353,7 @@ pub fn spawn_window_tracker(requires_titles: bool) -> Option<WindowTrackerHandle
             receiver,
             connected,
             stop,
-            title_matching,
+            requirements,
             supervisor: Some(supervisor),
         }),
         Err(error) => {
@@ -292,7 +370,7 @@ fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
     label: &'static str,
     mut probe: Probe,
     mut connect: Connect,
-    title_matching: Option<Arc<AtomicBool>>,
+    requirements: TrackerRequirements,
     lifecycle: TrackerConnectionState,
 ) where
     T: WindowTracker,
@@ -339,9 +417,8 @@ fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
             continue;
         }
 
-        let current_title_requirement = title_matching
-            .as_ref()
-            .is_some_and(|required| required.load(Ordering::Acquire));
+        let current_title_requirement = requirements.title_matching();
+        let current_process_identity_requirement = requirements.process_identity();
         let mut tracker = match connect(current_title_requirement) {
             Ok(tracker) => tracker,
             Err(error) => {
@@ -380,9 +457,10 @@ fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
                 lifecycle.diagnostics.mark_stopped();
                 return;
             }
-            if title_matching.as_ref().is_some_and(|required| {
-                required.load(Ordering::Acquire) != current_title_requirement
-            }) {
+            if requirements.changed_since(
+                current_title_requirement,
+                current_process_identity_requirement,
+            ) {
                 lifecycle.connected.store(false, Ordering::Release);
                 lifecycle
                     .diagnostics
@@ -395,6 +473,24 @@ fn supervise_window_tracker<T, Probe, Connect, ProbeError, ConnectError>(
             }
             match tracker.next_window_timeout(TRACKER_POLL_INTERVAL) {
                 Ok(Some(window)) => {
+                    let identity_source = if window.is_none() {
+                        WindowIdentitySource::Unavailable
+                    } else {
+                        tracker.identity_source()
+                    };
+                    lifecycle
+                        .diagnostics
+                        .identity_source
+                        .store(u64::from(identity_source.code()), Ordering::Relaxed);
+                    let process_identity_state = if window.is_none() {
+                        ProcessIdentityState::NotApplicable
+                    } else {
+                        tracker.process_identity_state()
+                    };
+                    lifecycle
+                        .diagnostics
+                        .process_identity_state
+                        .store(u64::from(process_identity_state.code()), Ordering::Relaxed);
                     if sender.send(window).is_err() {
                         lifecycle.connected.store(false, Ordering::Release);
                         lifecycle.diagnostics.mark_stopped();
@@ -622,7 +718,7 @@ mod tests {
                 "test tracker",
                 probe,
                 connect,
-                None,
+                TrackerRequirements::default(),
                 TrackerConnectionState {
                     connected: supervisor_connected,
                     diagnostics: supervisor_diagnostics,
@@ -673,7 +769,7 @@ mod tests {
                 "test tracker",
                 || Ok::<_, &'static str>(()),
                 |_| Ok::<_, &'static str>(tracker.take().unwrap()),
-                None,
+                TrackerRequirements::default(),
                 TrackerConnectionState {
                     connected: supervisor_connected,
                     diagnostics: Arc::new(WindowTrackerDiagnostics::default()),
@@ -723,7 +819,7 @@ mod tests {
                 "test tracker",
                 || Ok::<_, &'static str>(()),
                 |_| Ok::<_, &'static str>(IdleTracker),
-                None,
+                TrackerRequirements::default(),
                 TrackerConnectionState {
                     connected: supervisor_connected,
                     diagnostics: Arc::new(WindowTrackerDiagnostics::default()),
@@ -769,7 +865,10 @@ mod tests {
                     mode_sender.send(include_titles).unwrap();
                     Ok::<_, &'static str>(IdleTracker)
                 },
-                Some(supervisor_title_requirement),
+                TrackerRequirements {
+                    title_matching: Some(supervisor_title_requirement),
+                    process_identity: None,
+                },
                 TrackerConnectionState {
                     connected: supervisor_connected,
                     diagnostics: Arc::new(WindowTrackerDiagnostics::default()),
@@ -779,6 +878,49 @@ mod tests {
 
         assert!(!mode_receiver.recv_timeout(Duration::from_secs(1)).unwrap());
         title_requirement.store(true, Ordering::Release);
+        assert!(mode_receiver.recv_timeout(Duration::from_secs(2)).unwrap());
+
+        stop.store(true, Ordering::Release);
+        supervisor.join().unwrap();
+        drop(receiver);
+    }
+
+    #[test]
+    fn process_identity_requirement_changes_refresh_the_focused_window() {
+        let (sender, receiver) = window_update_channel();
+        let connected = Arc::new(AtomicBool::new(false));
+        let supervisor_connected = Arc::clone(&connected);
+        let stop = Arc::new(AtomicBool::new(false));
+        let supervisor_stop = Arc::clone(&stop);
+        let process_requirement = Arc::new(AtomicBool::new(false));
+        let supervisor_process_requirement = Arc::clone(&process_requirement);
+        let (mode_sender, mode_receiver) = mpsc::channel();
+        let requirements = TrackerRequirements {
+            title_matching: None,
+            process_identity: Some(Arc::clone(&process_requirement)),
+        };
+        let supervisor = thread::spawn(move || {
+            supervise_window_tracker(
+                sender,
+                supervisor_stop,
+                "test KWin tracker",
+                || Ok::<_, &'static str>(()),
+                move |_| {
+                    mode_sender
+                        .send(supervisor_process_requirement.load(Ordering::Acquire))
+                        .unwrap();
+                    Ok::<_, &'static str>(IdleTracker)
+                },
+                requirements,
+                TrackerConnectionState {
+                    connected: supervisor_connected,
+                    diagnostics: Arc::new(WindowTrackerDiagnostics::default()),
+                },
+            );
+        });
+
+        assert!(!mode_receiver.recv_timeout(Duration::from_secs(1)).unwrap());
+        process_requirement.store(true, Ordering::Release);
         assert!(mode_receiver.recv_timeout(Duration::from_secs(2)).unwrap());
 
         stop.store(true, Ordering::Release);

@@ -1,5 +1,28 @@
 # Performance baselines
 
+## User-visible latency priorities
+
+The matcher benchmark is a regression check for the core, not WayExpand's
+primary performance target. The expensive path is from a completed physical
+trigger to a correct result in the focused application. Performance work must
+not shorten safety deadlines, remove the non-atomic output interruption poll,
+or promote an unverified output route just to improve a timing number.
+
+| Measurement | Existing evidence | What it does not establish |
+| --- | --- | --- |
+| Physical key to recognized trigger, p50/p95/p99 | Not yet measured end to end. `matcher_latency_*` begins after the daemon receives an input event. | Device, compositor, scheduling, and capture delivery delay. |
+| Trigger to output completion, by route and size | `injection_latency_profiles` reports rolling p50/p95/p99 by output mode and replacement-size bucket; `output_queue_latency_*` measures queue wait. | Application paint or proof that the target applied the replacement. IBus signals and synthetic key acknowledgments remain unverified without a real-client result check. |
+| Physical interruption to backend return | The bounded recent-outcomes trace records `interrupt_to_backend_return_us`; `wayexpand status --json` also exposes rolling sample count and p50/p95/p99 in `output_interrupt_to_backend_return_*`. | Timing starts when the daemon observes input, not at the physical key. Backend return does not prove the compositor or client stopped rendering output. Physical-key-to-detection and target-text integrity still require a real input/output stress harness. |
+| Compositor/portal acknowledgment wait | Included in output transaction timing when the backend call waits for completion; asynchronous queue wait is reported separately. | Client rendering after protocol completion. |
+| Configuration reload at 1K/10K snippets | `crates/core/benches/config_edit.rs` measures reload/build costs; the IBus runtime profile measures multi-context reload separately. | Desktop input responsiveness during a live daemon reload. |
+| Long-term RSS, file descriptors, threads | `scripts/soak-daemon.sh` samples these during a bounded synthetic workload. | A 72-hour physical-desktop soak; release guidance still requires that separately. |
+
+Prioritize filling the missing physical-path measurements and running the
+real-client integrity corpus before tuning matcher microseconds. Report p50,
+p95, and p99 with the exact route, compositor, application, replacement size,
+sample count, and whether the result was verified in the target. Do not combine
+injector acknowledgment with target-visible completion under one label.
+
 The checked-in matcher benchmark measures the cost of feeding a trigger one
 character at a time through an initialized `ExpansionEngine` containing 100,
 1,000, or 10,000 snippets. Configuration parsing and engine construction are
@@ -114,7 +137,7 @@ cargo bench --locked -p wayexpand-backend-evdev --features benchmark --bench cap
 Run the focused profile with:
 
 ```sh
-cargo bench --locked -p wayexpand-backend-ibus --bench runtime-profile
+WAYEXPAND_PROCESS_CGROUP=disabled cargo bench --locked -p wayexpand-backend-ibus --bench runtime-profile
 ```
 
 It measures construction and reload of text-only and async-capable IBus engine
@@ -124,6 +147,10 @@ client application. RSS/PSS and thread counts come from `/proc`; other
 platforms print `n/a` for those values. Worker counts reported by the adapter
 are included alongside actual process threads to make per-context scaling
 visible.
+The final phase queues a 16-command `/usr/bin/sleep 0.02` burst per context
+at 1, 4, and 16 contexts and reports per-context first and last completion
+times. It is a local scheduling/fairness probe, not a production throughput
+claim.
 
 ## IBus surrounding-text updates
 
@@ -180,6 +207,44 @@ They exclude D-Bus transport, compositor scheduling, target application
 rendering, and GUI stalls; the harness runs synchronously on its benchmark
 thread.
 
+### Recheck: 2026-11-11
+
+Re-ran the same six cases on the same AMD Ryzen 7 7735U with Linux
+7.0.0-43-generic and Rust 1.96.0:
+
+| Input document | p50 | p95 | p99 | Allocated bytes/update + key |
+| --- | ---: | ---: | ---: | ---: |
+| ASCII / 128 B | 7.54 µs | 9.15 µs | 10.96 µs | 1,053 B |
+| ASCII / 100 KiB | 90.72 µs | 197.10 µs | 245.70 µs | 645 B |
+| ASCII / 2 MiB | 1.62 ms | 2.09 ms | 2.69 ms | 645 B |
+| Mixed UTF-8 / 128 B | 5.80 µs | 6.29 µs | 7.05 µs | 1,053 B |
+| Mixed UTF-8 / 100 KiB | 84.79 µs | 94.92 µs | 107.00 µs | 645 B |
+| Mixed UTF-8 / 2 MiB | 1.56 ms | 1.71 ms | 1.82 ms | 645 B |
+
+The large-document scan remains linear, but this run's 2 MiB p95 was about
+1.7–2.1 ms with bounded allocations. This does not justify an algorithmic
+rewrite by itself; keep the benchmark as a regression signal and measure on
+actual large-document clients before changing cursor-location logic. Results
+are machine-specific and do not include D-Bus or application response time.
+
+### Same-day repeat on the current worktree
+
+A repeat on the same host and toolchain produced:
+
+| Input document | p50 | p95 | p99 | Allocated bytes/update + key |
+| --- | ---: | ---: | ---: | ---: |
+| ASCII / 128 B | 5.73 µs | 6.29 µs | 7.47 µs | 1,053 B |
+| ASCII / 100 KiB | 91.63 µs | 102.88 µs | 127.11 µs | 645 B |
+| ASCII / 2 MiB | 1.62 ms | 1.69 ms | 1.75 ms | 645 B |
+| Mixed UTF-8 / 128 B | 5.80 µs | 6.29 µs | 7.26 µs | 1,053 B |
+| Mixed UTF-8 / 100 KiB | 88.91 µs | 95.89 µs | 102.04 µs | 645 B |
+| Mixed UTF-8 / 2 MiB | 1.56 ms | 1.65 ms | 1.75 ms | 645 B |
+
+The results reinforce the scan's linear scaling while showing a relatively
+stable large-document tail on this machine. This is still a backend-local
+microbenchmark; it does not measure physical-key-to-trigger delay, D-Bus
+delivery, compositor scheduling, or target-application updates.
+
 ### Baseline: 2026-11-07
 
 Captured on AMD Ryzen 7 7735U (16 logical CPUs), Linux 7.0.0-42-generic,
@@ -213,6 +278,74 @@ The poll loop reuses thread-local descriptor and ready/lost-index buffers, so
 the repeated benchmark iterations exercise the warmed path. Use a separate
 real-session soak to measure process idle CPU and compositor layout-switch
 latency; the synthetic benchmark cannot report those values.
+
+### Recheck: 2026-11-11
+
+Historical pre-shared-pool baseline: this profile was run on the same AMD
+Ryzen 7 7735U, on Linux 7.0.0-43-generic with Rust 1.96.0, before the
+process-wide pool was implemented. Text-only contexts started no async
+workers; each async context allocated five workers. The following section
+records the later shared-pool recheck on the same host.
+
+| Async contexts | Context construction median | Worker threads | Process threads | RSS | PSS |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 0.382 ms | 5 | 6 | 4,176 KiB | 2,114 KiB |
+| 4 | 0.949 ms | 20 | 21 | 4,400 KiB | 2,338 KiB |
+| 16 | 4.800 ms | 80 | 81 | 5,412 KiB | 3,350 KiB |
+
+Command-capable configuration reload (25 samples):
+
+| Contexts | p50 | p95 | p99 |
+| ---: | ---: | ---: | ---: |
+| 1 | 0.255 ms | 0.739 ms | 0.772 ms |
+| 4 | 1.039 ms | 1.198 ms | 1.227 ms |
+| 16 | 4.290 ms | 4.740 ms | 4.940 ms |
+
+Per-key processing p50/p95/p99 was 3.841/5.308/6.076 µs with no async
+contexts and 3.841/4.260/4.749 µs while 16 async contexts were live. This
+single rerun is consistent with the previous latency profile, but confirms the
+resource concern: 16 IBus contexts create 80 worker threads waiting on their
+bounded queues.
+This historical profile is synthetic and does not measure service-wide
+contention or IBus client delivery.
+
+### Shared-pool recheck: 2026-11-11
+
+After implementing a process-wide pool, re-ran the same profile on the same
+host and toolchain. All asynchronous IBus contexts now share four command
+workers and one hotkey worker. Text-only contexts still create none.
+
+| Async contexts | Context construction median | Shared worker threads | Process threads | RSS | PSS |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 0.429 ms | 5 | 6 | 4,160 KiB | 2,097 KiB |
+| 4 | 0.505 ms | 5 | 6 | 4,188 KiB | 2,125 KiB |
+| 16 | 0.831 ms | 5 | 6 | 4,336 KiB | 2,273 KiB |
+
+Configuration reload across all contexts (25 samples):
+
+| Contexts | p50 | p95 | p99 |
+| ---: | ---: | ---: | ---: |
+| 1 | 0.049 ms | 0.079 ms | 0.110 ms |
+| 4 | 0.118 ms | 0.277 ms | 0.301 ms |
+| 16 | 0.472 ms | 0.760 ms | 0.768 ms |
+
+Per-key processing p50/p95/p99 was 3.911/5.308/6.216 µs without async
+contexts and 5.169/5.727/6.705 µs with 16 async contexts. After the last
+async context is dropped, the pool retires and process threads return to the
+one-thread baseline.
+
+Concurrent command load queued 16 `/usr/bin/sleep 0.02` jobs per context and
+recorded content-free completion latencies at a 1 ms reactor polling cadence.
+The observed p50/p95/p99 were 109/148/148 ms (1 context), 332/590/591 ms (4),
+and 1,222/2,261/2,369 ms (16). First completion ranged from 35.8 ms (1) to
+35.7–39.2 ms (4) and 36.0–149.3 ms (16); last completion ranged from 148.2 ms,
+589.6–590.7 ms, and 2.258–2.370 s, respectively. The 16-context results show
+FIFO progress across contexts but also queueing delay for later contexts in
+the burst. This is one local sample, not a fairness guarantee or production
+load target. It does not measure IBus delivery or target-application latency.
+A separate regression verifies that a full completion channel in one context
+does not prevent another context from completing a short command. Longer-running
+mixed workloads and command/hotkey isolation remain stress cases.
 
 ### Evdev capture/poll comparison: 2026-11-01
 

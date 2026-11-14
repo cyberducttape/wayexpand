@@ -4,7 +4,42 @@ use super::Args;
 use crate::errors::{classified_error, CliErrorKind};
 use crate::*;
 
-pub(crate) const HEALTH_SCHEMA: u32 = 4;
+pub(crate) const HEALTH_SCHEMA: u32 = 8;
+
+/// Report whether this daemon process has observed a partial or uncertain
+/// output transaction. These lifetime counters are evidence requiring review,
+/// not a statement that a particular application was or was not modified.
+fn output_integrity(snapshot: Option<&serde_json::Value>) -> serde_json::Value {
+    let uncertain = snapshot
+        .and_then(|status| status.get("output_uncertain_total"))
+        .and_then(serde_json::Value::as_u64);
+    let partial = snapshot
+        .and_then(|status| status.get("output_partial_total"))
+        .and_then(serde_json::Value::as_u64);
+
+    match (uncertain, partial) {
+        (Some(uncertain), Some(partial)) if uncertain > 0 || partial > 0 => {
+            serde_json::json!({
+                "state":"output_integrity_review_required",
+                "uncertain_total":uncertain,
+                "partial_total":partial,
+                "review_required":true
+            })
+        }
+        (Some(uncertain), Some(partial)) => serde_json::json!({
+            "state":"no_uncertain_output_observed",
+            "uncertain_total":uncertain,
+            "partial_total":partial,
+            "review_required":false
+        }),
+        _ => serde_json::json!({
+            "state":"unknown",
+            "uncertain_total":uncertain,
+            "partial_total":partial,
+            "review_required":null
+        }),
+    }
+}
 
 fn classify_health(
     config_valid: bool,
@@ -83,6 +118,8 @@ fn classify_health(
                 "paused" => "paused",
                 "configuration_unhealthy" => "configuration_unhealthy",
                 "replacement_not_admitted" => "replacement_not_admitted",
+                "application_scope_unknown" => "focus_identity_unavailable",
+                "application_scope_denied" => "application_scope_denied",
                 "none" => "output_not_healthy",
                 _ => "status_incomplete",
             }
@@ -146,6 +183,8 @@ fn route_safety(snapshot: Option<&serde_json::Value>) -> serde_json::Value {
         return serde_json::json!({
             "sensitive_field_signal":"unknown",
             "target_identity":"unknown",
+            "window_identity":"unknown",
+            "application_identity":"unknown",
             "replacement":"unknown",
             "production_certified":false,
             "readiness":{"state":"unknown","ready":false},
@@ -161,6 +200,19 @@ fn route_safety(snapshot: Option<&serde_json::Value>) -> serde_json::Value {
         .and_then(serde_json::Value::as_bool);
     let exact_identity = snapshot
         .get("window_identity_exact")
+        .and_then(serde_json::Value::as_bool);
+    let app_scoped = snapshot
+        .get("terminal_apps_only")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let app_id_available = snapshot
+        .get("window_app_id_available")
+        .and_then(serde_json::Value::as_bool);
+    let executable_available = snapshot
+        .get("window_process_executable_available")
+        .and_then(serde_json::Value::as_bool);
+    let process_name_available = snapshot
+        .get("window_process_name_available")
         .and_then(serde_json::Value::as_bool);
     let compatibility_mode = snapshot
         .get("compatibility_mode")
@@ -180,7 +232,7 @@ fn route_safety(snapshot: Option<&serde_json::Value>) -> serde_json::Value {
         }
     };
 
-    let target_identity = match exact_identity {
+    let window_identity = match exact_identity {
         Some(true) => "exact",
         Some(false) => {
             limitations.push("target_identity_not_exact");
@@ -191,6 +243,44 @@ fn route_safety(snapshot: Option<&serde_json::Value>) -> serde_json::Value {
             "unknown"
         }
     };
+
+    let application_identity = match (
+        app_id_available,
+        executable_available,
+        process_name_available,
+    ) {
+        (_, Some(true), _) => "executable_path",
+        (_, _, Some(true)) => {
+            limitations.push("application_identity_lower_assurance");
+            "process_name_lower_assurance"
+        }
+        (Some(true), _, _) => "available",
+        (Some(false), _, _) => {
+            if app_scoped {
+                limitations.push("application_identity_unavailable");
+            }
+            "unavailable"
+        }
+        (None, _, _) => {
+            if app_scoped {
+                limitations.push("application_identity_unknown");
+            }
+            "unknown"
+        }
+    };
+
+    // For app-scoped capture, an exact KWin window token does not establish
+    // which configured application owns that window. Report effective target
+    // identity separately from the two evidence sources used to establish it.
+    let target_identity =
+        if app_scoped && !matches!(application_identity, "available" | "executable_path") {
+            match application_identity {
+                "unavailable" => "application_unavailable",
+                _ => "unknown",
+            }
+        } else {
+            window_identity
+        };
 
     let replacement = match atomic_replace {
         Some(true) => "atomic",
@@ -218,6 +308,7 @@ fn route_safety(snapshot: Option<&serde_json::Value>) -> serde_json::Value {
             *limitation,
             "input_privacy_unavailable"
                 | "target_identity_not_exact"
+                | "application_identity_unavailable"
                 | "non_atomic_automatic_replacement_refused"
                 | "non_atomic_compatibility_override_enabled"
         )
@@ -225,11 +316,13 @@ fn route_safety(snapshot: Option<&serde_json::Value>) -> serde_json::Value {
     let has_unknown_requirement = sensitive_focus.is_none()
         || atomic_replace.is_none()
         || exact_identity.is_none()
+        || (app_scoped && app_id_available.is_none())
         || limitations.iter().any(|limitation| {
             matches!(
                 *limitation,
                 "input_privacy_unknown"
                     | "target_identity_unknown"
+                    | "application_identity_unknown"
                     | "replacement_guarantee_unknown"
             )
         });
@@ -245,6 +338,8 @@ fn route_safety(snapshot: Option<&serde_json::Value>) -> serde_json::Value {
     serde_json::json!({
         "sensitive_field_signal":sensitive_field_signal,
         "target_identity":target_identity,
+        "window_identity":window_identity,
+        "application_identity":application_identity,
         "replacement":replacement,
         "compatibility_mode":compatibility_mode,
         "production_certified":production_certified,
@@ -278,6 +373,7 @@ fn health_report(
 ) -> (serde_json::Value, &'static str, u8, &'static str, bool) {
     let (state, code, reason, matching_available) = classify_health(config_valid, daemon);
     let safety = route_safety(daemon);
+    let integrity = output_integrity(daemon);
     let errors = if code == 0 {
         Vec::<serde_json::Value>::new()
     } else {
@@ -294,7 +390,12 @@ fn health_report(
             }
             "paused" => ("WX-INPUT-001", "matching", true),
             "replacement_not_admitted" => ("WX-POLICY-001", "replacement-policy", false),
-            "focus_identity_unavailable" => ("WX-EVDEV-FOCUS-001", "input-scope", true),
+            "focus_identity_unavailable" => (
+                focus_identity_advice(daemon).problem_id,
+                "input-scope",
+                true,
+            ),
+            "application_scope_denied" => ("WX-EVDEV-FOCUS-002", "input-scope", true),
             _ => ("WX-OUTPUT-001", "output-backend", false),
         };
         vec![serde_json::json!({
@@ -305,7 +406,8 @@ fn health_report(
                 "configuration_unhealthy" => "The daemon rejected or has not loaded the active configuration",
                 "paused" => "Expansion matching is paused",
                 "replacement_not_admitted" => "Automatic replacement is refused by the active safety policy",
-                "focus_identity_unavailable" => "The app-scoped evdev route cannot verify the focused application",
+                "focus_identity_unavailable" => focus_identity_advice(daemon).message,
+                "application_scope_denied" => "The focused application is outside the configured automatic-capture allowlist",
                 "daemon_protocol_incompatible" => "The running daemon status schema is incompatible with this CLI",
                 _ => reason,
             },
@@ -315,7 +417,8 @@ fn health_report(
                 "configuration_unhealthy" => "Run `wayexpand status --json` and `wayexpand validate`, correct configuration errors, then run `wayexpand reload`",
                 "paused" => "Run `wayexpand resume`, then check `wayexpand health` again",
                 "replacement_not_admitted" => "Run `wayexpand policy check --json` and inspect `wayexpand status`; authorize non-atomic replacement only if you explicitly accept its risks",
-                "focus_identity_unavailable" => "Run `wayexpand debug --live --seconds 60` while testing a harmless trigger in a configured application, then inspect the sanitized app_scope events; do not disable app-scoped capture as a workaround",
+                "focus_identity_unavailable" => focus_identity_advice(daemon).action,
+                "application_scope_denied" => "Run `wayexpand debug --focused-app-id --json`, then add the intended application using an exact app ID or process-executable filter; do not broaden the allowlist",
                 "daemon_protocol_incompatible" => "Run `wayexpand upgrade --check`; restart or upgrade the daemon only after reviewing the reported process and compatibility details",
                 "status_incomplete" => "Run `wayexpand status --json` and check that the daemon reports loaded configuration counts",
                 _ => "Run `wayexpand doctor` for diagnostic details",
@@ -331,6 +434,7 @@ fn health_report(
         "reason": reason,
         "readiness": readiness_summary(state, code, &safety),
         "errors": errors,
+        "output_integrity": integrity,
         "application_coverage": application_coverage(daemon),
         "route_safety": safety,
         "configuration": {
@@ -348,6 +452,11 @@ fn health_report(
             "raw_capture_fallback_enabled": snapshot.get("raw_capture_fallback_enabled"),
             "raw_capture_app_count": snapshot.get("raw_capture_app_count"),
             "capture_app_scope_state": snapshot.get("capture_app_scope_state"),
+            "window_tracker_connected": snapshot.get("window_tracker_connected"),
+            "window_context_available": snapshot.get("window_context_available"),
+            "window_app_id_available": snapshot.get("window_app_id_available"),
+            "window_process_executable_available": snapshot.get("window_process_executable_available"),
+            "window_process_name_available": snapshot.get("window_process_name_available"),
             "enabled_expansions": snapshot.get("config_enabled_expansions"),
             "disabled_expansions": snapshot.get("config_disabled_expansions"),
             "generate_only_expansions": snapshot.get("config_generate_only_expansions"),
@@ -355,10 +464,92 @@ fn health_report(
             "output_health": snapshot.get("output_health"),
             "matching_available": matching_available,
             "matching_unavailable_reason": snapshot.get("matching_unavailable_reason"),
+            "backend_policy_blocked": snapshot.get("backend_policy_blocked"),
             "production_certified": false,
         })).unwrap_or_else(|| serde_json::json!({"reachable": false})),
     });
     (report, state, code, reason, matching_available)
+}
+
+struct FocusIdentityAdvice {
+    problem_id: &'static str,
+    message: &'static str,
+    action: &'static str,
+}
+
+fn focus_identity_advice(snapshot: Option<&serde_json::Value>) -> FocusIdentityAdvice {
+    let compositor_pid = snapshot.is_some_and(|snapshot| {
+        snapshot
+            .get("window_process_identity_state")
+            .and_then(serde_json::Value::as_str)
+            == Some("compositor-process-id")
+    });
+    if compositor_pid {
+        return FocusIdentityAdvice {
+            problem_id: "WX-EVDEV-FOCUS-006",
+            message: "KWin reported its own process ID for the focused compositor surface, not an application process",
+            action: "Focus the actual terminal or browser window and rerun `wayexpand debug --focused-app-id --json`; do not allowlist `kwin_wayland` or use a window title as a substitute for client identity.",
+        };
+    }
+
+    let process_name_only = snapshot.is_some_and(|snapshot| {
+        snapshot
+            .get("window_tracker_connected")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+            && snapshot
+                .get("window_context_available")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true)
+            && snapshot
+                .get("window_process_name_available")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true)
+            && snapshot
+                .get("window_process_executable_available")
+                .and_then(serde_json::Value::as_bool)
+                != Some(true)
+    });
+    if process_name_only {
+        return FocusIdentityAdvice {
+            problem_id: "WX-EVDEV-FOCUS-004",
+            message: "The focus tracker has only a mutable process name, which is lower assurance than an application ID or executable path",
+            action: "Run `wayexpand debug --focused-app-id --json` to inspect the process identity. If your policy permits this weaker scope, add an exact `process_name_exact:<name>` filter and retest; do not use it where stable application identity is required.",
+        };
+    }
+
+    let tracker_has_context_without_app_id = snapshot.is_some_and(|snapshot| {
+        snapshot
+            .get("window_tracker_connected")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+            && snapshot
+                .get("window_context_available")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true)
+            && snapshot
+                .get("window_app_id_available")
+                .and_then(serde_json::Value::as_bool)
+                == Some(false)
+            && snapshot
+                .get("window_process_executable_available")
+                .and_then(serde_json::Value::as_bool)
+                != Some(true)
+    });
+
+    if tracker_has_context_without_app_id {
+        FocusIdentityAdvice {
+            problem_id: "WX-EVDEV-FOCUS-001",
+            message: "The window tracker is connected, but KWin has not supplied an application ID for the focused window; terminal-only matching remains suppressed",
+            action: "Run `wayexpand debug --focused-app-id --json` and verify `window_app_id_available`; then inspect `wayexpand status --json` for tracker state. Keep terminal app scoping enabled while the focused app ID is unknown.",
+        }
+    } else {
+        FocusIdentityAdvice {
+            problem_id: "WX-EVDEV-FOCUS-001",
+            message: "The app-scoped evdev route cannot verify the focused application",
+            action: "Run `wayexpand debug --focused-app-id --json`, then `wayexpand debug --live --seconds 60` while testing a harmless trigger in a configured application; inspect the sanitized app_scope events and do not disable app-scoped capture as a workaround",
+        }
+    }
 }
 
 pub(crate) fn health_command(args: Args) -> Result<()> {
@@ -421,6 +612,18 @@ pub(crate) fn health_command(args: Args) -> Result<()> {
                 })
                 .unwrap_or_default();
             println!("Route safety: {limitations}");
+            let integrity = &report["output_integrity"];
+            match integrity["state"].as_str().unwrap_or("unknown") {
+                "output_integrity_review_required" => println!(
+                    "Output integrity: review required ({} uncertain, {} partial); the affected application result is unknown",
+                    integrity["uncertain_total"].as_u64().unwrap_or(0),
+                    integrity["partial_total"].as_u64().unwrap_or(0),
+                ),
+                "no_uncertain_output_observed" => println!(
+                    "Output integrity: no partial or uncertain output recorded since daemon start"
+                ),
+                _ => println!("Output integrity: unknown"),
+            }
         } else {
             println!("Daemon: unavailable");
         }
@@ -439,8 +642,8 @@ pub(crate) fn health_command(args: Args) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        application_coverage, classify_health, health_report, readiness_summary, route_safety,
-        HEALTH_SCHEMA,
+        application_coverage, classify_health, focus_identity_advice, health_report,
+        output_integrity, readiness_summary, route_safety, HEALTH_SCHEMA,
     };
 
     #[test]
@@ -456,10 +659,13 @@ mod tests {
             "status_schema": crate::CONTROL_STATUS_SCHEMA,
             "config_enabled_expansions": 1,
             "config_generate_only_expansions": 2,
+            "output_uncertain_total": 0,
+            "output_partial_total": 0,
             "capture_sensitive_focus": false,
             "window_identity_exact": true,
             "inject_atomic_replace": false,
-            "compatibility_mode": "off"
+            "compatibility_mode": "off",
+            "backend_policy_blocked": false
         });
         let (report, state, exit_code, reason, matching_available) = health_report(
             std::path::Path::new("/tmp/wayexpand/expansions.toml"),
@@ -494,6 +700,10 @@ mod tests {
             keys(&report["application_coverage"]),
             expected("health_application_coverage")
         );
+        assert_eq!(
+            keys(&report["route_safety"]),
+            expected("health_route_safety")
+        );
         assert_eq!(keys(&report["daemon"]), expected("health_daemon"));
         assert_eq!(
             report["schema_version"].as_u64(),
@@ -516,6 +726,52 @@ mod tests {
         assert_eq!(report["readiness"]["operational"]["ready"], true);
         assert_eq!(report["readiness"]["route_safety"]["state"], "limited");
         assert_eq!(report["readiness"]["route_safety"]["ready"], false);
+        assert_eq!(
+            report["output_integrity"]["state"],
+            "no_uncertain_output_observed"
+        );
+        assert_eq!(report["output_integrity"]["review_required"], false);
+    }
+
+    #[test]
+    fn partial_output_requires_review_without_relabeling_worker_liveness() {
+        let snapshot = serde_json::json!({
+            "matching_available": true,
+            "output_health": "ok",
+            "state": "connected",
+            "status_schema": crate::CONTROL_STATUS_SCHEMA,
+            "config_enabled_expansions": 1,
+            "output_uncertain_total": 2,
+            "output_partial_total": 1
+        });
+        let (report, state, exit_code, _, _) = health_report(
+            std::path::Path::new("/tmp/wayexpand/expansions.toml"),
+            true,
+            Some(&snapshot),
+        );
+
+        assert_eq!(state, "ready");
+        assert_eq!(exit_code, 0);
+        assert_eq!(report["healthy"], true);
+        assert_eq!(
+            report["output_integrity"]["state"],
+            "output_integrity_review_required"
+        );
+        assert_eq!(report["output_integrity"]["uncertain_total"], 2);
+        assert_eq!(report["output_integrity"]["partial_total"], 1);
+        assert_eq!(report["output_integrity"]["review_required"], true);
+    }
+
+    #[test]
+    fn missing_output_integrity_counters_are_unknown_not_zero() {
+        let integrity = output_integrity(Some(&serde_json::json!({
+            "output_uncertain_total": 0
+        })));
+        assert_eq!(integrity["state"], "unknown");
+        assert_eq!(integrity["uncertain_total"], 0);
+        assert!(integrity["partial_total"].is_null());
+        assert!(integrity["review_required"].is_null());
+        assert_eq!(output_integrity(None)["state"], "unknown");
     }
 
     #[test]
@@ -613,6 +869,64 @@ mod tests {
     }
 
     #[test]
+    fn app_scoped_route_does_not_confuse_exact_window_with_app_identity() {
+        let safety = route_safety(Some(&serde_json::json!({
+            "capture_sensitive_focus": false,
+            "window_identity_exact": true,
+            "window_app_id_available": false,
+            "terminal_apps_only": true,
+            "inject_atomic_replace": false,
+            "compatibility_mode": "untracked-focus"
+        })));
+        assert_eq!(safety["window_identity"], "exact");
+        assert_eq!(safety["application_identity"], "unavailable");
+        assert_eq!(safety["target_identity"], "application_unavailable");
+        assert_eq!(safety["readiness"]["state"], "limited");
+        assert_eq!(safety["readiness"]["ready"], false);
+        assert!(safety["limitations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item == "application_identity_unavailable"));
+    }
+
+    #[test]
+    fn app_scoped_route_keeps_unknown_application_identity_unknown() {
+        let safety = route_safety(Some(&serde_json::json!({
+            "capture_sensitive_focus": true,
+            "window_identity_exact": true,
+            "terminal_apps_only": true,
+            "inject_atomic_replace": true,
+            "compatibility_mode": "off"
+        })));
+        assert_eq!(safety["window_identity"], "exact");
+        assert_eq!(safety["application_identity"], "unknown");
+        assert_eq!(safety["target_identity"], "unknown");
+        assert_eq!(safety["readiness"]["state"], "unknown");
+        assert!(safety["limitations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item == "application_identity_unknown"));
+    }
+
+    #[test]
+    fn app_scoped_route_reports_executable_identity_without_disclosing_path() {
+        let safety = route_safety(Some(&serde_json::json!({
+            "capture_sensitive_focus": false,
+            "window_identity_exact": true,
+            "terminal_apps_only": true,
+            "window_app_id_available": false,
+            "window_process_executable_available": true,
+            "inject_atomic_replace": false,
+            "compatibility_mode": "tracked-focus"
+        })));
+        assert_eq!(safety["application_identity"], "executable_path");
+        assert_eq!(safety["target_identity"], "exact");
+        assert!(!safety.to_string().contains("/usr/bin"));
+    }
+
+    #[test]
     fn safety_readiness_never_promotes_missing_capabilities_or_uncertified_routes() {
         let unavailable = route_safety(None);
         assert_eq!(unavailable["readiness"]["state"], "unknown");
@@ -673,13 +987,17 @@ mod tests {
     #[test]
     fn app_scoped_health_degrades_when_focused_app_identity_is_unknown() {
         let snapshot = serde_json::json!({
-            "matching_available": true,
+            "matching_available": false,
+            "matching_unavailable_reason": "application_scope_unknown",
             "output_health": "ok",
             "state": "connected",
             "status_schema": crate::CONTROL_STATUS_SCHEMA,
             "config_enabled_expansions": 281,
             "terminal_apps_only": true,
-            "capture_app_scope_state": "unknown"
+            "capture_app_scope_state": "unknown",
+            "window_tracker_connected": true,
+            "window_context_available": true,
+            "window_app_id_available": false
         });
         let (report, state, exit_code, reason, matching_available) = health_report(
             std::path::Path::new("/tmp/wayexpand/expansions.toml"),
@@ -690,27 +1008,151 @@ mod tests {
         assert_eq!(state, "degraded");
         assert_eq!(exit_code, 1);
         assert_eq!(reason, "focus_identity_unavailable");
-        assert!(matching_available);
+        assert!(!matching_available);
         assert_eq!(report["healthy"], false);
         assert_eq!(report["errors"][0]["id"], "WX-EVDEV-FOCUS-001");
         assert_eq!(report["errors"][0]["component"], "input-scope");
+        assert_eq!(
+            report["errors"][0]["message"],
+            "The window tracker is connected, but KWin has not supplied an application ID for the focused window; terminal-only matching remains suppressed"
+        );
+        assert!(report["errors"][0]["suggested_action"]
+            .as_str()
+            .unwrap()
+            .contains("wayexpand debug --focused-app-id --json"));
+        assert_eq!(report["daemon"]["window_tracker_connected"], true);
+        assert_eq!(report["daemon"]["window_context_available"], true);
+        assert_eq!(report["daemon"]["window_app_id_available"], false);
     }
 
     #[test]
-    fn app_scoped_health_stays_operational_when_known_focus_is_outside_scope() {
+    fn app_scoped_health_reports_outside_allowlist_separately() {
+        let snapshot = serde_json::json!({
+            "matching_available": false,
+            "matching_unavailable_reason": "application_scope_denied",
+            "output_health": "ok",
+            "state": "connected",
+            "status_schema": crate::CONTROL_STATUS_SCHEMA,
+            "config_enabled_expansions": 12,
+            "terminal_apps_only": true,
+            "capture_app_scope_state": "outside_allowlist"
+        });
+        let (report, state, exit_code, reason, matching_available) = health_report(
+            std::path::Path::new("/tmp/wayexpand/expansions.toml"),
+            true,
+            Some(&snapshot),
+        );
+
+        assert_eq!(state, "degraded");
+        assert_eq!(exit_code, 1);
+        assert_eq!(reason, "application_scope_denied");
+        assert!(!matching_available);
+        assert_eq!(report["errors"][0]["id"], "WX-EVDEV-FOCUS-002");
+        assert_eq!(
+            report["errors"][0]["message"],
+            "The focused application is outside the configured automatic-capture allowlist"
+        );
+    }
+
+    #[test]
+    fn focus_identity_health_uses_generic_repair_when_tracker_evidence_is_incomplete() {
+        let advice = focus_identity_advice(Some(&serde_json::json!({
+            "window_tracker_connected": true,
+            "window_context_available": false,
+            "window_app_id_available": false
+        })));
+
+        assert_eq!(
+            advice.message,
+            "The app-scoped evdev route cannot verify the focused application"
+        );
+        assert!(advice
+            .action
+            .contains("wayexpand debug --live --seconds 60"));
+        assert!(advice.action.contains("do not disable app-scoped capture"));
+
+        let no_status = focus_identity_advice(None);
+        assert_eq!(no_status.message, advice.message);
+        assert_eq!(no_status.action, advice.action);
+    }
+
+    #[test]
+    fn focus_identity_health_distinguishes_a_compositor_surface_from_client_identity() {
         let snapshot = serde_json::json!({
             "matching_available": true,
+            "matching_unavailable_reason": "none",
+            "output_health": "ok",
+            "state": "connected",
+            "status_schema": crate::CONTROL_STATUS_SCHEMA,
+            "config_enabled_expansions": 1,
+            "terminal_apps_only": true,
+            "capture_app_scope_state": "unknown",
+            "window_process_identity_state": "compositor-process-id"
+        });
+        let advice = focus_identity_advice(Some(&snapshot));
+        assert_eq!(advice.problem_id, "WX-EVDEV-FOCUS-006");
+        assert!(advice.message.contains("KWin reported its own process ID"));
+        assert!(advice.action.contains("Focus the actual terminal"));
+
+        let (report, _, _, _, _) = health_report(
+            std::path::Path::new("/tmp/wayexpand/expansions.toml"),
+            true,
+            Some(&snapshot),
+        );
+        assert_eq!(report["errors"][0]["id"], "WX-EVDEV-FOCUS-006");
+    }
+
+    #[test]
+    fn focus_identity_health_labels_mutable_process_names_as_lower_assurance() {
+        let advice = focus_identity_advice(Some(&serde_json::json!({
+            "window_tracker_connected": true,
+            "window_context_available": true,
+            "window_app_id_available": false,
+            "window_process_executable_available": false,
+            "window_process_name_available": true
+        })));
+        assert!(advice.message.contains("mutable process name"));
+        assert!(advice.action.contains("process_name_exact:<name>"));
+        assert!(advice.action.contains("stable application identity"));
+
+        let safety = route_safety(Some(&serde_json::json!({
+            "capture_sensitive_focus": false,
+            "inject_atomic_replace": false,
+            "window_identity_exact": true,
+            "terminal_apps_only": true,
+            "window_app_id_available": false,
+            "window_process_executable_available": false,
+            "window_process_name_available": true,
+            "compatibility_mode": "untracked-focus"
+        })));
+        assert_eq!(
+            safety["application_identity"],
+            "process_name_lower_assurance"
+        );
+        assert!(safety["limitations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item == "application_identity_lower_assurance"));
+        assert_ne!(safety["target_identity"], "verified");
+    }
+
+    #[test]
+    fn app_scoped_health_is_degraded_when_focus_is_outside_allowlist() {
+        let snapshot = serde_json::json!({
+            "matching_available": false,
+            "matching_unavailable_reason": "application_scope_denied",
             "output_health": "ok",
             "state": "connected",
             "status_schema": crate::CONTROL_STATUS_SCHEMA,
             "config_enabled_expansions": 281,
             "terminal_apps_only": true,
-            "capture_app_scope_state": "denied"
+            "capture_app_scope_state": "outside_allowlist"
         });
 
         assert_eq!(
             classify_health(true, Some(&snapshot)),
-            ("ready", 0, "none", true)
+            ("degraded", 1, "application_scope_denied", false)
         );
     }
 

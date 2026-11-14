@@ -277,6 +277,10 @@ enum SettledMatch {
 /// immediate path and the deferred path the daemon actually runs.
 impl ExpansionEngine {
     fn bump_generation(&mut self) {
+        let _start_gate = self
+            .command_start_gate
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         self.input_generation = self.input_generation.wrapping_add(1);
         self.shared_input_generation
             .store(self.input_generation, std::sync::atomic::Ordering::Release);
@@ -389,7 +393,7 @@ impl ExpansionEngine {
         scalars
     }
 
-    fn on_reset(&mut self) {
+    pub(super) fn on_reset(&mut self) {
         self.bump_generation();
         self.clear_buffer();
     }
@@ -647,6 +651,19 @@ impl ExpansionEngine {
     ) {
         self.expire_command_cache();
         results.clear();
+        if self.backend_policy_blocked {
+            // Keep target and privacy state current while refusing to buffer
+            // text or recognize triggers on a route disallowed by policy.
+            self.on_reset();
+            match event {
+                InputEvent::Text(mut text) => text.zeroize(),
+                InputEvent::WindowChanged(window) => self.set_window_context(window),
+                InputEvent::FocusChanged { sensitive } => self.sensitive_focus = sensitive,
+                InputEvent::CompositionChanged { active } => self.composition_active = active,
+                _ => {}
+            }
+            return;
+        }
         P::before_event(self);
         self.invalidate_undo_unless_undo_chord(&event);
         match event {
@@ -791,5 +808,123 @@ impl ExpansionEngine {
     fn discard_after_result_limit(&mut self) {
         self.clear_buffer();
         self.buffer_truncated = true;
+    }
+}
+
+#[cfg(test)]
+mod focus_transition_model_tests {
+    use super::*;
+    use crate::{Config, WindowContext};
+
+    #[derive(Clone, Copy, Debug)]
+    enum FocusEvent {
+        TargetA,
+        RetitleA,
+        TargetB,
+        UnknownTargetA,
+        NoWindow,
+    }
+
+    impl FocusEvent {
+        fn snapshot(self) -> Option<WindowContext> {
+            match self {
+                Self::TargetA => Some(window("app.a", Some("window-a"), "A")),
+                Self::RetitleA => Some(window("app.a", Some("window-a"), "A retitled")),
+                Self::TargetB => Some(window("app.b", Some("window-b"), "B")),
+                Self::UnknownTargetA => Some(window("app.a", None, "A, identity unavailable")),
+                Self::NoWindow => None,
+            }
+        }
+    }
+
+    fn window(app_id: &str, instance_id: Option<&str>, title: &str) -> WindowContext {
+        WindowContext {
+            app_id: Some(app_id.to_owned()),
+            title: Some(title.to_owned()),
+            instance_id: instance_id.map(str::to_owned),
+        }
+    }
+
+    // This is the contract independently stated in the state-machine model:
+    // only two snapshots naming the same app and nonempty exact instance are
+    // certainly the same target. Missing identity fails closed.
+    fn model_same_target(current: Option<&WindowContext>, update: Option<&WindowContext>) -> bool {
+        match (current, update) {
+            (None, None) => true,
+            (Some(current), Some(update)) => {
+                current.app_id == update.app_id
+                    && current
+                        .instance_id
+                        .as_deref()
+                        .is_some_and(|id| !id.is_empty())
+                    && current.instance_id == update.instance_id
+            }
+            _ => false,
+        }
+    }
+
+    fn check_sequence(events: &[FocusEvent]) {
+        let mut engine = ExpansionEngine::new(
+            Config::parse(
+                r#"
+                [[expansion]]
+                trigger = ":abc"
+                replacement = "safe"
+                "#,
+            )
+            .expect("valid model configuration"),
+        )
+        .expect("valid engine");
+        let mut modeled_focus: Option<WindowContext> = None;
+
+        for event in events {
+            // Create buffered text owned by the current focus identity.
+            engine.process(InputEvent::Reset);
+            engine.process(InputEvent::Text(":ab".into()));
+            assert_eq!(engine.buffer.len(), 3, "precondition for {event:?}");
+
+            let update = event.snapshot();
+            let same_target = model_same_target(modeled_focus.as_ref(), update.as_ref());
+            let generation_before = engine.input_generation;
+            engine.process(InputEvent::WindowChanged(update.clone()));
+
+            assert_eq!(
+                engine.input_generation,
+                generation_before + u64::from(!same_target),
+                "focus generation violated the model at {event:?} in {events:?}"
+            );
+            assert_eq!(
+                engine.buffer.len(),
+                if same_target { 3 } else { 0 },
+                "buffer crossed an identity boundary at {event:?} in {events:?}"
+            );
+            modeled_focus = update;
+        }
+    }
+
+    #[test]
+    fn generated_focus_histories_match_identity_and_buffer_invariants() {
+        fn generate(prefix: &mut Vec<FocusEvent>, remaining: usize) {
+            check_sequence(prefix);
+            if remaining == 0 {
+                return;
+            }
+            for event in [
+                FocusEvent::TargetA,
+                FocusEvent::RetitleA,
+                FocusEvent::TargetB,
+                FocusEvent::UnknownTargetA,
+                FocusEvent::NoWindow,
+            ] {
+                prefix.push(event);
+                generate(prefix, remaining - 1);
+                prefix.pop();
+            }
+        }
+
+        // 3,906 histories, including A→B→A, unknown identity, title refresh,
+        // and repeated no-window reports. Sequence generation is deterministic
+        // so a failure is reproducible without relying on a random seed.
+        generate(&mut Vec::new(), 5);
     }
 }

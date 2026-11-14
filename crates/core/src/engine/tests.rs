@@ -1,7 +1,7 @@
 use std::os::unix::fs::PermissionsExt;
 use std::{
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc, Arc,
     },
     thread,
@@ -30,6 +30,143 @@ fn engine() -> ExpansionEngine {
         .unwrap(),
     )
     .unwrap()
+}
+
+fn test_async_runtime(engine: &ExpansionEngine, command_queue_slots: usize) -> AsyncCommandRuntime {
+    super::async_runtime::AsyncCommandRuntime::for_test(engine, command_queue_slots)
+        .expect("shared pool starts")
+}
+
+#[test]
+fn async_runtimes_share_one_bounded_process_pool() {
+    let mut first = engine();
+    let mut second = engine();
+    assert!(first.enable_async_commands());
+    assert!(second.enable_async_commands());
+    let first_runtime = first.async_commands.as_ref().unwrap();
+    let second_runtime = second.async_commands.as_ref().unwrap();
+    assert!(first_runtime.shares_pool_with(second_runtime));
+    assert_eq!(
+        first.command_metrics().command_worker_threads,
+        ASYNC_COMMAND_WORKER_COUNT
+    );
+    assert_eq!(
+        second.command_metrics().command_worker_threads,
+        ASYNC_COMMAND_WORKER_COUNT
+    );
+    assert_eq!(
+        first.command_metrics().hotkey_worker_threads,
+        ASYNC_HOTKEY_WORKER_COUNT
+    );
+    assert_eq!(
+        second.command_metrics().hotkey_worker_threads,
+        ASYNC_HOTKEY_WORKER_COUNT
+    );
+}
+
+#[test]
+fn completions_keep_per_context_slots_until_the_consumer_drains_them() {
+    let config = Config::parse(
+        r#"
+        [[expansion]]
+        trigger = ":run"
+        replacement = ""
+        [expansion.command]
+        program = "/bin/true"
+        timeout_ms = 500
+        "#,
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config.clone()).unwrap();
+    let mut other_engine = ExpansionEngine::new(config).unwrap();
+    assert!(engine.enable_async_commands());
+    assert!(other_engine.enable_async_commands());
+    let runtime = engine.async_commands.as_ref().unwrap();
+    let other_runtime = other_engine.async_commands.as_ref().unwrap();
+    let command = Arc::new(engine.config.expansion[0].command.clone().unwrap());
+    let make_job = || AsyncCommandJob::Expansion {
+        config_index: 0,
+        generation: 0,
+        additional_max_size: 0,
+        command: Arc::clone(&command),
+        result: ExpansionResult {
+            snippet_id: Arc::from("test"),
+            trigger: Arc::from(":run"),
+            matched_text: ":run".into(),
+            insert: String::new().into(),
+            cursor_offset: None,
+            reinsert_after: None,
+            command_backed: true,
+            undoable: true,
+            folded_suffix_chars: 0,
+        },
+    };
+
+    for _ in 0..ASYNC_COMMAND_QUEUE_CAPACITY {
+        assert!(runtime.try_send_command(make_job()).is_ok());
+    }
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while engine.command_metrics().command_in_flight > 0
+        || engine.command_metrics().expansion_command_queue_depth > 0
+    {
+        assert!(Instant::now() < deadline, "command pool did not drain");
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert!(
+        matches!(
+            runtime.try_send_command(make_job()),
+            Err(QueueSendError::Full)
+        ),
+        "a full completion channel must not allow new jobs to block shared workers"
+    );
+
+    let other_command = Arc::new(other_engine.config.expansion[0].command.clone().unwrap());
+    let other_job = AsyncCommandJob::Expansion {
+        config_index: 0,
+        generation: 0,
+        additional_max_size: 0,
+        command: other_command,
+        result: ExpansionResult {
+            snippet_id: Arc::from("other-context"),
+            trigger: Arc::from(":run"),
+            matched_text: ":run".into(),
+            insert: String::new().into(),
+            cursor_offset: None,
+            reinsert_after: None,
+            command_backed: true,
+            undoable: true,
+            folded_suffix_chars: 0,
+        },
+    };
+    assert!(other_runtime.try_send_command(other_job).is_ok());
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        match other_runtime.receiver.try_recv() {
+            Ok(completion) => {
+                assert!(completion.output.is_ok());
+                drop(completion);
+                break;
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                panic!("other context's worker disconnected")
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                assert!(
+                    Instant::now() < deadline,
+                    "full completion channel in one context starved another context"
+                );
+                thread::sleep(Duration::from_millis(5));
+            }
+        }
+    }
+
+    while let Ok(completion) = runtime.receiver.try_recv() {
+        drop(completion);
+    }
+    assert!(
+        runtime.try_send_command(make_job()).is_ok(),
+        "draining a completion releases its admission slot"
+    );
 }
 
 #[test]
@@ -136,6 +273,89 @@ enabled = false"#,
     let mut policy_disabled = title_filter;
     policy_disabled.set_title_matching_disabled(true);
     assert!(!policy_disabled.requires_window_titles());
+}
+
+#[test]
+fn process_identity_is_resolved_for_explicit_paths_and_scoped_terminal_diagnostics() {
+    let ordinary = ExpansionEngine::new(Config::parse("").unwrap()).unwrap();
+    assert!(!ordinary.requires_process_executable_identity());
+
+    let app_filtered = ExpansionEngine::new(
+        Config::parse(
+            r#"[[expansion]]
+trigger = ":mail"
+replacement = "person@example.com"
+app_filter = ["process_executable_exact:/usr/bin/example"]"#,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(app_filtered.requires_process_executable_identity());
+
+    let process_name_filtered = ExpansionEngine::new(
+        Config::parse(
+            r#"[[expansion]]
+trigger = ":mail"
+replacement = "person@example.com"
+app_filter = ["process_name_exact:konsole"]"#,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(process_name_filtered.requires_process_executable_identity());
+
+    let terminal_scoped = ExpansionEngine::new(
+        Config::parse(
+            r#"[settings]
+terminal_apps = ["process_executable_exact:/usr/bin/konsole"]"#,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(terminal_scoped.requires_process_executable_identity());
+
+    let terminal_only_with_app_ids = ExpansionEngine::new(
+        Config::parse(
+            r#"[settings]
+terminal_apps = ["org.kde.konsole"]"#,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(!terminal_only_with_app_ids.requires_process_executable_identity());
+    let mut terminal_only_with_app_ids = terminal_only_with_app_ids;
+    terminal_only_with_app_ids.set_terminal_apps_only(true);
+    assert!(terminal_only_with_app_ids.requires_process_executable_identity());
+}
+
+#[test]
+fn process_name_filter_requires_explicit_operator_and_matches_reserved_identity_only() {
+    let config = Config::parse(
+        r#"[[expansion]]
+trigger = ":terminal"
+replacement = "terminal"
+app_filter = ["process_name_exact:konsole"]"#,
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+
+    engine.set_current_window(Some(WindowContext {
+        app_id: Some("org.kde.konsole".into()),
+        title: None,
+        instance_id: Some("window-1".into()),
+    }));
+    assert!(engine
+        .process(InputEvent::Text(":terminal".into()))
+        .is_empty());
+
+    engine.set_current_window(Some(WindowContext {
+        app_id: Some("process-name:konsole".into()),
+        title: None,
+        instance_id: Some("window-1".into()),
+    }));
+    let result = engine.process(InputEvent::Text(":terminal".into()));
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].insert, "terminal");
 }
 
 #[test]
@@ -447,6 +667,46 @@ fn window_changed_clears_buffer_to_prevent_cross_window_matches() {
 }
 
 #[test]
+fn window_identity_transition_matrix_never_joins_trigger_text_across_targets() {
+    let trigger = ":hello";
+    let transitions = [
+        // A title refresh on the exact same app/window must preserve input.
+        ("org.example.editor", Some("window-a"), true),
+        // Same application, different toplevel: a distinct document target.
+        ("org.example.editor", Some("window-b"), false),
+        // Different application, even if a tracker reuses an instance label.
+        ("org.example.terminal", Some("window-a"), false),
+        // Application-only identity cannot prove continuity.
+        ("org.example.editor", None, false),
+    ];
+
+    for split in 1..trigger.len() {
+        for (app_id, instance_id, same_target) in transitions {
+            let mut engine = engine();
+            engine.process(InputEvent::WindowChanged(Some(WindowContext {
+                app_id: Some("org.example.editor".into()),
+                title: Some("before".into()),
+                instance_id: Some("window-a".into()),
+            })));
+            engine.process(InputEvent::Text(trigger[..split].into()));
+            engine.process(InputEvent::WindowChanged(Some(WindowContext {
+                app_id: Some(app_id.into()),
+                title: Some("after".into()),
+                instance_id: instance_id.map(str::to_owned),
+            })));
+
+            let mut results = engine.process(InputEvent::Text(trigger[split..].into()));
+            results.extend(engine.process(InputEvent::EndOfInput));
+            assert_eq!(
+                results.len(),
+                usize::from(same_target),
+                "split {split}, app {app_id:?}, instance {instance_id:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn cross_window_trigger_does_not_delete_wrong_text() {
     // Regression test for P0 bug: Alt-Tab mid-trigger.
     // Type ":he" in App A, switch to App B, type "llo". Should NOT match.
@@ -683,6 +943,11 @@ fn asynchronous_hotkey_execution_does_not_block_input_processing() {
     .unwrap();
     let mut engine = ExpansionEngine::new(config).unwrap();
     engine.enable_async_commands();
+    let completion_wakes = Arc::new(AtomicUsize::new(0));
+    let notifier_wakes = Arc::clone(&completion_wakes);
+    engine.set_completion_notifier(Some(Arc::new(move || {
+        notifier_wakes.fetch_add(1, Ordering::Relaxed);
+    })));
     let action = engine
         .process_key(&KeyChord::parse("Ctrl+M").unwrap())
         .pop()
@@ -711,6 +976,10 @@ fn asynchronous_hotkey_execution_does_not_block_input_processing() {
     );
     assert_eq!(completed_action.chord, action.chord);
     assert!(result.is_ok());
+    assert!(
+        completion_wakes.load(Ordering::Relaxed) > 0,
+        "hotkey completion must wake the reactor that drains it"
+    );
 }
 
 #[test]
@@ -728,23 +997,11 @@ fn rejected_command_job_does_not_consume_the_trigger() {
     .unwrap();
     let mut engine = ExpansionEngine::new(config).unwrap();
 
-    // A zero-capacity queue with its receiver held makes try_send return
-    // Full deterministically, without starting a child process.
-    let sender = Arc::new(super::async_runtime::CommandQueue::new(0));
-    let hotkey_sender = Arc::new(super::async_runtime::CommandQueue::new(0));
-    let (_, completion_receiver) = mpsc::sync_channel(1);
-    let (_, hotkey_completion_receiver) = mpsc::sync_channel(1);
-    engine.async_commands = Some(AsyncCommandRuntime {
-        command_sender: sender,
-        hotkey_sender,
-        receiver: completion_receiver,
-        hotkey_receiver: hotkey_completion_receiver,
-        expansion_metrics: Arc::clone(&engine.expansion_metrics),
-        hotkey_metrics: Arc::clone(&engine.hotkey_metrics),
-        shutdown: Arc::new(AtomicBool::new(false)),
-        command_workers: Vec::new(),
-        hotkey_worker: None,
-    });
+    // A saturated per-context slot count makes dispatch reject deterministically.
+    engine.async_commands = Some(test_async_runtime(
+        &engine,
+        super::ASYNC_COMMAND_QUEUE_CAPACITY,
+    ));
     for character in ":slow".chars() {
         engine.push_buffered(character);
     }
@@ -780,21 +1037,10 @@ fn deferred_dispatch_rejects_a_saturated_queue_without_running_command() {
     .unwrap();
     let mut engine = ExpansionEngine::new(config).unwrap();
 
-    let sender = Arc::new(super::async_runtime::CommandQueue::new(0));
-    let hotkey_sender = Arc::new(super::async_runtime::CommandQueue::new(0));
-    let (_, completion_receiver) = mpsc::sync_channel(1);
-    let (_, hotkey_completion_receiver) = mpsc::sync_channel(1);
-    engine.async_commands = Some(AsyncCommandRuntime {
-        command_sender: sender,
-        hotkey_sender,
-        receiver: completion_receiver,
-        hotkey_receiver: hotkey_completion_receiver,
-        expansion_metrics: Arc::clone(&engine.expansion_metrics),
-        hotkey_metrics: Arc::clone(&engine.hotkey_metrics),
-        shutdown: Arc::new(AtomicBool::new(false)),
-        command_workers: Vec::new(),
-        hotkey_worker: None,
-    });
+    engine.async_commands = Some(test_async_runtime(
+        &engine,
+        super::ASYNC_COMMAND_QUEUE_CAPACITY,
+    ));
 
     let pending = engine
         .process_deferred(InputEvent::Text(":full".into()))
@@ -827,6 +1073,14 @@ fn command_metrics_count_timeouts_and_failures() {
         [expansion.command]
         program = "/bin/false"
         timeout_ms = 500
+
+        [[expansion]]
+        trigger = ":cancel"
+        replacement = ""
+        [expansion.command]
+        program = "/bin/sleep"
+        args = ["1"]
+        timeout_ms = 1500
         "#,
     )
     .unwrap();
@@ -846,28 +1100,63 @@ fn command_metrics_count_timeouts_and_failures() {
         assert!(Instant::now() < deadline, "timeout command did not start");
         thread::sleep(Duration::from_millis(1));
     }
-    assert!(engine
-        .process(InputEvent::Text(":failure".into()))
-        .is_empty());
-
-    let deadline = Instant::now() + Duration::from_secs(1);
     let mut failures = Vec::new();
     loop {
         engine.drain_completed_commands();
         failures.extend(engine.drain_command_failures());
         let metrics = engine.command_metrics();
-        if metrics.command_timeout_total == 1
-            && metrics.command_failure_total == 1
-            && failures.contains(&CommandErrorKind::Timeout)
-            && failures.contains(&CommandErrorKind::NonZeroExit)
-        {
+        if metrics.command_timeout_total == 1 && failures.contains(&CommandErrorKind::Timeout) {
             break;
         }
-        assert!(Instant::now() < deadline, "command metrics did not update");
+        assert!(Instant::now() < deadline, "timeout metrics did not update");
         thread::sleep(Duration::from_millis(5));
     }
     assert!(failures.contains(&CommandErrorKind::Timeout));
+
+    // Keep this failure-accounting case separate from stale-input cancellation:
+    // a new trigger now terminates any still-running command by design.
+    assert!(engine
+        .process(InputEvent::Text(":failure".into()))
+        .is_empty());
+    let deadline = Instant::now() + Duration::from_secs(1);
+    loop {
+        engine.drain_completed_commands();
+        failures.extend(engine.drain_command_failures());
+        let metrics = engine.command_metrics();
+        if metrics.command_failure_total == 1 && failures.contains(&CommandErrorKind::NonZeroExit) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "failure metrics did not update");
+        thread::sleep(Duration::from_millis(5));
+    }
     assert!(failures.contains(&CommandErrorKind::NonZeroExit));
+
+    assert!(engine
+        .process(InputEvent::Text(":cancel".into()))
+        .is_empty());
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while engine.command_metrics().command_in_flight == 0 {
+        assert!(
+            Instant::now() < deadline,
+            "cancellable command did not start"
+        );
+        thread::sleep(Duration::from_millis(1));
+    }
+    engine.note_key_event();
+    loop {
+        engine.drain_completed_commands();
+        failures.extend(engine.drain_command_failures());
+        let metrics = engine.command_metrics();
+        if metrics.command_cancelled_total == 1 {
+            assert_eq!(metrics.command_failure_total, 1);
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "cancellation metrics did not update"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
 }
 
 #[test]
@@ -1665,9 +1954,105 @@ fn apply_preflights_backend_capabilities_before_destructive_output() {
         outcome,
         crate::TransactionOutcome::NotApplied { ref source }
             if source.message.contains("supports at most 250")
-                && source.message.contains("keystroke_max_chars")
     ));
     assert!(injector.calls.is_empty());
+}
+
+#[test]
+fn paced_output_within_the_configured_limit_is_not_capped_by_duration() {
+    // Regression: a fixed 100 ms paced-output budget refused every keysym
+    // replacement longer than about eight keys, overriding the user's
+    // explicit `keystroke_max_chars`.
+    let result = ExpansionResult {
+        snippet_id: Arc::from(""),
+        trigger: ":x".into(),
+        matched_text: ":x".into(),
+        insert: "r".repeat(250).into(),
+        cursor_offset: None,
+        reinsert_after: Some(' '),
+        command_backed: false,
+        undoable: true,
+        folded_suffix_chars: 0,
+    };
+    let mut injector = CapabilityInjector {
+        calls: Vec::new(),
+        capabilities: crate::InjectorCapabilities {
+            insertion_mode: "libei keysym fallback",
+            max_text_chars: 250,
+            expected_throughput_chars_per_sec: Some(83),
+            cursor_reposition: true,
+            ..crate::InjectorCapabilities::default()
+        },
+    };
+    let mut over_route_limit = result.clone();
+    over_route_limit.insert = "r".repeat(251).into();
+    assert!(matches!(
+        ExpansionEngine::apply(&mut injector, &over_route_limit),
+        crate::TransactionOutcome::NotApplied { ref source }
+            if source.message.contains("raise keystroke_max_chars")
+    ));
+    assert!(injector.calls.is_empty());
+    // 250 characters plus a reinserted delimiter exceed the 250-character
+    // route limit, so trim the replacement to fit exactly.
+    let mut fits = result;
+    fits.insert = "r".repeat(249).into();
+    assert!(ExpansionEngine::apply(&mut injector, &fits).is_output_acknowledged());
+    assert_eq!(injector.calls.len(), 2);
+}
+
+struct UnknownRatePacedInjector {
+    calls: Vec<String>,
+}
+
+impl crate::TextInjector for UnknownRatePacedInjector {
+    fn name(&self) -> &'static str {
+        "unknown-rate-paced-test"
+    }
+
+    fn capabilities(&self) -> crate::InjectorCapabilities {
+        crate::InjectorCapabilities {
+            insertion_mode: "paced synthetic test keys",
+            replacement_guarantee: crate::ReplacementGuarantee::BestEffort,
+            ..crate::InjectorCapabilities::default()
+        }
+    }
+
+    fn uses_paced_synthetic_output(&self) -> bool {
+        true
+    }
+
+    fn erase(&mut self, trigger: &str) -> Result<(), crate::InjectorError> {
+        self.calls.push(format!("erase:{trigger}"));
+        Ok(())
+    }
+
+    fn insert(&mut self, text: &str) -> Result<(), crate::InjectorError> {
+        self.calls.push(format!("insert:{text}"));
+        Ok(())
+    }
+}
+
+#[test]
+fn paced_output_without_a_declared_rate_is_still_typed() {
+    // Routes such as the wlroots virtual keyboard type key by key but do not
+    // declare a throughput. They must not be refused for lacking one.
+    let result = ExpansionResult {
+        snippet_id: Arc::from(""),
+        trigger: ":sig".into(),
+        matched_text: ":sig".into(),
+        insert: "replacement".into(),
+        cursor_offset: None,
+        reinsert_after: None,
+        command_backed: false,
+        undoable: true,
+        folded_suffix_chars: 0,
+    };
+    let mut injector = UnknownRatePacedInjector { calls: Vec::new() };
+
+    let outcome = ExpansionEngine::apply(&mut injector, &result);
+
+    assert!(outcome.is_output_acknowledged(), "{outcome}");
+    assert_eq!(injector.calls, ["erase::sig", "insert:replacement"]);
 }
 
 #[test]
@@ -1723,7 +2108,7 @@ fn apply_preflight_counts_reinserted_delimiter_as_one_character() {
         },
     };
     let outcome = ExpansionEngine::apply(&mut injector, &result);
-    assert!(outcome.is_applied(), "{outcome:?}");
+    assert!(outcome.is_output_acknowledged(), "{outcome:?}");
 }
 
 #[test]
@@ -1747,7 +2132,7 @@ fn apply_allows_zero_cursor_offset_without_cursor_support() {
         },
     };
     let outcome = ExpansionEngine::apply(&mut injector, &result);
-    assert!(outcome.is_applied(), "{outcome:?}");
+    assert!(outcome.is_output_acknowledged(), "{outcome:?}");
 }
 
 #[test]
@@ -1793,7 +2178,7 @@ fn apply_erases_before_inserting() {
         folded_suffix_chars: 0,
     };
     let mut injector = RecordingInjector { calls: Vec::new() };
-    assert!(ExpansionEngine::apply(&mut injector, &result).is_applied());
+    assert!(ExpansionEngine::apply(&mut injector, &result).is_output_acknowledged());
     assert_eq!(injector.calls, ["erase::x", "insert:value"]);
 }
 
@@ -1917,14 +2302,16 @@ fn cursor_failure_after_delimiter_reinsertion_is_reported_as_applied() {
         &outcome,
         crate::TransactionOutcome::AppliedWithCursorPositionFailure { .. }
     ));
-    assert!(outcome.is_applied());
+    assert!(outcome.is_output_acknowledged());
 }
 
 struct AtomicInjector {
     calls: Vec<String>,
 }
 
-struct UncertainAtomicFailureInjector;
+struct UncertainAtomicFailureInjector {
+    atomic_contract: bool,
+}
 
 impl crate::TextInjector for UncertainAtomicFailureInjector {
     fn name(&self) -> &'static str {
@@ -1934,6 +2321,11 @@ impl crate::TextInjector for UncertainAtomicFailureInjector {
     fn capabilities(&self) -> crate::InjectorCapabilities {
         crate::InjectorCapabilities {
             atomic_replace: true,
+            replacement_guarantee: if self.atomic_contract {
+                crate::ReplacementGuarantee::Atomic
+            } else {
+                crate::ReplacementGuarantee::VerifiedSurroundingText
+            },
             ..crate::InjectorCapabilities::default()
         }
     }
@@ -1962,13 +2354,31 @@ impl crate::TextInjector for UncertainAtomicFailureInjector {
 #[test]
 fn atomic_replace_error_with_lost_acknowledgement_is_non_replayable() {
     let outcome = ExpansionEngine::apply(
-        &mut UncertainAtomicFailureInjector,
+        &mut UncertainAtomicFailureInjector {
+            atomic_contract: true,
+        },
         &failure_injection_result(),
     );
 
     assert!(matches!(
         outcome,
         crate::TransactionOutcome::UnknownApplicationOutcome { ref source }
+            if source.message == "flush acknowledgement lost"
+    ));
+}
+
+#[test]
+fn inconsistent_atomic_claim_is_classified_as_partial_uncertainty() {
+    let outcome = ExpansionEngine::apply(
+        &mut UncertainAtomicFailureInjector {
+            atomic_contract: false,
+        },
+        &failure_injection_result(),
+    );
+
+    assert!(matches!(
+        outcome,
+        crate::TransactionOutcome::UnknownPartialFailure { ref source }
             if source.message == "flush acknowledgement lost"
     ));
 }
@@ -2032,7 +2442,7 @@ fn apply_uses_atomic_backend_operation_when_available() {
         folded_suffix_chars: 0,
     };
     let mut injector = AtomicInjector { calls: Vec::new() };
-    assert!(ExpansionEngine::apply(&mut injector, &result).is_applied());
+    assert!(ExpansionEngine::apply(&mut injector, &result).is_output_acknowledged());
     assert_eq!(injector.calls, ["replace::x:value"]);
 }
 
@@ -2050,7 +2460,7 @@ fn apply_replaces_typed_trigger_and_commits_terminator() {
         folded_suffix_chars: 0,
     };
     let mut injector = RecordingInjector { calls: Vec::new() };
-    assert!(ExpansionEngine::apply(&mut injector, &result).is_applied());
+    assert!(ExpansionEngine::apply(&mut injector, &result).is_output_acknowledged());
     assert_eq!(
         injector.calls,
         ["erase::SIG ", "insert:Best regards, ", "left:3"]
@@ -2090,7 +2500,7 @@ impl crate::TextInjector for CursorFailingInjector {
 }
 
 #[test]
-fn cursor_failure_is_reported_after_replacement_is_applied() {
+fn cursor_failure_is_reported_after_output_acknowledgement() {
     let result = ExpansionResult {
         snippet_id: Arc::from(""),
         trigger: ":x".into(),
@@ -2107,7 +2517,7 @@ fn cursor_failure_is_reported_after_replacement_is_applied() {
         &outcome,
         crate::TransactionOutcome::AppliedWithCursorPositionFailure { .. }
     ));
-    assert!(outcome.is_applied());
+    assert!(outcome.is_output_acknowledged());
 }
 
 #[test]
@@ -2400,7 +2810,7 @@ fn propagate_case_tracks_unicode_matched_text_for_deletion() {
     assert_eq!(result.insert, "GRÜSSE");
 
     let mut injector = RecordingInjector { calls: Vec::new() };
-    assert!(ExpansionEngine::apply(&mut injector, &result).is_applied());
+    assert!(ExpansionEngine::apply(&mut injector, &result).is_output_acknowledged());
     assert_eq!(injector.calls, ["erase:SS", "insert:GRÜSSE"]);
 }
 
@@ -2529,6 +2939,94 @@ fn undo_reverts_the_expansion_immediately_following_it() {
 }
 
 #[test]
+fn unverified_emission_clears_stale_undo_without_creating_new_undo() {
+    let config = Config::parse(
+        "[settings]\nundo_chord = \"Ctrl+Z\"\n[[expansion]]\ntrigger = \":sig\"\nreplacement = \"regards\"",
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    let chord = KeyChord::parse("Ctrl+Z").unwrap();
+    let previously_applied = ExpansionResult {
+        snippet_id: Arc::from("old"),
+        trigger: Arc::from(":old"),
+        matched_text: ":old".into(),
+        insert: "old replacement".into(),
+        cursor_offset: None,
+        reinsert_after: None,
+        command_backed: false,
+        undoable: true,
+        folded_suffix_chars: 0,
+    };
+    engine.commit_applied_expansion(&previously_applied);
+    assert!(engine.prepare_undo(&chord).is_some());
+
+    let unverified = ExpansionResult {
+        snippet_id: Arc::from("new"),
+        trigger: Arc::from(":sig"),
+        matched_text: ":sig".into(),
+        insert: "regards".into(),
+        cursor_offset: None,
+        reinsert_after: None,
+        command_backed: false,
+        undoable: true,
+        folded_suffix_chars: 0,
+    };
+    engine.commit_emitted_unverified_expansion(&unverified);
+
+    assert!(
+        engine.prepare_undo(&chord).is_none(),
+        "unverified output must not create undo or leave a stale undo transaction"
+    );
+}
+
+#[test]
+fn restoring_or_discarding_a_deferred_result_clears_only_its_provisional_undo() {
+    let config = Config::parse(
+        "[settings]\nundo_chord = \"Ctrl+Z\"\n[[expansion]]\ntrigger = \":sig\"\nreplacement = \"regards\"",
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    let pending = engine
+        .process_deferred(InputEvent::Text(":sig".into()))
+        .pop()
+        .expect("trigger should be reserved");
+    let result = match engine.dispatch_pending_with_policy(pending, 0).unwrap() {
+        PendingExpansionDispatch::Ready(result) => result,
+        PendingExpansionDispatch::Queued => panic!("static expansion should be ready"),
+    };
+    let undo_chord = KeyChord::parse("Ctrl+Z").unwrap();
+
+    engine.restore_deferred_result(&result);
+    assert!(
+        engine.prepare_undo(&undo_chord).is_none(),
+        "restoring a matched trigger must clear its not-yet-emitted undo record"
+    );
+
+    let newer_applied = ExpansionResult {
+        snippet_id: Arc::from("newer"),
+        trigger: Arc::from(":new"),
+        matched_text: ":new".into(),
+        insert: "new replacement".into(),
+        cursor_offset: None,
+        reinsert_after: None,
+        command_backed: false,
+        undoable: true,
+        folded_suffix_chars: 0,
+    };
+    engine.commit_applied_expansion(&newer_applied);
+    // A stale duplicate for the already restored result has no reservation
+    // and must not erase undo state belonging to a later acknowledged result.
+    engine.discard_deferred_result(&result);
+    assert_eq!(
+        engine
+            .prepare_undo(&undo_chord)
+            .expect("newer undo state should remain")
+            .matched_text,
+        "new replacement"
+    );
+}
+
+#[test]
 fn undo_applies_by_erasing_the_inserted_text() {
     let config = Config::parse(
         "[settings]\nundo_chord = \"Ctrl+Z\"\n[[expansion]]\ntrigger = \":sig\"\nreplacement = \"regards\"",
@@ -2537,12 +3035,12 @@ fn undo_applies_by_erasing_the_inserted_text() {
     let mut engine = ExpansionEngine::new(config).unwrap();
     let expansion = engine.process(InputEvent::Text(":sig".into()))[0].clone();
     let mut injector = RecordingInjector { calls: Vec::new() };
-    assert!(ExpansionEngine::apply(&mut injector, &expansion).is_applied());
+    assert!(ExpansionEngine::apply(&mut injector, &expansion).is_output_acknowledged());
 
     let undo = engine
         .try_undo(&KeyChord::parse("Ctrl+Z").unwrap())
         .expect("an expansion is pending to undo");
-    assert!(ExpansionEngine::apply(&mut injector, &undo).is_applied());
+    assert!(ExpansionEngine::apply(&mut injector, &undo).is_output_acknowledged());
 
     assert_eq!(
         injector.calls,
@@ -2567,14 +3065,14 @@ fn undo_round_trip_includes_reinserted_word_boundary() {
         .pop()
         .unwrap();
     let mut injector = RecordingInjector { calls: Vec::new() };
-    assert!(ExpansionEngine::apply(&mut injector, &expansion).is_applied());
+    assert!(ExpansionEngine::apply(&mut injector, &expansion).is_output_acknowledged());
 
     let undo = engine
         .try_undo(&KeyChord::parse("Ctrl+Z").unwrap())
         .expect("a boundary expansion should be undoable");
     assert_eq!(undo.matched_text, "Regards ");
     assert_eq!(undo.insert, ":sig ");
-    assert!(ExpansionEngine::apply(&mut injector, &undo).is_applied());
+    assert!(ExpansionEngine::apply(&mut injector, &undo).is_output_acknowledged());
 
     assert_eq!(
         injector.calls,
@@ -2613,14 +3111,14 @@ timeout_ms = 500
         .unwrap();
     let expansion = dispatch_and_wait(&mut engine, pending);
     let mut injector = RecordingInjector { calls: Vec::new() };
-    assert!(ExpansionEngine::apply(&mut injector, &expansion).is_applied());
+    assert!(ExpansionEngine::apply(&mut injector, &expansion).is_output_acknowledged());
 
     let undo = engine
         .try_undo(&KeyChord::parse("Ctrl+Z").unwrap())
         .expect("an async boundary expansion should be undoable");
     assert_eq!(undo.matched_text, "Regards ");
     assert_eq!(undo.insert, ":sig ");
-    assert!(ExpansionEngine::apply(&mut injector, &undo).is_applied());
+    assert!(ExpansionEngine::apply(&mut injector, &undo).is_output_acknowledged());
 }
 
 #[test]
@@ -4739,7 +5237,7 @@ fn queued_async_command_that_becomes_stale_is_discarded_before_spawn() {
     let mut expansions = String::new();
     for marker in starts.iter().chain(std::iter::once(&stale_marker)) {
         expansions.push_str(&format!(
-            "\n[[expansion]]\ntrigger = \":job{}\"\nreplacement = \"\"\n[expansion.command]\nprogram = \"/bin/sh\"\nargs = [\"-c\", \"touch '{}'; sleep 1\"]\ntimeout_ms = 3000\n",
+            "\n[[expansion]]\ntrigger = \":job{}\"\nreplacement = \"\"\n[expansion.command]\nprogram = \"/bin/sh\"\nargs = [\"-c\", \"touch '{}'; sleep 10\"]\ntimeout_ms = 5000\n",
             expansions.matches("[[expansion]]").count(),
             marker.display()
         ));
@@ -4824,11 +5322,25 @@ fn queued_async_command_that_becomes_stale_is_discarded_before_spawn() {
         );
         thread::sleep(Duration::from_millis(5));
     }
+    while engine.command_metrics().command_in_flight > 0 {
+        engine.drain_completed_commands();
+        assert!(
+            Instant::now() < deadline,
+            "cancelled commands did not finish"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
     engine.drain_completed_commands();
     assert!(
         !stale_marker.exists(),
         "queued command that became stale must not spawn or cause side effects"
     );
+    let metrics = engine.command_metrics();
+    assert_eq!(
+        metrics.command_cancelled_total,
+        (ASYNC_COMMAND_WORKER_COUNT + 1) as u64
+    );
+    assert_eq!(metrics.command_failure_total, 0);
     for path in starts {
         let _ = std::fs::remove_file(path);
     }
@@ -4866,7 +5378,7 @@ fn dropping_async_runtime_discards_queued_commands() {
     ))
     .unwrap();
     let mut engine = ExpansionEngine::new(config).unwrap();
-    assert!(engine.enable_async_commands());
+    engine.async_commands = Some(test_async_runtime(&engine, 0));
 
     // Fill every command worker so the next job is deterministically queued.
     // A single in-flight command is insufficient because the runtime owns a
@@ -5153,7 +5665,7 @@ fn grapheme_heavy_triggers_preserve_exact_input_for_deletion() {
         // The engine passes the exact committed input to the backend. The
         // backend then interprets it in grapheme units for backspace counts.
         let mut injector = RecordingInjector { calls: Vec::new() };
-        assert!(ExpansionEngine::apply(&mut injector, &results[0]).is_applied());
+        assert!(ExpansionEngine::apply(&mut injector, &results[0]).is_output_acknowledged());
         assert_eq!(injector.calls[0], format!("erase:{typed}"));
     }
 }
@@ -7136,6 +7648,68 @@ fn terminal_apps_only_expands_in_listed_terminals_and_fails_closed_elsewhere() {
 }
 
 #[test]
+fn executable_path_identity_matches_only_explicit_exact_filters() {
+    let config = Config::parse(
+        r#"[settings]
+terminal_apps = ["process_executable_exact:/usr/bin/konsole"]
+
+[[expansion]]
+trigger = ":go"
+replacement = "runbook"
+app_filter = ["process_executable_exact:/usr/bin/konsole"]
+"#,
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    engine.set_terminal_apps_only(true);
+
+    engine.process(InputEvent::WindowChanged(Some(WindowContext {
+        app_id: Some(format!(
+            "{}{}",
+            crate::PROCESS_EXECUTABLE_APP_ID_PREFIX,
+            "/usr/bin/konsole"
+        )),
+        title: None,
+        instance_id: Some("kwin-window-1".into()),
+    })));
+    assert_eq!(
+        type_text(&mut engine, ":go").pop().unwrap().insert,
+        "runbook"
+    );
+
+    engine.process(InputEvent::WindowChanged(Some(WindowContext {
+        app_id: Some(format!(
+            "{}{}",
+            crate::PROCESS_EXECUTABLE_APP_ID_PREFIX,
+            "/usr/bin/other"
+        )),
+        title: None,
+        instance_id: Some("kwin-window-2".into()),
+    })));
+    assert!(type_text(&mut engine, ":go").is_empty());
+
+    let config = Config::parse(
+        r#"[[expansion]]
+trigger = ":go"
+replacement = "must not match path identity"
+app_filter = ["app_id_exact:usr.bin.konsole", "app_id_glob:*"]
+"#,
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    engine.process(InputEvent::WindowChanged(Some(WindowContext {
+        app_id: Some(format!(
+            "{}{}",
+            crate::PROCESS_EXECUTABLE_APP_ID_PREFIX,
+            "/usr/bin/konsole"
+        )),
+        title: None,
+        instance_id: Some("kwin-window-3".into()),
+    })));
+    assert!(type_text(&mut engine, ":go").is_empty());
+}
+
+#[test]
 fn terminal_scope_accepts_konsole_wm_class_alias() {
     let config = Config::parse(
         r#"[settings]
@@ -7192,6 +7766,54 @@ replacement = "browser fallback"
     assert!(!engine.raw_capture_app_owns_focus());
     focus(&mut engine, Some("org.mozilla.firefox"));
     assert!(engine.raw_capture_app_owns_focus());
+    assert!(engine.evdev_fallback_owns_focus());
+}
+
+#[test]
+fn terminal_handoff_is_active_only_when_the_evdev_companion_is_enabled() {
+    let enabled = Config::parse(
+        r#"[settings]
+terminal_apps = ["app_id_exact:org.kde.konsole"]
+raw_capture_fallback_enabled = true
+"#,
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(enabled).unwrap();
+    focus(&mut engine, Some("org.kde.konsole"));
+    assert!(engine.evdev_fallback_owns_focus());
+
+    let disabled = Config::parse(
+        r#"[settings]
+terminal_apps = ["app_id_exact:org.kde.konsole"]
+raw_capture_fallback_enabled = false
+"#,
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(disabled).unwrap();
+    focus(&mut engine, Some("org.kde.konsole"));
+    assert!(!engine.evdev_fallback_owns_focus());
+}
+
+#[test]
+fn process_name_scope_is_explicit_and_works_for_terminal_handoff_only() {
+    let config = Config::parse(
+        r#"[settings]
+terminal_apps = ["process_name_exact:konsole"]
+raw_capture_apps = ["process_name_exact:konsole"]
+raw_capture_fallback_enabled = true
+"#,
+    )
+    .unwrap();
+    let mut engine = ExpansionEngine::new(config).unwrap();
+    focus(&mut engine, Some("process-name:konsole"));
+    assert!(engine.evdev_fallback_owns_focus());
+    assert!(engine.raw_capture_app_owns_focus());
+
+    // The same string under an ordinary app ID cannot match a process-name
+    // rule; no fallback identity is inferred from titles or desktop IDs.
+    focus(&mut engine, Some("org.kde.konsole"));
+    assert!(!engine.evdev_fallback_owns_focus());
+    assert!(!engine.raw_capture_app_owns_focus());
 }
 
 #[test]

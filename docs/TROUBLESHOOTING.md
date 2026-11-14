@@ -30,14 +30,47 @@ so matching remains disabled for that focus until identity is available.
 
 When scope is `outside_allowlist`, focus the affected terminal and run
 `wayexpand debug --focused-app-id`. This explicit diagnostic prints only the
-bounded application ID (never the window title or typed text) and the daemon's
-current app-scope decision. If it reports `outside_allowlist`, automatic
-matching is suppressed for the reported focus; compare the ID with
-`settings.terminal_apps` and `settings.raw_capture_apps`. The JSON form also
-includes `terminal_apps_only` when the running daemon supports it. The command
-reports `unavailable` if the tracker has no safe application ID or policy
-withholds focus identity. If the running daemon reports an unsupported
-command, update and restart it before retrying.
+bounded application ID or, when KWin cannot provide one, the authenticated
+focused process's exact executable path if the host permits that lookup (never
+the window title or typed text), and the daemon's current app-scope decision.
+When it succeeds, JSON reports `focused_app_id: null` and
+`focused_process_executable`; use the path only in an explicit
+`process_executable_exact:` allowlist entry. If the host denies executable
+inspection but permits reading `/proc/<pid>/comm`, the command reports a
+`focused_process_name` separately. That kernel task name is mutable and is a
+lower-assurance identity; matching requires an explicit
+`process_name_exact:<name>` filter and is never inferred from an application
+ID or executable-path filter. Do not use it when policy requires a stable
+executable identity. If neither identity is available, the command reports
+that limitation and no identity. Its JSON
+`matching_status` is one of `allowed`,
+`suppressed_unknown_focus`, `suppressed_outside_allowlist`,
+`scope_unverified`, `unrestricted`, or `unknown`. If it reports
+`outside_allowlist`, automatic matching is suppressed for the reported focus;
+compare the ID with `settings.terminal_apps` and `settings.raw_capture_apps`.
+`suppressed_unknown_focus` means terminal-scoped matching is refused because
+the tracker supplied no safe app ID. Check `wayexpand status --json` for
+window-tracker health, then use `wayexpand debug --live` to see whether scope
+becomes available. The command reports `unavailable` if the tracker has no
+safe application ID or policy withholds focus identity. If the running daemon
+reports an unsupported command, update and restart it before retrying.
+
+`wayexpand debug --json` reports `WX-EVDEV-FOCUS-001` when terminal-only
+matching is suppressed because focus identity is unknown, and
+`WX-EVDEV-FOCUS-002` when the focused app is outside the explicit allowlist.
+`WX-EVDEV-FOCUS-003` means KWin supplied a process ID but the host denied
+WayExpand permission to verify its executable. In that case, adding an exact
+executable-path filter cannot help until the host provides a trustworthy
+identity. Do not weaken `/proc` permissions or use a title/wildcard; use an
+application-ID-capable route or the manual copy-and-paste picker. The finding
+contains no application ID, executable path, or window title.
+`WX-EVDEV-FOCUS-004` means the focused process is outside the allowlist and
+only a mutable process name is available. It explains the lower-assurance
+`process_name_exact:` option; this is opt-in and should not be used to satisfy
+a policy that requires stable application identity.
+`WX-EVDEV-FOCUS-006` means KWin reported its own PID for a compositor-owned
+surface, not a client process. Focus the actual application and rerun the
+diagnostic. Never allowlist `kwin_wayland` to make this state appear supported.
 
 Live output reports route-state changes, aggregate input-event counts, IBus
 activity counters, and output transaction IDs/states. It never records key

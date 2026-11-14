@@ -20,6 +20,7 @@ use std::{
 
 use super::command_runtime::{
     configure_process_group, run_command_cancellable, run_command_unix, stop_transient_unit,
+    CommandCancellation,
 };
 use super::{CommandConfig, CommandEnvironment, CommandError, MINIMAL_COMMAND_PATH};
 
@@ -128,7 +129,10 @@ pub fn run_command_preview(
         command
             .timeout_ms
             .saturating_add(SANDBOX_STARTUP_ALLOWANCE_MS),
-        Some(cancelled),
+        &CommandCancellation {
+            shutdown: Some(cancelled),
+            input_generation: None,
+        },
         None,
     );
     if result.is_err() {
@@ -491,7 +495,17 @@ mod tests {
         let Some(stderr) = child.stderr.take() else {
             panic!("systemd-run stderr was not piped");
         };
-        let result = run_command_unix(child, stdout, stderr, 6_000, None, None);
+        let result = run_command_unix(
+            child,
+            stdout,
+            stderr,
+            6_000,
+            &CommandCancellation {
+                shutdown: None,
+                input_generation: None,
+            },
+            None,
+        );
         if result.is_err() {
             stop_transient_unit(Some(&unit));
         }

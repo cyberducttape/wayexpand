@@ -20,6 +20,7 @@ pub(super) use wayexpand_process_supervisor::{
     configure_process_group, ChildCgroup, ChildSupervisor,
 };
 
+use super::input_generation_matches;
 use super::{
     BrokerOperation, BrokerProtocolFailure, BrokerUnavailableReason, CommandConfig,
     CommandEnvironment, CommandError, ProcessWaitFailure, ProcessWaitOperation,
@@ -35,6 +36,7 @@ pub(super) struct CommandMetricsState {
     pub(super) in_flight: AtomicUsize,
     pub(super) queue_rejected_total: AtomicU64,
     pub(super) timeout_total: AtomicU64,
+    pub(super) cancelled_total: AtomicU64,
     pub(super) failure_total: AtomicU64,
 }
 
@@ -45,13 +47,16 @@ impl CommandMetricsState {
             in_flight: AtomicUsize::new(0),
             queue_rejected_total: AtomicU64::new(0),
             timeout_total: AtomicU64::new(0),
+            cancelled_total: AtomicU64::new(0),
             failure_total: AtomicU64::new(0),
         }
     }
 
-    pub(super) fn record_error(&self, timeout: bool) {
+    pub(super) fn record_error(&self, timeout: bool, cancelled: bool) {
         if timeout {
             self.timeout_total.fetch_add(1, Ordering::Relaxed);
+        } else if cancelled {
+            self.cancelled_total.fetch_add(1, Ordering::Relaxed);
         } else {
             self.failure_total.fetch_add(1, Ordering::Relaxed);
         }
@@ -92,6 +97,43 @@ pub(super) fn run_command_with_parameters(
     parameters: &std::collections::HashMap<String, String>,
     shutdown: Option<&AtomicBool>,
 ) -> Result<String, CommandError> {
+    run_command_with_parameters_and_generation(command, parameters, shutdown, None, None)
+}
+
+/// Execute an expansion command only while both the daemon runtime and the
+/// input context that requested it remain current. The result is still
+/// postflight-checked by the engine; this additional check stops a long-running
+/// direct child process when focus/input changes instead of merely discarding
+/// its eventual output.
+pub(super) fn run_command_with_generation(
+    command: &CommandConfig,
+    shutdown: Option<&AtomicBool>,
+    input_generation: &AtomicU64,
+    command_start_gate: &std::sync::Mutex<()>,
+    expected_generation: u64,
+) -> Result<String, CommandError> {
+    // Named actions are authorized and supervised by the separate broker.
+    // Their lifetime follows that authorization and broker shutdown contract;
+    // a focus change is not implicitly treated as revoking an approved action.
+    if command.action.is_some() {
+        return run_command_with_shutdown(command, shutdown);
+    }
+    run_command_with_parameters_and_generation(
+        command,
+        &std::collections::HashMap::new(),
+        shutdown,
+        Some((input_generation, expected_generation)),
+        Some(command_start_gate),
+    )
+}
+
+fn run_command_with_parameters_and_generation(
+    command: &CommandConfig,
+    parameters: &std::collections::HashMap<String, String>,
+    shutdown: Option<&AtomicBool>,
+    input_generation: Option<(&AtomicU64, u64)>,
+    command_start_gate: Option<&std::sync::Mutex<()>>,
+) -> Result<String, CommandError> {
     if let Some(action_id) = &command.action {
         return run_broker_action(action_id, command, parameters, shutdown, true);
     }
@@ -100,7 +142,11 @@ pub(super) fn run_command_with_parameters(
     }
     #[cfg(unix)]
     {
-        if shutdown.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+        let cancellation = CommandCancellation {
+            shutdown,
+            input_generation,
+        };
+        if cancellation.is_cancelled() {
             return Err(CommandError::StaleInput);
         }
         let mut process = Command::new(&command.program);
@@ -115,18 +161,66 @@ pub(super) fn run_command_with_parameters(
             ChildCgroup::prepare(&mut process).map_err(|error| CommandError::SpawnFailed {
                 detail: format!("could not establish command containment: {error}"),
             })?;
-        let mut child = process.spawn().map_err(|error| CommandError::SpawnFailed {
+        // Containment setup can take time. Recheck immediately before the
+        // irreversible spawn boundary so stale work does not launch merely
+        // because its earlier preflight passed.
+        let spawn_result =
+            with_start_admission(&cancellation, command_start_gate, || process.spawn())?;
+        let mut child = spawn_result.map_err(|error| CommandError::SpawnFailed {
             detail: error.to_string(),
         })?;
         let stdout = child.stdout.take().ok_or(CommandError::OutputChannelLost)?;
         let stderr = child.stderr.take().ok_or(CommandError::OutputChannelLost)?;
-        run_command_unix(child, stdout, stderr, command.timeout_ms, shutdown, cgroup)
+        run_command_unix(
+            child,
+            stdout,
+            stderr,
+            command.timeout_ms,
+            &cancellation,
+            cgroup,
+        )
     }
 
     #[cfg(not(unix))]
     {
         let _ = (command, shutdown);
         unreachable!("wayexpand-core requires a Unix target")
+    }
+}
+
+pub(super) struct CommandCancellation<'a> {
+    pub(super) shutdown: Option<&'a AtomicBool>,
+    pub(super) input_generation: Option<(&'a AtomicU64, u64)>,
+}
+
+/// Linearize the final context/shutdown check with the irreversible start.
+/// The input reactor takes the same gate when it advances the generation.
+/// Tests exercise this production boundary with generated event sequences.
+fn with_start_admission<T>(
+    cancellation: &CommandCancellation<'_>,
+    gate: Option<&std::sync::Mutex<()>>,
+    start: impl FnOnce() -> T,
+) -> Result<T, CommandError> {
+    if let Some(gate) = gate {
+        let _admission = gate.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if cancellation.is_cancelled() {
+            return Err(CommandError::StaleInput);
+        }
+        Ok(start())
+    } else if cancellation.is_cancelled() {
+        Err(CommandError::StaleInput)
+    } else {
+        Ok(start())
+    }
+}
+
+impl CommandCancellation<'_> {
+    fn is_cancelled(&self) -> bool {
+        self.shutdown
+            .is_some_and(|flag| flag.load(Ordering::Acquire))
+            || self.input_generation.is_some_and(|(current, expected)| {
+                !input_generation_matches(expected, current.load(Ordering::Acquire))
+            })
     }
 }
 
@@ -275,7 +369,7 @@ pub(super) fn run_command_unix(
     mut stdout: ChildStdout,
     mut stderr: ChildStderr,
     timeout_ms: u64,
-    shutdown: Option<&AtomicBool>,
+    cancellation: &CommandCancellation<'_>,
     cgroup: Option<ChildCgroup>,
 ) -> Result<String, CommandError> {
     let mut guard = ChildSupervisor::new_with_cgroup(child, cgroup);
@@ -289,11 +383,12 @@ pub(super) fn run_command_unix(
     let mut stderr_eof = false;
 
     let status = loop {
-        if shutdown.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+        if cancellation.is_cancelled() {
             return Err(CommandError::StaleInput);
         }
         if !stdout_eof {
-            stdout_eof = read_available_stdout(&mut stdout, &mut bytes, Some(deadline), shutdown)?;
+            stdout_eof =
+                read_available_stdout(&mut stdout, &mut bytes, Some(deadline), cancellation)?;
         }
         if !stderr_eof {
             stderr_eof = read_available_stderr(&mut stderr)?;
@@ -329,7 +424,7 @@ pub(super) fn run_command_unix(
                 (!stderr_eof).then_some(&stderr),
                 guard.pidfd(),
                 deadline,
-                shutdown.is_some(),
+                cancellation.shutdown.is_some() || cancellation.input_generation.is_some(),
             )?;
         } else {
             return Err(CommandError::Timeout);
@@ -337,7 +432,7 @@ pub(super) fn run_command_unix(
     };
     let drain_deadline = Instant::now() + Duration::from_millis(100);
     while (!stdout_eof || !stderr_eof) && Instant::now() < drain_deadline {
-        stdout_eof = read_available_stdout(&mut stdout, &mut bytes, None, None)?;
+        stdout_eof = read_available_stdout(&mut stdout, &mut bytes, None, cancellation)?;
         stderr_eof = read_available_stderr(&mut stderr)?;
         if !stdout_eof || !stderr_eof {
             wait_for_command_event(
@@ -506,13 +601,13 @@ fn read_available_stdout(
     stdout: &mut ChildStdout,
     bytes: &mut Zeroizing<Vec<u8>>,
     deadline: Option<Instant>,
-    shutdown: Option<&AtomicBool>,
+    cancellation: &CommandCancellation<'_>,
 ) -> Result<bool, CommandError> {
     // The stack buffer can temporarily contain the same sensitive output as
     // the accumulator, so wipe it on every return path as well.
     let mut buffer = Zeroizing::new([0_u8; 8192]);
     for _ in 0..STDOUT_READS_PER_DRAIN {
-        if shutdown.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+        if cancellation.is_cancelled() {
             return Err(CommandError::StaleInput);
         }
         if deadline.is_some_and(|limit| Instant::now() >= limit) {
@@ -927,6 +1022,94 @@ pub(super) fn normalize_form_action_parameters(
 mod tests {
     use super::*;
 
+    #[test]
+    fn generated_context_and_shutdown_sequences_gate_irreversible_command_start() {
+        #[derive(Clone, Copy, Debug)]
+        enum Event {
+            TargetChanged,
+            Shutdown,
+            StartAttempt,
+        }
+
+        fn check(sequence: &[Event]) {
+            let generation = AtomicU64::new(0);
+            let shutdown = AtomicBool::new(false);
+            let gate = std::sync::Mutex::new(());
+            let mut attempted = false;
+            let mut started = false;
+            let mut stale_before_attempt = false;
+
+            for event in sequence {
+                match event {
+                    Event::TargetChanged => {
+                        let _guard = gate.lock().unwrap();
+                        generation.fetch_add(1, Ordering::Release);
+                    }
+                    Event::Shutdown => {
+                        let _guard = gate.lock().unwrap();
+                        shutdown.store(true, Ordering::Release);
+                    }
+                    Event::StartAttempt if !attempted => {
+                        attempted = true;
+                        stale_before_attempt = shutdown.load(Ordering::Acquire)
+                            || generation.load(Ordering::Acquire) != 0;
+                        let cancellation = CommandCancellation {
+                            shutdown: Some(&shutdown),
+                            input_generation: Some((&generation, 0)),
+                        };
+                        let admission = with_start_admission(&cancellation, Some(&gate), || {
+                            started = true;
+                        });
+                        assert_eq!(
+                            admission.is_ok(),
+                            !stale_before_attempt,
+                            "start admission disagreed with event order: {sequence:?}"
+                        );
+                    }
+                    Event::StartAttempt => {}
+                }
+            }
+
+            assert_eq!(
+                started,
+                attempted && !stale_before_attempt,
+                "irreversible operation crossed a prior invalidation: {sequence:?}"
+            );
+        }
+
+        fn generate(prefix: &mut Vec<Event>, remaining: usize) {
+            check(prefix);
+            if remaining == 0 {
+                return;
+            }
+            for event in [Event::TargetChanged, Event::Shutdown, Event::StartAttempt] {
+                prefix.push(event);
+                generate(prefix, remaining - 1);
+                prefix.pop();
+            }
+        }
+
+        generate(&mut Vec::new(), 7);
+    }
+
+    #[test]
+    fn cancellation_metrics_are_separate_from_failures_and_timeouts() {
+        let metrics = CommandMetricsState::new();
+
+        metrics.record_error(false, true);
+        assert_eq!(metrics.cancelled_total.load(Ordering::Relaxed), 1);
+        assert_eq!(metrics.failure_total.load(Ordering::Relaxed), 0);
+        assert_eq!(metrics.timeout_total.load(Ordering::Relaxed), 0);
+
+        metrics.record_error(false, false);
+        assert_eq!(metrics.cancelled_total.load(Ordering::Relaxed), 1);
+        assert_eq!(metrics.failure_total.load(Ordering::Relaxed), 1);
+
+        metrics.record_error(true, false);
+        assert_eq!(metrics.timeout_total.load(Ordering::Relaxed), 1);
+        assert_eq!(metrics.failure_total.load(Ordering::Relaxed), 1);
+    }
+
     #[cfg(unix)]
     #[test]
     fn nonzero_command_error_never_retains_or_displays_stderr() {
@@ -948,6 +1131,72 @@ mod tests {
         assert_eq!(error, CommandError::NonZeroExit { code: Some(23) });
         assert!(!error.to_string().contains("synthetic-secret-from-stderr"));
         assert!(!format!("{error:?}").contains("synthetic-secret-from-stderr"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn input_generation_change_terminates_a_running_direct_expansion_command() {
+        use std::sync::{atomic::AtomicU64, Arc};
+
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-generation-cancel-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let started = directory.join("started");
+        let side_effect = directory.join("side-effect");
+        let command = CommandConfig {
+            action: None,
+            program: "/bin/sh".into(),
+            args: vec![
+                "-c".into(),
+                format!(
+                    "printf started > '{}'; sleep 0.5; printf ran > '{}'",
+                    started.display(),
+                    side_effect.display()
+                ),
+            ],
+            timeout_ms: 10_000,
+            cache_ms: 0,
+            environment: CommandEnvironment::Minimal,
+            pass_env: Vec::new(),
+        };
+        let generation = Arc::new(AtomicU64::new(7));
+        let command_start_gate = Arc::new(std::sync::Mutex::new(()));
+        let worker_generation = Arc::clone(&generation);
+        let worker_start_gate = Arc::clone(&command_start_gate);
+        let worker_command = command.clone();
+        let worker = std::thread::spawn(move || {
+            run_command_with_generation(
+                &worker_command,
+                None,
+                &worker_generation,
+                &worker_start_gate,
+                7,
+            )
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !started.exists() {
+            assert!(Instant::now() < deadline, "command did not start");
+            thread::sleep(Duration::from_millis(5));
+        }
+        generation.store(8, Ordering::Release);
+
+        assert_eq!(worker.join().unwrap(), Err(CommandError::StaleInput));
+        // Wait beyond the child's scheduled side effect so the assertion also
+        // proves the process did not merely return early while leaving it
+        // alive in the background.
+        thread::sleep(Duration::from_millis(700));
+        assert!(
+            !side_effect.exists(),
+            "the process group continued after its input generation became stale"
+        );
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

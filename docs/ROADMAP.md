@@ -85,7 +85,11 @@ always require explicit consent.
 
 - [ ] Feed local certification evidence (from `wayexpand doctor --certify`
       records) into the planner, not only the catalog status.
-- [ ] Add Fcitx5 as a candidate once an integration exists.
+- [x] Add an opt-in Fcitx5 direct-commit output bridge for compatible
+      installations. This is an output path only, not a capture route or
+      composition-aware IME integration.
+- [ ] Evaluate a native Fcitx5 input integration as a separate candidate; do
+      not treat the direct-commit bridge as completion of this work.
 - [x] Show the full ranked plan (standing and reason per route) in setup, the
       GUI diagnostics, and `doctor`; all three use the shared planner and keep
       catalog certification separate from runtime availability.
@@ -130,15 +134,85 @@ supported end state before broad adoption:
       by a synthetic test without opening a kernel device.
 - [x] The input-method poll helper's eventfd readiness and drain behavior is
       covered with synthetic descriptors, without connecting to a compositor.
+- [x] Worker completion publication and reactor notification share one
+      production delivery transition. Loom covers a completion consumed before
+      notification, a queued completion with a pending wake, and shutdown
+      releasing a worker waiting on a full bounded queue.
+- [x] Broker shutdown races with blocking client-read registration in a
+      repeated threaded test using real Unix sockets. Reads are canceled both
+      when shutdown finds an active registration and when registration observes
+      an already-shutting-down registry. PolicyKit-mediated action cancellation
+      and required audit flushing remain covered separately by the ignored live
+      integration test and executor tests.
 - [x] An injectable input-method event-transport seam exercises readiness,
       activation, safe content-type `done`, deactivation, dispatch failure, and
       flush failure, and disconnect through `InputMethodSource`; live
       Wayland/compositor behavior remains a separate certification requirement.
-- [ ] Loom models of small extracted state machines (needs `cfg(loom)` shims
-      for std sync types), in priority order: output completion
-      notification, daemon shutdown during a pending injection, async command
-      completion during reload, waker delivery, broker shutdown, and GUI save
-      completion versus an external file edit.
+- [x] Bounded exhaustive event-order model for the output integrity gate:
+      physical input before/after worker completion, focus loss, uncertain
+      completion, and late events after resolution all preserve quarantine.
+- [x] Barrier-driven output regression changes focus after replacement text is
+      submitted but before worker acknowledgment; the next queued transaction
+      and buffered follow-up trigger are refused before they can modify the
+      new target. This does not verify the result already submitted to the old
+      target.
+- [x] Loom scheduler model for cancellation racing the paced output worker's
+      checkpoint/send boundary: at most one already-authorized event can
+      follow observed cancellation, and the production integrity gate prevents
+      continuation. It runs under the daemon's `loom-tests` feature on the
+      Rust 1.92 MSRV.
+- [x] Loom scheduler model for an async command completion racing with input
+      context invalidation. The worker preflight and engine postflight share
+      the production generation predicate; an old completion is rejected if
+      input/focus/policy state advanced before drain. Separate reload-promotion
+      and composed output/reload/focus/shutdown models cover the completion
+      mailbox epoch boundary and the named cross-component interleaving. These
+      models still do not represent the complete daemon reactor or prove
+      compositor/application effects.
+- [x] A shared bounded IBus command/hotkey worker pool keeps context-specific
+      completion credits until drain. Loom exercises the production active-job
+      admission state transition against shutdown closure; a saturated
+      completion-channel regression proves one stalled context cannot park all
+      shared workers or prevent another context from completing a short job.
+      Throughput fairness under concurrent long-running command load still
+      needs a stress benchmark.
+- [x] Exhaustively test every split point of a trigger across same-window
+      retitles, new window instances, changed applications, and unavailable
+      identity using the real expansion engine. Cross-target text never forms
+      a trigger; real compositor focus identity still needs certification.
+- [x] Exercise the production reload-result admission predicate across every
+      combination of active-path, requested/built file-stamp, and fleet-layer
+      signature agreement. Successful and failed stale results are rejected;
+      filesystem-backed reload tests separately verify that a newer snapshot
+      becomes active.
+- [x] Loom model for reload promotion racing with async completion publication
+      and draining. It invokes the production reload-admission predicate and
+      models the per-engine completion-mailbox ownership boundary. A separate
+      barrier-driven process test proves the retired command cannot perform a
+      delayed side effect. The model does not represent the full reactor or
+      prove compositor/application effects.
+- [x] Conditional configuration replacement rechecks the source revision after
+      staging and syncing the temporary file. A deterministic injected external
+      edit during staging is preserved and reported as a conflict. A writer
+      racing after the final check still requires cooperation with the stable
+      lock to be excluded.
+- [x] GUI regression covers an external edit after one save completes and
+      before the next GUI save: the external disk version is kept, the draft is
+      retained, and the overlapping snippet edit is reported for resolution.
+- [x] Broker action spawn and shutdown publication use a shared launch gate;
+      a repeated barrier race proves startup either linearizes first or is
+      refused. Existing process tests verify shutdown cancels and reaps a
+      running action before a later side effect.
+- [x] Loom scheduler model for the broker action-start/shutdown linearization
+      point. It exercises the production action-start admission predicate under
+      both lock orderings; the real `ActionShutdown` still has a barrier-driven
+      race test because Loom does not control its standard-library mutex.
+- [ ] GUI save completion versus an external file edit remains covered by
+      filesystem-backed revision-conflict tests rather than a model of
+      filesystem behavior. Models do not prove whole-daemon scheduler
+      correctness or replace integration, stress, and fault-injection tests.
+      See [state-machine invariants](STATE_MACHINE_INVARIANTS.md) for the
+      current model inventory and required cross-component safety contracts.
 - [ ] Form snippets and the clipboard variable need validation with real
       clients on each compositor (focus return after the form closes).
       Headless KWin and Sway now run `clipboard-variable` and

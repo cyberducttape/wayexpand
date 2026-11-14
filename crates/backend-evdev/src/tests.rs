@@ -510,22 +510,15 @@ fn input_topology_watch_invalidation_is_an_error() {
     drop(watch);
 }
 
-#[test]
-fn hotplug_during_output_interrupts_before_device_discovery() {
-    let directory =
-        std::env::temp_dir().join(format!("wayexpand-evdev-interrupt-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&directory);
-    std::fs::create_dir(&directory).unwrap();
-    let topology_watch = create_topology_watch(&directory).unwrap();
-    let path = PathBuf::from("/dev/input/test-keyboard");
-    let (reader, _writer) = UnixStream::pair().unwrap();
+fn hotplug_test_source(directory: &std::path::Path) -> (EvdevSource, UnixStream) {
+    let topology_watch = create_topology_watch(directory).unwrap();
+    let (reader, writer) = UnixStream::pair().unwrap();
     reader.set_nonblocking(true).unwrap();
-    let events = Arc::new(Mutex::new(Vec::new()));
-    let mut source = EvdevSource {
+    let source = EvdevSource {
         devices: vec![Box::new(TestKeyboard {
-            path,
+            path: PathBuf::from("/dev/input/test-keyboard"),
             reader,
-            events,
+            events: Arc::new(Mutex::new(Vec::new())),
         })],
         state: test_state(),
         layout_provider: Box::new(TestLayoutProvider),
@@ -544,13 +537,55 @@ fn hotplug_during_output_interrupts_before_device_discovery() {
         topology_watch: Some(topology_watch),
         topology_refresh_pending: false,
     };
+    (source, writer)
+}
+
+#[test]
+fn hotplug_of_a_non_keyboard_node_does_not_interrupt_output() {
+    // Headphone jacks, HDMI audio, mice and permission updates churn
+    // /dev/input all day. None of them can type, so a long paced
+    // replacement must not be cut off partway by them.
+    let directory =
+        std::env::temp_dir().join(format!("wayexpand-evdev-nonkbd-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir(&directory).unwrap();
+    let (mut source, _keyboard_writer) = hotplug_test_source(&directory);
+
+    std::fs::write(directory.join("event-headphone-jack"), b"device").unwrap();
+    assert!(!source.next_event_during_output(Duration::ZERO).unwrap());
+    assert!(
+        !source.topology_refresh_pending,
+        "the change was rescanned during output"
+    );
+    assert_eq!(source.devices.len(), 1);
+
+    drop(source);
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn hotplug_that_adds_a_keyboard_interrupts_output() {
+    // A newly attached keyboard may already have delivered keys this source
+    // never saw, so output must stop.
+    let directory =
+        std::env::temp_dir().join(format!("wayexpand-evdev-newkbd-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir(&directory).unwrap();
+    let (mut source, _keyboard_writer) = hotplug_test_source(&directory);
+    let (reader, _new_keyboard_writer) = UnixStream::pair().unwrap();
+    reader.set_nonblocking(true).unwrap();
+    poll::TEST_DISCOVERED_KEYBOARDS.with(|keyboards| {
+        keyboards.borrow_mut().push(Box::new(TestKeyboard {
+            path: PathBuf::from("/dev/input/test-new-keyboard"),
+            reader,
+            events: Arc::new(Mutex::new(Vec::new())),
+        }))
+    });
 
     std::fs::write(directory.join("event-new-keyboard"), b"device").unwrap();
-    assert!(source
-        .next_event_during_output(Duration::from_secs(1))
-        .unwrap());
-    assert!(source.topology_refresh_pending);
-    assert_eq!(source.devices.len(), 1);
+    assert!(source.next_event_during_output(Duration::ZERO).unwrap());
+    assert_eq!(source.devices.len(), 2, "the new keyboard is now monitored");
+    assert_eq!(source.pressed.len(), 2);
 
     drop(source);
     std::fs::remove_dir_all(directory).unwrap();
@@ -600,6 +635,50 @@ fn topology_notification_interrupts_before_a_buffered_raw_event_slice() {
 
     drop(source);
     std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn buffered_key_activity_interrupts_before_raw_backlog_translation() {
+    let (reader, _writer) = UnixStream::pair().unwrap();
+    reader.set_nonblocking(true).unwrap();
+    let mut raw_events = (0..MAX_RAW_EVENTS_PER_SLICE * 4)
+        .map(|_| evdev::InputEvent::new(evdev::EventType::SYNCHRONIZATION.0, 0, 0))
+        .collect::<Vec<_>>();
+    raw_events.push(evdev::InputEvent::new(evdev::EventType::KEY.0, 30, 1));
+    let mut source = EvdevSource {
+        devices: vec![Box::new(TestKeyboard {
+            path: PathBuf::from("/dev/input/test-keyboard"),
+            reader,
+            events: Arc::new(Mutex::new(Vec::new())),
+        })],
+        state: test_state(),
+        layout_provider: Box::new(TestLayoutProvider),
+        layout_generation: Some(1),
+        layout_available: true,
+        raw_key_events_total: 0,
+        layout_unavailable_key_events_total: 0,
+        pending: VecDeque::new(),
+        raw_events,
+        raw_event_cursor: 0,
+        raw_event_device: Some(0),
+        pending_lost_devices: Vec::new(),
+        pressed: vec![HashSet::new()],
+        last_device_refresh: Instant::now(),
+        wake: None,
+        topology_watch: None,
+        topology_refresh_pending: false,
+    };
+
+    assert!(source.next_event_during_output(Duration::ZERO).unwrap());
+    assert_eq!(
+        source.raw_event_cursor, 0,
+        "interrupt detection must not translate the backlog"
+    );
+    assert_eq!(
+        source.raw_key_events_total, 0,
+        "interrupted key data is not matcher input"
+    );
+    assert!(source.pending.is_empty());
 }
 
 #[test]

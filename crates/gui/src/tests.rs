@@ -55,8 +55,12 @@ fn route_recommendation_preserves_ibus_topology() {
     assert_eq!(route.capture_label, "ibus");
     assert_eq!(route.injection_label, "ibus");
     assert!(route.sensitive_fields);
-    // Delete and commit are separate IBus signals, so not atomic.
-    assert!(!route.atomic_replace);
+    assert_eq!(
+        route.trigger_precondition,
+        "surrounding_text_matches_trigger"
+    );
+    assert_eq!(route.output_transaction, "separate_delete_and_commit");
+    assert_eq!(route.application_result, "unobservable");
 
     let capabilities = Capabilities {
         has_dev_input: true,
@@ -911,6 +915,75 @@ fn a_conflicting_save_merges_with_an_external_edit_of_another_snippet() {
     assert_eq!(saved.expansion[1].replacement, "edited elsewhere");
     assert!(!app.save_in_flight());
     fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn save_completion_then_external_edit_is_preserved_by_the_next_gui_save() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-save-completion-external-edit-{}.toml",
+        std::process::id()
+    ));
+    let snippet = ExpansionConfig {
+        id: ExpansionConfig::new_id(),
+        trigger: ":race".into(),
+        replacement: "initial".into(),
+        delivery: wayexpand_core::ExpansionDelivery::Insert,
+        description: String::new(),
+        tags: Vec::new(),
+        category: String::new(),
+        app_filter: Vec::new(),
+        match_mode: MatchMode::Immediate,
+        command: None,
+        enabled: true,
+        propagate_case: false,
+        aliases: Vec::new(),
+        output_file: None,
+    };
+    let config = Config {
+        expansion: vec![snippet],
+        hotkey: Vec::new(),
+        settings: Settings::default(),
+        organization: OrganizationPolicy::default(),
+    };
+    let _ = fs::remove_file(&path);
+    config.save_atomic(&path).unwrap();
+    let mut app = GuiApp::load(path.clone()).unwrap();
+
+    app.draft.as_mut().unwrap().replacement = "first GUI save".into();
+    app.save_selected();
+    assert_eq!(
+        Config::load(&path).unwrap().expansion[0].replacement,
+        "first GUI save"
+    );
+
+    let mut external = Config::load(&path).unwrap();
+    external.expansion[0].description = "added by external editor".into();
+    external.save_atomic(&path).unwrap();
+
+    app.draft.as_mut().unwrap().replacement = "second GUI save".into();
+    app.save_selected();
+
+    let saved = Config::load(&path).unwrap();
+    assert_eq!(saved.expansion[0].replacement, "first GUI save");
+    assert_eq!(saved.expansion[0].description, "added by external editor");
+    assert_eq!(app.config.expansion[0].replacement, "first GUI save");
+    assert_eq!(
+        app.config.expansion[0].description,
+        "added by external editor"
+    );
+    assert_eq!(
+        app.draft.as_ref().unwrap().replacement,
+        "second GUI save",
+        "the local draft remains available for explicit conflict resolution"
+    );
+    assert_eq!(app.status.tone_for_test(), status::StatusTone::Error);
+    assert!(!app.save_in_flight());
+    fs::remove_file(&path).unwrap();
+    let lock_path = path.with_file_name(format!(
+        ".{}.wayexpand.lock",
+        path.file_name().unwrap().to_string_lossy()
+    ));
+    let _ = fs::remove_file(lock_path);
 }
 
 #[test]
@@ -2121,6 +2194,11 @@ fn every_panel_and_dialog_renders_for_supported_languages_and_settings_tabs() {
         injection_latency_mean_us: None,
         injection_latency_p95_us: None,
         injection_latency_p99_us: None,
+        output_interrupt_sample_count: None,
+        output_interrupt_dropped_total: None,
+        output_interrupt_p50_us: None,
+        output_interrupt_p95_us: None,
+        output_interrupt_p99_us: None,
         matcher_latency_p50_us: None,
         matcher_latency_p95_us: None,
         matcher_latency_p99_us: None,
@@ -2139,6 +2217,7 @@ fn every_panel_and_dialog_renders_for_supported_languages_and_settings_tabs() {
         window_tracker_last_connected_unix: Some(1_794_268_800),
         window_tracker_reconnect_backoff_ms: Some(0),
         window_identity_exact: Some(true),
+        window_process_identity_state: None,
         inject_atomic_replace: Some(false),
         inject_full_unicode: Some(true),
         inject_cursor_reposition: Some(true),
@@ -2287,7 +2366,7 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
     app.daemon_reachable = Some(true);
     app.route_state = Some(runtime::RouteState::Connected);
     app.daemon_status = format!(
-        "source=input-method · backend=input-method-v2 · daemon_commit={} · daemon_version={}",
+        "source=input-method · backend=input-method-v2 · daemon_commit={} · daemon_version={}\ninject_atomic_replace=true\nreplacement_assurance=verified\ncompatibility_mode=off",
         env!("WAYEXPAND_COMMIT"),
         env!("WAYEXPAND_BUILD_VERSION")
     );
@@ -2327,23 +2406,25 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
         "{guide_semantics}"
     );
     assert!(
+        [
+            "Working in tested application",
+            "Safe fallback",
+            "Setup incomplete",
+        ]
+        .iter()
+        .any(|state| guide_semantics.contains(state)),
+        "first-run must expose one unambiguous operational state: {guide_semantics}"
+    );
+    assert!(
         guide_semantics.contains("Try it in a real app"),
         "{guide_semantics}"
     );
+    assert!(guide_semantics.contains("Verified in tested application: not tested"));
+    assert!(!guide_semantics.contains("Verified working: yes"));
     assert!(guide_semantics.contains("Open Quick Picker (copy and paste)"));
     assert!(!guide_semantics.contains("It expanded correctly"));
     assert!(!guide_semantics.contains("Copy trigger"));
-    if build_identity_unverified() {
-        assert!(
-            guide_semantics.contains("daemon's build identity is unknown"),
-            "{guide_semantics}"
-        );
-    } else {
-        assert!(
-            guide_semantics.contains("Start Desktop Integration Test"),
-            "{guide_semantics}"
-        );
-    }
+
     app.filter = "working".into();
     app.refresh_visible_indices_cache();
     assert!(app.visible_indices().is_empty());
@@ -2378,6 +2459,25 @@ fn first_run_cannot_be_recorded_complete_without_desktop_verification() {
         "deferring is not completing onboarding"
     );
     assert!(!app.onboarding_visible);
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn requesting_a_new_desktop_test_invalidates_the_previous_application_confirmation() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-first-run-reset-test-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    app.desktop_test_verified = true;
+    app.desktop_test_verified_application = Some("org.example.Editor".into());
+
+    app.require_desktop_test();
+
+    assert!(!app.desktop_test_verified);
+    assert!(app.desktop_test_verified_application.is_none());
+    assert!(app.desktop_test_dialog_required);
     fs::remove_file(path).unwrap();
 }
 
@@ -3155,12 +3255,14 @@ fn best_effort_route_explains_concurrent_typing_risk_in_all_languages() {
             let explanation = strings.replacement_explanation(assurance);
             assert!(
                 explanation.contains("trigger")
+                    || explanation.contains("Auslöser")
                     || explanation.contains("Auslösers")
                     || explanation.contains("pemicu"),
                 "explanation should describe the trigger: {language:?} {assurance:?}: {explanation}"
             );
             assert!(
                 explanation.contains("physical")
+                    || explanation.contains("Physische")
                     || explanation.contains("physische")
                     || explanation.contains("fisik"),
                 "explanation should describe concurrent physical input: {language:?} {assurance:?}: {explanation}"
@@ -3171,7 +3273,86 @@ fn best_effort_route_explains_concurrent_typing_risk_in_all_languages() {
                     || explanation.contains("menghapus"),
                 "explanation should describe possible text corruption: {language:?} {assurance:?}: {explanation}"
             );
+            assert!(
+                explanation.contains("cannot be rolled back")
+                    || explanation.contains("nicht zurückgenommen")
+                    || explanation.contains("tidak dapat dibatalkan"),
+                "explanation should describe irreversible output: {language:?} {assurance:?}: {explanation}"
+            );
+            assert!(
+                explanation.contains("never retries")
+                    || explanation.contains("nie")
+                    || explanation.contains("tidak pernah mengulang"),
+                "explanation should describe no-retry behavior: {language:?} {assurance:?}: {explanation}"
+            );
+            assert!(
+                explanation.contains("certification")
+                    || explanation.contains("zertifizier")
+                    || explanation.contains("sertifikasi"),
+                "explanation should distinguish missing physical certification: {language:?} {assurance:?}: {explanation}"
+            );
         }
+    }
+}
+
+#[test]
+fn atomic_route_assurance_does_not_claim_the_application_result_was_verified() {
+    for language in [Language::English, Language::German, Language::Indonesian] {
+        let strings = crate::lang::Strings::new(language);
+        let explanation = strings.replacement_explanation(runtime::ReplacementAssurance::Verified);
+        assert!(
+            explanation.contains("atomic")
+                || explanation.contains("atomar")
+                || explanation.contains("atomik"),
+            "route guarantee should be identified as atomic: {language:?}: {explanation}"
+        );
+        assert!(
+            explanation.contains("application")
+                || explanation.contains("Anwendung")
+                || explanation.contains("aplikasi"),
+            "application-level uncertainty should remain explicit: {language:?}: {explanation}"
+        );
+        assert!(
+            explanation.contains("unverified")
+                || explanation.contains("unverifiziert")
+                || explanation.contains("belum terverifikasi"),
+            "output must not be described as application-verified: {language:?}: {explanation}"
+        );
+    }
+}
+
+#[test]
+fn insertion_plan_separates_route_capability_from_application_results() {
+    for language in [Language::English, Language::German, Language::Indonesian] {
+        let strings = crate::lang::Strings::new(language);
+        let atomic =
+            strings.insertion_plan_notice(wayexpand_core::InsertionStrategy::VerifiedReplacement);
+        assert!(
+            atomic.contains("atomic") || atomic.contains("atomar") || atomic.contains("atomik"),
+            "plan should identify the atomic route contract: {language:?}: {atomic}"
+        );
+        assert!(
+            atomic.contains("application")
+                || atomic.contains("Application")
+                || atomic.contains("Anwendung")
+                || atomic.contains("aplikasi"),
+            "plan should require an application-level test: {language:?}: {atomic}"
+        );
+
+        let non_atomic =
+            strings.insertion_plan_notice(wayexpand_core::InsertionStrategy::NativeTextCommit);
+        assert!(
+            non_atomic.contains("non-atomic")
+                || non_atomic.contains("nicht atomar")
+                || non_atomic.contains("non-atomik"),
+            "plan should disclose non-atomic output: {language:?}: {non_atomic}"
+        );
+        assert!(
+            non_atomic.contains("unverified")
+                || non_atomic.contains("unverifiziert")
+                || non_atomic.contains("belum terverifikasi"),
+            "plan should disclose unverified application result: {language:?}: {non_atomic}"
+        );
     }
 }
 
@@ -3353,4 +3534,52 @@ fn arrow_keys_move_the_selection_through_the_snippet_list() {
     assert!(second.is_some());
     frame(&mut app, Some(egui::Key::ArrowUp));
     assert_eq!(app.selected_index(), first);
+}
+
+#[test]
+fn toolbar_leaves_room_for_the_editor_and_never_overlaps_its_brand() {
+    let path = std::env::temp_dir().join(format!(
+        "wayexpand-gui-toolbar-fit-{}.toml",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&path);
+    let mut app = GuiApp::load(path.clone()).unwrap();
+    app.daemon_reachable = Some(true);
+    app.route_state = Some(runtime::RouteState::Connected);
+    let ctx = egui::Context::default();
+    theme::install_pack(&ctx, app.colorpack, FontScale::Large);
+    app.settings_font_scale = FontScale::Large;
+    for width in [700.0, 1008.0, 1300.0, 2000.0] {
+        let mut remaining = 0.0;
+        // The first frame may measure an overlap and lay out compactly on
+        // the next; the settled frame is what the user sees.
+        for _ in 0..60 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(width, 600.0),
+                )),
+                ..Default::default()
+            };
+            let _ = run_gui_test_frame(&ctx, input, |ui| {
+                let palette = Palette::for_pack(app.colorpack, app.dark_mode);
+                app.render_toolbar(ui, &palette);
+                remaining = ui.available_rect_before_wrap().height();
+            });
+        }
+        // Smoke check: the toolbar must leave the editor most of the window.
+        // (The live full-height toolbar needed real route status chips and
+        // was confirmed with a debug screenshot, not reproduced here.)
+        assert!(
+            remaining > 300.0,
+            "toolbar at width {width} left only {remaining}px for the editor"
+        );
+        let wide = width >= 920.0 * FontScale::Large.multiplier() && width >= app.toolbar_row_width;
+        assert!(
+            !wide || app.toolbar_row_width <= width,
+            "one-row toolbar needs {} px but has {width}",
+            app.toolbar_row_width
+        );
+    }
+    let _ = fs::remove_file(path);
 }

@@ -18,11 +18,47 @@ pub(super) fn save_atomic_serialized_relative(
 }
 
 #[cfg(target_os = "linux")]
+pub(super) fn save_atomic_serialized_relative_if_revision_matches(
+    resolved: &Path,
+    file_name: &str,
+    serialized: &[u8],
+    expected: &ConfigRevision,
+) -> Result<(), ConfigError> {
+    save_atomic_serialized_relative_with_revision_and_hooks(
+        resolved,
+        file_name,
+        serialized,
+        Some(expected),
+        |directory| directory.sync_all(),
+        || {},
+    )
+}
+
+#[cfg(target_os = "linux")]
 fn save_atomic_serialized_relative_with_sync(
     resolved: &Path,
     file_name: &str,
     serialized: &[u8],
+    sync_directory: impl FnMut(&fs::File) -> std::io::Result<()>,
+) -> Result<(), ConfigError> {
+    save_atomic_serialized_relative_with_revision_and_hooks(
+        resolved,
+        file_name,
+        serialized,
+        None,
+        sync_directory,
+        || {},
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn save_atomic_serialized_relative_with_revision_and_hooks(
+    resolved: &Path,
+    file_name: &str,
+    serialized: &[u8],
+    expected: Option<&ConfigRevision>,
     mut sync_directory: impl FnMut(&fs::File) -> std::io::Result<()>,
+    mut before_revision_check: impl FnMut(),
 ) -> Result<(), ConfigError> {
     let parent = resolved.parent().unwrap_or_else(|| Path::new("."));
     let parent_fd = open_secure_directory(parent).map_err(|source| ConfigError::Read {
@@ -77,6 +113,18 @@ fn save_atomic_serialized_relative_with_sync(
                 path: temp_path.display().to_string(),
                 source,
             })?;
+            if let Some(expected) = expected {
+                // External editors do not participate in our stable advisory
+                // lock. Recheck after staging and syncing the replacement so
+                // edits made during that work are not silently overwritten.
+                // The check is descriptor-secure, but cannot make a pathname
+                // rename conditional against a non-cooperating writer racing
+                // in the final syscall-sized interval.
+                before_revision_check();
+                if !Config::source_matches_revision(resolved, expected)? {
+                    return Err(ConfigError::RevisionConflict);
+                }
+            }
             Config::validate_save_target_owner(resolved)?;
             rustix::fs::renameat(&parent_fd, &temp_name, &parent_fd, file_name).map_err(
                 |source| ConfigError::Read {
@@ -123,6 +171,8 @@ mod durability_tests {
                 .as_nanos()
         ));
         fs::create_dir(&root).unwrap();
+        #[cfg(unix)]
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
         let path = root.join("expansions.toml");
         fs::write(&path, b"old").unwrap();
 
@@ -140,6 +190,51 @@ mod durability_tests {
         assert!(error
             .safe_summary()
             .contains("replaced, but its durability could not be confirmed"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn revision_checked_commit_preserves_external_edit_during_temp_staging() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let root = std::env::temp_dir().join(format!(
+            "wayexpand-config-external-race-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&root).unwrap();
+        #[cfg(unix)]
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        let path = root.join("expansions.toml");
+        Config::parse("[[expansion]]\ntrigger = ':x'\nreplacement = 'initial'\n")
+            .unwrap()
+            .save_atomic(&path)
+            .unwrap();
+        let loaded = Config::load_versioned(&path).unwrap();
+        let mut external = loaded.config.clone();
+        external.expansion[0].replacement = "external edit".into();
+        let external_text = toml::to_string_pretty(&external).unwrap();
+        let file_name = path.file_name().unwrap().to_str().unwrap();
+
+        let error = save_atomic_serialized_relative_with_revision_and_hooks(
+            &path,
+            file_name,
+            b"replacement from GUI",
+            Some(&loaded.revision),
+            |directory| directory.sync_all(),
+            || fs::write(&path, &external_text).unwrap(),
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, ConfigError::RevisionConflict));
+        assert_eq!(fs::read_to_string(&path).unwrap(), external_text);
+        assert_eq!(
+            Config::load(&path).unwrap().expansion[0].replacement,
+            "external edit"
+        );
         fs::remove_dir_all(root).unwrap();
     }
 }

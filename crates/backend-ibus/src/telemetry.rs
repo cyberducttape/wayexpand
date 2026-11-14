@@ -20,6 +20,7 @@ use std::{
 pub const IBUS_STATUS_SCHEMA: u32 = 1;
 const STATUS_FILE_NAME: &str = "wayexpand-ibus-status.json";
 const MAX_RECENT_FIELDS: usize = 8;
+const MAX_RECENT_OUTPUTS: usize = 8;
 const MAX_STATUS_BYTES: u64 = 64 * 1024;
 static TRANSACTION_ID_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -145,15 +146,34 @@ pub struct IbusStatus {
     pub totals: IbusTotals,
     /// Most recent last.
     pub recent_fields: Vec<IbusFieldActivity>,
+    /// Bounded, content-free output history. `emitted-unverified` means the
+    /// IBus signals were sent; it does not confirm the application's document.
+    #[serde(default)]
+    pub recent_outputs: Vec<IbusOutputRecord>,
     /// Opaque ID for the most recently emitted expansion, unrelated to text.
     #[serde(default)]
     pub last_transaction_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IbusOutputRecord {
+    pub transaction_id: String,
+    pub at_unix: u64,
+    pub backend: String,
+    /// IBus context sequence, not an application identity.
+    pub focus_generation: Option<u64>,
+    pub target_identity_state: String,
+    pub expected_characters: usize,
+    pub duration_us: Option<u64>,
+    /// `emitted-unverified` or `partial-uncertain`.
+    pub outcome: String,
 }
 
 #[derive(Debug)]
 struct State {
     status: IbusStatus,
     fields: VecDeque<IbusFieldActivity>,
+    outputs: VecDeque<IbusOutputRecord>,
     dirty: bool,
 }
 
@@ -197,9 +217,11 @@ impl IbusTelemetry {
                     engines: 0,
                     totals: IbusTotals::default(),
                     recent_fields: Vec::new(),
+                    recent_outputs: Vec::new(),
                     last_transaction_id: None,
                 },
                 fields: VecDeque::new(),
+                outputs: VecDeque::new(),
                 dirty: true,
             }),
             changed: Condvar::new(),
@@ -333,17 +355,45 @@ impl IbusTelemetry {
     }
 
     pub fn expansion(&self, field: Option<u64>) {
+        self.update(|state| {
+            state.status.totals.expansions = state.status.totals.expansions.saturating_add(1);
+        });
+        self.update_field(field, |field| {
+            field.expansions = field.expansions.saturating_add(1)
+        });
+    }
+
+    /// Record output protocol evidence without recording any text. The
+    /// outcome describes what WayExpand observed at the protocol boundary,
+    /// never whether the target application committed the edit.
+    pub fn output_record(
+        &self,
+        field: Option<u64>,
+        target_identity_state: &'static str,
+        expected_characters: usize,
+        duration_us: Option<u64>,
+        outcome: &'static str,
+    ) {
         let transaction_id = format!(
             "{:x}-{:x}",
             std::process::id(),
             TRANSACTION_ID_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         );
         self.update(|state| {
-            state.status.totals.expansions = state.status.totals.expansions.saturating_add(1);
-            state.status.last_transaction_id = Some(transaction_id);
-        });
-        self.update_field(field, |field| {
-            field.expansions = field.expansions.saturating_add(1)
+            state.status.last_transaction_id = Some(transaction_id.clone());
+            state.outputs.push_back(IbusOutputRecord {
+                transaction_id,
+                at_unix: now_unix(),
+                backend: "ibus".into(),
+                focus_generation: field,
+                target_identity_state: target_identity_state.into(),
+                expected_characters,
+                duration_us,
+                outcome: outcome.into(),
+            });
+            while state.outputs.len() > MAX_RECENT_OUTPUTS {
+                state.outputs.pop_front();
+            }
         });
     }
 
@@ -378,6 +428,7 @@ impl IbusTelemetry {
         let mut status = state.status.clone();
         status.updated_unix = now_unix();
         status.recent_fields = state.fields.iter().cloned().collect();
+        status.recent_outputs = state.outputs.iter().cloned().collect();
         status
     }
 
@@ -484,10 +535,11 @@ pub fn read_status_at(path: &Path) -> Option<IbusStatusReading> {
 /// A plain-language verdict about one observed field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IbusFieldVerdict {
-    /// At least one expansion was emitted in this field.
-    Expanded,
-    /// The field supports verified replacement; no trigger was typed yet.
-    Ready,
+    /// IBus emitted replacement actions, but the client result is unknown.
+    OutputEmittedUnverified,
+    /// The field reported normal content and surrounding text. This is a
+    /// prerequisite only; policy admission and client insertion are unknown.
+    ReplacementContextObserved,
     /// IBus never told the engine the field's type, so capture stayed off.
     NoContentType,
     /// The field is a password, PIN, or private field; capture stays off.
@@ -506,7 +558,7 @@ pub enum IbusFieldVerdict {
 impl IbusFieldVerdict {
     pub fn of(field: &IbusFieldActivity) -> Self {
         if field.expansions > 0 {
-            return Self::Expanded;
+            return Self::OutputEmittedUnverified;
         }
         match field.content_type {
             IbusContentTypeState::Sensitive => return Self::Sensitive,
@@ -529,14 +581,14 @@ impl IbusFieldVerdict {
         if !field.surrounding_capability || !field.surrounding_nonempty {
             Self::NoSurroundingText
         } else {
-            Self::Ready
+            Self::ReplacementContextObserved
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Expanded => "expanded",
-            Self::Ready => "ready",
+            Self::OutputEmittedUnverified => "output-emitted-unverified",
+            Self::ReplacementContextObserved => "replacement-context-observed",
             Self::NoContentType => "no-content-type",
             Self::Sensitive => "sensitive",
             Self::NoSurroundingText => "no-surrounding-text",
@@ -548,10 +600,8 @@ impl IbusFieldVerdict {
 
     pub fn explanation(self) -> &'static str {
         match self {
-            Self::Expanded => "expansions work in this field",
-            Self::Ready => {
-                "the app reports its field type and text; triggers typed here can expand"
-            }
+            Self::OutputEmittedUnverified => "IBus emitted replacement actions, but the target application result is unknown; inspect the field before continuing",
+            Self::ReplacementContextObserved => "the field reported normal content and surrounding text; policy admission, trigger matching, and target insertion are not verified",
             Self::NoContentType => {
                 "IBus never reported this field's type, so capture stayed off (restart the engine: `ibus engine wayexpand`; if it persists, report a bug with `wayexpand support-bundle`)"
             }
@@ -615,6 +665,13 @@ mod tests {
         let telemetry = IbusTelemetry::new();
         let field = Some(telemetry.focus_in(None));
         telemetry.expansion(field);
+        telemetry.output_record(
+            field,
+            "ibus-context-only",
+            5,
+            Some(10),
+            "emitted-unverified",
+        );
         let status = telemetry.snapshot();
         let id = status
             .last_transaction_id
@@ -623,6 +680,31 @@ mod tests {
         assert_eq!(status.totals.expansions, 1);
         assert!(!id.contains("trigger"));
         assert!(!id.contains("replacement"));
+    }
+
+    #[test]
+    fn output_flight_recorder_is_bounded_and_content_free() {
+        let telemetry = IbusTelemetry::new();
+        for _ in 0..MAX_RECENT_OUTPUTS + 2 {
+            telemetry.output_record(
+                Some(7),
+                "ibus-context-only",
+                128,
+                Some(42),
+                "emitted-unverified",
+            );
+        }
+        let status = telemetry.snapshot();
+        assert_eq!(status.recent_outputs.len(), MAX_RECENT_OUTPUTS);
+        let record = status.recent_outputs.last().unwrap();
+        assert_eq!(record.backend, "ibus");
+        assert_eq!(record.focus_generation, Some(7));
+        assert_eq!(record.expected_characters, 128);
+        assert_eq!(record.duration_us, Some(42));
+        assert_eq!(record.outcome, "emitted-unverified");
+        let serialized = serde_json::to_string(&status).unwrap();
+        assert!(!serialized.contains("private-trigger"));
+        assert!(!serialized.contains("replacement contents"));
     }
 
     #[test]
@@ -659,10 +741,23 @@ mod tests {
         telemetry.surrounding_text(field, true);
         telemetry.key(field, true);
         let editor = telemetry.snapshot().recent_fields.pop().unwrap();
-        assert_eq!(IbusFieldVerdict::of(&editor), IbusFieldVerdict::Ready);
+        assert_eq!(
+            IbusFieldVerdict::of(&editor),
+            IbusFieldVerdict::ReplacementContextObserved
+        );
         telemetry.expansion(field);
         let editor = telemetry.snapshot().recent_fields.pop().unwrap();
-        assert_eq!(IbusFieldVerdict::of(&editor), IbusFieldVerdict::Expanded);
+        assert_eq!(
+            IbusFieldVerdict::of(&editor),
+            IbusFieldVerdict::OutputEmittedUnverified
+        );
+        assert_eq!(
+            IbusFieldVerdict::of(&editor).label(),
+            "output-emitted-unverified"
+        );
+        assert!(IbusFieldVerdict::of(&editor)
+            .explanation()
+            .contains("target application result is unknown"));
     }
 
     #[test]

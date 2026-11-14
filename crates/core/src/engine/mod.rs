@@ -50,7 +50,7 @@ use std::{
     process::{Command, Stdio},
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, RwLock,
+        Arc, Mutex, RwLock,
     },
     time::{Duration, Instant},
 };
@@ -62,7 +62,18 @@ pub(crate) use crate::limits::{
 const MINIMAL_COMMAND_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
 const ASYNC_COMMAND_QUEUE_CAPACITY: usize = 16;
 const ASYNC_COMMAND_WORKER_COUNT: usize = 4;
+const ASYNC_HOTKEY_WORKER_COUNT: usize = 1;
+const ASYNC_COMMAND_POOL_QUEUE_CAPACITY: usize = 256;
+const ASYNC_HOTKEY_POOL_QUEUE_CAPACITY: usize = 64;
 const COMMAND_FAILURE_HISTORY_LIMIT: usize = 16;
+
+/// A deferred command may only be delivered while the input context that
+/// scheduled it is still current. Kept as a tiny shared predicate so worker
+/// preflight and engine postflight use the same generation contract.
+#[inline]
+pub(crate) const fn input_generation_matches(expected: u64, current: u64) -> bool {
+    expected == current
+}
 
 struct DeferredMatchReservation {
     matched_text: SensitiveText,
@@ -80,13 +91,20 @@ pub struct ExpansionEngine {
     /// Runtime-only restrictions supplied by the host (for example command
     /// worker availability) are kept outside the immutable source snapshot.
     runtime_policy: crate::OrganizationPolicy,
+    /// The host has determined that this engine's active route cannot satisfy
+    /// the effective organization policy. Input may still be observed for
+    /// lifecycle updates, but it must not produce automatic expansions.
+    backend_policy_blocked: bool,
     compatibility_mode_override: Option<crate::CompatibilityMode>,
     /// Compiled app-id globs corresponding positionally to `app_filters`.
     app_filter_globs: Vec<Vec<Option<GlobPattern>>>,
     /// `settings.terminal_apps`, parsed and compiled.
     terminal_app_scope: Vec<(AppFilter, Option<GlobPattern>)>,
-    /// `settings.raw_capture_apps`, parsed and compiled. IBus yields matching
-    /// ownership to the explicitly configured evdev fallback in these apps.
+    /// How many leading `terminal_app_scope` entries come from
+    /// `settings.terminal_apps` (the rest are `raw_capture_apps`).
+    terminal_apps_len: usize,
+    /// `settings.raw_capture_apps`, parsed and compiled for diagnostic and
+    /// ownership checks against the explicit evdev fallback.
     raw_capture_app_scope: Vec<(AppFilter, Option<GlobPattern>)>,
     raw_capture_fallback_enabled: bool,
     /// Host restriction: expand automatically only in `terminal_apps`.
@@ -146,6 +164,11 @@ pub struct ExpansionEngine {
     command_failures: VecDeque<CommandErrorKind>,
     input_generation: u64,
     shared_input_generation: Arc<AtomicU64>,
+    /// Serializes context invalidation with the irreversible spawn boundary
+    /// for direct expansion commands. A stale command either spawns before an
+    /// input transition is applied, or observes the new generation and is
+    /// refused; it cannot pass the generation check and spawn across it.
+    command_start_gate: Arc<Mutex<()>>,
     async_commands: Option<AsyncCommandRuntime>,
     /// Called by expansion workers after each completion is queued, so a host
     /// without its own event loop can drain results on wakeup instead of
@@ -200,6 +223,33 @@ impl ExpansionEngine {
                 .filter(|(expansion, _)| expansion.is_keyboard_matchable())
                 .flat_map(|(_, filters)| filters.iter())
                 .any(|filter| matches!(filter, AppFilter::TitleContains(_)))
+    }
+
+    /// Resolve KWin process identities when an exact executable or explicit
+    /// process-name filter is configured, or when terminal-only mode needs a
+    /// fallback for a compositor-only window identity.
+    pub fn requires_process_executable_identity(&self) -> bool {
+        let expansion_filter_requires_process = self
+            .config
+            .expansion
+            .iter()
+            .zip(self.validated.app_filters.iter())
+            .filter(|(expansion, _)| expansion.is_keyboard_matchable())
+            .flat_map(|(_, filters)| filters.iter())
+            .any(|filter| {
+                matches!(
+                    filter,
+                    AppFilter::ProcessExecutableExact(_) | AppFilter::ProcessNameExact(_)
+                )
+            });
+        expansion_filter_requires_process
+            || self.terminal_app_scope.iter().any(|(filter, _)| {
+                matches!(
+                    filter,
+                    AppFilter::ProcessExecutableExact(_) | AppFilter::ProcessNameExact(_)
+                )
+            })
+            || (self.terminal_apps_only && !self.terminal_app_scope.is_empty())
     }
 
     /// The immutable validated source and derived metadata used by this
@@ -280,6 +330,12 @@ impl ExpansionEngine {
         } else {
             &[]
         };
+        let terminal_apps_len = config
+            .settings
+            .terminal_apps
+            .iter()
+            .filter(|raw| AppFilter::parse(raw).is_some())
+            .count();
         let terminal_app_scope = config
             .settings
             .terminal_apps
@@ -317,9 +373,11 @@ impl ExpansionEngine {
             config,
             validated: Arc::clone(&validated),
             runtime_policy: validated.resolved_policy.clone(),
+            backend_policy_blocked: false,
             compatibility_mode_override: None,
             app_filter_globs,
             terminal_app_scope,
+            terminal_apps_len,
             raw_capture_app_scope,
             raw_capture_fallback_enabled,
             terminal_apps_only: false,
@@ -345,6 +403,7 @@ impl ExpansionEngine {
             command_failures: VecDeque::with_capacity(COMMAND_FAILURE_HISTORY_LIMIT),
             input_generation: 0,
             shared_input_generation: Arc::new(AtomicU64::new(0)),
+            command_start_gate: Arc::new(Mutex::new(())),
             async_commands: None,
             completion_notifier: Arc::new(RwLock::new(None)),
             expansion_metrics: Arc::new(CommandMetricsState::new()),
@@ -386,6 +445,22 @@ impl ExpansionEngine {
         self.runtime_policy = validated.resolved_policy.clone();
         self.validated = validated;
         Ok(())
+    }
+
+    /// Refuse automatic expansion when the connected route cannot satisfy the
+    /// effective policy. This is refreshed when a configuration is promoted
+    /// or a backend is reconnected.
+    pub fn set_backend_policy_blocked(&mut self, blocked: bool) {
+        if self.backend_policy_blocked != blocked {
+            self.backend_policy_blocked = blocked;
+            self.on_reset();
+            // An undo record would replay output through the blocked route.
+            self.clear_undo_state();
+        }
+    }
+
+    pub fn backend_policy_blocked(&self) -> bool {
+        self.backend_policy_blocked
     }
 
     /// Configure whether a match's terminating delimiter is erased with the
@@ -509,6 +584,7 @@ impl ExpansionEngine {
         }
         let Some(runtime) = AsyncCommandRuntime::start(
             Arc::clone(&self.shared_input_generation),
+            Arc::clone(&self.command_start_gate),
             Arc::clone(&self.completion_notifier),
             Arc::clone(&self.expansion_metrics),
             Arc::clone(&self.hotkey_metrics),
@@ -957,6 +1033,10 @@ impl ExpansionEngine {
             .take_deferred_reservation(Self::reserved_text(result))
             .is_some()
         {
+            // A matched result may have staged undo text before its host
+            // attempted output. Restoring the trigger means that text was not
+            // applied, so its provisional undo must not survive this result.
+            self.discard_undo();
             self.restore_buffered(&result.matched_text);
         }
     }
@@ -1375,6 +1455,27 @@ impl ExpansionEngine {
     fn clear_undo_state(&mut self) {
         self.zeroize_undo_contents();
         self.last_expansion = None;
+    }
+}
+
+/// Whether a normalized focused app ID satisfies one app-ID scope filter.
+/// This is the single rule shared by snippet `app_filter`s, `terminal_apps`
+/// and `raw_capture_apps`: ordinary app-ID filters never match the reserved
+/// process-identity namespaces, and those namespaces match only their own
+/// explicit `process_*_exact:` filters. Title filters are not app-ID scopes.
+fn app_id_matches_scope(app_id: &str, filter: &AppFilter, glob: Option<&GlobPattern>) -> bool {
+    let reserved = app_id.starts_with(crate::PROCESS_EXECUTABLE_APP_ID_PREFIX)
+        || app_id.starts_with(crate::PROCESS_NAME_APP_ID_PREFIX);
+    match filter {
+        AppFilter::AppIdExact(expected) => !reserved && app_id == expected,
+        AppFilter::AppIdGlob(_) => !reserved && glob.is_some_and(|glob| glob.matches(app_id)),
+        AppFilter::ProcessExecutableExact(expected) => app_id
+            .strip_prefix(crate::PROCESS_EXECUTABLE_APP_ID_PREFIX)
+            .is_some_and(|path| path == expected),
+        AppFilter::ProcessNameExact(expected) => app_id
+            .strip_prefix(crate::PROCESS_NAME_APP_ID_PREFIX)
+            .is_some_and(|name| name == expected),
+        _ => false,
     }
 }
 

@@ -116,8 +116,11 @@ impl EvdevSource {
             if !self.has_buffered_raw_events() {
                 self.apply_pending_lost_devices()?;
             }
+            // A topology change is reported through the flag, not as key
+            // activity: the output monitor decides separately whether it
+            // added a keyboard.
             self.topology_refresh_pending |= topology_changed;
-            Ok(key_activity || topology_changed)
+            Ok(key_activity)
         })
     }
 
@@ -216,7 +219,7 @@ impl EvdevSource {
             self.apply_pending_lost_devices()?;
         }
         self.topology_refresh_pending |= topology_changed;
-        Ok(key_activity || topology_changed)
+        Ok(key_activity)
     }
 
     #[cfg(test)]
@@ -289,9 +292,10 @@ impl EvdevSource {
         self.pending.push_back(event);
     }
 
-    pub(super) fn refresh_devices(&mut self) {
-        let discovery = device::discover_keyboards();
-        for keyboard in discovery.keyboards {
+    /// Open newly discovered keyboards and return how many were added.
+    pub(super) fn refresh_devices(&mut self) -> usize {
+        let mut added = 0;
+        for keyboard in discover_keyboard_devices() {
             if self
                 .devices
                 .iter()
@@ -300,9 +304,11 @@ impl EvdevSource {
                 continue;
             }
             tracing::info!(path = %keyboard.path().display(), "keyboard device connected");
-            self.devices.push(Box::new(keyboard));
+            self.devices.push(keyboard);
             self.pressed.push(HashSet::new());
+            added += 1;
         }
+        added
     }
 
     pub(super) fn drain_ready(&mut self, ready_indices: &[usize]) -> Result<bool, EvdevError> {
@@ -394,4 +400,27 @@ impl EvdevSource {
         }
         Ok(())
     }
+}
+
+#[cfg(not(test))]
+fn discover_keyboard_devices() -> Vec<Box<dyn device::KeyboardDeviceAccess>> {
+    device::discover_keyboards()
+        .keyboards
+        .into_iter()
+        .map(|keyboard| Box::new(keyboard) as Box<dyn device::KeyboardDeviceAccess>)
+        .collect()
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Keyboards the next rescan "discovers" in unit tests, which must never
+    /// enumerate the host's real /dev/input.
+    pub(super) static TEST_DISCOVERED_KEYBOARDS:
+        std::cell::RefCell<Vec<Box<dyn device::KeyboardDeviceAccess>>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+#[cfg(test)]
+fn discover_keyboard_devices() -> Vec<Box<dyn device::KeyboardDeviceAccess>> {
+    TEST_DISCOVERED_KEYBOARDS.with(|keyboards| std::mem::take(&mut *keyboards.borrow_mut()))
 }

@@ -5,10 +5,21 @@
       "id": "gnome-wayland",
       "desktop": "GNOME / Wayland",
       "recommended_route_id": "ibus",
-      "supported_injection_backends": ["ibus"],
-      "required_permissions": ["Allow WayExpand to add and select its IBus source in GNOME input settings"],
-      "setup_instructions": ["Run wayexpand setup --check", "Run wayexpand setup --apply to preserve existing sources and add WayExpand", "Verify WayExpand appears in GNOME's input-source menu; reselect it after changing input sources if needed"],
-      "known_limitations": ["Active preedit/IME composition is unsupported", "Desktop end-to-end certification is pending"],
+      "supported_injection_backends": [
+        "ibus"
+      ],
+      "required_permissions": [
+        "Allow WayExpand to add and select its IBus source in GNOME input settings"
+      ],
+      "setup_instructions": [
+        "Run wayexpand setup --check",
+        "Run wayexpand setup --apply to preserve existing sources and add WayExpand",
+        "Verify WayExpand appears in GNOME's input-source menu; reselect it after changing input sources if needed"
+      ],
+      "known_limitations": [
+        "Active preedit/IME composition is unsupported",
+        "Desktop end-to-end certification is pending"
+      ],
       "verified_applications": [],
       "last_certification_result": "Not certified; no accepted GNOME physical-desktop evidence"
     },
@@ -16,10 +27,25 @@
       "id": "kde-wayland",
       "desktop": "KDE Plasma / Wayland",
       "recommended_route_id": "ibus",
-      "supported_injection_backends": ["ibus", "libei"],
-      "required_permissions": ["IBus engine selection for the recommended route", "Explicit consent and raw-input access for evdev compatibility mode", "RemoteDesktop portal consent for libei injection when requested"],
-      "setup_instructions": ["Run wayexpand setup --check", "Prefer the policy-allowed IBus route", "Run wayexpand backend test --capture and --injection separately before evaluating evdev+libei"],
-      "known_limitations": ["evdev cannot identify sensitive fields", "Multi-layout EIS active-group discovery may be unavailable", "No route is production certified"],
+      "supported_injection_backends": [
+        "ibus",
+        "libei"
+      ],
+      "required_permissions": [
+        "IBus engine selection for the recommended route",
+        "Explicit consent and raw-input access for evdev compatibility mode",
+        "RemoteDesktop portal consent for libei injection when requested"
+      ],
+      "setup_instructions": [
+        "Run wayexpand setup --check",
+        "Prefer the policy-allowed IBus route",
+        "Run wayexpand backend test --capture and --injection separately before evaluating evdev+libei"
+      ],
+      "known_limitations": [
+        "evdev cannot identify sensitive fields",
+        "Multi-layout EIS active-group discovery may be unavailable",
+        "No route is production certified"
+      ],
       "verified_applications": [],
       "last_certification_result": "Not certified; preserved KWin tests are not current physical-input certification"
     },
@@ -27,10 +53,23 @@
       "id": "sway",
       "desktop": "Sway / Wayland",
       "recommended_route_id": "input-method-v2",
-      "supported_injection_backends": ["input-method-v2", "wlroots-virtual-keyboard"],
-      "required_permissions": ["Compositor support and activation for input-method-v2", "Explicit raw-input authorization for evdev fallback"],
-      "setup_instructions": ["Run wayexpand setup --check --json", "Use input-method-v2 only when the live probe and organization policy allow it", "Do not enable evdev when the active layout cannot be determined"],
-      "known_limitations": ["Sway evdev does not report the effective keyboard XKB layout", "Input-method-v2 application behavior is not certified"],
+      "supported_injection_backends": [
+        "input-method-v2",
+        "wlroots-virtual-keyboard"
+      ],
+      "required_permissions": [
+        "Compositor support and activation for input-method-v2",
+        "Explicit raw-input authorization for evdev fallback"
+      ],
+      "setup_instructions": [
+        "Run wayexpand setup --check --json",
+        "Use input-method-v2 only when the live probe and organization policy allow it",
+        "Do not enable evdev when the active layout cannot be determined"
+      ],
+      "known_limitations": [
+        "Sway evdev does not report the effective keyboard XKB layout",
+        "Input-method-v2 application behavior is not certified"
+      ],
       "verified_applications": [],
       "last_certification_result": "Not certified; no accepted Sway physical-desktop evidence"
     },
@@ -38,10 +77,23 @@
       "id": "hyprland",
       "desktop": "Hyprland / Wayland",
       "recommended_route_id": "input-method-v2",
-      "supported_injection_backends": ["input-method-v2", "wlroots-virtual-keyboard"],
-      "required_permissions": ["Compositor support and activation for input-method-v2", "Explicit raw-input authorization for evdev fallback"],
-      "setup_instructions": ["Run wayexpand setup --check --json", "Use the live capability and policy recommendation", "Run real-client tests after compositor upgrades"],
-      "known_limitations": ["Input-method-v2 application behavior is not certified", "evdev fallback does not detect sensitive fields"],
+      "supported_injection_backends": [
+        "input-method-v2",
+        "wlroots-virtual-keyboard"
+      ],
+      "required_permissions": [
+        "Compositor support and activation for input-method-v2",
+        "Explicit raw-input authorization for evdev fallback"
+      ],
+      "setup_instructions": [
+        "Run wayexpand setup --check --json",
+        "Use the live capability and policy recommendation",
+        "Run real-client tests after compositor upgrades"
+      ],
+      "known_limitations": [
+        "Input-method-v2 application behavior is not certified",
+        "evdev fallback does not detect sensitive fields"
+      ],
       "verified_applications": [],
       "last_certification_result": "Not certified; no accepted Hyprland physical-desktop evidence"
     }
@@ -70,7 +122,9 @@
         "gnome"
       ],
       "setup_detail": "toolkit-aware committed text; capture stays off until the field reports a non-sensitive content type, and replacements require matching surrounding text; no raw keyboard access",
-      "replacement_assurance": "verified"
+      "trigger_precondition": "surrounding_text_matches_trigger",
+      "output_transaction": "separate_delete_and_commit",
+      "application_result": "unobservable"
     },
     {
       "id": "kde-evdev-libei",
@@ -95,7 +149,9 @@
         "gnome"
       ],
       "setup_detail": "explicit evdev compatibility fallback with libei output; observes global keyboard input and has no password-field awareness",
-      "replacement_assurance": "unverified"
+      "trigger_precondition": "focus_checked_with_compatibility_consent",
+      "output_transaction": "separate_delete_and_key_events",
+      "application_result": "unobservable"
     },
     {
       "id": "sway-evdev-wlroots",
@@ -120,7 +176,9 @@
         "hyprland"
       ],
       "setup_detail": "explicit evdev compatibility fallback with wlroots virtual-keyboard output; observes global keyboard input and has no password-field awareness",
-      "replacement_assurance": "unverified"
+      "trigger_precondition": "none",
+      "output_transaction": "separate_delete_and_key_events",
+      "application_result": "unobservable"
     },
     {
       "id": "input-method-v2",
@@ -145,7 +203,9 @@
         "hyprland"
       ],
       "setup_detail": "exclusive text capture; unsupported-key pass-through and compositor behavior require certification",
-      "replacement_assurance": "verified"
+      "trigger_precondition": "surrounding_text_matches_trigger",
+      "output_transaction": "atomic_protocol_batch",
+      "application_result": "unobservable"
     }
   ]
 }

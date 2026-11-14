@@ -18,6 +18,9 @@ pub const MAX_TAG_CHARS: usize = 64;
 pub const MAX_CATEGORY_CHARS: usize = 64;
 pub const MAX_APP_FILTERS: usize = 32;
 pub const MAX_APP_FILTER_CHARS: usize = 256;
+pub const MAX_PROCESS_EXECUTABLE_PATH_CHARS: usize = 4096;
+/// Linux task `comm` names are limited to 15 bytes plus a trailing NUL.
+pub const MAX_PROCESS_NAME_BYTES: usize = 15;
 pub const MAX_TEMPLATE_ENV: usize = 32;
 
 // ---- Triggers ---------------------------------------------------------

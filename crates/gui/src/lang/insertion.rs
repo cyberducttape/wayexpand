@@ -1,46 +1,46 @@
 use super::{Language, Strings};
 use crate::runtime::{OutputRefusal, ReplacementAssurance};
-use wayexpand_core::CompatibilityMode;
+use wayexpand_core::{CompatibilityMode, TerminalPaste};
 
 impl Strings {
     pub fn insertion_plan_notice(&self, strategy: wayexpand_core::InsertionStrategy) -> String {
         use wayexpand_core::InsertionStrategy as Strategy;
         match (self.lang, strategy) {
             (Language::English, Strategy::VerifiedReplacement) => {
-                "Plan: verified atomic replacement.".into()
+                "Plan: use the atomic route contract. Application-level insertion still needs a real-app test.".into()
             }
             (Language::English, Strategy::NativeTextCommit) => {
-                "Plan: native text commit. Compatibility mode is enabled; replacement remains non-atomic.".into()
+                "Plan: native text commit. Compatibility mode is enabled; replacement is non-atomic and the application result remains unverified.".into()
             }
             (Language::English, Strategy::ClipboardAssistedPaste) => {
                 "Plan: copy and paste manually. The active route cannot provide a verified, interactive replacement. For long configuration text, use `wayexpand new` to generate a file.".into()
             }
             (Language::English, Strategy::PacedSyntheticKeystrokes { predicted_ms }) => {
-                format!("Plan: paced synthetic keystrokes, estimated {predicted_ms} ms; compatibility mode is enabled.")
+                format!("Plan: paced synthetic keystrokes, estimated {predicted_ms} ms; compatibility mode is enabled, replacement is non-atomic, and the application result remains unverified.")
             }
             (Language::German, Strategy::VerifiedReplacement) => {
-                "Plan: verifizierte atomare Ersetzung.".into()
+                "Plan: atomaren Routenvertrag verwenden. Die Einfügung muss noch in einer echten Anwendung getestet werden.".into()
             }
             (Language::German, Strategy::NativeTextCommit) => {
-                "Plan: native Texteingabe. Der Kompatibilitätsmodus ist aktiv; die Ersetzung bleibt nicht atomar.".into()
+                "Plan: native Texteingabe. Der Kompatibilitätsmodus ist aktiv; die Ersetzung ist nicht atomar und das Anwendungsergebnis bleibt unverifiziert.".into()
             }
             (Language::German, Strategy::ClipboardAssistedPaste) => {
                 "Plan: manuell kopieren und einfügen. Der aktive Weg bietet keine verifizierte interaktive Ersetzung.".into()
             }
             (Language::German, Strategy::PacedSyntheticKeystrokes { predicted_ms }) => {
-                format!("Plan: simulierte Tastenanschläge, geschätzt {predicted_ms} ms; der Kompatibilitätsmodus ist aktiv.")
+                format!("Plan: simulierte Tastenanschläge, geschätzt {predicted_ms} ms; der Kompatibilitätsmodus ist aktiv, die Ersetzung ist nicht atomar und das Anwendungsergebnis bleibt unverifiziert.")
             }
             (Language::Indonesian, Strategy::VerifiedReplacement) => {
-                "Rencana: penggantian atomik terverifikasi.".into()
+                "Rencana: gunakan kontrak rute atomik. Penyisipan pada aplikasi tetap perlu diuji di aplikasi nyata.".into()
             }
             (Language::Indonesian, Strategy::NativeTextCommit) => {
-                "Rencana: komit teks native. Mode kompatibilitas aktif; penggantian tetap non-atomik.".into()
+                "Rencana: komit teks native. Mode kompatibilitas aktif; penggantian non-atomik dan hasil aplikasi belum terverifikasi.".into()
             }
             (Language::Indonesian, Strategy::ClipboardAssistedPaste) => {
                 "Rencana: salin dan tempel secara manual. Jalur aktif tidak menyediakan penggantian interaktif terverifikasi.".into()
             }
             (Language::Indonesian, Strategy::PacedSyntheticKeystrokes { predicted_ms }) => {
-                format!("Rencana: ketukan papan ketik sintetis, perkiraan {predicted_ms} ms; mode kompatibilitas aktif.")
+                format!("Rencana: ketukan papan ketik sintetis, perkiraan {predicted_ms} ms; mode kompatibilitas aktif, penggantian non-atomik, dan hasil aplikasi belum terverifikasi.")
             }
         }
     }
@@ -48,7 +48,7 @@ impl Strings {
     pub fn replacement_pill(&self, assurance: ReplacementAssurance) -> &'static str {
         match (self.lang, assurance) {
             (Language::English, ReplacementAssurance::Verified) => {
-                "Replacement: Target text verified"
+                "Replacement: Atomic route contract"
             }
             (Language::English, ReplacementAssurance::FocusTrackedBestEffort) => {
                 "Replacement: Focus-tracked best effort"
@@ -56,7 +56,9 @@ impl Strings {
             (Language::English, ReplacementAssurance::Unverified) => "Replacement: Unverified",
             (Language::English, ReplacementAssurance::Blocked) => "Replacement: Blocked",
             (Language::English, ReplacementAssurance::Unavailable) => "Replacement: Unavailable",
-            (Language::German, ReplacementAssurance::Verified) => "Ersetzung: Zieltext verifiziert",
+            (Language::German, ReplacementAssurance::Verified) => {
+                "Ersetzung: Atomarer Routenvertrag"
+            }
             (Language::German, ReplacementAssurance::FocusTrackedBestEffort) => {
                 "Ersetzung: Fokusgeprüft, bestmöglich"
             }
@@ -64,7 +66,7 @@ impl Strings {
             (Language::German, ReplacementAssurance::Blocked) => "Ersetzung: Blockiert",
             (Language::German, ReplacementAssurance::Unavailable) => "Ersetzung: Nicht verfügbar",
             (Language::Indonesian, ReplacementAssurance::Verified) => {
-                "Penggantian: Teks tujuan terverifikasi"
+                "Penggantian: kontrak rute atomik"
             }
             (Language::Indonesian, ReplacementAssurance::FocusTrackedBestEffort) => {
                 "Penggantian: Upaya terbaik dengan pelacakan fokus"
@@ -82,19 +84,19 @@ impl Strings {
     /// Explain exactly what the active route can establish before erasing.
     pub fn replacement_explanation(&self, assurance: ReplacementAssurance) -> &'static str {
         match (self.lang, assurance) {
-            (Language::English, ReplacementAssurance::Verified) => "The route checks the target field's surrounding text before deleting the trigger.",
-            (Language::English, ReplacementAssurance::FocusTrackedBestEffort) => "The window tracker confirms focus immediately before typing, but the route cannot verify that the text at the cursor is still the trigger. New physical typing can reach the app during replacement and may delete surrounding text or leave part of the trigger behind. A focus change refuses or stops output.",
-            (Language::English, ReplacementAssurance::Unverified) => "This explicitly allowed keystroke route cannot verify the target field, focus, or text it erases. New physical typing can reach the app during replacement and may delete surrounding text or leave part of the trigger behind. Strict mode refuses this operation.",
+            (Language::English, ReplacementAssurance::Verified) => "The active route advertises an atomic replacement contract, so trigger deletion and replacement are submitted as one operation. This route-level guarantee does not confirm that this specific application rendered the expected text; recent output acknowledgements remain unverified until an application test confirms the result.",
+            (Language::English, ReplacementAssurance::FocusTrackedBestEffort) => "The window tracker confirms focus immediately before typing, but the route cannot verify that the text at the cursor is still the trigger; deletion and insertion are separate, non-atomic steps. Physical typing can interleave, delete surrounding text, corrupt nearby text, or leave partial output. Already-delivered text cannot be rolled back, and WayExpand never retries uncertain output. This route has no accepted physical-session target-integrity certification. A detected focus change stops output.",
+            (Language::English, ReplacementAssurance::Unverified) => "This explicitly allowed keystroke route cannot verify the target field, focus, or trigger text it erases; deletion and insertion are separate, non-atomic steps. Physical typing can interleave, delete surrounding text, corrupt nearby text, or leave partial output. Already-delivered text cannot be rolled back, and WayExpand never retries uncertain output. This route has no accepted physical-session target-integrity certification. Strict mode refuses this operation.",
             (Language::English, ReplacementAssurance::Blocked) => "Strict mode refuses keystroke replacement because the route cannot verify what it erases. Choose a verified route or explicitly allow a compatibility mode in Settings → Engine.",
             (Language::English, ReplacementAssurance::Unavailable) => "No output route is connected.",
-            (Language::German, ReplacementAssurance::Verified) => "Der Weg prüft den umgebenden Text des Zielfelds, bevor der Auslöser gelöscht wird.",
-            (Language::German, ReplacementAssurance::FocusTrackedBestEffort) => "Der Fenster-Tracker bestätigt den Fokus direkt vor dem Tippen, aber der Weg kann nicht prüfen, ob am Cursor noch der Auslöser steht. Neue physische Eingaben können die Anwendung während der Ersetzung erreichen und umliegenden Text löschen oder Teile des Auslösers zurücklassen. Ein Fokuswechsel verweigert oder stoppt die Ausgabe.",
-            (Language::German, ReplacementAssurance::Unverified) => "Dieser ausdrücklich erlaubte Tastenanschlag-Weg kann Zielfeld, Fokus oder gelöschten Text nicht verifizieren. Neue physische Eingaben können die Anwendung während der Ersetzung erreichen und umliegenden Text löschen oder Teile des Auslösers zurücklassen. Der strikte Modus verweigert diesen Vorgang.",
+            (Language::German, ReplacementAssurance::Verified) => "Der aktive Weg bietet einen atomaren Ersetzungsvertrag: Löschen des Auslösers und Einfügen des Ersatzes werden als ein Vorgang übermittelt. Diese Routengarantie bestätigt nicht, dass diese konkrete Anwendung den erwarteten Text dargestellt hat; Ausgabe-Bestätigungen bleiben unverifiziert, bis ein Anwendungstest das Ergebnis bestätigt.",
+            (Language::German, ReplacementAssurance::FocusTrackedBestEffort) => "Der Fenster-Tracker bestätigt den Fokus direkt vor dem Tippen, aber der Weg kann nicht prüfen, ob am Cursor noch der Auslöser steht; Löschen und Einfügen sind getrennte, nicht atomare Schritte. Physische Eingaben können sich überlagern, umliegenden Text löschen oder beschädigen oder eine unvollständige Ausgabe hinterlassen. Bereits gesendeter Text kann nicht zurückgenommen werden; WayExpand wiederholt unsichere Ausgaben nie. Für diesen Weg gibt es keine anerkannte Integritätszertifizierung in einer realen Desktop-Sitzung. Ein erkannter Fokuswechsel stoppt die Ausgabe.",
+            (Language::German, ReplacementAssurance::Unverified) => "Dieser ausdrücklich erlaubte Tastenanschlag-Weg kann Zielfeld, Fokus oder Auslösertext nicht verifizieren; Löschen und Einfügen sind getrennte, nicht atomare Schritte. Physische Eingaben können sich überlagern, umliegenden Text löschen oder beschädigen oder eine unvollständige Ausgabe hinterlassen. Bereits gesendeter Text kann nicht zurückgenommen werden; WayExpand wiederholt unsichere Ausgaben nie. Für diesen Weg gibt es keine anerkannte Integritätszertifizierung in einer realen Desktop-Sitzung. Der strikte Modus verweigert diesen Vorgang.",
             (Language::German, ReplacementAssurance::Blocked) => "Der strikte Modus verweigert die Ersetzung per Tastenanschlag, weil der Weg den gelöschten Text nicht prüfen kann. Wählen Sie einen verifizierten Weg oder erlauben Sie ausdrücklich einen Kompatibilitätsmodus unter Einstellungen → Engine.",
             (Language::German, ReplacementAssurance::Unavailable) => "Kein Ausgabeweg ist verbunden.",
-            (Language::Indonesian, ReplacementAssurance::Verified) => "Jalur ini memeriksa teks di sekitar pemicu pada kolom tujuan sebelum menghapusnya.",
-            (Language::Indonesian, ReplacementAssurance::FocusTrackedBestEffort) => "Pelacak jendela memastikan fokus tepat sebelum mengetik, tetapi jalur ini tidak dapat memastikan teks di kursor masih berupa pemicu. Ketikan fisik baru dapat masuk ke aplikasi selama penggantian dan mungkin menghapus teks di sekitarnya atau menyisakan sebagian pemicu. Perpindahan fokus akan menolak atau menghentikan keluaran.",
-            (Language::Indonesian, ReplacementAssurance::Unverified) => "Jalur tombol yang diizinkan secara eksplisit ini tidak dapat memastikan kolom tujuan, fokus, atau teks yang dihapus. Ketikan fisik baru dapat masuk ke aplikasi selama penggantian dan mungkin menghapus teks di sekitarnya atau menyisakan sebagian pemicu. Mode ketat menolak operasi ini.",
+            (Language::Indonesian, ReplacementAssurance::Verified) => "Jalur aktif menawarkan kontrak penggantian atomik: penghapusan pemicu dan pengiriman pengganti dilakukan sebagai satu operasi. Jaminan tingkat rute ini tidak memastikan bahwa aplikasi ini menampilkan teks yang diharapkan; pengakuan keluaran tetap belum terverifikasi sampai pengujian aplikasi mengonfirmasi hasilnya.",
+            (Language::Indonesian, ReplacementAssurance::FocusTrackedBestEffort) => "Pelacak jendela memastikan fokus tepat sebelum mengetik, tetapi jalur ini tidak dapat memastikan teks di kursor masih berupa pemicu; penghapusan dan penyisipan adalah langkah terpisah yang tidak atomik. Ketikan fisik dapat bercampur, menghapus teks di sekitarnya, merusak teks, atau meninggalkan keluaran yang tidak lengkap. Teks yang sudah terkirim tidak dapat dibatalkan, dan WayExpand tidak pernah mengulang keluaran yang hasilnya tidak pasti. Jalur ini belum memiliki sertifikasi integritas target dari sesi desktop fisik yang diterima. Perubahan fokus yang terdeteksi akan menghentikan keluaran.",
+            (Language::Indonesian, ReplacementAssurance::Unverified) => "Jalur tombol yang diizinkan secara eksplisit ini tidak dapat memastikan kolom tujuan, fokus, atau teks pemicu yang dihapus; penghapusan dan penyisipan adalah langkah terpisah yang tidak atomik. Ketikan fisik dapat bercampur, menghapus teks di sekitarnya, merusak teks, atau meninggalkan keluaran yang tidak lengkap. Teks yang sudah terkirim tidak dapat dibatalkan, dan WayExpand tidak pernah mengulang keluaran yang hasilnya tidak pasti. Jalur ini belum memiliki sertifikasi integritas target dari sesi desktop fisik yang diterima. Mode ketat menolak operasi ini.",
             (Language::Indonesian, ReplacementAssurance::Blocked) => "Mode ketat menolak penggantian melalui tombol karena jalur ini tidak dapat memastikan teks yang dihapus. Pilih jalur terverifikasi atau izinkan mode kompatibilitas secara eksplisit di Pengaturan → Mesin.",
             (Language::Indonesian, ReplacementAssurance::Unavailable) => "Tidak ada jalur keluaran yang terhubung.",
         }
@@ -259,6 +261,42 @@ impl Strings {
             Language::English => "Risk of non-atomic replacement: physical typing can reach the application while WayExpand is erasing and inserting, so the two streams may interleave and corrupt nearby text. Evdev also cannot detect password fields. Keep this Off for strict safety; prefer a verified input-method route when text integrity matters.",
             Language::German => "Risiko einer nicht atomaren Ersetzung: Physische Tasten können die Anwendung erreichen, während WayExpand löscht und einfügt. Beide Eingabeströme können sich überlagern und benachbarten Text beschädigen. Evdev erkennt außerdem keine Passwortfelder. Für strikte Sicherheit deaktiviert lassen; wenn Textintegrität wichtig ist, eine verifizierte Eingabemethoden-Route verwenden.",
             Language::Indonesian => "Risiko penggantian non-atomik: ketikan fisik dapat mencapai aplikasi saat WayExpand menghapus dan menyisipkan teks. Kedua aliran input dapat bercampur dan merusak teks di sekitarnya. Evdev juga tidak dapat mendeteksi kolom kata sandi. Biarkan nonaktif untuk keselamatan ketat; gunakan rute metode input terverifikasi bila integritas teks penting.",
+        }
+    }
+
+    pub fn terminal_paste_label(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Terminal paste",
+            Language::German => "Einfügen im Terminal",
+            Language::Indonesian => "Tempel di terminal",
+        }
+    }
+
+    pub fn terminal_paste_option(&self, mode: TerminalPaste) -> &'static str {
+        match (self.lang, mode) {
+            (Language::English, TerminalPaste::Off) => "Off: type",
+            (Language::English, TerminalPaste::Multiline) => "Multi-line and long text",
+            (Language::English, TerminalPaste::Always) => "Always",
+            (Language::German, TerminalPaste::Off) => "Aus: tippen",
+            (Language::German, TerminalPaste::Multiline) => "Mehrzeiliger und langer Text",
+            (Language::German, TerminalPaste::Always) => "Immer",
+            (Language::Indonesian, TerminalPaste::Off) => "Nonaktif: ketik",
+            (Language::Indonesian, TerminalPaste::Multiline) => "Teks multibaris dan panjang",
+            (Language::Indonesian, TerminalPaste::Always) => "Selalu",
+        }
+    }
+
+    pub fn terminal_paste_help(&self) -> &'static str {
+        match self.lang {
+            Language::English => {
+                "In your terminal apps, the libei route can paste a replacement with the clipboard and Ctrl+Shift+V instead of typing it. Typed line breaks press Enter, so a shell runs each line as it arrives; a paste arrives at once and bracketed paste waits for your Enter. Pasted text is not limited by the keystroke limit or the keyboard layout. The clipboard manager is asked not to keep the replacement, and your previous clipboard text is restored. If the clipboard holds something other than text, the replacement is typed."
+            }
+            Language::German => {
+                "In Ihren Terminal-Apps kann der libei-Weg eine Ersetzung über die Zwischenablage und Strg+Umschalt+V einfügen, statt sie zu tippen. Getippte Zeilenumbrüche drücken die Eingabetaste, sodass eine Shell jede Zeile sofort ausführt; eingefügter Text kommt auf einmal an, und Bracketed Paste wartet auf Ihre Eingabetaste. Eingefügter Text ist weder durch das Tastenanschlag-Limit noch durch das Tastaturlayout begrenzt. Die Zwischenablageverwaltung wird gebeten, die Ersetzung nicht zu speichern, und Ihr vorheriger Text in der Zwischenablage wird wiederhergestellt. Enthält die Zwischenablage etwas anderes als Text, wird die Ersetzung getippt."
+            }
+            Language::Indonesian => {
+                "Di aplikasi terminal Anda, jalur libei dapat menempelkan pengganti melalui papan klip dan Ctrl+Shift+V alih-alih mengetiknya. Baris baru yang diketik menekan Enter, sehingga shell menjalankan setiap baris begitu tiba; tempelan tiba sekaligus dan bracketed paste menunggu Enter Anda. Teks yang ditempel tidak dibatasi oleh batas penekanan tombol maupun tata letak keyboard. Pengelola papan klip diminta untuk tidak menyimpan pengganti, dan teks papan klip Anda sebelumnya dipulihkan. Jika papan klip berisi selain teks, pengganti diketik."
+            }
         }
     }
 }

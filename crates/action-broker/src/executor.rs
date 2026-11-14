@@ -32,6 +32,72 @@ pub struct ActionExecutor {
     authorization_gate: AuthorizationGate,
 }
 
+/// Linearizes action process startup with broker shutdown publication.
+/// Running child supervisors still observe the cancellation token, while this
+/// gate ensures no new process starts after shutdown wins the launch race.
+#[derive(Default)]
+pub struct ActionShutdown {
+    cancelled: Arc<AtomicBool>,
+    launch_lock: Mutex<()>,
+}
+
+impl ActionShutdown {
+    pub fn request(&self) {
+        let _guard = self
+            .launch_lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        self.cancelled.store(true, Ordering::Release);
+    }
+
+    pub fn is_requested(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+
+    fn cancellation_token(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.cancelled)
+    }
+
+    /// Run the synchronous process-start operation while holding the same
+    /// gate used by `request()`. `None` means shutdown won the race.
+    fn start_if_running<T>(
+        &self,
+        authorization: &AuthorizedAction,
+        requested_action: &str,
+        start: impl FnOnce() -> T,
+    ) -> Option<T> {
+        let _guard = self
+            .launch_lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let authorized_for_action = authorization.action_id == requested_action;
+        if !action_start_is_admitted(
+            authorized_for_action,
+            self.cancelled.load(Ordering::Acquire),
+        ) {
+            None
+        } else {
+            Some(start())
+        }
+    }
+}
+
+/// Unforgeable proof that the active-session authorization check approved one
+/// named action. Carry it to the process-spawn boundary so an authorized
+/// request cannot accidentally become an unauthenticated launch during a
+/// future refactor.
+#[derive(Debug)]
+struct AuthorizedAction {
+    action_id: String,
+}
+
+/// The irreversible process-spawn transition requires authorization for the
+/// requested action and an open shutdown gate. Kept as a pure predicate so
+/// the scheduler model exercises the same transition as production.
+fn action_start_is_admitted(authorized_for_action: bool, shutdown_requested: bool) -> bool {
+    authorized_for_action && !shutdown_requested
+}
+
 const MAX_PENDING_AUTHORIZATIONS: usize = 4;
 const MAX_AUTHORIZATION_FAILURES: usize = 256;
 const AUTHORIZATION_COOLDOWN_BASE: Duration = Duration::from_secs(2);
@@ -211,7 +277,7 @@ impl ActionExecutor {
     /// Execute an action with process-group containment and policy enforcement.
     #[cfg(test)]
     pub async fn execute(&self, request: ActionRequest) -> Result<ActionResponse, ActionError> {
-        self.execute_inner(request, None).await
+        self.execute_inner(request, None, None, None).await
     }
 
     /// Execute an action that can be cancelled when the broker begins
@@ -223,7 +289,8 @@ impl ActionExecutor {
         request: ActionRequest,
         shutdown: Arc<AtomicBool>,
     ) -> Result<ActionResponse, ActionError> {
-        self.execute_inner(request, Some(shutdown)).await
+        self.execute_inner(request, Some(shutdown), None, None)
+            .await
     }
 
     /// Authorize the authenticated socket peer for this specific action with
@@ -234,7 +301,7 @@ impl ActionExecutor {
         &self,
         request: ActionRequest,
         peer: &crate::ipc::PeerIdentity,
-        shutdown: Arc<AtomicBool>,
+        shutdown: Arc<ActionShutdown>,
     ) -> Result<ActionResponse, ActionError> {
         let action_id = request.action_id.clone();
         if !valid_action_id(&action_id) {
@@ -288,24 +355,33 @@ impl ActionExecutor {
                 }
                 .into(),
             })?;
-        if shutdown.load(Ordering::Acquire) {
+        if shutdown.is_requested() {
             return Err(ActionError::CommunicationError {
                 reason: "broker is shutting down; action was not started".into(),
             });
         }
+        let cancellation = shutdown.cancellation_token();
         let authorized =
-            polkit_authorized(pid, start_time, peer.uid, &request.action_id, &shutdown).await;
+            polkit_authorized(pid, start_time, peer.uid, &request.action_id, &cancellation).await;
         prompt.complete(authorized);
         if !authorized {
             return Err(authorization_denied(&request.action_id));
         }
-        self.execute_inner(request, Some(shutdown)).await
+        self.execute_inner(
+            request,
+            Some(cancellation),
+            Some(shutdown),
+            Some(AuthorizedAction { action_id }),
+        )
+        .await
     }
 
     async fn execute_inner(
         &self,
         request: ActionRequest,
         shutdown: Option<Arc<AtomicBool>>,
+        launch_gate: Option<Arc<ActionShutdown>>,
+        authorization: Option<AuthorizedAction>,
     ) -> Result<ActionResponse, ActionError> {
         if shutdown
             .as_ref()
@@ -497,7 +573,35 @@ impl ActionExecutor {
 
         let start = Instant::now();
 
-        let mut child = spawn_action(&mut cmd).map_err(|e| ActionError::SpawnFailed {
+        let mut spawn = || spawn_action(&mut cmd);
+        let mut child = match launch_gate {
+            Some(gate) => {
+                let authorization = authorization.as_ref().ok_or_else(|| {
+                    authorization_denied(&request.action_id)
+                })?;
+                gate.start_if_running(authorization, &request.action_id, spawn)
+                    .ok_or_else(|| ActionError::CommunicationError {
+                        reason: if authorization.action_id != request.action_id {
+                            "authorization did not match the requested action; action was not started"
+                        } else {
+                            "broker is shutting down; action was not started"
+                        }
+                        .into(),
+                    })?
+            }
+            None => {
+                if shutdown
+                    .as_ref()
+                    .is_some_and(|token| token.load(Ordering::Acquire))
+                {
+                    return Err(ActionError::CommunicationError {
+                        reason: "broker is shutting down; action was not started".into(),
+                    });
+                }
+                spawn()
+            }
+        }
+        .map_err(|e| ActionError::SpawnFailed {
             action_id: request.action_id.clone(),
             program: action_config.program.clone(),
             reason: e.to_string(),
@@ -769,6 +873,74 @@ mod tests {
     #[cfg(unix)]
     use crate::child_process::run_child_unix;
     use crate::config::ActionConfig;
+
+    #[test]
+    fn action_start_is_linearized_before_or_refused_after_shutdown() {
+        for _ in 0..128 {
+            let shutdown = Arc::new(ActionShutdown::default());
+            let authorization = Arc::new(AuthorizedAction {
+                action_id: "restart-service".into(),
+            });
+            let barrier = Arc::new(std::sync::Barrier::new(3));
+            let events = Arc::new(Mutex::new(Vec::new()));
+
+            let starter_shutdown = Arc::clone(&shutdown);
+            let starter_authorization = Arc::clone(&authorization);
+            let starter_barrier = Arc::clone(&barrier);
+            let starter_events = Arc::clone(&events);
+            let starter = std::thread::spawn(move || {
+                starter_barrier.wait();
+                starter_shutdown.start_if_running(&starter_authorization, "restart-service", || {
+                    starter_events.lock().unwrap().push("start")
+                })
+            });
+
+            let stopper_shutdown = Arc::clone(&shutdown);
+            let stopper_barrier = Arc::clone(&barrier);
+            let stopper_events = Arc::clone(&events);
+            let stopper = std::thread::spawn(move || {
+                stopper_barrier.wait();
+                stopper_shutdown.request();
+                stopper_events.lock().unwrap().push("shutdown");
+            });
+
+            barrier.wait();
+            let started = starter.join().unwrap().is_some();
+            stopper.join().unwrap();
+            assert!(shutdown.is_requested());
+
+            let events = events.lock().unwrap();
+            assert_eq!(events.last(), Some(&"shutdown"));
+            assert_eq!(started, events.first() == Some(&"start"));
+            assert!(shutdown
+                .start_if_running(&authorization, "restart-service", || {
+                    panic!("process start after shutdown")
+                })
+                .is_none());
+            assert!(shutdown
+                .start_if_running(&authorization, "different-action", || {
+                    panic!("process start with authorization for another action")
+                })
+                .is_none());
+        }
+    }
+
+    #[test]
+    fn action_start_refuses_a_permit_for_a_different_action() {
+        let shutdown = ActionShutdown::default();
+        let authorization = AuthorizedAction {
+            action_id: "restart-service".into(),
+        };
+        let mut spawned = false;
+
+        let result = shutdown.start_if_running(&authorization, "delete-database", || {
+            spawned = true;
+        });
+
+        assert!(result.is_none());
+        assert!(!spawned, "a mismatched authorization must not reach spawn");
+        assert!(!shutdown.is_requested());
+    }
 
     #[cfg(unix)]
     #[test]
@@ -1572,6 +1744,160 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn broker_shutdown_kills_action_before_its_delayed_side_effect() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-broker-delayed-side-effect-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let started_marker = directory.join("started");
+        let effect_marker = directory.join("effect");
+        let script = format!(
+            "printf started > '{}'; sleep 1; printf happened > '{}'",
+            started_marker.display(),
+            effect_marker.display()
+        );
+
+        let mut config = BrokerConfig::default();
+        config.actions.insert(
+            "delayed-side-effect".to_string(),
+            ActionConfig {
+                parameters: HashMap::new(),
+                sandbox: None,
+                program: "/bin/sh".to_string(),
+                args: vec!["-c".to_string(), script],
+                timeout_ms: 10_000,
+                server_env: vec![],
+                client_forward_env: vec![],
+                allow_dangerous_env: false,
+                inherit_env: false,
+                cwd: None,
+                log_output: false,
+                enabled: true,
+                description: None,
+            },
+        );
+        let executor = Arc::new(ActionExecutor::new(&config).unwrap());
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let action_executor = Arc::clone(&executor);
+        let action_shutdown = Arc::clone(&shutdown);
+        let action = tokio::spawn(async move {
+            action_executor
+                .execute_cancellable(
+                    ActionRequest {
+                        action_id: "delayed-side-effect".to_string(),
+                        timeout_ms: 10_000,
+                        inherit_env: false,
+                        env_vars: vec![],
+                        stdout_capture: true,
+                        parameters: std::collections::BTreeMap::new(),
+                    },
+                    action_shutdown,
+                )
+                .await
+        });
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !started_marker.exists() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("action did not reach its cancellable delay");
+        shutdown.store(true, Ordering::Release);
+
+        let result = tokio::time::timeout(Duration::from_secs(2), action)
+            .await
+            .expect("action did not stop after shutdown")
+            .expect("action task panicked");
+        assert!(matches!(
+            result,
+            Err(ActionError::CommunicationError { ref reason })
+                if reason.contains("cancelled because the broker is shutting down")
+        ));
+        assert!(
+            !effect_marker.exists(),
+            "descendant completed a delayed side effect after shutdown"
+        );
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn executor_does_not_start_action_after_shutdown_is_published() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = std::env::temp_dir().join(format!(
+            "wayexpand-broker-shutdown-before-start-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let marker = directory.join("action-started");
+        let program = directory.join("action.sh");
+        std::fs::write(
+            &program,
+            format!("#!/bin/sh\nprintf started > '{}'\n", marker.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let mut config = BrokerConfig::default();
+        config.actions.insert(
+            "marker".to_string(),
+            ActionConfig {
+                parameters: HashMap::new(),
+                sandbox: None,
+                program: program.display().to_string(),
+                args: vec![],
+                timeout_ms: 5_000,
+                server_env: vec![],
+                client_forward_env: vec![],
+                allow_dangerous_env: false,
+                inherit_env: false,
+                cwd: None,
+                log_output: false,
+                enabled: true,
+                description: None,
+            },
+        );
+        let executor = ActionExecutor::new(&config).unwrap();
+        let shutdown = Arc::new(AtomicBool::new(true));
+        let result = executor
+            .execute_cancellable(
+                ActionRequest {
+                    action_id: "marker".to_string(),
+                    timeout_ms: 5_000,
+                    inherit_env: false,
+                    env_vars: vec![],
+                    stdout_capture: true,
+                    parameters: std::collections::BTreeMap::new(),
+                },
+                shutdown,
+            )
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(ActionError::CommunicationError { .. })
+        ));
+        assert!(!marker.exists(), "shutdown action was launched");
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
     #[tokio::test]
     async fn uncaptured_output_is_discarded_unless_policy_logs_it() {
         let target_file = format!(
@@ -1669,7 +1995,7 @@ mod tests {
             .execute_authorized_cancellable(
                 timeout_test_request(1000),
                 &peer,
-                Arc::new(AtomicBool::new(false)),
+                Arc::new(ActionShutdown::default()),
             )
             .await
             .unwrap_err();
@@ -1941,5 +2267,75 @@ mod tests {
         let output = response.output().expect("noisy action should succeed");
         assert!(output.stdout_truncated);
         assert_eq!(output.stdout.len(), MAX_STREAM_OUTPUT_BYTES);
+    }
+}
+
+#[cfg(all(test, feature = "loom-tests"))]
+mod shutdown_loom {
+    use loom::sync::{Arc, Mutex};
+    use loom::thread;
+
+    use super::action_start_is_admitted;
+
+    #[derive(Default)]
+    struct State {
+        authorized: bool,
+        shutdown_requested: bool,
+        sequence: usize,
+        start_order: Option<usize>,
+        authorization_order: Option<usize>,
+        shutdown_order: Option<usize>,
+    }
+
+    /// Exhaust authorization, shutdown, and process-start orderings around the
+    /// broker's irreversible boundary. A start requires a positive action
+    /// authorization and must linearize before shutdown publication.
+    #[test]
+    fn action_start_requires_authorization_and_linearizes_before_shutdown() {
+        loom::model(|| {
+            let state = Arc::new(Mutex::new(State::default()));
+
+            let authorization_state = Arc::clone(&state);
+            let authorizer = thread::spawn(move || {
+                let mut state = authorization_state.lock().unwrap();
+                state.sequence += 1;
+                state.authorization_order = Some(state.sequence);
+                state.authorized = true;
+            });
+
+            let start_state = Arc::clone(&state);
+            let starter = thread::spawn(move || {
+                let mut state = start_state.lock().unwrap();
+                if action_start_is_admitted(state.authorized, state.shutdown_requested) {
+                    state.sequence += 1;
+                    state.start_order = Some(state.sequence);
+                }
+            });
+
+            let stop_state = Arc::clone(&state);
+            let stopper = thread::spawn(move || {
+                let mut state = stop_state.lock().unwrap();
+                state.sequence += 1;
+                state.shutdown_order = Some(state.sequence);
+                state.shutdown_requested = true;
+            });
+
+            authorizer.join().unwrap();
+            starter.join().unwrap();
+            stopper.join().unwrap();
+
+            let state = state.lock().unwrap();
+            assert!(state.shutdown_requested);
+            if let Some(start_order) = state.start_order {
+                assert!(state.authorized);
+                assert!(start_order > state.authorization_order.unwrap());
+                assert!(start_order < state.shutdown_order.unwrap());
+            }
+            assert!(!action_start_is_admitted(false, false));
+            assert!(!action_start_is_admitted(
+                state.authorized,
+                state.shutdown_requested
+            ));
+        });
     }
 }

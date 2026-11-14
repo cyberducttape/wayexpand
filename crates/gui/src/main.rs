@@ -76,8 +76,9 @@ struct RouteRecommendation {
     injection_state: BackendState,
     focus_tracking: bool,
     sensitive_fields: bool,
-    atomic_replace: bool,
-    replacement_assurance: &'static str,
+    trigger_precondition: &'static str,
+    output_transaction: &'static str,
+    application_result: &'static str,
     certified: bool,
 }
 
@@ -124,8 +125,9 @@ fn route_recommendation(
         injection_state: state,
         focus_tracking: contract.focus_tracking,
         sensitive_fields: contract.sensitive_fields,
-        atomic_replace: contract.atomic_replace,
-        replacement_assurance: &contract.replacement_assurance,
+        trigger_precondition: &contract.trigger_precondition,
+        output_transaction: &contract.output_transaction,
+        application_result: &contract.application_result,
         certified: contract.is_certified(),
     })
 }
@@ -313,7 +315,12 @@ struct GuiApp {
     settings_undo_chord: String,
     settings_compatibility_mode: wayexpand_core::CompatibilityMode,
     settings_keystroke_limit: String,
+    settings_terminal_paste: wayexpand_core::TerminalPaste,
     settings_font_scale: FontScale,
+    /// Width the one-row toolbar needed when it was last laid out. The
+    /// status chips change with the route, so a fixed breakpoint cannot
+    /// tell whether they fit beside the brand.
+    toolbar_row_width: f32,
     settings_error: Option<String>,
     dark_mode: bool,
     onboarding_visible: bool,
@@ -586,6 +593,7 @@ impl GuiApp {
         let settings_undo_chord = config.settings.undo_chord.clone().unwrap_or_default();
         let settings_compatibility_mode = config.settings.compatibility_mode;
         let settings_keystroke_limit = config.settings.keystroke_max_chars.to_string();
+        let settings_terminal_paste = config.settings.terminal_paste;
         let prefs = load_gui_prefs();
         let onboarding_completed = prefs.onboarding_completed;
         let onboarding_visible = gnome_setup_resume_pending
@@ -720,7 +728,9 @@ impl GuiApp {
             settings_undo_chord,
             settings_compatibility_mode,
             settings_keystroke_limit,
+            settings_terminal_paste,
             settings_font_scale,
+            toolbar_row_width: 0.0,
             settings_error: None,
             dark_mode: prefs.dark_mode.unwrap_or(true),
             onboarding_visible,

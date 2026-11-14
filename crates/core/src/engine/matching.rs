@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use unicode_general_category::{get_general_category, GeneralCategory};
 
-use super::{ExpansionEngine, MatchPlan, SensitiveText};
+use super::{input_generation_matches, ExpansionEngine, MatchPlan, SensitiveText};
 use crate::config::capitalize_first_letter;
 use crate::{AppFilter, ExpansionConfig, MatchMode};
 
@@ -272,7 +272,7 @@ impl ExpansionEngine {
         if max_size > 0 && output.len() > max_size {
             return false;
         }
-        if generation != self.input_generation {
+        if !input_generation_matches(generation, self.input_generation) {
             return false;
         }
         !self.sensitive_focus && !self.user_paused
@@ -361,11 +361,22 @@ impl ExpansionEngine {
         };
         self.terminal_app_scope
             .iter()
-            .any(|(filter, glob)| match filter {
-                AppFilter::AppIdExact(expected) => app_id == expected,
-                AppFilter::AppIdGlob(_) => glob.as_ref().is_some_and(|glob| glob.matches(app_id)),
-                AppFilter::TitleContains(_) => false,
-            })
+            .any(|(filter, glob)| super::app_id_matches_scope(app_id, filter, glob.as_ref()))
+    }
+
+    /// Whether the focused window is one of `settings.terminal_apps` (not
+    /// `raw_capture_apps`). Fails closed without a known app ID.
+    pub fn focused_app_is_listed_terminal(&self) -> bool {
+        let Some(app_id) = self
+            .normalized_window
+            .as_ref()
+            .and_then(|window| window.app_id.as_deref())
+        else {
+            return false;
+        };
+        self.terminal_app_scope[..self.terminal_apps_len]
+            .iter()
+            .any(|(filter, glob)| super::app_id_matches_scope(app_id, filter, glob.as_ref()))
     }
 
     /// An empty app filter matches everywhere. Each configured filter names
@@ -385,15 +396,18 @@ impl ExpansionEngine {
             .iter()
             .enumerate()
             .any(|(filter_index, filter)| match filter {
-                AppFilter::AppIdExact(app_id_filter) => window
-                    .app_id
-                    .as_deref()
-                    .is_some_and(|app_id| app_id == app_id_filter),
-                AppFilter::AppIdGlob(_) => window.app_id.as_deref().is_some_and(|app_id| {
-                    self.app_filter_globs[config_index][filter_index]
-                        .as_ref()
-                        .is_some_and(|pattern| pattern.matches(app_id))
-                }),
+                AppFilter::AppIdExact(_)
+                | AppFilter::AppIdGlob(_)
+                | AppFilter::ProcessExecutableExact(_)
+                | AppFilter::ProcessNameExact(_) => {
+                    window.app_id.as_deref().is_some_and(|app_id| {
+                        super::app_id_matches_scope(
+                            app_id,
+                            filter,
+                            self.app_filter_globs[config_index][filter_index].as_ref(),
+                        )
+                    })
+                }
                 AppFilter::TitleContains(title_filter) => {
                     if self.runtime_policy.disable_title_matching {
                         false

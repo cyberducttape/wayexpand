@@ -1,6 +1,6 @@
 //! End-to-end IBus engine resource profile.
 //!
-//! Run with `cargo bench -p wayexpand-backend-ibus --bench runtime-profile`.
+//! Run with `WAYEXPAND_PROCESS_CGROUP=disabled cargo bench -p wayexpand-backend-ibus --bench runtime-profile`.
 //! Linux runs also report process thread count and RSS/PSS from procfs. Other
 //! platforms report those OS-level measurements as unavailable.
 
@@ -10,11 +10,14 @@ use std::{
     time::{Duration, Instant},
 };
 use wayexpand_backend_ibus::{IbusEngineAdapter, IBUS_CAP_SURROUNDING_TEXT};
-use wayexpand_core::{Config, ExpansionEngine};
+use wayexpand_core::{
+    Config, ExpansionEngine, InputEvent, PendingExpansionDispatch, PendingExpansionResult,
+};
 
 const CONTEXT_COUNTS: [usize; 3] = [1, 4, 16];
 const RESOURCE_REPETITIONS: usize = 5;
 const LATENCY_SAMPLES: usize = 2_000;
+const COMMANDS_PER_CONTEXT: usize = 16;
 
 fn text_config() -> Config {
     Config::parse("[[expansion]]\ntrigger = ';profile'\nreplacement = 'WayExpand profile'\n")
@@ -25,6 +28,14 @@ fn async_config() -> Config {
     Config::parse(
         "[[expansion]]\ntrigger = ';profile'\nreplacement = ''\n\
          [expansion.command]\nprogram = '/usr/bin/true'\nargs = []\n",
+    )
+    .unwrap()
+}
+
+fn command_load_config() -> Config {
+    Config::parse(
+        "[[expansion]]\ntrigger = ';load'\nreplacement = ''\n\
+         [expansion.command]\nprogram = '/usr/bin/sleep'\nargs = ['0.02']\ntimeout_ms = 5000\n",
     )
     .unwrap()
 }
@@ -119,9 +130,10 @@ fn profile_contexts(label: &str, config: &Config) {
                 let metrics = adapter.engine().command_metrics();
                 metrics.command_worker_threads + metrics.hotkey_worker_threads
             })
-            .sum();
+            .max()
+            .unwrap_or(0);
         println!(
-            "context_profile kind={label} contexts={contexts} create_median={median}us reported_worker_threads={workers} before=[{before}] after=[{}]",
+            "context_profile kind={label} contexts={contexts} create_median={median}us shared_worker_threads={workers} before=[{before}] after=[{}]",
             resources()
         );
         drop(live);
@@ -173,13 +185,83 @@ fn profile_typing_latency(config: &Config, label: &str) {
     );
 }
 
+fn profile_concurrent_command_load() {
+    let config = command_load_config();
+    for contexts in CONTEXT_COUNTS {
+        let mut engines = (0..contexts)
+            .map(|_| ExpansionEngine::new(config.clone()).unwrap())
+            .collect::<Vec<_>>();
+        for engine in &mut engines {
+            assert!(engine.enable_async_commands());
+        }
+        let pending = engines
+            .iter_mut()
+            .map(|engine| {
+                engine
+                    .process_deferred(InputEvent::Text(";load".into()))
+                    .pop()
+                    .expect("load trigger should match")
+            })
+            .collect::<Vec<PendingExpansionResult>>();
+
+        let started = Instant::now();
+        for _ in 0..COMMANDS_PER_CONTEXT {
+            for (engine, pending) in engines.iter_mut().zip(&pending) {
+                assert!(matches!(
+                    engine.dispatch_pending_with_policy(pending.clone(), 0),
+                    Ok(PendingExpansionDispatch::Queued)
+                ));
+            }
+        }
+
+        let mut completions = vec![0_usize; contexts];
+        let mut first_completion_us = vec![None; contexts];
+        let mut last_completion_us = vec![None; contexts];
+        let mut completion_latency_samples_ns = Vec::with_capacity(contexts * COMMANDS_PER_CONTEXT);
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while completions
+            .iter()
+            .any(|count| *count < COMMANDS_PER_CONTEXT)
+        {
+            for (index, engine) in engines.iter_mut().enumerate() {
+                let ready = engine.drain_completed_commands();
+                if !ready.is_empty() {
+                    let completed_at_ns = started.elapsed().as_nanos();
+                    let completed_at_us = completed_at_ns / 1_000;
+                    completions[index] += ready.len();
+                    first_completion_us[index].get_or_insert(completed_at_us);
+                    last_completion_us[index] = Some(completed_at_us);
+                    completion_latency_samples_ns
+                        .extend(std::iter::repeat_n(completed_at_ns, ready.len()));
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "async command load failed to drain: contexts={contexts}, completed={completions:?}"
+            );
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(completions, vec![COMMANDS_PER_CONTEXT; contexts]);
+        assert!(engines
+            .iter()
+            .all(|engine| { engine.command_metrics().command_failure_total == 0 }));
+        let completion_latency = report_latency(&mut completion_latency_samples_ns);
+        println!(
+            "command_load contexts={contexts} jobs_per_context={COMMANDS_PER_CONTEXT} elapsed={}us reactor_observed_completion_latency={completion_latency} first_completion_us={first_completion_us:?} last_completion_us={last_completion_us:?} resources=[{}]",
+            started.elapsed().as_micros(),
+            resources()
+        );
+    }
+}
+
 fn main() {
     let text = text_config();
     let command = async_config();
-    println!("ibus_runtime_profile workers=4_command+1_hotkey_per_async_context");
+    println!("ibus_runtime_profile workers=shared_4_command+1_hotkey_pool");
     profile_contexts("text_only", &text);
     profile_contexts("async_required", &command);
     profile_reload(&command);
+    profile_concurrent_command_load();
     profile_typing_latency(&text, "text_only");
 
     // Typing latency while the runtime is at its largest measured context

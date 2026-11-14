@@ -14,6 +14,7 @@ mod latency;
 mod output_connect;
 mod output_health;
 mod output_loop;
+mod paste;
 mod pending_output;
 mod policy;
 mod reactor;
@@ -41,8 +42,7 @@ use input_loop::{
     next_retry_delay, spawn_stdin_reader,
 };
 use output_loop::{
-    connect_output_with_retry, shutdown_injector, spawn_async_injector, OutputConnectOptions,
-    OutputWorkerState,
+    connect_output_with_retry, shutdown_injector, OutputConnectOptions, OutputWorkerState,
 };
 use reload::ReloadableConfig;
 use signal_hook::{
@@ -106,6 +106,13 @@ impl std::error::Error for EventError {
 }
 
 impl EventError {
+    fn applied_with_cursor_position_failure(&self) -> bool {
+        matches!(
+            self.source,
+            wayexpand_core::TransactionOutcome::AppliedWithCursorPositionFailure { .. }
+        )
+    }
+
     /// Stable, content-free outcome label for logs and diagnostics. Backend
     /// error messages can contain the rejected character or payload, so they
     /// must never be formatted on an expansion path.
@@ -215,7 +222,9 @@ struct Daemon {
     evdev: Option<EvdevSource>,
     #[cfg(test)]
     evdev_output_test_events: Option<mpsc::Receiver<InputEvent>>,
-    receiver: Option<mpsc::Receiver<String>>,
+    receiver: Option<mpsc::Receiver<input_loop::StdinLine>>,
+    stdin_input_monitor: input_loop::StdinInputMonitor,
+    stdin_quarantine_through: u64,
     status_publisher: StatusPublisher,
     focus_state: FocusState,
     profile_assignments: wayexpand_core::ProfileAssignments,
@@ -455,6 +464,10 @@ fn main() -> Result<()> {
         .map_err(|error| anyhow::anyhow!("could not start signal handler: {error}"))?;
     info!(path = %config.path().display(), fleet = use_fleet, "configuration loaded");
     wayexpand_core::set_keystroke_max_chars(config.engine.keystroke_max_chars());
+    paste::set_active_mode(
+        config.engine.terminal_paste(),
+        config.engine.focused_app_is_listed_terminal(),
+    );
     if let Some(socket) = control.path() {
         info!(path = %socket.display(), "control socket ready");
     } else {
@@ -500,6 +513,7 @@ fn main() -> Result<()> {
         );
     }
     let active_source = source_name;
+    let stdin_input_monitor = input_loop::StdinInputMonitor::default();
     let reconnect_delay = Duration::from_millis(250);
     let output_retry_at: Option<Instant> = None;
     let output_retry_delay = Duration::from_millis(250);
@@ -526,10 +540,14 @@ fn main() -> Result<()> {
                 else {
                     anyhow::bail!("output backend startup cancelled while stopping")
                 };
-                if evdev_mode && backend == "libei" {
+                if (evdev_mode && backend == "libei") || active_source == "stdin" {
                     let (injector, failures, worker_state) =
-                        spawn_async_injector(injector, Some(waker.clone()))
-                            .map_err(|error| anyhow::anyhow!("{error}"))?;
+                        output_loop::spawn_async_injector_with_stdin_monitor(
+                            injector,
+                            Some(waker.clone()),
+                            (active_source == "stdin").then(|| stdin_input_monitor.clone()),
+                        )
+                        .map_err(|error| anyhow::anyhow!("{error}"))?;
                     output_failures = Some(failures);
                     output_worker = Some(worker_state);
                     Some(injector)
@@ -560,6 +578,7 @@ fn main() -> Result<()> {
         policy::log_violation(&policy, &violation);
         anyhow::bail!("organization policy blocks startup: {violation}");
     }
+    config.set_route_capabilities(injector_capabilities, source_capabilities);
 
     let active_backend = input_method
         .as_ref()
@@ -593,13 +612,15 @@ fn main() -> Result<()> {
     );
 
     let receiver = if !control_only_mode && input_method.is_none() && evdev.is_none() {
-        Some(spawn_stdin_reader()?)
+        Some(spawn_stdin_reader(stdin_input_monitor.clone())?)
     } else {
         None
     };
 
-    let window_tracker =
-        backend_lifecycle::spawn_window_tracker(config.engine.requires_window_titles());
+    let window_tracker = backend_lifecycle::spawn_window_tracker(
+        config.engine.requires_window_titles(),
+        config.engine.requires_process_executable_identity(),
+    );
     let output_guard = assurance::GuardState::global();
     output_guard.set_mode(config.engine.compatibility_mode());
     output_guard.set_witness(
@@ -645,6 +666,8 @@ fn main() -> Result<()> {
         #[cfg(test)]
         evdev_output_test_events: None,
         receiver,
+        stdin_input_monitor,
+        stdin_quarantine_through: 0,
         status_publisher,
         focus_state,
         profile_assignments,

@@ -10,6 +10,7 @@ impl GuiApp {
         self.settings_undo_chord = self.config.settings.undo_chord.clone().unwrap_or_default();
         self.settings_compatibility_mode = self.config.settings.compatibility_mode;
         self.settings_keystroke_limit = self.config.settings.keystroke_max_chars.to_string();
+        self.settings_terminal_paste = self.config.settings.terminal_paste;
         self.settings_error = None;
         self.settings_open = true;
     }
@@ -117,6 +118,7 @@ impl GuiApp {
         candidate.settings.undo_chord =
             (!undo_chord_input.is_empty()).then(|| undo_chord_input.to_owned());
         candidate.settings.compatibility_mode = self.settings_compatibility_mode;
+        candidate.settings.terminal_paste = self.settings_terminal_paste;
         if let Err(error) = candidate.validate() {
             let detail = error.safe_summary();
             self.status = Status::error(self.strings.status_settings_rejected(&detail));
@@ -372,6 +374,36 @@ impl GuiApp {
                     ui.colored_label(palette.danger, self.strings.compatibility_mode_risk());
                 });
         }
+
+        ui.add_space(10.0);
+        ui.label(self.strings.terminal_paste_label());
+        ui.horizontal_wrapped(|ui| {
+            for mode in [
+                wayexpand_core::TerminalPaste::Off,
+                wayexpand_core::TerminalPaste::Multiline,
+                wayexpand_core::TerminalPaste::Always,
+            ] {
+                if theme::chip_scaled(
+                    ui,
+                    palette,
+                    self.strings.terminal_paste_option(mode),
+                    self.settings_terminal_paste == mode,
+                    self.settings_font_scale.multiplier(),
+                )
+                .clicked()
+                {
+                    self.settings_terminal_paste = mode;
+                }
+            }
+        });
+        ui.add(
+            egui::Label::new(
+                RichText::new(self.strings.terminal_paste_help())
+                    .small()
+                    .color(palette.muted),
+            )
+            .wrap(),
+        );
 
         if let Some(error) = self.settings_error.clone() {
             ui.add_space(8.0);

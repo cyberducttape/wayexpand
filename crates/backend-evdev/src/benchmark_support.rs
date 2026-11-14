@@ -79,6 +79,8 @@ impl CaptureSource {
                 layout_provider: Box::new(BenchLayoutProvider),
                 layout_generation: Some(1),
                 layout_available: true,
+                raw_key_events_total: 0,
+                layout_unavailable_key_events_total: 0,
                 pending: VecDeque::with_capacity(4),
                 raw_events: Vec::with_capacity(4),
                 raw_event_cursor: 0,

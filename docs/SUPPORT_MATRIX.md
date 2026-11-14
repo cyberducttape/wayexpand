@@ -36,7 +36,7 @@ complete right-to-left editing experience.
 | input-method-v2 capture | Experimental | Activation, focus, and Unicode tests |
 | evdev capture (`--source=evdev --allow-evdev-sensitive-fields`) | Experimental, best-effort, explicit opt-in | Compositor-agnostic compatibility fallback (e.g. KWin); cannot detect password or other sensitive fields and must not be described as providing input-method privacy protections. Organizations that require this signal should enforce `safe_mode = true` and `require_sensitive_focus = true`. It also cannot make rapid replacement atomic under non-exclusive capture. See [`BACKENDS.md`](BACKENDS.md), [ADR 0001](adr/0001-evdev-best-effort-semantics.md), and [`SECURITY.md`](../SECURITY.md) |
 | Global hotkeys | Experimental | Backend capture and action tests |
-| Focused-window tracking (`app_filter`) | Supported by the KDE/KWin path; awaiting independent certification. Implemented on GNOME 45+ through the WayExpand GNOME Shell extension; tested in a headless GNOME Shell, awaiting real-session evidence | wlroots paths explicitly report application filters unavailable rather than guessing |
+| Focused-window tracking (`app_filter`) | Implemented on KDE/KWin and on GNOME Shell 46, 50, and 51 through the WayExpand extension; GNOME runtime-tested headlessly and awaiting real-session evidence. Other GNOME Shell majors are not declared compatible | wlroots paths explicitly report application filters unavailable rather than guessing |
 | Key pass-through | Experimental | libei-assisted lifecycle-aware press/release pass-through exists for input-method-v2; modifier chords, repetition, reconnect, and compositor/client behavior still require certification |
 | Runtime keyboard-layout switching | Route-dependent | input-method-v2 and IBus expose layout-aware input paths; KDE evdev cross-checks KWin's active group against configured XKB settings; GNOME evdev reads Mutter's live input-source map, model, and options through the Shell extension (using Mutter's `pc105` model default on GNOME 45); Hyprland evdev validates compositor-reported per-device XKB settings and active group, refusing inconsistent keyboards or unknown layouts; Sway evdev matching remains unavailable because its input query omits the effective XKB settings. GNOME evdev layout tracking still requires live certification |
 | External preedit/IME composition | **Not supported** | ⚠️ Affects CJK and active Fcitx/IBus/Rime composition (see below) |
@@ -68,10 +68,10 @@ real-session evidence with `certification_scope: production` exists.
 <!-- generated:desktop-certification-matrix:start -->
 | Target | Desktop/session | Declared test paths | Window tracking | App filters | Sensitive fields observed | Production certification |
 | --- | --- | --- | --- | --- | --- | --- |
-| `kde` | KDE Plasma / KWin | ibus, evdev+libei | KWin application tracker | Available in declared path | Not observed | **Not certified** |
-| `gnome` | GNOME Shell / Mutter | ibus, evdev+libei | WayExpand GNOME Shell extension (GNOME 45+) | Implemented; awaiting real-session evidence | Not observed | **Not certified** |
-| `sway` | Sway / wlroots | evdev+wlroots, input-method-v2 | none | Unavailable | Not observed | **Not certified** |
-| `hyprland` | Hyprland / wlroots | evdev+wlroots, input-method-v2 | none | Unavailable | Not observed | **Not certified** |
+| `kde` | KDE Plasma / KWin (wayland) | ibus, evdev+libei | KWin application tracker | Available in declared path | Not observed | **Not certified** |
+| `gnome` | GNOME Shell / Mutter (wayland) | ibus, evdev+libei | WayExpand GNOME Shell extension (headless runtime gates: GNOME 46, 50, 51) | Implemented; awaiting real-session evidence | Not observed | **Not certified** |
+| `sway` | Sway / wlroots (wayland) | evdev+wlroots, input-method-v2 | none | Unavailable | Not observed | **Not certified** |
+| `hyprland` | Hyprland / wlroots (wayland) | evdev+wlroots, input-method-v2 | none | Unavailable | Not observed | **Not certified** |
 <!-- generated:desktop-certification-matrix:end -->
 
 ## Initial desktop and distribution validation plan
@@ -101,18 +101,19 @@ not test their combined replacement behavior or certify the desktop route.
 Evdev remains explicit opt-in because it has no sensitive-field signal.
 
 <!-- generated:route-contract:start -->
-| Route | Capture | Injection | Replacement assurance | Focus tracking | Sensitive fields (implementation) | Protocol signal | Compositor observation | Certification | Atomic replace | App identity | Status |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `ibus` (IBus) | ibus | ibus | verified | unavailable | implemented | IBus content purpose | session-dependent | not certified | no | none | experimental |
-| `kde-evdev-libei` (Maximum compatibility) | evdev | libei | unverified | available | not implemented | none | unavailable | not certified | no | kwin | experimental |
-| `sway-evdev-wlroots` (Evdev + wlroots) | evdev | wlroots-virtual-keyboard | unverified | unavailable | not implemented | none | unavailable | not certified | no | none | experimental |
-| `input-method-v2` (Input Method v2) | input-method-v2 | input-method-v2 | verified | unavailable | implemented | input-method-v2 content purpose | compositor-dependent | not certified | yes | none | experimental |
+| Route | Capture | Injection | Trigger precondition | Output transaction | Application result | Focus tracking | Sensitive fields (implementation) | Protocol signal | Compositor observation | Certification | App identity | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `ibus` (IBus) | ibus | ibus | surrounding_text_matches_trigger | separate_delete_and_commit | unobservable | unavailable | implemented | IBus content purpose | session-dependent | not certified | no | none | experimental |
+| `kde-evdev-libei` (Maximum compatibility) | evdev | libei | focus_checked_with_compatibility_consent | separate_delete_and_key_events | unobservable | available | not implemented | none | unavailable | not certified | no | kwin | experimental |
+| `sway-evdev-wlroots` (Evdev + wlroots) | evdev | wlroots-virtual-keyboard | none | separate_delete_and_key_events | unobservable | unavailable | not implemented | none | unavailable | not certified | no | none | experimental |
+| `input-method-v2` (Input Method v2) | input-method-v2 | input-method-v2 | surrounding_text_matches_trigger | atomic_protocol_batch | unobservable | unavailable | implemented | input-method-v2 content purpose | compositor-dependent | not certified | yes | none | experimental |
 <!-- generated:route-contract:end -->
 
-Replacement assurance is an explicit route property and a live status. The
-route table's `verified` label means the protocol validates target text before
-deletion; it does not by itself mean the erase and insert form one atomic
-transaction. Automatic replacement requires an atomic contract by default.
+The route table separates `trigger_precondition`, `output_transaction`, and
+`application_result`. A matching surrounding-text precondition does not make
+separate delete and insert operations atomic, and an accepted output request
+does not prove that the client document changed. Automatic replacement
+requires an atomic contract by default.
 Non-atomic routes, including routes that verify surrounding text, are blocked
 by default until they pass the real-session target-integrity gate.
 `compatibility_mode` remains an explicit experimental override for typed
@@ -177,23 +178,28 @@ notes.
 
 ## Known Limitations: Active IME and Preedit Composition
 
-**WayExpand does not support external active Input Method Editor (IME)
-composition or preedit sequences.**
+**WayExpand does not observe or expand inside another input method's active
+preedit composition.** Commit or cancel the composition before typing a
+WayExpand trigger. A connected backend or successful committed-Unicode test
+does not prove that WayExpand can see an in-progress CJK/Rime/Fcitx/IBus
+composition.
 
 This affects users who rely on:
 
 - **CJK input** (Chinese, Japanese, Korean) using active IME composition
 - **External IME preedit** for CJK and other active composition engines
-- **Multi-key sequences** (e.g., Compose key combinations)
+- **Multi-key sequences** (e.g., Compose key combinations): input-method-v2
+  tracks local XKB dead-key/Compose sequences and holds matching until the
+  sequence resolves; this is not external IME/preedit support, and behavior on
+  other routes depends on what committed text they receive.
 - **Active IME/preedit composition workflows** (e.g., Fcitx, IBus engines, Rime, and similar systems actively composing text)
 
 ### Why Unsupported
 
 The supported workflow is direct keyboard input or text expansion after an
-input method has committed its text. WayExpand safely recognizes local XKB
-dead-key/Compose boundaries, but does not observe or control another engine's
-active IME session. Typing an expansion trigger during external IME
-composition may:
+input method has committed its text, subject to route and application support.
+WayExpand does not observe or control another engine's active IME session.
+Typing an expansion trigger during external IME composition may:
 
 - Interrupt ongoing composition
 - Insert the trigger text before the IME has finished
@@ -201,7 +207,8 @@ composition may:
 
 ### Workarounds
 
-1. **Complete composition first:** Finish your IME input (Enter/Space), then type expansion triggers
+1. **Complete composition first:** Commit or cancel the IME composition, wait
+   for the text to appear in the application, then type the expansion trigger.
 2. **Use global shortcuts instead:** Configure a hotkey that directly expands without typing
 3. **Separate tools:** Use your IME system's own abbreviation/phrase expansion (many have this built-in)
 
@@ -251,8 +258,12 @@ systemctl --user status fcitx.service  # or ibus, etc.
 wayexpand doctor
 ```
 
-**Summary:** The current intended scope is direct keyboard input and committed
-text. Active-preedit expansion is unsupported; users who need expansion during
-composition should use their IME's own phrase-expansion feature or a
-composition-aware tool. Desktop behavior remains uncertified until real-client
-evidence is published.
+**Summary:** WayExpand may process committed Unicode where the selected route
+and application support it. Active external preedit is not observed, so do not
+type triggers until composition has been committed. Local dead-key/Compose
+guards are route-specific. For layout-dependent routes, an unknown active
+layout produces a refusal: choose a single known layout or use a route with a
+trustworthy active-layout provider; WayExpand will not guess. On libei, the
+optional Fcitx5 direct-commit bridge can provide a layout-independent Unicode
+output path when explicitly enabled, installed, and available, but it does
+not add capture-side IME composition awareness. See [BACKENDS.md](BACKENDS.md#optional-fcitx5-direct-commit).

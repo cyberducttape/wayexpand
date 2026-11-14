@@ -133,14 +133,20 @@ pub(crate) fn finish_undo(
     result: ExpansionResult,
     outcome: wayexpand_core::TransactionOutcome,
 ) -> std::result::Result<(), Box<EventError>> {
-    if !outcome.is_applied() {
+    finish_undo_with_retry_allowed(engine, result, outcome, true)
+}
+
+pub(crate) fn finish_undo_with_retry_allowed(
+    engine: &mut ExpansionEngine,
+    result: ExpansionResult,
+    outcome: wayexpand_core::TransactionOutcome,
+    retry_allowed: bool,
+) -> std::result::Result<(), Box<EventError>> {
+    if !outcome.is_output_acknowledged() {
         // Only a transaction known not to have started may retain the undo
         // record for a retry. After a possibly partial one, replaying the
         // undo would erase text the user never typed, so drop it.
-        if !matches!(
-            outcome,
-            wayexpand_core::TransactionOutcome::NotApplied { .. }
-        ) {
+        if !retry_allowed || !outcome.is_safe_to_retry() {
             engine.discard_undo();
         }
         return Err(Box::new(EventError {
@@ -148,13 +154,24 @@ pub(crate) fn finish_undo(
             source: outcome,
         }));
     }
-    if let wayexpand_core::TransactionOutcome::AppliedWithCursorPositionFailure { ref source } =
-        outcome
-    {
-        warn!(%source, "undo applied but cursor repositioning failed");
-    }
-    failure_trace::note_successful_insertion();
+    let cursor_failure = match &outcome {
+        wayexpand_core::TransactionOutcome::AppliedWithCursorPositionFailure { source } => {
+            warn!(%source, "undo applied but cursor repositioning failed");
+            Some(outcome.clone())
+        }
+        _ => None,
+    };
+    failure_trace::note_output_acknowledged();
     engine.commit_undo(&result);
+    if let Some(cursor_failure) = cursor_failure {
+        // Undo text is already applied, so consume its record, invalidate the
+        // cursor-dependent matcher context, and stop the current event batch.
+        engine.reset_with_unknown_preceding_text();
+        return Err(Box::new(EventError {
+            result,
+            source: cursor_failure,
+        }));
+    }
     info!("expansion undone");
     Ok(())
 }
@@ -543,56 +560,90 @@ pub(crate) fn expansion_allowed(
     true
 }
 
-/// Record an expansion transaction outcome. Only a known-not-applied result
-/// is restored for retry. Uncertain results discard the deferred reservation
-/// so the engine cannot replay a trigger that may already have been replaced.
+/// Record an expansion transaction outcome. A known-not-applied result is
+/// restored only while its original target context remains valid. Uncertain
+/// results discard the deferred reservation so the engine cannot replay a
+/// trigger that may already have been replaced.
 pub(crate) fn finish_expansion(
     engine: &mut ExpansionEngine,
     result: ExpansionResult,
     outcome: wayexpand_core::TransactionOutcome,
 ) -> std::result::Result<(), Box<EventError>> {
+    finish_expansion_with_retry_allowed(engine, result, outcome, true)
+}
+
+pub(crate) fn finish_expansion_with_retry_allowed(
+    engine: &mut ExpansionEngine,
+    result: ExpansionResult,
+    outcome: wayexpand_core::TransactionOutcome,
+    retry_allowed: bool,
+) -> std::result::Result<(), Box<EventError>> {
+    let cursor_failure = matches!(
+        &outcome,
+        wayexpand_core::TransactionOutcome::AppliedWithCursorPositionFailure { .. }
+    )
+    .then(|| outcome.clone());
+    if !outcome.is_output_acknowledged() {
+        failure_trace::note_expansion_outcome(false);
+        if retry_allowed && outcome.is_safe_to_retry() {
+            engine.restore_deferred_result(&result);
+        } else {
+            engine.discard_deferred_result(&result);
+            match &outcome {
+                wayexpand_core::TransactionOutcome::UnknownApplicationOutcome { .. } => {
+                    warn!("expansion replacement outcome is unknown; refusing automatic retry");
+                }
+                wayexpand_core::TransactionOutcome::UnknownPartialFailure { .. } => {
+                    warn!("expansion transaction may have partially applied; refusing automatic retry");
+                }
+                wayexpand_core::TransactionOutcome::NotApplied { .. } => {
+                    warn!("expansion context changed before retry; dropping stale trigger");
+                }
+                _ => unreachable!("acknowledged outcomes were handled before retry policy"),
+            }
+        }
+        return Err(Box::new(EventError {
+            result,
+            source: outcome,
+        }));
+    }
+
     match outcome {
         wayexpand_core::TransactionOutcome::Applied => {
             failure_trace::note_expansion_outcome(true);
-            failure_trace::note_successful_insertion();
+            failure_trace::note_output_acknowledged();
         }
         wayexpand_core::TransactionOutcome::AppliedWithCursorPositionFailure { ref source } => {
             failure_trace::note_expansion_outcome(true);
-            failure_trace::note_successful_insertion();
-            warn!(%source, "expansion applied but cursor repositioning failed");
+            failure_trace::note_output_acknowledged();
+            warn!(%source, "output acknowledged but cursor repositioning failed; target text remains unverified");
         }
-        wayexpand_core::TransactionOutcome::NotApplied { .. } => {
-            failure_trace::note_expansion_outcome(false);
-            engine.restore_deferred_result(&result);
-            return Err(Box::new(EventError {
-                result,
-                source: outcome,
-            }));
-        }
-        wayexpand_core::TransactionOutcome::UnknownApplicationOutcome { .. } => {
-            failure_trace::note_expansion_outcome(false);
-            engine.discard_deferred_result(&result);
-            warn!("expansion replacement outcome is unknown; refusing automatic retry");
-            return Err(Box::new(EventError {
-                result,
-                source: outcome,
-            }));
-        }
-        wayexpand_core::TransactionOutcome::UnknownPartialFailure { .. } => {
-            failure_trace::note_expansion_outcome(false);
-            engine.discard_deferred_result(&result);
-            warn!("expansion transaction may have partially applied; refusing automatic retry");
-            return Err(Box::new(EventError {
-                result,
-                source: outcome,
-            }));
+        wayexpand_core::TransactionOutcome::NotApplied { .. }
+        | wayexpand_core::TransactionOutcome::UnknownApplicationOutcome { .. }
+        | wayexpand_core::TransactionOutcome::UnknownPartialFailure { .. } => {
+            unreachable!("unacknowledged outcomes are handled before commit")
         }
     }
-    engine.commit_applied_expansion(&result);
+    // Injector acknowledgment does not prove that the target application's
+    // document changed. Do not create undo state that could erase unrelated
+    // text if the client did not apply the output.
+    engine.commit_emitted_unverified_expansion(&result);
+    if let Some(cursor_failure) = cursor_failure {
+        // Output was acknowledged, but neither the document result nor the
+        // cursor position is verified. Invalidate matcher context and stop
+        // this synchronous batch rather than applying another result at an
+        // unknown location.
+        engine.reset_with_unknown_preceding_text();
+        return Err(Box::new(EventError {
+            result,
+            source: cursor_failure,
+        }));
+    }
     info!(
         trigger_chars = result.trigger.chars().count(),
         insert_bytes = result.insert.len(),
-        "expansion injected"
+        application_result = "unverified",
+        "expansion output acknowledged; target text unverified"
     );
     Ok(())
 }
@@ -698,6 +749,29 @@ mod tests {
     }
 
     #[test]
+    fn invalidated_context_drops_known_not_applied_trigger_instead_of_restoring_it() {
+        let (mut engine, result) = deferred_engine_and_result();
+
+        // This is the pending-output ordering: external input invalidates the
+        // cursor context before the backend reports that it did not start.
+        engine.reset_with_unknown_preceding_text();
+        let failed = finish_expansion_with_retry_allowed(
+            &mut engine,
+            result,
+            wayexpand_core::TransactionOutcome::NotApplied { source: failure() },
+            false,
+        );
+
+        assert!(failed.is_err());
+        assert!(
+            engine
+                .process_deferred(InputEvent::Text(" ".into()))
+                .is_empty(),
+            "a trigger from the invalidated context must not be restored and retried"
+        );
+    }
+
+    #[test]
     fn uncertain_results_discard_the_deferred_trigger_instead_of_replaying_it() {
         for outcome in [
             wayexpand_core::TransactionOutcome::UnknownApplicationOutcome { source: failure() },
@@ -712,6 +786,180 @@ mod tests {
                 .process_deferred(InputEvent::Text(" ".into()))
                 .is_empty());
         }
+    }
+
+    #[test]
+    fn non_acknowledged_output_discards_provisional_undo_state() {
+        let undo_chord = wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap();
+        let outcomes = [
+            wayexpand_core::TransactionOutcome::NotApplied { source: failure() },
+            wayexpand_core::TransactionOutcome::UnknownApplicationOutcome { source: failure() },
+            wayexpand_core::TransactionOutcome::UnknownPartialFailure { source: failure() },
+        ];
+        for outcome in outcomes {
+            let outcome_label = outcome.to_string();
+            let config = wayexpand_core::Config::parse(
+                "[settings]\nundo_chord = \"Ctrl+Z\"\n[[expansion]]\ntrigger = \":x\"\nreplacement = \"replacement\"",
+            )
+            .unwrap();
+            let mut engine = ExpansionEngine::new(config).unwrap();
+            let pending = engine
+                .process_deferred(InputEvent::Text(":x".into()))
+                .pop()
+                .expect("trigger should be reserved");
+            let result = match engine.dispatch_pending_with_policy(pending, 0).unwrap() {
+                wayexpand_core::PendingExpansionDispatch::Ready(result) => result,
+                wayexpand_core::PendingExpansionDispatch::Queued => {
+                    panic!("static replacement must be ready")
+                }
+            };
+
+            let failed = finish_expansion(&mut engine, result, outcome);
+
+            assert!(failed.is_err());
+            assert!(
+                engine.prepare_undo(&undo_chord).is_none(),
+                "non-acknowledged {outcome_label} must not leave undo for unverified text"
+            );
+        }
+    }
+
+    #[test]
+    fn invalidated_context_discards_undo_after_known_not_applied_output() {
+        let undo_chord = wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap();
+        let config = wayexpand_core::Config::parse(
+            "[settings]\nundo_chord = \"Ctrl+Z\"\n[[expansion]]\ntrigger = \":x\"\nreplacement = \"replacement\"",
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let pending = engine
+            .process_deferred(InputEvent::Text(":x".into()))
+            .pop()
+            .expect("trigger should be reserved");
+        let result = match engine.dispatch_pending_with_policy(pending, 0).unwrap() {
+            wayexpand_core::PendingExpansionDispatch::Ready(result) => result,
+            wayexpand_core::PendingExpansionDispatch::Queued => {
+                panic!("static replacement must be ready")
+            }
+        };
+        engine.commit_applied_expansion(&result);
+        let undo = engine
+            .prepare_undo(&undo_chord)
+            .expect("committed expansion should have undo state");
+        engine.reset_with_unknown_preceding_text();
+
+        let failed = finish_undo_with_retry_allowed(
+            &mut engine,
+            undo,
+            wayexpand_core::TransactionOutcome::NotApplied { source: failure() },
+            false,
+        );
+
+        assert!(failed.is_err());
+        assert!(
+            engine.prepare_undo(&undo_chord).is_none(),
+            "undo state tied to an invalidated target must not survive"
+        );
+    }
+
+    #[test]
+    fn cursor_position_failure_reports_applied_text_and_invalidates_match_context() {
+        let (mut engine, result) = deferred_engine_and_result();
+        let error = finish_expansion(
+            &mut engine,
+            result,
+            wayexpand_core::TransactionOutcome::AppliedWithCursorPositionFailure {
+                source: failure(),
+            },
+        )
+        .expect_err("cursor failure must stop synchronous batches");
+
+        assert!(error.to_string().contains("cursor repositioning failed"));
+        assert!(
+            engine
+                .process_deferred(InputEvent::Text(" ".into()))
+                .is_empty(),
+            "the already-applied trigger must not be restored after cursor failure"
+        );
+    }
+
+    #[test]
+    fn backend_acknowledgement_does_not_create_undo_without_application_verification() {
+        let config = wayexpand_core::Config::parse(
+            "[settings]\nundo_chord = \"Ctrl+Z\"\n[[expansion]]\ntrigger = \":x\"\nreplacement = \"replacement\"",
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let pending = engine
+            .process_deferred(InputEvent::Text(":x".into()))
+            .pop()
+            .expect("trigger should be reserved");
+        let result = match engine.dispatch_pending_with_policy(pending, 0).unwrap() {
+            wayexpand_core::PendingExpansionDispatch::Ready(result) => result,
+            wayexpand_core::PendingExpansionDispatch::Queued => {
+                panic!("static replacement must be ready")
+            }
+        };
+
+        finish_expansion(
+            &mut engine,
+            result,
+            wayexpand_core::TransactionOutcome::Applied,
+        )
+        .expect("backend acknowledged output");
+
+        assert!(engine
+            .prepare_undo(&wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap())
+            .is_none());
+    }
+
+    #[test]
+    fn undo_cursor_failure_consumes_undo_and_invalidates_match_context() {
+        let config = wayexpand_core::Config::parse(
+            r#"
+            [settings]
+            undo_chord = "Ctrl+Z"
+            [[expansion]]
+            trigger = ":x"
+            replacement = "replacement"
+            "#,
+        )
+        .unwrap();
+        let mut engine = ExpansionEngine::new(config).unwrap();
+        let result = ExpansionResult {
+            snippet_id: "test".into(),
+            trigger: ":x".into(),
+            matched_text: ":x".into(),
+            insert: "replacement".into(),
+            cursor_offset: None,
+            reinsert_after: None,
+            command_backed: false,
+            undoable: true,
+            folded_suffix_chars: 0,
+        };
+        engine.commit_applied_expansion(&result);
+        let undo_chord = wayexpand_core::KeyChord::parse("Ctrl+Z").unwrap();
+        let undo = engine
+            .prepare_undo(&undo_chord)
+            .expect("applied expansion should have undo state");
+
+        let error = finish_undo(
+            &mut engine,
+            undo,
+            wayexpand_core::TransactionOutcome::AppliedWithCursorPositionFailure {
+                source: failure(),
+            },
+        )
+        .expect_err("cursor failure must stop this event batch");
+
+        assert!(error.to_string().contains("cursor repositioning failed"));
+        assert!(engine.prepare_undo(&undo_chord).is_none());
+        assert!(
+            engine
+                .process_deferred(InputEvent::Text(" ".into()))
+                .is_empty(),
+            "matcher must not continue from the cursor position it expected"
+        );
     }
 
     #[test]

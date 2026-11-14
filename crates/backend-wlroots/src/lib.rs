@@ -476,6 +476,10 @@ impl TextInjector for WlrootsInjector {
         }
     }
 
+    fn uses_paced_synthetic_output(&self) -> bool {
+        true
+    }
+
     fn erase(&mut self, trigger: &str) -> Result<(), InjectorError> {
         self.send_minimal_keymap().map_err(|error| InjectorError {
             backend: BACKEND_NAME,

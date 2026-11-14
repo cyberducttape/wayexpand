@@ -52,6 +52,7 @@ pub struct CommandMetrics {
     pub hotkey_in_flight: usize,
     pub command_queue_rejected_total: u64,
     pub command_timeout_total: u64,
+    pub command_cancelled_total: u64,
     pub command_failure_total: u64,
 }
 

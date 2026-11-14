@@ -30,7 +30,7 @@ e2e_input_source=${E2E_INPUT_SOURCE:-stdin}
 activate() {
     script="$case_dir/activate-$1.js"
     cat >"$script" <<EOF
-const target = workspace.windowList().find((window) => window.resourceClass === "$1");
+const target = workspace.windowList().find((window) => window.resourceClass === "$1" || window.desktopFileName === "$1");
 if (target) {
     workspace.activeWindow = target;
 }
@@ -110,12 +110,15 @@ if [ "$e2e_input_source" = input-method ]; then
     run_scenarios "input-method-expansion input-method-password-field form-returns-to-origin
 form-focus-moved-fails-closed"
 else
-    # The known-failing overlap reproduction remains opt-in via
-    # `scripts/test-kwin-e2e.sh second-trigger-during-nonatomic-replacement`;
-    # its observed corruption is recorded as a production release blocker in
-    # docs/PRODUCTION_ACCEPTANCE_CHECKLIST.md.
+    # Physical overlap remains a separate, not-yet-certified production case.
+    # The headless regressions below check that output over the configured
+    # limit is refused before deletion, that a raised limit types long output,
+    # and that later input remains intact.
     run_scenarios "expansion-replaces-trigger word-boundary-reinserts-delimiter cursor-placement
 multiline-replacement unreachable-character-is-refused app-filter-follows-focus
 command-expansion-completes focus-change-during-expansion target-closes-during-expansion config-reload daemon-restart
-clipboard-variable clipboard-empty-fails-closed output-latency keystroke-route-refuses-without-consent"
+clipboard-variable clipboard-empty-fails-closed output-latency paced-output-over-limit-refuses-before-erasing
+paced-output-within-raised-limit-is-typed paced-refusal-preserves-follow-up-input
+batched-stdin-lines-are-not-quarantined
+keystroke-route-refuses-without-consent"
 fi

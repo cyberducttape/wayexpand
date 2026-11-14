@@ -91,9 +91,9 @@ pub enum ConfigError {
     InvalidBufferLimit,
     #[error("keystroke_max_chars must be between 1 and {maximum}")]
     InvalidKeystrokeLimit { maximum: usize },
-    #[error("settings.terminal_apps entry {index} must be an app ID (`app_id_exact:` or `app_id_glob:`); at most {maximum} entries")]
+    #[error("settings.terminal_apps entry {index} must be an app ID, exact executable path (`process_executable_exact:`), or explicit process name (`process_name_exact:`); at most {maximum} entries")]
     InvalidTerminalApp { index: usize, maximum: usize },
-    #[error("settings.raw_capture_apps entry {index} must be an app ID (`app_id_exact:` or `app_id_glob:`); at most {maximum} entries")]
+    #[error("settings.raw_capture_apps entry {index} must be an app ID, exact executable path (`process_executable_exact:`), or explicit process name (`process_name_exact:`); at most {maximum} entries")]
     InvalidRawCaptureApp { index: usize, maximum: usize },
     #[error("settings.undo_chord is empty, ambiguous, or contains an unknown modifier")]
     InvalidUndoChord,
@@ -235,10 +235,10 @@ impl ConfigError {
                 format!("keystroke_max_chars must be between 1 and {maximum}")
             }
             Self::InvalidTerminalApp { index, maximum } => format!(
-                "settings.terminal_apps entry {index} must be an app ID (app_id_exact: or app_id_glob:); at most {maximum} entries"
+                "settings.terminal_apps entry {index} must be an app ID, exact executable path (process_executable_exact:), or explicit process name (process_name_exact:); at most {maximum} entries"
             ),
             Self::InvalidRawCaptureApp { index, maximum } => format!(
-                "settings.raw_capture_apps entry {index} must be an app ID (app_id_exact: or app_id_glob:); at most {maximum} entries"
+                "settings.raw_capture_apps entry {index} must be an app ID, exact executable path (process_executable_exact:), or explicit process name (process_name_exact:); at most {maximum} entries"
             ),
             Self::InvalidUndoChord => "settings.undo_chord is invalid".into(),
             Self::TooManyExpansions { count, maximum } => {
