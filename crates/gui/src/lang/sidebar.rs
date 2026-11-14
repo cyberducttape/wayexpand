@@ -1,14 +1,6 @@
 use super::{Language, Strings};
 
 impl Strings {
-    pub fn your_library(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Your reusable text library",
-            Language::Indonesian => "Pustaka teks Anda yang dapat dipakai ulang",
-            Language::German => "Ihre wiederverwendbare Textbibliothek",
-        }
-    }
-
     pub fn filtered_snippets(&self) -> &'static str {
         match self.lang {
             Language::English => "Filtered snippets",

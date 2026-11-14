@@ -145,24 +145,19 @@ impl GuiApp {
             .max_size(max_size)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    for (tab, label) in [
-                        (SettingsTab::Appearance, self.strings.appearance()),
-                        (SettingsTab::Engine, self.strings.engine()),
-                    ] {
-                        if theme::chip_scaled(
-                            ui,
-                            palette,
-                            label,
-                            self.settings_tab == tab,
-                            self.settings_font_scale.multiplier(),
-                        )
-                        .clicked()
-                        {
-                            self.settings_tab = tab;
-                        }
-                    }
-                });
+                let tabs = [SettingsTab::Appearance, SettingsTab::Engine];
+                let selected = tabs
+                    .iter()
+                    .position(|tab| *tab == self.settings_tab)
+                    .unwrap_or(0);
+                if let Some(index) = theme::segmented(
+                    ui,
+                    palette,
+                    &[self.strings.appearance(), self.strings.engine()],
+                    selected,
+                ) {
+                    self.settings_tab = tabs[index];
+                }
                 ui.add_space(10.0);
                 egui::ScrollArea::vertical()
                     .id_salt("settings_scroll")
@@ -190,64 +185,53 @@ impl GuiApp {
         ui.add_space(10.0);
 
         theme::section_header(ui, "", self.strings.theme());
-        ui.horizontal(|ui| {
-            for (dark, label) in [
-                (false, self.strings.theme_light()),
-                (true, self.strings.theme_dark()),
-            ] {
-                if theme::chip_scaled(
-                    ui,
-                    palette,
-                    label,
-                    self.dark_mode == dark,
-                    self.settings_font_scale.multiplier(),
-                )
-                .clicked()
-                {
-                    self.set_dark_mode(ui.ctx(), dark);
-                }
-            }
-        });
+        if let Some(index) = theme::segmented(
+            ui,
+            palette,
+            &[self.strings.theme_light(), self.strings.theme_dark()],
+            usize::from(self.dark_mode),
+        ) {
+            self.set_dark_mode(ui.ctx(), index == 1);
+        }
 
         ui.add_space(12.0);
         theme::section_header(ui, "", self.strings.language());
-        ui.horizontal(|ui| {
-            for (language, label) in [
-                (Language::English, "English"),
-                (Language::German, "Deutsch"),
-                (Language::Indonesian, "Bahasa Indonesia"),
-            ] {
-                if theme::chip_scaled(
-                    ui,
-                    palette,
-                    label,
-                    self.language == language,
-                    self.settings_font_scale.multiplier(),
-                )
-                .clicked()
-                {
-                    self.set_language(language);
-                }
-            }
-        });
+        let languages = [Language::English, Language::German, Language::Indonesian];
+        let current = languages
+            .iter()
+            .position(|language| *language == self.language)
+            .unwrap_or(0);
+        if let Some(index) = theme::segmented(
+            ui,
+            palette,
+            &["English", "Deutsch", "Bahasa Indonesia"],
+            current,
+        ) {
+            self.set_language(languages[index]);
+        }
 
         ui.add_space(12.0);
         theme::section_header(ui, "", self.strings.font_size());
-        ui.horizontal_wrapped(|ui| {
-            for scale in FONT_SCALES {
-                if theme::chip_scaled(
-                    ui,
-                    palette,
-                    self.strings.font_scale_label(*scale),
-                    *scale == self.settings_font_scale,
-                    self.settings_font_scale.multiplier(),
-                )
-                .clicked()
-                {
-                    self.apply_font_scale(ui.ctx(), *scale);
+        let mut chosen = None;
+        egui::ComboBox::from_id_salt("font_scale")
+            .width(220.0)
+            .selected_text(self.strings.font_scale_label(self.settings_font_scale))
+            .show_ui(ui, |ui| {
+                for scale in FONT_SCALES {
+                    if ui
+                        .selectable_label(
+                            *scale == self.settings_font_scale,
+                            self.strings.font_scale_label(*scale),
+                        )
+                        .clicked()
+                    {
+                        chosen = Some(*scale);
+                    }
                 }
-            }
-        });
+            });
+        if let Some(scale) = chosen {
+            self.apply_font_scale(ui.ctx(), scale);
+        }
         ui.label(
             RichText::new(self.strings.font_size_help())
                 .small()
