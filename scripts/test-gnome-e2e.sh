@@ -43,10 +43,11 @@ if [ -n "$expected_shell_version" ] && [ "$shell_version" != "$expected_shell_ve
     exit 1
 fi
 if [ -n "$expected_shell_version" ]; then
-    printf '%s\n' "pass gnome-shell-runtime-version GNOME Shell $shell_version matches its compatibility gate"
+    runtime_version_result="pass gnome-shell-runtime-version GNOME Shell $shell_version matches its compatibility gate"
 else
-    printf '%s\n' "pass gnome-shell-runtime-version GNOME Shell $shell_version detected; no version-specific CI gate was requested"
+    runtime_version_result="pass gnome-shell-runtime-version GNOME Shell $shell_version detected; no version-specific CI gate was requested"
 fi
+printf '%s\n' "$runtime_version_result"
 if [ -z "$shell_version" ] || ! python3 - "$project_dir/scripts/gnome-e2e-focus-controller/metadata.json" "$shell_version" <<'PY'
 import json
 import sys
@@ -1509,6 +1510,9 @@ env -i \
     E2E_STATE_HELPER="$project_dir/scripts/gnome-extension-state.sh" \
     E2E_DBUS_HELPER="$project_dir/scripts/gnome-extension-dbus.sh" \
     dbus-run-session -- "$work/session.sh" >"$work/results.txt" 2>"$work/session.log" || status=$?
+# The runtime-version check ran before the session; record it with the
+# session's results so the checkpoint list below can find it.
+printf '%s\n' "$runtime_version_result" >>"$work/results.txt"
 
 cat "$work/results.txt"
 expected_checks='gnome-shell-runtime-version extension-active unauthorized-tracker-subscription extension-initial-build extension-upgrade-not-current ibus-engine-registered gnome-ibus-source-registered ibus-engine-active deprecated-current-no-activation gnome-ibus-source-active gnome-x11-terminal-baseline gnome-gtk-wayland-baseline gnome-gtk-insertion gnome-gtk-unicode gnome-gtk-password gnome-gtk-gtk4-insertion gnome-gtk-gtk4-unicode gnome-gtk-gtk4-password gnome-qt-safe-passthrough gnome-qt-unicode-passthrough gnome-qt-password gnome-terminal-safe-passthrough gnome-terminal-unicode-passthrough gnome-layout-de gnome-layout-fr extension-disabled extension-after-login gnome-ibus-source-persisted-after-login gnome-ibus-source-after-login gnome-gtk-after-login'
