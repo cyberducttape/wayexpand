@@ -73,7 +73,9 @@ case "$package" in
         install_package() { dnf install -y -q "$package"; }
         reinstall_package() { dnf reinstall -y -q "$package"; }
         install_previous_package() { dnf install -y -q "$previous_package"; }
-        rollback_package() { rpm -U --oldpackage "$previous_package"; }
+        # The previous-version fixture is built locally and unsigned; newer
+        # rpm releases refuse unsigned packages unless told otherwise.
+        rollback_package() { rpm -U --oldpackage --nosignature "$previous_package"; }
         remove_package() { dnf remove -y -q wayexpand; }
         ;;
     *)

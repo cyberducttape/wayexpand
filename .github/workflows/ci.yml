@@ -1051,7 +1051,7 @@ jobs:
             # (rely on rpmbuild's generated library dependencies) so the
             # fixture tests an upgrade rather than that known packaging bug.
             sed -i '/^Requires:[[:space:]]*wayland-libs$/d' wayexpand.spec
-            ! grep -q 'wayland-libs' wayexpand.spec
+            if grep -q 'wayland-libs' wayexpand.spec; then exit 1; fi
             mkdir -p .cargo
             cargo vendor --locked vendor/ > .cargo/config.toml
             TMPDIR="$RUNNER_TEMP" bash scripts/build-release-packages.sh 1.3.2
