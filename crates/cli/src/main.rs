@@ -398,8 +398,8 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "Inspect or remove the libei portal token",
             ),
             (
-                "ibus status [--json]|watch [--seconds N]",
-                "Check the IBus route link by link; explain why a field expands or not",
+                "ibus status [--json]|watch [--seconds N]|restart",
+                "Check the IBus route link by link; explain why a field expands or not; restart IBus",
             ),
         ],
     ),

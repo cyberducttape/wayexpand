@@ -288,7 +288,7 @@ Show implementation and environment status for backend paths.
 .B explain-backend
 Explain the expert backend selection decision and its tradeoffs.
 .TP
-.B ibus status [--json] | ibus watch [--seconds N]
+.B ibus status [--json] | ibus watch [--seconds N] | ibus restart
 Check the IBus route link by link and print the fix for the first broken one.
 Configuration readiness and operational readiness are separate. An unknown
 condition is not reported as success; target application text is not
@@ -296,6 +296,9 @@ observable to IBus and needs interactive confirmation.
 \fBwatch\fR explains, per focused field, why triggers do or do not expand (for
 example password fields, or terminals that report no surrounding text). Only
 counts and states are shown; typed text is never recorded.
+\fBrestart\fR restarts IBus so it reloads components and engines. On KDE Plasma,
+where KWin launches IBus and \fBibus restart\fR hangs, it switches KWin's input
+method off and on and waits for the new daemon.
 .TP
 .B portal status|reset
 Inspect or forget the stored libei portal restoration token. Resetting the

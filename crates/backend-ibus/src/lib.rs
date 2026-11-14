@@ -45,12 +45,10 @@ const IBUS_INPUT_HINT_HIDDEN_TEXT: u32 = 1 << 12;
 mod availability;
 #[cfg(test)]
 use availability::component_file_present_in;
-pub use availability::{
-    engine_available, engine_installed, global_engine_selected, ibus_restart_arguments,
-    ibus_restart_command,
-};
+pub use availability::{engine_available, engine_installed, global_engine_selected};
 pub mod chain;
 pub mod gnome_input_sources;
+pub mod restart;
 pub mod telemetry;
 pub use telemetry::{IbusFieldVerdict, IbusRefusal, IbusTelemetry};
 mod text;

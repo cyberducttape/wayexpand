@@ -1261,8 +1261,7 @@ fn print_ibus_engine_restart_guidance(processes: &[crate::setup_ibus::StaleEngin
         );
     }
     println!(
-        "Restart IBus to load the updated engine: `{}` (input pauses briefly).",
-        wayexpand_backend_ibus::ibus_restart_command()
+        "Restart IBus to load the updated engine: `wayexpand ibus restart` (input pauses briefly)."
     );
 }
 
