@@ -42,6 +42,16 @@ jobs:
             exit 1
           fi
           gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_REF" >/dev/null
+          # Fail in the first minute, not after the hour of CI and builds, when
+          # the tag names a commit whose version was never bumped.
+          cargo_version=$(gh api -H 'Accept: application/vnd.github.raw' \
+            "repos/$GITHUB_REPOSITORY/contents/Cargo.toml?ref=refs/tags/$RELEASE_REF" \
+            | sed -n 's/^version = "\([^"]*\)"/\1/p' | head -n1)
+          if [ "$cargo_version" != "${RELEASE_REF#v}" ]; then
+            echo "tag $RELEASE_REF points at a commit whose Cargo.toml version is ${cargo_version:-unknown}" >&2
+            echo "merge the scripts/prepare-release.sh version commit first, then tag that commit" >&2
+            exit 1
+          fi
 
   ci:
     name: Verify
