@@ -1919,6 +1919,8 @@ fn diagnostics_accessibly_explains_keysym_fallback_and_separates_latency() {
     ));
     let _ = fs::remove_file(&path);
     let mut app = GuiApp::load(path.clone()).unwrap();
+    // The evidence grid starts collapsed behind a plain summary.
+    app.diagnostics_details_open = true;
     app.diagnostics_open = true;
     app.diagnostics_checked_at = Some(Instant::now() - Duration::from_secs(75));
     app.daemon_reachable = Some(true);
@@ -2025,6 +2027,7 @@ fn diagnostics_overview_does_not_invent_missing_capability_or_latency_evidence()
     ));
     let _ = fs::remove_file(&path);
     let mut app = GuiApp::load(path.clone()).unwrap();
+    app.diagnostics_details_open = true;
     app.daemon_reachable = Some(true);
     app.daemon_status = "source=evdev · backend=libei".into();
     app.permission_health = "unknown".into();
@@ -2409,7 +2412,8 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
         [
             "Working in tested application",
             "Safe fallback",
-            "Setup incomplete",
+            // The incomplete state is a note pointing at the steps.
+            "Almost there",
         ]
         .iter()
         .any(|state| guide_semantics.contains(state)),
@@ -2421,7 +2425,10 @@ fn first_run_screen_renders_and_creates_a_real_test_expansion() {
     );
     assert!(guide_semantics.contains("Verified in tested application: not tested"));
     assert!(!guide_semantics.contains("Verified working: yes"));
-    assert!(guide_semantics.contains("Open Quick Picker (copy and paste)"));
+    assert!(
+        guide_semantics.contains("Open Quick Picker (copy and paste)")
+            || guide_semantics.contains("Use Quick Picker meanwhile (copy and paste)")
+    );
     assert!(!guide_semantics.contains("It expanded correctly"));
     assert!(!guide_semantics.contains("Copy trigger"));
 

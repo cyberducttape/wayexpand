@@ -363,14 +363,11 @@ impl GuiApp {
         let mut detect_app_clicked = false;
         let mut variable_inserted = false;
         let daemon_capabilities = self.daemon_capabilities.clone();
+        // The pane itself is the surface: a card inside the pane inside the
+        // window added a frame without adding meaning.
         egui::Frame::new()
-            .fill(palette.surface)
-            .stroke(egui::Stroke::new(1.0, palette.border))
-            .corner_radius(egui::CornerRadius::same(10))
-            .inner_margin(egui::Margin::same(18))
+            .inner_margin(egui::Margin::symmetric(4, 2))
             .show(ui, |ui| {
-                theme::section_header(ui, "", self.strings.snippet_details());
-                ui.add_space(6.0);
                 let categories = self.categories().to_vec();
                 let duplicate_trigger = self.draft.as_ref().is_some_and(|draft| {
                     !draft.trigger.is_empty()
@@ -416,7 +413,6 @@ impl GuiApp {
                     strings.app_filter(),
                     strings.matching(),
                     strings.output_file(),
-                    strings.generate_only(),
                     strings.replacement(),
                 ]
                 .iter()
@@ -430,7 +426,11 @@ impl GuiApp {
                         .size()
                         .x
                 })
-                .fold(0.0, f32::max);
+                .fold(0.0, f32::max)
+                // Labels sit next to their fields: a column sized by its
+                // longest label left short labels stranded far from their
+                // inputs. Longer labels wrap instead.
+                .min(150.0 * body_font.size / 14.5);
                 let columns = FormColumns::new(ui, label_width);
                 let field_width = columns.field_width;
                 let hint = |ui: &mut egui::Ui, text: RichText| {
@@ -671,13 +671,11 @@ impl GuiApp {
                             .desired_width(field_width),
                     )
                     .on_hover_text(strings.output_file_tooltip());
-                });
-
-                ui.horizontal(|ui| {
                     let mut generate_only =
                         draft.delivery == wayexpand_core::ExpansionDelivery::GenerateOnly;
                     if ui
                         .checkbox(&mut generate_only, strings.generate_only())
+                        .on_hover_text(strings.generate_only_hint())
                         .changed()
                     {
                         draft.delivery = if generate_only {
@@ -686,7 +684,14 @@ impl GuiApp {
                             wayexpand_core::ExpansionDelivery::Insert
                         };
                     }
-                    ui.label(strings.generate_only_hint());
+                    if generate_only {
+                        hint(
+                            ui,
+                            RichText::new(strings.generate_only_hint())
+                                .small()
+                                .color(palette.muted),
+                        );
+                    }
                 });
 
                 form_row(ui, strings.app_filter(), columns, |ui| {
@@ -1207,35 +1212,47 @@ impl GuiApp {
                     .stroke(egui::Stroke::NONE),
             )
             .show(root, |ui| {
+                // Delete sits apart from Save, on the far side and as a quiet
+                // text button, so the primary and the destructive action are
+                // never one slip apart.
                 ui.horizontal(|ui| {
                     let dirty = self.draft_is_dirty();
-                    if ui
-                        .add_enabled_ui(dirty, |ui| {
-                            theme::primary_button(ui, palette, self.strings.save_changes())
-                        })
-                        .inner
-                        .on_hover_text(self.strings.save_tooltip())
-                        .on_disabled_hover_text(self.strings.no_changes_to_save())
-                        .clicked()
+                    if !self.new_draft
+                        && theme::quiet_danger_button(ui, palette, self.strings.delete()).clicked()
                     {
-                        self.save_selected();
-                    }
-                    if self.new_draft {
-                        if theme::secondary_button(ui, palette, self.strings.cancel()).clicked() {
-                            self.abandon_new_draft();
-                            self.status = Status::info(self.strings.ready());
-                        }
-                    } else if theme::danger_button(ui, palette, self.strings.delete()).clicked() {
                         self.request_action(PendingAction::Delete);
                     }
-                    if dirty {
-                        theme::pill(
-                            ui,
-                            self.strings.unsaved_changes(),
-                            palette.warning,
-                            theme::tint(palette.warning, 38),
-                        );
-                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add_enabled_ui(dirty, |ui| {
+                                theme::primary_button(ui, palette, self.strings.save_changes())
+                            })
+                            .inner
+                            .on_hover_text(self.strings.save_tooltip())
+                            .on_disabled_hover_text(self.strings.no_changes_to_save())
+                            .clicked()
+                        {
+                            self.save_selected();
+                        }
+                        if (self.new_draft || dirty)
+                            && theme::secondary_button(ui, palette, self.strings.cancel()).clicked()
+                        {
+                            if self.new_draft {
+                                self.abandon_new_draft();
+                            } else {
+                                self.discard_draft_changes();
+                            }
+                            self.status = Status::info(self.strings.ready());
+                        }
+                        if dirty {
+                            theme::pill(
+                                ui,
+                                self.strings.unsaved_changes(),
+                                palette.warning,
+                                theme::tint(palette.warning, 38),
+                            );
+                        }
+                    });
                 });
             });
     }

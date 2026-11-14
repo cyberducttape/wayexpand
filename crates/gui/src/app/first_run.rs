@@ -374,28 +374,8 @@ impl GuiApp {
                 ui.vertical_centered(|ui| {
                     ui.add_space(12.0);
 
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label(format!(
-                            "Installed: {}",
-                            if env::current_exe().is_ok() {
-                                "yes"
-                            } else {
-                                "unknown"
-                            }
-                        ));
-                        ui.label(format!(
-                            "Configured: {}",
-                            if route_ready { "ready" } else { "incomplete" }
-                        ));
-                        if outcome == FirstRunOutcome::WorkingInTestedApplication {
-                            ui.label(verification_scope_label(
-                                outcome,
-                                self.desktop_test_verified_application.as_deref(),
-                            ));
-                        } else {
-                            ui.label(verification_scope_label(outcome, None));
-                        }
-                    });
+                    // Progress is shown by the numbered steps below; a raw
+                    // "Installed / Configured / Verified" line repeated it.
                     ui.add_space(8.0);
                     theme::brand_mark(ui, 36.0, palette.accent);
                     ui.label(
@@ -435,9 +415,22 @@ impl GuiApp {
                             ui.label(format!(
                                 "You confirmed the exact test replacement in {application}. This verifies that application and session only."
                             ));
+                            ui.label(
+                                RichText::new(verification_scope_label(
+                                    outcome,
+                                    self.desktop_test_verified_application.as_deref(),
+                                ))
+                                .small()
+                                .color(palette.muted),
+                            );
                         }
                         FirstRunOutcome::SafeFallback => {
                             ui.colored_label(palette.warning, "Safe fallback");
+                            ui.label(
+                                RichText::new(verification_scope_label(outcome, None))
+                                    .small()
+                                    .color(palette.muted),
+                            );
                             if matcher_passed {
                                 ui.label("The local matcher produced the expected result. Automatic replacement has not been verified in a real application.");
                             } else {
@@ -479,37 +472,36 @@ impl GuiApp {
                                 }
                             });
                         }
+                        // Not an error on a first run: an amber note that
+                        // points at the steps. Its one primary action only
+                        // appears once step 1 no longer offers the same one,
+                        // and checks are refreshed from step 2.
                         FirstRunOutcome::SetupIncomplete => {
-                            ui.colored_label(palette.danger, "Setup incomplete");
-                            ui.label(format!(
-                                "WayExpand cannot use the selected input route yet: {route_state_detail}."
-                            ));
+                            ui.label(
+                                RichText::new(self.strings.first_run_setup_incomplete())
+                                    .strong()
+                                    .color(palette.warning),
+                            );
+                            ui.label(self.strings.first_run_route_not_ready(&route_state_detail));
+                            // Never leave it implied that a real application
+                            // was verified.
+                            ui.label(
+                                RichText::new(verification_scope_label(outcome, None))
+                                    .small()
+                                    .color(palette.muted),
+                            );
                             ui.horizontal_wrapped(|ui| {
-                                if theme::primary_button(
-                                    ui,
-                                    palette,
-                                    "Continue guided setup",
-                                )
-                                .clicked()
+                                if (daemon_running || ibus_only)
+                                    && theme::primary_button(
+                                        ui,
+                                        palette,
+                                        self.strings.first_run_continue_setup(),
+                                    )
+                                    .clicked()
                                 {
                                     self.start_guided_setup();
                                 }
-                                if theme::secondary_button(
-                                    ui,
-                                    palette,
-                                    self.strings.onboarding_refresh_checks(),
-                                )
-                                .clicked()
-                                {
-                                    self.refresh_diagnostics(true);
-                                }
-                                if theme::secondary_button(
-                                    ui,
-                                    palette,
-                                    "Open Quick Picker (copy and paste)",
-                                )
-                                .clicked()
-                                {
+                                if ui.link(self.strings.first_run_quick_picker()).clicked() {
                                     self.open_copy_only_picker();
                                 }
                             });

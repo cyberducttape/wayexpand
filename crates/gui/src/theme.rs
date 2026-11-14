@@ -359,10 +359,25 @@ fn readable_text_color(preferred: Color32, background: Color32) -> Color32 {
 /// readable tinted color for every status, so the header keeps its height
 /// whichever statuses are visible. Clicking it opens details.
 pub fn status_chip(ui: &mut egui::Ui, text: &str, color: Color32) -> egui::Response {
-    let background = blend_over(tint(color, 38), ui.visuals().panel_fill);
-    let foreground = readable_text_color(color, background);
+    // A colored dot carries the state; the word stays in the normal text
+    // color so it is readable on every pack and in light mode, where tinted
+    // colored text on a tinted background turned grey-on-grey.
+    let background = blend_over(
+        tint(color, if ui.visuals().dark_mode { 38 } else { 30 }),
+        ui.visuals().panel_fill,
+    );
+    let dot = readable_text_color(color, background);
+    let text_color = readable_text_color(ui.visuals().text_color(), background);
+    let font = FontId::new(13.0, FontFamily::Proportional);
+    let mut job = egui::text::LayoutJob::default();
+    job.append(
+        "● ",
+        0.0,
+        egui::TextFormat::simple(FontId::new(11.0, FontFamily::Proportional), dot),
+    );
+    job.append(text, 0.0, egui::TextFormat::simple(font, text_color));
     ui.add(
-        egui::Button::new(egui::RichText::new(text).color(foreground).size(13.0))
+        egui::Button::new(job)
             .wrap_mode(egui::TextWrapMode::Extend)
             .fill(background)
             .stroke(Stroke::NONE)
@@ -419,11 +434,21 @@ pub fn chip_scaled(
         } else if hovered {
             (ui.visuals().text_color(), palette.surface_hover)
         } else {
-            (palette.muted, tint(palette.border, 140))
+            // An outlined chip with normal text: muted text on a grey fill
+            // fell below readable contrast in light mode.
+            (ui.visuals().text_color(), palette.surface)
         };
         let fg = readable_text_color(fg, blend_over(bg, ui.visuals().panel_fill));
         let painter = ui.painter();
         painter.rect_filled(rect, CornerRadius::same(255), bg);
+        if !selected && !hovered {
+            painter.rect_stroke(
+                rect,
+                CornerRadius::same(255),
+                Stroke::new(1.0, palette.border),
+                egui::StrokeKind::Inside,
+            );
+        }
         if response.has_focus() {
             painter.rect_stroke(
                 rect.expand(1.0),
@@ -557,6 +582,63 @@ pub fn danger_button(ui: &mut egui::Ui, palette: &Palette, text: &str) -> egui::
             .fill(Color32::TRANSPARENT)
             .min_size(Vec2::new(0.0, 34.0))
             .stroke(Stroke::new(1.0, palette.danger)),
+    )
+}
+
+/// A joined segmented control for choosing one of a few options (tabs,
+/// theme, language). Returns the index the user clicked, if any. Filter
+/// chips look like toggles; a choice that always has exactly one value
+/// reads better as one control.
+pub fn segmented(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    options: &[&str],
+    selected: usize,
+) -> Option<usize> {
+    let mut clicked = None;
+    egui::Frame::new()
+        .fill(palette.surface_hover)
+        .stroke(Stroke::new(1.0, palette.border))
+        .corner_radius(CornerRadius::same(9))
+        .inner_margin(Margin::same(3))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                for (index, option) in options.iter().enumerate() {
+                    let active = index == selected;
+                    let text = egui::RichText::new(*option).color(if active {
+                        palette.accent_text
+                    } else {
+                        ui.visuals().text_color()
+                    });
+                    let response = ui.add(
+                        egui::Button::new(text)
+                            .fill(if active {
+                                palette.accent
+                            } else {
+                                Color32::TRANSPARENT
+                            })
+                            .stroke(Stroke::NONE)
+                            .corner_radius(CornerRadius::same(7))
+                            .min_size(Vec2::new(0.0, 28.0)),
+                    );
+                    if response.clicked() && !active {
+                        clicked = Some(index);
+                    }
+                }
+            });
+        });
+    clicked
+}
+
+/// A frameless danger-colored text button, for a destructive action that
+/// sits in an action bar beside the primary one without competing with it.
+pub fn quiet_danger_button(ui: &mut egui::Ui, palette: &Palette, text: &str) -> egui::Response {
+    ui.add(
+        egui::Button::new(egui::RichText::new(text).color(palette.danger))
+            .fill(Color32::TRANSPARENT)
+            .min_size(Vec2::new(0.0, 34.0))
+            .stroke(Stroke::NONE),
     )
 }
 
