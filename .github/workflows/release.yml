@@ -3,11 +3,12 @@ name: Release
 on:
   push:
     tags:
-      - "v*"
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "[0-9]+.[0-9]+.[0-9]+"
   workflow_dispatch:
     inputs:
       release_ref:
-        description: "Existing vX.Y.Z release tag of this repository to build and publish"
+        description: "Existing X.Y.Z or vX.Y.Z release tag of this repository to build and publish"
         required: true
         type: string
       launchpad_series:
@@ -30,14 +31,14 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Verify the release ref is a vX.Y.Z tag here
+      - name: Verify the release ref is an X.Y.Z or vX.Y.Z tag here
         env:
           RELEASE_REF: ${{ inputs.release_ref || github.ref_name }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if [[ ! "$RELEASE_REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "release ref must be a vX.Y.Z tag (got $RELEASE_REF)" >&2
+          if [[ ! "$RELEASE_REF" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "release ref must be an X.Y.Z or vX.Y.Z tag (got $RELEASE_REF)" >&2
             exit 1
           fi
           gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_REF" >/dev/null
@@ -49,6 +50,10 @@ jobs:
     with:
       checkout_ref: ${{ inputs.release_ref || github.ref }}
 
+  # Certification decides what the release may claim, not whether it ships.
+  # No compositor route is production-certified yet, so gating the binaries
+  # on it published releases without any downloads. The release notes state
+  # the certification result instead.
   certification:
     name: Real compositor certification
     needs: release-ref
@@ -61,6 +66,7 @@ jobs:
   linux-aarch64:
     name: Linux aarch64 release
     needs: [ci, certification]
+    if: ${{ !cancelled() && needs.ci.result == 'success' }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     permissions:
@@ -114,6 +120,7 @@ jobs:
   linux-x86_64:
     name: Linux x86_64 release
     needs: [ci, certification, linux-aarch64]
+    if: ${{ !cancelled() && needs.ci.result == 'success' && needs.linux-aarch64.result == 'success' }}
     # Build the release binaries and .deb against Ubuntu 24.04 LTS, the oldest
     # supported Ubuntu package target. Fedora package installation is covered
     # by the pinned Fedora 45 smoke lane in ci.yml.
@@ -125,6 +132,16 @@ jobs:
       attestations: write
     env:
       RELEASE_REF_NAME: ${{ inputs.release_ref || github.ref_name }}
+      CERTIFIED_NOTE: >-
+        This release passed real-compositor certification; see
+        docs/CERTIFICATION_MATRIX.md for the certified routes.
+      UNCERTIFIED_NOTE: >-
+        **Not compositor-certified.** These binaries passed the full CI
+        suite, including headless KWin, Sway, GNOME and IBus end-to-end
+        tests, but no desktop route has passed physical-session
+        certification yet. Run `wayexpand setup` and verify an insertion
+        in a real application before relying on it; see
+        docs/CERTIFICATION_MATRIX.md.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -143,8 +160,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ ! "$RELEASE_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "❌ release refs must use a SemVer tag vX.Y.Z (got $RELEASE_REF_NAME)" >&2
+          if [[ ! "$RELEASE_REF_NAME" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ release refs must use a SemVer tag X.Y.Z or vX.Y.Z (got $RELEASE_REF_NAME)" >&2
             exit 1
           fi
           expected="${RELEASE_REF_NAME#v}"
@@ -313,6 +330,8 @@ jobs:
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           generate_release_notes: true
+          make_latest: true
+          body: ${{ needs.certification.result == 'success' && env.CERTIFIED_NOTE || env.UNCERTIFIED_NOTE }}
           files: |
             wayexpand-*.tar.gz
             wayexpand-*.sha256

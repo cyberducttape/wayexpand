@@ -50,40 +50,21 @@ local, offline, no account, no telemetry.
 | Linux architectures | x86_64 and aarch64 build paths |
 | Desktop integration | Wayland backends available; compositor support varies |
 | Production certification | No compositor has accepted physical-session certification; see the [certification matrix](docs/CERTIFICATION_MATRIX.md) |
-| Distribution packages | Ubuntu 26.04 amd64 daily PPA package; no published GitHub release and no published Fedora Copr repository; certification pending |
+| Distribution packages | Ubuntu 26.04+ amd64 daily PPA package; release binaries for every distribution from the next GitHub release; no Fedora Copr repository yet; certification pending |
 
 ## Install
 
-### Distribution packages
+| Your system | Install with |
+| --- | --- |
+| Ubuntu 26.04 or newer (amd64) | the [WayExpand PPA](#ubuntu-ppa) |
+| Any other Linux distribution | [a source build](#build-from-source), about five minutes |
+| Any distribution, no compiler | the `.tar.gz`, `.deb` or `.rpm` attached to a [GitHub release](https://github.com/cyberducttape/wayexpand/releases) or *Experimental build* prerelease; release 1.3.3 has none attached |
 
-The currently published package channel is an experimental daily PPA build
-for Ubuntu 26.04 amd64. No GitHub release is currently published, and no
-Fedora Copr repository is published. Package recipes and CI
-install tests exist for Ubuntu 24.04/26.04 and Fedora 45, but that does not
-mean installable release packages are available for those distributions.
-The Ubuntu daily package is not compositor-certified.
+None of these channels is compositor-certified yet; see the
+[packaging status](docs/PACKAGING.md) and the
+[certification matrix](docs/CERTIFICATION_MATRIX.md).
 
-```sh
-sudo add-apt-repository ppa:cyberducttape/ppa
-sudo apt update
-sudo apt install wayexpand
-# Arch packaging preview: see docs/PACKAGING.md#arch-linux-packaging-preview
-```
-
-The PPA currently publishes current daily builds for Ubuntu 26.04 (Resolute)
-amd64. Ubuntu 24.04's PPA package is stale. Read the [packaging status](docs/PACKAGING.md)
-before choosing an installation method; do not assume CI artifacts are
-published packages.
-
-Launch **WayExpand** from the desktop application menu or run `wayexpand-gui`.
-Its first-run guide checks the installation and route, then asks you to verify
-an exact insertion in a real application before it records setup as working.
-`wayexpand setup --check` reports missing integration dependencies without
-enabling raw keyboard capture. If automatic expansion cannot be verified yet,
-the guide offers a copy-only Quick Picker for manual paste.
-
-Ubuntu 26.04 (Resolute) users can also install the experimental daily package
-from the [WayExpand PPA](https://launchpad.net/~cyberducttape/+archive/ubuntu/ppa):
+### Ubuntu PPA
 
 ```sh
 sudo add-apt-repository ppa:cyberducttape/ppa
@@ -91,19 +72,30 @@ sudo apt update
 sudo apt install wayexpand
 ```
 
-The PPA is currently limited to Ubuntu 26.04 amd64 and is not
-compositor-certified. Check the PPA page and [packaging status](docs/PACKAGING.md)
-before installing.
+The PPA publishes experimental daily builds for Ubuntu 26.04 (Resolute) and
+newer on amd64. Ubuntu 24.04 cannot be served yet because its archive has no
+Rust 1.92; build from source there.
 
-### Developer installs
+### Build from source
 
-The release archive and source installer are per-user developer paths. They
-stage the IBus component but may require administrator authorization to
-register the system-wide IBus component. On GNOME, setup can also ask you to log
-out and back in before resuming. Prefer a distribution package for an ordinary
-desktop installation when one is available.
+```sh
+# 1. Native build tools (pick your distribution)
+sudo apt install build-essential pkg-config libwayland-dev libxkbcommon-dev git   # Debian, Ubuntu
+sudo dnf install gcc pkgconf-pkg-config wayland-devel libxkbcommon-devel git      # Fedora
+sudo pacman -S --needed base-devel wayland libxkbcommon git                       # Arch
 
-To install a release archive without building from source:
+# 2. Rust 1.92 or newer; skip if `cargo --version` already shows one.
+#    Distribution Rust is often too old (Ubuntu 24.04 ships 1.75).
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# 3. Build and install for your user
+git clone --depth 1 https://github.com/cyberducttape/wayexpand
+cd wayexpand
+./scripts/install-user.sh
+wayexpand-gui
+```
+
+### Release archive
 
 ```sh
 sha256sum --check wayexpand-*-linux-x86_64.tar.gz.sha256
@@ -111,20 +103,20 @@ tar -xzf wayexpand-*-linux-x86_64.tar.gz
 ./wayexpand-*-linux-x86_64/scripts/install-release.sh
 ```
 
-To build and install from source:
+The release archive and source installer install for your user only. They never
+run as root, enable services, grant raw-input access, or accept portal consent
+for you. They stage the IBus component but may ask for administrator
+authorization to register it system-wide, and on GNOME setup can ask you to log
+out and back in before resuming.
 
-Rust 1.92 or newer:
+### After installing
 
-```sh
-git clone https://github.com/cyberducttape/wayexpand
-cd wayexpand
-./scripts/install-user.sh
-wayexpand-gui
-```
-
-The installers never run as root, enable services, grant raw-input access, or
-accept portal consent for you. [Packaging](docs/PACKAGING.md) covers distro
-packages and the Ubuntu PPA's status.
+Launch **WayExpand** from the desktop application menu or run `wayexpand-gui`.
+Its first-run guide checks the installation and route, then asks you to verify
+an exact insertion in a real application before it records setup as working.
+`wayexpand setup --check` reports missing integration dependencies without
+enabling raw keyboard capture. If automatic expansion cannot be verified yet,
+the guide offers a copy-only Quick Picker for manual paste.
 
 ## Your first minute
 

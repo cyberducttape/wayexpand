@@ -52,12 +52,46 @@ if [ -z "$cargo_bin" ] && [ -x "$HOME/.cargo/bin/cargo" ]; then
     cargo_bin="$HOME/.cargo/bin/cargo"
 fi
 if [ -z "$cargo_bin" ]; then
-    printf '%s\n' "error: Cargo was not found; this source installer is intended for developers" >&2
-    printf '%s\n' "install a published package or release archive instead; those do not need a Rust toolchain:" >&2
+    printf '%s\n' "error: Cargo was not found; building WayExpand from source needs Rust" >&2
+    printf '%s\n' "install Rust with rustup (https://rustup.rs), open a new terminal, and run this script again:" >&2
+    printf '%s\n' "  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh" >&2
+    printf '%s\n' "or install a published package or release archive, which needs no Rust toolchain:" >&2
     printf '%s\n' "  https://github.com/cyberducttape/wayexpand/releases" >&2
-    printf '%s\n' "See README.md for current package availability and certification status." >&2
     exit 127
 fi
+
+# Distribution packages of Rust are often older than the project's minimum
+# (Ubuntu 24.04 ships 1.75). Say so before a long build fails on it.
+required_rust=$(sed -n 's/^rust-version = "\([0-9.]*\)"/\1/p' "$project_dir/Cargo.toml" | head -n1)
+cargo_version=$(cd "$project_dir" && "$cargo_bin" --version 2>/dev/null | awk '{print $2}' || true)
+if [ -n "$required_rust" ] && [ -n "$cargo_version" ]; then
+    oldest=$(printf '%s\n%s\n' "$required_rust" "${cargo_version%%-*}" | sort -V | head -n1)
+    if [ "$oldest" != "$required_rust" ]; then
+        printf '%s\n' "error: Rust $required_rust or newer is required; $cargo_bin is $cargo_version" >&2
+        printf '%s\n' "install a current toolchain with rustup (https://rustup.rs); this checkout then selects the right version itself" >&2
+        exit 1
+    fi
+fi
+
+# Print the command that installs the native build dependencies on this
+# distribution; used when the build fails.
+build_dependency_hint() {
+    os_ids=
+    if [ -r /etc/os-release ]; then
+        # shellcheck source=/dev/null
+        os_ids=$(. /etc/os-release && printf '%s %s' "${ID:-}" "${ID_LIKE:-}")
+    fi
+    case " $os_ids " in
+        *" fedora "*|*" rhel "*|*" centos "*)
+            printf '%s\n' "  sudo dnf install gcc pkgconf-pkg-config wayland-devel libxkbcommon-devel" ;;
+        *" arch "*)
+            printf '%s\n' "  sudo pacman -S --needed base-devel wayland libxkbcommon" ;;
+        *" opensuse"*|*" suse "*)
+            printf '%s\n' "  sudo zypper install gcc pkg-config wayland-devel libxkbcommon-devel" ;;
+        *)
+            printf '%s\n' "  sudo apt install build-essential pkg-config libwayland-dev libxkbcommon-dev" ;;
+    esac
+}
 printf '%s\n' "Developer source install: compiling the application from this checkout."
 printf '%s\n' "For ordinary desktop installation, use a published .deb/.rpm or release archive; no local Rust toolchain is needed."
 bin_dir="$HOME/.local/bin"
@@ -123,14 +157,20 @@ esac
 config_path="$config_dir/expansions.toml"
 
 printf '%s\n' "Building WayExpand release binaries..."
-CARGO_TARGET_DIR="$target_dir" "$cargo_bin" build --locked --release \
+if ! CARGO_TARGET_DIR="$target_dir" "$cargo_bin" build --locked --release \
     --manifest-path "$project_dir/Cargo.toml" \
     -p wayexpand-daemon \
     -p action-broker \
     -p wayexpand \
     -p wayexpand-ui \
     -p wayexpand-gui \
-    -p wayexpand-backend-ibus
+    -p wayexpand-backend-ibus; then
+    printf '%s\n' "error: the build failed; nothing was installed" >&2
+    printf '%s\n' "the most common cause is missing native build dependencies; install them with:" >&2
+    build_dependency_hint >&2
+    printf '%s\n' "then run this script again" >&2
+    exit 1
+fi
 
 # Development builds intentionally retain the package version and encode the
 # source commit in the binary version. Use that complete build identity for
