@@ -311,8 +311,13 @@ EOF
     chmod +x "$recorder"
     QT_QPA_PLATFORM=wayland konsole --nofork --separate -e "$recorder" \
         >>"$case_dir/konsole.log" 2>&1 &
-    sink_pids="$sink_pids $!"
+    konsole_pid=$!
+    sink_pids="$sink_pids $konsole_pid"
     sleep 4
+    kill -0 "$konsole_pid" 2>/dev/null || {
+        printf 'Konsole did not start: %s' "$(tail -n 1 "$case_dir/konsole.log" | cut -c 1-200)"
+        return 2
+    }
     printf 'keep-me' | wl-copy --type='text/plain;charset=utf-8' 2>>"$case_dir/clipboard.log"
     wait_until 30 session_clipboard_is "keep-me" || {
         printf 'could not seed the session clipboard'

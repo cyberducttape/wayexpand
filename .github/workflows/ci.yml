@@ -632,7 +632,8 @@ jobs:
         run: bash scripts/test-kwin-e2e.sh --keep
       - name: Test terminal paste into Konsole
         run: |
-          sudo apt-get install -y --no-install-recommends konsole
+          # qt6-wayland provides the xdg-shell integration Konsole needs.
+          sudo apt-get install -y --no-install-recommends konsole qt6-wayland
           bash scripts/test-kwin-e2e.sh --keep terminal-paste-multiline
       - name: Test isolated doctor certification report
         run: bash scripts/test-doctor-certify.sh target/debug/wayexpand
