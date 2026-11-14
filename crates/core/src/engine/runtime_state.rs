@@ -163,27 +163,7 @@ impl ExpansionEngine {
         };
         self.raw_capture_app_scope
             .iter()
-            .any(|(filter, glob)| match filter {
-                crate::AppFilter::AppIdExact(expected)
-                    if !app_id.starts_with(crate::PROCESS_EXECUTABLE_APP_ID_PREFIX)
-                        && !app_id.starts_with(crate::PROCESS_NAME_APP_ID_PREFIX) =>
-                {
-                    app_id == expected
-                }
-                crate::AppFilter::AppIdGlob(_)
-                    if !app_id.starts_with(crate::PROCESS_EXECUTABLE_APP_ID_PREFIX)
-                        && !app_id.starts_with(crate::PROCESS_NAME_APP_ID_PREFIX) =>
-                {
-                    glob.as_ref().is_some_and(|glob| glob.matches(app_id))
-                }
-                crate::AppFilter::ProcessExecutableExact(expected) => app_id
-                    .strip_prefix(crate::PROCESS_EXECUTABLE_APP_ID_PREFIX)
-                    .is_some_and(|path| path == expected),
-                crate::AppFilter::ProcessNameExact(expected) => app_id
-                    .strip_prefix(crate::PROCESS_NAME_APP_ID_PREFIX)
-                    .is_some_and(|name| name == expected),
-                _ => false,
-            })
+            .any(|(filter, glob)| super::app_id_matches_scope(app_id, filter, glob.as_ref()))
     }
 
     /// Whether an explicitly configured app-scoped evdev companion owns the
@@ -204,27 +184,7 @@ impl ExpansionEngine {
         };
         self.terminal_app_scope
             .iter()
-            .any(|(filter, glob)| match filter {
-                crate::AppFilter::AppIdExact(expected)
-                    if !app_id.starts_with(crate::PROCESS_EXECUTABLE_APP_ID_PREFIX)
-                        && !app_id.starts_with(crate::PROCESS_NAME_APP_ID_PREFIX) =>
-                {
-                    app_id == expected
-                }
-                crate::AppFilter::AppIdGlob(_)
-                    if !app_id.starts_with(crate::PROCESS_EXECUTABLE_APP_ID_PREFIX)
-                        && !app_id.starts_with(crate::PROCESS_NAME_APP_ID_PREFIX) =>
-                {
-                    glob.as_ref().is_some_and(|glob| glob.matches(app_id))
-                }
-                crate::AppFilter::ProcessExecutableExact(expected) => app_id
-                    .strip_prefix(crate::PROCESS_EXECUTABLE_APP_ID_PREFIX)
-                    .is_some_and(|path| path == expected),
-                crate::AppFilter::ProcessNameExact(expected) => app_id
-                    .strip_prefix(crate::PROCESS_NAME_APP_ID_PREFIX)
-                    .is_some_and(|name| name == expected),
-                _ => false,
-            })
+            .any(|(filter, glob)| super::app_id_matches_scope(app_id, filter, glob.as_ref()))
     }
 
     /// Whether a snippet form is open (capture is suspended meanwhile).

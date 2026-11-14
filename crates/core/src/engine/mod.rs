@@ -1448,6 +1448,27 @@ impl ExpansionEngine {
     }
 }
 
+/// Whether a normalized focused app ID satisfies one app-ID scope filter.
+/// This is the single rule shared by snippet `app_filter`s, `terminal_apps`
+/// and `raw_capture_apps`: ordinary app-ID filters never match the reserved
+/// process-identity namespaces, and those namespaces match only their own
+/// explicit `process_*_exact:` filters. Title filters are not app-ID scopes.
+fn app_id_matches_scope(app_id: &str, filter: &AppFilter, glob: Option<&GlobPattern>) -> bool {
+    let reserved = app_id.starts_with(crate::PROCESS_EXECUTABLE_APP_ID_PREFIX)
+        || app_id.starts_with(crate::PROCESS_NAME_APP_ID_PREFIX);
+    match filter {
+        AppFilter::AppIdExact(expected) => !reserved && app_id == expected,
+        AppFilter::AppIdGlob(_) => !reserved && glob.is_some_and(|glob| glob.matches(app_id)),
+        AppFilter::ProcessExecutableExact(expected) => app_id
+            .strip_prefix(crate::PROCESS_EXECUTABLE_APP_ID_PREFIX)
+            .is_some_and(|path| path == expected),
+        AppFilter::ProcessNameExact(expected) => app_id
+            .strip_prefix(crate::PROCESS_NAME_APP_ID_PREFIX)
+            .is_some_and(|name| name == expected),
+        _ => false,
+    }
+}
+
 impl Drop for ExpansionEngine {
     fn drop(&mut self) {
         self.clear_sensitive_runtime_state();

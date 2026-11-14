@@ -361,28 +361,7 @@ impl ExpansionEngine {
         };
         self.terminal_app_scope
             .iter()
-            .any(|(filter, glob)| match filter {
-                AppFilter::AppIdExact(expected)
-                    if !app_id.starts_with(crate::PROCESS_EXECUTABLE_APP_ID_PREFIX)
-                        && !app_id.starts_with(crate::PROCESS_NAME_APP_ID_PREFIX) =>
-                {
-                    app_id == expected
-                }
-                AppFilter::AppIdGlob(_)
-                    if !app_id.starts_with(crate::PROCESS_EXECUTABLE_APP_ID_PREFIX)
-                        && !app_id.starts_with(crate::PROCESS_NAME_APP_ID_PREFIX) =>
-                {
-                    glob.as_ref().is_some_and(|glob| glob.matches(app_id))
-                }
-                AppFilter::ProcessExecutableExact(expected) => app_id
-                    .strip_prefix(crate::PROCESS_EXECUTABLE_APP_ID_PREFIX)
-                    .is_some_and(|path| path == expected),
-                AppFilter::ProcessNameExact(expected) => app_id
-                    .strip_prefix(crate::PROCESS_NAME_APP_ID_PREFIX)
-                    .is_some_and(|name| name == expected),
-                AppFilter::TitleContains(_) => false,
-                _ => false,
-            })
+            .any(|(filter, glob)| super::app_id_matches_scope(app_id, filter, glob.as_ref()))
     }
 
     /// An empty app filter matches everywhere. Each configured filter names
@@ -402,35 +381,18 @@ impl ExpansionEngine {
             .iter()
             .enumerate()
             .any(|(filter_index, filter)| match filter {
-                AppFilter::AppIdExact(app_id_filter) => {
+                AppFilter::AppIdExact(_)
+                | AppFilter::AppIdGlob(_)
+                | AppFilter::ProcessExecutableExact(_)
+                | AppFilter::ProcessNameExact(_) => {
                     window.app_id.as_deref().is_some_and(|app_id| {
-                        !app_id.starts_with(crate::PROCESS_EXECUTABLE_APP_ID_PREFIX)
-                            && !app_id.starts_with(crate::PROCESS_NAME_APP_ID_PREFIX)
-                            && app_id == app_id_filter
+                        super::app_id_matches_scope(
+                            app_id,
+                            filter,
+                            self.app_filter_globs[config_index][filter_index].as_ref(),
+                        )
                     })
                 }
-                AppFilter::AppIdGlob(_) => window
-                    .app_id
-                    .as_deref()
-                    .filter(|app_id| {
-                        !app_id.starts_with(crate::PROCESS_EXECUTABLE_APP_ID_PREFIX)
-                            && !app_id.starts_with(crate::PROCESS_NAME_APP_ID_PREFIX)
-                    })
-                    .is_some_and(|app_id| {
-                        self.app_filter_globs[config_index][filter_index]
-                            .as_ref()
-                            .is_some_and(|pattern| pattern.matches(app_id))
-                    }),
-                AppFilter::ProcessExecutableExact(expected) => window
-                    .app_id
-                    .as_deref()
-                    .and_then(|app_id| app_id.strip_prefix(crate::PROCESS_EXECUTABLE_APP_ID_PREFIX))
-                    .is_some_and(|path| path == expected),
-                AppFilter::ProcessNameExact(expected) => window
-                    .app_id
-                    .as_deref()
-                    .and_then(|app_id| app_id.strip_prefix(crate::PROCESS_NAME_APP_ID_PREFIX))
-                    .is_some_and(|name| name == expected),
                 AppFilter::TitleContains(title_filter) => {
                     if self.runtime_policy.disable_title_matching {
                         false
