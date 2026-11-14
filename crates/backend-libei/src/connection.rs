@@ -172,7 +172,7 @@ pub(super) fn connect_portal(
                 .select_devices(
                     session,
                     SelectDevicesOptions::default()
-                        .set_devices(ashpd::enumflags2::BitFlags::from_flag(DeviceType::Keyboard))
+                        .set_devices(DeviceType::KEYBOARD)
                         .set_restore_token(stored_token.as_deref())
                         .set_persist_mode(if options.persist_portal_token {
                             PersistMode::ExplicitlyRevoked
