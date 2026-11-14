@@ -53,10 +53,11 @@ empty until the project accepts matching real-session evidence. A catalog
 recommendation is guidance and does not assert current route availability.
 
 No compositor is currently certified by automated end-to-end tests, and no
-route is currently eligible to satisfy the production release gate. The release
-workflow intentionally fails closed until a real-session route demonstrates
-verified sensitive-field handling, atomic replacement, and the required
-input/output contract. Before deploying desktop capture, test and record the
+route is currently eligible to satisfy the production certification gate.
+Releases still publish binaries after CI passes, but their notes state that they
+are not compositor-certified until a real-session route demonstrates verified
+sensitive-field handling, atomic replacement, and the required input/output
+contract. Before deploying desktop capture, test and record the
 exact compositor and version:
 
 The table below is generated from the certification target contract. Its

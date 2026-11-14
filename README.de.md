@@ -41,8 +41,8 @@ produktiven Einsatz `wayexpand doctor` und die
 
 ### Experimentelle Pakete
 
-Derzeit ist keine GitHub-Version veröffentlicht; der einzige aktuell
-veröffentlichte Paketkanal ist das unten beschriebene PPA.
+Release 1.3.3 enthält keine Binärdateien; ab der nächsten GitHub-Version
+hängen Archive, `.deb` und `.rpm` an jeder Version.
 
 Unzertifizierte Builds können als GitHub-Vorabversionen *Experimental build …*
 auf der [Release-Seite](https://github.com/cyberducttape/wayexpand/releases)
@@ -79,10 +79,19 @@ aktive Weg garantiert.
 
 ### Aus Quellen
 
-Benötigt Rust 1.92 oder neuer:
+Benötigt Rust 1.92 oder neuer und die nativen Build-Werkzeuge:
 
 ```bash
-git clone https://github.com/cyberducttape/wayexpand
+# 1. Build-Werkzeuge (je nach Distribution)
+sudo apt install build-essential pkg-config libwayland-dev libxkbcommon-dev git   # Debian, Ubuntu
+sudo dnf install gcc pkgconf-pkg-config wayland-devel libxkbcommon-devel git      # Fedora
+sudo pacman -S --needed base-devel wayland libxkbcommon git                       # Arch
+
+# 2. Rust 1.92+, falls `cargo --version` älter ist (Ubuntu 24.04 liefert 1.75)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# 3. Bauen und für den eigenen Benutzer installieren
+git clone --depth 1 https://github.com/cyberducttape/wayexpand
 cd wayexpand
 ./scripts/install-user.sh
 wayexpand doctor
