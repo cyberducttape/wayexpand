@@ -297,9 +297,10 @@ explicit `wayexpand debug --focused-app-id` command. Opt in to matching with
 `process_executable_exact:/absolute/path` in `app_filter`,
 `settings.terminal_apps`, or `settings.raw_capture_apps`; for example,
 `process_executable_exact:/usr/bin/konsole`. This is an exact path comparison,
-not a basename or title heuristic. It is currently KWin-specific. A missing,
-cross-user, deleted, or changing process identity remains unknown and matching
-fails closed. An executable allowlist limits which app receives expansion; it
+not a basename or title heuristic. It is currently KWin-specific. A process
+whose executable was replaced by a package upgrade keeps its identity while an
+executable is installed at the same path. A missing, cross-user, removed, or
+changing process identity remains unknown and matching fails closed. An executable allowlist limits which app receives expansion; it
 does not provide password-field detection or make raw evdev capture private.
 Input-method and virtual-keyboard protocol availability must be checked in the
 configured session: KWin lets users select a virtual keyboard, and a headless

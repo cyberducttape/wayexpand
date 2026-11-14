@@ -248,6 +248,10 @@ enum OutputCommand {
         std::time::Instant,
         SyncSender<(ExpansionResult, TransactionOutcome, String)>,
     ),
+    /// Start a new output transaction on the worker's backend, so its
+    /// assurance guard takes a fresh focus/consent baseline before the
+    /// per-operation commands that follow.
+    ResetProgress,
     Shutdown,
 }
 
@@ -543,6 +547,10 @@ pub(crate) fn spawn_async_injector_with_stdin_monitor(
                         }
                         continue;
                     }
+                    OutputCommand::ResetProgress => {
+                        backend.reset_output_progress();
+                        continue;
+                    }
                     OutputCommand::Shutdown => break,
                 };
                 // A rejected expansion (unrepresentable text, a sensitive or
@@ -631,6 +639,12 @@ impl TextInjector for AsyncInjector {
 
     fn reset_output_progress(&mut self) {
         self.output_checkpoint.reset_progress();
+        // Per-operation output runs on the worker's backend; forward the
+        // transaction start so its guard does not validate against another
+        // transaction's baseline. FIFO order puts this before the operations
+        // that follow. If the queue is full or the worker is gone, those
+        // operations are refused the same way, so never block the reactor.
+        let _ = self.sender.try_send(OutputCommand::ResetProgress);
     }
 
     fn output_progress(&self) -> wayexpand_core::OutputProgress {

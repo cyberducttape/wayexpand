@@ -4,6 +4,27 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Discard client-supplied window app IDs that use the reserved
+  `process-executable:` or `process-name:` namespaces (in any letter case)
+  in the KWin and GNOME trackers, so a client cannot name itself
+  `process-executable:/usr/bin/konsole` and satisfy an exact executable
+  filter.
+- Keep a KWin executable identity after a package upgrade replaces the
+  running binary (`/proc/<pid>/exe` ends in ` (deleted)`) while an executable
+  is installed at the same path again.
+- Do not quarantine stdin-source input because the reader had already read a
+  later line before the current one started; only lines that arrive while
+  output runs count as concurrent input.
+- Forward the start of each per-operation output transaction to the output
+  worker, so its assurance guard validates against a fresh baseline.
+- Advance the output guard's focus stamp even when applying a window change
+  fails, instead of refusing all later output.
+- Clear undo state when the backend policy blocks the active route.
+- Warn when `undo_chord` is set: no current output route can verify the
+  application text, so expansion undo is unavailable.
+- Trust root-owned IBus install directories that are group-writable only by
+  a system group, such as Debian's `/usr/local` (`root:staff 2775`).
+
 - Reject KWin's own PID as a focused-application identity instead of falling
   back to the mutable `kwin_wayland` process name; report the compositor-surface
   case as `WX-EVDEV-FOCUS-006` in focused-app, health, and support diagnostics.

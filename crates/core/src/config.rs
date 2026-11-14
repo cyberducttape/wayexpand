@@ -392,6 +392,22 @@ pub const PROCESS_EXECUTABLE_APP_ID_PREFIX: &str = "process-executable:";
 /// process-name scope. The kernel comm field can be changed by the process.
 pub const PROCESS_NAME_APP_ID_PREFIX: &str = "process-name:";
 
+/// Whether `app_id` uses one of the reserved process-identity namespaces,
+/// ignoring ASCII case. Window trackers must discard client-supplied app IDs
+/// for which this is true: only a tracker's own verified process lookup may
+/// produce these identities, or a client could name itself
+/// `process-executable:/usr/bin/konsole` and satisfy an exact executable
+/// filter.
+pub fn is_reserved_process_app_id(app_id: &str) -> bool {
+    [PROCESS_EXECUTABLE_APP_ID_PREFIX, PROCESS_NAME_APP_ID_PREFIX]
+        .iter()
+        .any(|prefix| {
+            app_id
+                .get(..prefix.len())
+                .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+        })
+}
+
 impl AppFilter {
     pub fn parse(raw: &str) -> Option<Self> {
         let raw = raw.trim();

@@ -199,9 +199,12 @@ fn apply_focus_change_before_advancing_guard(
     stamp: wayexpand_core::FocusStamp,
     apply: impl FnOnce() -> std::result::Result<(), Box<EventError>>,
 ) -> std::result::Result<(), Box<EventError>> {
-    apply()?;
+    let result = apply();
+    // Advance even when applying failed: the engine has already seen the new
+    // window, and a guard left on the old stamp would refuse every later
+    // output as "focused window changed" until the next focus change.
     guard.set_stamp(stamp);
-    Ok(())
+    result
 }
 
 /// The configuration a focused application should use: the base library,

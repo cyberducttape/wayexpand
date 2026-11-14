@@ -245,6 +245,7 @@ fn build_config(path: &Path, fleet: bool, policy: &OrganizationPolicy) -> BuildR
         let snapshot = config
             .validate_snapshot()
             .map_err(|error| BuildFailure::Engine(anyhow::Error::new(error)))?;
+        warn_if_undo_unavailable(&config);
         let engine = ExpansionEngine::from_validated(Arc::new(snapshot));
         return Ok(BuiltConfig {
             engine,
@@ -257,6 +258,17 @@ fn build_config(path: &Path, fleet: bool, policy: &OrganizationPolicy) -> BuildR
         });
     }
     unreachable!("fleet consistency loop returns or fails on every attempt")
+}
+
+/// No current daemon output route can verify that the application applied
+/// an expansion, so the daemon never records undo state. Say so rather than
+/// leaving a configured `undo_chord` silently inert.
+fn warn_if_undo_unavailable(config: &wayexpand_core::Config) {
+    if config.settings.undo_chord.is_some() {
+        warn!(
+            "undo_chord is set, but expansion undo is unavailable: no current output route can verify the application text it would undo"
+        );
+    }
 }
 
 impl ReloadableConfig {
@@ -302,6 +314,7 @@ impl ReloadableConfig {
         let snapshot = config
             .validate_snapshot()
             .map_err(|error| anyhow::anyhow!("invalid configuration: {error}"))?;
+        warn_if_undo_unavailable(&config);
         let engine = ExpansionEngine::from_validated(Arc::new(snapshot));
         record_initial_config(
             &path,

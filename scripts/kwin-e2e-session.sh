@@ -119,5 +119,6 @@ multiline-replacement unreachable-character-is-refused app-filter-follows-focus
 command-expansion-completes focus-change-during-expansion target-closes-during-expansion config-reload daemon-restart
 clipboard-variable clipboard-empty-fails-closed output-latency paced-output-over-limit-refuses-before-erasing
 paced-output-within-raised-limit-is-typed paced-refusal-preserves-follow-up-input
+batched-stdin-lines-are-not-quarantined
 keystroke-route-refuses-without-consent"
 fi

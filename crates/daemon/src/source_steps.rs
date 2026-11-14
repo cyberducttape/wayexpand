@@ -23,11 +23,22 @@ impl Daemon {
     /// Stop after the first output checkpoint observes a newer stdin line.
     /// The current replacement may already be partial, so invalidate matcher
     /// state and quarantine every generation the reader has observed.
-    fn quarantine_interrupted_stdin(&mut self, error: Option<&EventError>) -> bool {
+    fn quarantine_interrupted_stdin(
+        &mut self,
+        error: Option<&EventError>,
+        output_attempted: bool,
+    ) -> bool {
         if !self.stdin_input_monitor.interrupted() {
             return false;
         }
         let observed = self.stdin_input_monitor.observed_generation();
+        if error.is_none() && !output_attempted {
+            // A later line arrived, but no output ran while it did, so
+            // nothing was interleaved. Keep processing; later output in this
+            // line is checked against the new epoch.
+            self.stdin_input_monitor.begin_line(observed);
+            return false;
+        }
         if let Some(error) = error {
             warn!(
                 outcome = error.diagnostic_category(),
@@ -469,7 +480,13 @@ impl Daemon {
                     self.config.engine.reset_with_unknown_preceding_text();
                     return Ok(Step::Next);
                 }
-                self.stdin_input_monitor.begin_line(line.generation);
+                // The reader thread reads ahead, so lines already queued when
+                // this one starts were not typed during its output. Only lines
+                // read after this point count as concurrent input.
+                self.stdin_input_monitor.begin_line(
+                    line.generation
+                        .max(self.stdin_input_monitor.observed_generation()),
+                );
                 drain_pending_window_events(
                     &self.window_tracker,
                     &mut self.config.engine,
@@ -483,6 +500,7 @@ impl Daemon {
                 if self.injector.is_some() {
                     for character in line.text.chars() {
                         let event = InputEvent::TextChar(character);
+                        let attempts_before = crate::failure_trace::expansion_attempts();
                         let (result, backend) = if let Some(mut backend) = self.injector.take() {
                             let result = process_event_with_pending_buffer(
                                 &mut self.config.engine,
@@ -509,8 +527,12 @@ impl Daemon {
                             )
                         };
                         self.injector = backend;
-                        if self.quarantine_interrupted_stdin(result.as_ref().err().map(Box::as_ref))
-                        {
+                        let output_attempted =
+                            crate::failure_trace::expansion_attempts() != attempts_before;
+                        if self.quarantine_interrupted_stdin(
+                            result.as_ref().err().map(Box::as_ref),
+                            output_attempted,
+                        ) {
                             stdin_interrupted = true;
                             break;
                         }
@@ -568,6 +590,7 @@ impl Daemon {
                             if !self.config.engine.has_deferred_reservations() {
                                 // The flush can apply an expansion too; a refused
                                 // one typed nothing and must not stop the daemon.
+                                let attempts_before = crate::failure_trace::expansion_attempts();
                                 let result = process_event_with_pending_buffer(
                                     &mut self.config.engine,
                                     InputEvent::EndOfInput,
@@ -577,8 +600,11 @@ impl Daemon {
                                     &mut self.pending_results,
                                     &mut self.ready_results,
                                 );
+                                let output_attempted =
+                                    crate::failure_trace::expansion_attempts() != attempts_before;
                                 let interrupted = self.quarantine_interrupted_stdin(
                                     result.as_ref().err().map(Box::as_ref),
+                                    output_attempted,
                                 );
                                 if !interrupted {
                                     if let Err(error) = result {

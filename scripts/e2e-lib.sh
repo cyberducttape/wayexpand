@@ -263,6 +263,27 @@ EOF
     return "$result"
 }
 
+scenario_batched_stdin_lines_are_not_quarantined() {
+    # The stdin reader reads ahead. A line that was already queued before the
+    # previous one started is not typing during output and must still expand.
+    [ "$e2e_input_source" = stdin ] || {
+        printf 'stdin-only scenario'
+        return 2
+    }
+    write_config <<'EOF'
+[[expansion]]
+trigger = ";s"
+replacement = "Thanks"
+EOF
+    start_sink e2e-a && start_daemon || return 2
+    user_types e2e-a "x;s" "x;s" || return 2
+    printf '%s\n%s\n' "x" ";s" >&3
+    wait_until 50 sink_text_is e2e-a "xThanks"
+    result=$?
+    describe e2e-a
+    return "$result"
+}
+
 scenario_output_latency() {
     status=''
     profiles=''

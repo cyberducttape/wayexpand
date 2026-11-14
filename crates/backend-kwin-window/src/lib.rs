@@ -183,7 +183,8 @@ fn window_context_from_signal(
     );
     let mut app_id = (identity_source_is_application
         && !app_id.is_empty()
-        && !is_kwin_compositor_app_id(&app_id))
+        && !is_kwin_compositor_app_id(&app_id)
+        && !wayexpand_core::is_reserved_process_app_id(&app_id))
     .then_some(app_id);
     if app_id.is_none() {
         if let Some(path) = process_executable.filter(|path| is_valid_executable_path(path)) {
@@ -242,7 +243,13 @@ fn process_executable_path(pid: i32, expected_uid: u32) -> Result<String, Execut
     let path = executable
         .to_str()
         .ok_or(ExecutableLookupFailure::ExecutableInvalid)?;
-    if path.ends_with(" (deleted)") || !is_valid_executable_path(path) {
+    // A package upgrade replaces the binary of every running instance, and
+    // the kernel then reports "<path> (deleted)". The process was still
+    // started from that path, so keep the identity while a valid executable
+    // is installed there again; otherwise terminal-scoped expansion would stop
+    // in every open terminal until it is restarted.
+    let path = path.strip_suffix(" (deleted)").unwrap_or(path);
+    if !is_valid_executable_path(path) {
         return Err(ExecutableLookupFailure::ExecutableInvalid);
     }
     if process_start_time(&process_dir) != Some(before) {
@@ -1221,6 +1228,26 @@ mod tests {
             None,
         )
         .is_none());
+    }
+
+    #[test]
+    fn client_app_id_cannot_claim_a_reserved_process_identity() {
+        for spoof in [
+            "process-executable:/usr/bin/konsole",
+            "Process-Executable:/usr/bin/konsole",
+            "PROCESS-NAME:konsole",
+        ] {
+            let context = window_context_from_signal(
+                spoof.into(),
+                "Terminal".into(),
+                "window-1".into(),
+                WindowIdentitySource::ResourceClass,
+                None,
+                None,
+            )
+            .unwrap();
+            assert_eq!(context.app_id, None, "{spoof}");
+        }
     }
 
     #[test]

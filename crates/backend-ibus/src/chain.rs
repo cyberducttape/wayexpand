@@ -552,9 +552,23 @@ fn trusted_root_directory_chain(path: &Path) -> bool {
     };
     std::iter::successors(Some(path.as_path()), |directory| directory.parent()).all(|directory| {
         fs::metadata(directory).is_ok_and(|metadata| {
-            metadata.is_dir() && metadata.uid() == 0 && metadata.permissions().mode() & 0o022 == 0
+            metadata.is_dir()
+                && metadata.uid() == 0
+                && root_directory_mode_is_trusted(metadata.permissions().mode(), metadata.gid())
         })
     })
+}
+
+/// Below this, a group is a distribution-managed system group (Debian's
+/// `staff` is 50), whose membership only an administrator grants.
+const FIRST_REGULAR_GID: u32 = 1000;
+
+/// A root-owned ancestor must not be world-writable. Group write is accepted
+/// only for a system group, so Debian's `/usr/local` (`root:staff 2775`)
+/// remains trusted while a directory writable by an ordinary user group does
+/// not.
+fn root_directory_mode_is_trusted(mode: u32, gid: u32) -> bool {
+    mode & 0o002 == 0 && (mode & 0o020 == 0 || gid < FIRST_REGULAR_GID)
 }
 
 fn known_user_homes() -> Vec<PathBuf> {
@@ -2074,6 +2088,18 @@ fn target_insertion_check(activity: Option<&IbusStatusReading>) -> IbusCheck {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn root_directories_writable_by_a_system_group_are_trusted() {
+        assert!(root_directory_mode_is_trusted(0o755, 0));
+        assert!(
+            root_directory_mode_is_trusted(0o2775, 50),
+            "Debian /usr/local"
+        );
+        assert!(!root_directory_mode_is_trusted(0o775, 1000));
+        assert!(!root_directory_mode_is_trusted(0o757, 0));
+        assert!(!root_directory_mode_is_trusted(0o777, 50));
+    }
 
     #[test]
     fn kwin_input_method_parser_accepts_kconfig_environment_marker() {

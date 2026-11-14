@@ -120,6 +120,10 @@ pub(crate) fn note_matches(count: usize) {
     MATCHES_FOUND.fetch_add(count as u64, Ordering::Relaxed);
 }
 
+pub(crate) fn expansion_attempts() -> u64 {
+    EXPANSION_ATTEMPTS.load(Ordering::Relaxed)
+}
+
 pub(crate) fn note_expansion_attempt() {
     EXPANSION_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
 }

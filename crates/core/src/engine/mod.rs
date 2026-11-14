@@ -444,6 +444,8 @@ impl ExpansionEngine {
         if self.backend_policy_blocked != blocked {
             self.backend_policy_blocked = blocked;
             self.on_reset();
+            // An undo record would replay output through the blocked route.
+            self.clear_undo_state();
         }
     }
 
