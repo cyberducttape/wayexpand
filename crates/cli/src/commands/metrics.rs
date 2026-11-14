@@ -159,7 +159,8 @@ pub(crate) fn metrics_command(args: Args) -> Result<()> {
     let config_path = rest
         .into_iter()
         .next()
-        .map(PathBuf::from)
+        .map(crate::args::config_path_arg)
+        .transpose()?
         .unwrap_or_else(default_config_path);
     // A stopped daemon or a broken configuration is a metric value, not a
     // command failure: the collector must keep reporting exactly then.

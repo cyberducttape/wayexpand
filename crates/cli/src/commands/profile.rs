@@ -19,7 +19,8 @@ pub(crate) fn profile_command(mut args: Args) -> Result<()> {
         }
         let config_path = args
             .next()
-            .map(PathBuf::from)
+            .map(crate::args::config_path_arg)
+            .transpose()?
             .unwrap_or_else(default_config_path);
         if args.next().is_some() {
             usage_bail!("{USAGE}");
@@ -33,7 +34,8 @@ pub(crate) fn profile_command(mut args: Args) -> Result<()> {
     }
     let config_path = args
         .next()
-        .map(PathBuf::from)
+        .map(crate::args::config_path_arg)
+        .transpose()?
         .unwrap_or_else(default_config_path);
     if args.next().is_some() {
         usage_bail!("{USAGE}");
