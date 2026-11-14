@@ -85,8 +85,9 @@ real-compositor certification workflow. Certification decides what the release
 may claim, not whether it ships: once CI passes, the workflow builds the Linux
 x86_64 and aarch64 binaries with the locked dependency graph and publishes the
 end-user packages and source archives. **No route is currently declared
-production-eligible**, so certification fails closed and the release notes
-open with a "Not compositor-certified" notice. A release is described as
+production-eligible**, so the certification job is skipped (as it is when
+the `CERTIFICATION_RUNNER_TOKEN` secret is missing) and the release notes open
+with a "Not compositor-certified" notice. A release is described as
 certified only when the certification job succeeds. The current compatibility
 candidates are listed in [CERTIFICATION.md](CERTIFICATION.md).
 When manually dispatched with a `launchpad_series` input, it also produces an
