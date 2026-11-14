@@ -4,6 +4,47 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+## [1.3.5] - 2026-11-14
+
+### Highlights
+
+- **IBus route for KDE Plasma and GNOME.** The WayExpand IBus engine expands
+  in native Wayland applications and browsers and replaces a trigger only
+  when the field's surrounding text confirms it. `wayexpand ibus status`
+  checks each link of the route and `wayexpand ibus watch` explains, per
+  field, why triggers do or do not expand. Raw keyboard capture can be limited
+  to terminals with `settings.terminal_apps`.
+- **GNOME window tracking.** A bundled GNOME Shell extension (GNOME 45+)
+  reports the focused window, so app-specific snippets work on GNOME;
+  `wayexpand doctor --gnome` checks it.
+- **Terminal paste mode.** `settings.terminal_paste` delivers multi-line or
+  long replacements in terminals through the clipboard and the terminal's
+  paste key, then restores the previous clipboard text.
+- **Setup, diagnosis, and recovery.** `setup --check|--apply`,
+  `install-check`, `repair`, `reset`, `restore`, `upgrade
+  --check|--apply|--rollback`, `health`, and `debug` with stable finding IDs
+  explained by `wayexpand help finding <ID>`.
+- **Forms and file templates.** Validated form fields (text, dropdown, date),
+  Generate-only templates written with `wayexpand new`, and
+  `wayexpand workflow` for explicit insertion, file generation, or approved
+  broker actions.
+- **Packs, profiles, and libraries.** Signed and community snippet packs with
+  lint, test, diff, lock, update, and rollback, reviewable in the GUI; named
+  configuration profiles with per-application assignment; offline Git
+  snippet catalogs with `wayexpand library`.
+- **Hardened command execution.** Per-action broker sandboxes (Landlock
+  filesystem profiles, network and `io_uring` restrictions), the
+  `require_broker_actions` policy, and `wayexpand doctor --security`.
+- **Organization policy.** `wayexpand policy check` fails CI when restrictions
+  are not enforced, and safe-mode requirements apply consistently to the
+  daemon, IBus, and setup.
+- **AutoKey import** alongside Espanso.
+- **Safer output.** Expansions are cancelled when input or focus changes during
+  output, and recent-expansion diagnostics record content-free transaction
+  phases.
+
+### All changes
+
 - Add `settings.terminal_paste` (`off` by default). On the libei route,
   replacements in `terminal_apps` are delivered with the clipboard and
   Ctrl+Shift+V instead of typed: `multiline` pastes text with a line break,
@@ -4615,28 +4656,28 @@ Changes not yet released.
   output is applied only if no intervening input or focus-state change makes
   the original trigger location stale.
 
-## [1.3.5] - 2026-11-14
-
-Release v1.3.5. Move the unreleased entries above into this section before publishing.
-
 ## [1.3.3] - 2026-10-03
 
-Release v1.3.3. Move the unreleased entries above into this section before publishing.
+Tagged while the release pipeline was being repaired; no GitHub release
+binaries were published. Changes after it are listed under 1.3.5.
 
 ## [1.3.2] - 2026-10-03
 
-Release v1.3.2. Move the unreleased entries above into this section before publishing.
+Tagged while the release pipeline was being repaired; no GitHub release
+binaries were published. Changes after it are listed under 1.3.5.
 
 ## [1.3.1] - 2026-10-03
 
-Release v1.3.1. Move the unreleased entries above into this section before publishing.
+Tagged while the release pipeline was being repaired; no GitHub release
+binaries were published. Changes after it are listed under 1.3.5.
 
 - Restrict the packaged Action Broker and its child actions to Unix-domain
   sockets and document the required no-network service sandbox.
 
 ## [1.3.0] - 2026-10-03
 
-Release v1.3.0. Move the unreleased entries above into this section before publishing.
+Tagged while the release pipeline was being repaired; no GitHub release
+binaries were published. Changes after it are listed under 1.3.5.
 
 ## [1.2.0] - 2026-09-23
 
@@ -4912,19 +4953,9 @@ This is the first stable release. WayExpand is now recommended for production us
 - Installer idempotence, workspace tests, Clippy, systemd verification, and
   systemd security analysis remain covered by the release checks.
 
-[Unreleased]: https://github.com/cyberducttape/wayexpand/compare/v1.3.5...HEAD
-[1.3.5]: https://github.com/cyberducttape/wayexpand/compare/v1.3.3...v1.3.5
-[1.3.3]: https://github.com/cyberducttape/wayexpand/compare/v1.3.2...v1.3.3
-[1.3.2]: https://github.com/cyberducttape/wayexpand/compare/v1.3.1...v1.3.2
-[1.3.1]: https://github.com/cyberducttape/wayexpand/compare/v1.3.0...v1.3.1
-[1.3.0]: https://github.com/cyberducttape/wayexpand/compare/v1.2.0...v1.3.0
-[1.2.0]: https://github.com/cyberducttape/wayexpand/compare/v1.1.2...v1.2.0
-[1.1.2]: https://github.com/cyberducttape/wayexpand/compare/v1.1.1...v1.1.2
-[1.1.1]: https://github.com/cyberducttape/wayexpand/compare/v1.1.0...v1.1.1
-[1.1.0]: https://github.com/cyberducttape/wayexpand/compare/v1.0.0...v1.1.0
-[1.0.0]: https://github.com/cyberducttape/wayexpand/releases/tag/v1.0.0
-[0.2.0]: https://github.com/cyberducttape/wayexpand/releases/tag/v0.2.0
-[0.1.0]: https://github.com/cyberducttape/wayexpand/releases/tag/v0.1.0
+[Unreleased]: https://github.com/cyberducttape/wayexpand/compare/1.3.5...HEAD
+[1.3.5]: https://github.com/cyberducttape/wayexpand/compare/1.3.3...1.3.5
+[1.3.3]: https://github.com/cyberducttape/wayexpand/releases/tag/1.3.3
 - Require GTK and Qt acceptance clients to report stable active-field focus
   before XTEST sends the first key. This prevents window activation from being
   mistaken for a ready input context and keeps the result check tied to the
