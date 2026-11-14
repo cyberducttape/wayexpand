@@ -110,6 +110,10 @@ impl Daemon {
         crate::assurance::GuardState::global().set_mode(self.config.engine.compatibility_mode());
         // Read by keystroke routes as they type, so no reconnect is needed.
         wayexpand_core::set_keystroke_max_chars(self.config.engine.keystroke_max_chars());
+        crate::paste::set_active_mode(
+            self.config.engine.terminal_paste(),
+            self.config.engine.focused_app_is_listed_terminal(),
+        );
         for (action, result) in self.config.engine.drain_completed_hotkeys() {
             match result {
                 Ok(()) => info!(chord = %action.chord, "hotkey action completed"),

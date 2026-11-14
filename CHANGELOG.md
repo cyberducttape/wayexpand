@@ -4,6 +4,17 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Add `settings.terminal_paste` (`off` by default). On the libei route,
+  replacements in `terminal_apps` are delivered with the clipboard and
+  Ctrl+Shift+V instead of typed: `multiline` pastes text with a line break,
+  over `keystroke_max_chars`, or with characters the layout cannot type, and
+  `always` pastes everything. Bracketed paste keeps shells from running each
+  line as it arrives. The trigger is erased only once the clipboard holds the
+  replacement, Klipper is asked not to record it, and the previous clipboard
+  text is restored. Without `ext-data-control-v1`, or when the clipboard holds
+  non-text data, the replacement is typed. Covered by an opt-in KWin e2e
+  scenario with Konsole (`terminal-paste-multiline`).
+
 - Discard client-supplied window app IDs that use the reserved
   `process-executable:` or `process-name:` namespaces (in any letter case)
   in the KWin and GNOME trackers, so a client cannot name itself

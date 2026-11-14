@@ -100,6 +100,9 @@ pub struct ExpansionEngine {
     app_filter_globs: Vec<Vec<Option<GlobPattern>>>,
     /// `settings.terminal_apps`, parsed and compiled.
     terminal_app_scope: Vec<(AppFilter, Option<GlobPattern>)>,
+    /// How many leading `terminal_app_scope` entries come from
+    /// `settings.terminal_apps` (the rest are `raw_capture_apps`).
+    terminal_apps_len: usize,
     /// `settings.raw_capture_apps`, parsed and compiled for diagnostic and
     /// ownership checks against the explicit evdev fallback.
     raw_capture_app_scope: Vec<(AppFilter, Option<GlobPattern>)>,
@@ -327,6 +330,12 @@ impl ExpansionEngine {
         } else {
             &[]
         };
+        let terminal_apps_len = config
+            .settings
+            .terminal_apps
+            .iter()
+            .filter(|raw| AppFilter::parse(raw).is_some())
+            .count();
         let terminal_app_scope = config
             .settings
             .terminal_apps
@@ -368,6 +377,7 @@ impl ExpansionEngine {
             compatibility_mode_override: None,
             app_filter_globs,
             terminal_app_scope,
+            terminal_apps_len,
             raw_capture_app_scope,
             raw_capture_fallback_enabled,
             terminal_apps_only: false,

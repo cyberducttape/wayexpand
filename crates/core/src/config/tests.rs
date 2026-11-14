@@ -1320,3 +1320,28 @@ fn control_socket_only_policy_preserves_user_embedded_policy() {
     assert!(config.organization.require_verified_insert_target);
     assert!(config.organization.disable_control_socket_mutations);
 }
+
+#[test]
+fn terminal_paste_parses_and_decides_which_text_to_paste() {
+    let config = Config::parse("[settings]\nterminal_paste = \"multiline\"\n").unwrap();
+    assert_eq!(config.settings.terminal_paste, TerminalPaste::Multiline);
+    assert_eq!(Settings::default().terminal_paste, TerminalPaste::Off);
+    assert!(Config::parse("[settings]\nterminal_paste = \"sometimes\"\n").is_err());
+    assert!(
+        !toml::to_string(&Settings::default())
+            .unwrap()
+            .contains("terminal_paste"),
+        "the default is omitted so older readers still load saved configs"
+    );
+
+    assert!(!TerminalPaste::Off.pastes("a\nb", 8));
+    assert!(TerminalPaste::Always.pastes("short", 8));
+    assert!(!TerminalPaste::Always.pastes("", 8));
+    assert!(TerminalPaste::Multiline.pastes("line one\nline two", 1000));
+    assert!(TerminalPaste::Multiline.pastes("carriage\rreturn", 1000));
+    assert!(!TerminalPaste::Multiline.pastes("one line", 1000));
+    assert!(
+        TerminalPaste::Multiline.pastes("longer than the typing limit", 8),
+        "text the keystroke route would refuse is pasted instead"
+    );
+}

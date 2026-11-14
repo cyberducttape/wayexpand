@@ -30,7 +30,7 @@ e2e_input_source=${E2E_INPUT_SOURCE:-stdin}
 activate() {
     script="$case_dir/activate-$1.js"
     cat >"$script" <<EOF
-const target = workspace.windowList().find((window) => window.resourceClass === "$1");
+const target = workspace.windowList().find((window) => window.resourceClass === "$1" || window.desktopFileName === "$1");
 if (target) {
     workspace.activeWindow = target;
 }

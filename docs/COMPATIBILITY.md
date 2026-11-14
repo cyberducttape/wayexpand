@@ -1116,6 +1116,19 @@ These fields are guaranteed present and backward-compatible. Missing fields use 
   raw keyboard events globally and cannot detect password fields; the app
   list limits matching, not observation. This fallback is experimental and
   does not certify every browser field or guarantee atomic replacement.
+- `Settings::terminal_paste` (`"off"`, `"multiline"` or `"always"`, default
+  `"off"`, omitted when off) — on the libei route, deliver replacements in
+  `settings.terminal_apps` (not `raw_capture_apps`) through the clipboard and
+  Ctrl+Shift+V instead of typing them. `multiline` pastes replacements that
+  contain a line break, exceed `keystroke_max_chars`, or contain characters
+  the keyboard layout cannot type; `always` pastes every replacement. The
+  trigger is still erased with backspaces, and only after the clipboard holds
+  the replacement. The offer carries KDE's `x-kde-passwordManagerHint=secret`
+  so Klipper does not record it, and the previous clipboard text is restored
+  afterwards. Paste mode needs `ext-data-control-v1`; when it is unavailable,
+  or the clipboard holds non-text data that could not be restored, the
+  replacement is typed instead. A content pack cannot set it. Older readers
+  that reject unknown fields will not load a config that sets it.
 - `ExpansionConfig::output_file` (relative path string or absent, omitted
   from saved TOML and JSON when absent) — the file `wayexpand new` writes the
   snippet to. It may not be absolute or contain `..`, and command-backed

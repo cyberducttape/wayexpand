@@ -233,6 +233,51 @@ pub struct Settings {
     /// `raw_capture_apps`; merely listing apps never disables IBus matching.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub raw_capture_fallback_enabled: bool,
+    /// Deliver replacements in `terminal_apps` by pasting them (the terminal's
+    /// Ctrl+Shift+V) instead of typing them key by key. Pasting is not
+    /// limited by `keystroke_max_chars`, is much faster, and lets a shell's
+    /// bracketed paste hold multi-line text until Enter is pressed instead of
+    /// running each line as it is typed. Omitted when off.
+    #[serde(skip_serializing_if = "TerminalPaste::is_off")]
+    pub terminal_paste: TerminalPaste,
+}
+
+/// When replacements in terminal apps are pasted rather than typed.
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum TerminalPaste {
+    /// Always type replacements key by key.
+    #[default]
+    Off,
+    /// Paste replacements that contain a line break, or that are longer than
+    /// `keystroke_max_chars`; type the rest.
+    Multiline,
+    /// Paste every replacement.
+    Always,
+}
+
+impl TerminalPaste {
+    fn is_off(&self) -> bool {
+        *self == Self::Off
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Multiline => "multiline",
+            Self::Always => "always",
+        }
+    }
+
+    /// Whether `text` should be pasted under this mode. `typed_limit` is the
+    /// longest replacement the paced keystroke route will type.
+    pub fn pastes(self, text: &str, typed_limit: usize) -> bool {
+        match self {
+            Self::Off => false,
+            Self::Always => !text.is_empty(),
+            Self::Multiline => text.contains(['\n', '\r']) || text.chars().count() > typed_limit,
+        }
+    }
 }
 
 /// Upper bound on `settings.terminal_apps` entries.
@@ -359,6 +404,7 @@ impl Default for Settings {
             terminal_apps: Vec::new(),
             raw_capture_apps: Vec::new(),
             raw_capture_fallback_enabled: false,
+            terminal_paste: TerminalPaste::Off,
         }
     }
 }

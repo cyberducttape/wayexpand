@@ -626,6 +626,10 @@ impl TextInjector for AsyncInjector {
         if capabilities.max_text_chars > 0 {
             capabilities.max_text_chars = wayexpand_core::keystroke_max_chars();
         }
+        if self.name == "libei" {
+            // The worker's backend pastes in terminals; see `paste`.
+            capabilities = crate::paste::adjust_capabilities(capabilities);
+        }
         capabilities
     }
 
@@ -785,7 +789,8 @@ fn connect_unguarded_output_backend(
             },
             cancellation,
         )
-        .map(|injector| Box::new(injector) as Box<dyn TextInjector>)
+        // Terminal paste mode needs Ctrl+Shift+V, which libei can press.
+        .map(|injector| crate::paste::PasteInjector::wrap(Box::new(injector)))
         .map_err(|error| OutputConnectError {
             retryable: error.is_retryable(),
             message: format!("connecting libei output backend: {error}"),

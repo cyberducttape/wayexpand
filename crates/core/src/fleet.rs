@@ -135,6 +135,7 @@ fn setting_fields_from_non_defaults(settings: &crate::Settings) -> BTreeSet<Stri
         terminal_apps,
         raw_capture_apps,
         raw_capture_fallback_enabled,
+        terminal_paste,
     );
     fields
 }
@@ -171,7 +172,7 @@ fn resolve_setting_candidates(
             // observed raw-keyboard matching or redirect applications to it.
             if matches!(
                 field.as_str(),
-                "raw_capture_apps" | "raw_capture_fallback_enabled"
+                "raw_capture_apps" | "raw_capture_fallback_enabled" | "terminal_paste"
             ) && candidate.provenance.layer.starts_with("pack:")
             {
                 continue;
@@ -194,6 +195,7 @@ fn resolve_setting_candidates(
                 terminal_apps,
                 raw_capture_apps,
                 raw_capture_fallback_enabled,
+                terminal_paste,
             );
             sources.insert(field.clone(), candidate.provenance.clone());
         }
@@ -226,6 +228,7 @@ fn resolve_setting_candidates(
         "terminal_apps",
         "raw_capture_apps",
         "raw_capture_fallback_enabled",
+        "terminal_paste",
     ] {
         sources
             .entry(field.to_owned())

@@ -53,6 +53,11 @@ impl ExpansionEngine {
         self.config.settings.keystroke_max_chars
     }
 
+    /// When replacements in terminal apps are pasted instead of typed.
+    pub fn terminal_paste(&self) -> crate::TerminalPaste {
+        self.config.settings.terminal_paste
+    }
+
     /// Whether keystroke routes may erase text they cannot verify.
     pub fn compatibility_mode(&self) -> crate::CompatibilityMode {
         self.compatibility_mode_override

@@ -364,6 +364,21 @@ impl ExpansionEngine {
             .any(|(filter, glob)| super::app_id_matches_scope(app_id, filter, glob.as_ref()))
     }
 
+    /// Whether the focused window is one of `settings.terminal_apps` (not
+    /// `raw_capture_apps`). Fails closed without a known app ID.
+    pub fn focused_app_is_listed_terminal(&self) -> bool {
+        let Some(app_id) = self
+            .normalized_window
+            .as_ref()
+            .and_then(|window| window.app_id.as_deref())
+        else {
+            return false;
+        };
+        self.terminal_app_scope[..self.terminal_apps_len]
+            .iter()
+            .any(|(filter, glob)| super::app_id_matches_scope(app_id, filter, glob.as_ref()))
+    }
+
     /// An empty app filter matches everywhere. Each configured filter names
     /// its source explicitly; app IDs never fall back to editable titles.
     pub(super) fn app_filter_allows(

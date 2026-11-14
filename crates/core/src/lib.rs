@@ -55,7 +55,7 @@ pub use config::{
     is_reserved_process_app_id, validate_command_config, AppFilter, ClipboardMode, CommandConfig,
     CommandEnvironment, CompatibilityMode, Config, ConfigError, ConfigRevision, ExpansionConfig,
     ExpansionDelivery, FontScale, HotkeyConfig, LoadedConfig, MatchMode, OrganizationPolicy,
-    Settings, ValidatedConfig, DEFAULT_KEYSTROKE_MAX_CHARS, MAX_KEYSTROKE_MAX_CHARS,
+    Settings, TerminalPaste, ValidatedConfig, DEFAULT_KEYSTROKE_MAX_CHARS, MAX_KEYSTROKE_MAX_CHARS,
     PROCESS_EXECUTABLE_APP_ID_PREFIX, PROCESS_NAME_APP_ID_PREFIX,
 };
 pub use daemon_client::{DaemonClient, DaemonClientError, DaemonFocus, DaemonOperation};

@@ -284,6 +284,68 @@ EOF
     return "$result"
 }
 
+file_has_at_least() {
+    [ "$(wc -c <"$1")" -ge "$2" ]
+}
+
+scenario_terminal_paste_multiline() {
+    # Opt-in: needs Konsole. A multi-line replacement in a listed terminal
+    # arrives through the clipboard and Ctrl+Shift+V, byte for byte, and the
+    # previous clipboard text is restored afterwards.
+    if ! command -v konsole >/dev/null 2>&1 || ! command -v wl-copy >/dev/null 2>&1; then
+        printf 'konsole or wl-copy is not installed'
+        return 2
+    fi
+    e2e_extra_settings='terminal_apps = ["org.kde.konsole"]
+terminal_paste = "multiline"'
+    write_config <<'EOF'
+[[expansion]]
+trigger = ";ml"
+replacement = "first line\nsecond line ünïcode"
+EOF
+    e2e_extra_settings=''
+    out="$case_dir/terminal.bin"
+    : >"$out"
+    recorder="$case_dir/record.sh"
+    printf '#!/bin/sh\nstty -icanon -echo min 1\nexec cat > "%s"\n' "$out" >"$recorder"
+    chmod +x "$recorder"
+    QT_QPA_PLATFORM=wayland konsole --nofork --separate -e "$recorder" \
+        >>"$case_dir/konsole.log" 2>&1 &
+    sink_pids="$sink_pids $!"
+    sleep 4
+    printf 'keep-me' | wl-copy --type='text/plain;charset=utf-8' 2>>"$case_dir/clipboard.log"
+    wait_until 30 session_clipboard_is "keep-me" || {
+        printf 'could not seed the session clipboard'
+        return 2
+    }
+    # activate() confirms focus through the test sink, which Konsole is
+    # not; Konsole is the only window, so its focus is best effort here.
+    activate org.kde.konsole || :
+    start_daemon || return 2
+    sleep 1
+    "$bin/wx-e2e-type" text ";ml" >>"$case_dir/type.log" 2>&1 || return 2
+    sleep 0.3
+    daemon_sees ";ml"
+    expected="first line
+second line ünïcode"
+    # Trigger, three DEL bytes erasing it, then the pasted text.
+    expected_len=$(( $(printf '%s' "$expected" | wc -c) + 6 ))
+    wait_until 50 file_has_at_least "$out" "$expected_len"
+    sleep 0.5
+    tail -c +7 "$out" >"$case_dir/got.txt"
+    printf '%s' "$expected" >"$case_dir/expected.txt"
+    if ! cmp -s "$case_dir/expected.txt" "$case_dir/got.txt"; then
+        printf 'pasted bytes differ: expected=%s got=%s' \
+            "$(wc -c <"$case_dir/expected.txt")" "$(wc -c <"$case_dir/got.txt")"
+        return 1
+    fi
+    wait_until 30 session_clipboard_is "keep-me" || {
+        printf 'the previous clipboard text was not restored'
+        return 1
+    }
+    printf 'pasted=%s bytes; clipboard restored' "$(wc -c <"$case_dir/got.txt")"
+}
+
 scenario_output_latency() {
     status=''
     profiles=''

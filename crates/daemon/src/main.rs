@@ -14,6 +14,7 @@ mod latency;
 mod output_connect;
 mod output_health;
 mod output_loop;
+mod paste;
 mod pending_output;
 mod policy;
 mod reactor;
@@ -463,6 +464,10 @@ fn main() -> Result<()> {
         .map_err(|error| anyhow::anyhow!("could not start signal handler: {error}"))?;
     info!(path = %config.path().display(), fleet = use_fleet, "configuration loaded");
     wayexpand_core::set_keystroke_max_chars(config.engine.keystroke_max_chars());
+    paste::set_active_mode(
+        config.engine.terminal_paste(),
+        config.engine.focused_app_is_listed_terminal(),
+    );
     if let Some(socket) = control.path() {
         info!(path = %socket.display(), "control socket ready");
     } else {

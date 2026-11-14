@@ -26,6 +26,113 @@ use wayexpand_core::{
 
 mod data_control;
 
+/// How long the clipboard may take to save the current selection and offer
+/// the snippet before paste mode gives up and the text is typed instead.
+const PASTE_PREPARE_TIMEOUT: Duration = Duration::from_secs(1);
+/// How long the focused application may take to request the clipboard after
+/// the paste key is pressed.
+const PASTE_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Outcome of delivering text through the clipboard.
+#[derive(Debug)]
+pub(crate) enum PasteOutcome {
+    /// The application read the text from the clipboard.
+    Pasted,
+    /// Paste mode could not start. Nothing was pressed and the clipboard
+    /// is unchanged, so the text may be typed instead.
+    Unavailable(&'static str),
+    /// The paste key was pressed, but the application never read the
+    /// clipboard: it may not have pasted anything.
+    NotRequested,
+}
+
+/// Put `text` on the clipboard, call `press_paste` to send the paste key
+/// once it is offered, and wait for the focused application to read it.
+/// The previous clipboard text is restored afterwards on a background
+/// thread, which keeps serving it until another client takes the clipboard.
+/// Never logs or retains the text.
+pub(crate) fn paste_text<E>(
+    text: &str,
+    press_paste: impl FnOnce() -> Result<(), E>,
+) -> Result<PasteOutcome, E> {
+    // A session that has not restored the clipboard yet still offers its
+    // snippet. Starting another now would save that snippet as the
+    // "previous" clipboard and put it back afterwards.
+    let mut previous = PASTE_SESSION
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(pending) = previous.take() {
+        if !wait_for_restore(&pending, Instant::now() + PASTE_RESTORE_WAIT) {
+            *previous = Some(pending);
+            return Ok(PasteOutcome::Unavailable(
+                "the previous paste has not restored the clipboard yet",
+            ));
+        }
+    }
+    let (events_sender, events) = mpsc::channel();
+    let (abort, abort_receiver) = mpsc::channel();
+    let owned = zeroize::Zeroizing::new(text.to_owned());
+    let prepare_deadline = Instant::now() + PASTE_PREPARE_TIMEOUT;
+    let spawned = std::thread::Builder::new()
+        .name("wayexpand-paste".into())
+        .spawn(move || {
+            data_control::paste_session(owned, events_sender, abort_receiver, prepare_deadline)
+        });
+    if spawned.is_err() {
+        return Ok(PasteOutcome::Unavailable(
+            "cannot start the clipboard thread",
+        ));
+    }
+    match events.recv_timeout(PASTE_PREPARE_TIMEOUT + Duration::from_millis(250)) {
+        Ok(data_control::PasteEvent::Ready) => {}
+        Ok(data_control::PasteEvent::Unavailable(reason)) => {
+            return Ok(PasteOutcome::Unavailable(reason))
+        }
+        Ok(data_control::PasteEvent::Served | data_control::PasteEvent::Restored) | Err(_) => {
+            let _ = abort.send(());
+            *previous = Some(events);
+            return Ok(PasteOutcome::Unavailable(
+                "the clipboard did not become ready",
+            ));
+        }
+    }
+    if let Err(error) = press_paste() {
+        let _ = abort.send(());
+        *previous = Some(events);
+        return Err(error);
+    }
+    let outcome = match events.recv_timeout(PASTE_REQUEST_TIMEOUT) {
+        Ok(data_control::PasteEvent::Served) => PasteOutcome::Pasted,
+        _ => {
+            let _ = abort.send(());
+            PasteOutcome::NotRequested
+        }
+    };
+    *previous = Some(events);
+    Ok(outcome)
+}
+
+/// How long a paste waits for the previous session to restore the clipboard.
+const PASTE_RESTORE_WAIT: Duration = Duration::from_secs(1);
+
+/// Events of the most recent paste session that may not have restored the
+/// clipboard yet.
+static PASTE_SESSION: Mutex<Option<mpsc::Receiver<data_control::PasteEvent>>> = Mutex::new(None);
+
+fn wait_for_restore(events: &mpsc::Receiver<data_control::PasteEvent>, deadline: Instant) -> bool {
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        match events.recv_timeout(remaining) {
+            Ok(data_control::PasteEvent::Restored) => return true,
+            Ok(_) => {}
+            // A session that ended without restoring (its thread exited) has
+            // nothing left on the clipboard to protect.
+            Err(mpsc::RecvTimeoutError::Disconnected) => return true,
+            Err(mpsc::RecvTimeoutError::Timeout) => return false,
+        }
+    }
+}
+
 /// How long a prefetched value may wait for its render before it is erased.
 /// Typing the rest of a trigger takes well under this.
 const PREFETCH_MAX_AGE: Duration = Duration::from_secs(2);

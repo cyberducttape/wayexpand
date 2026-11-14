@@ -191,6 +191,24 @@ configuration reload.
 This is intentional: the delay prioritizes correctness and reliability over speed
 when the fast path isn't available.
 
+**Terminal paste mode.** In terminals, typing a multi-line replacement runs
+each line in the shell as its Enter arrives. With `terminal_paste` set, the
+libei route pastes replacements in `terminal_apps` instead:
+
+```toml
+[settings]
+terminal_paste = "multiline"   # or "always"; "off" by default
+```
+
+The replacement is placed on the clipboard (with KDE's secret hint, so Klipper
+does not keep it in history), the trigger is erased, and Ctrl+Shift+V is
+pressed. A shell with bracketed paste then holds a multi-line replacement until
+you press Enter. Pasted text is not limited by `keystroke_max_chars` or the
+keyboard layout. Your previous clipboard text is restored afterwards. If the
+clipboard holds something that is not text, or the compositor lacks
+`ext-data-control-v1`, the replacement is typed as before. A terminal whose
+paste shortcut is not Ctrl+Shift+V reports an uncertain outcome instead.
+
 **When does this happen?** It has been observed with xdg-desktop-portal-kde on
 KWin 6.6. Treat that as a recorded compatibility observation, not a guarantee
 for every later KWin or portal build; use `wayexpand doctor` and compositor

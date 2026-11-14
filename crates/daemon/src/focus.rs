@@ -169,6 +169,11 @@ pub(crate) fn drain_pending_window_events(
             },
         )?;
     }
+    // Output for the new window must use that window's paste mode.
+    crate::paste::set_active_mode(
+        engine.terminal_paste(),
+        engine.focused_app_is_listed_terminal(),
+    );
     // Runs on every loop iteration: compare by reference and publish only on
     // an actual focus change.
     if focus_state.previous.as_ref() != engine.current_window() {
