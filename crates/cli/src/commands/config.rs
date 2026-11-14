@@ -18,7 +18,8 @@ pub(crate) fn test_command(mut args: Args) -> Result<()> {
     let path = rest
         .into_iter()
         .next()
-        .map(PathBuf::from)
+        .map(crate::args::config_path_arg)
+        .transpose()?
         .unwrap_or_else(default_config_path);
     let config = Config::load(&path).map_err(|error| config_load_error(&path, error))?;
     let form_triggers: Vec<(String, bool)> = config
@@ -119,7 +120,8 @@ pub(crate) fn test_hotkey_command(mut args: Args) -> Result<()> {
     let path = rest
         .into_iter()
         .next()
-        .map(PathBuf::from)
+        .map(crate::args::config_path_arg)
+        .transpose()?
         .unwrap_or_else(default_config_path);
     let chord = wayexpand_core::KeyChord::parse(&chord_text)
         .map_err(|error| config_error(format!("invalid hotkey chord: {error}")))?;
@@ -164,7 +166,8 @@ pub(crate) fn preview_command(mut args: Args) -> Result<()> {
     let path = rest
         .into_iter()
         .next()
-        .map(PathBuf::from)
+        .map(crate::args::config_path_arg)
+        .transpose()?
         .unwrap_or_else(default_config_path);
     let config = Config::load(&path).map_err(|error| config_load_error(&path, error))?;
     let form_triggers: Vec<(String, bool)> = config
@@ -353,7 +356,8 @@ pub(crate) fn list_command(args: Args) -> Result<()> {
     let path = rest
         .into_iter()
         .next()
-        .map(PathBuf::from)
+        .map(crate::args::config_path_arg)
+        .transpose()?
         .unwrap_or_else(default_config_path);
     let config = Config::load(&path).map_err(|error| config_load_error(&path, error))?;
     if requested_json {
@@ -392,7 +396,8 @@ pub(crate) fn search_command(mut args: Args) -> Result<()> {
     let path = rest
         .into_iter()
         .next()
-        .map(PathBuf::from)
+        .map(crate::args::config_path_arg)
+        .transpose()?
         .unwrap_or_else(default_config_path);
     let query_lower = query.to_lowercase();
     let config = Config::load(&path).map_err(|error| config_load_error(&path, error))?;
@@ -452,7 +457,8 @@ pub(crate) fn validate_command(args: Args) -> Result<()> {
     let path = rest
         .into_iter()
         .next()
-        .map(PathBuf::from)
+        .map(crate::args::config_path_arg)
+        .transpose()?
         .unwrap_or_else(default_config_path);
     let policy = load_policy()?;
     let loaded = Config::load_versioned(&path).map_err(|error| config_load_error(&path, error))?;
@@ -2420,7 +2426,8 @@ pub(crate) fn set_enabled_command(mut args: Args) -> Result<()> {
     };
     let path = args
         .next()
-        .map(PathBuf::from)
+        .map(crate::args::config_path_arg)
+        .transpose()?
         .unwrap_or_else(default_config_path);
     if args.next().is_some() {
         usage_bail!("usage: wayexpand set-enabled <trigger> <on|off> [config]");
@@ -2472,7 +2479,8 @@ pub(crate) fn set_mode_command(mut args: Args) -> Result<()> {
     };
     let path = args
         .next()
-        .map(PathBuf::from)
+        .map(crate::args::config_path_arg)
+        .transpose()?
         .unwrap_or_else(default_config_path);
     if args.next().is_some() {
         usage_bail!("usage: wayexpand set-mode <trigger> <immediate|word-boundary> [config]");
@@ -2509,7 +2517,8 @@ pub(crate) fn set_mode_command(mut args: Args) -> Result<()> {
 pub(crate) fn backup_command(mut args: Args) -> Result<()> {
     let source = args
         .next()
-        .map(PathBuf::from)
+        .map(crate::args::config_path_arg)
+        .transpose()?
         .unwrap_or_else(default_config_path);
     let destination = args
         .next()
@@ -2646,7 +2655,8 @@ pub(crate) fn stats_command(args: Args) -> Result<()> {
     let path = rest
         .into_iter()
         .next()
-        .map(PathBuf::from)
+        .map(crate::args::config_path_arg)
+        .transpose()?
         .unwrap_or_else(default_config_path);
     let stats_path = wayexpand_core::usage_stats_path(&path);
     if clear {
@@ -2786,7 +2796,8 @@ pub(crate) fn sync_command(args: Args) -> Result<()> {
     let path = rest
         .into_iter()
         .next()
-        .map(PathBuf::from)
+        .map(crate::args::config_path_arg)
+        .transpose()?
         .unwrap_or_else(default_config_path);
     match action.as_str() {
         "init" => {

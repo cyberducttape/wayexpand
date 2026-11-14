@@ -7,6 +7,7 @@ mod doctor;
 mod errors;
 mod gnome_extension;
 mod gnome_input_sources;
+mod help;
 mod services;
 mod setup;
 mod setup_ibus;
@@ -92,16 +93,52 @@ pub(crate) use usage_bail;
 fn main() {
     exit_quietly_when_stdout_closes();
     if let Err(error) = run().map_err(normalize_error) {
-        eprintln!("Error: {error:?}");
-        std::process::exit(exit_code_for(&error));
+        let code = exit_code_for(&error);
+        let label = if std::io::IsTerminal::is_terminal(&std::io::stderr())
+            && env::var_os("NO_COLOR").is_none()
+        {
+            "\x1b[1;31mError:\x1b[0m"
+        } else {
+            "Error:"
+        };
+        let message = error.to_string();
+        if let Some(usage) = message
+            .strip_prefix("usage: ")
+            .filter(|_| code == EXIT_USAGE)
+        {
+            // A bare usage line does not say what went wrong.
+            eprintln!("{label} missing or invalid arguments\nUsage: {usage}");
+        } else {
+            eprintln!("{label} {error:?}");
+        }
+        // Point a usage error at the command's full help, unless the message
+        // already points at help.
+        if code == EXIT_USAGE && !message.contains("`wayexpand help") {
+            if let Some(command) = CURRENT_COMMAND.get().filter(|command| **command != "help") {
+                eprintln!("Run `wayexpand help {command}` for its usage and examples.");
+            }
+        }
+        std::process::exit(code);
     }
 }
 
 fn run() -> Result<()> {
-    // `wayexpand <command> --help` would otherwise reach the command's own
-    // parser and be read as a trigger or config path.
-    if env::args().skip(2).any(|argument| argument == "--help") {
-        print_help();
+    // `wayexpand <command> --help` or `-h` would otherwise reach the
+    // command's own parser and be read as a trigger or config path (`doctor
+    // -h` diagnosed a configuration file called "-h").
+    let first = env::args().nth(1);
+    let known = first.as_deref().and_then(help::find);
+    if let Some(command) = known {
+        let _ = CURRENT_COMMAND.set(command.name);
+    }
+    if env::args()
+        .skip(2)
+        .any(|argument| argument == "--help" || argument == "-h")
+    {
+        match known {
+            Some(command) => print_command_help(command),
+            None => print_help(),
+        }
         return Ok(());
     }
     let mut args = env::args().skip(1);
@@ -163,8 +200,9 @@ fn run() -> Result<()> {
         }
         Some("insert") => insert_command(args)?,
         Some("help") => help_command(args)?,
+        Some("completions") => completions_command(args)?,
         Some("--help") | Some("-h") | None => print_help(),
-        Some(command) => usage_bail!("unknown command {command:?}; try `wayexpand help`"),
+        Some(command) => usage_bail!("{}", unknown_command_message(command)),
     }
     Ok(())
 }
@@ -172,6 +210,7 @@ fn run() -> Result<()> {
 fn help_command(mut args: Args) -> Result<()> {
     match args.next().as_deref() {
         None => print_help(),
+        Some("--all") => help::print_main_help(build_info::VERSION, true),
         Some("finding") => {
             let id = args
                 .next()
@@ -214,226 +253,12 @@ fn help_command(mut args: Args) -> Result<()> {
             };
             println!("{id} · {summary}\nNext step: {action}\nReference: {doc}");
         }
-        _ => usage_bail!("usage: wayexpand help [finding <WX-ID>]"),
+        Some(name) => match help::find(name) {
+            Some(command) => print_command_help(command),
+            None => usage_bail!("{}", unknown_command_message(name)),
+        },
     }
     Ok(())
-}
-
-/// `(usage, summary)` rows for `wayexpand help`, grouped by section.
-const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
-    (
-        "Getting started",
-        &[
-            (
-                "setup --check [--json] | --apply [--mode recommended|maximum|experimental] [--terminals | --evdev-apps] [--yes] [--accept-non-atomic-replacement] [--install-system-integration]",
-                "Check setup readiness or configure a reviewed input route",
-            ),
-            ("install-check [--json]", "Audit installed WayExpand components"),
-            ("health [--json]", "Report operational readiness with a stable monitoring exit code"),
-            ("compatibility-report [--json]", "Generate a reproducible desktop compatibility report"),
-            ("check --all [--json] [config]", "Run static configuration, template, file, policy, and trigger checks without executing commands"),
-            ("service status [--json] | restart --yes", "Inspect managed services or restart only the active route"),
-            ("config show|validate [--json] [config] | diff [--json] OLD NEW", "Inspect, validate, or compare configuration files"),
-            ("repair --check|--apply [--json] | --gnome-input-source [--json]", "Inspect installation repairs or register and activate the GNOME IBus source"),
-            ("reset --integration|--services|--preferences [--check|--apply --yes] [--json]", "Preview and apply a scoped recovery reset"),
-            ("restore <backup> [--check | --apply --yes --expected-current=HASH --expected-backup=HASH] [--json] [config]", "Review and safely restore a configuration backup"),
-            (
-                "doctor [--json] [config] | --gnome [--json]",
-                "Diagnose configuration, backends and the running daemon",
-            ),
-            ("debug [--json] [--trigger TEXT] [--live [--seconds 1..300]] | --focused-app-id [--json] | --test TRIGGER [--application-class CLASS --focus-confirmed [--observe-only]] | --gnome --interactive", "Explain runtime readiness, inspect the focused app ID, or guide a harmless insertion test"),
-            (
-                "policy inspect|check [--file PATH] [--allow-audit-only] [--json]",
-                "Inspect policy provenance or fail CI when restrictions are not enforced",
-            ),
-            (
-                "doctor --security [--profile workstation|hardened|strict] [--json] [config]",
-                "Inspect sandbox readiness against an explicit protection profile",
-            ),
-            (
-                "doctor --certify [--json]",
-                "Run isolated live insertion checks in a private KWin",
-            ),
-            (
-                "upgrade-status [--json]",
-                "Check whether the running daemon matches this CLI",
-            ),
-            ("upgrade --check|--apply|--rollback [--json]", "Verify or complete a staged runtime upgrade"),
-            (
-                "explain <text> [--json] [--offline] [--app ID] [config]",
-                "Explain why typed text would or would not expand",
-            ),
-            ("edit [config]", "Open the graphical snippet editor"),
-        ],
-    ),
-    (
-        "Daemon control",
-        &[(
-            "status|reload|pause|resume|stop [--json]",
-            "Control a running daemon",
-        )],
-    ),
-    (
-        "Terminal context",
-        &[
-            (
-                "context integration bash|zsh|fish",
-                "Print an opt-in shell prompt integration",
-            ),
-            (
-                "context report|status|clear",
-                "Report and inspect fresh terminal, remote, project, and runtime context",
-            ),
-            (
-                "context render <trigger> [--remote-host HOST] [--environment NAME] [--kubernetes-context NAME] [--set NAME=VALUE]... [--json]",
-                "Render text for the current shell and SSH context; never execute it",
-            ),
-        ],
-    ),
-    (
-        "Snippets",
-        &[
-            (
-                "list [--json] [config]",
-                "List configured expansions and hotkeys",
-            ),
-            (
-                "sync [init [--remote URL]|status] [--json] [--allow-executable --approved-revision FULL_COMMIT] [config]",
-                "Synchronize a static snippet library with Git (optional)",
-            ),
-            (
-                "stats [--json] [--days N] [--clear] [config]",
-                "Local usage: expansions, keystrokes saved, unused snippets",
-            ),
-            (
-                "search <query> [--json] [config]",
-                "Search triggers, descriptions, and tags",
-            ),
-            (
-                "schema",
-                "Print the stable configuration schema for authoring tools",
-            ),
-            (
-                "new [<name> [--set NAME=VALUE]... [-o FILE|--stdout] [--gui] [--force] [--validate]]",
-                "Fill in a file template (Dockerfile, playbook...) and write it",
-            ),
-            (
-                "workflow insert|generate|run ...",
-                "Choose explicit insertion, reviewed file generation, or an approved broker action",
-            ),
-            (
-                "test <text> [--json] [config]",
-                "Simulate input and print a match",
-            ),
-            (
-                "preview <trigger> [--preview-app APP] [--json] [config]",
-                "Preview a replacement",
-            ),
-            (
-                "test-hotkey <chord> [--json] [config]",
-                "Resolve a hotkey without executing it",
-            ),
-            (
-                "insert [--verified] <trigger>",
-                "Type a snippet at the cursor via the running daemon",
-            ),
-            (
-                "set-enabled <trigger> <on|off> [config]",
-                "Enable or disable an expansion",
-            ),
-            (
-                "set-mode <trigger> <immediate|word-boundary> [config]",
-                "Set the matching mode",
-            ),
-            (
-                "validate [--fleet] [--json] [--deny-risks] [config]",
-                "Validate configuration",
-            ),
-            (
-                "backup [config] [destination]",
-                "Create a non-overwriting config backup",
-            ),
-            (
-                "import <espanso|autokey> <file-or-directory> [--strict] [--report-json] [--add [--config PATH]]",
-                "Convert to TOML, or merge into a library after smoke-testing imported triggers",
-            ),
-            (
-                "pack lint|test|diff|search|inspect|install|outdated|update|lock|sync|list|path|remove|rollback|import|verify|sign ...",
-                "Lint, test, review, sign, distribute, and roll back local snippet packs",
-            ),
-            (
-                "profile list|create|switch|remove|assign-app|unassign-app ...",
-                "Switch validated configuration profiles, or assign them to apps",
-            ),
-            (
-                "library add [--approved-revision FULL_COMMIT]|list|path|search|remove ...",
-                "Browse and pin offline Git snippet catalogs",
-            ),
-        ],
-    ),
-    (
-        "Backends and operations",
-        &[
-            ("backend list [--json] | profile [ID|--current] [--json] | test --capture|--injection", "Inspect live route assessments, desktop guidance, or run an explicit one-shot route test"),
-            ("explain-backend", "Explain automatic backend selection"),
-            ("certify [--json]", "Run local compatibility certification"),
-            (
-                "support [--gnome] [--output FILE]",
-                "Write a sanitized GNOME-focused support report",
-            ),
-            (
-                "support-bundle [--output FILE]",
-                "Write redacted diagnostic JSON for support",
-            ),
-            (
-                "fleet status [--json]",
-                "Show merged fleet configuration status",
-            ),
-            (
-                "metrics [--output FILE] [config]",
-                "Write content-free Prometheus metrics (textfile collector)",
-            ),
-            (
-                "portal status|reset",
-                "Inspect or remove the libei portal token",
-            ),
-            (
-                "ibus status [--json]|watch [--seconds N]",
-                "Check the IBus route link by link; explain why a field expands or not",
-            ),
-        ],
-    ),
-    (
-        "Other",
-        &[
-            ("help", "Show this help"),
-            ("version", "Print the installed version"),
-        ],
-    ),
-];
-
-fn help_text() -> String {
-    let width = HELP_SECTIONS
-        .iter()
-        .flat_map(|(_, rows)| rows.iter())
-        .map(|(usage, _)| usage.chars().count())
-        .max()
-        .unwrap_or(0);
-    let mut help = format!(
-        "WayExpand {} — secure Wayland text expansion\n\nusage: wayexpand <command> [options]\n",
-        build_info::VERSION
-    );
-    for (section, rows) in HELP_SECTIONS {
-        help.push_str(&format!("\n{section}:\n"));
-        for (usage, summary) in *rows {
-            help.push_str(&format!("  {usage:<width$}  {summary}\n"));
-        }
-    }
-    help.push_str(&format!(
-        "\n[config] defaults to {}\nEnvironment: WAYEXPAND_CONFIG, WAYEXPAND_SOCKET, XDG_CONFIG_HOME, XDG_RUNTIME_DIR",
-        default_config_path().display()
-    ));
-    help
 }
 
 fn control_operation(operation: wayexpand_core::DaemonOperation) -> Result<String> {
@@ -442,8 +267,38 @@ fn control_operation(operation: wayexpand_core::DaemonOperation) -> Result<Strin
         .map_err(|error| daemon_error(error.to_string()))
 }
 
+/// The command being run, so a usage error can point at its help.
+static CURRENT_COMMAND: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+
 fn print_help() {
-    println!("{}", help_text());
+    help::print_main_help(build_info::VERSION, false);
+}
+
+fn print_command_help(command: &help::Command) {
+    help::print_command_help(command, &default_config_path().display().to_string());
+}
+
+fn completions_command(mut args: Args) -> Result<()> {
+    const USAGE: &str = "usage: wayexpand completions bash|zsh|fish";
+    let shell = args.next().ok_or_else(|| usage_error(USAGE))?;
+    if args.next().is_some() {
+        usage_bail!("{USAGE}");
+    }
+    let script = help::completions(&shell)
+        .ok_or_else(|| usage_error(format!("unsupported shell {shell:?}; {USAGE}")))?;
+    print!("{script}");
+    Ok(())
+}
+
+fn unknown_command_message(command: &str) -> String {
+    match help::suggestion(command) {
+        Some(suggestion) => {
+            format!("unknown command {command:?}; did you mean `wayexpand {suggestion}`?")
+        }
+        None => {
+            format!("unknown command {command:?}; run `wayexpand help` for the list of commands")
+        }
+    }
 }
 
 pub(crate) fn prompt_yes_no(prompt: &str, default: bool) -> Result<bool> {
