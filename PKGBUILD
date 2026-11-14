@@ -25,7 +25,7 @@ optdepends=(
     'polkit: for action-specific authorization of broker actions'
 )
 source=("https://github.com/cyberducttape/wayexpand/releases/download/v1.3.5/wayexpand-1.3.5.tar.gz")
-sha256sums=('5ca98534e16e3ec018a2c6705ea02e6e61d4d9b127fd4307ca5e2c685ee58147')
+sha256sums=('09b7c57e51a666c4d261721f8d15ef0003b5608b0a3f1ada4707d2e397dbeaee')
 conflicts=('wayexpand-git')
 
 prepare() {
@@ -40,7 +40,9 @@ build() {
 
 check() {
     cd "${pkgname}-${pkgver}"
-    cargo test --release --frozen --workspace
+    # Package builds do not run inside a delegated systemd cgroup, so command
+    # tests use process-group containment, as debian/rules does.
+    WAYEXPAND_PROCESS_CGROUP=disabled cargo test --release --frozen --workspace
 }
 
 package() {
