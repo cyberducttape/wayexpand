@@ -17,7 +17,8 @@ fn setup_command_timeout(program: &str, arguments: &[&str]) -> Duration {
     {
         Duration::from_secs(5)
     } else if (program == "systemctl" && joined.contains(" restart "))
-        || (program == "ibus" && (joined == "restart" || joined == "exit"))
+        || (program == "ibus"
+            && (joined == "restart" || joined.starts_with("restart --type=") || joined == "exit"))
     {
         Duration::from_secs(60)
     } else if program == "systemctl"
@@ -352,6 +353,15 @@ mod timeout_tests {
         assert_eq!(
             setup_command_timeout("systemctl", &["--user", "daemon-reload"]),
             Duration::from_secs(20)
+        );
+        // Restarting IBus through KWin takes as long as a plain restart.
+        assert_eq!(
+            setup_command_timeout("ibus", &["restart"]),
+            Duration::from_secs(60)
+        );
+        assert_eq!(
+            setup_command_timeout("ibus", &["restart", "--type=kde-wayland"]),
+            Duration::from_secs(60)
         );
         assert_eq!(
             setup_command_timeout("unknown", &["operation"]),

@@ -2283,7 +2283,7 @@ fn refresh_ibus_component_registry(desktop: IbusDesktop) -> Result<()> {
             run_setup_command("systemctl", &["--user", "restart", &unit])
         } else {
             step("Refreshing the IBus component registry (the desktop-managed IBus session may pause briefly)");
-            run_setup_command("ibus", &["restart"])
+            run_setup_command("ibus", wayexpand_backend_ibus::ibus_restart_arguments())
         }
     } else {
         step("Starting the desktop IBus session so it can load the WayExpand component");

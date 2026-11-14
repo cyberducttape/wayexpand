@@ -1019,7 +1019,10 @@ pub fn diagnose() -> IbusChainReport {
             IbusCheckState::Fail,
             format!("`ibus list-engine` does not list {ENGINE_NAME}"),
             Some(if manifest.is_some() {
-                "restart IBus so it reloads components: `ibus restart`".into()
+                format!(
+                    "restart IBus so it reloads components: `{}`",
+                    crate::ibus_restart_command()
+                )
             } else {
                 "install the component first (see above)".into()
             }),

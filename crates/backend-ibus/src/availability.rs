@@ -104,7 +104,59 @@ pub(crate) fn ibus_registry_contains_engine() -> bool {
     )
 }
 
+/// Arguments for restarting IBus on this desktop.
+///
+/// KDE Plasma's KWin launches IBus as its Wayland input method. A plain
+/// `ibus restart` there asks the daemon to restart itself and then waits for
+/// a daemon KWin never brings back, so it hangs. IBus 1.5.30 and later
+/// restart it through KWin with `--type=kde-wayland`; older IBus has no such
+/// option and keeps the plain command.
+pub fn ibus_restart_arguments() -> &'static [&'static str] {
+    if kde_wayland_session() && ibus_supports_kde_wayland_restart() {
+        &["restart", "--type=kde-wayland"]
+    } else {
+        &["restart"]
+    }
+}
+
+/// The IBus restart command to show users, for example in setup advice.
+pub fn ibus_restart_command() -> String {
+    format!("ibus {}", ibus_restart_arguments().join(" "))
+}
+
+fn kde_wayland_session() -> bool {
+    let kde = env::var("XDG_CURRENT_DESKTOP").is_ok_and(|desktops| {
+        desktops
+            .split(':')
+            .any(|desktop| desktop.eq_ignore_ascii_case("KDE"))
+    });
+    kde && env::var_os("WAYLAND_DISPLAY").is_some_and(|display| !display.is_empty())
+}
+
+fn ibus_supports_kde_wayland_restart() -> bool {
+    static SUPPORTED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *SUPPORTED.get_or_init(|| {
+        bounded_command_output_matches(
+            "ibus",
+            &["restart", "--help"],
+            Duration::from_secs(5),
+            |output| String::from_utf8_lossy(output).contains("kde-wayland"),
+        )
+    })
+}
+
 fn registry_command_contains_engine(program: &str, args: &[&str], timeout: Duration) -> bool {
+    bounded_command_output_matches(program, args, timeout, registry_output_contains_engine)
+}
+
+/// Run `program` with a deadline and bounded output, and report whether it
+/// succeeded with output accepted by `matches`.
+fn bounded_command_output_matches(
+    program: &str,
+    args: &[&str],
+    timeout: Duration,
+    matches: impl Fn(&[u8]) -> bool,
+) -> bool {
     let mut command = Command::new(program);
     command
         .args(args)
@@ -163,7 +215,7 @@ fn registry_command_contains_engine(program: &str, args: &[&str], timeout: Durat
                         Ok(_) | Err(_) => break false,
                     }
                 };
-                return complete && status.success() && registry_output_contains_engine(&output);
+                return complete && status.success() && matches(&output);
             }
             Ok(false) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
             Ok(false) | Err(_) => {

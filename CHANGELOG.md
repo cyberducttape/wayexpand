@@ -4,6 +4,14 @@ All notable changes to WayExpand are documented here.
 
 ## [Unreleased]
 
+- Restart IBus the way KDE Plasma expects. KWin launches IBus as its Wayland
+  input method, and a plain `ibus restart` there hangs waiting for a daemon
+  KWin never relaunches. Setup, `wayexpand ibus`, and the update notice now
+  use `ibus restart --type=kde-wayland` on KDE Wayland when the installed IBus
+  supports it, and keep `ibus restart` elsewhere.
+- Exit the IBus engine when its ibus-daemon goes away. Each IBus restart used
+  to leave the previous `wayexpand-ibus` process running indefinitely beside
+  the new one. Covered by the real-IBus end-to-end test.
 - Add `settings.terminal_paste` (`off` by default). On the libei route,
   replacements in `terminal_apps` are delivered with the clipboard and
   Ctrl+Shift+V instead of typed: `multiline` pastes text with a line break,

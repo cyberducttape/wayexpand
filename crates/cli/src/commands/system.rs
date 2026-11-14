@@ -1260,7 +1260,10 @@ fn print_ibus_engine_restart_guidance(processes: &[crate::setup_ibus::StaleEngin
             process.executable.display()
         );
     }
-    println!("Restart IBus to load the updated engine: `ibus restart` (input pauses briefly).");
+    println!(
+        "Restart IBus to load the updated engine: `{}` (input pauses briefly).",
+        wayexpand_backend_ibus::ibus_restart_command()
+    );
 }
 
 fn wait_for_daemon_build() -> (Result<serde_json::Value>, Option<String>) {
