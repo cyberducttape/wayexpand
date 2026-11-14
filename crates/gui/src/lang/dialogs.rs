@@ -3,9 +3,9 @@ use super::{Language, Strings};
 impl Strings {
     pub fn diagnostics_title(&self) -> &'static str {
         match self.lang {
-            Language::English => "WayExpand diagnostics",
-            Language::Indonesian => "Diagnostik WayExpand",
-            Language::German => "WayExpand Diagnose",
+            Language::English => "Diagnostics",
+            Language::Indonesian => "Diagnostik",
+            Language::German => "Diagnose",
         }
     }
 
@@ -402,9 +402,9 @@ impl Strings {
 
     pub fn settings_title(&self) -> &'static str {
         match self.lang {
-            Language::English => "WayExpand settings",
-            Language::Indonesian => "Pengaturan WayExpand",
-            Language::German => "WayExpand-Einstellungen",
+            Language::English => "Settings",
+            Language::Indonesian => "Pengaturan",
+            Language::German => "Einstellungen",
         }
     }
 

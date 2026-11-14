@@ -1,14 +1,6 @@
 use super::{Language, Strings};
 
 impl Strings {
-    pub fn snippet_details(&self) -> &'static str {
-        match self.lang {
-            Language::English => "Snippet details",
-            Language::Indonesian => "Detail cuplikan",
-            Language::German => "Snippet-Details",
-        }
-    }
-
     pub fn trigger(&self) -> &'static str {
         match self.lang {
             Language::English => "Trigger",
@@ -83,22 +75,22 @@ impl Strings {
 
     pub fn generate_only(&self) -> &'static str {
         match self.lang {
-            Language::English => "Generate only (never expand while typing)",
-            Language::Indonesian => "Hanya buat berkas (jangan perluas saat mengetik)",
-            Language::German => "Nur generieren (beim Tippen nie expandieren)",
+            Language::English => "Only use this snippet to generate files",
+            Language::Indonesian => "Gunakan cuplikan ini hanya untuk membuat berkas",
+            Language::German => "Snippet nur zum Erzeugen von Dateien verwenden",
         }
     }
 
     pub fn generate_only_hint(&self) -> &'static str {
         match self.lang {
             Language::English => {
-                "Use `wayexpand new <name> --stdout` or write the configured file."
+                "Typing the trigger does nothing; the snippet only fills in the file above."
             }
             Language::Indonesian => {
-                "Gunakan `wayexpand new <name> --stdout` atau tulis berkas yang dikonfigurasi."
+                "Mengetik pemicu tidak melakukan apa pun; cuplikan hanya mengisi berkas di atas."
             }
             Language::German => {
-                "`wayexpand new <name> --stdout` verwenden oder die konfigurierte Datei schreiben."
+                "Das Kürzel wird beim Tippen nicht ersetzt; das Snippet füllt nur die Datei oben."
             }
         }
     }

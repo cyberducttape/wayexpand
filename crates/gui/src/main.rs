@@ -393,6 +393,8 @@ struct GuiApp {
     /// Form values used only by the editor's local template playground.
     form_preview_values: std::collections::HashMap<String, String>,
     try_live_open: bool,
+    /// Whether the diagnostics overview shows its technical evidence grid.
+    diagnostics_details_open: bool,
     /// A running one-click "Turn on WayExpand" (`wayexpand setup --yes`).
     setup_task: Option<SetupTask>,
     sync_task: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
@@ -761,7 +763,10 @@ impl GuiApp {
             window_title: String::new(),
             playground: playground::Playground::default(),
             form_preview_values: std::collections::HashMap::new(),
-            try_live_open: true,
+            // Collapsed by default so the snippet form gets the window's
+            // height; its header stays visible as a one-line bar.
+            try_live_open: false,
+            diagnostics_details_open: false,
             setup_task: None,
             sync_task: None,
             pending_save: None,

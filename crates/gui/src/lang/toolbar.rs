@@ -1,7 +1,80 @@
 use super::{Language, RouteTrustDetails, Strings};
 use crate::*;
 
+/// The one-word state shown in the header's single status chip. Details
+/// (service, typing route, protection, replacement) live in its tooltip and
+/// in diagnostics.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HeaderState {
+    Active,
+    Running,
+    Limited,
+    Paused,
+    Off,
+    NotSetUp,
+    Checking,
+    Starting,
+    Reconnecting,
+    PermissionNeeded,
+    Unsupported,
+    Stopped,
+    Error,
+}
+
 impl Strings {
+    pub fn header_state(&self, state: HeaderState) -> &'static str {
+        use HeaderState as S;
+        match (self.lang, state) {
+            (Language::English, S::Active) => "Active",
+            (Language::English, S::Running) => "Running",
+            (Language::English, S::Limited) => "Limited",
+            (Language::English, S::Paused) => "Paused",
+            (Language::English, S::Off) => "Off",
+            (Language::English, S::NotSetUp) => "Not set up",
+            (Language::English, S::Checking) => "Checking…",
+            (Language::English, S::Starting) => "Starting…",
+            (Language::English, S::Reconnecting) => "Reconnecting…",
+            (Language::English, S::PermissionNeeded) => "Permission needed",
+            (Language::English, S::Unsupported) => "Unsupported",
+            (Language::English, S::Stopped) => "Stopped",
+            (Language::English, S::Error) => "Error",
+            (Language::German, S::Active) => "Aktiv",
+            (Language::German, S::Running) => "Läuft",
+            (Language::German, S::Limited) => "Eingeschränkt",
+            (Language::German, S::Paused) => "Pausiert",
+            (Language::German, S::Off) => "Aus",
+            (Language::German, S::NotSetUp) => "Nicht eingerichtet",
+            (Language::German, S::Checking) => "Wird geprüft…",
+            (Language::German, S::Starting) => "Startet…",
+            (Language::German, S::Reconnecting) => "Verbindet neu…",
+            (Language::German, S::PermissionNeeded) => "Berechtigung nötig",
+            (Language::German, S::Unsupported) => "Nicht unterstützt",
+            (Language::German, S::Stopped) => "Gestoppt",
+            (Language::German, S::Error) => "Fehler",
+            (Language::Indonesian, S::Active) => "Aktif",
+            (Language::Indonesian, S::Running) => "Berjalan",
+            (Language::Indonesian, S::Limited) => "Terbatas",
+            (Language::Indonesian, S::Paused) => "Dijeda",
+            (Language::Indonesian, S::Off) => "Mati",
+            (Language::Indonesian, S::NotSetUp) => "Belum disiapkan",
+            (Language::Indonesian, S::Checking) => "Memeriksa…",
+            (Language::Indonesian, S::Starting) => "Memulai…",
+            (Language::Indonesian, S::Reconnecting) => "Menyambung ulang…",
+            (Language::Indonesian, S::PermissionNeeded) => "Perlu izin",
+            (Language::Indonesian, S::Unsupported) => "Tidak didukung",
+            (Language::Indonesian, S::Stopped) => "Berhenti",
+            (Language::Indonesian, S::Error) => "Galat",
+        }
+    }
+
+    pub fn header_status_details_hint(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Click for diagnostics",
+            Language::German => "Klicken für die Diagnose",
+            Language::Indonesian => "Klik untuk diagnostik",
+        }
+    }
+
     pub fn title(&self) -> &'static str {
         match self.lang {
             Language::English => "Snippet library",
@@ -621,6 +694,44 @@ impl Strings {
             Language::English => "Not ready: the daemon's build identity is unknown. Install matching builds with a recorded commit identity before testing snippets.",
             Language::Indonesian => "Belum siap: identitas build daemon tidak diketahui. Pasang build yang cocok dengan identitas commit tercatat sebelum menguji cuplikan.",
             Language::German => "Noch nicht bereit: Die Build-Identität des Daemons ist unbekannt. Installieren Sie passende Builds mit aufgezeichneter Commit-Identität, bevor Sie Snippets testen.",
+        }
+    }
+
+    pub fn first_run_setup_incomplete(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Almost there",
+            Language::Indonesian => "Hampir selesai",
+            Language::German => "Fast geschafft",
+        }
+    }
+
+    pub fn first_run_route_not_ready(&self, detail: &str) -> String {
+        match self.lang {
+            Language::English => {
+                format!("Expansion is not active yet: {detail}. Finish the steps below.")
+            }
+            Language::Indonesian => {
+                format!("Ekspansi belum aktif: {detail}. Selesaikan langkah di bawah.")
+            }
+            Language::German => {
+                format!("Die Erweiterung ist noch nicht aktiv: {detail}. Schließen Sie die Schritte unten ab.")
+            }
+        }
+    }
+
+    pub fn first_run_continue_setup(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Continue guided setup",
+            Language::Indonesian => "Lanjutkan penyiapan terpandu",
+            Language::German => "Geführte Einrichtung fortsetzen",
+        }
+    }
+
+    pub fn first_run_quick_picker(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Use Quick Picker meanwhile (copy and paste)",
+            Language::Indonesian => "Pakai Quick Picker sementara (salin dan tempel)",
+            Language::German => "Solange den Schnellwähler nutzen (kopieren und einfügen)",
         }
     }
 

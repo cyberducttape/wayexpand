@@ -2,6 +2,79 @@ use super::{Language, Strings};
 use crate::*;
 
 impl Strings {
+    /// One plain sentence at the top of diagnostics: whether expansion
+    /// works right now and the one limitation that matters most.
+    pub fn diagnostics_summary(
+        &self,
+        state: crate::lang::HeaderState,
+        password_fields_detected: bool,
+    ) -> &'static str {
+        use crate::lang::HeaderState as S;
+        match (self.lang, state, password_fields_detected) {
+            (Language::English, S::Running, _) => {
+                "The service is running in control-only mode and is not watching your typing."
+            }
+            (Language::English, S::Active, _) => {
+                "Expansion is working. Password fields are detected where your desktop reports them."
+            }
+            (Language::English, S::Limited, false) => {
+                "Expansion is working, but this setup cannot detect password fields. Pause WayExpand before typing secrets."
+            }
+            (Language::English, S::Limited, true) => {
+                "Expansion is working with some safeguards unavailable on this setup. Technical details below."
+            }
+            (Language::English, S::Paused, _) => "Expansion is paused. Resume it from the menu.",
+            (Language::English, S::Off | S::NotSetUp, _) => {
+                "WayExpand is off. Turn it on from the header or the setup guide."
+            }
+            (Language::English, _, _) => {
+                "Expansion is not working right now. The checks below show what needs attention."
+            }
+            (Language::German, S::Running, _) => {
+                "Der Dienst läuft nur zur Steuerung und beobachtet Ihre Eingaben nicht."
+            }
+            (Language::German, S::Active, _) => {
+                "Die Erweiterung funktioniert. Passwortfelder werden erkannt, wo der Desktop sie meldet."
+            }
+            (Language::German, S::Limited, false) => {
+                "Die Erweiterung funktioniert, aber diese Einrichtung erkennt keine Passwortfelder. Pausieren Sie WayExpand, bevor Sie Geheimnisse eingeben."
+            }
+            (Language::German, S::Limited, true) => {
+                "Die Erweiterung funktioniert, einige Schutzfunktionen fehlen aber in dieser Einrichtung. Technische Details unten."
+            }
+            (Language::German, S::Paused, _) => {
+                "Die Erweiterung ist pausiert. Setzen Sie sie über das Menü fort."
+            }
+            (Language::German, S::Off | S::NotSetUp, _) => {
+                "WayExpand ist aus. Schalten Sie es in der Kopfleiste oder im Einrichtungsassistenten ein."
+            }
+            (Language::German, _, _) => {
+                "Die Erweiterung funktioniert gerade nicht. Die Prüfungen unten zeigen, was zu tun ist."
+            }
+            (Language::Indonesian, S::Running, _) => {
+                "Layanan berjalan dalam mode kendali saja dan tidak memantau ketikan Anda."
+            }
+            (Language::Indonesian, S::Active, _) => {
+                "Ekspansi berfungsi. Kolom kata sandi dikenali bila desktop Anda melaporkannya."
+            }
+            (Language::Indonesian, S::Limited, false) => {
+                "Ekspansi berfungsi, tetapi penyiapan ini tidak dapat mengenali kolom kata sandi. Jeda WayExpand sebelum mengetik rahasia."
+            }
+            (Language::Indonesian, S::Limited, true) => {
+                "Ekspansi berfungsi dengan beberapa pengaman tidak tersedia di penyiapan ini. Detail teknis di bawah."
+            }
+            (Language::Indonesian, S::Paused, _) => {
+                "Ekspansi dijeda. Lanjutkan dari menu."
+            }
+            (Language::Indonesian, S::Off | S::NotSetUp, _) => {
+                "WayExpand mati. Nyalakan dari kepala jendela atau panduan penyiapan."
+            }
+            (Language::Indonesian, _, _) => {
+                "Ekspansi sedang tidak berfungsi. Pemeriksaan di bawah menunjukkan apa yang perlu ditangani."
+            }
+        }
+    }
+
     pub fn keyboard_layout_label(&self) -> &'static str {
         match self.lang {
             Language::English => "Keyboard layout",

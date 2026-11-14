@@ -210,11 +210,18 @@ window opens on the checks that explain why. The same button appears in the
 toolbar whenever the library has snippets, no background service is running,
 and the WayExpand IBus engine is not active.
 
-The toolbar shows one status chip per fact, all the same size and all
-clickable to open Diagnostics: `Service: Running` / `Not running` for the
-background service, `IBus: Active` when the IBus engine is serving apps (the
-IBus route needs no background service, so a stopped service is not shown as
-an error then), and the typing route's state only while the service answers.
+The toolbar shows one status chip with a one-word state — `Active`,
+`Limited`, `Paused`, `Off`, `Not set up`, and so on — and a colored dot.
+Clicking it opens Diagnostics. Its tooltip, and its accessible label for
+screen readers, list the facts behind the state: the background service
+(`Service: Running` / `Not running`), `IBus: Active` when the IBus engine is
+serving apps (the IBus route needs no background service, so a stopped
+service is not shown as an error then), the typing route's state while the
+service answers, sensitive-field protection, and replacement assurance.
+Separate chips appear only for things that need action: partial or uncertain
+output, and a service that must restart after an update. The ☰ menu holds
+the remaining actions; the profile switcher appears in the toolbar once
+profiles exist.
 
 The `Settings` window is the single place for preferences and has two tabs:
 
@@ -230,7 +237,7 @@ The `Settings` window is the single place for preferences and has two tabs:
   reload path as snippet edits. A rejected value is reported next to the
   fields and on the status line, and the window stays open for correction.
 
-A light/dark toggle also remains in the toolbar, next to `Settings`, because
+A light/dark toggle also remains in the ☰ menu, next to `Settings`, because
 it is the one display preference people flip repeatedly during a day.
 
 The window title names the configuration file being edited and marks unsaved
@@ -485,7 +492,7 @@ The warm amber (RGB 255, 191, 0) matches vintage monochrome displays:
   snippet, local matcher preview, and a manual insertion check in a real text
   field. Backend probes and user-reported success are not certification. A
   failure expands into recovery steps and links to diagnostics; the flow can be
-  reopened from **More actions → Getting started**.
+  reopened from **☰ menu → Getting started**.
 - The editor's matcher preview tests the local draft and library only. It does
   not exercise keyboard capture, focus tracking, or desktop insertion. Form
   snippets containing `{{field:...}}` require verified replacement and a

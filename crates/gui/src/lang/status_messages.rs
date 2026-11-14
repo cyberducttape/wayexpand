@@ -1,6 +1,14 @@
 use super::{Language, Strings};
 
 impl Strings {
+    pub fn all_changes_saved(&self) -> &'static str {
+        match self.lang {
+            Language::English => "All changes saved",
+            Language::Indonesian => "Semua perubahan tersimpan",
+            Language::German => "Alle Änderungen gespeichert",
+        }
+    }
+
     pub fn ready(&self) -> &'static str {
         match self.lang {
             Language::English => "Ready",
