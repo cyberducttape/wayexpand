@@ -73,7 +73,7 @@ All WayExpand commands use standardized exit codes, enabling reliable automation
 |------|----------|---------|----------|
 | **0** | Success | Command completed successfully | Any successful command |
 | **1** | Generic Error | I/O, network, or other transient failure | File not found, socket timeout |
-| **2** | Usage Error | Invalid command or arguments | Unknown command, missing required arg, malformed hotkey chord |
+| **2** | Usage Error | Invalid command or arguments | Unknown command or option, missing required arg, malformed hotkey chord |
 | **3** | Configuration Error | Invalid or malformed configuration | Syntax error in TOML, invalid expansion trigger, missing required field |
 | **4** | Daemon Error | Daemon communication failure | Cannot connect to control socket, daemon unresponsive, non-UTF-8 response |
 
@@ -1277,6 +1277,7 @@ The following surfaces are **not** guaranteed stable and may change between mino
 - **Config reload behavior** (exact timing of propagation, error handling edge cases)
 - **Performance characteristics** (matching algorithm, memory usage)
 - **Error messages** (may be reworded for clarity; do not parse error text)
+- **Help text** (`wayexpand help` and per-command help layout and wording)
 - **Diagnostic output** (human-readable `wayexpand doctor` text output without `--json`)
 
 ---

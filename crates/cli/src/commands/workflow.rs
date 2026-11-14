@@ -50,7 +50,8 @@ fn run_approved_action(mut args: Vec<String>) -> Result<()> {
         .map_err(|error| usage_error(error.to_string()))?;
     let config_path = take_option(&mut args, "--config")
         .map_err(|error| usage_error(error.to_string()))?
-        .map(PathBuf::from)
+        .map(crate::args::config_path_arg)
+        .transpose()?
         .unwrap_or_else(default_config_path);
     let mut parameters = BTreeMap::new();
     while let Some(value) =

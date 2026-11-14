@@ -44,3 +44,16 @@ pub fn take_flag(args: &mut Vec<String>, name: &str) -> bool {
         false
     }
 }
+
+/// Turn the optional `[config]` argument into a path. A leftover argument
+/// that looks like an option is an unknown option, not a file name: without
+/// this, `wayexpand stats --bogus` reported a missing configuration file
+/// called `--bogus`. A file whose name starts with `-` is still reachable
+/// as `./-name`.
+pub(crate) fn config_path_arg(value: impl Into<String>) -> Result<std::path::PathBuf> {
+    let value = value.into();
+    if value.starts_with('-') {
+        return Err(crate::usage_error(format!("unknown option {value:?}")));
+    }
+    Ok(std::path::PathBuf::from(value))
+}

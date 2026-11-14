@@ -62,6 +62,9 @@ Compare the running daemon's build and status protocol with this CLI. The
 read-only report identifies a current, stale, incompatible, unverified, or
 unavailable daemon; it never restarts or mutates a service.
 .TP
+.B upgrade --check|--apply|--rollback [--json]
+Check, finish or roll back a staged runtime upgrade.
+.TP
 .B sync [init [--remote URL]|status] [--json] [--allow-executable --approved-revision FULL_COMMIT] [CONFIG]
 Synchronize the snippet library with Git. \fBinit\fR tracks only the library
 files in the configuration directory; a sync validates, commits, rebases,
@@ -317,6 +320,31 @@ session.
 .TP
 .B help | version
 Show command help or print the installed version.
+.TP
+.B restore <backup> [--check | --apply --yes --expected-current=HASH --expected-backup=HASH] [--json] [config]
+Review and restore a configuration backup. \fB--check\fR shows what would
+change; \fB--apply\fR needs the hashes \fB--check\fR printed, so a file that
+changed in between is never overwritten.
+.TP
+.B service status [--json] | service restart --yes
+Inspect the installed user services, or restart only the active route.
+.TP
+.B health [--json]
+Report operational readiness with a stable monitoring exit code.
+.TP
+.B install-check [--json]
+Check that WayExpand's components are installed.
+.TP
+.B support-bundle [--gnome] [--output FILE]
+Write a redacted report, without snippet text, to attach to a bug report.
+\fBsupport\fR is the same command.
+.TP
+.B compatibility-report [--json]
+Generate a reproducible desktop compatibility report.
+.TP
+.B completions bash|zsh|fish
+Print a shell completion script, for example
+\fBsource <(wayexpand completions bash)\fR in \fI~/.bashrc\fR.
 .SH FILES
 .TP
 .I ~/.config/wayexpand/expansions.toml
