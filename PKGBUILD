@@ -25,7 +25,7 @@ optdepends=(
     'polkit: for action-specific authorization of broker actions'
 )
 source=("https://github.com/cyberducttape/wayexpand/releases/download/v1.3.5/wayexpand-1.3.5.tar.gz")
-sha256sums=('77d5982306fdd550caf08b1a3af55bb0e84a78c3b9382754a2f832c985327396')
+sha256sums=('09b7c57e51a666c4d261721f8d15ef0003b5608b0a3f1ada4707d2e397dbeaee')
 conflicts=('wayexpand-git')
 
 prepare() {
