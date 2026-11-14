@@ -76,3 +76,4 @@ mod insertion;
 mod sidebar;
 mod status_messages;
 mod toolbar;
+pub use toolbar::HeaderState;

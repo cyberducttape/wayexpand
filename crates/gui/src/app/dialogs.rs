@@ -56,6 +56,16 @@ impl GuiApp {
         self.execute_action(action);
     }
 
+    /// Drop unsaved edits to the selected snippet and show it as saved.
+    pub(crate) fn discard_draft_changes(&mut self) {
+        let Some(index) = self.selected_index() else {
+            return;
+        };
+        self.draft = self.config.expansion.get(index).map(Draft::from_expansion);
+        self.clear_command_preview();
+        self.invalidate_preview();
+    }
+
     pub(crate) fn abandon_new_draft(&mut self) {
         if !self.new_draft {
             return;

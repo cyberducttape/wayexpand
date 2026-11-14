@@ -105,16 +105,16 @@ impl GuiApp {
                     .inner_margin(egui::Margin::symmetric(14, 14)),
             )
             .show(root, |ui| {
-                ui.label(
-                    RichText::new(if self.filter.is_empty() {
-                        self.strings.your_library()
-                    } else {
-                        self.strings.filtered_snippets()
-                    })
-                    .size(15.0)
-                    .strong(),
-                );
-                ui.add_space(6.0);
+                // The header already names the library; a second heading
+                // here only repeated it. A filtered list still says so.
+                if !self.filter.is_empty() {
+                    ui.label(
+                        RichText::new(self.strings.filtered_snippets())
+                            .size(15.0)
+                            .strong(),
+                    );
+                    ui.add_space(6.0);
+                }
                 ui.horizontal(|ui| {
                     if theme::primary_button(ui, palette, self.strings.new_button())
                         .on_hover_text(self.strings.new_tooltip())
@@ -133,17 +133,20 @@ impl GuiApp {
                     {
                         self.request_action(PendingAction::Duplicate);
                     }
-                    if ui
-                        .add_enabled_ui(!self.undo.is_empty() && !self.save_in_flight(), |ui| {
-                            theme::secondary_button(
-                                ui,
-                                palette,
-                                &self.strings.undo_button(self.undo.len()),
-                            )
-                        })
-                        .inner
-                        .on_disabled_hover_text(self.strings.status_nothing_to_undo())
-                        .clicked()
+                    // Undo appears once there is something to undo, instead
+                    // of a permanently greyed-out button.
+                    if !self.undo.is_empty()
+                        && ui
+                            .add_enabled_ui(!self.save_in_flight(), |ui| {
+                                theme::secondary_button(
+                                    ui,
+                                    palette,
+                                    &self.strings.undo_button(self.undo.len()),
+                                )
+                            })
+                            .inner
+                            .on_disabled_hover_text(self.strings.status_nothing_to_undo())
+                            .clicked()
                     {
                         self.request_action(PendingAction::Undo);
                     }
@@ -155,32 +158,43 @@ impl GuiApp {
                 let categories = self.categories();
                 let mut category_action = None;
                 if !categories.is_empty() {
-                    ui.horizontal_wrapped(|ui| {
-                        if theme::chip_scaled(
-                            ui,
-                            palette,
-                            self.strings.all(),
-                            self.category_filter.is_none(),
-                            font_scale,
+                    // One row that scrolls sideways: wrapped filter chips
+                    // grew into a block that pushed the list down.
+                    egui::ScrollArea::horizontal()
+                        .id_salt("category_filters")
+                        .scroll_bar_visibility(
+                            egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded,
                         )
-                        .clicked()
-                        {
-                            category_action = Some(None);
-                        }
-                        for category in categories {
-                            let selected =
-                                self.category_filter.as_deref() == Some(category.as_str());
-                            if theme::chip_scaled(ui, palette, category, selected, font_scale)
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                if theme::chip_scaled(
+                                    ui,
+                                    palette,
+                                    self.strings.all(),
+                                    self.category_filter.is_none(),
+                                    font_scale,
+                                )
                                 .clicked()
-                            {
-                                category_action = Some(if selected {
-                                    None
-                                } else {
-                                    Some(category.clone())
-                                });
-                            }
-                        }
-                    });
+                                {
+                                    category_action = Some(None);
+                                }
+                                for category in categories {
+                                    let selected =
+                                        self.category_filter.as_deref() == Some(category.as_str());
+                                    if theme::chip_scaled(
+                                        ui, palette, category, selected, font_scale,
+                                    )
+                                    .clicked()
+                                    {
+                                        category_action = Some(if selected {
+                                            None
+                                        } else {
+                                            Some(category.clone())
+                                        });
+                                    }
+                                }
+                            })
+                        });
                     ui.add_space(6.0);
                 }
                 if let Some(category) = category_action {

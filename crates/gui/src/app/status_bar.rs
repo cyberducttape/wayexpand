@@ -27,7 +27,19 @@ impl GuiApp {
                         ui.painter()
                             .rect_filled(bar, egui::CornerRadius::same(2), accent);
                     }
-                    ui.label(RichText::new(self.status.text()).color(text_color));
+                    // The idle message says something useful: whether the
+                    // library on disk matches what is on screen.
+                    let idle_text = (self.status.text() == self.strings.ready()).then(|| {
+                        if self.draft_is_dirty() || self.failed_save.is_some() {
+                            self.strings.unsaved_changes()
+                        } else {
+                            self.strings.all_changes_saved()
+                        }
+                    });
+                    ui.label(
+                        RichText::new(idle_text.unwrap_or_else(|| self.status.text()))
+                            .color(text_color),
+                    );
                     if self.diagnostics_running || self.pending_control > 0 {
                         ui.spinner();
                     }

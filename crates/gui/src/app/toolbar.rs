@@ -1,6 +1,6 @@
 //! Toolbar: brand, route status, pause/run controls, and library search.
 
-use crate::lang::RouteTrustDetails;
+use crate::lang::{HeaderState, RouteTrustDetails};
 use crate::*;
 
 impl GuiApp {
@@ -129,7 +129,7 @@ impl GuiApp {
         compact: bool,
     ) {
         let ctx = ui.ctx().clone();
-        let (daemon_label, daemon_color) = match self.daemon_reachable {
+        let (daemon_label, _) = match self.daemon_reachable {
             Some(true) => (self.strings.daemon_running_status(), palette.success),
             Some(false) if self.config.expansion.is_empty() => {
                 (self.strings.daemon_not_enabled_status(), palette.muted)
@@ -137,7 +137,7 @@ impl GuiApp {
             Some(false) => (self.strings.daemon_unreachable_status(), palette.danger),
             None => (self.strings.daemon_unknown_status(), palette.muted),
         };
-        let (route_label, route_color) = match self.route_state {
+        let (route_label, _) = match self.route_state {
             Some(runtime::RouteState::Connected) if self.paused => {
                 (self.strings.route_paused_status(), palette.warning)
             }
@@ -229,7 +229,11 @@ impl GuiApp {
                     .map(|name| format!("{}: {name}", self.strings.profiles()))
             })
             .unwrap_or_else(|| self.strings.profiles().to_owned());
-        if !compact {
+        // Profiles are an advanced feature: the quick switcher appears once
+        // there is something to switch between. Management stays in the menu.
+        let has_profiles =
+            !self.profiles.is_empty() || runtime_profile.is_some() || self.active_profile.is_some();
+        if !compact && has_profiles {
             ui.menu_button(active_profile_label, |ui| {
                 if self.profile_receiver.is_some() {
                     ui.horizontal(|ui| {
@@ -272,7 +276,7 @@ impl GuiApp {
         }
         let more_actions = self.strings.more_actions();
         let actions_response = ui
-            .menu_button(more_actions, |ui| {
+            .menu_button(RichText::new("☰").size(18.0), |ui| {
                 ui.menu_button(self.strings.profiles(), |ui| {
                     if !self.profile_loaded && self.profile_receiver.is_none() {
                         self.start_profile_operation(ProfileOperation::List);
@@ -510,25 +514,49 @@ impl GuiApp {
         });
         actions_response.on_hover_text(more_actions);
         let mut open_diagnostics = false;
-        // The typing-route chip only means something once the service
-        // answers; "Unknown" next to "Service: Not running" says nothing new.
-        // The control-only service (stdin source, stdin closed) captures no
-        // typing, so it has no typing route to report.
+        // One status chip with a one-word state. The facts behind it -- the
+        // service, the typing route, sensitive-field protection, replacement
+        // assurance -- are in its tooltip and in diagnostics; as separate
+        // chips they crowded the header and read as several half-failures.
+        // The control-only service (stdin source) captures no typing, so it
+        // has no typing route to report.
         let control_only =
             runtime::status_field(&self.daemon_status, "source").as_deref() == Some("stdin");
-        if self.daemon_reachable == Some(true)
-            && !control_only
-            && theme::status_chip(ui, route_label, route_color)
-                .on_hover_text(self.daemon_status.clone())
-                .clicked()
+        let ibus_only = self.daemon_reachable != Some(true) && self.ibus_active;
+        let (state, state_color) = self.header_state(ibus_only, control_only, palette);
+        let mut details = Vec::new();
+        if ibus_only || self.ibus_active {
+            details.push(format!(
+                "{} — {}",
+                self.strings.ibus_active_status(),
+                self.strings.ibus_active_help()
+            ));
+        }
+        if !ibus_only {
+            details.push(format!(
+                "{} — {}",
+                daemon_label,
+                self.strings.daemon_status_help()
+            ));
+        }
+        if self.daemon_reachable == Some(true) && !control_only {
+            details.push(route_label.to_owned());
+        }
+        if let Some((trust_label, _)) = route_trust.as_ref() {
+            details.push(trust_label.clone());
+        }
+        if let Some(assurance) = self
+            .daemon_capabilities
+            .as_ref()
+            .and_then(|capabilities| capabilities.replacement_assurance)
         {
-            open_diagnostics = true;
+            details.push(format!(
+                "{} — {}",
+                self.strings.replacement_pill(assurance),
+                self.strings.replacement_explanation(assurance)
+            ));
         }
-        if let Some((trust_label, trust_color)) = route_trust {
-            if theme::status_chip(ui, &trust_label, trust_color).clicked() {
-                open_diagnostics = true;
-            }
-        }
+        details.push(self.strings.header_status_details_hint().to_owned());
         if let Some(count) = self
             .daemon_capabilities
             .as_ref()
@@ -565,53 +593,6 @@ impl GuiApp {
                 open_diagnostics = true;
             }
         }
-        // Whether replacing a trigger is verified against the field's text or
-        // relies on keystrokes, shown wherever the route is visible.
-        if let Some(capabilities) = self.daemon_capabilities.as_ref() {
-            if let Some(assurance) = capabilities.replacement_assurance {
-                let color = match assurance {
-                    // The atomic route contract does not verify application output.
-                    runtime::ReplacementAssurance::Verified => palette.muted,
-                    runtime::ReplacementAssurance::FocusTrackedBestEffort => palette.warning,
-                    runtime::ReplacementAssurance::Unverified
-                    | runtime::ReplacementAssurance::Blocked => palette.danger,
-                    runtime::ReplacementAssurance::Unavailable => palette.muted,
-                };
-                let explanation = self.strings.replacement_explanation(assurance);
-                if theme::status_chip(ui, self.strings.replacement_pill(assurance), color)
-                    .on_hover_text(explanation)
-                    .clicked()
-                {
-                    open_diagnostics = true;
-                }
-            }
-        }
-        // The IBus route needs no background service: when its engine is
-        // live and the service is not running, say so instead of showing a
-        // red "not running" and a "Turn on" button for a working setup.
-        let ibus_only = self.daemon_reachable != Some(true) && self.ibus_active;
-        if ibus_only {
-            if theme::status_chip(ui, self.strings.ibus_active_status(), palette.success)
-                .on_hover_text(self.strings.ibus_active_help())
-                .clicked()
-            {
-                open_diagnostics = true;
-            }
-        } else {
-            if self.ibus_active
-                && theme::status_chip(ui, self.strings.ibus_active_status(), palette.success)
-                    .on_hover_text(self.strings.ibus_active_help())
-                    .clicked()
-            {
-                open_diagnostics = true;
-            }
-            if theme::status_chip(ui, daemon_label, daemon_color)
-                .on_hover_text(self.strings.daemon_status_help())
-                .clicked()
-            {
-                open_diagnostics = true;
-            }
-        }
         if self.daemon_reachable == Some(true)
             && runtime::daemon_build_state(&self.daemon_status)
                 == runtime::DaemonBuildState::RestartRequired
@@ -625,12 +606,64 @@ impl GuiApp {
         {
             open_diagnostics = true;
         }
+        let state_label = self.strings.header_state(state);
+        let chip = theme::status_chip(ui, state_label, state_color);
+        // Screen readers get the same details sighted users see on hover.
+        let accessible = format!("{state_label}. {}", details.join(". "));
+        chip.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &accessible));
+        if chip.on_hover_text(details.join("\n")).clicked() {
+            open_diagnostics = true;
+        }
         if open_diagnostics {
             self.diagnostics_open = true;
             self.refresh_diagnostics(true);
         }
         if self.daemon_reachable == Some(false) && !ibus_only && !self.config.expansion.is_empty() {
             self.turn_on_button(ui, palette);
+        }
+    }
+
+    /// The header chip's state and color, from the service and route state.
+    pub(crate) fn header_state(
+        &self,
+        ibus_only: bool,
+        control_only: bool,
+        palette: &Palette,
+    ) -> (HeaderState, Color32) {
+        use HeaderState as S;
+        if ibus_only {
+            return (S::Active, palette.success);
+        }
+        match self.daemon_reachable {
+            None => return (S::Checking, palette.muted),
+            Some(false) if self.config.expansion.is_empty() => return (S::NotSetUp, palette.muted),
+            Some(false) => return (S::Off, palette.danger),
+            Some(true) if control_only => return (S::Running, palette.success),
+            Some(true) => {}
+        }
+        match self.route_state {
+            Some(runtime::RouteState::Connected) if self.paused => (S::Paused, palette.warning),
+            Some(runtime::RouteState::Connected) => {
+                let full_protection = self
+                    .daemon_capabilities
+                    .as_ref()
+                    .is_some_and(|capabilities| capabilities.provides_full_protection());
+                if full_protection {
+                    (S::Active, palette.success)
+                } else {
+                    (S::Limited, palette.warning)
+                }
+            }
+            Some(runtime::RouteState::Degraded) => (S::Limited, palette.warning),
+            Some(runtime::RouteState::Reconnecting) => (S::Reconnecting, palette.warning),
+            Some(runtime::RouteState::Starting) => (S::Starting, palette.warning),
+            Some(runtime::RouteState::PermissionRequired | runtime::RouteState::PortalRevoked) => {
+                (S::PermissionNeeded, palette.warning)
+            }
+            Some(runtime::RouteState::Unsupported) => (S::Unsupported, palette.muted),
+            Some(runtime::RouteState::Failed) => (S::Error, palette.danger),
+            Some(runtime::RouteState::Stopped) => (S::Stopped, palette.muted),
+            None => (S::Checking, palette.muted),
         }
     }
 
@@ -677,7 +710,7 @@ impl GuiApp {
     }
 
     fn render_search_fields_menu(&mut self, ui: &mut egui::Ui) {
-        ui.menu_button("⚙", |ui| {
+        ui.menu_button("⏷", |ui| {
             ui.label(RichText::new(self.strings.search_fields()).small().strong());
             ui.checkbox(
                 &mut self.search_fields.triggers,
