@@ -49,6 +49,13 @@ if git rev-parse "refs/tags/$new_version" >/dev/null 2>&1; then
     exit 1
 fi
 
+# A release without changelog entries is refused before anything changes,
+# rather than published with a placeholder section.
+if ! awk '/^## \[Unreleased\]/ { inside = 1; next } inside && /^## \[/ { exit } inside && /^- / { found = 1 } END { exit !found }' CHANGELOG.md; then
+    printf '%s\n' "error: CHANGELOG.md has no entries under [Unreleased]; describe this release first" >&2
+    exit 1
+fi
+
 # Check for uncommitted changes
 if ! git diff-index --quiet HEAD --; then
     printf '%s\n' "error: working directory has uncommitted changes" >&2
@@ -90,16 +97,15 @@ mv "$lock_tmp" Cargo.lock
 
 # 2. Update the human and distro changelogs.
 printf '%s\n' "Updating CHANGELOG.md..."
+# Unreleased entries become this version's section; Unreleased starts empty.
 changelog_tmp=$(mktemp)
 awk -v version="$new_version" -v date="$release_date" '
-    !inserted && /^## \[[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\]/ {
+    { print }
+    !inserted && /^## \[Unreleased\]/ {
+        print ""
         print "## [" version "] - " date
-        print ""
-        print "Release v" version ". Move the unreleased entries above into this section before publishing."
-        print ""
         inserted = 1
     }
-    { print }
 ' CHANGELOG.md > "$changelog_tmp"
 mv "$changelog_tmp" CHANGELOG.md
 
