@@ -1,5 +1,5 @@
 Name:           wayexpand
-Version:        1.3.3
+Version:        1.3.5
 Release:        1%{?dist}
 Summary:        A privacy-first, Wayland-native text expander for Linux
 License:        MIT
@@ -109,6 +109,9 @@ install -Dm644 LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
 %{_datadir}/icons/hicolor/*/apps/wayexpand.png
 
 %changelog
+* Sat Nov 14 2026 Stephan Loesevitz <stephan.loesevitz@gmail.com> - 1.3.5-1
+- Release v1.3.5
+
 * Sat Oct 03 2026 Stephan Loesevitz <stephan.loesevitz@gmail.com> - 1.3.3-1
 - Release v1.3.3
 
