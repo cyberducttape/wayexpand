@@ -3,8 +3,11 @@
 use super::Args;
 use crate::*;
 
-fn path_or_default(value: Option<String>) -> PathBuf {
-    value.map(PathBuf::from).unwrap_or_else(default_config_path)
+fn path_or_default(value: Option<String>) -> Result<PathBuf> {
+    Ok(value
+        .map(crate::args::config_path_arg)
+        .transpose()?
+        .unwrap_or_else(default_config_path))
 }
 
 fn collect_changes(
@@ -58,7 +61,7 @@ pub(crate) fn config_command(mut args: Args) -> Result<()> {
                     path = Some(value);
                 }
             }
-            let path = path_or_default(path);
+            let path = path_or_default(path)?;
             let config = Config::load(&path).map_err(|error| config_load_error(&path, error))?;
             let value = serde_json::json!({
                 "schema_version":1,
@@ -83,7 +86,7 @@ pub(crate) fn config_command(mut args: Args) -> Result<()> {
                     path = Some(value);
                 }
             }
-            let path = path_or_default(path);
+            let path = path_or_default(path)?;
             let mut config =
                 Config::load(&path).map_err(|error| config_load_error(&path, error))?;
             Config::validate_library_files(&path)
