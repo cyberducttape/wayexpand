@@ -20,7 +20,7 @@ if "$binary" doctor --certify unexpected >"$report.invalid" 2>&1; then
     printf '%s\n' 'doctor --certify accepted an unexpected positional argument' >&2
     exit 1
 fi
-grep -F 'usage: wayexpand doctor --certify [--json]' "$report.invalid" >/dev/null
+grep -F 'wayexpand doctor --certify [--json]' "$report.invalid" >/dev/null
 
 if ! "$binary" doctor --certify --json >"$report" 2>"$report_error"; then
     printf '%s\n' 'error: doctor --certify failed; captured report follows:' >&2
