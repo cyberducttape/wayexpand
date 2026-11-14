@@ -343,5 +343,10 @@ PY
 grep -F -- 'needs: [ci, certification]' "$release_workflow" >/dev/null
 grep -F -- 'needs: [ci, certification, linux-aarch64]' "$release_workflow" >/dev/null
 grep -F -- "checkout_ref: \${{ inputs.release_ref || github.ref }}" "$release_workflow" >/dev/null
+# Certification decides what a release claims, not whether binaries ship:
+# builds run after CI alone, and the notes say when certification failed.
+grep -F -- "if: \${{ !cancelled() && needs.ci.result == 'success' }}" "$release_workflow" >/dev/null
+grep -F -- "needs.certification.result == 'success' && env.CERTIFIED_NOTE || env.UNCERTIFIED_NOTE" "$release_workflow" >/dev/null
+grep -F -- 'Not compositor-certified.' "$release_workflow" >/dev/null
 
 printf '%s\n' 'certification matrix contract passed'

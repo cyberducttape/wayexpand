@@ -78,17 +78,17 @@ git tag -a v<version> -m "WayExpand <version>"
 git push origin v<version>
 ```
 
-The release workflow runs the full CI verification suite (`ci.yml`) and
-requires production compositor certification before packaging. **No route is
-currently declared production-eligible**, so the certification workflow fails
-closed before runner discovery and no release artifacts are published. The
-current compatibility candidates are listed in
-[CERTIFICATION.md](CERTIFICATION.md); their reports cannot satisfy the release
-gate. Once a route is eligible, missing self-hosted drivers, incomplete route
-capabilities, or unverified required scenario cells will continue to block
-publishing. A successful certification run then builds the Linux x86_64
-binaries with the locked dependency graph and publishes the end-user packages
-and source archives.
+Tags may be written `v<version>` or `<version>`; both trigger the workflow.
+
+The release workflow runs the full CI verification suite (`ci.yml`) and the
+real-compositor certification workflow. Certification decides what the release
+may claim, not whether it ships: once CI passes, the workflow builds the Linux
+x86_64 and aarch64 binaries with the locked dependency graph and publishes the
+end-user packages and source archives. **No route is currently declared
+production-eligible**, so certification fails closed and the release notes
+open with a "Not compositor-certified" notice. A release is described as
+certified only when the certification job succeeds. The current compatibility
+candidates are listed in [CERTIFICATION.md](CERTIFICATION.md).
 When manually dispatched with a `launchpad_series` input, it also produces an
 unsigned Debian source package from the vendored archive targeted to that
 Ubuntu series. It intentionally does not guess a suite during tag-push
