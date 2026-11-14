@@ -1,6 +1,6 @@
 use super::{Language, Strings};
 use crate::runtime::{OutputRefusal, ReplacementAssurance};
-use wayexpand_core::CompatibilityMode;
+use wayexpand_core::{CompatibilityMode, TerminalPaste};
 
 impl Strings {
     pub fn insertion_plan_notice(&self, strategy: wayexpand_core::InsertionStrategy) -> String {
@@ -261,6 +261,42 @@ impl Strings {
             Language::English => "Risk of non-atomic replacement: physical typing can reach the application while WayExpand is erasing and inserting, so the two streams may interleave and corrupt nearby text. Evdev also cannot detect password fields. Keep this Off for strict safety; prefer a verified input-method route when text integrity matters.",
             Language::German => "Risiko einer nicht atomaren Ersetzung: Physische Tasten können die Anwendung erreichen, während WayExpand löscht und einfügt. Beide Eingabeströme können sich überlagern und benachbarten Text beschädigen. Evdev erkennt außerdem keine Passwortfelder. Für strikte Sicherheit deaktiviert lassen; wenn Textintegrität wichtig ist, eine verifizierte Eingabemethoden-Route verwenden.",
             Language::Indonesian => "Risiko penggantian non-atomik: ketikan fisik dapat mencapai aplikasi saat WayExpand menghapus dan menyisipkan teks. Kedua aliran input dapat bercampur dan merusak teks di sekitarnya. Evdev juga tidak dapat mendeteksi kolom kata sandi. Biarkan nonaktif untuk keselamatan ketat; gunakan rute metode input terverifikasi bila integritas teks penting.",
+        }
+    }
+
+    pub fn terminal_paste_label(&self) -> &'static str {
+        match self.lang {
+            Language::English => "Terminal paste",
+            Language::German => "Einfügen im Terminal",
+            Language::Indonesian => "Tempel di terminal",
+        }
+    }
+
+    pub fn terminal_paste_option(&self, mode: TerminalPaste) -> &'static str {
+        match (self.lang, mode) {
+            (Language::English, TerminalPaste::Off) => "Off: type",
+            (Language::English, TerminalPaste::Multiline) => "Multi-line and long text",
+            (Language::English, TerminalPaste::Always) => "Always",
+            (Language::German, TerminalPaste::Off) => "Aus: tippen",
+            (Language::German, TerminalPaste::Multiline) => "Mehrzeiliger und langer Text",
+            (Language::German, TerminalPaste::Always) => "Immer",
+            (Language::Indonesian, TerminalPaste::Off) => "Nonaktif: ketik",
+            (Language::Indonesian, TerminalPaste::Multiline) => "Teks multibaris dan panjang",
+            (Language::Indonesian, TerminalPaste::Always) => "Selalu",
+        }
+    }
+
+    pub fn terminal_paste_help(&self) -> &'static str {
+        match self.lang {
+            Language::English => {
+                "In your terminal apps, the libei route can paste a replacement with the clipboard and Ctrl+Shift+V instead of typing it. Typed line breaks press Enter, so a shell runs each line as it arrives; a paste arrives at once and bracketed paste waits for your Enter. Pasted text is not limited by the keystroke limit or the keyboard layout. The clipboard manager is asked not to keep the replacement, and your previous clipboard text is restored. If the clipboard holds something other than text, the replacement is typed."
+            }
+            Language::German => {
+                "In Ihren Terminal-Apps kann der libei-Weg eine Ersetzung über die Zwischenablage und Strg+Umschalt+V einfügen, statt sie zu tippen. Getippte Zeilenumbrüche drücken die Eingabetaste, sodass eine Shell jede Zeile sofort ausführt; eingefügter Text kommt auf einmal an, und Bracketed Paste wartet auf Ihre Eingabetaste. Eingefügter Text ist weder durch das Tastenanschlag-Limit noch durch das Tastaturlayout begrenzt. Die Zwischenablageverwaltung wird gebeten, die Ersetzung nicht zu speichern, und Ihr vorheriger Text in der Zwischenablage wird wiederhergestellt. Enthält die Zwischenablage etwas anderes als Text, wird die Ersetzung getippt."
+            }
+            Language::Indonesian => {
+                "Di aplikasi terminal Anda, jalur libei dapat menempelkan pengganti melalui papan klip dan Ctrl+Shift+V alih-alih mengetiknya. Baris baru yang diketik menekan Enter, sehingga shell menjalankan setiap baris begitu tiba; tempelan tiba sekaligus dan bracketed paste menunggu Enter Anda. Teks yang ditempel tidak dibatasi oleh batas penekanan tombol maupun tata letak keyboard. Pengelola papan klip diminta untuk tidak menyimpan pengganti, dan teks papan klip Anda sebelumnya dipulihkan. Jika papan klip berisi selain teks, pengganti diketik."
+            }
         }
     }
 }

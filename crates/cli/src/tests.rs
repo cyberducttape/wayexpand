@@ -936,7 +936,11 @@ fn status_json_matches_documented_stable_contract() {
          terminal_apps_only=false\n\
          capture_app_scope_state=unrestricted\n\
          raw_capture_fallback_enabled=false\n\
-         raw_capture_app_count=0";
+         raw_capture_app_count=0\n\
+         terminal_paste=off\n\
+         terminal_paste_total=0\n\
+         terminal_paste_fallbacks_total=0\n\
+         terminal_paste_unread_total=0";
     let value = status_as_json(daemon_response).unwrap();
     let object = value.as_object().expect("status --json returns an object");
     let contract: serde_json::Value =

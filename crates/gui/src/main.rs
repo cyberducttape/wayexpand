@@ -315,6 +315,7 @@ struct GuiApp {
     settings_undo_chord: String,
     settings_compatibility_mode: wayexpand_core::CompatibilityMode,
     settings_keystroke_limit: String,
+    settings_terminal_paste: wayexpand_core::TerminalPaste,
     settings_font_scale: FontScale,
     /// Width the one-row toolbar needed when it was last laid out. The
     /// status chips change with the route, so a fixed breakpoint cannot
@@ -592,6 +593,7 @@ impl GuiApp {
         let settings_undo_chord = config.settings.undo_chord.clone().unwrap_or_default();
         let settings_compatibility_mode = config.settings.compatibility_mode;
         let settings_keystroke_limit = config.settings.keystroke_max_chars.to_string();
+        let settings_terminal_paste = config.settings.terminal_paste;
         let prefs = load_gui_prefs();
         let onboarding_completed = prefs.onboarding_completed;
         let onboarding_visible = gnome_setup_resume_pending
@@ -726,6 +728,7 @@ impl GuiApp {
             settings_undo_chord,
             settings_compatibility_mode,
             settings_keystroke_limit,
+            settings_terminal_paste,
             settings_font_scale,
             toolbar_row_width: 0.0,
             settings_error: None,

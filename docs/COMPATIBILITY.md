@@ -752,6 +752,10 @@ legacy same-commit daemon as verified. Builds without Git metadata report
   "capture_app_scope_state": "unrestricted",
   "raw_capture_fallback_enabled": false,
   "raw_capture_app_count": 0,
+  "terminal_paste": "off",
+  "terminal_paste_total": 0,
+  "terminal_paste_fallbacks_total": 0,
+  "terminal_paste_unread_total": 0,
   "input_events_total": 42,
   "output_reconnect_total": 0,
   "input_reconnect_total": 0,
@@ -842,6 +846,10 @@ legacy same-commit daemon as verified. Builds without Git metadata report
 - `raw_capture_fallback_enabled` (bool): Whether the validated configuration assigns app-scoped input ownership to the evdev companion. IBus yields matching in configured terminal apps and, when enabled, `raw_capture_apps`. It does not prove that evdev is receiving events or that a target field can be safely replaced. Added in status schema 32.
 - `raw_capture_app_count` (integer): Number of effective app IDs assigned to the active raw-capture fallback, or zero when disabled. The IDs themselves are not exposed. Added in status schema 32.
 - `capture_app_scope_state` (string): `unrestricted`, `allowed`, `outside_allowlist`, or `unknown`. It reports whether the current focus is accepted by the daemon's application scope without exposing an app ID. `unknown` means a live focus tracker or app identity is unavailable; scoped matching fails closed in that state. Added in status schema 33.
+- `terminal_paste` (string): Paste mode in effect for the focused window: `off`, `multiline`, or `always`. It is the configured `settings.terminal_paste` while one of `settings.terminal_apps` has focus on the libei route, and `off` otherwise. Added in status schema 44.
+- `terminal_paste_total` (integer): Replacements the focused terminal read from the clipboard since daemon start. Added in status schema 44.
+- `terminal_paste_fallbacks_total` (integer): Pastes that could not start (no data control, or a clipboard holding non-text data) and were typed instead. Added in status schema 44.
+- `terminal_paste_unread_total` (integer): Paste keys pressed that the terminal never answered by reading the clipboard; such outcomes are uncertain. Added in status schema 44.
 - `input_events_total` (integer): Count of text/key/backspace/delimiter events accepted by the matching engine since daemon start. It contains no key or text values and is intended for sanitized live diagnostics. Added in status schema 27.
 - `evdev_raw_key_events_total` (integer): Count of raw key press, release, and repeat events processed by the evdev source since daemon start. It contains no keycodes or text and distinguishes device activity from matcher input. Added in status schema 34.
 - `evdev_layout_unavailable_key_events_total` (integer): Count of evdev key events discarded because no trustworthy active keyboard layout snapshot was available. Added in status schema 34.

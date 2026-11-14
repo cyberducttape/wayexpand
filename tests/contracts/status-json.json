@@ -1,6 +1,6 @@
 {
   "schema_version": 25,
-  "daemon_control_schema": 43,
+  "daemon_control_schema": 44,
   "fields": {
     "response": "string",
     "source": "string",
@@ -177,6 +177,10 @@
     "output_interrupt_to_backend_return_p99_us": "integer",
     "output_interrupt_to_backend_return_dropped_total": "integer",
     "partial_write_total": "integer",
-    "window_tracker_identity_source": "string"
+    "window_tracker_identity_source": "string",
+    "terminal_paste": "string",
+    "terminal_paste_total": "integer",
+    "terminal_paste_fallbacks_total": "integer",
+    "terminal_paste_unread_total": "integer"
   }
 }

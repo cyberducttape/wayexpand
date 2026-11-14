@@ -12,7 +12,7 @@
 //! output backend runs on its own worker thread. The output assurance gate
 //! still wraps this injector, so consent and focus checks apply unchanged.
 
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 
 use wayexpand_core::{
     InjectorCapabilities, InjectorError, KeyEventState, Modifiers, OutputCheckpoint,
@@ -61,8 +61,31 @@ pub(crate) fn set_active_mode(configured: TerminalPaste, focused_terminal: bool)
     ACTIVE_MODE.store(encode(mode), Ordering::Release);
 }
 
-fn active_mode() -> TerminalPaste {
+pub(crate) fn active_mode() -> TerminalPaste {
     decode(ACTIVE_MODE.load(Ordering::Acquire))
+}
+
+static PASTED: AtomicU64 = AtomicU64::new(0);
+static FALLBACKS: AtomicU64 = AtomicU64::new(0);
+static UNREAD: AtomicU64 = AtomicU64::new(0);
+
+/// Content-free paste counters for daemon status.
+pub(crate) struct PasteTotals {
+    /// Replacements the focused terminal read from the clipboard.
+    pub(crate) pasted: u64,
+    /// Pastes that could not start and were typed instead.
+    pub(crate) fallbacks: u64,
+    /// Paste keys pressed that the terminal never answered by reading the
+    /// clipboard.
+    pub(crate) unread: u64,
+}
+
+pub(crate) fn totals() -> PasteTotals {
+    PasteTotals {
+        pasted: PASTED.load(Ordering::Relaxed),
+        fallbacks: FALLBACKS.load(Ordering::Relaxed),
+        unread: UNREAD.load(Ordering::Relaxed),
+    }
 }
 
 /// Route capabilities while paste mode is active for the focused window:
@@ -127,16 +150,26 @@ impl PasteInjector {
             inner.inject_key_with_modifiers(KEY_V, PASTE_MODIFIERS)
         })?;
         match outcome {
-            PasteOutcome::Pasted => Ok(true),
+            PasteOutcome::Pasted => {
+                PASTED.fetch_add(1, Ordering::Relaxed);
+                Ok(true)
+            }
             PasteOutcome::Unavailable(reason) => {
-                tracing::warn!(reason, "terminal paste unavailable; typing the replacement instead");
+                FALLBACKS.fetch_add(1, Ordering::Relaxed);
+                tracing::warn!(
+                    reason,
+                    "terminal paste unavailable; typing the replacement instead"
+                );
                 Ok(false)
             }
-            PasteOutcome::NotRequested => Err(InjectorError {
+            PasteOutcome::NotRequested => {
+                UNREAD.fetch_add(1, Ordering::Relaxed);
+                Err(InjectorError {
                 backend: name,
-                message: "the terminal did not read the clipboard after Ctrl+Shift+V; check its paste shortcut".into(),
-                retryable: false,
-            }),
+                    message: "the terminal did not read the clipboard after Ctrl+Shift+V; check its paste shortcut".into(),
+                    retryable: false,
+                })
+            }
         }
     }
 }

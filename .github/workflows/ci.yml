@@ -630,6 +630,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends dbus-daemon jq kwin-common kwin-wayland libglib2.0-bin libwayland-dev libxkbcommon-dev pkg-config wl-clipboard
       - name: Test production output and KWin focus tracking
         run: bash scripts/test-kwin-e2e.sh --keep
+      - name: Test terminal paste into Konsole
+        run: |
+          sudo apt-get install -y --no-install-recommends konsole
+          bash scripts/test-kwin-e2e.sh --keep terminal-paste-multiline
       - name: Test isolated doctor certification report
         run: bash scripts/test-doctor-certify.sh target/debug/wayexpand
       - name: Upload headless KWin diagnostics

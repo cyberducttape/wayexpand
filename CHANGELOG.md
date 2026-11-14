@@ -13,7 +13,12 @@ All notable changes to WayExpand are documented here.
   replacement, Klipper is asked not to record it, and the previous clipboard
   text is restored. Without `ext-data-control-v1`, or when the clipboard holds
   non-text data, the replacement is typed. Covered by an opt-in KWin e2e
-  scenario with Konsole (`terminal-paste-multiline`).
+  scenario with Konsole (`terminal-paste-multiline`), which CI runs.
+- Offer terminal paste under Settings > Engine in the GUI, and report the
+  focused window's paste mode with content-free paste, fallback, and unread
+  counters in daemon status (schema 44: `terminal_paste`,
+  `terminal_paste_total`, `terminal_paste_fallbacks_total`,
+  `terminal_paste_unread_total`).
 
 - Discard client-supplied window app IDs that use the reserved
   `process-executable:` or `process-name:` namespaces (in any letter case)
